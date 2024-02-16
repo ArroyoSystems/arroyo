@@ -26,7 +26,7 @@ use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
+    FunctionRegistry, SendableRecordBatchStream,
 };
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
@@ -39,7 +39,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::info;
 
-use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
+use super::sync::streams::KeyedCloneableStreamFuture;
 
 pub struct SlidingAggregatingWindowFunc<K: Copy> {
     slide: Duration,
@@ -453,19 +453,17 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
     fn with_config(
         &self,
         config: api::SlidingWindowAggregateOperator,
-    ) -> anyhow::Result<OperatorNode> {
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
-        let slide = Duration::from_micros(config.slide_micros);
         let input_schema: ArroyoSchema = config
             .input_schema
             .ok_or_else(|| anyhow!("missing input schema"))?
             .try_into()?;
+        let slide = Duration::from_micros(config.slide_micros);
         let binning_function = PhysicalExprNode::decode(&mut config.binning_function.as_slice())?;
-        let binning_function = parse_physical_expr(
-            &binning_function,
-            &EmptyRegistry::new(),
-            &input_schema.schema,
-        )?;
+        let binning_function =
+            parse_physical_expr(&binning_function, registry.as_ref(), &input_schema.schema)?;
 
         let receiver = Arc::new(RwLock::new(None));
         let final_batches_passer = Arc::new(RwLock::new(Vec::new()));
@@ -477,7 +475,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
             PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
 
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            &EmptyRegistry::new(),
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -492,7 +490,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
             context: DecodingContext::LockedBatchVec(final_batches_passer.clone()),
         };
         let finish_execution_plan = finish_plan.try_into_physical_plan(
-            &EmptyRegistry::new(),
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;

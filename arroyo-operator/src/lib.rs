@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::future::Future;
 use std::ops::Sub;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{collections::HashSet, time::SystemTime};
 
@@ -10,6 +11,7 @@ use arrow::array::{Array, PrimitiveArray, RecordBatch, UInt64Array};
 use arrow::compute::kernels::numeric::{div, rem};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef};
 use bincode::{Decode, Encode};
+use datafusion::execution::FunctionRegistry;
 
 use crate::context::ArrowContext;
 use operator::{OperatorConstructor, OperatorNode};
@@ -130,12 +132,23 @@ pub struct ArrowTimerValue {
 }
 
 pub trait ErasedConstructor: Send {
-    fn with_config(&self, config: Vec<u8>) -> anyhow::Result<OperatorNode>;
+    fn with_config(
+        &self,
+        config: Vec<u8>,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> anyhow::Result<OperatorNode>;
 }
 
 impl<T: OperatorConstructor> ErasedConstructor for T {
-    fn with_config(&self, config: Vec<u8>) -> anyhow::Result<OperatorNode> {
-        self.with_config(prost::Message::decode(&mut config.as_slice()).unwrap())
+    fn with_config(
+        &self,
+        config: Vec<u8>,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> anyhow::Result<OperatorNode> {
+        self.with_config(
+            prost::Message::decode(&mut config.as_slice()).unwrap(),
+            registry,
+        )
     }
 }
 

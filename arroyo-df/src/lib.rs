@@ -1,4 +1,9 @@
 #![allow(clippy::new_without_default)]
+
+extern crate dlopen;
+#[macro_use]
+extern crate dlopen_derive;
+
 use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
@@ -46,6 +51,8 @@ use schemas::{add_timestamp_field, add_timestamp_field_if_missing_arrow, window_
 use rewriters::SourceRewriter;
 use tables::{Insert, Table};
 
+use crate::types::data_type_to_arrow_type;
+use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
 use prettyplease::unparse;
@@ -55,12 +62,14 @@ use std::fmt::Debug;
 
 use crate::json::get_json_functions;
 use crate::rewriters::{TimestampRewriter, UnnestRewriter};
-use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
+use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow};
 use crate::watermark_node::WatermarkNode;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
+use arroyo_types::{dylib_name, NullableType, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV};
+use std::path::Path;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
@@ -76,8 +85,8 @@ mod test;
 #[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct UdfDef {
-    args: Vec<NullableType>,
-    ret: NullableType,
+    pub args: Vec<NullableType>,
+    pub ret: NullableType,
     def: String,
     dependencies: String,
 }
@@ -99,6 +108,7 @@ pub struct ArroyoSchemaProvider {
     profiles: HashMap<String, ConnectionProfile>,
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
+    pub dylib_udfs: HashMap<String, DylibUdfConfig>,
 }
 
 impl ArroyoSchemaProvider {
@@ -177,6 +187,7 @@ impl ArroyoSchemaProvider {
             profiles: HashMap::new(),
             udf_defs: HashMap::new(),
             config_options: datafusion::config::ConfigOptions::new(),
+            dylib_udfs: HashMap::new(),
         }
     }
 
@@ -298,6 +309,35 @@ impl ArroyoSchemaProvider {
                 .insert(function.sig.ident.to_string(), Arc::new(udaf));
         } else {
             let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
+
+            let arg_types = args
+                .iter()
+                .map(|arg| data_type_to_arrow_type(&arg.data_type))
+                .collect();
+
+            let arg_types = match arg_types {
+                Ok(arg_types) => arg_types,
+                Err(e) => bail!("Error converting arg types: {}", e),
+            };
+
+            let artifact_url =
+                std::env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
+
+            let dylib_path = Path::new(&artifact_url)
+                .join("udfs")
+                .join(dylib_name(&function.sig.ident.to_string()))
+                .to_str()
+                .expect("Could not convert dylib path to string")
+                .to_string();
+
+            self.dylib_udfs.insert(
+                function.sig.ident.to_string(),
+                DylibUdfConfig {
+                    dylib_path,
+                    arg_types,
+                    return_type: data_type_to_arrow_type(&ret.data_type)?,
+                },
+            );
 
             if self
                 .functions

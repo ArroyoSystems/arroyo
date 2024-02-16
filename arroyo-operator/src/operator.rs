@@ -7,11 +7,13 @@ use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use async_trait::async_trait;
+use datafusion::execution::FunctionRegistry;
 use futures::future::OptionFuture;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::StreamExt;
@@ -19,7 +21,11 @@ use tracing::{debug, error, info, warn, Instrument};
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
-    fn with_config(&self, config: Self::ConfigT) -> anyhow::Result<OperatorNode>;
+    fn with_config(
+        &self,
+        config: Self::ConfigT,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> anyhow::Result<OperatorNode>;
 }
 
 pub enum OperatorNode {

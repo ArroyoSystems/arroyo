@@ -36,7 +36,7 @@ use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
+    FunctionRegistry, SendableRecordBatchStream,
 };
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
@@ -44,8 +44,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::{debug, warn};
-
-use super::EmptyRegistry;
 
 // TODO: advance futures outside of method calls.
 
@@ -677,7 +675,8 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
     fn with_config(
         &self,
         config: api::SessionWindowAggregateOperator,
-    ) -> anyhow::Result<OperatorNode> {
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> Result<OperatorNode> {
         let window_field = Arc::new(Field::new(
             config.window_field_name,
             window_arrow_struct(),
@@ -691,7 +690,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         };
         let final_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
         let final_execution_plan = final_plan.try_into_physical_plan(
-            &EmptyRegistry::new(),
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;

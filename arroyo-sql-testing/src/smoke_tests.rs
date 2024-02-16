@@ -1,6 +1,6 @@
 #![allow(warnings)]
 use anyhow::Result;
-use arroyo_datastream::logical::{LogicalEdge, LogicalNode, LogicalProgram};
+use arroyo_datastream::logical::{LogicalEdge, LogicalNode, LogicalProgram, ProgramConfig};
 use arroyo_df::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
 use std::collections::{BTreeMap, HashMap};
@@ -213,6 +213,7 @@ async fn run_pipeline_and_assert_outputs(
     }
 
     let program = Program::local_from_logical(job_id.clone(), &graph);
+
     run_completely(
         Program::local_from_logical(job_id.clone(), &graph),
         job_id.clone(),
@@ -389,7 +390,7 @@ async fn select_star() -> Result<()> {
       format = 'json',
       type = 'source'
     );
-    
+
     CREATE TABLE cars_output (
       timestamp TIMESTAMP,
       driver_id BIGINT,

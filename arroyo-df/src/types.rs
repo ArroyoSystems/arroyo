@@ -5,14 +5,21 @@ use std::{
 
 use anyhow::bail;
 use anyhow::Result;
+use arrow::array;
+use arrow::array::ArrayData;
 use arrow::datatypes::{DataType, Field, IntervalMonthDayNanoType};
+use arrow_array::make_array;
 
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
 use datafusion::sql::sqlparser::ast::{
     ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
 };
+use datafusion_common::ScalarValue;
+use datafusion_expr::ColumnarValue;
+use datafusion_proto::protobuf::arrow_type::ArrowTypeEnum;
+use datafusion_proto::protobuf::{ArrowType, EmptyMessage};
 
-use arroyo_types::ArroyoExtensionType;
+use arroyo_types::{ArroyoExtensionType, NullableType};
 use syn::PathArguments::AngleBracketed;
 use syn::{GenericArgument, Type};
 
@@ -25,36 +32,6 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     let days_to_seconds = ((year_hours + 24 * (day + 30 * extra_month)) as u64) * 60 * 60;
     let nanos = nanos as u64;
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
-}
-
-/// An Arrow DataType that also carries around its own nullability info
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NullableType {
-    pub data_type: DataType,
-    pub nullable: bool,
-}
-
-impl NullableType {
-    pub fn null(data_type: DataType) -> Self {
-        Self {
-            data_type,
-            nullable: true,
-        }
-    }
-
-    pub fn not_null(data_type: DataType) -> Self {
-        Self {
-            data_type,
-            nullable: false,
-        }
-    }
-
-    pub fn with_nullability(&self, nullable: bool) -> Self {
-        Self {
-            data_type: self.data_type.clone(),
-            nullable,
-        }
-    }
 }
 
 fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
@@ -115,6 +92,71 @@ pub fn rust_to_arrow(typ: &Type) -> Option<NullableType> {
         }
         _ => None,
     }
+}
+
+pub fn data_type_to_arrow_type(data_type: &DataType) -> Result<ArrowType> {
+    let t = match data_type {
+        DataType::Utf8 => ArrowTypeEnum::Utf8(EmptyMessage {}),
+        DataType::Boolean => ArrowTypeEnum::Bool(EmptyMessage {}),
+        DataType::Int8 => ArrowTypeEnum::Int8(EmptyMessage {}),
+        DataType::Int16 => ArrowTypeEnum::Int16(EmptyMessage {}),
+        DataType::Int32 => ArrowTypeEnum::Int32(EmptyMessage {}),
+        DataType::Int64 => ArrowTypeEnum::Int64(EmptyMessage {}),
+        DataType::UInt8 => ArrowTypeEnum::Uint8(EmptyMessage {}),
+        DataType::UInt16 => ArrowTypeEnum::Uint16(EmptyMessage {}),
+        DataType::UInt32 => ArrowTypeEnum::Uint32(EmptyMessage {}),
+        DataType::UInt64 => ArrowTypeEnum::Uint64(EmptyMessage {}),
+        DataType::Float32 => ArrowTypeEnum::Float32(EmptyMessage {}),
+        DataType::Float64 => ArrowTypeEnum::Float64(EmptyMessage {}),
+        _ => bail!("Unsupported DataType: {:?}", data_type),
+    };
+
+    Ok(ArrowType {
+        arrow_type_enum: Some(t),
+    })
+}
+
+pub fn arrow_type_to_data_type(arrow_type: &ArrowType) -> DataType {
+    match &arrow_type.arrow_type_enum {
+        Some(ArrowTypeEnum::Utf8(_)) => DataType::Utf8,
+        Some(ArrowTypeEnum::Bool(_)) => DataType::Boolean,
+        Some(ArrowTypeEnum::Int8(_)) => DataType::Int8,
+        Some(ArrowTypeEnum::Int16(_)) => DataType::Int16,
+        Some(ArrowTypeEnum::Int32(_)) => DataType::Int32,
+        Some(ArrowTypeEnum::Int64(_)) => DataType::Int64,
+        Some(ArrowTypeEnum::Uint8(_)) => DataType::UInt8,
+        Some(ArrowTypeEnum::Uint16(_)) => DataType::UInt16,
+        Some(ArrowTypeEnum::Uint32(_)) => DataType::UInt32,
+        Some(ArrowTypeEnum::Uint64(_)) => DataType::UInt64,
+        Some(ArrowTypeEnum::Float32(_)) => DataType::Float32,
+        Some(ArrowTypeEnum::Float64(_)) => DataType::Float64,
+        _ => panic!("Unsupported ArrowType"),
+    }
+}
+
+pub fn array_to_columnar_value(array: ArrayData, data_type: &DataType) -> ColumnarValue {
+    if array.len() != 1 {
+        return ColumnarValue::Array(make_array(array));
+    }
+
+    let scalar = match data_type {
+        DataType::Utf8 => {
+            ScalarValue::Utf8(Some(array::StringArray::from(array).value(0).to_string()))
+        }
+        DataType::Boolean => ScalarValue::Boolean(Some(array::BooleanArray::from(array).value(0))),
+        DataType::Int8 => ScalarValue::Int8(Some(array::Int8Array::from(array).value(0))),
+        DataType::Int16 => ScalarValue::Int16(Some(array::Int16Array::from(array).value(0))),
+        DataType::Int32 => ScalarValue::Int32(Some(array::Int32Array::from(array).value(0))),
+        DataType::Int64 => ScalarValue::Int64(Some(array::Int64Array::from(array).value(0))),
+        DataType::UInt8 => ScalarValue::UInt8(Some(array::UInt8Array::from(array).value(0))),
+        DataType::UInt16 => ScalarValue::UInt16(Some(array::UInt16Array::from(array).value(0))),
+        DataType::UInt32 => ScalarValue::UInt32(Some(array::UInt32Array::from(array).value(0))),
+        DataType::UInt64 => ScalarValue::UInt64(Some(array::UInt64Array::from(array).value(0))),
+        DataType::Float32 => ScalarValue::Float32(Some(array::Float32Array::from(array).value(0))),
+        DataType::Float64 => ScalarValue::Float64(Some(array::Float64Array::from(array).value(0))),
+        _ => panic!("Unsupported DataType: {:?}", data_type),
+    };
+    ColumnarValue::Scalar(scalar)
 }
 
 // Pulled from DataFusion

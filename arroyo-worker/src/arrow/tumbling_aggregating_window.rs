@@ -25,7 +25,7 @@ use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
+    FunctionRegistry, SendableRecordBatchStream,
 };
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
@@ -38,7 +38,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
+use super::sync::streams::KeyedCloneableStreamFuture;
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
 pub struct TumblingAggregatingWindowFunc<K: Copy> {
@@ -104,18 +104,19 @@ pub struct TumblingAggregateWindowConstructor;
 
 impl OperatorConstructor for TumblingAggregateWindowConstructor {
     type ConfigT = api::TumblingWindowAggregateOperator;
-    fn with_config(&self, config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
+    fn with_config(
+        &self,
+        config: api::TumblingWindowAggregateOperator,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema
             .ok_or_else(|| anyhow!("requires input schema"))?
             .try_into()?;
         let binning_function = PhysicalExprNode::decode(&mut config.binning_function.as_slice())?;
-        let binning_function = parse_physical_expr(
-            &binning_function,
-            &EmptyRegistry::new(),
-            &input_schema.schema,
-        )?;
+        let binning_function =
+            parse_physical_expr(&binning_function, registry.as_ref(), &input_schema.schema)?;
 
         let receiver = Arc::new(RwLock::new(None));
         let final_batches_passer = Arc::new(RwLock::new(Vec::new()));
@@ -131,7 +132,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         // this is behind a RwLock and will have a new channel swapped in before computation is initialized
         // for each bin.
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            &EmptyRegistry::new(),
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -149,7 +150,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
 
         // deserialize the finish plan to read directly from a Vec<RecordBatch> behind a RWLock.
         let finish_execution_plan = finish_plan.try_into_physical_plan(
-            &EmptyRegistry::new(),
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;
@@ -161,7 +162,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         let final_projection_plan = finish_projection
             .map(|finish_projection| {
                 finish_projection.try_into_physical_plan(
-                    &EmptyRegistry::new(),
+                    registry.as_ref(),
                     &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
                     &final_codec,
                 )

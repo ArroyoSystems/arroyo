@@ -4,8 +4,8 @@ use arroyo_connectors::{
     EmptyConfig,
 };
 use arroyo_operator::connector::Connector;
+use arroyo_types::NullableType;
 
-use crate::types::NullableType;
 use crate::{parse_and_get_arrow_program, parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
 
 #[ignore]

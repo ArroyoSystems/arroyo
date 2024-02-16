@@ -1,3 +1,4 @@
+use arroyo_compiler_service;
 use arroyo_server_common::shutdown::Shutdown;
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{ports, DatabaseConfig};
@@ -30,11 +31,15 @@ enum Commands {
 
     /// Starts an Arroyo worker
     Worker {},
+
+    /// Starts an Arroyo compiler
+    Compiler {},
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 enum CPService {
     Api,
+    Compiler,
     Controller,
     All,
 }
@@ -43,6 +48,7 @@ impl CPService {
     pub fn name(&self) -> &'static str {
         match self {
             CPService::Api => "api",
+            CPService::Compiler => "compiler",
             CPService::Controller => "controller",
             CPService::All => "cluster",
         }
@@ -56,6 +62,9 @@ async fn main() {
     match &cli.command {
         Commands::Api { .. } => {
             start_control_plane(CPService::Api).await;
+        }
+        Commands::Compiler { .. } => {
+            start_control_plane(CPService::Compiler).await;
         }
         Commands::Controller { .. } => {
             start_control_plane(CPService::Controller).await;
@@ -135,6 +144,10 @@ async fn start_control_plane(service: CPService) {
 
     if service == CPService::Api || service == CPService::All {
         shutdown.spawn_task("api", arroyo_api::start_server(pool.clone()));
+    }
+
+    if service == CPService::Compiler || service == CPService::All {
+        shutdown.spawn_task("compiler", arroyo_compiler_service::start_service());
     }
 
     if service == CPService::Controller || service == CPService::All {

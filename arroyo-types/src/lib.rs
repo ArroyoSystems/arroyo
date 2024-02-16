@@ -88,7 +88,7 @@ pub const WORKER_ID_ENV: &str = "WORKER_ID_ENV";
 pub const JOB_ID_ENV: &str = "JOB_ID_ENV";
 pub const RUN_ID_ENV: &str = "RUN_ID_ENV";
 pub const ARROYO_PROGRAM_ENV: &str = "ARROYO_PROGRAM";
-pub const REMOTE_COMPILER_ENDPOINT_ENV: &str = "REMOTE_COMPILER_ENDPOINT";
+pub const COMPILER_ADDR_ENV: &str = "COMPILER_ADDR";
 pub const NOMAD_ENDPOINT_ENV: &str = "NOMAD_ENDPOINT";
 pub const NOMAD_DC_ENV: &str = "NOMAD_DC";
 
@@ -101,6 +101,7 @@ pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
 pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
 pub const GRPC_PORT_ENV: &str = "GRPC_PORT";
 pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
+pub const COMPILER_PORT_ENV: &str = "COMPILER_PORT";
 
 pub const BATCH_SIZE_ENV: &str = "BATCH_SIZE";
 pub const BATCH_LINGER_MS_ENV: &str = "BATCH_LINGER_MS";
@@ -119,6 +120,7 @@ pub const CHECKPOINT_URL_ENV: &str = "CHECKPOINT_URL";
 
 // compiler service
 pub const ARTIFACT_URL_ENV: &str = "ARTIFACT_URL";
+pub const ARTIFACT_URL_DEFAULT: &str = "/tmp/arroyo/artifacts";
 pub const COMPILER_FEATURES_ENV: &str = "COMPILER_FEATURES";
 
 // kubernetes scheduler configuration
@@ -1035,4 +1037,42 @@ mod tests {
 pub trait UdfContext: Sync {
     async fn init(&self) {}
     async fn close(&self) {}
+}
+
+/// An Arrow DataType that also carries around its own nullability info
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NullableType {
+    pub data_type: DataType,
+    pub nullable: bool,
+}
+
+impl NullableType {
+    pub fn null(data_type: DataType) -> Self {
+        Self {
+            data_type,
+            nullable: true,
+        }
+    }
+
+    pub fn not_null(data_type: DataType) -> Self {
+        Self {
+            data_type,
+            nullable: false,
+        }
+    }
+
+    pub fn with_nullability(&self, nullable: bool) -> Self {
+        Self {
+            data_type: self.data_type.clone(),
+            nullable,
+        }
+    }
+}
+
+pub fn dylib_name(name: &str) -> String {
+    match env::consts::OS {
+        "macos" => format!("{}.dylib", name),
+        "linux" => format!("{}.so", name),
+        _ => panic!("unsupported OS"),
+    }
 }

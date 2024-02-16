@@ -7,7 +7,7 @@ use std::{
 use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry};
+use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::{
@@ -17,6 +17,7 @@ use arroyo_rpc::{
 use arroyo_state::timestamp_table_config;
 use datafusion::execution::context::SessionContext;
 use datafusion_execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion_execution::FunctionRegistry;
 use datafusion_physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -188,7 +189,11 @@ impl ArrowOperator for JoinWithExpiration {
 pub struct JoinWithExpirationConstructor;
 impl OperatorConstructor for JoinWithExpirationConstructor {
     type ConfigT = api::JoinOperator;
-    fn with_config(&self, config: api::JoinOperator) -> Result<OperatorNode> {
+    fn with_config(
+        &self,
+        config: api::JoinOperator,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> Result<OperatorNode> {
         let left_passer = Arc::new(RwLock::new(None));
         let right_passer = Arc::new(RwLock::new(None));
 
@@ -200,7 +205,7 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
         };
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
         let join_execution_plan = join_physical_plan_node.try_into_physical_plan(
-            &EmptyRegistry::new(),
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new())?,
             &codec,
         )?;

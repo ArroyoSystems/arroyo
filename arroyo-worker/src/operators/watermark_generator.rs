@@ -1,6 +1,5 @@
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
-use arroyo_df::physical::EmptyRegistry;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::get_timestamp_col;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
@@ -13,6 +12,7 @@ use arroyo_types::{
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use datafusion_execution::FunctionRegistry;
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::protobuf::PhysicalExprNode;
@@ -61,11 +61,14 @@ pub struct WatermarkGeneratorConstructor;
 
 impl OperatorConstructor for WatermarkGeneratorConstructor {
     type ConfigT = ExpressionWatermarkConfig;
-    fn with_config(&self, config: ExpressionWatermarkConfig) -> anyhow::Result<OperatorNode> {
+    fn with_config(
+        &self,
+        config: ExpressionWatermarkConfig,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> anyhow::Result<OperatorNode> {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let expression = PhysicalExprNode::decode(&mut config.expression.as_slice())?;
-        let expression =
-            parse_physical_expr(&expression, &EmptyRegistry::new(), &input_schema.schema)?;
+        let expression = parse_physical_expr(&expression, registry.as_ref(), &input_schema.schema)?;
 
         Ok(OperatorNode::from_operator(Box::new(
             WatermarkGenerator::expression(

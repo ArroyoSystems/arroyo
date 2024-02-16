@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 use std::{mem, thread};
 
 use std::time::SystemTime;
@@ -7,6 +8,7 @@ use std::time::SystemTime;
 use arroyo_connectors::connectors;
 use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
+use datafusion_execution::FunctionRegistry;
 use tracing::{debug, info, warn};
 
 use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
@@ -20,6 +22,7 @@ use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
+use arroyo_df::physical::Registry;
 pub use arroyo_macro::StreamNode;
 use arroyo_operator::context::{ArrowContext, QueueItem};
 use arroyo_operator::operator::OperatorNode;
@@ -177,15 +180,20 @@ impl Program {
                 })
             })
             .collect();
-        Self::from_logical(name, logical, &assignments)
+        Self::from_logical(name, logical, &assignments, Registry::new())
     }
+
+    pub async fn init_udfs() {}
 
     pub fn from_logical(
         name: String,
         logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
+        registry: Registry,
     ) -> Program {
         let mut physical = DiGraph::new();
+
+        let registry = Arc::new(registry);
 
         let mut parallelism_map = HashMap::new();
         for task in assignments {
@@ -221,8 +229,12 @@ impl Program {
                     parallelism,
                     in_schemas: in_schemas.clone(),
                     out_schema: out_schema.clone(),
-                    node: construct_operator(node.operator_name, node.operator_config.clone())
-                        .into(),
+                    node: construct_operator(
+                        node.operator_name,
+                        node.operator_config.clone(),
+                        registry.clone(),
+                    )
+                    .into(),
                     projection: projection.clone(),
                 }));
             }
@@ -754,7 +766,11 @@ impl Engine {
     }
 }
 
-pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNode {
+pub fn construct_operator(
+    operator: OperatorName,
+    config: Vec<u8>,
+    registry: Arc<dyn FunctionRegistry>,
+) -> OperatorNode {
     let ctor: Box<dyn ErasedConstructor> = match operator {
         OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
         OperatorName::ArrowKey => Box::new(KeyExecutionConstructor),
@@ -782,6 +798,6 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
         }
     };
 
-    ctor.with_config(config)
+    ctor.with_config(config, registry)
         .expect(&format!("Failed to construct operator {:?}", operator))
 }

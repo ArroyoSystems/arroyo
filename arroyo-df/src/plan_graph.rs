@@ -18,13 +18,15 @@ use tracing::info;
 
 use crate::{
     create_table_with_timestamp,
-    physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry},
+    physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, Registry},
     schemas::add_timestamp_field_arrow,
     AggregateCalculation, QueryToGraphVisitor, WindowBehavior,
 };
 use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
-use arroyo_datastream::logical::{LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
+use arroyo_datastream::logical::{
+    LogicalGraph, LogicalNode, LogicalProgram, OperatorName, ProgramConfig,
+};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api::{self, TumblingWindowAggregateOperator};
 use arroyo_rpc::grpc::api::{
@@ -332,8 +334,13 @@ impl Planner {
             }
         }
 
+        let program_config = ProgramConfig {
+            udf_dylibs: self.schema_provider.dylib_udfs.clone().into(),
+        };
+
         let program = LogicalProgram {
             graph: program_graph,
+            program_config,
         };
 
         Ok(CompiledSql {
@@ -422,7 +429,7 @@ impl Planner {
 
         // need to convert to ExecutionPlan to get the partial schema.
         let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            &EmptyRegistry::new(),
+            &Registry::new(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -520,7 +527,7 @@ impl Planner {
         let mut aggregate_fields = aggregate_plan.schema().fields().to_vec();
 
         // the timestamp will have been set as bin_start, need to calculate the bin from that, and also set _timestamp to bin_end - 1;
-        let registry = EmptyRegistry::new();
+        let registry = Registry::new();
         let window_expression = Expr::ScalarFunction(ScalarFunction {
             func_def: ScalarFunctionDefinition::UDF(registry.udf("window")?),
             args: vec![

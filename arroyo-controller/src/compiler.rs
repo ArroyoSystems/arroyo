@@ -4,7 +4,6 @@ use anyhow::{anyhow, Result};
 use arroyo_datastream::{parse_type, WasmBehavior};
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::{CompileQueryReq, UdfCrate};
-use arroyo_types::REMOTE_COMPILER_ENDPOINT_ENV;
 use petgraph::Direction;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -36,9 +35,6 @@ impl ProgramCompiler {
     }
 
     pub async fn compile(&self) -> Result<CompiledProgram> {
-        let endpoint = std::env::var(REMOTE_COMPILER_ENDPOINT_ENV)
-            .unwrap_or_else(|_| panic!("Must set {}", REMOTE_COMPILER_ENDPOINT_ENV));
-
         let req = CompileQueryReq {
             job_id: self.job_id.clone(),
             types: self.compile_types().to_string(),
