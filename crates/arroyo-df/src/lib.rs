@@ -568,10 +568,13 @@ impl LogicalPlanExtension {
                     fields.insert(*window_index, window_field.clone());
                 }
 
-                let output_schema = add_timestamp_field(Arc::new(
-                    DFSchema::new_with_metadata(fields, aggregate_schema.metadata().clone())
-                        .unwrap(),
-                ))
+                let output_schema = add_timestamp_field(
+                    Arc::new(
+                        DFSchema::new_with_metadata(fields, aggregate_schema.metadata().clone())
+                            .unwrap(),
+                    ),
+                    None,
+                )
                 .unwrap();
 
                 DataFusionEdge::new(output_schema, LogicalEdgeType::Forward, vec![]).unwrap()
@@ -1414,7 +1417,7 @@ pub async fn parse_and_get_arrow_program(
             .rewrite(&mut TimestampRewriter {})?
             .rewrite(&mut rewriter)?;
 
-        println!("Logical plan: {}", plan_rewrite.display_graphviz());
+        info!("Logical plan: {}", plan_rewrite.display_graphviz());
 
         for (original_name, index) in &rewriter.table_source_to_nodes {
             let node = rewriter
