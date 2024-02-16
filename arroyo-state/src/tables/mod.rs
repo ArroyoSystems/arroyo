@@ -135,6 +135,16 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
         operator_metadata: &OperatorMetadata,
         current_metadata: Self::TableCheckpointMessage,
     ) -> Result<Option<Self::TableCheckpointMessage>>;
+
+    fn committing_data(
+        _config: Self::ConfigMessage,
+        _table_metadata: Self::TableCheckpointMessage,
+    ) -> Option<HashMap<u32, Vec<u8>>>
+    where
+        Self: Sized,
+    {
+        None
+    }
 }
 
 pub struct CompactionConfig {
@@ -215,6 +225,13 @@ pub trait ErasedTable: Send + Sync + 'static {
         operator_metadata: &OperatorMetadata,
         current_metadata: TableCheckpointMetadata,
     ) -> Result<Option<TableCheckpointMetadata>>
+    where
+        Self: Sized;
+
+    fn committing_data(
+        config: TableConfig,
+        table_metadata: &TableCheckpointMetadata,
+    ) -> Option<HashMap<u32, Vec<u8>>>
     where
         Self: Sized;
 
@@ -340,6 +357,19 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
             Self::checked_proto_decode(T::table_type(), config.config)?,
             Self::checked_proto_decode(T::table_type(), checkpoint.data)?,
         )
+    }
+    fn committing_data(
+        config: TableConfig,
+        table_metadata: &TableCheckpointMetadata,
+    ) -> Option<HashMap<u32, Vec<u8>>>
+    where
+        Self: Sized,
+    {
+        let config = Self::checked_proto_decode(config.table_type(), config.config).ok()?;
+        let table_metadata =
+            Self::checked_proto_decode(table_metadata.table_type(), table_metadata.data.clone())
+                .ok()?;
+        T::committing_data(config, table_metadata)
     }
 
     async fn compact_data(

@@ -199,7 +199,7 @@ impl ConnectorTable {
             .remove("idle_micros")
             .map(|t| i64::from_str(&t))
             .transpose()
-            .map_err(|_| anyhow!("idle_micros must be sent to a number"))?
+            .map_err(|_| anyhow!("idle_micros must be set to a number"))?
             .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
             .filter(|t| *t <= 0)
             .map(|t| Duration::from_micros(t as u64));

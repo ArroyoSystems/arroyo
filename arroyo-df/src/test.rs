@@ -1,6 +1,6 @@
 use arrow_schema::DataType;
 use arroyo_connectors::{
-    nexmark::{NexmarkConnector, NexmarkTable},
+    nexmark::{nexmark_schema, NexmarkConnector, NexmarkTable},
     EmptyConfig,
 };
 use arroyo_operator::connector::Connector;

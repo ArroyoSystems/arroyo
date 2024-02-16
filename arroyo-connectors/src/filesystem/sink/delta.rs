@@ -1,6 +1,6 @@
 use super::FinishedFile;
 use anyhow::{bail, Context, Result};
-use arrow::datatypes::Schema;
+use arrow::datatypes::{Schema, SchemaRef};
 use arroyo_storage::{get_current_credentials, StorageProvider};
 use arroyo_types::to_millis;
 use deltalake::{
@@ -21,7 +21,7 @@ pub(crate) async fn commit_files_to_delta(
     relative_table_path: Path,
     storage_provider: Arc<StorageProvider>,
     last_version: i64,
-    schema: Schema,
+    schema: SchemaRef,
 ) -> Result<Option<i64>> {
     if finished_files.is_empty() {
         return Ok(None);

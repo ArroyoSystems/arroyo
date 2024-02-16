@@ -220,15 +220,18 @@ message SubtaskCheckpointMetadata {
 message GlobalKeyedTableConfig {
   string table_name = 1;
   string description = 2;
+  bool uses_two_phase_commit = 3;
 }
 
 message GlobalKeyedTableTaskCheckpointMetadata {
   repeated string files = 1;
+  map<uint32, bytes> commit_data_by_subtask = 2;
 }
 
 message GlobalKeyedTableSubtaskCheckpointMetadata {
   uint32 subtask_index = 1;
-  optional string file = 5;
+  optional string file = 2;
+  optional bytes commit_data = 3;
 }
 
 message ExpiringKeyedTimeTableConfig {

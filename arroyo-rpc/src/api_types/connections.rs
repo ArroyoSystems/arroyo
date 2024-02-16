@@ -5,8 +5,9 @@ use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
-use crate::df::ArroyoSchema;
+use crate::df::{ArroyoSchema, ArroyoSchemaRef};
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -208,7 +209,7 @@ impl TryFrom<Field> for SourceField {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum SchemaDefinition {
     JsonSchema(String),
@@ -217,7 +218,7 @@ pub enum SchemaDefinition {
     RawSchema(String),
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSchema {
     pub format: Option<Format>,
@@ -267,6 +268,10 @@ impl ConnectionSchema {
         }
 
         Ok(self)
+    }
+    pub fn arroyo_schema(&self) -> ArroyoSchemaRef {
+        let fields: Vec<Field> = self.fields.iter().map(|f| f.clone().into()).collect();
+        Arc::new(ArroyoSchema::from_fields(fields))
     }
 }
 

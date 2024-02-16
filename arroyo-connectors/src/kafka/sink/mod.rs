@@ -208,7 +208,7 @@ impl ArrowOperator for KafkaSinkFunc {
     async fn handle_commit(
         &mut self,
         epoch: u32,
-        _commit_data: &HashMap<char, HashMap<u32, Vec<u8>>>,
+        _commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut ArrowContext,
     ) {
         let ConsistencyMode::ExactlyOnce {

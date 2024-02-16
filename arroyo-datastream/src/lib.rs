@@ -2,6 +2,7 @@
 #![allow(clippy::comparison_chain)]
 
 pub mod logical;
+
 use arroyo_rpc::grpc::api::{self as GrpcApi};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -227,7 +228,8 @@ impl ConnectorOp {
     pub fn web_sink() -> Self {
         ConnectorOp {
             connector: "preview".to_string(),
-            config: "{\"connection\": {}, \"table\": {}}".to_string(),
+            config: "{\"connection\": {}, \"table\": {}, \"connection_schema\": {\"fields\":[]}}"
+                .to_string(),
             description: "PreviewSink".to_string(),
         }
     }

@@ -1,41 +1,55 @@
-use std::{
-    collections::HashMap, fs::create_dir_all, marker::PhantomData, path::Path, sync::Arc,
-    time::SystemTime,
-};
+use std::{collections::HashMap, fs::create_dir_all, path::Path, sync::Arc, time::SystemTime};
 
+use arrow::record_batch::RecordBatch;
+use arroyo_operator::context::ArrowContext;
+use arroyo_rpc::{
+    df::{ArroyoSchema, ArroyoSchemaRef},
+    formats::Format,
+    OperatorConfig,
+};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{Data, Key, Record, TaskInfo};
+use arroyo_types::TaskInfo;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use serde::Serialize;
+use datafusion::physical_plan::PhysicalExpr;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
 use uuid::Uuid;
 
+use crate::filesystem::{sink::two_phase_committer::TwoPhaseCommitter, FileSettings};
 use anyhow::{bail, Result};
-use arroyo_formats::SchemaData;
-use crate::filesystem::sink::two_phase_committer::TwoPhaseCommitter;
 
-use super::{add_suffix_prefix, delta, get_partitioner_from_file_settings, CommitState, CommitStyle, FileNaming, FileSystemTable, FilenameStrategy, MultiPartWriterStats, RollingPolicy, TableType, FinishedFile};
+use super::{
+    add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
+    two_phase_committer::TwoPhaseCommitterOperator, CommitState, CommitStyle, FileNaming,
+    FileSystemTable, FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
+    TableType,
+};
 
-pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
+pub struct LocalFileSystemWriter<V: LocalWriter> {
     // writer to a local tmp file
     writers: HashMap<Option<String>, V>,
     tmp_dir: String,
     final_dir: String,
     next_file_index: usize,
     subtask_id: usize,
-    partitioner: Option<Box<dyn Fn(&Record<K, D>) -> String + Send>>,
+    partitioner: Option<Arc<dyn PhysicalExpr>>,
     finished_files: Vec<FilePreCommit>,
     rolling_policy: RollingPolicy,
     table_properties: FileSystemTable,
+    file_settings: FileSettings,
+    format: Option<Format>,
+    schema: Option<ArroyoSchemaRef>,
     commit_state: CommitState,
-    phantom: PhantomData<(K, D)>,
     filenaming: FileNaming,
 }
 
-impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
-    pub fn new(final_dir: String, table_properties: FileSystemTable) -> Self {
+impl<V: LocalWriter> LocalFileSystemWriter<V> {
+    pub fn new(
+        final_dir: String,
+        table_properties: FileSystemTable,
+        config: OperatorConfig,
+    ) -> TwoPhaseCommitterOperator<Self> {
         // TODO: explore configuration options here
         let tmp_dir = format!("{}/__in_progress", final_dir);
         // make sure final_dir and tmp_dir exists
@@ -66,22 +80,43 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             filenaming.suffix = Some(V::file_suffix().to_string());
         }
 
-        Self {
+        let writer = Self {
             writers: HashMap::new(),
             tmp_dir,
             final_dir,
             next_file_index: 0,
             subtask_id: 0,
-            partitioner: get_partitioner_from_file_settings(
-                file_settings.as_ref().unwrap().clone(),
-            ),
+            partitioner: None,
             finished_files: Vec::new(),
+            file_settings: file_settings.clone().unwrap(),
+            schema: None,
+            format: config.format,
             rolling_policy: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
             table_properties,
             commit_state,
-            phantom: PhantomData,
             filenaming,
+        };
+        TwoPhaseCommitterOperator::new(writer)
+    }
+
+    fn init_schema_and_partitioner(&mut self, record_batch: &RecordBatch) -> Result<()> {
+        if self.schema.is_none() {
+            self.schema = Some(Arc::new(ArroyoSchema::from_fields(
+                record_batch
+                    .schema()
+                    .fields()
+                    .into_iter()
+                    .map(|field| field.as_ref().clone())
+                    .collect(),
+            )));
         }
+        if self.partitioner.is_none() {
+            self.partitioner = get_partitioner_from_file_settings(
+                self.file_settings.clone(),
+                self.schema.as_ref().unwrap().clone(),
+            );
+        }
+        Ok(())
     }
 
     fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
@@ -119,6 +154,8 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
                     format!("{}/{}", self.tmp_dir, filename),
                     format!("{}/{}", self.final_dir, filename),
                     &self.table_properties,
+                    self.format.clone(),
+                    self.schema.as_ref().unwrap().clone(),
                 ),
             );
             self.next_file_index += 1;
@@ -127,10 +164,16 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
     }
 }
 
-pub trait LocalWriter<T: Data>: Send + 'static {
-    fn new(tmp_path: String, final_path: String, table_properties: &FileSystemTable) -> Self;
+pub trait LocalWriter: Send + 'static {
+    fn new(
+        tmp_path: String,
+        final_path: String,
+        table_properties: &FileSystemTable,
+        format: Option<Format>,
+        schema: ArroyoSchemaRef,
+    ) -> Self;
     fn file_suffix() -> &'static str;
-    fn write(&mut self, value: T, timestamp: SystemTime) -> Result<()>;
+    fn write_batch(&mut self, batch: RecordBatch) -> Result<()>;
     // returns the total size of the file
     fn sync(&mut self) -> Result<usize>;
     fn close(&mut self) -> Result<FilePreCommit>;
@@ -159,9 +202,7 @@ pub struct FilePreCommit {
 }
 
 #[async_trait]
-impl<K: Key, D: Data + Sync + SchemaData + Serialize, V: LocalWriter<D> + Send + 'static>
-    TwoPhaseCommitter<K, D> for LocalFileSystemWriter<K, D, V>
-{
+impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWriter<V> {
     type DataRecovery = LocalFileDataRecovery;
     type PreCommit = FilePreCommit;
 
@@ -171,7 +212,7 @@ impl<K: Key, D: Data + Sync + SchemaData + Serialize, V: LocalWriter<D> + Send +
 
     async fn init(
         &mut self,
-        task_info: &TaskInfo,
+        ctx: &mut ArrowContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()> {
         let mut max_file_index = 0;
@@ -185,7 +226,7 @@ impl<K: Key, D: Data + Sync + SchemaData + Serialize, V: LocalWriter<D> + Send +
             // task 0 is responsible for recovering all files.
             // This is because the number of subtasks may have changed.
             // Recovering should be reasonably fast since it is just finishing the files.
-            if task_info.task_index > 0 {
+            if ctx.task_info.task_index > 0 {
                 continue;
             }
             for CurrentFileRecovery {
@@ -211,18 +252,25 @@ impl<K: Key, D: Data + Sync + SchemaData + Serialize, V: LocalWriter<D> + Send +
                 })
             }
         }
-        self.subtask_id = task_info.task_index;
+        self.subtask_id = ctx.task_info.task_index;
         self.finished_files = recovered_files;
         self.next_file_index = max_file_index;
         Ok(())
     }
 
-    async fn insert_record(&mut self, record: &Record<K, D>) -> Result<()> {
-        let partition = self.partitioner.as_ref().map(|f| f(record));
-        let writer = self.get_or_insert_writer(&partition);
-        writer
-            .write(record.value.clone(), record.timestamp)
-            .unwrap();
+    async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
+        if self.schema.is_none() {
+            self.init_schema_and_partitioner(&batch)?;
+        }
+        if let Some(partitioner) = self.partitioner.as_ref() {
+            for (batch, partition) in batches_by_partition(batch, partitioner.clone())? {
+                let writer = self.get_or_insert_writer(&partition);
+                writer.write_batch(batch)?;
+            }
+        } else {
+            let writer = self.get_or_insert_writer(&None);
+            writer.write_batch(batch)?;
+        }
         Ok(())
     }
 
@@ -263,14 +311,13 @@ impl<K: Key, D: Data + Sync + SchemaData + Serialize, V: LocalWriter<D> + Send +
             });
         }
         if let CommitState::DeltaLake { last_version } = self.commit_state {
-            let schema = D::schema();
             let storage_provider = Arc::new(StorageProvider::for_url("/").await?);
             if let Some(version) = delta::commit_files_to_delta(
                 finished_files,
                 object_store::path::Path::parse(&self.final_dir)?,
                 storage_provider,
                 last_version,
-                schema,
+                Arc::new(self.schema.as_ref().unwrap().schema_without_timestamp()),
             )
             .await?
             {

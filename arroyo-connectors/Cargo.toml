@@ -27,6 +27,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 typify = "0.0.13"
 schemars = "0.8"
+prost = "0.12"
 tonic = {workspace = true}
 governor = "0.6.0"
 anyhow = "1.0.71"

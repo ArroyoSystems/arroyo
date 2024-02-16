@@ -1,8 +1,10 @@
+mod sink;
 mod source;
 
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
 use std::collections::HashMap;
+
 use typify::import_types;
 
 use arroyo_operator::connector::Connection;
@@ -18,6 +20,10 @@ use crate::{pull_opt, pull_option_to_i64, EmptyConfig};
 use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::OperatorNode;
+
+use self::sink::{
+    JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
+};
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./filesystem.svg");
@@ -84,7 +90,7 @@ impl Connector for FileSystemConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
+    ) -> anyhow::Result<Connection> {
         let (description, connection_type) = match table.table_type {
             TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source),
             TableType::Sink {
@@ -213,8 +219,38 @@ impl Connector for FileSystemConnector {
                     file_states: HashMap::new(),
                 })))
             }
-            TableType::Sink { .. } => {
-                todo!()
+            TableType::Sink {
+                file_settings: _,
+                format_settings,
+                storage_options: _,
+                write_path,
+            } => {
+                let backend_config = BackendConfig::parse_url(&write_path, true)?;
+                let is_local = match &backend_config {
+                    BackendConfig::Local { .. } => true,
+                    _ => false,
+                };
+                match (format_settings, is_local) {
+                    (Some(FormatSettings::Parquet { .. }), true) => {
+                        Ok(OperatorNode::from_operator(Box::new(
+                            LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
+                        )))
+                    }
+                    (Some(FormatSettings::Parquet { .. }), false) => {
+                        Ok(OperatorNode::from_operator(Box::new(
+                            ParquetFileSystemSink::new(table, config),
+                        )))
+                    }
+                    (Some(FormatSettings::Json { .. }), true) => {
+                        Ok(OperatorNode::from_operator(Box::new(
+                            LocalJsonFileSystemSink::new(write_path.to_string(), table, config),
+                        )))
+                    }
+                    (Some(FormatSettings::Json { .. }), false) => Ok(OperatorNode::from_operator(
+                        Box::new(JsonFileSystemSink::new(table, config)),
+                    )),
+                    (None, _) => bail!("have to have some format settings"),
+                }
             }
         }
     }
@@ -293,13 +329,9 @@ pub fn file_system_sink_from_options(
         file_naming,
     });
 
-    let format_settings = match schema
-        .ok_or(anyhow!("require schema"))?
-        .format
-        .as_ref()
-        .ok_or(anyhow!(
-            "filesystem sink requires a format, such as json or parquet"
-        ))? {
+    let format_settings = match schema.as_ref().unwrap().format.as_ref().ok_or(anyhow!(
+        "filesystem sink requires a format, such as json or parquet"
+    ))? {
         Format::Parquet(..) => {
             let compression = opts
                 .remove("parquet_compression")

@@ -449,7 +449,7 @@ pub trait ArrowOperator: Send + 'static {
     async fn handle_commit(
         &mut self,
         epoch: u32,
-        commit_data: &HashMap<char, HashMap<u32, Vec<u8>>>,
+        commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut ArrowContext,
     ) {
         warn!("default handling of commit with epoch {:?}", epoch);

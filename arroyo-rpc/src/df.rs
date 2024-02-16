@@ -139,6 +139,10 @@ impl ArroyoSchema {
         builder.finish()
     }
 
+    pub fn remove_timestamp_column(&self, batch: &mut RecordBatch) {
+        batch.remove_column(self.timestamp_index);
+    }
+
     pub fn builders(&self) -> Vec<Box<dyn ArrayBuilder>> {
         self.schema
             .fields
