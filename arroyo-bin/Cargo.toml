@@ -14,6 +14,7 @@ arroyo-controller = { path = "../arroyo-controller" }
 arroyo-api = { path = "../arroyo-api" }
 arroyo-worker = { path = "../arroyo-worker" }
 arroyo-server-common = { path = "../arroyo-server-common" }
+arroyo-compiler-service = { path = "../arroyo-compiler-service" }
 
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }

@@ -59,7 +59,7 @@ impl Scheduler for EmbeddedScheduler {
                 req.job_id,
                 req.run_id.to_string(),
                 default_controller_addr(),
-                req.program.graph,
+                req.program,
                 guard,
             );
 

@@ -1,6 +1,10 @@
+use datafusion_proto::protobuf::ArrowType;
+
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc::api::{ArrowProgram, EdgeType, JobEdge, JobGraph, JobNode};
+use arroyo_rpc::grpc::api::{
+    ArrowDylibUdfConfig, ArrowProgram, ArrowProgramConfig, EdgeType, JobEdge, JobGraph, JobNode,
+};
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use petgraph::Direction;
@@ -123,8 +127,21 @@ impl Debug for LogicalNode {
 pub type LogicalGraph = DiGraph<LogicalNode, LogicalEdge>;
 
 #[derive(Clone, Debug)]
+pub struct DylibUdfConfig {
+    pub dylib_path: String,
+    pub arg_types: Vec<ArrowType>,
+    pub return_type: ArrowType,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgramConfig {
+    pub udf_dylibs: HashMap<String, DylibUdfConfig>,
+}
+
+#[derive(Clone, Debug)]
 pub struct LogicalProgram {
     pub graph: LogicalGraph,
+    pub program_config: ProgramConfig,
 }
 
 impl LogicalProgram {
@@ -249,7 +266,61 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
             );
         }
 
-        Ok(LogicalProgram { graph })
+        let program_config = value.program_config.unwrap().into();
+
+        Ok(LogicalProgram {
+            graph,
+            program_config,
+        })
+    }
+}
+
+impl From<DylibUdfConfig> for ArrowDylibUdfConfig {
+    fn from(from: DylibUdfConfig) -> Self {
+        ArrowDylibUdfConfig {
+            dylib_path: from.dylib_path,
+            arg_types: from.arg_types.iter().map(|t| t.encode_to_vec()).collect(),
+            return_type: from.return_type.encode_to_vec(),
+        }
+    }
+}
+
+impl From<ArrowDylibUdfConfig> for DylibUdfConfig {
+    fn from(from: ArrowDylibUdfConfig) -> Self {
+        DylibUdfConfig {
+            dylib_path: from.dylib_path,
+            arg_types: from
+                .arg_types
+                .iter()
+                .map(|t| ArrowType::decode(&mut t.as_slice()).expect("invalid arrow type"))
+                .collect(),
+            return_type: ArrowType::decode(&mut from.return_type.as_slice())
+                .expect("invalid arrow type"),
+        }
+    }
+}
+
+impl From<ProgramConfig> for ArrowProgramConfig {
+    fn from(from: ProgramConfig) -> Self {
+        ArrowProgramConfig {
+            udf_dylibs: from
+                .udf_dylibs
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        }
+    }
+}
+
+impl From<ArrowProgramConfig> for ProgramConfig {
+    fn from(from: ArrowProgramConfig) -> Self {
+        ProgramConfig {
+            udf_dylibs: from
+                .udf_dylibs
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        }
     }
 }
 
@@ -296,6 +367,10 @@ impl From<LogicalProgram> for ArrowProgram {
             })
             .collect();
 
-        api::ArrowProgram { nodes, edges }
+        api::ArrowProgram {
+            nodes,
+            edges,
+            program_config: Some(value.program_config.into()),
+        }
     }
 }

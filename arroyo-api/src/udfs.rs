@@ -11,7 +11,7 @@ use crate::to_micros;
 use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfPost, UdfValidationResult, ValidateUdfPost};
 use arroyo_rpc::api_types::GlobalUdfCollection;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::{CheckUdfsReq, CheckUdfsResp};
+use arroyo_rpc::grpc::{BuildUdfReq, BuildUdfResp};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use axum::extract::{Path, State};
 use axum::Json;
@@ -58,8 +58,7 @@ pub async fn create_udf(
         .map_err(log_and_map)?;
 
     // validate udf
-    let check_udfs_resp =
-        validate_udf_with_controller(&state.controller_addr, &req.definition).await?;
+    let check_udfs_resp = build_udf(&state.controller_addr, &req.definition).await?;
 
     if check_udfs_resp.errors.len() > 0 {
         return Err(bad_request(format!("UDF is invalid.",)));
@@ -190,10 +189,7 @@ pub async fn delete_udf(
     Ok(())
 }
 
-async fn validate_udf_with_controller(
-    controller_addr: &str,
-    udf_definition: &str,
-) -> Result<CheckUdfsResp, ErrorResp> {
+async fn build_udf(controller_addr: &str, udf_definition: &str) -> Result<BuildUdfResp, ErrorResp> {
     let mut controller = match ControllerGrpcClient::connect(controller_addr.to_string()).await {
         Ok(controller) => controller,
         Err(e) => {
@@ -203,7 +199,7 @@ async fn validate_udf_with_controller(
     };
 
     let check_udfs_resp = match controller
-        .check_udfs(CheckUdfsReq {
+        .build_udf(BuildUdfReq {
             definition: udf_definition.to_string(),
         })
         .await
@@ -235,8 +231,7 @@ pub async fn validate_udf(
     State(state): State<AppState>,
     WithRejection(Json(req), _): WithRejection<Json<ValidateUdfPost>, ApiError>,
 ) -> Result<Json<UdfValidationResult>, ErrorResp> {
-    let check_udfs_resp =
-        validate_udf_with_controller(&state.controller_addr, &req.definition).await?;
+    let check_udfs_resp = build_udf(&state.controller_addr, &req.definition).await?;
 
     Ok(Json(UdfValidationResult {
         udf_name: check_udfs_resp.udf_name,

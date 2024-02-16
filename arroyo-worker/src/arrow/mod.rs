@@ -3,7 +3,6 @@ use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
-use arroyo_df::physical::EmptyRegistry;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::grpc::api;
@@ -15,7 +14,7 @@ use datafusion_common::DataFusionError;
 use datafusion_common::Result as DFResult;
 use datafusion_execution::runtime_env::RuntimeConfig;
 use datafusion_execution::runtime_env::RuntimeEnv;
-use datafusion_execution::TaskContext;
+use datafusion_execution::{FunctionRegistry, TaskContext};
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::StreamExt;
@@ -38,9 +37,12 @@ pub struct ValueExecutionOperator {
 pub struct ValueExecutionConstructor;
 impl OperatorConstructor for ValueExecutionConstructor {
     type ConfigT = api::ValuePlanOperator;
-    fn with_config(&self, config: api::ValuePlanOperator) -> Result<OperatorNode> {
+    fn with_config(
+        &self,
+        config: api::ValuePlanOperator,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = EmptyRegistry::new();
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
 
@@ -49,7 +51,7 @@ impl OperatorConstructor for ValueExecutionConstructor {
         };
 
         let execution_plan = plan.try_into_physical_plan(
-            &registry,
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new())?,
             &codec,
         )?;
@@ -71,7 +73,6 @@ impl ArrowOperator for ValueExecutionOperator {
     }
 
     async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
-        //info!("incoming record batch {:?}", record_batch);
         {
             let mut writer = self.locked_batch.write().unwrap();
             *writer = Some(record_batch);
@@ -84,7 +85,6 @@ impl ArrowOperator for ValueExecutionOperator {
             .expect("successfully computed?");
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
-            //info!("batch {:?}", batch);
             ctx.collect(batch).await;
         }
     }
@@ -165,9 +165,12 @@ pub struct KeyExecutionConstructor;
 impl OperatorConstructor for KeyExecutionConstructor {
     type ConfigT = api::KeyPlanOperator;
 
-    fn with_config(&self, config: api::KeyPlanOperator) -> Result<OperatorNode> {
+    fn with_config(
+        &self,
+        config: api::KeyPlanOperator,
+        registry: Arc<dyn FunctionRegistry>,
+    ) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = EmptyRegistry::new();
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         let codec = ArroyoPhysicalExtensionCodec {
@@ -175,7 +178,7 @@ impl OperatorConstructor for KeyExecutionConstructor {
         };
 
         let execution_plan = plan.try_into_physical_plan(
-            &registry,
+            registry.as_ref(),
             &RuntimeEnv::new(RuntimeConfig::new())?,
             &codec,
         )?;

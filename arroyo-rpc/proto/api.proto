@@ -282,10 +282,21 @@ message OperatorCheckpointDetail {
   map<uint32, TaskCheckpointDetail> tasks = 5;
 }
 
+message ArrowDylibUdfConfig {
+  string dylib_path = 1;
+  repeated bytes arg_types = 2;
+  bytes return_type = 3;
+}
+
+message ArrowProgramConfig {
+  map<string, ArrowDylibUdfConfig> udf_dylibs = 1;
+}
+
 // Arrow
 message ArrowProgram {
   repeated ArrowNode nodes = 1;
   repeated ArrowEdge edges = 2;
+  ArrowProgramConfig program_config = 3;
 }
 
 message ArroyoSchema {

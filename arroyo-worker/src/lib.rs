@@ -24,6 +24,7 @@ use rand::random;
 
 use base64::engine::general_purpose;
 use base64::Engine as Base64Engine;
+use datafusion_expr::ScalarUDF;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
@@ -41,7 +42,8 @@ use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
 use prost::Message;
 
-use arroyo_datastream::logical::{LogicalGraph, LogicalProgram};
+use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
+use arroyo_df::physical::{Registry, UdfDylib};
 use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod arrow;
@@ -144,7 +146,8 @@ pub struct WorkerServer {
     run_id: String,
     name: &'static str,
     controller_addr: String,
-    logical: LogicalGraph,
+    logical_graph: LogicalGraph,
+    program_config: ProgramConfig,
     state: Arc<Mutex<Option<EngineState>>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
     shutdown_guard: ShutdownGuard,
@@ -178,7 +181,7 @@ impl WorkerServer {
             job_id,
             run_id,
             controller_addr,
-            logical.graph,
+            logical,
             shutdown_guard,
         )
     }
@@ -189,7 +192,7 @@ impl WorkerServer {
         job_id: String,
         run_id: String,
         controller_addr: String,
-        logical: LogicalGraph,
+        logical: LogicalProgram,
         shutdown_guard: ShutdownGuard,
     ) -> Self {
         Self {
@@ -198,7 +201,8 @@ impl WorkerServer {
             job_id,
             run_id,
             controller_addr,
-            logical,
+            logical_graph: logical.graph,
+            program_config: logical.program_config,
             state: Arc::new(Mutex::new(None)),
             network: Arc::new(Mutex::new(None)),
             shutdown_guard,
@@ -416,8 +420,19 @@ impl WorkerGrpc for WorkerServer {
         }
 
         let req = request.into_inner();
+        let mut registry = Registry::new();
 
-        let program = Program::from_logical(self.name.to_string(), &self.logical, &req.tasks);
+        for (udf_name, dylib_config) in self.program_config.udf_dylibs.iter() {
+            let dylib = UdfDylib::init(udf_name, dylib_config).await;
+            registry.add_udf(Arc::new(ScalarUDF::from(dylib)));
+        }
+
+        let program = Program::from_logical(
+            self.name.to_string(),
+            &self.logical_graph,
+            &req.tasks,
+            registry,
+        );
 
         let (engine, control_rx) = {
             let network = { self.network.lock().unwrap().take().unwrap() };

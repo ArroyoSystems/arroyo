@@ -11,6 +11,7 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-operator = { path = "../arroyo-operator" }
+arroyo-storage = { path = "../arroyo-storage" }
 
 datafusion = "35.0"
 datafusion-expr = "35.0"
@@ -30,7 +31,7 @@ tokio = "1.27"
 tokio-stream = { version = "0.1", features = ["full"] }
 quote = "1.0"
 regex = "1"
-arrow = { workspace = true }
+arrow = { workspace = true, features = ["ffi"] }
 arrow-array = { workspace = true}
 anyhow = {version = "1.0.70", features = ["backtrace"]}
 async-trait = "0.1"
@@ -44,3 +45,5 @@ apache-avro = "0.16.0"
 prettyplease = "0.2.4"
 unicase = "2.7.0"
 toml = "0.8.8"
+dlopen = "0.1.6"
+dlopen_derive = "0.1.3"

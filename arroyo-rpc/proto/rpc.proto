@@ -166,8 +166,13 @@ message WorkerErrorReq {
 message WorkerErrorRes {
 }
 
-message CheckUdfsReq {
+message BuildUdfReq {
   string definition = 1;
+}
+
+message BuildUdfResp {
+  repeated string errors = 1;
+  optional string udf_name = 2;
 }
 
 service ControllerGrpc {
@@ -186,7 +191,7 @@ service ControllerGrpc {
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
   rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
-  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsResp);
+  rpc BuildUdf(BuildUdfReq) returns (BuildUdfResp);
 
 }
 
@@ -207,7 +212,7 @@ message SubtaskCheckpointMetadata {
   uint64 finish_time = 3;
   optional uint64 watermark = 4;
 
-  map<string, TableSubtaskCheckpointMetadata> table_metadata = 10; 
+  map<string, TableSubtaskCheckpointMetadata> table_metadata = 10;
   // TODO: move this into plan?
   map<string, TableConfig> table_configs = 11;
 }
@@ -451,40 +456,22 @@ service NodeGrpc {
   rpc StopWorker(StopWorkerReq) returns (StopWorkerResp);
 }
 
-
 message UdfCrate {
   string name = 1;
   string definition = 2;
   string cargo_toml = 3;
+  string lib_rs = 4;
 }
 
-message CompileQueryReq {
-  string job_id = 1;
-  string types = 2;
-  string pipeline = 3;
-  string wasm_fns = 4;
-  repeated UdfCrate udf_crates = 5;
-}
-
-message CompileQueryResp {
-  string pipeline_path = 1;
-  string wasm_fns_path = 2;
-}
-
-message CheckUdfsResp {
-  repeated string errors = 1;
-  optional string udf_name = 2;
-}
-
-message CheckUdfsCompilerReq {
+message BuildUdfCompilerReq {
   UdfCrate udf_crate = 1;
+  string dylib_path = 2;
 }
 
-message CheckUdfsCompilerResp {
+message BuildUdfCompilerResp {
   repeated string errors = 1;
 }
 
 service CompilerGrpc {
-  rpc CompileQuery(CompileQueryReq) returns (CompileQueryResp);
-  rpc CheckUdfs(CheckUdfsCompilerReq) returns (CheckUdfsCompilerResp);
+  rpc BuildUdf(BuildUdfCompilerReq) returns (BuildUdfCompilerResp);
 }

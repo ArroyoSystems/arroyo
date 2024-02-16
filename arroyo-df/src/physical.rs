@@ -1,3 +1,5 @@
+use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray};
+use dlopen::wrapper::WrapperApi;
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
@@ -5,10 +7,11 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use arrow_array::{RecordBatch, StructArray};
+use crate::types::{array_to_columnar_value, arrow_type_to_data_type};
+use arrow_array::{Array, ArrayRef, RecordBatch, StructArray};
+use arrow_schema::ffi::FFI_ArrowSchema;
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
-use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
-use datafusion::physical_plan::unnest::UnnestExec;
+use arroyo_datastream::logical::DylibUdfConfig;
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
@@ -23,33 +26,26 @@ use datafusion_common::{
 
 use crate::json::get_json_functions;
 use crate::rewriters::UNNESTED_COL;
+use arrow::array;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
+use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
+use arroyo_storage::StorageProvider;
+use arroyo_types::dylib_name;
+use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion_execution::FunctionRegistry;
 use datafusion_expr::{
-    AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF,
+    AggregateUDF, ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+    WindowUDF,
 };
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
+use dlopen::wrapper::Container;
 use prost::Message;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use std::path::Path;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-
-pub struct EmptyRegistry {
-    udfs: HashMap<String, Arc<ScalarUDF>>,
-}
-
-impl EmptyRegistry {
-    pub fn new() -> Self {
-        let window_udf = window_scalar_function();
-        let mut udfs = HashMap::new();
-        udfs.insert("window".to_string(), Arc::new(window_udf));
-
-        udfs.extend(get_json_functions());
-
-        Self { udfs }
-    }
-}
 
 pub fn window_function(columns: &[ColumnarValue]) -> DFResult<ColumnarValue> {
     if columns.len() != 2 {
@@ -160,7 +156,161 @@ pub fn window_scalar_function() -> ScalarUDF {
     )
 }
 
-impl FunctionRegistry for EmptyRegistry {
+#[derive(WrapperApi)]
+struct UdfDylibInterface {
+    run: unsafe extern "C" fn(
+        args_ptr: *mut FfiArraySchemaPair,
+        args_len: usize,
+        args_capacity: usize,
+    ) -> FfiArraySchemaPair,
+}
+
+pub struct UdfDylib {
+    name: String,
+    signature: Signature,
+    return_type: DataType,
+    udf: Container<UdfDylibInterface>,
+}
+
+impl Debug for UdfDylib {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UdfDylib").finish()
+    }
+}
+
+impl UdfDylib {
+    /// Download a UDF dylib from the object store
+    pub async fn init(name: &str, config: &DylibUdfConfig) -> Self {
+        let signature = Signature::exact(
+            config
+                .arg_types
+                .iter()
+                .map(|arg| arrow_type_to_data_type(arg))
+                .collect(),
+            Volatility::Volatile,
+        );
+
+        let storage = StorageProvider::for_url("/")
+            .await
+            .expect("unable to construct storage provider");
+
+        let udf = storage
+            .get(&config.dylib_path)
+            .await
+            .expect("UDF dylib not found.");
+
+        // write the dylib to a local file
+        let local_udfs_dir = "/tmp/arroyo/local_udfs";
+        std::fs::create_dir_all(local_udfs_dir).expect("unable to create local udfs dir");
+        let local_dylib_path = Path::new(local_udfs_dir).join(dylib_name(name));
+
+        std::fs::write(&local_dylib_path, udf).expect("unable to write dylib to file");
+
+        Self {
+            name: name.to_string(),
+            signature,
+            udf: unsafe { Container::load(local_dylib_path).unwrap() },
+            return_type: arrow_type_to_data_type(&config.return_type),
+        }
+    }
+}
+
+#[repr(C)]
+struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
+
+fn scalar_value_to_array(scalar: &ScalarValue, length: usize) -> ArrayRef {
+    match scalar {
+        ScalarValue::Boolean(v) => Arc::new(array::BooleanArray::from(vec![*v; length])),
+        ScalarValue::Float32(v) => Arc::new(array::Float32Array::from(vec![*v; length])),
+        ScalarValue::Float64(v) => Arc::new(array::Float64Array::from(vec![*v; length])),
+        ScalarValue::Int8(v) => Arc::new(array::Int8Array::from(vec![*v; length])),
+        ScalarValue::Int16(v) => Arc::new(array::Int16Array::from(vec![*v; length])),
+        ScalarValue::Int32(v) => Arc::new(array::Int32Array::from(vec![*v; length])),
+        ScalarValue::Int64(v) => Arc::new(array::Int64Array::from(vec![*v; length])),
+        ScalarValue::UInt8(v) => Arc::new(array::UInt8Array::from(vec![*v; length])),
+        ScalarValue::UInt16(v) => Arc::new(array::UInt16Array::from(vec![*v; length])),
+        ScalarValue::UInt32(v) => Arc::new(array::UInt32Array::from(vec![*v; length])),
+        ScalarValue::UInt64(v) => Arc::new(array::UInt64Array::from(vec![*v; length])),
+        ScalarValue::Utf8(v) => Arc::new(array::StringArray::from(vec![v.clone(); length])),
+        _ => panic!("Unsupported scalar type : {:?}", scalar),
+    }
+}
+
+impl ScalarUDFImpl for UdfDylib {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _arg_types: &[DataType]) -> DFResult<DataType> {
+        Ok(self.return_type.clone())
+    }
+
+    fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
+        let batch_length = args
+            .iter()
+            .map(|arg| {
+                if let ColumnarValue::Array(array) = arg {
+                    array.len()
+                } else {
+                    1
+                }
+            })
+            .max()
+            .unwrap();
+
+        let mut args = args
+            .iter()
+            .map(|arg| {
+                let (array, schema) = match arg {
+                    ColumnarValue::Array(array) => to_ffi(&(array.to_data())).unwrap(),
+                    ColumnarValue::Scalar(s) => {
+                        to_ffi(&scalar_value_to_array(s, batch_length).to_data()).unwrap()
+                    }
+                };
+                FfiArraySchemaPair(array, schema)
+            })
+            .collect::<Vec<_>>();
+
+        let FfiArraySchemaPair(result_array, result_schema) =
+            unsafe { (self.udf.run)(args.as_mut_ptr(), args.len(), args.capacity()) };
+
+        // the UDF dylib is responsible for freeing the memory of the args
+        mem::forget(args);
+
+        let result_array = unsafe { from_ffi(result_array, &result_schema).unwrap() };
+
+        Ok(array_to_columnar_value(result_array, &self.return_type))
+    }
+}
+
+pub struct Registry {
+    udfs: HashMap<String, Arc<ScalarUDF>>,
+}
+
+impl Registry {
+    pub fn new() -> Self {
+        let window_udf = window_scalar_function();
+        let mut udfs = HashMap::new();
+        udfs.insert("window".to_string(), Arc::new(window_udf));
+        udfs.extend(get_json_functions());
+
+        Self { udfs }
+    }
+
+    pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {
+        self.udfs.insert(udf.name().to_string(), udf);
+    }
+}
+
+impl FunctionRegistry for Registry {
     fn udfs(&self) -> HashSet<String> {
         self.udfs.keys().cloned().collect()
     }
@@ -169,18 +319,18 @@ impl FunctionRegistry for EmptyRegistry {
         self.udfs
             .get(name)
             .cloned()
-            .ok_or_else(|| DataFusionError::NotImplemented(format!("udf {} not implemented", name)))
+            .ok_or_else(|| DataFusionError::Execution(format!("Udf {} not found", name)))
     }
 
     fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(format!(
+        Err(DataFusionError::NotImplemented(format!(
             "udaf {} not implemented",
             name
         )))
     }
 
     fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(format!(
+        Err(DataFusionError::NotImplemented(format!(
             "udwf {} not implemented",
             name
         )))
