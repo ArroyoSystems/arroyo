@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - dev
       - '*docker*'
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*' # Semver matching pattern with optional suffix
@@ -18,103 +19,112 @@ jobs:
         platform:
           - linux/amd64
           - linux/arm64
-        image_type:
-          - worker
-          - services
-          - compiler
-          - single
         include:
           - platform: linux/amd64
-            mold_arch: x86_64
-            proto_arch: x86_64
-            prom_arch: amd64
-            runs_on: buildjet-8vcpu-ubuntu-2204
+            runs_on: buildjet-32vcpu-ubuntu-2204
+            arch: amd64
           - platform: linux/arm64
-            mold_arch: aarch64
-            proto_arch: aarch_64
-            prom_arch: arm64
-            runs_on: buildjet-8vcpu-ubuntu-2204-arm
-          - image_type: worker
-            dockerfile: docker/cluster/worker/Dockerfile
-          - image_type: services
-            dockerfile: docker/cluster/services/Dockerfile
-          - image_type: compiler
-            dockerfile: docker/cluster/compiler/Dockerfile
-          - image_type: single
-            dockerfile: docker/single/Dockerfile
+            runs_on: buildjet-32vcpu-ubuntu-2204-arm
+            arch: arm64
     runs-on: ${{ matrix.runs_on }}
     steps:
-      # Get the repository's code
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Docker meta
-        id: arroyo-docker # you'll use this in the next step
-        uses: docker/metadata-action@v3
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          images: |
-            ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
-          tags: |
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
-          flavor: |
-            latest=false
-            prefix=${{ matrix.prom_arch }}-
-      - name: Set env
-        run: echo "GIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
-      - name: Build and push
-        uses: docker/build-push-action@v2
+          images: ghcr.io/arroyosystems/arroyo-single
+
+      - name: Build and push single
+        id: build-single
+        uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ${{ matrix.dockerfile }}
+          file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
           build-args: |
-            MOLD_ARCH=${{ matrix.mold_arch }}
-            PROTO_ARCH=${{ matrix.proto_arch }}
-            PROM_ARCH=${{ matrix.prom_arch }}
-            GIT_SHA=${{ env.GIT_SHA }}
+            GIT_SHA=${{ github.sha }}
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.arroyo-docker.outputs.tags }}
-          labels: ${{ steps.arroyo-docker.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
+          target: arroyo-single
+          outputs: type=image,name=ghcr.io/arroyosystems/arroyo-single,push-by-digest=true,name-canonical=true,push=true,store=true
+
+      - name: Docker meta
+        id: meta-arroyo
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/arroyosystems/arroyo
+
+      - name: Build and push arroyo
+        id: build-arroyo
+        uses: docker/build-push-action@v5
+        with:
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          push: ${{ github.event_name != 'pull_request' }}
+          cache-from: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
+          target: arroyo
+          outputs: type=image,name=ghcr.io/arroyosystems/arroyo,push-by-digest=true,name-canonical=true,push=true,store=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests/arroyo-single
+          digest="${{ steps.build-single.outputs.digest }}"
+          touch "/tmp/digests/arroyo-single/${digest#sha256:}"
+          
+          mkdir -p /tmp/digests/arroyo
+          digest="${{ steps.build-arroyo.outputs.digest }}"
+          touch "/tmp/digests/arroyo/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
   manifest:
     needs: build
     strategy:
       matrix:
-        image_type:
-          - worker
-          - services
-          - compiler
-          - single
+        image_name:
+          - arroyo
+          - arroyo-single
     runs-on: ubuntu-latest
     steps:
-      - name: Login to GHCR
-        uses: docker/login-action@v1
+      -
+        name: Download digests
+        uses: actions/download-artifact@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Docker meta
-        id: arroyo-docker # you'll use this in the next step
-        uses: docker/metadata-action@v3
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          images: |
-            ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
+          images: ghcr.io/arroyosystems/${{ matrix.image_name }}
           tags: |
             type=schedule
             type=ref,event=branch
@@ -123,20 +133,28 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha
-      - name: Create and push Docker manifest
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      -
+        name: Create manifest list and push
+        working-directory: /tmp/digests/${{ matrix.image_name }}
+        run: |          
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/arroyosystems/${{ matrix.image_name }}@sha256:%s ' *)
+      -
+        name: Inspect image
         run: |
-          TAG=${{ steps.arroyo-docker.outputs.version }}
-          IMAGE=ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
-          docker manifest create   ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} ${IMAGE}:amd64-${TAG}
-          docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} --arch arm64
-          docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:amd64-${TAG} --arch amd64
-          docker manifest push     ${IMAGE}:${TAG}
-      - name: Push latest to tip tag.
-        if: github.ref == 'refs/heads/master'
+          docker buildx imagetools inspect ghcr.io/arroyosystems/${{ matrix.image_name }}:${{ steps.meta.outputs.version }}
+      # TODO: change this to tip once merged into master
+      - name: Push to dev tag.
+        working-directory: /tmp/digests/${{ matrix.image_name }}
+        # change to dev before merging
+        if: github.ref == 'refs/heads/df-docker'
         run: |
-          TAG=${{ steps.arroyo-docker.outputs.version }}
-          IMAGE=ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
-          docker manifest create   ${IMAGE}:tip ${IMAGE}:arm64-${TAG} ${IMAGE}:amd64-${TAG}
-          docker manifest annotate ${IMAGE}:tip ${IMAGE}:arm64-${TAG} --arch arm64
-          docker manifest annotate ${IMAGE}:tip ${IMAGE}:amd64-${TAG} --arch amd64
-          docker manifest push     ${IMAGE}:tip
+          docker buildx imagetools create --tag ghcr.io/arroyosystems/${{ matrix.image_name }}:dev \
+            $(printf 'ghcr.io/arroyosystems/${{ matrix.image_name }}@sha256:%s ' *)

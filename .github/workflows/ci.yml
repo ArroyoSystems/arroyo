@@ -17,22 +17,8 @@ jobs:
               args: [--frozen-lockfile, --strict-peer-dependencies]
       - name: Run prettier
         run: |
-          cd arroyo-console
+          cd webui
           pnpm check
-
-  check-dockerfiles:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out
-        uses: actions/checkout@v3
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@ec02537da5712d66d4d50a0f33b7eb52773b5ed1
-        with:
-          ruby-version: '3.1'
-      - name: Install dependencies
-        run: gem install toml-rb
-      - name: Check Dockerfiles
-        run: ruby docker/check_dockerfiles.rb
 
   build-rust:
     runs-on: ubicloud-standard-16
@@ -54,12 +40,16 @@ jobs:
         with:
           toolchain: stable
           override: true
+      - name: Check Formatting
+        run: cargo fmt -- --check
       - name: Setup npm
         uses: actions/setup-node@v3
+        with:
+          node-version: '21'
       - name: Install OpenAPI Generator
         run: |
           npm install @openapitools/openapi-generator-cli -g
-          openapi-generator-cli version
+          cd crates/arroyo-openapi && openapi-generator-cli version
       - name: Setup Postgres
         run: |
           sudo apt-get update
@@ -72,7 +62,7 @@ jobs:
             tar xvfz refinery*.tar.gz
             mv /tmp/refinery*-musl/refinery /tmp
           popd
-          /tmp/refinery migrate -e DATABASE_URL -p arroyo-api/migrations
+          /tmp/refinery migrate -e DATABASE_URL -p crates/arroyo-api/migrations
       - name: Install dependencies
         run: |
           curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
@@ -88,14 +78,12 @@ jobs:
           mkdir /tmp/kraft-combined-logs
           kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
           kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
-      - name: Check Formatting
-        run: cargo fmt -- --check
       - name: Build
         run: cargo build --all-features
       - name: Validate API
         run: |
           npm install --global ibm-openapi-validator
-          cd arroyo-openapi
+          cd crates/arroyo-openapi
           lint-openapi --errors-only api-spec.json
       - name: Test
         run: cargo nextest run --jobs 4 --all-features
@@ -117,5 +105,5 @@ jobs:
               args: [--frozen-lockfile, --strict-peer-dependencies]
       - name: Build console
         run: |
-          cd arroyo-console
+          cd webui
           pnpm build
