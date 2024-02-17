@@ -33,10 +33,11 @@ use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermar
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::operator::Registry;
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    FunctionRegistry, SendableRecordBatchStream,
+    SendableRecordBatchStream,
 };
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
@@ -674,9 +675,9 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
     type ConfigT = api::SessionWindowAggregateOperator;
     fn with_config(
         &self,
-        config: api::SessionWindowAggregateOperator,
-        registry: Arc<dyn FunctionRegistry>,
-    ) -> Result<OperatorNode> {
+        config: Self::ConfigT,
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<OperatorNode> {
         let window_field = Arc::new(Field::new(
             config.window_field_name,
             window_arrow_struct(),

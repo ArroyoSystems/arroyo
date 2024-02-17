@@ -9,7 +9,7 @@ use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::{
     df::ArroyoSchema,
     grpc::{api, TableConfig},
@@ -17,7 +17,6 @@ use arroyo_rpc::{
 use arroyo_state::timestamp_table_config;
 use datafusion::execution::context::SessionContext;
 use datafusion_execution::runtime_env::{RuntimeConfig, RuntimeEnv};
-use datafusion_execution::FunctionRegistry;
 use datafusion_physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -191,9 +190,9 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
     type ConfigT = api::JoinOperator;
     fn with_config(
         &self,
-        config: api::JoinOperator,
-        registry: Arc<dyn FunctionRegistry>,
-    ) -> Result<OperatorNode> {
+        config: Self::ConfigT,
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<OperatorNode> {
         let left_passer = Arc::new(RwLock::new(None));
         let right_passer = Arc::new(RwLock::new(None));
 

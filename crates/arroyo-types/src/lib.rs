@@ -299,7 +299,7 @@ pub fn from_nanos(ts: u128) -> SystemTime {
 
 pub fn print_time(time: SystemTime) -> String {
     chrono::DateTime::<chrono::Utc>::from(time)
-        .format("%Y-%m-%d %H:%M:%S")
+        .format("%Y-%m-%d %H:%M:%S%.3f")
         .to_string()
 }
 

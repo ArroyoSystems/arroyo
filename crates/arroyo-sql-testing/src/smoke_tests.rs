@@ -409,6 +409,54 @@ async fn select_star() -> Result<()> {
     .await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn windowed_outer_join() -> Result<()> {
+    correctness_run_codegen(
+        "windowed_outer_join",
+        "CREATE TABLE cars (
+        timestamp TIMESTAMP,
+        driver_id BIGINT,
+        event_type TEXT,
+        location TEXT
+      ) WITH (
+        connector = 'single_file',
+        path = '$input_dir/cars.json',
+        format = 'json',
+        type = 'source',
+        event_time_field = 'timestamp'
+      );
+      CREATE TABLE hourly_aggregates (
+        hour TIMESTAMP,
+        drivers BIGINT,
+        pickups BIGINT
+      ) WITH (
+        connector = 'single_file',
+        path = '$output_path',
+        format = 'json',
+        type = 'sink'
+      );
+      INSERT INTO hourly_aggregates
+      SELECT window.start as hour, dropoff_drivers, pickup_drivers FROM (
+      SELECT dropoffs.window as window, dropoff_drivers, pickup_drivers
+      FROM (
+        SELECT  TUMBLE(INTERVAL '1' hour) as window,
+        COUNT(distinct driver_id) as dropoff_drivers FROM cars where event_type = 'dropoff'
+        GROUP BY 1
+      ) dropoffs
+      FULL OUTER JOIN (
+        SELECT  TUMBLE(INTERVAL '1' hour) as window,
+        COUNT(distinct driver_id) as pickup_drivers FROM cars where event_type = 'pickup'
+        GROUP BY 1
+      ) pickups
+      ON dropoffs.window = pickups.window)
+      ",
+        200,
+    )
+    .await?;
+    Ok(())
+}
+
 /*
 
 correctness_run_codegen! {"aggregates", 10,
@@ -698,45 +746,6 @@ FROM
 FULL OUTER JOIN
 (SELECT driver_id FROM cars WHERE event_type = 'dropoff' and driver_id % 100 = 0) dropoffs
 ON pickups.driver_id = dropoffs.driver_id
-"}
-
-correctness_run_codegen! {"windowed_outer_join", 200,
-"CREATE TABLE cars (
-  timestamp TIMESTAMP,
-  driver_id BIGINT,
-  event_type TEXT,
-  location TEXT
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/cars.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
-CREATE TABLE hourly_aggregates (
-  hour TIMESTAMP,
-  drivers BIGINT,
-  pickups BIGINT
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'json',
-  type = 'sink'
-);
-INSERT INTO hourly_aggregates
-SELECT window.start as hour, dropoff_drivers, pickup_drivers FROM (
-SELECT dropoffs.window as window, dropoff_drivers, pickup_drivers
-FROM (
-  SELECT  TUMBLE(INTERVAL '1' hour) as window,
-   COUNT(distinct driver_id) as dropoff_drivers FROM cars where event_type = 'dropoff'
-  GROUP BY 1
-) dropoffs
-FULL OUTER JOIN (
-  SELECT  TUMBLE(INTERVAL '1' hour) as window,
-   COUNT(distinct driver_id) as pickup_drivers FROM cars where event_type = 'pickup'
-  GROUP BY 1
-) pickups
-ON dropoffs.window = pickups.window)
 "}
 
 correctness_run_codegen! {"windowed_inner_join", 200,

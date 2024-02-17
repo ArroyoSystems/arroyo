@@ -7,7 +7,9 @@ use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use async_trait::async_trait;
+use datafusion::common::DataFusionError;
 use datafusion::execution::FunctionRegistry;
+use datafusion::logical_expr::{AggregateUDF, ScalarUDF, WindowUDF};
 use futures::future::OptionFuture;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -24,7 +26,7 @@ pub trait OperatorConstructor: Send {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<dyn FunctionRegistry>,
+        registry: Arc<Registry>,
     ) -> anyhow::Result<OperatorNode>;
 }
 
@@ -460,4 +462,42 @@ pub trait ArrowOperator: Send + 'static {
 
     #[allow(unused_variables)]
     async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
+}
+
+#[derive(Default)]
+pub struct Registry {
+    udfs: HashMap<String, Arc<ScalarUDF>>,
+}
+
+impl Registry {
+    pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {
+        self.udfs.insert(udf.name().to_string(), udf);
+    }
+}
+
+impl FunctionRegistry for Registry {
+    fn udfs(&self) -> HashSet<String> {
+        self.udfs.keys().cloned().collect()
+    }
+
+    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+        self.udfs
+            .get(name)
+            .cloned()
+            .ok_or_else(|| DataFusionError::Execution(format!("Udf {} not found", name)))
+    }
+
+    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+        Err(DataFusionError::NotImplemented(format!(
+            "udaf {} not implemented",
+            name
+        )))
+    }
+
+    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+        Err(DataFusionError::NotImplemented(format!(
+            "udwf {} not implemented",
+            name
+        )))
+    }
 }
