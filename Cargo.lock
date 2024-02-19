@@ -1030,7 +1030,6 @@ dependencies = [
  "async-trait",
  "bincode 2.0.0-rc.3",
  "datafusion",
- "datafusion-common",
  "futures",
  "prost 0.12.3",
  "rand",

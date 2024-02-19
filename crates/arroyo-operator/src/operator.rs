@@ -7,7 +7,7 @@ use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use async_trait::async_trait;
-use datafusion::common::DataFusionError;
+use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{AggregateUDF, ScalarUDF, WindowUDF};
 use futures::future::OptionFuture;
@@ -480,21 +480,21 @@ impl FunctionRegistry for Registry {
         self.udfs.keys().cloned().collect()
     }
 
-    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+    fn udf(&self, name: &str) -> DFResult<Arc<ScalarUDF>> {
         self.udfs
             .get(name)
             .cloned()
             .ok_or_else(|| DataFusionError::Execution(format!("Udf {} not found", name)))
     }
 
-    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+    fn udaf(&self, name: &str) -> DFResult<Arc<AggregateUDF>> {
         Err(DataFusionError::NotImplemented(format!(
             "udaf {} not implemented",
             name
         )))
     }
 
-    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+    fn udwf(&self, name: &str) -> DFResult<Arc<WindowUDF>> {
         Err(DataFusionError::NotImplemented(format!(
             "udwf {} not implemented",
             name
