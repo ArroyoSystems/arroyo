@@ -547,6 +547,16 @@ impl StorageProvider {
         }
     }
 
+    pub async fn exists<P: Into<String>>(&self, path: P) -> Result<bool, StorageError> {
+        let path: String = path.into();
+        let exists = self
+            .object_store
+            .head(&self.qualify_path(&path.into()))
+            .await;
+
+        Ok(exists.is_ok())
+    }
+
     pub async fn get_as_stream<P: Into<String>>(
         &self,
         path: P,

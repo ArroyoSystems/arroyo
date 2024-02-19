@@ -2,14 +2,17 @@ use crate::ports::CONTROLLER_GRPC;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use async_trait::async_trait;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use bincode::{Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
 use std::fmt::{Debug, Display, Formatter};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
@@ -960,4 +963,19 @@ pub fn dylib_name(name: &str) -> String {
         "linux" => format!("{}.so", name),
         _ => panic!("unsupported OS"),
     }
+}
+
+pub fn dylib_path(definition: &str) -> String {
+    let artifact_url = env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
+
+    let mut hasher = DefaultHasher::new();
+    definition.hash(&mut hasher);
+    let hash = BASE64_STANDARD.encode(hasher.finish().to_be_bytes());
+
+    std::path::Path::new(&artifact_url)
+        .join("udfs")
+        .join(dylib_name(&hash))
+        .to_str()
+        .expect("Could not convert dylib path to string")
+        .to_string()
 }

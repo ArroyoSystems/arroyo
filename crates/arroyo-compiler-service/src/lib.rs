@@ -8,7 +8,7 @@ use arroyo_rpc::grpc::{
 };
 
 use arroyo_storage::StorageProvider;
-use arroyo_types::{dylib_name, grpc_port, ports, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV};
+use arroyo_types::{dylib_name, grpc_port, ports};
 use serde_json::Value;
 use tokio::{process::Command, sync::Mutex};
 use tonic::{Request, Response, Status};
@@ -29,10 +29,6 @@ pub async fn start_service() {
     let addr = format!("0.0.0.0:{}", grpc).parse().unwrap();
 
     info!("Starting compiler service at {}", addr);
-    info!(
-        "artifacts will be written to {}",
-        service.storage.canonical_url()
-    );
 
     arroyo_server_common::grpc_server()
         .add_service(CompilerGrpcServer::new(service))
@@ -51,10 +47,7 @@ impl CompileService {
     pub async fn new() -> Self {
         let build_dir = std::env::var("BUILD_DIR").unwrap_or("build_dir".to_string());
 
-        let artifact_url =
-            std::env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
-
-        let storage = StorageProvider::for_url(&artifact_url)
+        let storage = StorageProvider::for_url("/")
             .await
             .expect("unable to construct storage provider");
 
@@ -110,6 +103,17 @@ impl CompilerGrpc for CompileService {
 
         let req = request.into_inner();
 
+        // exit early if udf is already compiled
+        if self
+            .storage
+            .exists(req.dylib_path.clone())
+            .await
+            .is_ok_and(|x| x)
+        {
+            info!("UDF already compiled, skipping");
+            return Ok(Response::new(BuildUdfCompilerResp { errors: vec![] }));
+        }
+
         info!("Checking UDFs");
         let start = Instant::now();
 
@@ -123,9 +127,11 @@ impl CompilerGrpc for CompileService {
             .map_err(|e| Status::internal(format!("Writing UDFs failed: {}", e)))?;
 
         let udf_build_dir = self.build_dir.join("udfs_dir").join("udf_wrapper");
+        let cargo_command = if req.save { "build" } else { "check" };
+
         let output = Command::new("cargo")
             .current_dir(&udf_build_dir)
-            .arg("build")
+            .arg(cargo_command)
             .arg("--release")
             .arg("--message-format=json")
             .output()
@@ -139,18 +145,22 @@ impl CompilerGrpc for CompileService {
         );
 
         if output.status.success() {
-            // save dylib to storage
-            let dylib = tokio::fs::read(
-                &udf_build_dir
-                    .join("target/release/")
-                    .join(dylib_name("libudf_wrapper")),
-            )
-            .await?;
-            self.storage
-                .put(req.dylib_path, dylib)
-                .await
-                .map_err(|e| Status::internal(format!("Failed to save dylib: {}", e)))?;
+            if req.save {
+                // save dylib to storage
+                let dylib = tokio::fs::read(
+                    &udf_build_dir
+                        .join("target/release/")
+                        .join(dylib_name("libudf_wrapper")),
+                )
+                .await?;
 
+                self.storage
+                    .put(req.dylib_path.clone(), dylib)
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to save UDF library: {}", e)))?;
+
+                info!("Saved UDF dylib to {}", req.dylib_path);
+            }
             return Ok(Response::new(BuildUdfCompilerResp { errors: vec![] }));
         }
 

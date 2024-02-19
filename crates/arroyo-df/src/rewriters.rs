@@ -18,7 +18,6 @@ use datafusion_expr::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
 
 #[derive(Default)]
 pub struct TimestampRewriter {}

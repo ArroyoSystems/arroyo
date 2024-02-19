@@ -21,7 +21,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{
-    dylib_name, from_micros, grpc_port, ports, service_port, NodeId, WorkerId, COMPILER_ADDR_ENV,
+    from_micros, grpc_port, ports, service_port, NodeId, WorkerId, COMPILER_ADDR_ENV,
     COMPILER_PORT_ENV,
 };
 use deadpool_postgres::Pool;
@@ -478,7 +478,8 @@ impl ControllerGrpc for ControllerServer {
                         Err(e) => return Ok(udf_error_resp(e)),
                     },
                 }),
-                dylib_path: format!("udfs/{}", dylib_name(&function_name)),
+                save: req.save,
+                dylib_path: req.dylib_path,
             })
             .await?
             .into_inner();
