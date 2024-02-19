@@ -1193,6 +1193,7 @@ dependencies = [
  "arrow 50.0.0",
  "arrow-array 50.0.0",
  "async-trait",
+ "base64 0.21.7",
  "bincode 2.0.0-rc.3",
  "chrono",
  "serde",

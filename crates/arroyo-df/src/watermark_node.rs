@@ -1,7 +1,7 @@
 use crate::schemas::add_timestamp_field;
 use anyhow::{anyhow, Result};
 use arroyo_rpc::df::ArroyoSchema;
-use datafusion_common::{DFSchemaRef, OwnedTableReference, TableReference};
+use datafusion_common::{DFSchemaRef, OwnedTableReference};
 use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use std::{fmt::Formatter, sync::Arc};
 

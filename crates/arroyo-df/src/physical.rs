@@ -30,7 +30,6 @@ use arrow::array;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
 use arroyo_storage::StorageProvider;
-use arroyo_types::dylib_name;
 use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion_execution::FunctionRegistry;
 use datafusion_expr::{
@@ -202,7 +201,11 @@ impl UdfDylib {
         // write the dylib to a local file
         let local_udfs_dir = "/tmp/arroyo/local_udfs";
         std::fs::create_dir_all(local_udfs_dir).expect("unable to create local udfs dir");
-        let local_dylib_path = Path::new(local_udfs_dir).join(dylib_name(name));
+
+        let dylib_file_name = Path::new(&config.dylib_path)
+            .file_name()
+            .expect("Invalid dylib path");
+        let local_dylib_path = Path::new(local_udfs_dir).join(dylib_file_name);
 
         std::fs::write(&local_dylib_path, udf).expect("unable to write dylib to file");
 

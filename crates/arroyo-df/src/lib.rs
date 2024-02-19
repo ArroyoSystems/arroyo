@@ -68,8 +68,7 @@ use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
-use arroyo_types::{dylib_name, NullableType, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV};
-use std::path::Path;
+use arroyo_types::{dylib_path, NullableType};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
@@ -320,20 +319,10 @@ impl ArroyoSchemaProvider {
                 Err(e) => bail!("Error converting arg types: {}", e),
             };
 
-            let artifact_url =
-                std::env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
-
-            let dylib_path = Path::new(&artifact_url)
-                .join("udfs")
-                .join(dylib_name(&function.sig.ident.to_string()))
-                .to_str()
-                .expect("Could not convert dylib path to string")
-                .to_string();
-
             self.dylib_udfs.insert(
                 function.sig.ident.to_string(),
                 DylibUdfConfig {
-                    dylib_path,
+                    dylib_path: dylib_path(&body),
                     arg_types,
                     return_type: data_type_to_arrow_type(&ret.data_type)?,
                 },

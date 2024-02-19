@@ -51,6 +51,7 @@ use crate::rest_utils::{
     unauthorized, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
+use crate::udfs::build_udf;
 use crate::{connection_tables, to_micros};
 use crate::{handle_db_error, AuthData};
 use create_pipeline_req::Config::Sql;
@@ -253,6 +254,7 @@ pub(crate) async fn create_pipeline<'a>(
     pub_id: &str,
     auth: AuthData,
     tx: &Transaction<'a>,
+    controller_addr: &str,
 ) -> Result<(i64, LogicalProgram), ErrorResp> {
     let pipeline_type;
     let mut compiled;
@@ -356,6 +358,18 @@ pub(crate) async fn create_pipeline<'a>(
 
     if req.name.is_empty() {
         return Err(required_field("name"));
+    }
+
+    if let Some(udfs) = udfs.clone() {
+        for udf in udfs {
+            let res = build_udf(controller_addr, &udf.definition, true).await?;
+            if res.errors.len() > 0 {
+                return Err(bad_request(format!(
+                    "Failed to build UDF: {}",
+                    res.errors.join("\n")
+                )));
+            }
+        }
     }
 
     let pipeline_id = api_queries::create_pipeline()
@@ -547,6 +561,7 @@ pub async fn post_pipeline(
         &pipeline_pub_id,
         auth_data.clone(),
         &transaction,
+        &state.controller_addr,
     )
     .await?;
 

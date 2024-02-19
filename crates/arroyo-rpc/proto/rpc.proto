@@ -168,6 +168,8 @@ message WorkerErrorRes {
 
 message BuildUdfReq {
   string definition = 1;
+  bool save = 2;
+  string dylib_path = 3;
 }
 
 message BuildUdfResp {
@@ -469,6 +471,7 @@ message UdfCrate {
 message BuildUdfCompilerReq {
   UdfCrate udf_crate = 1;
   string dylib_path = 2;
+  bool save = 3;
 }
 
 message BuildUdfCompilerResp {
