@@ -355,6 +355,11 @@ impl StorageProvider {
         Ok(key.clone())
     }
 
+    pub async fn url_exists(url: &str) -> Result<bool, StorageError> {
+        let provider = Self::for_url(url).await?;
+        provider.exists("").await
+    }
+
     async fn construct_s3(
         mut config: S3Config,
         options: HashMap<String, String>,
@@ -547,14 +552,18 @@ impl StorageProvider {
         }
     }
 
-    pub async fn exists<P: Into<String>>(&self, path: P) -> Result<bool, StorageError> {
-        let path: String = path.into();
+    pub async fn exists<P: Into<Path>>(&self, path: P) -> Result<bool, StorageError> {
+        let path: Path = path.into();
         let exists = self
             .object_store
-            .head(&self.qualify_path(&path.into()))
+            .head(&self.qualify_path(&path))
             .await;
 
-        Ok(exists.is_ok())
+        match exists {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn get_as_stream<P: Into<String>>(

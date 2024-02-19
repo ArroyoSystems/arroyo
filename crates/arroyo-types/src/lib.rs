@@ -125,6 +125,8 @@ pub const CHECKPOINT_URL_ENV: &str = "CHECKPOINT_URL";
 pub const ARTIFACT_URL_ENV: &str = "ARTIFACT_URL";
 pub const ARTIFACT_URL_DEFAULT: &str = "/tmp/arroyo/artifacts";
 pub const COMPILER_FEATURES_ENV: &str = "COMPILER_FEATURES";
+pub const INSTALL_CLANG_ENV: &str = "INSTALL_CLANG";
+pub const INSTALL_RUSTC_ENV: &str = "INSTALL_RUSTC";
 
 // kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
@@ -148,6 +150,21 @@ pub fn telemetry_enabled() -> bool {
         Ok(val) => val != "true",
         Err(_) => true,
     }
+}
+
+pub fn bool_config(var: &str, default: bool) -> bool {
+    if let Ok(v) = env::var(var) {
+        match v.to_lowercase().as_str() {
+            "true" | "yes" | "1" => {
+                return true;
+            }
+            "false" | "no" | "0" => {
+                return  false;
+            }
+            _ => {}
+        }
+    };
+    default
 }
 
 pub fn string_config(var: &str, default: &str) -> String {

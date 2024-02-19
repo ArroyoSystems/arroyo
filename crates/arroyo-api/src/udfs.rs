@@ -213,7 +213,7 @@ pub async fn build_udf(
     {
         Ok(resp) => resp.into_inner(),
         Err(e) => {
-            error!("Controller failed to validate UDF: {}", e);
+            error!("Controller failed to validate UDF: {}", e.message());
             return Err(internal_server_error(format!(
                 "Failed to validate UDF: {}",
                 e.message()
