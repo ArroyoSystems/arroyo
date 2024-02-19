@@ -36,9 +36,9 @@ use datafusion_common::tree_node::{
 };
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{
-    AccumulatorFactoryFunction, Aggregate, BinaryExpr, Case, Expr, Extension, Join, LogicalPlan,
-    Projection, ReturnTypeFunction, ScalarFunctionDefinition, ScalarUDF, Signature,
-    StateTypeFunction, TableScan, Volatility, WindowUDF,
+    AccumulatorFactoryFunction, Aggregate, BinaryExpr, BuiltinScalarFunction, Case, Expr,
+    Extension, Join, LogicalPlan, Projection, ReturnTypeFunction, ScalarFunctionDefinition,
+    ScalarUDF, Signature, StateTypeFunction, TableScan, Volatility, WindowUDF,
 };
 
 use datafusion_expr::{AggregateUDF, TableSource};
@@ -766,8 +766,6 @@ impl QueryToGraphVisitor {
             ));
         };
 
-        info!("On condition: {:?}", on);
-
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
         let (left_index, left_table_scan) =
@@ -927,7 +925,10 @@ impl QueryToGraphVisitor {
                     Box::new(right_column.clone()),
                 ),
             ],
-            else_expr: None,
+            else_expr: Some(Box::new(Expr::ScalarFunction(ScalarFunction::new(
+                BuiltinScalarFunction::Coalesce,
+                vec![left_column.clone(), right_column.clone()],
+            )))),
         });
 
         projection_expr.push(max_timestamp);
@@ -1266,7 +1267,6 @@ impl WindowDetectingVisitor {
         logical_plan: &LogicalPlan,
         table_scans_with_windows: HashMap<OwnedTableReference, WindowType>,
     ) -> DFResult<Option<WindowType>> {
-        info!("checking {:?} for window", logical_plan);
         let mut visitor = WindowDetectingVisitor {
             window: None,
             table_scans_with_windows,
@@ -1288,7 +1288,6 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                 schema: _,
                 ..
             }) => {
-                info!("group_expr: {:?}", group_expr);
                 let window_expressions = group_expr
                     .iter()
                     .filter_map(|expr| {

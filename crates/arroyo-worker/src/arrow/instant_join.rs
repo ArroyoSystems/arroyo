@@ -277,14 +277,24 @@ impl ArrowOperator for InstantJoin {
         };
         for mut future in futures_to_drain {
             while let (_time, Some((batch, new_exec))) = future.await {
-                let batch = batch.expect(&format!(
-                    "should be able to compute batch:
-                left input schema:{:?}, 
-                right input schema:{:?}, 
-                plan:{:?}",
-                    self.left_input_schema, self.right_input_schema, self.join_physical_plan
-                ));
-                ctx.collect(batch).await;
+                match batch {
+                    Ok(batch) => {
+                        ctx.collect(batch).await;
+                    }
+                    Err(err) => {
+                        info!(
+                            "failed with {:?}
+                        left input schema:{:?}, 
+                        right input schema:{:?}, 
+                        plan:{:?}",
+                            err,
+                            self.left_input_schema,
+                            self.right_input_schema,
+                            self.join_physical_plan
+                        );
+                        panic!("error in future: {:?}", err);
+                    }
+                }
                 future = new_exec;
             }
         }
