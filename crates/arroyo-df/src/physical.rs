@@ -1,5 +1,5 @@
 use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray};
-use dlopen::wrapper::WrapperApi;
+use dlopen2::wrapper::WrapperApi;
 use std::{
     any::Any,
     mem,
@@ -36,7 +36,7 @@ use datafusion_expr::{
 };
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
-use dlopen::wrapper::Container;
+use dlopen2::wrapper::Container;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;

@@ -166,17 +166,6 @@ message WorkerErrorReq {
 message WorkerErrorRes {
 }
 
-message BuildUdfReq {
-  string definition = 1;
-  bool save = 2;
-  string dylib_path = 3;
-}
-
-message BuildUdfResp {
-  repeated string errors = 1;
-  optional string udf_name = 2;
-}
-
 service ControllerGrpc {
   rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
   rpc HeartbeatNode(HeartbeatNodeReq) returns (HeartbeatNodeResp);
@@ -193,8 +182,6 @@ service ControllerGrpc {
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
   rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
-  rpc BuildUdf(BuildUdfReq) returns (BuildUdfResp);
-
 }
 
 // Checkpoint metadata
@@ -468,16 +455,27 @@ message UdfCrate {
   string lib_rs = 4;
 }
 
-message BuildUdfCompilerReq {
+message BuildUdfReq {
   UdfCrate udf_crate = 1;
-  string dylib_path = 2;
   bool save = 3;
 }
 
-message BuildUdfCompilerResp {
+message BuildUdfResp {
   repeated string errors = 1;
+  optional string udf_path = 2;
+}
+
+
+message GetUdfPathReq {
+  string name = 1;
+  string definition = 2;
+}
+
+message GetUdfPathResp {
+  optional string udf_path = 1;
 }
 
 service CompilerGrpc {
-  rpc BuildUdf(BuildUdfCompilerReq) returns (BuildUdfCompilerResp);
+  rpc BuildUdf(BuildUdfReq) returns (BuildUdfResp);
+  rpc GetUdfPath(GetUdfPathReq) returns (GetUdfPathResp);
 }

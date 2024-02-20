@@ -661,6 +661,10 @@ impl StorageProvider {
         &self.canonical_url
     }
 
+    pub fn canonical_url_for(&self, path: &str) -> String {
+        format!("{}/{}", self.canonical_url, path)
+    }
+
     // Returns a url that will, combined with storage_options, parse to
     // the same ObjectStore as self.object_store.
     // Needed for systems that build their own ObjectStore, such as delta-rs

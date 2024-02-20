@@ -14,7 +14,7 @@ use std::env;
 
 use std::time::Duration;
 
-use crate::{connection_profiles, jobs, pipelines, types};
+use crate::{compiler_service, connection_profiles, jobs, pipelines, types};
 use arroyo_datastream::ConnectorOp;
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, QueryValidationResult, StopType,
@@ -25,11 +25,11 @@ use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollec
 use arroyo_rpc::grpc::api::{
     create_pipeline_req, ArrowProgram, CreateJobReq, CreatePipelineReq, CreateSqlJob,
 };
-use arroyo_rpc::grpc::{api as api_proto, api};
+use arroyo_rpc::grpc::{api as api_proto, api, GetUdfPathReq};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalProgram, OperatorName};
-use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
+use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig, ParsedUdf};
 use arroyo_formats::avro::arrow_to_avro_schema;
 use arroyo_formats::json::arrow_to_json_schema;
 use arroyo_rpc::formats::Format;
@@ -41,6 +41,7 @@ use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
 use tracing::warn;
+use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
@@ -63,6 +64,7 @@ async fn compile_sql<'e, E>(
     local_udfs: &Vec<Udf>,
     parallelism: usize,
     auth_data: &AuthData,
+    for_validation: bool,
     tx: &E,
 ) -> anyhow::Result<CompiledSql>
 where
@@ -90,21 +92,56 @@ where
         bail!("Local UDFs have duplicate function names");
     }
 
-    for udf in global_udfs {
-        let _ = schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
-            warn!(
+    let udfs: anyhow::Result<Vec<_>> = global_udfs.into_iter()
+        .map(|udf| Ok((ParsedUdf::try_parse(&udf.definition)
+            .map_err(|e| anyhow!("invalid global UDF {}: {}", udf.name, e))?, "global")))
+        .chain(local_udfs.iter()
+            .map(|udf| Ok((ParsedUdf::try_parse(&udf.definition)
+                .map_err(|e| anyhow!("invalid local UDF: {e}"))?, "local"))))
+        .collect();
+    let udfs = udfs?;
+
+    if !udfs.is_empty() {
+        let mut compiler_service: CompilerGrpcClient<_> = compiler_service()?;
+
+        for (parsed, scope) in udfs {
+            let path = if for_validation {
+                let resp = compiler_service.get_udf_path(GetUdfPathReq {
+                    name: parsed.name.clone(),
+                    definition: parsed.definition.clone(),
+                }).await.map_err(|e| anyhow!("Failed to reach compiler service: {e}"))?;
+
+                match resp.into_inner().udf_path {
+                    Some(path) => path,
+                    None => bail!("{} UDF {} is not compiled", scope, parsed.name),
+                }
+            } else {
+                "".to_String()
+            };
+
+            schema_provider.add_rust_udf(parsed.definition, &path)
+                .map_err()
+        }
+    }
+
+    if !(global_udfs.is_empty() && local_udfs.is_empty()) {
+        for udf in global_udfs {
+            let _ = schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
+                warn!(
                 "Could not process global UDF {}: {:?}",
                 udf.name,
                 e.root_cause()
             );
-        });
+            });
+        }
+
+        for udf in local_udfs.iter() {
+            schema_provider
+                .add_rust_udf(&udf.definition, udf)
+                .map_err(|e| anyhow!(format!("Could not process local UDF: {:?}", e.root_cause())))?;
+        }
     }
 
-    for udf in local_udfs.iter() {
-        schema_provider
-            .add_rust_udf(&udf.definition)
-            .map_err(|e| anyhow!(format!("Could not process local UDF: {:?}", e.root_cause())))?;
-    }
 
     let tables = connection_tables::get_all_connection_tables(auth_data, tx)
         .await
@@ -254,7 +291,6 @@ pub(crate) async fn create_pipeline<'a>(
     pub_id: &str,
     auth: AuthData,
     tx: &Transaction<'a>,
-    controller_addr: &str,
 ) -> Result<(i64, LogicalProgram), ErrorResp> {
     let pipeline_type;
     let mut compiled;

@@ -15,3 +15,5 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 anyhow = "1.0.75"
 serde_json = "1.0.106"
+base64 = "0.21"
+dlopen2 = "0.7"

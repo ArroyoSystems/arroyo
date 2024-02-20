@@ -10,12 +10,14 @@ use once_cell::sync::Lazy;
 use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
+use tonic::transport::Channel;
 use tower::service_fn;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 
 use crate::connection_profiles::{
     create_connection_profile, delete_connection_profile, get_connection_profile_autocomplete,

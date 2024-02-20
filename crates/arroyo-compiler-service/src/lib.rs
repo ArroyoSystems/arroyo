@@ -1,21 +1,22 @@
 use std::str::from_utf8;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, path::PathBuf, str::FromStr, sync::Arc};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::process::Stdio;
 use anyhow::{anyhow, bail};
+use base64::Engine;
+use base64::prelude::{BASE64_STANDARD_NO_PAD};
 
-use arroyo_rpc::grpc::{
-    compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
-    BuildUdfCompilerReq, BuildUdfCompilerResp, UdfCrate,
-};
+use arroyo_rpc::grpc::{BuildUdfReq, BuildUdfResp, compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer}, GetUdfPathReq, GetUdfPathResp, UdfCrate};
 
 use arroyo_storage::StorageProvider;
-use arroyo_types::{dylib_name, grpc_port, ports, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV, bool_config, INSTALL_RUSTC_ENV, INSTALL_CLANG_ENV};
+use arroyo_types::{grpc_port, ports, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV, bool_config, INSTALL_RUSTC_ENV, INSTALL_CLANG_ENV};
 use serde_json::Value;
 use tokio::{process::Command, sync::Mutex};
 use tokio::time::{timeout};
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
+use dlopen2::utils::PLATFORM_FILE_EXTENSION;
 
 const RUSTUP: &str = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y";
 
@@ -191,12 +192,20 @@ crate-type = ["cdylib", "rlib"]
     }
 }
 
+fn dylib_path(name: &str, definition: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    definition.hash(&mut hasher);
+    let hash = BASE64_STANDARD_NO_PAD.encode(hasher.finish().to_le_bytes());
+
+    format!("udfs/{}_{}.{}", name, hash, PLATFORM_FILE_EXTENSION)
+}
+
 #[tonic::async_trait]
 impl CompilerGrpc for CompileService {
     async fn build_udf(
         &self,
-        request: Request<BuildUdfCompilerReq>,
-    ) -> Result<Response<BuildUdfCompilerResp>, Status> {
+        request: Request<BuildUdfReq>,
+    ) -> Result<Response<BuildUdfResp>, Status> {
         // only allow one request to be active at a given time
         let _guard = self.lock.lock().await;
 
@@ -206,24 +215,24 @@ impl CompilerGrpc for CompileService {
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
         let req = request.into_inner();
+        let udf_crate = req.udf_crate
+            .ok_or_else(|| Status::failed_precondition("missing udf_crate field"))?;
+
+        let path = dylib_path(&udf_crate.name, &udf_crate.definition);
+        let canonical_url = self.storage.canonical_url_for(&path);
 
         // exit early if udf is already compiled
         if self
             .storage
-            .exists(req.dylib_path.clone())
+            .exists(path.as_str())
             .await
             .is_ok_and(|x| x)
         {
-            info!("UDF already compiled, skipping");
-            return Ok(Response::new(BuildUdfCompilerResp { errors: vec![] }));
+            info!("UDF {} already compiled, skipping", udf_crate.name);
+            return Ok(Response::new(BuildUdfResp { errors: vec![], udf_path: Some(canonical_url)}));
         }
 
-        info!("Checking UDFs");
         let start = Instant::now();
-
-        let Some(udf_crate) = req.udf_crate else {
-            return Err(Status::internal("No UDF crate provided"));
-        };
 
         let name = udf_crate.name.clone();
         self.write_udf_crate(udf_crate)
@@ -234,6 +243,7 @@ impl CompilerGrpc for CompileService {
 
         let cargo_command = if req.save { "build" } else { "check" };
 
+        info!("{}ing udf", cargo_command);
         let output = Command::new(&*self.cargo_path.lock().await)
             .current_dir(&udf_build_dir)
             .arg(cargo_command)
@@ -244,30 +254,35 @@ impl CompilerGrpc for CompileService {
             .map_err(|e| Status::internal(format!("Failed to run cargo, will not be able to compile UDFs: {e}")))?;
 
         info!(
-            "Finished running cargo check on udfs crate {} after {:.2}s, exit code: {:?}",
+            "Finished running cargo {} on udfs crate {} after {:.2}s, exit code: {:?}",
+            cargo_command,
             &name,
             start.elapsed().as_secs_f32(),
             output.status.code()
         );
 
         if output.status.success() {
-            if req.save {
+            let udf_path = if req.save {
                 // save dylib to storage
                 let dylib = tokio::fs::read(
                     &udf_build_dir
                         .join("target/release/")
-                        .join(dylib_name("libudf_wrapper")),
+                        .join(format!("libudf_wrapper.{}", PLATFORM_FILE_EXTENSION)),
                 )
                 .await?;
 
                 self.storage
-                    .put(req.dylib_path.clone(), dylib)
+                    .put(&path, dylib)
                     .await
-                    .map_err(|e| Status::internal(format!("Failed to save UDF library: {}", e)))?;
+                    .map_err(|e| Status::internal(format!("Failed to write UDF library to artifact storage: {}", e)))?;
 
-                info!("Saved UDF dylib to {}", req.dylib_path);
-            }
-            return Ok(Response::new(BuildUdfCompilerResp { errors: vec![] }));
+                info!("Wrote UDF dylib to {}", canonical_url);
+                Some(canonical_url)
+            } else {
+                None
+            };
+
+            return Ok(Response::new(BuildUdfResp { errors: vec![], udf_path }));
         }
 
         let stdout = from_utf8(&output.stdout)
@@ -300,6 +315,23 @@ impl CompilerGrpc for CompileService {
 
         info!("Cargo check on udfs crate found {} errors", errors.len());
 
-        return Ok(Response::new(BuildUdfCompilerResp { errors }));
+        return Ok(Response::new(BuildUdfResp { errors, udf_path: None }));
+    }
+
+    async fn get_udf_path(&self, request: Request<GetUdfPathReq>) -> Result<Response<GetUdfPathResp>, Status> {
+        let req = request.into_inner();
+
+        let path = dylib_path(&req.name, &req.definition);
+        let canonical_url = self.storage.canonical_url_for(&path);
+
+        let exists = self
+            .storage
+            .exists(path.as_str())
+            .await
+            .map_err(|e| Status::internal(format!("Failed to read from storage system: {}", e)))?;
+
+        Ok(Response::new(GetUdfPathResp {
+            udf_path: exists.then_some(canonical_url),
+        }))
     }
 }
