@@ -1,9 +1,9 @@
+use crate::ParsedUdf;
 use anyhow::bail;
 use arrow_schema::DataType;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse_quote;
-use crate::ArroyoSchemaProvider;
 
 pub fn cargo_toml(dependencies: &str) -> String {
     format!(
@@ -19,26 +19,25 @@ edition = "2021"
     )
 }
 
-pub fn lib_rs(udf_name: &str, definition: &str) -> anyhow::Result<String> {
-    let mut schema_provider = ArroyoSchemaProvider::new();
-    schema_provider.add_rust_udf(definition).unwrap();
-    let udf_def = schema_provider.udf_defs.get(udf_name).unwrap().clone();
-    let udf_name = format_ident!("{}", udf_name);
+pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
+    let parsed = ParsedUdf::try_parse(definition)?;
 
-    let results_builder = if matches!(udf_def.ret.data_type, DataType::Utf8) {
+    let udf_name = format_ident!("{}", parsed.name);
+
+    let results_builder = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
         quote!(let mut results_builder = array::StringBuilder::with_capacity(args[0].len(), args[0].len() * 64);)
     } else {
-        let return_type = data_type_to_arrow_type_token(udf_def.ret.data_type.clone())?;
+        let return_type = data_type_to_arrow_type_token(parsed.ret_type.data_type.clone())?;
         quote!(let mut results_builder = array::PrimitiveBuilder::<datatypes::#return_type>::with_capacity(args[0].len());)
     };
 
     let mut arrow_types = vec![];
-    for arg in &udf_def.args {
+    for arg in &parsed.args {
         let arrow_type = data_type_to_arrow_type_token(arg.data_type.clone())?;
         arrow_types.push(arrow_type);
     }
 
-    let (defs, args): (Vec<_>, Vec<_>) = udf_def
+    let (defs, args): (Vec<_>, Vec<_>) = parsed
         .args
         .iter().zip(arrow_types.iter())
         .enumerate()
@@ -54,14 +53,14 @@ pub fn lib_rs(udf_name: &str, definition: &str) -> anyhow::Result<String> {
         })
         .unzip();
 
-    let unwrapping: Vec<_> = udf_def
+    let unwrapping: Vec<_> = parsed
         .args
         .iter()
         .enumerate()
         .map(|(i, arg_type)| {
             let id = format_ident!("arg_{}", i);
 
-            let append_none = if matches!(udf_def.ret.data_type, DataType::Utf8) {
+            let append_none = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
                 quote!(results_builder.append_option(None::<String>);)
             } else {
                 quote!(results_builder.append_option(None);)
@@ -80,7 +79,7 @@ pub fn lib_rs(udf_name: &str, definition: &str) -> anyhow::Result<String> {
         })
         .collect();
 
-    let to_string: Vec<_> = udf_def
+    let to_string: Vec<_> = parsed
         .args
         .iter()
         .enumerate()
@@ -100,7 +99,7 @@ pub fn lib_rs(udf_name: &str, definition: &str) -> anyhow::Result<String> {
         arg_zip = quote!(#arg_zip.zip(#next_arg.iter()));
     }
 
-    let call = if udf_def.ret.nullable {
+    let call = if parsed.ret_type.nullable {
         quote!(results_builder.append_option(udf::#udf_name(#(#args),*));)
     } else {
         quote!(results_builder.append_option(Some(udf::#udf_name(#(#args),*)));)

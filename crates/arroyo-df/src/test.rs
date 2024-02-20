@@ -248,11 +248,11 @@ async fn test_udf() {
     let mut schema_provider = get_test_schema_provider();
 
     schema_provider
-        .add_rust_udf("fn my_sqr(x: i64) -> i64 { x * x }")
+        .add_rust_udf("fn my_sqr(x: i64) -> i64 { x * x }", "")
         .unwrap();
 
     schema_provider
-        .add_rust_udf("fn my_sqr_opt(x: i64) -> Option<i64> { Some(x * x) }")
+        .add_rust_udf("fn my_sqr_opt(x: i64) -> Option<i64> { Some(x * x) }", "")
         .unwrap();
 
     let def = schema_provider.udf_defs.get("my_sqr").unwrap();

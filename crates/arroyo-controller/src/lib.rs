@@ -2,14 +2,14 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
-use anyhow::{Result};
+use anyhow::Result;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
-    BuildUdfReq, BuildUdfResp, GrpcOutputSubscription, HeartbeatNodeReq,
-    HeartbeatNodeResp, HeartbeatReq, HeartbeatResp, OutputData, RegisterNodeReq, RegisterNodeResp,
-    RegisterWorkerReq, RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
-    TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq,
-    TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
+    GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
+    OutputData, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq, RegisterWorkerResp,
+    TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskFailedReq, TaskFailedResp,
+    TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp, WorkerFinishedReq,
+    WorkerFinishedResp,
 };
 use arroyo_rpc::grpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
@@ -17,14 +17,10 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::shutdown::ShutdownGuard;
-use arroyo_types::{
-    from_micros, grpc_port, ports, service_port, NodeId, WorkerId, COMPILER_ADDR_ENV,
-    COMPILER_PORT_ENV,
-};
+use arroyo_types::{from_micros, grpc_port, ports, NodeId, WorkerId};
 use deadpool_postgres::Pool;
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
-use quote::{quote};
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -452,7 +448,6 @@ impl ControllerServer {
                 Arc::new(ProcessScheduler::new())
             }
         };
-
 
         Self {
             scheduler,

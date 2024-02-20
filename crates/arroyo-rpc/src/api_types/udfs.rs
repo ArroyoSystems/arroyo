@@ -55,4 +55,5 @@ pub struct GlobalUdf {
     pub updated_at: u64,
     pub definition: String,
     pub description: Option<String>,
+    pub dylib_url: String,
 }

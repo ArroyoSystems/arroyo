@@ -554,10 +554,7 @@ impl StorageProvider {
 
     pub async fn exists<P: Into<Path>>(&self, path: P) -> Result<bool, StorageError> {
         let path: Path = path.into();
-        let exists = self
-            .object_store
-            .head(&self.qualify_path(&path))
-            .await;
+        let exists = self.object_store.head(&self.qualify_path(&path)).await;
 
         match exists {
             Ok(_) => Ok(true),

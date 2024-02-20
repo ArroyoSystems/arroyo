@@ -1,22 +1,28 @@
+use anyhow::{anyhow, bail};
+use base64::prelude::BASE64_STANDARD_NO_PAD;
+use base64::Engine;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::process::Stdio;
 use std::str::from_utf8;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, path::PathBuf, str::FromStr, sync::Arc};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::process::Stdio;
-use anyhow::{anyhow, bail};
-use base64::Engine;
-use base64::prelude::{BASE64_STANDARD_NO_PAD};
 
-use arroyo_rpc::grpc::{BuildUdfReq, BuildUdfResp, compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer}, GetUdfPathReq, GetUdfPathResp, UdfCrate};
+use arroyo_rpc::grpc::{
+    compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
+    BuildUdfReq, BuildUdfResp, GetUdfPathReq, GetUdfPathResp, UdfCrate,
+};
 
 use arroyo_storage::StorageProvider;
-use arroyo_types::{grpc_port, ports, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV, bool_config, INSTALL_RUSTC_ENV, INSTALL_CLANG_ENV};
+use arroyo_types::{
+    bool_config, grpc_port, ports, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV, INSTALL_CLANG_ENV,
+    INSTALL_RUSTC_ENV,
+};
+use dlopen2::utils::PLATFORM_FILE_EXTENSION;
 use serde_json::Value;
+use tokio::time::timeout;
 use tokio::{process::Command, sync::Mutex};
-use tokio::time::{timeout};
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
-use dlopen2::utils::PLATFORM_FILE_EXTENSION;
 
 const RUSTUP: &str = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y";
 
@@ -40,7 +46,7 @@ pub async fn start_service() -> anyhow::Result<()> {
         .add_service(CompilerGrpcServer::new(service))
         .serve(addr)
         .await?;
-    
+
     Ok(())
 }
 
@@ -64,11 +70,10 @@ async fn binary_present(bin: &str) -> bool {
 
 impl CompileService {
     pub async fn new() -> anyhow::Result<Self> {
-        let build_dir = std::env::var("BUILD_DIR")
-            .unwrap_or("/tmp/arroyo/udf_build_dir".to_string());
+        let build_dir =
+            std::env::var("BUILD_DIR").unwrap_or("/tmp/arroyo/udf_build_dir".to_string());
 
-        let artifact_url =
-            env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
+        let artifact_url = env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
 
         let storage = StorageProvider::for_url(&artifact_url)
             .await
@@ -121,34 +126,46 @@ crate-type = ["cdylib", "rlib"]
         }
 
         if !bool_config(INSTALL_RUSTC_ENV, false) {
-            error!("Rustc is not installed, and compiler server was not configured to automatically \
+            error!(
+                "Rustc is not installed, and compiler server was not configured to automatically \
             install it. To compile UDFs, either manually install rustc or re-run the cluster with\
-            {}=true", INSTALL_RUSTC_ENV);
+            {}=true",
+                INSTALL_RUSTC_ENV
+            );
             bail!("Rustc is not installed and compiler service is not configured to automatically install it; \
             cannot compile UDFs");
         }
 
         info!("Rustc is not installed, but is required to compile UDFs. Attempting to install.");
 
-        let output = timeout(Duration::from_secs(2 * 60), Command::new("/bin/sh")
-            .arg("-c")
-            .arg(RUSTUP)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .output())
-            .await
-            .map_err(|e| anyhow!("Timed out while installing rust for UDF compilation after {e}"))?
-            .map_err(|e| anyhow!("Failed to install Rust: {e}"))?;
+        let output = timeout(
+            Duration::from_secs(2 * 60),
+            Command::new("/bin/sh")
+                .arg("-c")
+                .arg(RUSTUP)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .output(),
+        )
+        .await
+        .map_err(|e| anyhow!("Timed out while installing rust for UDF compilation after {e}"))?
+        .map_err(|e| anyhow!("Failed to install Rust: {e}"))?;
 
         if output.status.success() {
             info!("Rustc successfully installed...");
-            *self.cargo_path.lock().await = format!("{}/.cargo/bin/cargo", std::env::var("HOME")
-                .map_err(|_| anyhow!("Unable to determine cargo installation directory"))?);
+            *self.cargo_path.lock().await = format!(
+                "{}/.cargo/bin/cargo",
+                std::env::var("HOME")
+                    .map_err(|_| anyhow!("Unable to determine cargo installation directory"))?
+            );
             Ok(())
         } else {
-            error!("Failed to install rustc, will not be able to compile UDFs\
+            error!(
+                "Failed to install rustc, will not be able to compile UDFs\
             \n------------------------------\
-            \nInstall script stderr: {}", String::from_utf8_lossy(&output.stderr));
+            \nInstall script stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             bail!("UDFs are unavailable because Rust compiler is not installed and was not able to be installed. See controller logs for details.")
         }
     }
@@ -165,27 +182,37 @@ crate-type = ["cdylib", "rlib"]
             bail!("{}", error);
         }
 
-        info!("cc is not available, but required for UDF compilation. Attempting to install clang.");
-        let output = timeout(Duration::from_secs(2 * 60), Command::new("apt-get")
-            .arg("-y")
-            .arg("install")
-            .arg("clang")
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .output())
-            .await
-            .map_err(|e| anyhow!("Timed out while installing clang for UDF compilation after {e}"))?
-            .map_err(|e| anyhow!("Failed to install clang via apt-get: {e}"))?;
+        info!(
+            "cc is not available, but required for UDF compilation. Attempting to install clang."
+        );
+        let output = timeout(
+            Duration::from_secs(2 * 60),
+            Command::new("apt-get")
+                .arg("-y")
+                .arg("install")
+                .arg("clang")
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .output(),
+        )
+        .await
+        .map_err(|e| anyhow!("Timed out while installing clang for UDF compilation after {e}"))?
+        .map_err(|e| anyhow!("Failed to install clang via apt-get: {e}"))?;
 
         if output.status.success() {
             info!("clang successfully installed...");
         } else {
-            error!("Failed to install clang, will not be able to compile UDFs\
+            error!(
+                "Failed to install clang, will not be able to compile UDFs\
             \n------------------------------\
-            \napt-get stderr: {}", String::from_utf8_lossy(&output.stderr));
+            \napt-get stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
 
-            bail!("UDFs are unavailable because a C compiler is not installed and was not able to \
-            be installed. See controller logs for details.");
+            bail!(
+                "UDFs are unavailable because a C compiler is not installed and was not able to \
+            be installed. See controller logs for details."
+            );
         }
 
         Ok(())
@@ -209,27 +236,28 @@ impl CompilerGrpc for CompileService {
         // only allow one request to be active at a given time
         let _guard = self.lock.lock().await;
 
-        self.check_cc().await
+        self.check_cc()
+            .await
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
-        self.check_cargo().await
+        self.check_cargo()
+            .await
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
         let req = request.into_inner();
-        let udf_crate = req.udf_crate
+        let udf_crate = req
+            .udf_crate
             .ok_or_else(|| Status::failed_precondition("missing udf_crate field"))?;
 
         let path = dylib_path(&udf_crate.name, &udf_crate.definition);
         let canonical_url = self.storage.canonical_url_for(&path);
 
         // exit early if udf is already compiled
-        if self
-            .storage
-            .exists(path.as_str())
-            .await
-            .is_ok_and(|x| x)
-        {
+        if self.storage.exists(path.as_str()).await.is_ok_and(|x| x) {
             info!("UDF {} already compiled, skipping", udf_crate.name);
-            return Ok(Response::new(BuildUdfResp { errors: vec![], udf_path: Some(canonical_url)}));
+            return Ok(Response::new(BuildUdfResp {
+                errors: vec![],
+                udf_path: Some(canonical_url),
+            }));
         }
 
         let start = Instant::now();
@@ -251,7 +279,11 @@ impl CompilerGrpc for CompileService {
             .arg("--message-format=json")
             .output()
             .await
-            .map_err(|e| Status::internal(format!("Failed to run cargo, will not be able to compile UDFs: {e}")))?;
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to run cargo, will not be able to compile UDFs: {e}"
+                ))
+            })?;
 
         info!(
             "Finished running cargo {} on udfs crate {} after {:.2}s, exit code: {:?}",
@@ -271,10 +303,12 @@ impl CompilerGrpc for CompileService {
                 )
                 .await?;
 
-                self.storage
-                    .put(&path, dylib)
-                    .await
-                    .map_err(|e| Status::internal(format!("Failed to write UDF library to artifact storage: {}", e)))?;
+                self.storage.put(&path, dylib).await.map_err(|e| {
+                    Status::internal(format!(
+                        "Failed to write UDF library to artifact storage: {}",
+                        e
+                    ))
+                })?;
 
                 info!("Wrote UDF dylib to {}", canonical_url);
                 Some(canonical_url)
@@ -282,7 +316,10 @@ impl CompilerGrpc for CompileService {
                 None
             };
 
-            return Ok(Response::new(BuildUdfResp { errors: vec![], udf_path }));
+            return Ok(Response::new(BuildUdfResp {
+                errors: vec![],
+                udf_path,
+            }));
         }
 
         let stdout = from_utf8(&output.stdout)
@@ -315,20 +352,25 @@ impl CompilerGrpc for CompileService {
 
         info!("Cargo check on udfs crate found {} errors", errors.len());
 
-        return Ok(Response::new(BuildUdfResp { errors, udf_path: None }));
+        return Ok(Response::new(BuildUdfResp {
+            errors,
+            udf_path: None,
+        }));
     }
 
-    async fn get_udf_path(&self, request: Request<GetUdfPathReq>) -> Result<Response<GetUdfPathResp>, Status> {
+    async fn get_udf_path(
+        &self,
+        request: Request<GetUdfPathReq>,
+    ) -> Result<Response<GetUdfPathResp>, Status> {
         let req = request.into_inner();
 
         let path = dylib_path(&req.name, &req.definition);
         let canonical_url = self.storage.canonical_url_for(&path);
 
-        let exists = self
-            .storage
-            .exists(path.as_str())
-            .await
-            .map_err(|e| Status::internal(format!("Failed to read from storage system: {}", e)))?;
+        let exists =
+            self.storage.exists(path.as_str()).await.map_err(|e| {
+                Status::internal(format!("Failed to read from storage system: {}", e))
+            })?;
 
         Ok(Response::new(GetUdfPathResp {
             udf_path: exists.then_some(canonical_url),

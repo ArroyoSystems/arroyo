@@ -187,14 +187,14 @@ impl UdfDylib {
             Volatility::Volatile,
         );
 
-        let storage = StorageProvider::for_url("/")
+        let udf = StorageProvider::get_url(&config.dylib_path)
             .await
-            .expect("unable to construct storage provider");
-
-        let udf = storage
-            .get(&config.dylib_path)
-            .await
-            .expect("UDF dylib not found.");
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Unable to fetch UDF dylib from '{}': {:?}",
+                    config.dylib_path, e
+                )
+            });
 
         // write the dylib to a local file
         let local_udfs_dir = "/tmp/arroyo/local_udfs";

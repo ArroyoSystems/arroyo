@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
 use std::fmt::{Debug, Display, Formatter};
-use std::hash::{Hash};
+use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
@@ -155,7 +155,7 @@ pub fn bool_config(var: &str, default: bool) -> bool {
                 return true;
             }
             "false" | "no" | "0" => {
-                return  false;
+                return false;
             }
             _ => {}
         }

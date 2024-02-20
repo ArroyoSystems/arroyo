@@ -43,6 +43,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # arroyo-single
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -63,6 +64,7 @@ jobs:
           target: arroyo-single
           outputs: type=image,name=ghcr.io/arroyosystems/arroyo-single,push-by-digest=true,name-canonical=true,push=true,store=true
 
+      # arroyo
       - name: Docker meta
         id: meta-arroyo
         uses: docker/metadata-action@v5
@@ -83,6 +85,28 @@ jobs:
           target: arroyo
           outputs: type=image,name=ghcr.io/arroyosystems/arroyo,push-by-digest=true,name-canonical=true,push=true,store=true
 
+      # arroyo-full
+      - name: Docker meta
+        id: meta-arroyo-full
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/arroyosystems/arroyo-full
+
+      - name: Build and push arroyo-full
+        id: build-arroyo-full
+        uses: docker/build-push-action@v5
+        with:
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          push: ${{ github.event_name != 'pull_request' }}
+          cache-from: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
+          target: arroyo-full
+          outputs: type=image,name=ghcr.io/arroyosystems/arroyo-full,push-by-digest=true,name-canonical=true,push=true,store=true
+
+
       - name: Export digest
         run: |
           mkdir -p /tmp/digests/arroyo-single
@@ -92,6 +116,10 @@ jobs:
           mkdir -p /tmp/digests/arroyo
           digest="${{ steps.build-arroyo.outputs.digest }}"
           touch "/tmp/digests/arroyo/${digest#sha256:}"
+          
+          mkdir -p /tmp/digests/arroyo-full
+          digest="${{ steps.build-arroyo-full.outputs.digest }}"
+          touch "/tmp/digests/arroyo-full/${digest#sha256:}"
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
@@ -107,6 +135,7 @@ jobs:
         image_name:
           - arroyo
           - arroyo-single
+          - arroyo-full
     runs-on: ubuntu-latest
     steps:
       -

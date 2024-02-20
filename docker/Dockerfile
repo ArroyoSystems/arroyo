@@ -87,3 +87,17 @@ ENV PRODUCTION=true \
 
 EXPOSE 8000
 ENTRYPOINT [ "/app/arroyo-bin" ]
+
+FROM rust:slim-bookworm AS arroyo-full
+WORKDIR /app
+RUN apt-get update && \
+    apt-get -y install libsasl2-2 ca-certificates curl
+
+COPY --from=builder /arroyo-bin ./
+COPY --from=builder /app/webui/dist ./dist
+
+ENV PRODUCTION=true \
+    ASSET_DIR="/app/dist"
+
+EXPOSE 8000
+ENTRYPOINT [ "/app/arroyo-bin" ]

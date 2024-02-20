@@ -4,23 +4,22 @@ use crate::queries::api_queries::{
 };
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, internal_server_error, log_and_map, not_found,
-    service_unavailable, ApiError, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, internal_server_error, log_and_map, not_found, ApiError,
+    BearerAuth, ErrorResp,
 };
 use crate::{compiler_service, to_micros};
+use arroyo_df::{parse_dependencies, udfs, ParsedUdf};
 use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfPost, UdfValidationResult, ValidateUdfPost};
 use arroyo_rpc::api_types::GlobalUdfCollection;
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::{BuildUdfReq, UdfCrate};
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::Params;
 use tonic::transport::Channel;
 use tracing::error;
-use arroyo_df::{ArroyoSchemaProvider, parse_dependencies, ParsedUdf, udfs};
-use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
-use arroyo_types::{COMPILER_ADDR_ENV, COMPILER_PORT_ENV, ports, service_port};
 
 impl Into<GlobalUdf> for DbUdf {
     fn into(self) -> GlobalUdf {
@@ -32,6 +31,7 @@ impl Into<GlobalUdf> for DbUdf {
             definition: self.definition,
             updated_at: to_micros(self.updated_at),
             description: self.description,
+            dylib_url: self.dylib_url,
         }
     }
 }
@@ -61,16 +61,14 @@ pub async fn create_udf(
         .map_err(log_and_map)?;
 
     // build udf
-    let check_udfs_resp = build_udf(&req.definition, true).await?;
+    let build_udf_resp = build_udf(&mut compiler_service().await?, &req.definition, true).await?;
 
-    if check_udfs_resp.errors.len() > 0 {
+    if build_udf_resp.errors.len() > 0 {
         return Err(bad_request("UDF is invalid"));
     }
 
-    let Some(udf_name) = check_udfs_resp.name else {
-        // this should not be possible
-        return Err(internal_server_error("UDF name not found"));
-    };
+    let udf_name = build_udf_resp.name.expect("udf name not set for valid UDF");
+    let udf_url = build_udf_resp.url.expect("udf URL not set ofr valid UDF");
 
     // check for duplicates
     let duplicate = api_queries::get_udf_by_name()
@@ -104,6 +102,7 @@ pub async fn create_udf(
                 name: &udf_name,
                 definition: &req.definition,
                 description: &req.description.unwrap_or_default(),
+                dylib_url: udf_url,
             },
         )
         .await
@@ -209,6 +208,7 @@ impl From<anyhow::Error> for UdfResp {
 }
 
 pub async fn build_udf(
+    compiler_service: &mut CompilerGrpcClient<Channel>,
     udf_definition: &str,
     save: bool,
 ) -> Result<UdfResp, ErrorResp> {
@@ -227,13 +227,13 @@ pub async fn build_udf(
 
     let cargo_toml = udfs::cargo_toml(&dependencies);
 
-    let check_udfs_resp = match compiler_service()?
+    let check_udfs_resp = match compiler_service
         .build_udf(BuildUdfReq {
             udf_crate: Some(UdfCrate {
                 name: function_name.clone(),
                 definition: udf_definition.to_string(),
                 cargo_toml,
-                lib_rs: match udfs::lib_rs(&function_name, udf_definition) {
+                lib_rs: match udfs::lib_rs(&udf_definition) {
                     Ok(lib_rs) => lib_rs,
                     Err(e) => return Ok(e.into()),
                 },
@@ -270,15 +270,12 @@ pub async fn build_udf(
     ),
 )]
 pub async fn validate_udf(
-    State(state): State<AppState>,
     WithRejection(Json(req), _): WithRejection<Json<ValidateUdfPost>, ApiError>,
 ) -> Result<Json<UdfValidationResult>, ErrorResp> {
-    let check_udfs_resp = build_udf(&req.definition, false).await?;
+    let check_udfs_resp = build_udf(&mut compiler_service().await?, &req.definition, false).await?;
 
     Ok(Json(UdfValidationResult {
         udf_name: check_udfs_resp.name,
         errors: check_udfs_resp.errors,
     }))
 }
-
-

@@ -67,10 +67,10 @@ use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
-use arroyo_types::{NullableType};
+use arroyo_types::NullableType;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
-use syn::{parse_file, FnArg, Item, ReturnType, Visibility, ItemFn, parse};
+use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
 
@@ -137,7 +137,7 @@ impl ParsedUdf {
         }
         None
     }
-    
+
     pub fn try_parse(def: &str) -> anyhow::Result<ParsedUdf> {
         let mut file = parse_file(def)?;
 
@@ -196,7 +196,7 @@ impl ParsedUdf {
         };
 
         function.vis = Visibility::Public(Default::default());
-        
+
         Ok(ParsedUdf {
             name,
             args,
@@ -311,10 +311,10 @@ impl ArroyoSchemaProvider {
     pub fn get_table_mut(&mut self, table_name: impl Into<String>) -> Option<&mut Table> {
         self.tables.get_mut(&UniCase::new(table_name.into()))
     }
-    
+
     pub fn add_rust_udf(&mut self, body: &str, url: &str) -> Result<String> {
         let parsed = ParsedUdf::try_parse(body)?;
-        
+
         if parsed.vec_arguments > 0 && parsed.vec_arguments != parsed.args.len() {
             bail!("Function {} arguments must be vectors or none", parsed.name);
         }
@@ -328,14 +328,20 @@ impl ArroyoSchemaProvider {
             let accumulator: AccumulatorFactoryFunction = Arc::new(|_| unreachable!());
             let state_type: StateTypeFunction = Arc::new(|_| unreachable!());
             #[allow(deprecated)]
-            let udaf =
-                AggregateUDF::new(&parsed.name, &signature, &return_type, &accumulator, &state_type);
+            let udaf = AggregateUDF::new(
+                &parsed.name,
+                &signature,
+                &return_type,
+                &accumulator,
+                &state_type,
+            );
             self.aggregate_functions
                 .insert(parsed.name.clone(), Arc::new(udaf));
         } else {
             let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
-            let arg_types = parsed.args
+            let arg_types = parsed
+                .args
                 .iter()
                 .map(|arg| data_type_to_arrow_type(&arg.data_type))
                 .collect();
@@ -368,13 +374,10 @@ impl ArroyoSchemaProvider {
                 )
                 .is_some()
             {
-                warn!(
-                    "Global UDF '{}' is being overwritten",
-                    parsed.name
-                );
+                warn!("Global UDF '{}' is being overwritten", parsed.name);
             };
         }
-        
+
         self.udf_defs.insert(
             parsed.name.clone(),
             UdfDef {

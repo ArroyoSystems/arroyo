@@ -25,14 +25,15 @@ use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollec
 use arroyo_rpc::grpc::api::{
     create_pipeline_req, ArrowProgram, CreateJobReq, CreatePipelineReq, CreateSqlJob,
 };
-use arroyo_rpc::grpc::{api as api_proto, api, GetUdfPathReq};
+use arroyo_rpc::grpc::{api as api_proto, api};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalProgram, OperatorName};
-use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig, ParsedUdf};
+use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, ParsedUdf, SqlConfig};
 use arroyo_formats::avro::arrow_to_avro_schema;
 use arroyo_formats::json::arrow_to_json_schema;
 use arroyo_rpc::formats::Format;
+use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 use arroyo_rpc::{error_chain, OperatorConfig};
@@ -41,7 +42,6 @@ use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
 use tracing::warn;
-use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
@@ -64,7 +64,7 @@ async fn compile_sql<'e, E>(
     local_udfs: &Vec<Udf>,
     parallelism: usize,
     auth_data: &AuthData,
-    for_validation: bool,
+    validate_only: bool,
     tx: &E,
 ) -> anyhow::Result<CompiledSql>
 where
@@ -92,56 +92,40 @@ where
         bail!("Local UDFs have duplicate function names");
     }
 
-    let udfs: anyhow::Result<Vec<_>> = global_udfs.into_iter()
-        .map(|udf| Ok((ParsedUdf::try_parse(&udf.definition)
-            .map_err(|e| anyhow!("invalid global UDF {}: {}", udf.name, e))?, "global")))
-        .chain(local_udfs.iter()
-            .map(|udf| Ok((ParsedUdf::try_parse(&udf.definition)
-                .map_err(|e| anyhow!("invalid local UDF: {e}"))?, "local"))))
-        .collect();
-    let udfs = udfs?;
+    for udf in global_udfs {
+        if let Err(e) = schema_provider.add_rust_udf(&udf.definition, &udf.dylib_url) {
+            warn!("Invalid global UDF {}: {}", udf.name, e);
+        }
+    }
 
-    if !udfs.is_empty() {
-        let mut compiler_service: CompilerGrpcClient<_> = compiler_service()?;
+    if !local_udfs.is_empty() {
+        let mut compiler_service: CompilerGrpcClient<_> = compiler_service()
+            .await
+            .map_err(|e| anyhow!("{}", e.message))?;
 
-        for (parsed, scope) in udfs {
-            let path = if for_validation {
-                let resp = compiler_service.get_udf_path(GetUdfPathReq {
-                    name: parsed.name.clone(),
-                    definition: parsed.definition.clone(),
-                }).await.map_err(|e| anyhow!("Failed to reach compiler service: {e}"))?;
+        for udf in local_udfs {
+            let parsed =
+                ParsedUdf::try_parse(&udf.definition).map_err(|e| anyhow!("invalid UDF: {e}"))?;
 
-                match resp.into_inner().udf_path {
-                    Some(path) => path,
-                    None => bail!("{} UDF {} is not compiled", scope, parsed.name),
+            let url = if !validate_only {
+                let res = build_udf(&mut compiler_service, &udf.definition, true)
+                    .await
+                    .map_err(|e| anyhow!("Failed to reach compiler service: {}", e.message))?;
+
+                if res.errors.len() > 0 {
+                    bail!("Failed to build UDF: {}", res.errors.join("\n"));
                 }
+
+                res.url.expect("valid UDF does not have a URL in response")
             } else {
-                "".to_String()
+                "".to_string()
             };
 
-            schema_provider.add_rust_udf(parsed.definition, &path)
-                .map_err()
-        }
-    }
-
-    if !(global_udfs.is_empty() && local_udfs.is_empty()) {
-        for udf in global_udfs {
-            let _ = schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
-                warn!(
-                "Could not process global UDF {}: {:?}",
-                udf.name,
-                e.root_cause()
-            );
-            });
-        }
-
-        for udf in local_udfs.iter() {
             schema_provider
-                .add_rust_udf(&udf.definition, udf)
-                .map_err(|e| anyhow!(format!("Could not process local UDF: {:?}", e.root_cause())))?;
+                .add_rust_udf(&parsed.definition, &url)
+                .map_err(|e| anyhow!("Invalid UDF {}: {}", parsed.name, e))?;
         }
     }
-
 
     let tables = connection_tables::get_all_connection_tables(auth_data, tx)
         .await
@@ -335,6 +319,7 @@ pub(crate) async fn create_pipeline<'a>(
                 &api_udfs,
                 sql.parallelism as usize,
                 &auth,
+                false,
                 tx,
             )
             .await
@@ -394,18 +379,6 @@ pub(crate) async fn create_pipeline<'a>(
 
     if req.name.is_empty() {
         return Err(required_field("name"));
-    }
-
-    if let Some(udfs) = udfs.clone() {
-        for udf in udfs {
-            let res = build_udf(controller_addr, &udf.definition, true).await?;
-            if res.errors.len() > 0 {
-                return Err(bad_request(format!(
-                    "Failed to build UDF: {}",
-                    res.errors.join("\n")
-                )));
-            }
-        }
     }
 
     let pipeline_id = api_queries::create_pipeline()
@@ -527,21 +500,29 @@ pub async fn validate_query(
 
     let udfs = validate_query_post.udfs.unwrap_or(vec![]);
 
-    let pipeline_graph_validation_result =
-        match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, &client).await {
-            Ok(CompiledSql { program, .. }) => {
-                //optimizations::optimize(&mut program.graph);
+    let pipeline_graph_validation_result = match compile_sql(
+        validate_query_post.query,
+        &udfs,
+        1,
+        &auth_data,
+        true,
+        &client,
+    )
+    .await
+    {
+        Ok(CompiledSql { program, .. }) => {
+            //optimizations::optimize(&mut program.graph);
 
-                QueryValidationResult {
-                    graph: Some(program.as_job_graph().into()),
-                    errors: None,
-                }
+            QueryValidationResult {
+                graph: Some(program.as_job_graph().into()),
+                errors: None,
             }
-            Err(e) => QueryValidationResult {
-                graph: None,
-                errors: Some(vec![e.to_string()]),
-            },
-        };
+        }
+        Err(e) => QueryValidationResult {
+            graph: None,
+            errors: Some(vec![e.to_string()]),
+        },
+    };
 
     Ok(Json(pipeline_graph_validation_result))
 }
@@ -597,7 +578,6 @@ pub async fn post_pipeline(
         &pipeline_pub_id,
         auth_data.clone(),
         &transaction,
-        &state.controller_addr,
     )
     .await?;
 

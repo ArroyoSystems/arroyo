@@ -820,7 +820,6 @@ dependencies = [
  "anyhow",
  "arrow-schema 50.0.0",
  "arroyo-datastream",
- "arroyo-df",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
