@@ -90,7 +90,11 @@ fn produce_optimized_plan(
 
     let optimizer_config = OptimizerContext::default();
     let analyzer = Analyzer::default();
-    let optimizer = Optimizer::new();
+    let mut optimizer = Optimizer::new();
+    optimizer
+        .rules
+        // This rule can drop event time calculation fields if they aren't used elsewhere.
+        .retain(|rule| rule.name() != "optimize_projections");
     let analyzed_plan =
         analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
 
