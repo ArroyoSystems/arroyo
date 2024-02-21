@@ -125,7 +125,6 @@ message SinkDataReq {
   string operator_id = 2;
   uint32 subtask_index = 3;
   uint64 timestamp = 4;
-  string key = 5;
   string value = 6;
   bool done = 7;
 }
@@ -150,7 +149,6 @@ message GrpcOutputSubscription {
 message OutputData {
   string operator_id = 1;
   uint64 timestamp = 2;
-  string key = 3;
   string value = 4;
   bool done = 5;
 }

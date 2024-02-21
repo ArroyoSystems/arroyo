@@ -103,6 +103,7 @@ export function CreatePipeline() {
   const [resourcePanelTab, setResourcePanelTab] = useLocalStorage('resourcePanelTabIndex', 0);
   const [udfValidationApiError, setUdfValidationApiError] = useState<any | undefined>(undefined);
   const [validationInProgress, setValidationInProgress] = useState<boolean>(false);
+  const [startingPreview, setStartingPreview] = useState<boolean>(false);
 
   const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
 
@@ -271,6 +272,7 @@ export function CreatePipeline() {
   const preview = async () => {
     setTourStep(undefined);
     setQueryInputToCheck('');
+    setStartingPreview(true);
 
     if (!(await pipelineIsValid(1))) {
       return;
@@ -290,12 +292,14 @@ export function CreatePipeline() {
       },
     });
 
+    setStartingPreview(false);
+
     if (error) {
       console.log('Create pipeline failed');
+    } else {
+      // Setting the pipeline id will trigger fetching the job and subscribing to the output
+      setPipelineId(newPipeline?.id);
     }
-
-    // Setting the pipeline id will trigger fetching the job and subscribing to the output
-    setPipelineId(newPipeline?.id);
   };
 
   const stopPreview = async () => {
@@ -374,6 +378,7 @@ export function CreatePipeline() {
         colorScheme="blue"
         title="Run a preview pipeline"
         borderRadius={2}
+        isLoading={startingPreview}
       >
         Start Preview
       </Button>

@@ -12,15 +12,13 @@ use arroyo_rpc::api_types::{
 };
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
-    CreateJobReq, JobStatus, OperatorCheckpointDetail, TaskCheckpointDetail,
-    TaskCheckpointEventType,
+    CreateJobReq, OperatorCheckpointDetail, TaskCheckpointDetail, TaskCheckpointEventType,
 };
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
 use axum::Json;
-use cornucopia_async::GenericClient;
 use cornucopia_async::Params;
 use deadpool_postgres::Transaction;
 use futures_util::stream::Stream;
@@ -63,10 +61,20 @@ pub(crate) async fn create_job<'a>(
         ));
     }
 
-    let running_jobs = get_job_statuses(&auth, client)
-        .await?
+    let running_jobs = api_queries::get_jobs()
+        .bind(client, &auth.organization_id)
+        .all()
+        .await
+        .map_err(log_and_map)?
         .iter()
-        .filter(|j| j.running_desired && j.state != "Failed" && j.state != "Finished")
+        .filter(|j| {
+            j.stop == public::StopMode::none
+                && !j
+                    .state
+                    .as_ref()
+                    .map(|s| s == "Failed" || s == "Finished")
+                    .unwrap_or(false)
+        })
         .count();
 
     if running_jobs > auth.org_metadata.max_running_jobs as usize {
@@ -109,36 +117,6 @@ pub(crate) async fn create_job<'a>(
         .map_err(log_and_map)?;
 
     Ok(job_id)
-}
-
-pub(crate) async fn get_job_statuses(
-    auth: &AuthData,
-    client: &impl GenericClient,
-) -> Result<Vec<JobStatus>, ErrorResp> {
-    let res = api_queries::get_jobs()
-        .bind(client, &auth.organization_id)
-        .all()
-        .await
-        .map_err(log_and_map)?;
-
-    res.into_iter()
-        .map(|rec| {
-            Ok(JobStatus {
-                job_id: rec.id,
-                pipeline_name: rec.pipeline_name,
-                running_desired: rec.stop == public::StopMode::none,
-                state: rec.state.unwrap_or_else(|| "Created".to_string()),
-                run_id: rec.run_id.unwrap_or(0) as u64,
-                start_time: rec.start_time.map(to_micros),
-                finish_time: rec.finish_time.map(to_micros),
-                tasks: rec.tasks.map(|t| t as u64),
-                definition: rec.textual_repr,
-                udfs: serde_json::from_value(rec.udfs).map_err(log_and_map)?,
-                pipeline_id: format!("{}", rec.pipeline_id),
-                failure_message: rec.failure_message,
-            })
-        })
-        .collect()
 }
 
 pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option<StopType>, bool) {
@@ -479,11 +457,12 @@ pub async fn get_job_output(
     // validate that the job exists, the user has access, and the graph has a GrpcSink
     query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    println!("nodes: {:#?}", pipeline.graph.nodes);
     if !pipeline
         .graph
         .nodes
         .iter()
-        .any(|n| n.operator.contains("PreviewSink"))
+        .any(|n| n.operator.contains("preview"))
     {
         // TODO: make this check more robust
         return Err(bad_request("Job does not have a preview sink".to_string()));

@@ -435,7 +435,6 @@ export interface components {
       data: (components["schemas"]["OperatorMetricGroup"])[];
     };
     OutputData: {
-      key: string;
       operatorId: string;
       /** Format: int64 */
       timestamp: number;
@@ -479,6 +478,7 @@ export interface components {
       nodes: (components["schemas"]["PipelineNode"])[];
     };
     PipelineNode: {
+      description: string;
       nodeId: string;
       operator: string;
       /** Format: int32 */

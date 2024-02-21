@@ -206,51 +206,6 @@ message ArroyoExecNode {
 }
 
 
-
-// job status
-
-message JobStatus {
-  string job_id = 1;
-  string pipeline_name = 2;
-  bool running_desired = 8;
-  string state = 3;
-  uint64 run_id = 11;
-  string pipeline_id = 9;
-  optional uint64 start_time = 4;
-  optional uint64 finish_time = 5;
-  optional uint64 tasks = 6;
-  optional string definition = 7;
-  repeated Udf udfs = 12;
-  optional string failure_message = 10;
-}
-
-message JobStatusResp {
-  JobStatus job_status = 1;
-}
-
-message JobDetailsReq {
-  string job_id = 1;
-}
-
-message JobNode {
-  string node_id = 1;
-  string operator = 2;
-  uint32 parallelism = 3;
-}
-
-message JobEdge {
-  string src_id = 1;
-  string dest_id = 2;
-  string key_type = 3;
-  string value_type = 4;
-  string edge_type = 5;
-}
-
-message JobGraph {
-  repeated JobNode nodes = 1;
-  repeated JobEdge edges = 2;
-}
-
 // Checkpoints
 
 enum TaskCheckpointEventType {

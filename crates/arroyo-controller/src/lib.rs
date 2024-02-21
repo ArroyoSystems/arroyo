@@ -351,13 +351,11 @@ impl ControllerGrpc for ControllerServer {
         request: Request<SinkDataReq>,
     ) -> Result<Response<SinkDataResp>, Status> {
         let req = request.into_inner();
-        //info!("received {:#?}", req);
         let mut data_txs = self.data_txs.lock().await;
         if let Some(v) = data_txs.get_mut(&req.job_id) {
             let output = OutputData {
                 operator_id: req.operator_id,
                 timestamp: req.timestamp,
-                key: req.key,
                 value: req.value,
                 done: req.done,
             };

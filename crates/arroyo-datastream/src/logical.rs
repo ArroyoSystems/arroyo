@@ -1,9 +1,11 @@
 use datafusion_proto::protobuf::ArrowType;
 
+use anyhow::anyhow;
+use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{
-    ArrowDylibUdfConfig, ArrowProgram, ArrowProgramConfig, EdgeType, JobEdge, JobGraph, JobNode,
+    ArrowDylibUdfConfig, ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
 };
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
@@ -72,6 +74,50 @@ impl From<LogicalEdgeType> for api::EdgeType {
             LogicalEdgeType::LeftJoin => EdgeType::LeftJoin,
             LogicalEdgeType::RightJoin => EdgeType::RightJoin,
         }
+    }
+}
+
+impl TryFrom<LogicalProgram> for PipelineGraph {
+    type Error = anyhow::Error;
+    fn try_from(value: LogicalProgram) -> anyhow::Result<Self> {
+        let nodes: anyhow::Result<Vec<_>> = value
+            .graph
+            .node_weights()
+            .map(|node| Ok(PipelineNode {
+                node_id: node.operator_id.to_string(),
+                operator: match node.operator_name {
+                    OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
+                        ConnectorOp::decode(&node.operator_config[..])
+                            .map_err(|_| anyhow!("invalid graph: could not decode connector configuration for {}", node.operator_id))?
+                            .connector
+                    }
+                    op => op.to_string(),
+                },
+                description: node.description.clone(),
+                parallelism: node.parallelism as u32,
+            }))
+            .collect();
+
+        let edges = value
+            .graph
+            .edge_references()
+            .map(|edge| {
+                let src = value.graph.node_weight(edge.source()).unwrap();
+                let target = value.graph.node_weight(edge.target()).unwrap();
+                PipelineEdge {
+                    src_id: src.operator_id.to_string(),
+                    dest_id: target.operator_id.to_string(),
+                    key_type: "()".to_string(),
+                    value_type: "()".to_string(),
+                    edge_type: format!("{:?}", edge.weight().edge_type),
+                }
+            })
+            .collect();
+
+        Ok(Self {
+            nodes: nodes?,
+            edges,
+        })
     }
 }
 
@@ -189,36 +235,6 @@ impl LogicalProgram {
             tasks_per_operator.insert(node.operator_id.clone(), node.parallelism);
         }
         tasks_per_operator
-    }
-
-    pub fn as_job_graph(&self) -> JobGraph {
-        let nodes = self
-            .graph
-            .node_weights()
-            .map(|node| JobNode {
-                node_id: node.operator_id.to_string(),
-                operator: node.description.clone(),
-                parallelism: node.parallelism as u32,
-            })
-            .collect();
-
-        let edges = self
-            .graph
-            .edge_references()
-            .map(|edge| {
-                let src = self.graph.node_weight(edge.source()).unwrap();
-                let target = self.graph.node_weight(edge.target()).unwrap();
-                JobEdge {
-                    src_id: src.operator_id.to_string(),
-                    dest_id: target.operator_id.to_string(),
-                    key_type: "()".to_string(),
-                    value_type: "()".to_string(),
-                    edge_type: format!("{:?}", edge.weight().edge_type),
-                }
-            })
-            .collect();
-
-        JobGraph { nodes, edges }
     }
 }
 

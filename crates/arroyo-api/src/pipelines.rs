@@ -375,6 +375,8 @@ pub(crate) async fn create_pipeline<'a>(
 
     let proto_program: ArrowProgram = compiled.program.clone().try_into().map_err(log_and_map)?;
 
+    println!("PROTO {}: {:#?}", pub_id, proto_program);
+
     let program_bytes = proto_program.encode_to_vec();
 
     if req.name.is_empty() {
@@ -455,7 +457,7 @@ impl TryInto<Pipeline> for DbPipeline {
             checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
             stop,
             created_at: to_micros(self.created_at),
-            graph: program.as_job_graph().into(),
+            graph: program.try_into().map_err(log_and_map)?,
             action: action.map(|a| a.into()),
             action_text,
             action_in_progress,
@@ -514,7 +516,7 @@ pub async fn validate_query(
             //optimizations::optimize(&mut program.graph);
 
             QueryValidationResult {
-                graph: Some(program.as_job_graph().into()),
+                graph: Some(program.try_into().map_err(log_and_map)?),,
                 errors: None,
             }
         }
