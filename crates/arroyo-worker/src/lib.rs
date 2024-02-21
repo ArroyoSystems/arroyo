@@ -43,7 +43,7 @@ pub use ordered_float::OrderedFloat;
 use prost::Message;
 
 use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
-use arroyo_df::physical::{Registry, UdfDylib};
+use arroyo_df::physical::{new_registry, UdfDylib};
 use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod arrow;
@@ -420,7 +420,7 @@ impl WorkerGrpc for WorkerServer {
         }
 
         let req = request.into_inner();
-        let mut registry = Registry::new();
+        let mut registry = new_registry();
 
         for (udf_name, dylib_config) in self.program_config.udf_dylibs.iter() {
             let dylib = UdfDylib::init(udf_name, dylib_config).await;

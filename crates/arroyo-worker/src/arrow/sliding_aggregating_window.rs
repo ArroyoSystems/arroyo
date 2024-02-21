@@ -23,10 +23,11 @@ use datafusion_common::ScalarValue;
 use futures::stream::FuturesUnordered;
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::operator::Registry;
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    FunctionRegistry, SendableRecordBatchStream,
+    SendableRecordBatchStream,
 };
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
@@ -452,9 +453,9 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
     type ConfigT = api::SlidingWindowAggregateOperator;
     fn with_config(
         &self,
-        config: api::SlidingWindowAggregateOperator,
-        registry: Arc<dyn FunctionRegistry>,
-    ) -> Result<OperatorNode> {
+        config: Self::ConfigT,
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema

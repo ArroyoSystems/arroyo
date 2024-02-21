@@ -14,11 +14,10 @@ use datafusion::{
 use datafusion_execution::{runtime_env::RuntimeConfig, FunctionRegistry};
 use petgraph::{graph::DiGraph, visit::Topo};
 
-use tracing::info;
-
+use crate::physical::new_registry;
 use crate::{
     create_table_with_timestamp,
-    physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, Registry},
+    physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext},
     schemas::add_timestamp_field_arrow,
     AggregateCalculation, QueryToGraphVisitor, WindowBehavior,
 };
@@ -154,8 +153,6 @@ impl Planner {
                     projection: logical_plan,
                     key_columns,
                 } => {
-                    info!("logical plan for key calculation:\n{:?}", logical_plan);
-                    info!("input schema: {:?}", logical_plan.schema());
                     let physical_plan = self
                         .planner
                         .create_physical_plan(logical_plan, &self.session_state)
@@ -163,7 +160,6 @@ impl Planner {
 
                     let physical_plan = physical_plan.context("creating physical plan")?;
 
-                    println!("physical plan {:#?}", physical_plan);
                     let physical_plan_node: PhysicalPlanNode =
                         PhysicalPlanNode::try_from_physical_plan(
                             physical_plan,
@@ -287,11 +283,7 @@ impl Planner {
                     watermark_index
                 }
                 crate::LogicalPlanExtension::Join(join) => {
-                    let output_schema = ArroyoSchema::new(
-                        Arc::new(join.output_schema.as_ref().into()),
-                        join.output_schema.fields().len() - 1,
-                        vec![],
-                    );
+                    let output_schema = logical_extension.outgoing_edge().arroyo_schema();
 
                     let join_plan = self
                         .planner
@@ -303,6 +295,12 @@ impl Planner {
                     )?;
                     let join_plan = physical_plan_node.encode_to_vec();
 
+                    let operator_name = if join.is_instant {
+                        OperatorName::InstantJoin
+                    } else {
+                        OperatorName::Join
+                    };
+
                     let join_operator = JoinOperator {
                         name: format!("join_{}", program_graph.node_count()),
                         left_schema: Some(join.left_input_schema.clone().try_into()?),
@@ -312,7 +310,7 @@ impl Planner {
                     };
                     let join_index = program_graph.add_node(LogicalNode {
                         operator_id: format!("join_{}", program_graph.node_count()),
-                        operator_name: OperatorName::Join,
+                        operator_name,
                         operator_config: join_operator.encode_to_vec(),
                         parallelism: 1,
                         description: "join".to_string(),
@@ -429,7 +427,7 @@ impl Planner {
 
         // need to convert to ExecutionPlan to get the partial schema.
         let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            &Registry::new(),
+            &new_registry(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -527,7 +525,7 @@ impl Planner {
         let mut aggregate_fields = aggregate_plan.schema().fields().to_vec();
 
         // the timestamp will have been set as bin_start, need to calculate the bin from that, and also set _timestamp to bin_end - 1;
-        let registry = Registry::new();
+        let registry = new_registry();
         let window_expression = Expr::ScalarFunction(ScalarFunction {
             func_def: ScalarFunctionDefinition::UDF(registry.udf("window")?),
             args: vec![

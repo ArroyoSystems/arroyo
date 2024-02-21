@@ -11,9 +11,9 @@ use arrow::array::{Array, PrimitiveArray, RecordBatch, UInt64Array};
 use arrow::compute::kernels::numeric::{div, rem};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef};
 use bincode::{Decode, Encode};
-use datafusion::execution::FunctionRegistry;
 
 use crate::context::ArrowContext;
+use crate::operator::Registry;
 use operator::{OperatorConstructor, OperatorNode};
 use tokio_stream::Stream;
 
@@ -132,18 +132,15 @@ pub struct ArrowTimerValue {
 }
 
 pub trait ErasedConstructor: Send {
-    fn with_config(
-        &self,
-        config: Vec<u8>,
-        registry: Arc<dyn FunctionRegistry>,
-    ) -> anyhow::Result<OperatorNode>;
+    fn with_config(&self, config: Vec<u8>, registry: Arc<Registry>)
+        -> anyhow::Result<OperatorNode>;
 }
 
 impl<T: OperatorConstructor> ErasedConstructor for T {
     fn with_config(
         &self,
         config: Vec<u8>,
-        registry: Arc<dyn FunctionRegistry>,
+        registry: Arc<Registry>,
     ) -> anyhow::Result<OperatorNode> {
         self.with_config(
             prost::Message::decode(&mut config.as_slice()).unwrap(),

@@ -6,11 +6,12 @@ use std::{mem, thread};
 use std::time::SystemTime;
 
 use arroyo_connectors::connectors;
+use arroyo_df::physical::new_registry;
 use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
-use datafusion_execution::FunctionRegistry;
 use tracing::{debug, info, warn};
 
+use crate::arrow::instant_join::InstantJoinConstructor;
 use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
@@ -22,10 +23,10 @@ use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
-use arroyo_df::physical::Registry;
 pub use arroyo_macro::StreamNode;
 use arroyo_operator::context::{ArrowContext, QueueItem};
 use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::Registry;
 use arroyo_operator::ErasedConstructor;
 use arroyo_rpc::grpc::{api, CheckpointMetadata, TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
@@ -180,7 +181,7 @@ impl Program {
                 })
             })
             .collect();
-        Self::from_logical(name, logical, &assignments, Registry::new())
+        Self::from_logical(name, logical, &assignments, new_registry())
     }
 
     pub async fn init_udfs() {}
@@ -769,7 +770,7 @@ impl Engine {
 pub fn construct_operator(
     operator: OperatorName,
     config: Vec<u8>,
-    registry: Arc<dyn FunctionRegistry>,
+    registry: Arc<Registry>,
 ) -> OperatorNode {
     let ctor: Box<dyn ErasedConstructor> = match operator {
         OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
@@ -783,6 +784,7 @@ pub fn construct_operator(
         OperatorName::SessionWindowAggregate => Box::new(SessionAggregatingWindowConstructor),
         OperatorName::ExpressionWatermark => Box::new(WatermarkGeneratorConstructor),
         OperatorName::Join => Box::new(JoinWithExpirationConstructor),
+        OperatorName::InstantJoin => Box::new(InstantJoinConstructor),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut config.as_slice()).unwrap();
             return connectors()
