@@ -2,7 +2,6 @@ use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray};
 use dlopen::wrapper::WrapperApi;
 use std::{
     any::Any,
-    collections::{HashMap, HashSet},
     mem,
     sync::{Arc, RwLock},
 };
@@ -27,14 +26,13 @@ use datafusion_common::{
 use crate::json::get_json_functions;
 use crate::rewriters::UNNESTED_COL;
 use arrow::array;
+use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
 use arroyo_storage::StorageProvider;
 use datafusion::physical_plan::unnest::UnnestExec;
-use datafusion_execution::FunctionRegistry;
 use datafusion_expr::{
-    AggregateUDF, ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
-    WindowUDF,
+    ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
@@ -294,52 +292,6 @@ impl ScalarUDFImpl for UdfDylib {
     }
 }
 
-pub struct Registry {
-    udfs: HashMap<String, Arc<ScalarUDF>>,
-}
-
-impl Registry {
-    pub fn new() -> Self {
-        let window_udf = window_scalar_function();
-        let mut udfs = HashMap::new();
-        udfs.insert("window".to_string(), Arc::new(window_udf));
-        udfs.extend(get_json_functions());
-
-        Self { udfs }
-    }
-
-    pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {
-        self.udfs.insert(udf.name().to_string(), udf);
-    }
-}
-
-impl FunctionRegistry for Registry {
-    fn udfs(&self) -> HashSet<String> {
-        self.udfs.keys().cloned().collect()
-    }
-
-    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        self.udfs
-            .get(name)
-            .cloned()
-            .ok_or_else(|| DataFusionError::Execution(format!("Udf {} not found", name)))
-    }
-
-    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        Err(DataFusionError::NotImplemented(format!(
-            "udaf {} not implemented",
-            name
-        )))
-    }
-
-    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        Err(DataFusionError::NotImplemented(format!(
-            "udwf {} not implemented",
-            name
-        )))
-    }
-}
-
 #[derive(Debug)]
 pub struct ArroyoPhysicalExtensionCodec {
     pub context: DecodingContext,
@@ -363,6 +315,19 @@ pub enum DecodingContext {
         left: Arc<RwLock<Option<RecordBatch>>>,
         right: Arc<RwLock<Option<RecordBatch>>>,
     },
+    LockedJoinStream {
+        left: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
+        right: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
+    },
+}
+
+pub fn new_registry() -> Registry {
+    let mut registry = Registry::default();
+    registry.add_udf(Arc::new(window_scalar_function()));
+    for json_function in get_json_functions().values() {
+        registry.add_udf(json_function.clone());
+    }
+    registry
 }
 
 impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
@@ -419,6 +384,22 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                             "right" => Ok(Arc::new(RwLockRecordBatchReader {
                                 schema,
                                 locked_batch: right.clone(),
+                            })),
+                            _ => Err(DataFusionError::Internal(format!(
+                                "unknown table name {}",
+                                mem_exec.table_name
+                            ))),
+                        }
+                    }
+                    DecodingContext::LockedJoinStream { left, right } => {
+                        match mem_exec.table_name.as_str() {
+                            "left" => Ok(Arc::new(UnboundedRecordBatchReader {
+                                schema,
+                                receiver: left.clone(),
+                            })),
+                            "right" => Ok(Arc::new(UnboundedRecordBatchReader {
+                                schema,
+                                receiver: right.clone(),
                             })),
                             _ => Err(DataFusionError::Internal(format!(
                                 "unknown table name {}",

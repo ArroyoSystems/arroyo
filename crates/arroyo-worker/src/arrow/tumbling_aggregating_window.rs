@@ -13,7 +13,7 @@ use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::SchemaRef;
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
@@ -25,7 +25,7 @@ use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    FunctionRegistry, SendableRecordBatchStream,
+    SendableRecordBatchStream,
 };
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
@@ -106,9 +106,9 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
     type ConfigT = api::TumblingWindowAggregateOperator;
     fn with_config(
         &self,
-        config: api::TumblingWindowAggregateOperator,
-        registry: Arc<dyn FunctionRegistry>,
-    ) -> Result<OperatorNode> {
+        config: Self::ConfigT,
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema

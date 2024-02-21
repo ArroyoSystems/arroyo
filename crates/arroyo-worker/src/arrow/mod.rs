@@ -1,10 +1,9 @@
-use anyhow::Result;
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::grpc::api;
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::memory::MemoryStream;
@@ -14,7 +13,7 @@ use datafusion_common::DataFusionError;
 use datafusion_common::Result as DFResult;
 use datafusion_execution::runtime_env::RuntimeConfig;
 use datafusion_execution::runtime_env::RuntimeEnv;
-use datafusion_execution::{FunctionRegistry, TaskContext};
+use datafusion_execution::TaskContext;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::StreamExt;
@@ -22,6 +21,7 @@ use prost::Message as ProstMessage;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+pub mod instant_join;
 pub mod join_with_expiration;
 pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
@@ -39,9 +39,9 @@ impl OperatorConstructor for ValueExecutionConstructor {
     type ConfigT = api::ValuePlanOperator;
     fn with_config(
         &self,
-        config: api::ValuePlanOperator,
-        registry: Arc<dyn FunctionRegistry>,
-    ) -> Result<OperatorNode> {
+        config: Self::ConfigT,
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
@@ -167,9 +167,9 @@ impl OperatorConstructor for KeyExecutionConstructor {
 
     fn with_config(
         &self,
-        config: api::KeyPlanOperator,
-        registry: Arc<dyn FunctionRegistry>,
-    ) -> Result<OperatorNode> {
+        config: Self::ConfigT,
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
