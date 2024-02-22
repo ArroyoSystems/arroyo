@@ -5,6 +5,7 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{anyhow, bail, Context, Result};
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_connectors::connector_for_type;
+
 use arroyo_datastream::ConnectorOp;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
@@ -35,7 +36,7 @@ use crate::{
     ArroyoSchemaProvider,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
     pub id: Option<i64>,
     pub connector: String,
@@ -52,7 +53,7 @@ pub struct ConnectorTable {
     pub inferred_fields: Option<Vec<DFField>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldSpec {
     StructField(Field),
     VirtualField { field: Field, expression: Expr },
@@ -333,74 +334,6 @@ impl ConnectorTable {
             watermark_column,
         })
     }
-
-    // TODO: implement
-    pub fn as_sql_sink(&self) -> Result<()> {
-        todo!();
-        /*
-        match self.connection_type {
-            ConnectionType::Source => {
-                bail!("inserting into a source is not allowed")
-            }
-            ConnectionType::Sink => {}
-        }
-
-        if self.has_virtual_fields() {
-            // TODO: I think it would be reasonable and possibly useful to support this
-            bail!("virtual fields are not currently supported in sinks");
-        }
-
-        let updating_type = if self.is_update() {
-            SinkUpdateType::Force
-        } else {
-            SinkUpdateType::Disallow
-        };
-
-        if updating_type == SinkUpdateType::Disallow && input.is_updating() {
-            bail!("sink does not support update messages, cannot be used with an updating query");
-        }
-
-        if let Some(format) = &self.format {
-            let output_struct: StructDef = input.return_type();
-            // we may need to copy the record into a new struct, that has the appropriate annotations
-            // for serializing into our format
-            let mut projection = Projection::new(
-                output_struct
-                    .fields
-                    .iter()
-                    .map(|t| Column {
-                        relation: t.alias.clone(),
-                        name: t.name(),
-                    })
-                    .zip(
-                        output_struct
-                            .fields
-                            .iter()
-                            .map(|t| Expression::Column(ColumnExpression::new(t.clone()))),
-                    )
-                    .collect(),
-            );
-
-            projection.format = Some(format.clone());
-            projection.struct_name = self.type_name.clone();
-
-            input = SqlOperator::RecordTransform(
-                Box::new(input),
-                crate::pipeline::RecordTransform::ValueProjection(projection),
-            );
-        }
-
-        Ok(SqlOperator::Sink(
-            self.name.clone(),
-            SqlSink {
-                id: self.id,
-                struct_def: input.return_type(),
-                updating_type,
-                operator: Operator::ConnectorSink(self.connector_op()),
-            },
-            Box::new(input),
-        ))*/
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -411,7 +344,7 @@ pub struct SourceOperator {
     pub watermark_column: Option<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Table {
     ConnectorTable(ConnectorTable),
     MemoryTable {
@@ -420,6 +353,9 @@ pub enum Table {
     },
     TableFromQuery {
         name: String,
+        logical_plan: LogicalPlan,
+    },
+    PreviewSink {
         logical_plan: LogicalPlan,
     },
 }
@@ -619,6 +555,7 @@ impl Table {
         match self {
             Table::MemoryTable { name, .. } | Table::TableFromQuery { name, .. } => name.as_str(),
             Table::ConnectorTable(c) => c.name.as_str(),
+            Table::PreviewSink { .. } => "preview",
         }
     }
 
@@ -671,17 +608,24 @@ impl Table {
                 .map(qualified_field)
                 .map(Arc::new)
                 .collect(),
+            Table::PreviewSink { logical_plan } => logical_plan
+                .schema()
+                .fields()
+                .iter()
+                .map(qualified_field)
+                .map(Arc::new)
+                .collect(),
         }
     }
 
-    pub fn as_sql_sink(&self) -> Result<()> {
+    pub fn connector_op(&self) -> Result<ConnectorOp> {
         match self {
-            Table::ConnectorTable(c) => c.as_sql_sink(),
+            Table::ConnectorTable(c) => Ok(c.connector_op()),
             Table::MemoryTable { .. } => {
-                todo!()
-                //Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
+                bail!("can't write to a memory table")
             }
             Table::TableFromQuery { .. } => todo!(),
+            Table::PreviewSink { logical_plan: _ } => Ok(ConnectorOp::web_sink()),
         }
     }
 }
@@ -720,18 +664,16 @@ impl Insert {
     ) -> Result<Insert> {
         if let Statement::Insert {
             source,
-            into,
+            into: true,
             table_name,
             ..
         } = statement
         {
-            if *into {
-                infer_sink_schema(
-                    source.as_ref().unwrap(),
-                    table_name.to_string(),
-                    schema_provider,
-                )?;
-            }
+            infer_sink_schema(
+                source.as_ref().unwrap(),
+                table_name.to_string(),
+                schema_provider,
+            )?;
         }
 
         let logical_plan = produce_optimized_plan(statement, schema_provider)?;

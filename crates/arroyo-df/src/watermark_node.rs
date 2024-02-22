@@ -9,7 +9,7 @@ use std::{fmt::Formatter, sync::Arc};
 pub struct WatermarkNode {
     pub input: LogicalPlan,
     pub qualifier: OwnedTableReference,
-    pub watermark_expression: Option<Expr>,
+    pub watermark_expression: Expr,
     pub schema: DFSchemaRef,
     timestamp_index: usize,
 }
@@ -28,11 +28,7 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
     }
 
     fn expressions(&self) -> Vec<Expr> {
-        if let Some(expr) = &self.watermark_expression {
-            vec![expr.clone()]
-        } else {
-            vec![]
-        }
+        vec![self.watermark_expression.clone()]
     }
 
     fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
@@ -61,7 +57,7 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
         Self {
             input: inputs[0].clone(),
             qualifier: self.qualifier.clone(),
-            watermark_expression: Some(exprs[0].clone()),
+            watermark_expression: exprs[0].clone(),
             schema: self.schema.clone(),
             timestamp_index,
         }
@@ -72,7 +68,7 @@ impl WatermarkNode {
     pub(crate) fn new(
         input: LogicalPlan,
         qualifier: OwnedTableReference,
-        watermark_expression: Option<Expr>,
+        watermark_expression: Expr,
     ) -> Result<Self> {
         let schema = add_timestamp_field(input.schema().clone(), Some(qualifier.clone()))?;
         let timestamp_index = schema

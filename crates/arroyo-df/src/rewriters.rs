@@ -1,10 +1,14 @@
+use crate::plan::{RemoteTableExtension, TableSourceExtension};
 use crate::schemas::{add_timestamp_field, has_timestamp_field};
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
 use crate::watermark_node::WatermarkNode;
 use crate::{create_table_with_timestamp, ArroyoSchemaProvider};
-use arrow_schema::{DataType, Schema, TimeUnit};
+
+use arrow_schema::DataType;
+use arroyo_rpc::TIMESTAMP_FIELD;
+
 use datafusion_common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
 use datafusion_common::{
     Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
@@ -12,8 +16,8 @@ use datafusion_common::{
 };
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{
-    BinaryExpr, Expr, Extension, LogicalPlan, Projection, ScalarFunctionDefinition, TableScan,
-    Unnest,
+    Aggregate, BinaryExpr, Expr, Extension, LogicalPlan, Projection, ScalarFunctionDefinition,
+    TableScan, Unnest,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,10 +33,17 @@ impl TreeNodeRewriter for TimestampRewriter {
         match node {
             LogicalPlan::Projection(ref mut projection) => {
                 if !has_timestamp_field(projection.schema.clone()) {
-                    projection.schema = add_timestamp_field(projection.schema.clone(), None)
-                        .expect("in projection");
+                    let timestamp_field = projection
+                        .input
+                        .schema()
+                        .fields_with_unqualified_name(TIMESTAMP_FIELD)[0];
+                    projection.schema = add_timestamp_field(
+                        projection.schema.clone(),
+                        timestamp_field.qualifier().cloned(),
+                    )
+                    .expect("in projection");
                     projection.expr.push(Expr::Column(Column {
-                        relation: None,
+                        relation: timestamp_field.qualifier().cloned(),
                         name: "_timestamp".to_string(),
                     }));
                 }
@@ -41,22 +52,22 @@ impl TreeNodeRewriter for TimestampRewriter {
                 if !has_timestamp_field(unnest.schema.clone()) {
                     unnest.schema = add_timestamp_field(unnest.schema.clone(), None).unwrap();
                 }
-            }
+            } /*
             LogicalPlan::Join(ref mut join) => {
-                let mut fields: Vec<_> = join
-                    .schema
-                    .fields()
-                    .iter()
-                    .filter(|field| field.name() != "_timestamp")
-                    .map(|field| field.clone())
-                    .collect();
-                fields.push(DFField::new_unqualified(
-                    "_timestamp",
-                    DataType::Timestamp(TimeUnit::Nanosecond, None),
-                    false,
-                ));
-                join.schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
-            }
+            let mut fields: Vec<_> = join
+            .schema
+            .fields()
+            .iter()
+            .filter(|field| field.name() != "_timestamp")
+            .map(|field| field.clone())
+            .collect();
+            fields.push(DFField::new_unqualified(
+            "_timestamp",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+            ));
+            join.schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
+            }*/
             LogicalPlan::Union(ref mut union) => {
                 union.schema = add_timestamp_field(union.schema.clone(), None)?;
             }
@@ -77,6 +88,24 @@ impl TreeNodeRewriter for TimestampRewriter {
                     subquery_alias.schema = add_timestamp_field(
                         subquery_alias.schema.clone(),
                         Some(subquery_alias.alias.to_owned()),
+                    )?;
+                }
+            }
+            LogicalPlan::Aggregate(ref mut aggregate) => {
+                if !has_timestamp_field(aggregate.schema.clone()) {
+                    let mut group_expr = aggregate.group_expr.clone();
+                    let input_timestamp = aggregate
+                        .input
+                        .schema()
+                        .fields_with_unqualified_name(TIMESTAMP_FIELD)[0];
+                    group_expr.push(Expr::Column(Column {
+                        relation: input_timestamp.qualifier().cloned(),
+                        name: TIMESTAMP_FIELD.to_string(),
+                    }));
+                    *aggregate = Aggregate::try_new(
+                        aggregate.input.clone(),
+                        group_expr,
+                        aggregate.aggr_expr.clone(),
                     )?;
                 }
             }
@@ -178,44 +207,26 @@ impl SourceRewriter {
             let event_time_field =
                 event_time_field.alias_qualified(Some(qualifier.clone()), "_timestamp".to_string());
             expressions.push(event_time_field);
-        };
+        } else {
+            expressions.push(Expr::Column(Column::new(
+                Some(qualifier.clone()),
+                TIMESTAMP_FIELD,
+            )))
+        }
         Ok(expressions)
     }
 
     fn projection(&self, table_scan: &TableScan, table: &ConnectorTable) -> DFResult<LogicalPlan> {
         let qualifier = table_scan.table_name.clone();
-        let non_virtual_fields = table
-            .fields
-            .iter()
-            .filter_map(|field| match field {
-                FieldSpec::StructField(f) => Some(f.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
 
-        let table_scan_schema = DFSchema::try_from_qualified_schema(
-            qualifier.clone(),
-            &Schema::new(non_virtual_fields.clone()),
-        )?;
-
-        let table_scan_table_source = self
-            .schema_provider
-            .get_table_source_with_fields(&table.name, non_virtual_fields)
-            .unwrap();
-
-        let input_table_scan = LogicalPlan::TableScan(TableScan {
-            table_name: table_scan.table_name.clone(),
-            source: table_scan_table_source,
-            projection: None, // None because we are taking it out
-            projected_schema: Arc::new(table_scan_schema),
-            filters: table_scan.filters.clone(),
-            fetch: table_scan.fetch,
-        });
+        let table_source_extension = TableSourceExtension::new(qualifier.to_owned(), table.clone());
 
         Ok(LogicalPlan::Projection(
             datafusion_expr::Projection::try_new(
                 Self::projection_expressions(table, &qualifier, &table_scan.projection)?,
-                Arc::new(input_table_scan),
+                Arc::new(LogicalPlan::Extension(Extension {
+                    node: Arc::new(table_source_extension),
+                })),
             )?,
         ))
     }
@@ -238,10 +249,20 @@ impl TreeNodeRewriter for SourceRewriter {
         let Table::ConnectorTable(table) = table else {
             return Ok(node);
         };
+        let input = self.projection(&table_scan, table)?;
+        let schema = input.schema().clone();
+        let remote = LogicalPlan::Extension(Extension {
+            node: Arc::new(RemoteTableExtension {
+                input,
+                name: table_scan.table_name.to_owned(),
+                schema,
+            }),
+        });
+
         let watermark_node = WatermarkNode::new(
-            self.projection(&table_scan, table)?,
+            remote,
             table_scan.table_name.clone(),
-            Some(Self::watermark_expression(table)?),
+            Self::watermark_expression(table)?,
         )
         .map_err(|err| {
             DataFusionError::Internal(format!("failed to create watermark expression: {}", err))
