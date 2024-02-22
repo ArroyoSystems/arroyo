@@ -5,6 +5,8 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{anyhow, bail, Context, Result};
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
+
+use arroyo_datastream::preview_sink;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
@@ -35,7 +37,7 @@ use crate::{
     ArroyoSchemaProvider,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
     pub id: Option<i64>,
     pub connector: String,
@@ -52,7 +54,7 @@ pub struct ConnectorTable {
     pub inferred_fields: Option<Vec<DFField>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldSpec {
     StructField(Field),
     VirtualField { field: Field, expression: Expr },
@@ -353,7 +355,7 @@ pub struct SourceOperator {
     pub watermark_column: Option<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Table {
     ConnectorTable(ConnectorTable),
     MemoryTable {
@@ -362,6 +364,9 @@ pub enum Table {
     },
     TableFromQuery {
         name: String,
+        logical_plan: LogicalPlan,
+    },
+    PreviewSink {
         logical_plan: LogicalPlan,
     },
 }
@@ -561,6 +566,7 @@ impl Table {
         match self {
             Table::MemoryTable { name, .. } | Table::TableFromQuery { name, .. } => name.as_str(),
             Table::ConnectorTable(c) => c.name.as_str(),
+            Table::PreviewSink { .. } => "preview",
         }
     }
 
@@ -613,6 +619,24 @@ impl Table {
                 .map(qualified_field)
                 .map(Arc::new)
                 .collect(),
+            Table::PreviewSink { logical_plan } => logical_plan
+                .schema()
+                .fields()
+                .iter()
+                .map(qualified_field)
+                .map(Arc::new)
+                .collect(),
+        }
+    }
+
+    pub fn connector_op(&self) -> Result<ConnectorOp> {
+        match self {
+            Table::ConnectorTable(c) => Ok(c.connector_op()),
+            Table::MemoryTable { .. } => {
+                bail!("can't write to a memory table")
+            }
+            Table::TableFromQuery { .. } => todo!(),
+            Table::PreviewSink { logical_plan: _ } => Ok(preview_sink()),
         }
     }
 }
@@ -651,18 +675,16 @@ impl Insert {
     ) -> Result<Insert> {
         if let Statement::Insert {
             source,
-            into,
+            into: true,
             table_name,
             ..
         } = statement
         {
-            if *into {
-                infer_sink_schema(
-                    source.as_ref().unwrap(),
-                    table_name.to_string(),
-                    schema_provider,
-                )?;
-            }
+            infer_sink_schema(
+                source.as_ref().unwrap(),
+                table_name.to_string(),
+                schema_provider,
+            )?;
         }
 
         let logical_plan = produce_optimized_plan(statement, schema_provider)?;

@@ -45,7 +45,7 @@ pub struct ConnectionProfilePost {
     pub config: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionType {
     Source,

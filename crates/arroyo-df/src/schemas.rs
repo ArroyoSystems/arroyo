@@ -48,10 +48,6 @@ pub(crate) fn has_timestamp_field(schema: DFSchemaRef) -> bool {
         .any(|field| field.name() == "_timestamp")
 }
 
-pub(crate) fn has_timestamp_field_arrow(schema: SchemaRef) -> bool {
-    schema.fields.iter().any(|f| f.name() == "_timestamp")
-}
-
 pub fn add_timestamp_field_arrow(schema: SchemaRef) -> SchemaRef {
     let mut fields = schema.fields().to_vec();
     fields.push(Arc::new(Field::new(
@@ -60,12 +56,4 @@ pub fn add_timestamp_field_arrow(schema: SchemaRef) -> SchemaRef {
         false,
     )));
     Arc::new(Schema::new(fields))
-}
-
-pub(crate) fn add_timestamp_field_if_missing_arrow(schema: SchemaRef) -> SchemaRef {
-    if has_timestamp_field_arrow(schema.clone()) {
-        schema
-    } else {
-        add_timestamp_field_arrow(schema)
-    }
 }

@@ -12,6 +12,7 @@ use anyhow::{anyhow, Result};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::SchemaRef;
+use arroyo_df::schemas::add_timestamp_field_arrow;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::grpc::{api, TableConfig};
@@ -47,6 +48,7 @@ pub struct TumblingAggregatingWindowFunc<K: Copy> {
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
     partial_schema: ArroyoSchema,
     finish_execution_plan: Arc<dyn ExecutionPlan>,
+    aggregate_with_timestamp_schema: SchemaRef,
     final_projection: Option<Arc<dyn ExecutionPlan>>,
     // the partial aggregation plan shares a reference to it,
     // which is only used on the exec()
@@ -96,7 +98,11 @@ impl TumblingAggregatingWindowFunc<SystemTime> {
         let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
         let mut columns = batch.columns().to_vec();
         columns.push(timestamp_array);
-        Ok(RecordBatch::try_new(schema, columns)?)
+        Ok(
+            RecordBatch::try_new(schema.clone(), columns).map_err(|err| {
+                anyhow::anyhow!("schema: {:?}\nbatch:{:?}\nerr:{}", schema, batch, err)
+            })?,
+        )
     }
 }
 
@@ -169,6 +175,9 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
             })
             .transpose()?;
 
+        let aggregate_with_timestamp_schema =
+            add_timestamp_field_arrow(finish_execution_plan.schema());
+
         Ok(OperatorNode::from_operator(Box::new(
             TumblingAggregatingWindowFunc {
                 width,
@@ -176,6 +185,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
                 partial_aggregation_plan,
                 partial_schema,
                 finish_execution_plan,
+                aggregate_with_timestamp_schema,
                 final_projection: final_projection_plan,
                 receiver,
                 final_batches_passer,
@@ -253,10 +263,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
+                info!("partial aggregation schema: {:?}", self.partial_schema);
                 let new_exec = self
                     .partial_aggregation_plan
                     .execute(0, SessionContext::new().task_ctx())
                     .unwrap();
+                info!("new exec schema is {:?}", new_exec.schema());
                 let next_batch_future = NextBatchFuture::new(bin_start, new_exec);
                 self.futures.lock().await.push(next_batch_future.clone());
                 bin_exec.active_exec = Some(next_batch_future);
@@ -311,7 +323,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                         let with_timestamp = Self::add_bin_start_as_timestamp(
                             &batch,
                             popped_bin,
-                            self.partial_schema.schema.clone(),
+                            self.aggregate_with_timestamp_schema.clone(),
                         )
                         .expect("should be able to add timestamp");
                         if self.final_projection.is_some() {

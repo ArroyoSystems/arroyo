@@ -123,7 +123,13 @@ impl ArroyoSchema {
     pub fn from_schema_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> anyhow::Result<Self> {
         let timestamp_index = schema
             .column_with_name(TIMESTAMP_FIELD)
-            .ok_or_else(|| anyhow!("no {} field in schema", TIMESTAMP_FIELD))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "no {} field in schema, schema is {:?}",
+                    TIMESTAMP_FIELD,
+                    schema
+                )
+            })?
             .0;
 
         Ok(Self {

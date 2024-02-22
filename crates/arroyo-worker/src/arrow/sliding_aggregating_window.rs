@@ -8,8 +8,7 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
-use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
-use arroyo_df::schemas::window_arrow_struct;
+use arrow_schema::SchemaRef;
 use arroyo_operator::{
     context::ArrowContext,
     operator::{ArrowOperator, OperatorConstructor, OperatorNode},
@@ -56,8 +55,8 @@ pub struct SlidingAggregatingWindowFunc<K: Copy> {
     futures: FuturesUnordered<NextBatchFuture<K>>,
     execs: BTreeMap<K, BinComputingHolder<K>>,
     tiered_record_batches: TieredRecordBatchHolder,
-    window_field: FieldRef,
-    window_index: usize,
+    projection_input_schema: SchemaRef,
+    final_projection: Arc<dyn ExecutionPlan>,
     state: SlidingWindowState,
 }
 #[derive(Debug)]
@@ -181,47 +180,42 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
                 next_window_start: bin_end,
             }
         };
+        let mut aggregate_results = Vec::new();
         while let Some(batch) = final_exec.next().await {
             let batch = batch.expect("should be able to compute batch");
-            let timestamp_array =
-                ScalarValue::TimestampNanosecond(Some(to_nanos(interval_end) as i64 - 1), None)
-                    .to_array_of_size(batch.num_rows())
-                    .unwrap();
-            let mut fields = batch.schema().fields().as_ref().to_vec();
-            fields.push(Arc::new(Field::new(
-                "_timestamp",
-                DataType::Timestamp(TimeUnit::Nanosecond, None),
-                false,
-            )));
-
-            fields.insert(self.window_index, self.window_field.clone());
-
-            let mut columns = batch.columns().to_vec();
-            columns.push(timestamp_array);
-            let DataType::Struct(struct_fields) = self.window_field.data_type() else {
-                unreachable!("should have struct for window field type")
-            };
-            let window_scalar = ScalarValue::Struct(
-                Some(vec![
-                    ScalarValue::TimestampNanosecond(Some(to_nanos(interval_start) as i64), None),
-                    ScalarValue::TimestampNanosecond(Some(to_nanos(interval_end) as i64), None),
-                ]),
-                struct_fields.clone(),
-            );
-            columns.insert(
-                self.window_index,
-                window_scalar.to_array_of_size(batch.num_rows()).unwrap(),
-            );
-
-            let batch_with_timestamp = RecordBatch::try_new(
-                Arc::new(Schema::new_with_metadata(fields, HashMap::new())),
-                columns,
-            )
+            let with_timestamp = Self::add_bin_start_as_timestamp(
+                &batch,
+                interval_start,
+                self.projection_input_schema.clone(),
+            )?;
+            aggregate_results.push(with_timestamp);
+        }
+        {
+            let mut batches = self.final_batches_passer.write().unwrap();
+            *batches = aggregate_results;
+        }
+        let mut final_projection_exec = self
+            .final_projection
+            .execute(0, SessionContext::new().task_ctx())
             .unwrap();
-            ctx.collect(batch_with_timestamp).await;
+        while let Some(batch) = final_projection_exec.next().await {
+            let batch = batch.expect("should be able to compute batch");
+            ctx.collector.collect(batch).await;
         }
 
         Ok(())
+    }
+    // TODO: don't repeat this
+    fn add_bin_start_as_timestamp(
+        batch: &RecordBatch,
+        bin_start: SystemTime,
+        schema: SchemaRef,
+    ) -> Result<RecordBatch> {
+        let bin_start = ScalarValue::TimestampNanosecond(Some(to_nanos(bin_start) as i64), None);
+        let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
+        let mut columns = batch.columns().to_vec();
+        columns.push(timestamp_array);
+        Ok(RecordBatch::try_new(schema, columns)?)
     }
 }
 
@@ -496,11 +490,12 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
             &final_codec,
         )?;
 
-        let window_field = Arc::new(Field::new(
-            config.window_field_name,
-            window_arrow_struct(),
-            true,
-        ));
+        let final_projection = PhysicalPlanNode::decode(&mut config.final_projection.as_slice())?;
+        let final_projection = final_projection.try_into_physical_plan(
+            registry.as_ref(),
+            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &final_codec,
+        )?;
 
         Ok(OperatorNode::from_operator(Box::new(
             SlidingAggregatingWindowFunc {
@@ -517,8 +512,8 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
                 tiered_record_batches: TieredRecordBatchHolder::new(vec![Duration::from_micros(
                     config.slide_micros,
                 )])?,
-                window_field,
-                window_index: config.window_index as usize,
+                projection_input_schema: final_projection.children()[0].schema().clone(),
+                final_projection,
                 state: SlidingWindowState::NoData,
             },
         )))
