@@ -5,7 +5,8 @@ use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
-use tracing::{info, warn};
+use tonic::transport::Channel;
+use tracing::{error, info, warn};
 use utoipa::OpenApi;
 
 use crate::connection_profiles::{
@@ -30,11 +31,14 @@ use crate::pipelines::{
     __path_restart_pipeline, __path_validate_query,
 };
 use crate::rest::__path_ping;
-use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
+use crate::rest_utils::{bad_request, log_and_map, service_unavailable, ErrorResp};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
-use arroyo_types::{ports, service_port, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV};
+use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
+use arroyo_types::{
+    ports, service_port, COMPILER_ADDR_ENV, COMPILER_PORT_ENV, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
+};
 
 mod cloud;
 mod connection_profiles;
@@ -127,6 +131,23 @@ fn handle_delete(name: &str, users: &str, err: tokio_postgres::Error) -> ErrorRe
 
 pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     (dt.unix_timestamp_nanos() / 1_000) as u64
+}
+
+pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp> {
+    let compiler_addr = std::env::var(COMPILER_ADDR_ENV).unwrap_or_else(|_| {
+        format!(
+            "http://localhost:{}",
+            service_port("compiler", ports::COMPILER_GRPC, COMPILER_PORT_ENV)
+        )
+    });
+
+    // TODO: cache this
+    CompilerGrpcClient::connect(compiler_addr.to_string())
+        .await
+        .map_err(|e| {
+            error!("Failed to connect to compiler service: {}", e);
+            service_unavailable("compiler-service")
+        })
 }
 
 pub async fn start_server(pool: Pool) {

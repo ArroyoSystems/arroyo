@@ -4,6 +4,7 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 ARG GIT_SHA
 ARG TARGETPLATFORM
+ARG PROFILE=release
 
 RUN apt-get update && \
     apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
@@ -36,13 +37,13 @@ RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm instal
 
 COPY docker/refinery.toml refinery.toml
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM} \
-      --mount=type=cache,target=/app/target,id=${TARGETPLATFORM} \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${PROFILE} \
+      --mount=type=cache,target=/app/target,id=${TARGETPLATFORM}-${PROFILE} \
     service postgresql start && \
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p crates/arroyo-api/migrations && \
-    CARGO_PROFILE_RELEASE_DEBUG=false cargo build --release --bin arroyo-bin --all-features && \
+    CARGO_PROFILE_RELEASE_DEBUG=false cargo build --profile ${PROFILE} --bin arroyo-bin --all-features && \
     mv target/release/arroyo-bin /arroyo-bin
 
 FROM debian:bookworm-slim AS arroyo-single
@@ -61,7 +62,10 @@ COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/prometheus.yml /etc/prometheus/prometheus.yml
 
 ENV PRODUCTION=true \
-    ASSET_DIR="/app/dist"
+    ASSET_DIR="/app/dist" \
+    INSTALL_RUSTC=true \
+    INSTALL_CLANG=true
+
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8000
@@ -71,13 +75,29 @@ FROM debian:bookworm-slim as arroyo
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get -y install libsasl2-2 ca-certificates
+    apt-get -y install libsasl2-2 ca-certificates curl
 
 COPY --from=builder /arroyo-bin ./
 COPY --from=builder /app/webui/dist ./dist
 
-ENV PRODUCTION=true
-ENV ASSET_DIR="/app/dist"
+ENV PRODUCTION=true \
+    ASSET_DIR="/app/dist" \
+    INSTALL_RUSTC=true \
+    INSTALL_CLANG=true
+
+EXPOSE 8000
+ENTRYPOINT [ "/app/arroyo-bin" ]
+
+FROM rust:slim-bookworm AS arroyo-full
+WORKDIR /app
+RUN apt-get update && \
+    apt-get -y install libsasl2-2 ca-certificates curl
+
+COPY --from=builder /arroyo-bin ./
+COPY --from=builder /app/webui/dist ./dist
+
+ENV PRODUCTION=true \
+    ASSET_DIR="/app/dist"
 
 EXPOSE 8000
 ENTRYPOINT [ "/app/arroyo-bin" ]

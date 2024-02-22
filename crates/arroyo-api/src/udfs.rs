@@ -4,20 +4,21 @@ use crate::queries::api_queries::{
 };
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, internal_server_error, log_and_map, not_found,
-    service_unavailable, ApiError, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, internal_server_error, log_and_map, not_found, ApiError,
+    BearerAuth, ErrorResp,
 };
-use crate::to_micros;
+use crate::{compiler_service, to_micros};
+use arroyo_df::{parse_dependencies, udfs, ParsedUdf};
 use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfPost, UdfValidationResult, ValidateUdfPost};
 use arroyo_rpc::api_types::GlobalUdfCollection;
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::{BuildUdfReq, BuildUdfResp};
+use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
+use arroyo_rpc::grpc::{BuildUdfReq, UdfCrate};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_types::dylib_path;
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::Params;
+use tonic::transport::Channel;
 use tracing::error;
 
 impl Into<GlobalUdf> for DbUdf {
@@ -30,6 +31,7 @@ impl Into<GlobalUdf> for DbUdf {
             definition: self.definition,
             updated_at: to_micros(self.updated_at),
             description: self.description,
+            dylib_url: self.dylib_url,
         }
     }
 }
@@ -58,17 +60,15 @@ pub async fn create_udf(
         .await
         .map_err(log_and_map)?;
 
-    // validate udf
-    let check_udfs_resp = build_udf(&state.controller_addr, &req.definition, true).await?;
+    // build udf
+    let build_udf_resp = build_udf(&mut compiler_service().await?, &req.definition, true).await?;
 
-    if check_udfs_resp.errors.len() > 0 {
-        return Err(bad_request(format!("UDF is invalid.",)));
+    if build_udf_resp.errors.len() > 0 {
+        return Err(bad_request("UDF is invalid"));
     }
 
-    let Some(udf_name) = check_udfs_resp.udf_name else {
-        // this should not be possible
-        return Err(internal_server_error("UDF name not found"));
-    };
+    let udf_name = build_udf_resp.name.expect("udf name not set for valid UDF");
+    let udf_url = build_udf_resp.url.expect("udf URL not set ofr valid UDF");
 
     // check for duplicates
     let duplicate = api_queries::get_udf_by_name()
@@ -102,6 +102,7 @@ pub async fn create_udf(
                 name: &udf_name,
                 definition: &req.definition,
                 description: &req.description.unwrap_or_default(),
+                dylib_url: udf_url,
             },
         )
         .await
@@ -190,30 +191,60 @@ pub async fn delete_udf(
     Ok(())
 }
 
+pub struct UdfResp {
+    pub errors: Vec<String>,
+    pub name: Option<String>,
+    pub url: Option<String>,
+}
+
+impl From<anyhow::Error> for UdfResp {
+    fn from(value: anyhow::Error) -> Self {
+        Self {
+            errors: vec![value.to_string()],
+            name: None,
+            url: None,
+        }
+    }
+}
+
 pub async fn build_udf(
-    controller_addr: &str,
+    compiler_service: &mut CompilerGrpcClient<Channel>,
     udf_definition: &str,
     save: bool,
-) -> Result<BuildUdfResp, ErrorResp> {
-    let mut controller = match ControllerGrpcClient::connect(controller_addr.to_string()).await {
-        Ok(controller) => controller,
+) -> Result<UdfResp, ErrorResp> {
+    let dependencies = match parse_dependencies(udf_definition) {
+        Ok(dependencies) => dependencies,
         Err(e) => {
-            error!("Failed to connect to controller: {}", e);
-            return Err(service_unavailable("Controller"));
+            return Ok(e.into());
         }
     };
 
-    let check_udfs_resp = match controller
+    // use the ArroyoSchemaProvider to do some validation and to get the function name
+    let function_name = match ParsedUdf::try_parse(udf_definition) {
+        Ok(function_name) => function_name.name,
+        Err(e) => return Ok(e.into()),
+    };
+
+    let cargo_toml = udfs::cargo_toml(&dependencies);
+
+    let check_udfs_resp = match compiler_service
         .build_udf(BuildUdfReq {
-            definition: udf_definition.to_string(),
-            dylib_path: dylib_path(udf_definition),
+            udf_crate: Some(UdfCrate {
+                name: function_name.clone(),
+                definition: udf_definition.to_string(),
+                cargo_toml,
+                lib_rs: match udfs::lib_rs(&udf_definition) {
+                    Ok(lib_rs) => lib_rs,
+                    Err(e) => return Ok(e.into()),
+                },
+            }),
             save,
         })
         .await
     {
         Ok(resp) => resp.into_inner(),
         Err(e) => {
-            error!("Controller failed to validate UDF: {}", e);
+            error!("compiler service failed to validate UDF: {}", e.message());
             return Err(internal_server_error(format!(
                 "Failed to validate UDF: {}",
                 e.message()
@@ -221,7 +252,11 @@ pub async fn build_udf(
         }
     };
 
-    Ok(check_udfs_resp)
+    Ok(UdfResp {
+        errors: check_udfs_resp.errors,
+        name: Some(function_name),
+        url: check_udfs_resp.udf_path,
+    })
 }
 
 /// Validate UDFs
@@ -235,13 +270,12 @@ pub async fn build_udf(
     ),
 )]
 pub async fn validate_udf(
-    State(state): State<AppState>,
     WithRejection(Json(req), _): WithRejection<Json<ValidateUdfPost>, ApiError>,
 ) -> Result<Json<UdfValidationResult>, ErrorResp> {
-    let check_udfs_resp = build_udf(&state.controller_addr, &req.definition, false).await?;
+    let check_udfs_resp = build_udf(&mut compiler_service().await?, &req.definition, false).await?;
 
     Ok(Json(UdfValidationResult {
-        udf_name: check_udfs_resp.udf_name,
+        udf_name: check_udfs_resp.name,
         errors: check_udfs_resp.errors,
     }))
 }

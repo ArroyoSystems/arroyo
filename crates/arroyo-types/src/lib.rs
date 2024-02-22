@@ -1,18 +1,14 @@
 use crate::ports::CONTROLLER_GRPC;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
-use async_trait::async_trait;
-use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
 use bincode::{Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
 use std::fmt::{Debug, Display, Formatter};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
@@ -125,6 +121,8 @@ pub const CHECKPOINT_URL_ENV: &str = "CHECKPOINT_URL";
 pub const ARTIFACT_URL_ENV: &str = "ARTIFACT_URL";
 pub const ARTIFACT_URL_DEFAULT: &str = "/tmp/arroyo/artifacts";
 pub const COMPILER_FEATURES_ENV: &str = "COMPILER_FEATURES";
+pub const INSTALL_CLANG_ENV: &str = "INSTALL_CLANG";
+pub const INSTALL_RUSTC_ENV: &str = "INSTALL_RUSTC";
 
 // kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
@@ -148,6 +146,21 @@ pub fn telemetry_enabled() -> bool {
         Ok(val) => val != "true",
         Err(_) => true,
     }
+}
+
+pub fn bool_config(var: &str, default: bool) -> bool {
+    if let Ok(v) = env::var(var) {
+        match v.to_lowercase().as_str() {
+            "true" | "yes" | "1" => {
+                return true;
+            }
+            "false" | "no" | "0" => {
+                return false;
+            }
+            _ => {}
+        }
+    };
+    default
 }
 
 pub fn string_config(var: &str, default: &str) -> String {
@@ -921,12 +934,6 @@ mod tests {
     }
 }
 
-#[async_trait]
-pub trait UdfContext: Sync {
-    async fn init(&self) {}
-    async fn close(&self) {}
-}
-
 /// An Arrow DataType that also carries around its own nullability info
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NullableType {
@@ -955,27 +962,4 @@ impl NullableType {
             nullable,
         }
     }
-}
-
-pub fn dylib_name(name: &str) -> String {
-    match env::consts::OS {
-        "macos" => format!("{}.dylib", name),
-        "linux" => format!("{}.so", name),
-        _ => panic!("unsupported OS"),
-    }
-}
-
-pub fn dylib_path(definition: &str) -> String {
-    let artifact_url = env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
-
-    let mut hasher = DefaultHasher::new();
-    definition.hash(&mut hasher);
-    let hash = BASE64_STANDARD.encode(hasher.finish().to_be_bytes());
-
-    std::path::Path::new(&artifact_url)
-        .join("udfs")
-        .join(dylib_name(&hash))
-        .to_str()
-        .expect("Could not convert dylib path to string")
-        .to_string()
 }

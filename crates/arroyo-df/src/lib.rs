@@ -1,8 +1,7 @@
 #![allow(clippy::new_without_default)]
 
-extern crate dlopen;
-#[macro_use]
-extern crate dlopen_derive;
+extern crate dlopen2;
+extern crate dlopen2_derive;
 
 use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
@@ -68,7 +67,7 @@ use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
-use arroyo_types::{dylib_path, NullableType};
+use arroyo_types::NullableType;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
@@ -78,6 +77,8 @@ use unicase::UniCase;
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
 mod json;
+pub mod udfs;
+
 #[cfg(test)]
 mod test;
 
@@ -108,6 +109,103 @@ pub struct ArroyoSchemaProvider {
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
+}
+
+pub struct ParsedUdf {
+    pub name: String,
+    pub args: Vec<NullableType>,
+    pub vec_arguments: usize,
+    pub ret_type: NullableType,
+    pub definition: String,
+    pub dependencies: String,
+}
+
+impl ParsedUdf {
+    fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
+        if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
+            if let Some(segment) = path.segments.last() {
+                if segment.ident == "Vec" {
+                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                        if args.args.len() == 1 {
+                            if let syn::GenericArgument::Type(inner_ty) = &args.args[0] {
+                                return Some(inner_ty.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn try_parse(def: &str) -> anyhow::Result<ParsedUdf> {
+        let mut file = parse_file(def)?;
+
+        let mut functions = file.items.iter_mut().filter_map(|item| match item {
+            Item::Fn(function) => Some(function),
+            _ => None,
+        });
+
+        let function = match (functions.next(), functions.next()) {
+            (Some(function), None) => function,
+            _ => bail!("UDF definition must contain exactly 1 function."),
+        };
+
+        let name = function.sig.ident.to_string();
+        let mut args = vec![];
+        let mut vec_arguments = 0;
+        for (i, arg) in function.sig.inputs.iter().enumerate() {
+            match arg {
+                FnArg::Receiver(_) => {
+                    bail!(
+                        "Function {} has a 'self' argument, which is not allowed",
+                        name
+                    )
+                }
+                FnArg::Typed(t) => {
+                    if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
+                        vec_arguments += 1;
+                        args.push(rust_to_arrow(&vec_type).ok_or_else(|| {
+                            anyhow!(
+                                    "Could not convert function {} inner vector arg {} into a SQL data type",
+                                    name,
+                                    i
+                                )
+                        })?);
+                    } else {
+                        args.push(rust_to_arrow(&*t.ty).ok_or_else(|| {
+                            anyhow!(
+                                "Could not convert function {} arg {} into a SQL data type",
+                                name,
+                                i
+                            )
+                        })?);
+                    }
+                }
+            }
+        }
+
+        let ret = match &function.sig.output {
+            ReturnType::Default => bail!("Function {} return type must be specified", name),
+            ReturnType::Type(_, t) => rust_to_arrow(&**t).ok_or_else(|| {
+                anyhow!(
+                    "Could not convert function {} return type into a SQL data type",
+                    name
+                )
+            })?,
+        };
+
+        function.vis = Visibility::Public(Default::default());
+
+        Ok(ParsedUdf {
+            name,
+            args,
+            vec_arguments,
+            ret_type: ret,
+            definition: unparse(&file),
+            dependencies: parse_dependencies(def)?,
+        })
+    }
 }
 
 impl ArroyoSchemaProvider {
@@ -214,102 +312,36 @@ impl ArroyoSchemaProvider {
         self.tables.get_mut(&UniCase::new(table_name.into()))
     }
 
-    fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
-        if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
-            if let Some(segment) = path.segments.last() {
-                if segment.ident == "Vec" {
-                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                        if args.args.len() == 1 {
-                            if let syn::GenericArgument::Type(inner_ty) = &args.args[0] {
-                                return Some(inner_ty.clone());
-                            }
-                        }
-                    }
-                }
-            }
+    pub fn add_rust_udf(&mut self, body: &str, url: &str) -> Result<String> {
+        let parsed = ParsedUdf::try_parse(body)?;
+
+        if parsed.vec_arguments > 0 && parsed.vec_arguments != parsed.args.len() {
+            bail!("Function {} arguments must be vectors or none", parsed.name);
         }
-        None
-    }
-
-    pub fn add_rust_udf(&mut self, body: &str) -> Result<String> {
-        let mut file = parse_file(body)?;
-
-        let mut functions = file.items.iter_mut().filter_map(|item| match item {
-            Item::Fn(function) => Some(function),
-            _ => None,
-        });
-
-        let function = match (functions.next(), functions.next()) {
-            (Some(function), None) => function,
-            _ => bail!("UDF definition must contain exactly 1 function."),
-        };
-
-        let name = function.sig.ident.to_string();
-        let mut args = vec![];
-        let mut vec_arguments = 0;
-        for (i, arg) in function.sig.inputs.iter().enumerate() {
-            match arg {
-                FnArg::Receiver(_) => {
-                    bail!(
-                        "Function {} has a 'self' argument, which is not allowed",
-                        name
-                    )
-                }
-                FnArg::Typed(t) => {
-                    if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
-                        vec_arguments += 1;
-                        args.push(rust_to_arrow(&vec_type).ok_or_else(|| {
-                                anyhow!(
-                                    "Could not convert function {} inner vector arg {} into a SQL data type",
-                                    name,
-                                    i
-                                )
-                            })?);
-                    } else {
-                        args.push(rust_to_arrow(&*t.ty).ok_or_else(|| {
-                            anyhow!(
-                                "Could not convert function {} arg {} into a SQL data type",
-                                name,
-                                i
-                            )
-                        })?);
-                    }
-                }
-            }
-        }
-
-        let ret = match &function.sig.output {
-            ReturnType::Default => bail!("Function {} return type must be specified", name),
-            ReturnType::Type(_, t) => rust_to_arrow(&**t).ok_or_else(|| {
-                anyhow!(
-                    "Could not convert function {} return type into a SQL data type",
-                    name
-                )
-            })?,
-        };
-
-        if vec_arguments > 0 && vec_arguments != args.len() {
-            bail!("Function {} arguments must be vectors or none", name);
-        }
-        if vec_arguments > 0 {
-            let return_type = Arc::new(ret.data_type.clone());
-            let name = function.sig.ident.to_string();
+        if parsed.vec_arguments > 0 {
+            let return_type = Arc::new(parsed.ret_type.data_type.clone());
             let signature = Signature::exact(
-                args.iter().map(|t| t.data_type.clone()).collect(),
+                parsed.args.iter().map(|t| t.data_type.clone()).collect(),
                 Volatility::Volatile,
             );
             let return_type: ReturnTypeFunction = Arc::new(move |_| Ok(return_type.clone()));
             let accumulator: AccumulatorFactoryFunction = Arc::new(|_| unreachable!());
             let state_type: StateTypeFunction = Arc::new(|_| unreachable!());
             #[allow(deprecated)]
-            let udaf =
-                AggregateUDF::new(&name, &signature, &return_type, &accumulator, &state_type);
+            let udaf = AggregateUDF::new(
+                &parsed.name,
+                &signature,
+                &return_type,
+                &accumulator,
+                &state_type,
+            );
             self.aggregate_functions
-                .insert(function.sig.ident.to_string(), Arc::new(udaf));
+                .insert(parsed.name.clone(), Arc::new(udaf));
         } else {
             let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
-            let arg_types = args
+            let arg_types = parsed
+                .args
                 .iter()
                 .map(|arg| data_type_to_arrow_type(&arg.data_type))
                 .collect();
@@ -320,48 +352,43 @@ impl ArroyoSchemaProvider {
             };
 
             self.dylib_udfs.insert(
-                function.sig.ident.to_string(),
+                parsed.name.clone(),
                 DylibUdfConfig {
-                    dylib_path: dylib_path(&body),
+                    dylib_path: url.to_string(),
                     arg_types,
-                    return_type: data_type_to_arrow_type(&ret.data_type)?,
+                    return_type: data_type_to_arrow_type(&parsed.ret_type.data_type)?,
                 },
             );
 
             if self
                 .functions
                 .insert(
-                    function.sig.ident.to_string(),
+                    parsed.name.clone(),
                     Arc::new(create_udf(
-                        &function.sig.ident.to_string(),
-                        args.iter().map(|t| t.data_type.clone()).collect(),
-                        Arc::new(ret.data_type.clone()),
+                        &parsed.name,
+                        parsed.args.iter().map(|t| t.data_type.clone()).collect(),
+                        Arc::new(parsed.ret_type.data_type.clone()),
                         Volatility::Volatile,
                         make_scalar_function(fn_impl),
                     )),
                 )
                 .is_some()
             {
-                warn!(
-                    "Global UDF '{}' is being overwritten",
-                    function.sig.ident.to_string()
-                );
+                warn!("Global UDF '{}' is being overwritten", parsed.name);
             };
         }
 
-        function.vis = Visibility::Public(Default::default());
-
         self.udf_defs.insert(
-            function.sig.ident.to_string(),
+            parsed.name.clone(),
             UdfDef {
-                args,
-                ret,
-                def: unparse(&file.clone()),
-                dependencies: parse_dependencies(body)?,
+                args: parsed.args,
+                ret: parsed.ret_type,
+                def: parsed.definition,
+                dependencies: parsed.dependencies,
             },
         );
 
-        Ok(name)
+        Ok(parsed.name)
     }
 
     fn get_table_source_with_fields(

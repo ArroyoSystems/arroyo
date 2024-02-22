@@ -1,5 +1,5 @@
 use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray};
-use dlopen::wrapper::WrapperApi;
+use dlopen2::wrapper::WrapperApi;
 use std::{
     any::Any,
     mem,
@@ -36,7 +36,7 @@ use datafusion_expr::{
 };
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
-use dlopen::wrapper::Container;
+use dlopen2::wrapper::Container;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -187,14 +187,14 @@ impl UdfDylib {
             Volatility::Volatile,
         );
 
-        let storage = StorageProvider::for_url("/")
+        let udf = StorageProvider::get_url(&config.dylib_path)
             .await
-            .expect("unable to construct storage provider");
-
-        let udf = storage
-            .get(&config.dylib_path)
-            .await
-            .expect("UDF dylib not found.");
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Unable to fetch UDF dylib from '{}': {:?}",
+                    config.dylib_path, e
+                )
+            });
 
         // write the dylib to a local file
         let local_udfs_dir = "/tmp/arroyo/local_udfs";
