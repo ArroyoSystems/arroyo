@@ -21,7 +21,7 @@ use crate::{
     schemas::add_timestamp_field_arrow,
     AggregateCalculation, QueryToGraphVisitor, WindowBehavior,
 };
-use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
+use crate::{tables::Table, ArroyoSchemaProvider};
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{
     LogicalGraph, LogicalNode, LogicalProgram, OperatorName, ProgramConfig,
@@ -76,7 +76,7 @@ impl Planner {
     pub(crate) async fn get_arrow_program(
         &self,
         rewriter: QueryToGraphVisitor,
-    ) -> Result<CompiledSql> {
+    ) -> Result<LogicalProgram> {
         let mut topo = Topo::new(&rewriter.local_logical_plan_graph);
         let mut program_graph: LogicalGraph = DiGraph::new();
 
@@ -97,7 +97,7 @@ impl Planner {
                     let source = self
                         .schema_provider
                         .get_table(&table_name)
-                        .ok_or_else(|| anyhow!("table {} not found", table_scan.table_name))?;
+                        .ok_or_else(|| anyhow!("table not found: {}", table_scan.table_name))?;
 
                     let Table::ConnectorTable(cn) = source else {
                         panic!("expect connector table")
@@ -336,15 +336,9 @@ impl Planner {
             udf_dylibs: self.schema_provider.dylib_udfs.clone().into(),
         };
 
-        let program = LogicalProgram {
+        Ok(LogicalProgram {
             graph: program_graph,
             program_config,
-        };
-
-        Ok(CompiledSql {
-            program,
-            connection_ids: vec![],
-            schemas: HashMap::new(),
         })
     }
 

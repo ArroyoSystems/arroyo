@@ -1,18 +1,17 @@
-use crate::SchemaData;
 use anyhow::{anyhow, bail};
 use apache_avro::types::{Record, Value as AvroValue, Value};
 pub use apache_avro::Schema;
-use apache_avro::{from_avro_datum, AvroResult, Reader, Writer};
+use apache_avro::{from_avro_datum, AvroResult, Reader};
 use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
 use arrow_array::cast::AsArray;
 use arrow_array::types::{
-    BooleanType, Float16Type, Float32Type, Float64Type, Int32Type, Int64Type, Int8Type,
-    TimestampNanosecondType, UInt32Type, UInt64Type, UInt8Type,
+    Float16Type, Float32Type, Float64Type, Int32Type, Int64Type, Int8Type, TimestampNanosecondType,
+    UInt32Type, UInt64Type, UInt8Type,
 };
-use arrow_array::{Array, ArrayRef, RecordBatch, TimestampNanosecondArray};
+use arrow_array::{Array, ArrayRef, RecordBatch};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_types::{from_nanos, to_micros, to_nanos, ArroyoExtensionType, SourceError};
+use arroyo_types::{from_nanos, to_micros, ArroyoExtensionType, SourceError};
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -89,40 +88,6 @@ pub(crate) async fn avro_messages(
             .collect()
     };
     Ok(messages)
-}
-
-pub fn to_vec<T: SchemaData>(
-    record: &T,
-    format: &AvroFormat,
-    schema: &Schema,
-    version: Option<u32>,
-) -> Vec<u8> {
-    let v = record.to_avro(schema);
-
-    if format.raw_datums || format.confluent_schema_registry {
-        let record =
-            apache_avro::to_avro_datum(schema, v.clone()).expect("avro serialization failed");
-        if format.confluent_schema_registry {
-            // TODO: this would be more efficient if we could use the internal write_avro_datum to avoid
-            // allocating the buffer twice
-            let mut buf = Vec::with_capacity(record.len() + 5);
-            buf.push(0);
-            buf.extend(
-                version
-                    .expect("no schema version for confluent schema avro")
-                    .to_be_bytes(),
-            );
-            buf.extend(record);
-            buf
-        } else {
-            record
-        }
-    } else {
-        let mut buf = Vec::with_capacity(128);
-        let mut writer = Writer::new(schema, &mut buf);
-        writer.append(v).unwrap();
-        buf
-    }
 }
 
 fn convert_float(f: f64) -> JsonValue {
@@ -398,12 +363,17 @@ fn serialize_column(
                     .unwrap_or_else(||
                         panic!("invalid avro schema -- struct field {name} should be a union with two variants")
                     );
-                let nulls = column.nulls().unwrap();
 
-                let mut struct_values = nulls
-                    .iter()
-                    .map(|null| null.then(|| Record::new(schema).unwrap()))
-                    .collect::<Vec<_>>();
+                let mut struct_values = if let Some(nulls) = column.nulls() {
+                    nulls
+                        .iter()
+                        .map(|null| null.then(|| Record::new(schema).unwrap()))
+                        .collect()
+                } else {
+                    (0..column.len())
+                        .map(|_| Some(Record::new(schema).unwrap()))
+                        .collect()
+                };
 
                 for (field, column) in fields.iter().zip(column.as_struct().columns()) {
                     let name = AvroFormat::sanitize_field(field.name());
@@ -417,18 +387,14 @@ fn serialize_column(
                     );
                 }
 
-                for ((struct_v, outer_v), notnull) in struct_values
-                    .into_iter()
-                    .zip(values.iter_mut())
-                    .zip(column.nulls().unwrap().iter())
-                {
+                for (struct_v, outer_v) in struct_values.into_iter().zip(values.iter_mut()) {
                     if let Some(outer_v) = outer_v.as_mut() {
                         outer_v.put(
                             name,
                             Value::Union(
-                                notnull as u32,
-                                Box::new(if notnull {
-                                    struct_v.expect("should not be null").into()
+                                struct_v.is_some() as u32,
+                                Box::new(if let Some(struct_v) = struct_v {
+                                    struct_v.into()
                                 } else {
                                     Value::Null
                                 }),
@@ -539,20 +505,17 @@ fn to_arrow_datatype(
 
 #[cfg(test)]
 mod tests {
-    use super::{arrow_to_avro_schema, serialize, to_arrow, to_vec};
-    use crate::{avro, ArrowDeserializer, SchemaData};
+    use super::{arrow_to_avro_schema, serialize, to_arrow};
+    use crate::{avro, ArrowDeserializer};
     use arrow_array::builder::{make_builder, ArrayBuilder, StringBuilder, StructBuilder};
-    use arrow_array::{Array, ArrayRef, RecordBatch, StringArray};
-    use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
+    use arrow_array::RecordBatch;
+    use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{AvroFormat, BadData, Format};
     use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-    use arroyo_rpc::TIMESTAMP_FIELD;
-    use arroyo_types::to_nanos;
-    use arroyo_types::ArrowMessage::Data;
     use serde_json::json;
     use std::sync::Arc;
-    use std::time::{Duration, SystemTime};
+    use std::time::SystemTime;
 
     const SCHEMA: &str = r#"
         {

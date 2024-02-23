@@ -2,7 +2,7 @@ use crate::{avro, json};
 use arrow_array::cast::AsArray;
 use arrow_array::RecordBatch;
 use arrow_json::writer::record_batches_to_json_rows;
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Field};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, RawStringFormat};
 use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
@@ -12,6 +12,7 @@ pub struct ArrowSerializer {
     kafka_schema: Option<Value>,
     avro_schema: Option<Arc<apache_avro::schema::Schema>>,
     format: Format,
+    projection: Vec<usize>,
 }
 
 impl ArrowSerializer {
@@ -20,28 +21,62 @@ impl ArrowSerializer {
             kafka_schema: None,
             avro_schema: None,
             format,
+            projection: vec![],
         }
     }
 
+    fn projection(schema: &arrow_schema::Schema) -> Vec<usize> {
+        schema
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.name() != TIMESTAMP_FIELD)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    fn projected_schema(schema: &arrow_schema::Schema) -> Vec<Field> {
+        let projection = Self::projection(schema);
+        projection
+            .iter()
+            .map(|i| schema.field(*i).clone())
+            .collect()
+    }
+
+    pub fn avro_schema(schema: &arrow_schema::Schema) -> apache_avro::Schema {
+        avro::arrow_to_avro_schema("ArroyoAvro", &Self::projected_schema(schema).into())
+    }
+
+    pub fn json_schema(schema: &arrow_schema::Schema) -> Value {
+        json::arrow_to_json_schema(&Self::projected_schema(schema).into())
+    }
+
+    pub fn kafka_schema(schema: &arrow_schema::Schema) -> Value {
+        json::arrow_to_kafka_json("ArroyoJson", &Self::projected_schema(schema).into())
+    }
+
     pub fn serialize(&mut self, batch: &RecordBatch) -> Box<dyn Iterator<Item = Vec<u8>> + Send> {
-        if self.kafka_schema.is_none() {
-            self.kafka_schema = Some(json::arrow_to_kafka_json(
-                "ArroyoJson",
-                batch.schema().fields(),
-            ));
-        }
-        if self.avro_schema.is_none() {
-            self.avro_schema = Some(Arc::new(avro::arrow_to_avro_schema(
-                "ArroyoAvro",
-                batch.schema().fields(),
-            )));
+        if self.projection.is_empty() {
+            self.projection = Self::projection(&batch.schema());
         }
 
+        if self.kafka_schema.is_none() {
+            self.kafka_schema = Some(Self::kafka_schema(&batch.schema()));
+        }
+
+        if self.avro_schema.is_none() {
+            self.avro_schema = Some(Arc::new(Self::avro_schema(&batch.schema())));
+        }
+
+        let batch = batch
+            .project(&self.projection)
+            .expect("batch has wrong number of columns");
+
         match &self.format {
-            Format::Json(json) => self.serialize_json(json, batch),
-            Format::Avro(avro) => self.serialize_avro(avro, batch),
+            Format::Json(json) => self.serialize_json(json, &batch),
+            Format::Avro(avro) => self.serialize_avro(avro, &batch),
             Format::Parquet(_) => todo!("parquet"),
-            Format::RawString(RawStringFormat {}) => self.serialize_raw_string(batch),
+            Format::RawString(RawStringFormat {}) => self.serialize_raw_string(&batch),
         }
     }
 
@@ -65,9 +100,7 @@ impl ArrowSerializer {
 
         let include_schema = json.include_schema.then(|| self.kafka_schema.clone());
 
-        Box::new(rows.into_iter().map(move |mut row| {
-            row.remove(TIMESTAMP_FIELD);
-
+        Box::new(rows.into_iter().map(move |row| {
             let mut buf: Vec<u8> = Vec::with_capacity(128);
             if let Some(header) = header {
                 buf.extend(&header);

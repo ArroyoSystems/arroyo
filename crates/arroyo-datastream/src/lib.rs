@@ -3,7 +3,7 @@
 
 pub mod logical;
 
-use arroyo_rpc::grpc::api::{self as GrpcApi};
+use arroyo_rpc::grpc::api;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
@@ -214,43 +214,11 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq)]
-pub struct ConnectorOp {
-    // name of the connector
-    pub connector: String,
-    // json-encoded config for the operator
-    pub config: String,
-    // description to be rendered in the pipeline graph
-    pub description: String,
-}
-
-impl ConnectorOp {
-    pub fn web_sink() -> Self {
-        ConnectorOp {
-            connector: "preview".to_string(),
-            config: "{\"connection\": {}, \"table\": {}, \"connection_schema\": {\"fields\":[]}}"
-                .to_string(),
-            description: "PreviewSink".to_string(),
-        }
-    }
-}
-
-impl From<GrpcApi::ConnectorOp> for ConnectorOp {
-    fn from(c: GrpcApi::ConnectorOp) -> Self {
-        ConnectorOp {
-            connector: c.connector,
-            config: c.config,
-            description: c.description,
-        }
-    }
-}
-
-impl From<ConnectorOp> for GrpcApi::ConnectorOp {
-    fn from(c: ConnectorOp) -> Self {
-        GrpcApi::ConnectorOp {
-            connector: c.connector,
-            config: c.config,
-            description: c.description,
-        }
+pub fn preview_sink() -> api::ConnectorOp {
+    api::ConnectorOp {
+        connector: "preview".to_string(),
+        config: "{\"connection\": {}, \"table\": {}, \"connection_schema\": {\"fields\":[]}}"
+            .to_string(),
+        description: "PreviewSink".to_string(),
     }
 }

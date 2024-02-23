@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::{FieldRef, Schema, TimeUnit};
-use arroyo_datastream::{ConnectorOp, WindowType};
+use arroyo_datastream::{preview_sink, WindowType};
 
 use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
@@ -59,12 +59,13 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::json::get_json_functions;
-use crate::rewriters::{TimestampRewriter, UnnestRewriter};
+use crate::rewriters::{SourceMetadataVisitor, TimestampRewriter, UnnestRewriter};
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow};
 use crate::watermark_node::WatermarkNode;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::grpc::api;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_types::NullableType;
 use datafusion_proto::protobuf::ArrowType;
@@ -95,7 +96,6 @@ pub struct UdfDef {
 pub struct CompiledSql {
     pub program: LogicalProgram,
     pub connection_ids: Vec<i64>,
-    pub schemas: HashMap<String, Schema>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1042,7 +1042,7 @@ enum LogicalPlanExtension {
     Sink {
         #[allow(unused)]
         name: String,
-        connector_op: ConnectorOp,
+        connector_op: api::ConnectorOp,
     },
     WatermarkNode(WatermarkNode),
     Join(JoinCalculation),
@@ -1470,6 +1470,8 @@ pub async fn parse_and_get_arrow_program(
     }
 
     let mut rewriter = QueryToGraphVisitor::default();
+
+    let mut used_connections = HashSet::new();
     for insert in inserts {
         let (plan, sink_name) = match insert {
             // TODO: implement inserts
@@ -1482,11 +1484,15 @@ pub async fn parse_and_get_arrow_program(
 
         let plan_rewrite = plan
             .rewrite(&mut SourceRewriter {
-                schema_provider: schema_provider.clone(),
+                schema_provider: &schema_provider,
             })?
             .rewrite(&mut UnnestRewriter {})?
             .rewrite(&mut TimestampRewriter {})?
             .rewrite(&mut rewriter)?;
+
+        let mut metadata = SourceMetadataVisitor::new(&schema_provider);
+        plan_rewrite.visit(&mut metadata)?;
+        used_connections.extend(metadata.connection_ids.iter());
 
         info!("Logical plan: {}", plan_rewrite.display_graphviz());
 
@@ -1527,7 +1533,7 @@ pub async fn parse_and_get_arrow_program(
 
                 LogicalPlanExtension::Sink {
                     name: sink_name,
-                    connector_op: ConnectorOp {
+                    connector_op: api::ConnectorOp {
                         connector: connector_table.connector.clone(),
                         config: connector_table.config.clone(),
                         description: connector_table.description.clone(),
@@ -1536,7 +1542,7 @@ pub async fn parse_and_get_arrow_program(
             }
             None => LogicalPlanExtension::Sink {
                 name: "preview".to_string(),
-                connector_op: arroyo_datastream::ConnectorOp::web_sink(),
+                connector_op: preview_sink(),
             },
         };
 
@@ -1577,7 +1583,12 @@ pub async fn parse_and_get_arrow_program(
         }
     }
     let planner = Planner::new(schema_provider);
-    planner.get_arrow_program(rewriter).await
+    let program = planner.get_arrow_program(rewriter).await?;
+
+    Ok(CompiledSql {
+        program,
+        connection_ids: used_connections.into_iter().collect(),
+    })
 }
 
 #[derive(Clone)]

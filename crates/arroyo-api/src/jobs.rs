@@ -457,7 +457,6 @@ pub async fn get_job_output(
     // validate that the job exists, the user has access, and the graph has a GrpcSink
     query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
-    println!("nodes: {:#?}", pipeline.graph.nodes);
     if !pipeline
         .graph
         .nodes

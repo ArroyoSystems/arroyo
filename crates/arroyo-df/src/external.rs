@@ -1,8 +1,6 @@
 use arrow_schema::FieldRef;
-use arroyo_datastream::logical::LogicalNode;
+use arroyo_rpc::grpc::api::ConnectorOp;
 use std::time::Duration;
-
-use arroyo_datastream::ConnectorOp;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessingMode {
@@ -17,14 +15,6 @@ pub struct SqlSource {
     pub config: ConnectorOp,
     pub processing_mode: ProcessingMode,
     pub idle_time: Option<Duration>,
-}
-
-#[derive(Clone, Debug)]
-pub struct SqlSink {
-    pub id: Option<i64>,
-    pub struct_def: Vec<FieldRef>,
-    pub operator: LogicalNode,
-    pub updating_type: SinkUpdateType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

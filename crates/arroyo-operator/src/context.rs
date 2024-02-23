@@ -1,5 +1,5 @@
 use crate::{server_for_hash_array, RateLimiter};
-use arrow::array::{make_builder, ArrayBuilder, PrimitiveArray, RecordBatch};
+use arrow::array::{make_builder, Array, ArrayBuilder, PrimitiveArray, RecordBatch};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::{SchemaRef, UInt64Type};
 use arroyo_formats::ArrowDeserializer;
