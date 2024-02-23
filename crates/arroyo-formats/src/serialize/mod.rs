@@ -3,13 +3,14 @@ use arrow_array::cast::AsArray;
 use arrow_array::RecordBatch;
 use arrow_json::writer::record_batches_to_json_rows;
 use arrow_schema::DataType;
-use arroyo_rpc::formats::{Format, JsonFormat, RawStringFormat};
+use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, RawStringFormat};
 use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
+use std::sync::Arc;
 
 pub struct ArrowSerializer {
     kafka_schema: Option<Value>,
-    avro_schema: Option<apache_avro::schema::Schema>,
+    avro_schema: Option<Arc<apache_avro::schema::Schema>>,
     format: Format,
 }
 
@@ -30,15 +31,15 @@ impl ArrowSerializer {
             ));
         }
         if self.avro_schema.is_none() {
-            self.avro_schema = Some(avro::arrow_to_avro_schema(
+            self.avro_schema = Some(Arc::new(avro::arrow_to_avro_schema(
                 "ArroyoAvro",
                 batch.schema().fields(),
-            ));
+            )));
         }
 
         match &self.format {
             Format::Json(json) => self.serialize_json(json, batch),
-            Format::Avro(_) => todo!("avro"),
+            Format::Avro(avro) => self.serialize_avro(avro, batch),
             Format::Parquet(_) => todo!("parquet"),
             Format::RawString(RawStringFormat {}) => self.serialize_raw_string(batch),
         }
@@ -108,6 +109,52 @@ impl ArrowSerializer {
             .collect();
 
         Box::new(values.into_iter())
+    }
+
+    fn serialize_avro(
+        &self,
+        format: &AvroFormat,
+        batch: &RecordBatch,
+    ) -> Box<dyn Iterator<Item = Vec<u8>> + Send> {
+        let schema = self
+            .avro_schema
+            .as_ref()
+            .expect("must have avro schema set for avro format")
+            .clone();
+
+        let items = avro::serialize(&schema, batch);
+
+        if format.raw_datums || format.confluent_schema_registry {
+            let schema_id = format.confluent_schema_registry.then(|| {
+                format
+                    .schema_id
+                    .expect("must have schema id for confluent schema registry")
+                    .to_be_bytes()
+            });
+
+            Box::new(items.into_iter().map(move |v| {
+                let record = apache_avro::to_avro_datum(&schema, v.clone())
+                    .expect("avro serialization failed");
+                if let Some(schema_id) = schema_id {
+                    // TODO: this would be more efficient if we could use the internal write_avro_datum to avoid
+                    // allocating the buffer twice
+                    let mut buf = Vec::with_capacity(record.len() + 5);
+                    buf.push(0);
+                    buf.extend(schema_id);
+                    buf.extend(record);
+                    buf
+                } else {
+                    record
+                }
+            }))
+        } else {
+            let mut buf = Vec::with_capacity(128);
+            let mut writer = apache_avro::Writer::new(&schema, &mut buf);
+            for v in items {
+                writer.append(v).expect("avro serialization failed");
+            }
+            Box::new(vec![buf].into_iter())
+        }
     }
 }
 

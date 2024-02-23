@@ -275,6 +275,7 @@ export function CreatePipeline() {
     setStartingPreview(true);
 
     if (!(await pipelineIsValid(1))) {
+      setStartingPreview(false);
       return;
     }
 

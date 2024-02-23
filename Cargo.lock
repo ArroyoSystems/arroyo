@@ -953,13 +953,14 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "chrono",
  "memchr",
+ "prost 0.12.3",
  "schemars",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
  "typify",
- "utoipa 3.5.0",
+ "utoipa 4.2.0",
 ]
 
 [[package]]
