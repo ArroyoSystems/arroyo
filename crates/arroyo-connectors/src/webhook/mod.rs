@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use anyhow::anyhow;
 use arroyo_rpc::OperatorConfig;
 
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,

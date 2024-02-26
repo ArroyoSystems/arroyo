@@ -2,7 +2,7 @@ use crate::{server_for_hash_array, RateLimiter};
 use arrow::array::{make_builder, Array, ArrayBuilder, PrimitiveArray, RecordBatch};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::{SchemaRef, UInt64Type};
-use arroyo_formats::ArrowDeserializer;
+use arroyo_formats::de::ArrowDeserializer;
 use arroyo_metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};

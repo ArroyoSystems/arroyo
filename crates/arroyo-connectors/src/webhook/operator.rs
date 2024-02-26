@@ -12,7 +12,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tracing::warn;
 
 use crate::webhook::MAX_INFLIGHT;
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::TableConfig;

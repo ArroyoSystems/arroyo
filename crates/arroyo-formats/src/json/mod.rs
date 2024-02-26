@@ -4,6 +4,8 @@ use arroyo_rpc::formats::JsonFormat;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+pub mod schema;
+
 pub fn deserialize_slice_json(
     schema: &SchemaRef,
     buffer: &mut Vec<Box<dyn ArrayBuilder>>,

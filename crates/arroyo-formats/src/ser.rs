@@ -1,3 +1,4 @@
+use crate::avro::schema;
 use crate::{avro, json};
 use arrow_array::cast::AsArray;
 use arrow_array::RecordBatch;
@@ -44,7 +45,7 @@ impl ArrowSerializer {
     }
 
     pub fn avro_schema(schema: &arrow_schema::Schema) -> apache_avro::Schema {
-        avro::arrow_to_avro_schema("ArroyoAvro", &Self::projected_schema(schema).into())
+        schema::to_avro("ArroyoAvro", &Self::projected_schema(schema).into())
     }
 
     pub fn json_schema(schema: &arrow_schema::Schema) -> Value {
@@ -155,7 +156,7 @@ impl ArrowSerializer {
             .expect("must have avro schema set for avro format")
             .clone();
 
-        let items = avro::serialize(&schema, batch);
+        let items = avro::ser::serialize(&schema, batch);
 
         if format.raw_datums || format.confluent_schema_registry {
             let schema_id = format.confluent_schema_registry.then(|| {
@@ -193,7 +194,7 @@ impl ArrowSerializer {
 
 #[cfg(test)]
 mod tests {
-    use crate::serialize::ArrowSerializer;
+    use crate::ser::ArrowSerializer;
     use arrow_schema::{Schema, TimeUnit};
     use arroyo_rpc::formats::{Format, RawStringFormat};
     use arroyo_types::to_nanos;

@@ -31,7 +31,7 @@ use arroyo_rpc::grpc::api::{
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalProgram, OperatorName};
 use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, ParsedUdf, SqlConfig};
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};

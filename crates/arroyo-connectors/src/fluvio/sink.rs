@@ -2,7 +2,7 @@ use arrow::array::RecordBatch;
 use async_trait::async_trait;
 use fluvio::{Fluvio, FluvioConfig, TopicProducer};
 
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use tracing::info;
 
 use arroyo_operator::context::ArrowContext;
