@@ -22,6 +22,7 @@ use tracing::info;
 pub struct SingleFileSourceFunc {
     pub input_file: String,
     pub lines_read: usize,
+    pub wait_for_control: bool,
 }
 
 impl SingleFileSourceFunc {
@@ -70,38 +71,56 @@ impl SingleFileSourceFunc {
             i += 1;
 
             // wait for a control message after each line
-            match ctx.control_rx.recv().await {
-                Some(ControlMessage::Checkpoint(c)) => {
-                    let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
-                        String,
-                        usize,
-                    > = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
-                    state.insert(self.input_file.clone(), self.lines_read).await;
-                    // checkpoint our state
-                    if self.start_checkpoint(c, ctx).await {
-                        return SourceFinishType::Immediate;
-                    }
-                }
-                Some(ControlMessage::Stop { mode }) => {
-                    info!("Stopping file source {:?}", mode);
+            let return_type = if self.wait_for_control {
+                self.handle_control(ctx.control_rx.recv().await, ctx).await
+            } else {
+                self.handle_control(ctx.control_rx.try_recv().ok(), ctx)
+                    .await
+            };
 
-                    match mode {
-                        StopMode::Graceful => {
-                            return SourceFinishType::Graceful;
-                        }
-                        StopMode::Immediate => {
-                            return SourceFinishType::Immediate;
-                        }
-                    }
-                }
-                Some(ControlMessage::NoOp) => {
-                    // No-op messages allow the source to advance and process a record
-                }
-                _ => {}
+            if let Some(value) = return_type {
+                return value;
             }
         }
         info!("file source finished");
         SourceFinishType::Final
+    }
+
+    async fn handle_control(
+        &mut self,
+        msg: Option<ControlMessage>,
+        ctx: &mut ArrowContext,
+    ) -> Option<SourceFinishType> {
+        match msg {
+            Some(ControlMessage::Checkpoint(c)) => {
+                let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
+                    String,
+                    usize,
+                > = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+                state.insert(self.input_file.clone(), self.lines_read).await;
+                // checkpoint our state
+                if self.start_checkpoint(c, ctx).await {
+                    return Some(SourceFinishType::Immediate);
+                }
+            }
+            Some(ControlMessage::Stop { mode }) => {
+                info!("Stopping file source {:?}", mode);
+
+                match mode {
+                    StopMode::Graceful => {
+                        return Some(SourceFinishType::Graceful);
+                    }
+                    StopMode::Immediate => {
+                        return Some(SourceFinishType::Immediate);
+                    }
+                }
+            }
+            Some(ControlMessage::NoOp) => {
+                // No-op messages allow the source to advance and process a record
+            }
+            _ => {}
+        }
+        None
     }
 }
 

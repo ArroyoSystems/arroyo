@@ -291,7 +291,6 @@ async fn run_pipeline_and_assert_outputs(
         std::fs::remove_file(&output_location).unwrap();
     }
 
-    let program = Program::local_from_logical(job_id.clone(), &graph);
     run_completely(
         Program::local_from_logical(job_id.clone(), &graph),
         job_id.clone(),
@@ -299,6 +298,7 @@ async fn run_pipeline_and_assert_outputs(
         golden_output_location.clone(),
     )
     .await;
+
     let program = Program::local_from_logical(job_id.clone(), &graph);
     let tasks_per_operator = program.tasks_per_operator();
     let engine = Engine::for_local(program, job_id.clone());
@@ -405,6 +405,7 @@ pub async fn correctness_run_codegen(
         .unwrap()
         .to_string_lossy()
         .to_string();
+
     // Depending on run location the directory might end with arroyo-sql-testing.
     // If so, remove it.
     let parent_directory = if parent_directory.ends_with("arroyo-sql-testing") {
@@ -415,20 +416,24 @@ pub async fn correctness_run_codegen(
     } else {
         parent_directory
     };
+
     // replace $input_file with the current directory and then inputs/query_name.json
     let physical_input_dir = format!("{}/arroyo-sql-testing/inputs/", parent_directory,);
 
     let query_string = query.into().replace("$input_dir", &physical_input_dir);
+
     // replace $output_file with the current directory and then outputs/query_name.json
     let physical_output = format!(
         "{}/arroyo-sql-testing/outputs/{}.json",
         parent_directory, test_name
     );
+
     let query_string = query_string.replace("$output_path", &physical_output);
     let golden_output_location = format!(
         "{}/arroyo-sql-testing/golden_outputs/{}.json",
         parent_directory, test_name
     );
+
     let logical_program = get_graph(query_string.clone()).await?;
     run_pipeline_and_assert_outputs(
         logical_program.graph,
@@ -457,7 +462,7 @@ async fn get_graph(query_string: String) -> Result<LogicalProgram> {
     Ok(program)
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn select_star() -> Result<()> {
     correctness_run_codegen(
         "select_star".to_string(),
@@ -492,7 +497,7 @@ async fn select_star() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn windowed_outer_join() -> Result<()> {
     correctness_run_codegen(
         "windowed_outer_join",
@@ -539,35 +544,7 @@ async fn windowed_outer_join() -> Result<()> {
     Ok(())
 }
 
-/*
-
-correctness_run_codegen! {"aggregates", 10,
-"CREATE TABLE impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'impulse',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source'
-);
-CREATE TABLE aggregates (
-  min BIGINT,
-  max BIGINT,
-  sum BIGINT,
-  count BIGINT,
-  avg DOUBLE
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
-INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"}
-*/
-
-#[tokio::test]
+#[test(tokio::test)]
 async fn hourly_by_event_type() -> Result<()> {
     correctness_run_codegen(
         "hourly_by_event_type",
@@ -606,8 +583,8 @@ GROUP BY 1,2);
     Ok(())
 }
 
-/*
-#[tokio::test]
+#[test(tokio::test)]
+#[ignore] // currently broken
 async fn month_loose_watermark() -> Result<()> {
     correctness_run_codegen(
         "month_loose_watermark",
@@ -647,7 +624,8 @@ async fn month_loose_watermark() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[test(tokio::test)] // currently broken
+#[ignore]
 async fn tight_watermark() -> Result<()> {
     correctness_run_codegen(
         "tight_watermark",
@@ -686,40 +664,53 @@ GROUP BY 1);
     Ok(())
 }
 
-correctness_run_codegen! {"suspicious_drivers", 200,
-"CREATE TABLE cars(
-  timestamp TIMESTAMP,
-  driver_id BIGINT,
-  event_type TEXT,
-  location TEXT
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/sorted_cars.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp',
-  watermark_field = 'timestamp'
-);
-CREATE TABLE suspicious_drivers (
-  drivers BIGINT
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
-INSERT INTO suspicious_drivers
-SELECT count(*) drivers FROM
-(
-SELECT driver_id, sum(case when event_type = 'pickup' then 1 else 0 END ) as pickups,
-sum(case when event_type = 'dropoff' THEN 1 else 0 END) as dropoffs
-FROM cars
-GROUP BY 1
-) WHERE pickups < dropoffs
-"}
+#[test(tokio::test)]
+#[ignore] // non-windowed aggregates are not yet supported
+async fn suspicious_drivers() -> Result<()> {
+    correctness_run_codegen(
+        "suspicious_drivers",
+        "CREATE TABLE cars(
+      timestamp TIMESTAMP,
+      driver_id BIGINT,
+      event_type TEXT,
+      location TEXT
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/sorted_cars.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp',
+      watermark_field = 'timestamp'
+    );
+    CREATE TABLE suspicious_drivers (
+      drivers BIGINT
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
+    INSERT INTO suspicious_drivers
+    SELECT count(*) drivers FROM
+    (
+    SELECT driver_id, sum(case when event_type = 'pickup' then 1 else 0 END ) as pickups,
+    sum(case when event_type = 'dropoff' THEN 1 else 0 END) as dropoffs
+    FROM cars
+    GROUP BY 1
+    ) WHERE pickups < dropoffs
+    ",
+        200,
+    )
+    .await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"most_active_driver_last_hour_unaligned", 200,
-"CREATE TABLE cars (
+#[test(tokio::test)]
+#[ignore] // window functions are not yet supported
+async fn most_active_driver_last_hour_unaligned() -> Result<()> {
+    correctness_run_codegen(
+        "most_active_driver_last_hour_unaligned",
+        "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
   event_type TEXT,
@@ -755,10 +746,19 @@ SELECT * FROM (
          count(*) as count
          FROM cars
          GROUP BY 1,2)) ) where row_number = 1
-"}
+",
+        200,
+    )
+    .await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"most_active_driver_last_hour", 200,
-"CREATE TABLE cars (
+#[test(tokio::test)]
+#[ignore] // window functions are not yet supported
+async fn most_active_driver_last_hour() -> Result<()> {
+    correctness_run_codegen(
+        "most_active_driver_last_hour",
+        "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
   event_type TEXT,
@@ -794,44 +794,62 @@ SELECT * FROM (
          count(*) as count
          FROM cars
          GROUP BY 1,2)) ) where row_number = 1
-"}
+",
+        200,
+    )
+    .await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"outer_join", 200,
-"CREATE TABLE cars (
-  timestamp TIMESTAMP,
-  driver_id BIGINT,
-  event_type TEXT,
-  location TEXT
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/cars.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
-CREATE TABLE driver_status (
-  driver_id BIGINT,
-  has_pickup BOOLEAN,
-  has_dropoff BOOLEAN
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
-INSERT INTO driver_status
-SELECT distinct COALESCE(pickups.driver_id, dropoffs.driver_id) as
-driver_id, pickups.driver_id is not null as has_pickup,
-dropoffs.driver_id is not null as has_dropoff
-FROM
-(SELECT driver_id FROM cars WHERE event_type = 'pickup' and driver_id % 100 = 0) pickups
-FULL OUTER JOIN
-(SELECT driver_id FROM cars WHERE event_type = 'dropoff' and driver_id % 100 = 0) dropoffs
-ON pickups.driver_id = dropoffs.driver_id
-"}
+#[test(tokio::test)]
+#[ignore] // only windowed inner-join is supported
+async fn most_active_driver_last_hour_aligned() -> Result<()> {
+    correctness_run_codegen(
+        "most_active_driver_last_hour_aligned",
+        "CREATE TABLE cars (
+      timestamp TIMESTAMP,
+      driver_id BIGINT,
+      event_type TEXT,
+      location TEXT
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/cars.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp'
+    );
+    CREATE TABLE driver_status (
+      driver_id BIGINT,
+      has_pickup BOOLEAN,
+      has_dropoff BOOLEAN
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
+    INSERT INTO driver_status
+    SELECT distinct COALESCE(pickups.driver_id, dropoffs.driver_id) as
+    driver_id, pickups.driver_id is not null as has_pickup,
+    dropoffs.driver_id is not null as has_dropoff
+    FROM
+        (SELECT driver_id FROM cars WHERE event_type = 'pickup' and driver_id % 100 = 0) pickups
+        FULL OUTER JOIN
+        (SELECT driver_id FROM cars WHERE event_type = 'dropoff' and driver_id % 100 = 0) dropoffs
+        ON pickups.driver_id = dropoffs.driver_id
+",
+        200,
+    )
+    .await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"windowed_inner_join", 200,
-"CREATE TABLE cars (
+#[test(tokio::test)]
+#[ignore] // should work
+async fn windowed_inner_join() -> Result<()> {
+    correctness_run_codegen(
+        "windowed_inner_join",
+        "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
   event_type TEXT,
@@ -867,33 +885,45 @@ INNER JOIN (
   GROUP BY 1
 ) pickups
 ON dropoffs.window = pickups.window)
-"}
+",
+        200,
+    )
+    .await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"aggregates", 10,
-"CREATE TABLE impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source'
-);
-CREATE TABLE aggregates (
-  min BIGINT,
-  max BIGINT,
-  sum BIGINT,
-  count BIGINT,
-  avg DOUBLE
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
-INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"}
+#[test(tokio::test)]
+#[ignore] // non-windowed aggregates are not yet supported
+async fn aggregates() -> Result<()> {
+    correctness_run_codegen("aggregates",
+    "CREATE TABLE impulse_source (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source'
+    );
+    CREATE TABLE aggregates (
+      min BIGINT,
+      max BIGINT,
+      sum BIGINT,
+      count BIGINT,
+      avg DOUBLE
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
+    INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"
+    , 10).await?;
+    Ok(())
+}
 
+/*
 // test double negative UDF
 correctness_run_codegen! {"double_negative_udf", 10,
 "CREATE TABLE impulse_source (
@@ -989,257 +1019,297 @@ pub fn max_product(first_arg: Vec<u64>, second_arg: Vec<u64>) -> u64 {
   let pairs = first_arg.iter().zip(second_arg.iter());
   pairs.map(|(x, y)| x * y).max().unwrap()
 }"}
+*/
 
-// filter updating aggregates
-correctness_run_codegen! {"filter_updating_aggregates", 10,
-"CREATE TABLE impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source'
-);
-CREATE TABLE filter_updating_aggregates (
-  subtasks BIGINT
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
+#[test(tokio::test)]
+#[ignore] // non-windowed aggregates are not yet supported
+async fn filter_updating_aggregates() -> Result<()> {
+    correctness_run_codegen(
+        "filter_updating_aggregates",
+        "CREATE TABLE impulse_source (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source'
+    );
+    CREATE TABLE filter_updating_aggregates (
+      subtasks BIGINT
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
 
-INSERT INTO filter_updating_aggregates
-SELECT * FROM (
-  SELECT count(distinct subtask_index) as subtasks FROM impulse_source
-)
-WHERE subtasks >= 1"}
-
-correctness_run_codegen! {"union", 10,
-"CREATE TABLE impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source'
-);
-CREATE TABLE second_impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source'
-);
-CREATE TABLE union_output (
-  counter bigint
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'json',
-  type = 'sink'
-);
-INSERT INTO union_output
-SELECT counter  FROM impulse_source
-UNION ALL SELECT counter FROM second_impulse_source"
+    INSERT INTO filter_updating_aggregates
+    SELECT * FROM (
+      SELECT count(distinct subtask_index) as subtasks FROM impulse_source
+    )
+    WHERE subtasks >= 1",
+        10,
+    )
+    .await?;
+    Ok(())
 }
 
-correctness_run_codegen! {"session_window", 10,
-"CREATE TABLE impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
+#[test(tokio::test)]
+async fn union() -> Result<()> {
+    correctness_run_codegen(
+        "union",
+        "CREATE TABLE impulse_source (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source'
+    );
+    CREATE TABLE second_impulse_source (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source'
+    );
+    CREATE TABLE union_output (
+      counter bigint
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'json',
+      type = 'sink'
+    );
+    INSERT INTO union_output
+    SELECT counter FROM impulse_source
+    UNION ALL SELECT counter FROM second_impulse_source",
+        10,
+    )
+    .await?;
+    Ok(())
+}
 
-CREATE TABLE session_window_output (
-  start timestamp,
-  end timestamp,
-  user_id bigint,
-  rows bigint,
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'json',
-  type = 'sink'
-);
+#[test(tokio::test)]
+async fn session_window() -> Result<()> {
+    correctness_run_codegen("session_window",
+                            "CREATE TABLE impulse_source (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp'
+    );
 
-INSERT INTO session_window_output
-SELECT window.start, window.end, user_id, rows FROM (
-    SELECT SESSION(interval '20 seconds') as window, Case when counter%10=0 then 0 else counter END as user_id, count(*) as rows
-    FROM impulse_source GROUP BY window, user_id);
-"}
+    CREATE TABLE session_window_output (
+      start timestamp,
+      end timestamp,
+      user_id bigint,
+      rows bigint
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'json',
+      type = 'sink'
+    );
 
-correctness_run_codegen! {"offset_impulse_join", 10,
-"CREATE TABLE impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
-CREATE TABLE delayed_impulse_source (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null,
-  watermark timestamp GENERATED ALWAYS AS (timestamp - INTERVAL '10 minute')
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp',
-  watermark_field = 'watermark'
-);
-CREATE TABLe offset_output (
-  start timestamp,
-  counter bigint
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'json',
-  type = 'sink'
-);
-INSERT INTO offset_output
-SELECT window.start, a.counter as counter
-FROM (SELECT TUMBLE(interval '1 second'),  counter, count(*) FROM impulse_source GROUP BY 1,2) a
+    INSERT INTO session_window_output
+    SELECT window.start, window.end, user_id, rows FROM (
+        SELECT SESSION(interval '20 seconds') as window, CASE WHEN counter % 10 = 0 THEN 0 ELSE counter END as user_id, count(*) as rows
+        FROM impulse_source GROUP BY window, user_id)", 10).await?;
+    Ok(())
+}
 
-JOIN (SELECT TUMBLE(interval '1 second') as window, counter , count(*) FROM delayed_impulse_source GROUP BY 1,2) b
-ON a.counter = b.counter;"}
+#[test(tokio::test)]
+#[ignore] // should work
+async fn offset_impulse_join() -> Result<()> {
+    correctness_run_codegen("offset_impulse_join",
+                            "CREATE TABLE impulse_source (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp'
+    );
+    CREATE TABLE delayed_impulse_source (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null,
+      watermark timestamp GENERATED ALWAYS AS (timestamp - INTERVAL '10 minute') STORED
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp',
+      watermark_field = 'watermark'
+    );
+    CREATE TABLE offset_output (
+      start timestamp,
+      counter bigint
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'json',
+      type = 'sink'
+    );
+    INSERT INTO offset_output
+    SELECT window.start, a.counter as counter
+    FROM (SELECT TUMBLE(interval '1 second'),  counter, count(*) FROM impulse_source GROUP BY 1,2) a
+    JOIN (SELECT TUMBLE(interval '1 second') as window, counter , count(*) FROM delayed_impulse_source GROUP BY 1,2) b
+    ON a.counter = b.counter", 10).await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"updating_left_join", 10,
-"CREATE TABLE impulse (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
+#[test(tokio::test)]
+#[ignore] // non-windowed joins are not yet supported
+async fn updating_left_join() -> Result<()> {
+    correctness_run_codegen("updating_left_join",
+                            "CREATE TABLE impulse (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp'
+    );
 
+    CREATE TABLE output (
+      left_counter bigint,
+      counter_mod_2 bigint,
+      right_count bigint
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
 
-CREATE TABLE output (
-  left_counter bigint,
-  counter_mod_2 bigint,
-  right_count bigint
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
+    INSERT INTO output
+    select counter as left_counter, counter_mod_2, right_count from impulse
+         left join
+         (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+        on counter = right_count where counter < 3;", 10).await?;
+    Ok(())
+}
 
-INSERT INTO output
-select counter as left_counter, counter_mod_2, right_count from impulse left join
-     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
-    on counter = right_count where counter < 3;"}
+#[test(tokio::test)]
+#[ignore] // non-windowed joins are not yet supported
+async fn updating_right_join() -> Result<()> {
+    correctness_run_codegen("updating_right_join",
+                            "CREATE TABLE impulse (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp'
+    );
 
-correctness_run_codegen! {"updating_right_join", 10,
-"CREATE TABLE impulse (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
+    CREATE TABLE output (
+      left_counter bigint,
+      counter_mod_2 bigint,
+      right_count bigint
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
 
+    INSERT INTO output
+    select counter as left_counter, counter_mod_2, right_count from impulse right join
+         (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+        on counter = right_count where counter < 3;", 10).await?;
+    Ok(())
+}
 
-CREATE TABLE output (
-  left_counter bigint,
-  counter_mod_2 bigint,
-  right_count bigint
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
-
-INSERT INTO output
-select counter as left_counter, counter_mod_2, right_count from impulse right join
-     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
-    on counter = right_count where counter < 3;"}
-
-correctness_run_codegen! {"updating_inner_join", 10,
-"CREATE TABLE impulse (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
-
-
-CREATE TABLE output (
-  left_counter bigint,
-  counter_mod_2 bigint,
-  right_count bigint
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
-
-INSERT INTO output
-select counter as left_counter, counter_mod_2, right_count from impulse inner join
-     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
-    on counter = right_count where counter < 3;"}
-
-correctness_run_codegen! {"updating_full_join", 10,
-"CREATE TABLE impulse (
-  timestamp TIMESTAMP,
-  counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/impulse.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
+#[test(tokio::test)]
+#[ignore] // non-windowed joins are not yet supported
+async fn updating_inner_join() -> Result<()> {
+    correctness_run_codegen("updating_inner_join",
+                            "CREATE TABLE impulse (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp'
+    );
 
 
-CREATE TABLE output (
-  left_counter bigint,
-  counter_mod_2 bigint,
-  right_count bigint
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'debezium_json',
-  type = 'sink'
-);
+    CREATE TABLE output (
+      left_counter bigint,
+      counter_mod_2 bigint,
+      right_count bigint
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
 
-INSERT INTO output
-select counter as left_counter, counter_mod_2, right_count from impulse full outer join
-     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
-    on counter = right_count where counter < 3;"}
-*/
+    INSERT INTO output
+    select counter as left_counter, counter_mod_2, right_count from impulse inner join
+         (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+        on counter = right_count where counter < 3;", 10).await?;
+    Ok(())
+}
+
+#[test(tokio::test)]
+#[ignore] // non-windowed joins are not yet supported
+async fn updating_full_join() -> Result<()> {
+    correctness_run_codegen("updating_full_join",
+                            "CREATE TABLE impulse (
+      timestamp TIMESTAMP,
+      counter bigint unsigned not null,
+      subtask_index bigint unsigned not null
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/impulse.json',
+      format = 'json',
+      type = 'source',
+      event_time_field = 'timestamp'
+    );
+
+    CREATE TABLE output (
+      left_counter bigint,
+      counter_mod_2 bigint,
+      right_count bigint
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'debezium_json',
+      type = 'sink'
+    );
+
+    INSERT INTO output
+    select counter as left_counter, counter_mod_2, right_count from impulse full outer join
+         (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+        on counter = right_count where counter < 3;", 10).await?;
+    Ok(())
+}

@@ -14,6 +14,11 @@
             "source",
             "sink"
         ]
+    },
+    "wait_for_control": {
+        "type": "boolean",
+        "title": "Wait for control message",
+        "description": "Whether to wait for a control message after each line"
     }
   },
   "required": ["path", "table_type"],
