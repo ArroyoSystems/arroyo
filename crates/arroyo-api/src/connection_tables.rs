@@ -18,8 +18,8 @@ use tracing::warn;
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::connector_for_type;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
-use arroyo_formats::avro;
-use arroyo_formats::json_schema::to_arrow;
+use arroyo_formats::avro::schema;
+use arroyo_formats::avro::schema::to_arrow;
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
@@ -526,7 +526,7 @@ async fn expand_avro_schema(
         );
     }
 
-    let fields: Result<_, String> = avro::to_arrow(&name, &definition)
+    let fields: Result<_, String> = schema::to_arrow(&name, &definition)
         .map_err(|e| bad_request(format!("Invalid avro schema: {}", e)))?
         .fields
         .into_iter()

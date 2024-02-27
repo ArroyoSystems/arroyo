@@ -1,6 +1,6 @@
 use crate::redis::{ListOperation, RedisClient, RedisTable, TableType, Target};
 use arrow::array::{AsArray, RecordBatch};
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{ArrowContext, ErrorReporter};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_types::CheckpointBarrier;

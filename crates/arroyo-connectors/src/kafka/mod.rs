@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail};
-use arroyo_formats::serialize::ArrowSerializer;
-use arroyo_formats::ArrowDeserializer;
+use arroyo_formats::de::ArrowDeserializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::df::ArroyoSchema;

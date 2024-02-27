@@ -1,12 +1,8 @@
-use crate::SchemaData;
-use anyhow::{anyhow, bail};
-use apache_avro::types::{Value as AvroValue, Value};
-pub use apache_avro::Schema;
-use apache_avro::{from_avro_datum, AvroResult, Reader, Writer};
-use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
+use apache_avro::types::{Value, Value as AvroValue};
+use apache_avro::{from_avro_datum, AvroResult, Reader, Schema};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_types::{ArroyoExtensionType, SourceError};
+use arroyo_types::SourceError;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -85,40 +81,6 @@ pub(crate) async fn avro_messages(
     Ok(messages)
 }
 
-pub fn to_vec<T: SchemaData>(
-    record: &T,
-    format: &AvroFormat,
-    schema: &Schema,
-    version: Option<u32>,
-) -> Vec<u8> {
-    let v = record.to_avro(schema);
-
-    if format.raw_datums || format.confluent_schema_registry {
-        let record =
-            apache_avro::to_avro_datum(schema, v.clone()).expect("avro serialization failed");
-        if format.confluent_schema_registry {
-            // TODO: this would be more efficient if we could use the internal write_avro_datum to avoid
-            // allocating the buffer twice
-            let mut buf = Vec::with_capacity(record.len() + 5);
-            buf.push(0);
-            buf.extend(
-                version
-                    .expect("no schema version for confluent schema avro")
-                    .to_be_bytes(),
-            );
-            buf.extend(record);
-            buf
-        } else {
-            record
-        }
-    } else {
-        let mut buf = Vec::with_capacity(128);
-        let mut writer = Writer::new(schema, &mut buf);
-        writer.append(v).unwrap();
-        buf
-    }
-}
-
 fn convert_float(f: f64) -> JsonValue {
     match serde_json::Number::from_f64(f) {
         Some(n) => JsonValue::Number(n),
@@ -181,166 +143,11 @@ pub(crate) fn avro_to_json(value: AvroValue) -> JsonValue {
     }
 }
 
-fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
-    let typ = match dt {
-        DataType::Null => unreachable!("null fields are not supported"),
-        DataType::Boolean => "boolean",
-        DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::UInt8 | DataType::UInt16 => {
-            "int"
-        }
-        // TODO: not all values of u64 can be represented as a long in avro
-        DataType::Int64 | DataType::UInt32 | DataType::UInt64 => "long",
-        DataType::Float16 | DataType::Float32 => "float",
-        DataType::Float64 => "double",
-        DataType::Timestamp(t, tz) => {
-            let logical = match (t, tz) {
-                (TimeUnit::Microsecond | TimeUnit::Nanosecond, None) => "timestamp-micros",
-                (TimeUnit::Microsecond | TimeUnit::Nanosecond, Some(_)) => "local-timestamp-micros",
-                (TimeUnit::Millisecond | TimeUnit::Second, None) => "timestamp-millis",
-                (TimeUnit::Millisecond | TimeUnit::Second, Some(_)) => "local-timestamp-millis",
-            };
-
-            return json!({
-                "type": "long",
-                "logicalType": logical
-            });
-        }
-        DataType::Date32 | DataType::Date64 => {
-            return json!({
-                "type": "int",
-                "logicalType": "date"
-            });
-        }
-        DataType::Time64(_) | DataType::Time32(_) => {
-            todo!("time is not supported")
-        }
-        DataType::Duration(_) => todo!("duration is not supported"),
-        DataType::Interval(_) => todo!("interval is not supported"),
-        DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => "bytes",
-        DataType::Utf8 | DataType::LargeUtf8 => "string",
-        DataType::List(t) | DataType::FixedSizeList(t, _) | DataType::LargeList(t) => {
-            return json!({
-                "type": "array",
-                "items": arrow_to_avro(name, t.data_type())
-            });
-        }
-        DataType::Struct(fields) => {
-            let schema = arrow_to_avro_schema(name, fields).canonical_form();
-            return serde_json::from_str(&schema).unwrap();
-        }
-        DataType::Union(_, _) => unimplemented!("unions are not supported"),
-        DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
-        DataType::Decimal128(_, _) => unimplemented!("decimal128 is not supported"),
-        DataType::Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
-        DataType::Map(_, _) => unimplemented!("maps are not supported"),
-        DataType::RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),
-    };
-
-    json!({
-        "type": typ
-    })
-}
-
-fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
-    let next_name = format!("{}_{}", name, &field.name());
-    let mut schema = arrow_to_avro(&next_name, field.data_type());
-
-    if field.is_nullable() {
-        schema = json!({
-            "type": ["null", schema]
-        })
-    }
-
-    json!({
-        "name": AvroFormat::sanitize_field(field.name()),
-        "type": schema
-    })
-}
-
-/// Computes an avro schema from an arrow schema
-pub fn arrow_to_avro_schema(name: &str, fields: &Fields) -> Schema {
-    let fields: Vec<_> = fields.iter().map(|f| field_to_avro(name, &**f)).collect();
-
-    let schema = json!({
-        "type": "record",
-        "name": name,
-        "fields": fields,
-    });
-
-    Schema::parse_str(&schema.to_string()).unwrap()
-}
-
-pub fn to_arrow(name: &str, schema: &str) -> anyhow::Result<arrow_schema::Schema> {
-    let schema =
-        Schema::parse_str(schema).map_err(|e| anyhow!("avro schema is not valid: {:?}", e))?;
-
-    let (dt, _, _) = to_arrow_datatype(name, &schema);
-    let fields = match dt {
-        DataType::Struct(fields) => fields,
-        _ => {
-            bail!("top-level schema must be a record")
-        }
-    };
-
-    Ok(arrow_schema::Schema::new(fields))
-}
-
-fn to_arrow_datatype(
-    source_name: &str,
-    schema: &Schema,
-) -> (DataType, bool, Option<ArroyoExtensionType>) {
-    match schema {
-        Schema::Null => (DataType::Null, false, None),
-        Schema::Boolean => (DataType::Boolean, false, None),
-        Schema::Int | Schema::TimeMillis => (DataType::Int32, false, None),
-        Schema::Long
-        | Schema::TimeMicros
-        | Schema::TimestampMillis
-        | Schema::LocalTimestampMillis
-        | Schema::LocalTimestampMicros => (DataType::Int64, false, None),
-        Schema::Float => (DataType::Float32, false, None),
-        Schema::Double => (DataType::Float64, false, None),
-        Schema::Bytes | Schema::Fixed(_) | Schema::Decimal(_) => (DataType::Binary, false, None),
-        Schema::String | Schema::Enum(_) | Schema::Uuid => (DataType::Utf8, false, None),
-        Schema::Union(union) => {
-            // currently just support unions that have [t, null] as variants, which is the
-            // avro way to represent optional fields
-
-            let (nulls, not_nulls): (Vec<_>, Vec<_>) = union
-                .variants()
-                .iter()
-                .partition(|v| matches!(v, Schema::Null));
-
-            if nulls.len() == 1 && not_nulls.len() == 1 {
-                let (dt, _, ext) = to_arrow_datatype(source_name, not_nulls[0]);
-                (dt, true, ext)
-            } else {
-                (DataType::Utf8, false, Some(ArroyoExtensionType::JSON))
-            }
-        }
-        Schema::Record(record) => {
-            let fields = record
-                .fields
-                .iter()
-                .map(|f| {
-                    let (dt, nullable, extension) = to_arrow_datatype(source_name, &f.schema);
-                    Arc::new(ArroyoExtensionType::add_metadata(
-                        extension,
-                        Field::new(&f.name, dt, nullable),
-                    ))
-                })
-                .collect();
-
-            (DataType::Struct(fields), false, None)
-        }
-        _ => (DataType::Utf8, false, Some(ArroyoExtensionType::JSON)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{arrow_to_avro_schema, to_arrow, to_vec};
-    use crate::{avro, ArrowDeserializer, SchemaData};
+    use crate::avro;
+    use crate::avro::schema::to_arrow;
+    use crate::de::ArrowDeserializer;
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::RecordBatch;
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
@@ -462,7 +269,7 @@ mod tests {
                 } else {
                     0
                 },
-                avro::Schema::parse_str(schema).unwrap(),
+                apache_avro::Schema::parse_str(schema).unwrap(),
             ))
         } else {
             Arc::new(FailingSchemaResolver::new())
@@ -524,7 +331,7 @@ mod tests {
         ];
 
         let mut format = AvroFormat::new(true, false, false);
-        format.add_reader_schema(avro::Schema::parse_str(SCHEMA).unwrap());
+        format.add_reader_schema(apache_avro::Schema::parse_str(SCHEMA).unwrap());
         let row = deserialize_with_schema(format, Some(SCHEMA), &message)
             .await
             .remove(0);
@@ -566,9 +373,9 @@ mod tests {
         }"#;
 
         let mut format = AvroFormat::new(true, false, false);
-        format.add_reader_schema(avro::Schema::parse_str(reader_schema).unwrap());
+        format.add_reader_schema(apache_avro::Schema::parse_str(reader_schema).unwrap());
 
-        let schema = avro::Schema::parse_str(writer_schema).unwrap();
+        let schema = apache_avro::Schema::parse_str(writer_schema).unwrap();
         let mut value = apache_avro::types::Record::new(&schema).unwrap();
         value.put(
             "name",
@@ -586,8 +393,11 @@ mod tests {
 
         let mut bytes = vec![0, 0, 0, 0, 1];
         bytes.extend_from_slice(
-            &apache_avro::to_avro_datum(&avro::Schema::parse_str(writer_schema).unwrap(), value)
-                .unwrap(),
+            &apache_avro::to_avro_datum(
+                &apache_avro::Schema::parse_str(writer_schema).unwrap(),
+                value,
+            )
+            .unwrap(),
         );
 
         let v = deserialize_with_schema(format, Some(writer_schema), &bytes[..]).await;
@@ -624,7 +434,7 @@ mod tests {
             ]
         }"#;
 
-        let schema = avro::Schema::parse_str(writer_schema).unwrap();
+        let schema = apache_avro::Schema::parse_str(writer_schema).unwrap();
         let mut value = apache_avro::types::Record::new(&schema).unwrap();
         value.put(
             "name",
@@ -634,12 +444,15 @@ mod tests {
 
         let mut bytes = vec![0, 0, 0, 0, 1];
         bytes.extend_from_slice(
-            &apache_avro::to_avro_datum(&avro::Schema::parse_str(writer_schema).unwrap(), value)
-                .unwrap(),
+            &apache_avro::to_avro_datum(
+                &apache_avro::Schema::parse_str(writer_schema).unwrap(),
+                value,
+            )
+            .unwrap(),
         );
 
         let mut format = AvroFormat::new(true, false, false);
-        format.add_reader_schema(avro::Schema::parse_str(reader_schema).unwrap());
+        format.add_reader_schema(apache_avro::Schema::parse_str(reader_schema).unwrap());
 
         let v = deserialize_with_schema(format, Some(writer_schema), bytes.as_slice()).await;
         assert_eq!(
@@ -704,7 +517,7 @@ mod tests {
         }"#;
 
         let mut format = AvroFormat::new(false, true, true);
-        format.add_reader_schema(avro::Schema::parse_str(&schema_str).unwrap());
+        format.add_reader_schema(apache_avro::Schema::parse_str(&schema_str).unwrap());
         let vs = deserialize_with_schema(format, Some(schema_str), &data).await;
 
         let expected = json!({ "name": "Alyssa", "favorite_number": 256, "favorite_color": null });
@@ -716,111 +529,5 @@ mod tests {
             .unwrap(),
             expected
         );
-    }
-
-    #[tokio::test]
-    async fn test_writing() {
-        #[derive(
-            Clone,
-            Debug,
-            bincode::Encode,
-            bincode::Decode,
-            PartialEq,
-            PartialOrd,
-            serde::Serialize,
-            serde::Deserialize,
-        )]
-        pub struct ArroyoAvroRoot {
-            pub name: String,
-            pub favorite_number: Option<u64>,
-            pub favorite_color: Option<String>,
-            pub new_field: String,
-        }
-        impl SchemaData for ArroyoAvroRoot {
-            fn name() -> &'static str {
-                "ArroyoAvroRoot"
-            }
-            fn schema() -> arrow::datatypes::Schema {
-                arrow::datatypes::Schema::new(vec![
-                    arrow::datatypes::Field::new("name", arrow::datatypes::DataType::Utf8, false),
-                    arrow::datatypes::Field::new(
-                        "favorite_number",
-                        arrow::datatypes::DataType::UInt64,
-                        true,
-                    ),
-                    arrow::datatypes::Field::new(
-                        "favorite_color",
-                        arrow::datatypes::DataType::Utf8,
-                        true,
-                    ),
-                    arrow::datatypes::Field::new(
-                        "new_field",
-                        arrow::datatypes::DataType::Utf8,
-                        false,
-                    ),
-                ])
-            }
-            fn to_raw_string(&self) -> Option<Vec<u8>> {
-                unimplemented!("to_raw_string is not implemented for this type")
-            }
-
-            fn to_avro(&self, schema: &avro::Schema) -> apache_avro::types::Value {
-                let mut __avro_record = apache_avro::types::Record::new(schema).unwrap();
-                use apache_avro::types::Value::*;
-                __avro_record.put("name", {
-                    let v = &self.name;
-                    String(v.clone())
-                });
-                __avro_record.put(
-                    "favorite_number",
-                    Union(
-                        self.favorite_number.is_some() as u32,
-                        Box::new(
-                            self.favorite_number
-                                .as_ref()
-                                .map(|v| Long(*v as i64))
-                                .unwrap_or(Null),
-                        ),
-                    ),
-                );
-                __avro_record.put(
-                    "favorite_color",
-                    Union(
-                        self.favorite_color.is_some() as u32,
-                        Box::new(
-                            self.favorite_color
-                                .as_ref()
-                                .map(|v| String(v.clone()))
-                                .unwrap_or(Null),
-                        ),
-                    ),
-                );
-                __avro_record.put("new_field", {
-                    let v = &self.new_field;
-                    String(v.clone())
-                });
-
-                __avro_record.into()
-            }
-        }
-
-        let format = AvroFormat {
-            confluent_schema_registry: false,
-            raw_datums: false,
-            into_unstructured_json: false,
-            reader_schema: None,
-            schema_id: None,
-        };
-
-        let schema = arrow_to_avro_schema("ArroyoAvroRoot", &ArroyoAvroRoot::schema().fields());
-
-        let record = ArroyoAvroRoot {
-            name: "Alyssa".to_string(),
-            favorite_number: Some(256),
-            favorite_color: None,
-            new_field: "hello!".to_string(),
-        };
-
-        let _data = to_vec(&record, &format, &schema, None);
     }
 }

@@ -8,30 +8,30 @@ use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
 use http::StatusCode;
 
-use petgraph::Direction;
+use petgraph::{Direction, EdgeDirection};
 use std::collections::HashMap;
 use std::env;
 
+use petgraph::visit::NodeRef;
 use std::time::Duration;
 
 use crate::{compiler_service, connection_profiles, jobs, pipelines, types};
-use arroyo_datastream::ConnectorOp;
+use arroyo_datastream::preview_sink;
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, QueryValidationResult, StopType,
     ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
+use arroyo_rpc::grpc::api as api_proto;
 use arroyo_rpc::grpc::api::{
-    create_pipeline_req, ArrowProgram, CreateJobReq, CreatePipelineReq, CreateSqlJob,
+    create_pipeline_req, ArrowProgram, ConnectorOp, CreateJobReq, CreatePipelineReq, CreateSqlJob,
 };
-use arroyo_rpc::grpc::{api as api_proto, api};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalProgram, OperatorName};
 use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, ParsedUdf, SqlConfig};
-use arroyo_formats::avro::arrow_to_avro_schema;
-use arroyo_formats::json::arrow_to_json_schema;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
@@ -212,7 +212,7 @@ async fn try_register_confluent_schema(
     match config.format.clone() {
         Some(Format::Avro(mut avro)) => {
             if avro.confluent_schema_registry && avro.schema_id.is_none() {
-                let avro_schema = arrow_to_avro_schema("avro_root", schema.fields());
+                let avro_schema = ArrowSerializer::avro_schema(&*schema);
 
                 let id = schema_registry
                     .write_schema(avro_schema.canonical_form(), ConfluentSchemaType::Avro)
@@ -224,7 +224,7 @@ async fn try_register_confluent_schema(
         }
         Some(Format::Json(mut json)) => {
             if json.confluent_schema_registry && json.schema_id.is_none() {
-                let json_schema = arrow_to_json_schema(schema.fields());
+                let json_schema = ArrowSerializer::json_schema(&*schema);
 
                 let id = schema_registry
                     .write_schema(json_schema.to_string(), ConfluentSchemaType::Json)
@@ -245,26 +245,35 @@ async fn try_register_confluent_schema(
 }
 
 async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> {
-    for node in compiled_sql.program.graph.node_indices() {
-        let Some(_input) = compiled_sql
+    // register schemas for sinks
+    for idx in compiled_sql
+        .program
+        .graph
+        .externals(Direction::Outgoing)
+        .collect::<Vec<_>>()
+    {
+        let edge = compiled_sql
             .program
             .graph
-            .edges_directed(node, Direction::Incoming)
+            .edges_directed(idx, EdgeDirection::Incoming)
             .next()
-        else {
-            continue;
-        };
+            .ok_or_else(|| anyhow!("no incoming edges for sink node: {:?}", idx.weight()))?;
 
-        // TODO: schema registration
-        // let Some(value_schema) = compiled_sql.schemas.get(&input.weight().value) else {
-        //     continue;
-        // };
-        //
-        // let node = compiled_sql.program.graph.node_weight_mut(node).unwrap();
-        //
-        // if let Operator::ConnectorSink(connector) = &mut node.operator {
-        //     try_register_confluent_schema(connector, value_schema).await?;
-        // }
+        let schema = edge.weight().schema.schema.clone();
+
+        let node = compiled_sql.program.graph.node_weight_mut(idx).unwrap();
+        if node.operator_name == OperatorName::ConnectorSink {
+            let mut op = ConnectorOp::decode(&node.operator_config[..]).map_err(|_| {
+                anyhow!(
+                    "failed to decode configuration for connector node {:?}",
+                    node
+                )
+            })?;
+
+            try_register_confluent_schema(&mut op, &schema).await?;
+
+            node.operator_config = op.encode_to_vec();
+        }
     }
 
     Ok(())
@@ -296,7 +305,6 @@ pub(crate) async fn create_pipeline<'a>(
                     .try_into()
                     .map_err(log_and_map)?,
                 connection_ids: vec![],
-                schemas: HashMap::new(),
             };
             text = None;
             udfs = None;
@@ -356,8 +364,7 @@ pub(crate) async fn create_pipeline<'a>(
         for node in compiled.program.graph.node_weights_mut() {
             // replace all sink connectors with websink for preview
             if node.operator_name == OperatorName::ConnectorSink {
-                node.operator_config =
-                    api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec();
+                node.operator_config = preview_sink().encode_to_vec();
             }
         }
     }
@@ -455,7 +462,7 @@ impl TryInto<Pipeline> for DbPipeline {
             checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
             stop,
             created_at: to_micros(self.created_at),
-            graph: program.as_job_graph().into(),
+            graph: program.try_into().map_err(log_and_map)?,
             action: action.map(|a| a.into()),
             action_text,
             action_in_progress,
@@ -514,7 +521,7 @@ pub async fn validate_query(
             //optimizations::optimize(&mut program.graph);
 
             QueryValidationResult {
-                graph: Some(program.as_job_graph().into()),
+                graph: Some(program.try_into().map_err(log_and_map)?),
                 errors: None,
             }
         }

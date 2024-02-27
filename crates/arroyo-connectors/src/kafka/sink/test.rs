@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 use arrow::array::{RecordBatch, UInt32Array};
 use arrow::datatypes::Field;
 use arrow::datatypes::{DataType, Schema, SchemaRef};
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::df::ArroyoSchema;

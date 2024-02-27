@@ -5,7 +5,9 @@ use crate::tables::Table;
 use crate::watermark_node::WatermarkNode;
 use crate::{create_table_with_timestamp, ArroyoSchemaProvider};
 use arrow_schema::{DataType, Schema, TimeUnit};
-use datafusion_common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
+use datafusion_common::tree_node::{
+    Transformed, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
+};
 use datafusion_common::{
     Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
     ScalarValue,
@@ -15,7 +17,7 @@ use datafusion_expr::{
     BinaryExpr, Expr, Extension, LogicalPlan, Projection, ScalarFunctionDefinition, TableScan,
     Unnest,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -89,11 +91,11 @@ impl TreeNodeRewriter for TimestampRewriter {
 /// Rewrites a logical plan to move projections out of table scans
 /// and into a separate projection node which may include virtual fields,
 /// and adds a watermark node.
-pub struct SourceRewriter {
-    pub(crate) schema_provider: ArroyoSchemaProvider,
+pub struct SourceRewriter<'a> {
+    pub(crate) schema_provider: &'a ArroyoSchemaProvider,
 }
 
-impl SourceRewriter {
+impl<'a> SourceRewriter<'a> {
     fn watermark_expression(table: &ConnectorTable) -> DFResult<Expr> {
         let expr = match table.watermark_field.clone() {
             Some(watermark_field) => table
@@ -221,7 +223,7 @@ impl SourceRewriter {
     }
 }
 
-impl TreeNodeRewriter for SourceRewriter {
+impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
     type N = LogicalPlan;
 
     fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
@@ -410,5 +412,46 @@ impl TreeNodeRewriter for UnnestRewriter {
         } else {
             Ok(LogicalPlan::Projection(projection.clone()))
         }
+    }
+}
+
+pub struct SourceMetadataVisitor<'a> {
+    schema_provider: &'a ArroyoSchemaProvider,
+    pub connection_ids: HashSet<i64>,
+}
+
+impl<'a> SourceMetadataVisitor<'a> {
+    pub fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
+        Self {
+            schema_provider,
+            connection_ids: HashSet::new(),
+        }
+    }
+}
+
+impl<'a> SourceMetadataVisitor<'a> {
+    fn get_connection_id(&self, node: &LogicalPlan) -> Option<i64> {
+        let LogicalPlan::TableScan(TableScan { table_name, .. }) = node else {
+            return None;
+        };
+
+        let table = self.schema_provider.get_table(table_name.table())?;
+
+        let Table::ConnectorTable(table) = table else {
+            return None;
+        };
+
+        table.id
+    }
+}
+
+impl<'a> TreeNodeVisitor for SourceMetadataVisitor<'a> {
+    type N = LogicalPlan;
+
+    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+        if let Some(id) = self.get_connection_id(node) {
+            self.connection_ids.insert(id);
+        }
+        Ok(VisitRecursion::Continue)
     }
 }

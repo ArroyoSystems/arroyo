@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, time::Instant};
 
 use arrow::record_batch::RecordBatch;
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 
 use super::{

@@ -55,7 +55,6 @@ impl ArrowOperator for PreviewSink {
                             .map(|nanos| from_nanos(nanos as u128))
                             .unwrap_or_else(|| SystemTime::now()),
                     ),
-                    key: value.clone(),
                     value,
                     done: false,
                 })
@@ -72,7 +71,6 @@ impl ArrowOperator for PreviewSink {
                 operator_id: ctx.task_info.operator_id.clone(),
                 subtask_index: ctx.task_info.task_index as u32,
                 timestamp: to_micros(SystemTime::now()),
-                key: "".to_string(),
                 value: "".to_string(),
                 done: true,
             })

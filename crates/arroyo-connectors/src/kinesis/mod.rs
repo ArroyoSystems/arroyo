@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
 use typify::import_types;
 
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, TestSourceMessage};
 use arroyo_rpc::{api_types, OperatorConfig};

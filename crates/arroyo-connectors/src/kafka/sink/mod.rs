@@ -13,7 +13,7 @@ use rdkafka::util::Timeout;
 use rdkafka::ClientConfig;
 
 use arrow::array::RecordBatch;
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_types::CheckpointBarrier;

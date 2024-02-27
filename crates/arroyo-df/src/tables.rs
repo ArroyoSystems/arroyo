@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
-use arrow_schema::{DataType, Field, FieldRef};
+use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
-use arroyo_datastream::ConnectorOp;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
 use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser::ast::Query;
@@ -280,6 +280,16 @@ impl ConnectorTable {
         }
     }
 
+    pub fn physical_schema(&self) -> Schema {
+        Schema::new(
+            self.fields
+                .iter()
+                .filter(|f| !f.is_virtual())
+                .map(|f| f.field().clone())
+                .collect::<Vec<_>>(),
+        )
+    }
+
     fn connector_op(&self) -> ConnectorOp {
         ConnectorOp {
             connector: self.connector.clone(),
@@ -332,74 +342,6 @@ impl ConnectorTable {
             timestamp_override,
             watermark_column,
         })
-    }
-
-    // TODO: implement
-    pub fn as_sql_sink(&self) -> Result<()> {
-        todo!();
-        /*
-        match self.connection_type {
-            ConnectionType::Source => {
-                bail!("inserting into a source is not allowed")
-            }
-            ConnectionType::Sink => {}
-        }
-
-        if self.has_virtual_fields() {
-            // TODO: I think it would be reasonable and possibly useful to support this
-            bail!("virtual fields are not currently supported in sinks");
-        }
-
-        let updating_type = if self.is_update() {
-            SinkUpdateType::Force
-        } else {
-            SinkUpdateType::Disallow
-        };
-
-        if updating_type == SinkUpdateType::Disallow && input.is_updating() {
-            bail!("sink does not support update messages, cannot be used with an updating query");
-        }
-
-        if let Some(format) = &self.format {
-            let output_struct: StructDef = input.return_type();
-            // we may need to copy the record into a new struct, that has the appropriate annotations
-            // for serializing into our format
-            let mut projection = Projection::new(
-                output_struct
-                    .fields
-                    .iter()
-                    .map(|t| Column {
-                        relation: t.alias.clone(),
-                        name: t.name(),
-                    })
-                    .zip(
-                        output_struct
-                            .fields
-                            .iter()
-                            .map(|t| Expression::Column(ColumnExpression::new(t.clone()))),
-                    )
-                    .collect(),
-            );
-
-            projection.format = Some(format.clone());
-            projection.struct_name = self.type_name.clone();
-
-            input = SqlOperator::RecordTransform(
-                Box::new(input),
-                crate::pipeline::RecordTransform::ValueProjection(projection),
-            );
-        }
-
-        Ok(SqlOperator::Sink(
-            self.name.clone(),
-            SqlSink {
-                id: self.id,
-                struct_def: input.return_type(),
-                updating_type,
-                operator: Operator::ConnectorSink(self.connector_op()),
-            },
-            Box::new(input),
-        ))*/
     }
 }
 
@@ -671,17 +613,6 @@ impl Table {
                 .map(qualified_field)
                 .map(Arc::new)
                 .collect(),
-        }
-    }
-
-    pub fn as_sql_sink(&self) -> Result<()> {
-        match self {
-            Table::ConnectorTable(c) => c.as_sql_sink(),
-            Table::MemoryTable { .. } => {
-                todo!()
-                //Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
-            }
-            Table::TableFromQuery { .. } => todo!(),
         }
     }
 }

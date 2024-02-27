@@ -3,7 +3,7 @@ mod operator;
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail};
-use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::var_str::VarStr;

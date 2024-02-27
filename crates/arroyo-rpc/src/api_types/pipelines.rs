@@ -1,6 +1,5 @@
 use crate::api_types::udfs::Udf;
 use crate::grpc as grpc_proto;
-use crate::grpc::api as api_proto;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -71,38 +70,8 @@ pub struct PipelineGraph {
 pub struct PipelineNode {
     pub node_id: String,
     pub operator: String,
+    pub description: String,
     pub parallelism: u32,
-}
-
-impl From<api_proto::JobNode> for PipelineNode {
-    fn from(value: api_proto::JobNode) -> Self {
-        PipelineNode {
-            node_id: value.node_id,
-            operator: value.operator,
-            parallelism: value.parallelism,
-        }
-    }
-}
-
-impl From<api_proto::JobEdge> for PipelineEdge {
-    fn from(value: api_proto::JobEdge) -> Self {
-        PipelineEdge {
-            src_id: value.src_id,
-            dest_id: value.dest_id,
-            key_type: value.key_type,
-            value_type: value.value_type,
-            edge_type: value.edge_type,
-        }
-    }
-}
-
-impl From<api_proto::JobGraph> for PipelineGraph {
-    fn from(value: api_proto::JobGraph) -> Self {
-        PipelineGraph {
-            nodes: value.nodes.into_iter().map(|n| n.into()).collect(),
-            edges: value.edges.into_iter().map(|n| n.into()).collect(),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -164,7 +133,6 @@ pub struct JobLogMessage {
 pub struct OutputData {
     pub operator_id: String,
     pub timestamp: u64,
-    pub key: String,
     pub value: String,
 }
 
@@ -173,7 +141,6 @@ impl From<grpc_proto::OutputData> for OutputData {
         OutputData {
             operator_id: value.operator_id,
             timestamp: value.timestamp,
-            key: value.key,
             value: value.value,
         }
     }

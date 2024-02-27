@@ -32,7 +32,7 @@ function PipelineGraphNode({
     >
       <Handle type="target" position={Position.Top} />
       <Text userSelect="none" pointerEvents="none">
-        {data.node.operator}
+        {data.node.description}
       </Text>
       <Handle type="source" position={Position.Bottom} />
     </Box>
@@ -67,7 +67,7 @@ export function PipelineGraphViewer({
       id: node.nodeId,
       type: 'pipelineNode',
       data: {
-        label: node.operator,
+        label: node.description,
         node: node,
         setActiveOperator: setActiveOperator,
         isActive: node.nodeId == activeOperator,
