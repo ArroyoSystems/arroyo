@@ -132,12 +132,11 @@ async fn advance(engine: &RunningEngine, count: i32) {
 }
 
 async fn run_until_finished(engine: &RunningEngine, control_rx: &mut Receiver<ControlResp>) {
-    while control_rx.try_recv().is_ok()
-        || control_rx
-            .try_recv()
-            .is_err_and(|e| e == TryRecvError::Empty)
-    {
-        advance(engine, 10).await;
+    loop {
+        match control_rx.try_recv() {
+            Ok(_) | Err(TryRecvError::Empty) => advance(engine, 10).await,
+            Err(TryRecvError::Disconnected) => return,
+        }
     }
 }
 
@@ -358,7 +357,7 @@ async fn check_output_files(output_location: String, golden_output_location: Str
         .await
         .expect(&format!("output file not found at {}", output_location))
         .lines()
-        .map(|s| serde_json::from_str(s).unwrap())
+        .map(|s| serde_json::from_str(s).expect(s))
         .collect();
 
     let mut golden_output_lines: Vec<Value> = read_to_string(golden_output_location.clone())
@@ -533,7 +532,7 @@ async fn windowed_outer_join() -> Result<()> {
         ) pickups
         ON dropoffs.window.start = pickups.window.start)
       ",
-        20,
+        100,
     )
     .await?;
     Ok(())
@@ -631,12 +630,102 @@ async fn session_windows() -> Result<()> {
     format = 'json',
     type = 'sink'
   );
-  
+
   INSERT INTO session_window_output
   SELECT window.start, window.end, user_id, rows FROM (
       SELECT SESSION(interval '20 seconds') as window, Case when counter%10=0 then 0 else counter END as user_id, count(*) as rows
       FROM impulse_source GROUP BY window, user_id);
   ", 20).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn overall_tumbling_aggregate() -> Result<()> {
+    correctness_run_codegen(
+        "overall_tumbling",
+        "CREATE TABLE impulse_source (
+    timestamp TIMESTAMP,
+    counter bigint unsigned not null,
+    subtask_index bigint unsigned not null
+  ) WITH (
+    connector = 'single_file',
+    path = '$input_dir/impulse.json',
+    format = 'json',
+    type = 'source',
+    event_time_field = 'timestamp'
+  );
+
+  CREATE TABLE overall_tumbling_table (
+    start timestamp,
+    end timestamp,
+    rows bigint,
+  ) WITH (
+    connector = 'single_file',
+    path = '$output_path',
+    format = 'json',
+    type = 'sink'
+  );
+
+  INSERT INTO overall_tumbling_table
+  SELECT window.start as start, window.end as end, rows FROM (
+  SELECT  TUMBLE(INTERVAL '1' hour) as window,
+  COUNT(*) as rows
+  FROM impulse_source
+  GROUP BY 1)
+  ",
+        10,
+    )
+    .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn delayed_join() -> Result<()> {
+    correctness_run_codegen(
+        "delayed_join",
+        "CREATE TABLE impulse_source (
+    timestamp TIMESTAMP,
+    counter bigint unsigned not null,
+    subtask_index bigint unsigned not null
+  ) WITH (
+    connector = 'single_file',
+    path = '$input_dir/impulse.json',
+    format = 'json',
+    type = 'source',
+    event_time_field = 'timestamp'
+  );
+
+  CREATE TABLE delayed_impulse_source (
+    timestamp TIMESTAMP,
+    counter bigint unsigned not null,
+    subtask_index bigint unsigned not null,
+    watermark TIMESTAMP GENERATED ALWAYS AS (timestamp - INTERVAL '1 day') STORED
+  ) WITH (
+    connector = 'single_file',
+    path = '$input_dir/impulse.json',
+    format = 'json',
+    type = 'source',
+    event_time_field = 'timestamp'
+  );
+
+  CREATE TABLE join_result (
+    left_counter bigint unsigned not null,
+  ) WITH (
+    connector = 'single_file',
+    path = '$output_path',
+    format = 'json',
+    type = 'sink'
+  );
+
+  INSERT INTO join_result
+  SELECT l.counter as left_counter 
+  FROM impulse_source l
+  JOIN (SELECT 2 * counter as counter FROM delayed_impulse_source) r
+  ON l.counter = r.counter
+  ",
+        10,
+    )
+    .await?;
     Ok(())
 }
 

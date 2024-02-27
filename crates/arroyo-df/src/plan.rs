@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt::Formatter, sync::Arc};
 use anyhow::Result;
 use arrow::datatypes::IntervalMonthDayNanoType;
 
+use arrow_schema::DataType;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use datafusion_common::{
@@ -522,7 +523,17 @@ impl TreeNodeRewriter for AggregateRewriter {
             }
         };
 
-        let key_count = key_fields.len();
+        let output_key_count = key_fields.len();
+        let mut key_projection_expressions = group_expr.clone();
+        if output_key_count == 0 {
+            // need to add a dummy key to the schema
+            key_fields.insert(
+                0,
+                DFField::new_unqualified("_key_dummy", DataType::Boolean, false),
+            );
+            key_projection_expressions.push(Expr::Literal(ScalarValue::Boolean(Some(true))));
+        }
+        let input_key_count = key_fields.len();
         key_fields.extend(input.schema().fields().clone());
 
         let key_schema = Arc::new(DFSchema::new_with_metadata(
@@ -530,7 +541,6 @@ impl TreeNodeRewriter for AggregateRewriter {
             schema.metadata().clone(),
         )?);
 
-        let mut key_projection_expressions = group_expr.clone();
         key_projection_expressions.extend(
             input
                 .schema()
@@ -549,7 +559,7 @@ impl TreeNodeRewriter for AggregateRewriter {
         let key_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(KeyCalculationExtension::new(
                 key_projection,
-                (0..key_count).collect(),
+                (0..input_key_count).collect(),
             )),
         });
         let mut aggregate_schema_fields = schema.fields().clone();
@@ -576,7 +586,7 @@ impl TreeNodeRewriter for AggregateRewriter {
         let aggregate_extension = AggregateExtension::new(
             window_behavior,
             LogicalPlan::Aggregate(rewritten_aggregate),
-            (0..key_count).collect(),
+            (0..output_key_count).collect(),
         );
         let final_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(aggregate_extension),
