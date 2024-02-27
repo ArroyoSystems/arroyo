@@ -16,8 +16,6 @@ use datafusion::sql::sqlparser::ast::{
 };
 use datafusion_common::ScalarValue;
 use datafusion_expr::ColumnarValue;
-use datafusion_proto::protobuf::arrow_type::ArrowTypeEnum;
-use datafusion_proto::protobuf::{ArrowType, EmptyMessage};
 
 use arroyo_types::{ArroyoExtensionType, NullableType};
 use syn::PathArguments::AngleBracketed;
@@ -34,7 +32,7 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
 }
 
-fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
+pub fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
     match typ {
         Type::Path(pat) => {
             let path: Vec<String> = pat
@@ -91,46 +89,6 @@ pub fn rust_to_arrow(typ: &Type) -> Option<NullableType> {
             }
         }
         _ => None,
-    }
-}
-
-pub fn data_type_to_arrow_type(data_type: &DataType) -> Result<ArrowType> {
-    let t = match data_type {
-        DataType::Utf8 => ArrowTypeEnum::Utf8(EmptyMessage {}),
-        DataType::Boolean => ArrowTypeEnum::Bool(EmptyMessage {}),
-        DataType::Int8 => ArrowTypeEnum::Int8(EmptyMessage {}),
-        DataType::Int16 => ArrowTypeEnum::Int16(EmptyMessage {}),
-        DataType::Int32 => ArrowTypeEnum::Int32(EmptyMessage {}),
-        DataType::Int64 => ArrowTypeEnum::Int64(EmptyMessage {}),
-        DataType::UInt8 => ArrowTypeEnum::Uint8(EmptyMessage {}),
-        DataType::UInt16 => ArrowTypeEnum::Uint16(EmptyMessage {}),
-        DataType::UInt32 => ArrowTypeEnum::Uint32(EmptyMessage {}),
-        DataType::UInt64 => ArrowTypeEnum::Uint64(EmptyMessage {}),
-        DataType::Float32 => ArrowTypeEnum::Float32(EmptyMessage {}),
-        DataType::Float64 => ArrowTypeEnum::Float64(EmptyMessage {}),
-        _ => bail!("Unsupported DataType: {:?}", data_type),
-    };
-
-    Ok(ArrowType {
-        arrow_type_enum: Some(t),
-    })
-}
-
-pub fn arrow_type_to_data_type(arrow_type: &ArrowType) -> DataType {
-    match &arrow_type.arrow_type_enum {
-        Some(ArrowTypeEnum::Utf8(_)) => DataType::Utf8,
-        Some(ArrowTypeEnum::Bool(_)) => DataType::Boolean,
-        Some(ArrowTypeEnum::Int8(_)) => DataType::Int8,
-        Some(ArrowTypeEnum::Int16(_)) => DataType::Int16,
-        Some(ArrowTypeEnum::Int32(_)) => DataType::Int32,
-        Some(ArrowTypeEnum::Int64(_)) => DataType::Int64,
-        Some(ArrowTypeEnum::Uint8(_)) => DataType::UInt8,
-        Some(ArrowTypeEnum::Uint16(_)) => DataType::UInt16,
-        Some(ArrowTypeEnum::Uint32(_)) => DataType::UInt32,
-        Some(ArrowTypeEnum::Uint64(_)) => DataType::UInt64,
-        Some(ArrowTypeEnum::Float32(_)) => DataType::Float32,
-        Some(ArrowTypeEnum::Float64(_)) => DataType::Float64,
-        _ => panic!("Unsupported ArrowType"),
     }
 }
 

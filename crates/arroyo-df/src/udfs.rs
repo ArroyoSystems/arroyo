@@ -37,17 +37,37 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
         arrow_types.push(arrow_type);
     }
 
+    let udaf = parsed
+        .args
+        .iter()
+        .any(|arg| matches!(arg.data_type, DataType::List(_)));
+
     let (defs, args): (Vec<_>, Vec<_>) = parsed
         .args
         .iter().zip(arrow_types.iter())
         .enumerate()
         .map(|(i, (arg_type, arrow_type))| {
             let id = format_ident!("arg_{}", i);
-            let def = if matches!(arg_type.data_type, DataType::Utf8) {
-                quote!(let #id = array::StringArray::from(args[#i].clone());)
-            } else {
-                quote!(let #id = array::PrimitiveArray::<datatypes::#arrow_type>::from(args[#i].clone());)
+            let def = match &arg_type.data_type {
+                DataType::Utf8 => {
+                    quote!(let #id = array::StringArray::from(args[#i].clone());)
+                }
+                DataType::List(field) => {
+                    let filter = if !field.is_nullable() {
+                        quote!(.filter_map(|x| x))
+                    } else {
+                        quote!()
+                    };
+
+                    quote!(let #id = array::PrimitiveArray::<datatypes::#arrow_type>::from(
+                        args[0usize].clone().child_data()[0].clone()
+                    ).iter()#filter.collect();)
+                }
+                _ => {
+                    quote!(let #id = array::PrimitiveArray::<datatypes::#arrow_type>::from(args[#i].clone());)
+                }
             };
+
 
             (def, quote!(#id))
         })
@@ -105,6 +125,20 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
         quote!(results_builder.append_option(Some(udf::#udf_name(#(#args),*)));)
     };
 
+    let call_loop = if udaf {
+        quote! {
+            #call
+        }
+    } else {
+        quote! {
+            for (#(#args),*) in #arg_zip {
+                #(#unwrapping;)*
+                #(#to_string;)*
+                #call
+            }
+        }
+    };
+
     Ok(prettyplease::unparse(&parse_quote! {
         use arrow::array;
         use arrow::array::Array;
@@ -134,12 +168,7 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
 
             #(#defs;)*
 
-            for (#(#args),*) in #arg_zip {
-                #(#unwrapping;)*
-                #(#to_string;)*
-
-                #call
-            }
+            #call_loop
 
             let (array, schema) = to_ffi(&results_builder.finish().to_data()).unwrap();
             FfiArraySchemaPair(array, schema)
@@ -148,20 +177,20 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
 }
 
 fn data_type_to_arrow_type_token(data_type: DataType) -> anyhow::Result<TokenStream> {
-    let t = match data_type {
-        DataType::Utf8 => quote!(GenericStringType<i32>),
-        DataType::Boolean => quote!(BooleanType),
-        DataType::Int16 => quote!(Int16Type),
-        DataType::Int32 => quote!(Int32Type),
-        DataType::Int64 => quote!(Int64Type),
-        DataType::Int8 => quote!(Int8Type),
-        DataType::UInt8 => quote!(UInt8Type),
-        DataType::UInt16 => quote!(UInt16Type),
-        DataType::UInt32 => quote!(UInt32Type),
-        DataType::UInt64 => quote!(UInt64Type),
-        DataType::Float32 => quote!(Float32Type),
-        DataType::Float64 => quote!(Float64Type),
+    match data_type {
+        DataType::Utf8 => Ok(quote!(GenericStringType<i32>)),
+        DataType::Boolean => Ok(quote!(BooleanType)),
+        DataType::Int16 => Ok(quote!(Int16Type)),
+        DataType::Int32 => Ok(quote!(Int32Type)),
+        DataType::Int64 => Ok(quote!(Int64Type)),
+        DataType::Int8 => Ok(quote!(Int8Type)),
+        DataType::UInt8 => Ok(quote!(UInt8Type)),
+        DataType::UInt16 => Ok(quote!(UInt16Type)),
+        DataType::UInt32 => Ok(quote!(UInt32Type)),
+        DataType::UInt64 => Ok(quote!(UInt64Type)),
+        DataType::Float32 => Ok(quote!(Float32Type)),
+        DataType::Float64 => Ok(quote!(Float64Type)),
+        DataType::List(f) => data_type_to_arrow_type_token(f.data_type().clone()),
         _ => bail!("Unsupported data type: {:?}", data_type),
-    };
-    Ok(t)
+    }
 }

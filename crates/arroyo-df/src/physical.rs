@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::types::{array_to_columnar_value, arrow_type_to_data_type};
+use crate::types::array_to_columnar_value;
 use arrow_array::{Array, ArrayRef, RecordBatch, StructArray};
 use arrow_schema::ffi::FFI_ArrowSchema;
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
@@ -182,7 +182,9 @@ impl UdfDylib {
             config
                 .arg_types
                 .iter()
-                .map(|arg| arrow_type_to_data_type(arg))
+                .map(|arg| {
+                    DataType::try_from(arg).expect("Failed to convert ArrowType to DataType")
+                })
                 .collect(),
             Volatility::Volatile,
         );
@@ -211,12 +213,14 @@ impl UdfDylib {
             name: name.to_string(),
             signature,
             udf: unsafe { Container::load(local_dylib_path).unwrap() },
-            return_type: arrow_type_to_data_type(&config.return_type),
+            return_type: DataType::try_from(&config.return_type)
+                .expect("Failed to convert ArrowType to DataType"),
         }
     }
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
 
 fn scalar_value_to_array(scalar: &ScalarValue, length: usize) -> ArrayRef {
@@ -272,9 +276,10 @@ impl ScalarUDFImpl for UdfDylib {
             .map(|arg| {
                 let (array, schema) = match arg {
                     ColumnarValue::Array(array) => to_ffi(&(array.to_data())).unwrap(),
-                    ColumnarValue::Scalar(s) => {
-                        to_ffi(&scalar_value_to_array(s, batch_length).to_data()).unwrap()
-                    }
+                    ColumnarValue::Scalar(s) => match s {
+                        ScalarValue::List(l) => to_ffi(&l.values().to_data()).unwrap(),
+                        _ => to_ffi(&scalar_value_to_array(s, batch_length).to_data()).unwrap(),
+                    },
                 };
                 FfiArraySchemaPair(array, schema)
             })

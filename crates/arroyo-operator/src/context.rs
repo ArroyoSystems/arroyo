@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{info, warn};
+use tracing::warn;
 
 pub type QueueItem = ArrowMessage;
 

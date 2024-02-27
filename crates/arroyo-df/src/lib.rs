@@ -35,9 +35,9 @@ use datafusion_common::tree_node::{
 };
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{
-    AccumulatorFactoryFunction, Aggregate, BinaryExpr, BuiltinScalarFunction, Case, Expr,
-    Extension, Join, LogicalPlan, Projection, ReturnTypeFunction, ScalarFunctionDefinition,
-    ScalarUDF, Signature, StateTypeFunction, TableScan, Volatility, WindowUDF,
+    Aggregate, BinaryExpr, BuiltinScalarFunction, Case, Expr, Extension, Join, LogicalPlan,
+    Projection, ReturnTypeFunction, ScalarFunctionDefinition, ScalarUDF, Signature, TableScan,
+    Volatility, WindowUDF,
 };
 
 use datafusion_expr::{AggregateUDF, TableSource};
@@ -50,7 +50,6 @@ use schemas::{add_timestamp_field, add_timestamp_field_if_missing_arrow, window_
 use rewriters::SourceRewriter;
 use tables::{Insert, Table};
 
-use crate::types::data_type_to_arrow_type;
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
@@ -68,6 +67,7 @@ use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_types::NullableType;
+use datafusion_proto::protobuf::ArrowType;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
@@ -165,13 +165,17 @@ impl ParsedUdf {
                 FnArg::Typed(t) => {
                     if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
                         vec_arguments += 1;
-                        args.push(rust_to_arrow(&vec_type).ok_or_else(|| {
+                        let vec_type = rust_to_arrow(&vec_type).ok_or_else(|| {
                             anyhow!(
-                                    "Could not convert function {} inner vector arg {} into a SQL data type",
-                                    name,
-                                    i
-                                )
-                        })?);
+                                "Could not convert function {} inner vector arg {} into an Arrow data type",
+                                name,
+                                i
+                            )
+                        })?;
+
+                        args.push(NullableType::not_null(DataType::List(Arc::new(
+                            Field::new("field", vec_type.data_type, vec_type.nullable),
+                        ))));
                     } else {
                         args.push(rust_to_arrow(&*t.ty).ok_or_else(|| {
                             anyhow!(
@@ -318,65 +322,44 @@ impl ArroyoSchemaProvider {
         if parsed.vec_arguments > 0 && parsed.vec_arguments != parsed.args.len() {
             bail!("Function {} arguments must be vectors or none", parsed.name);
         }
-        if parsed.vec_arguments > 0 {
-            let return_type = Arc::new(parsed.ret_type.data_type.clone());
-            let signature = Signature::exact(
-                parsed.args.iter().map(|t| t.data_type.clone()).collect(),
-                Volatility::Volatile,
-            );
-            let return_type: ReturnTypeFunction = Arc::new(move |_| Ok(return_type.clone()));
-            let accumulator: AccumulatorFactoryFunction = Arc::new(|_| unreachable!());
-            let state_type: StateTypeFunction = Arc::new(|_| unreachable!());
-            #[allow(deprecated)]
-            let udaf = AggregateUDF::new(
-                &parsed.name,
-                &signature,
-                &return_type,
-                &accumulator,
-                &state_type,
-            );
-            self.aggregate_functions
-                .insert(parsed.name.clone(), Arc::new(udaf));
-        } else {
-            let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
+        let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
-            let arg_types = parsed
-                .args
-                .iter()
-                .map(|arg| data_type_to_arrow_type(&arg.data_type))
-                .collect();
+        let arg_types = parsed
+            .args
+            .iter()
+            .map(|arg| ArrowType::try_from(&arg.data_type))
+            .collect();
 
-            let arg_types = match arg_types {
-                Ok(arg_types) => arg_types,
-                Err(e) => bail!("Error converting arg types: {}", e),
-            };
+        let arg_types = match arg_types {
+            Ok(arg_types) => arg_types,
+            Err(e) => bail!("Error converting arg types: {}", e),
+        };
 
-            self.dylib_udfs.insert(
+        self.dylib_udfs.insert(
+            parsed.name.clone(),
+            DylibUdfConfig {
+                dylib_path: url.to_string(),
+                arg_types,
+                return_type: ArrowType::try_from(&parsed.ret_type.data_type)?,
+            },
+        );
+
+        if self
+            .functions
+            .insert(
                 parsed.name.clone(),
-                DylibUdfConfig {
-                    dylib_path: url.to_string(),
-                    arg_types,
-                    return_type: data_type_to_arrow_type(&parsed.ret_type.data_type)?,
-                },
-            );
-
-            if self
-                .functions
-                .insert(
-                    parsed.name.clone(),
-                    Arc::new(create_udf(
-                        &parsed.name,
-                        parsed.args.iter().map(|t| t.data_type.clone()).collect(),
-                        Arc::new(parsed.ret_type.data_type.clone()),
-                        Volatility::Volatile,
-                        make_scalar_function(fn_impl),
-                    )),
-                )
-                .is_some()
-            {
-                warn!("Global UDF '{}' is being overwritten", parsed.name);
-            };
-        }
+                Arc::new(create_udf(
+                    &parsed.name,
+                    parsed.args.iter().map(|t| t.data_type.clone()).collect(),
+                    Arc::new(parsed.ret_type.data_type.clone()),
+                    Volatility::Volatile,
+                    make_scalar_function(fn_impl),
+                )),
+            )
+            .is_some()
+        {
+            warn!("Global UDF '{}' is being overwritten", parsed.name);
+        };
 
         self.udf_defs.insert(
             parsed.name.clone(),

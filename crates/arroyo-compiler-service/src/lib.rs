@@ -1,7 +1,8 @@
 use anyhow::{anyhow, bail};
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::Engine;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::process::Stdio;
 use std::str::from_utf8;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
