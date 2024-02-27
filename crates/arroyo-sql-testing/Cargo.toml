@@ -33,5 +33,7 @@ arrow = {workspace = true }
 arrow-array = {workspace = true }
 arrow-schema = {workspace = true }
 tracing = "0.1.37"
-test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
 tracing-subscriber = {version = "0.3.17"}
+
+[dev-dependencies]
+test-log = { version = "0.2.12", default-features = false, features = ["trace"] }

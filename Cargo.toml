@@ -32,10 +32,10 @@ exclude = [
 ]
 
 [workspace.dependencies]
-tonic = { version = "0.10" }
-tonic-build = { version = "0.10" }
-tonic-web = { version = "0.10" }
-tonic-reflection = { version = "0.10" }
+tonic = { version = "0.11" }
+tonic-build = { version = "0.11" }
+tonic-web = { version = "0.11" }
+tonic-reflection = { version = "0.11" }
 arrow = { version = "50.0.0" }
 arrow-ord = { version = "50.0.0" }
 arrow-array = { version = "50.0.0" }

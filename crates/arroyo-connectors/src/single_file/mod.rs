@@ -127,11 +127,23 @@ impl Connector for SingleFileConnector {
             bail!("'type' must be 'source' or 'sink'");
         };
 
+        let wait_for_control = options
+            .remove("wait_for_control")
+            .map(|s| {
+                s.parse()
+                    .map_err(|_| anyhow!("'wait_for_control' must be a boolean"))
+            })
+            .transpose()?;
+
         self.from_config(
             None,
             name,
             EmptyConfig {},
-            SingleFileTable { path, table_type },
+            SingleFileTable {
+                path,
+                table_type,
+                wait_for_control,
+            },
             schema,
         )
     }
@@ -146,6 +158,7 @@ impl Connector for SingleFileConnector {
             TableType::Source => Ok(OperatorNode::from_source(Box::new(SingleFileSourceFunc {
                 input_file: table.path,
                 lines_read: 0,
+                wait_for_control: table.wait_for_control.unwrap_or(true),
             }))),
             TableType::Sink => Ok(OperatorNode::from_operator(Box::new(SingleFileSink {
                 output_path: table.path,

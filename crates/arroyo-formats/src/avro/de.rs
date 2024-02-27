@@ -145,7 +145,6 @@ pub(crate) fn avro_to_json(value: AvroValue) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-    use crate::avro;
     use crate::avro::schema::to_arrow;
     use crate::de::ArrowDeserializer;
     use arrow_array::builder::{make_builder, ArrayBuilder};
