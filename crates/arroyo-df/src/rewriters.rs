@@ -139,25 +139,12 @@ impl<'a> SourceRewriter<'a> {
             )?,
         ))
     }
-}
 
-impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
-    type N = LogicalPlan;
-
-    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
-        let LogicalPlan::TableScan(table_scan) = &node else {
-            return Ok(node);
-        };
-
-        let table_name = table_scan.table_name.table();
-        let table = self
-            .schema_provider
-            .get_table(table_name)
-            .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", table_name)))?;
-
-        let Table::ConnectorTable(table) = table else {
-            return Ok(node);
-        };
+    fn mutate_connector_table(
+        &self,
+        table_scan: &TableScan,
+        table: &ConnectorTable,
+    ) -> DFResult<LogicalPlan> {
         let input = self.projection(&table_scan, table)?;
         let schema = input.schema().clone();
         let remote = LogicalPlan::Extension(Extension {
@@ -180,6 +167,81 @@ impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
         return Ok(LogicalPlan::Extension(Extension {
             node: Arc::new(watermark_node),
         }));
+    }
+
+    fn mutate_table_from_query(
+        &self,
+        table_scan: &TableScan,
+        logical_plan: &LogicalPlan,
+    ) -> DFResult<LogicalPlan> {
+        let column_expressions: Vec<_> = if let Some(projection) = &table_scan.projection {
+            logical_plan
+                .schema()
+                .fields()
+                .iter()
+                .enumerate()
+                .filter_map(|(i, f)| {
+                    if projection.contains(&i) {
+                        Some(Expr::Column(Column::new(
+                            f.qualifier().cloned(),
+                            f.name().to_string(),
+                        )))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            logical_plan
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| Expr::Column(Column::new(f.qualifier().cloned(), f.name().to_string())))
+                .collect()
+        };
+        let expressions = column_expressions
+            .into_iter()
+            .zip(table_scan.projected_schema.fields().iter())
+            .map(|(expr, field)| {
+                expr.alias_qualified(field.qualifier().cloned(), field.name().to_string())
+            })
+            .collect();
+        let projection = LogicalPlan::Projection(Projection::try_new_with_schema(
+            expressions,
+            Arc::new(logical_plan.clone()),
+            table_scan.projected_schema.clone(),
+        )?);
+        Ok(projection)
+    }
+}
+
+impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
+    type N = LogicalPlan;
+
+    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+        let LogicalPlan::TableScan(table_scan) = node else {
+            return Ok(node);
+        };
+
+        let table_name = table_scan.table_name.table();
+        let table = self
+            .schema_provider
+            .get_table(table_name)
+            .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", table_name)))?;
+
+        match table {
+            Table::ConnectorTable(table) => self.mutate_connector_table(&table_scan, table),
+            Table::MemoryTable { .. } => Err(DataFusionError::Plan(
+                "Memory tables are not supported yet".to_string(),
+            )),
+            Table::TableFromQuery {
+                name: _,
+                logical_plan,
+            } => self.mutate_table_from_query(&table_scan, logical_plan),
+            Table::PreviewSink { .. } => Err(DataFusionError::Plan(
+                "can't select from a preview sink".to_string(),
+            )),
+        }
     }
 }
 

@@ -263,12 +263,10 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
-                info!("partial aggregation schema: {:?}", self.partial_schema);
                 let new_exec = self
                     .partial_aggregation_plan
                     .execute(0, SessionContext::new().task_ctx())
                     .unwrap();
-                info!("new exec schema is {:?}", new_exec.schema());
                 let next_batch_future = NextBatchFuture::new(bin_start, new_exec);
                 self.futures.lock().await.push(next_batch_future.clone());
                 bin_exec.active_exec = Some(next_batch_future);
