@@ -246,8 +246,8 @@ impl ArrowCollector {
         let record = RecordBatch::try_new(out_schema.schema.clone(), record.columns().to_vec())
             .unwrap_or_else(|e| {
                 panic!(
-                    "Data does not match expected schema for {}: {:?}",
-                    self.task_info.operator_id, e
+                    "Data does not match expected schema for {}: {:?}. expected schema:\n{:#?}\n, actual schema:\n{:#?}",
+                    self.task_info.operator_id, e, out_schema.schema, record.schema()
                 );
             });
 

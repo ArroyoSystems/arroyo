@@ -1,10 +1,13 @@
-use crate::schemas::{add_timestamp_field, has_timestamp_field};
+use crate::plan::{RemoteTableExtension, SinkExtension, TableSourceExtension};
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
 use crate::watermark_node::WatermarkNode;
-use crate::{create_table_with_timestamp, ArroyoSchemaProvider};
-use arrow_schema::{DataType, Schema, TimeUnit};
+use crate::ArroyoSchemaProvider;
+
+use arrow_schema::DataType;
+use arroyo_rpc::TIMESTAMP_FIELD;
+
 use datafusion_common::tree_node::{
     Transformed, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
 };
@@ -20,73 +23,6 @@ use datafusion_expr::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-
-#[derive(Default)]
-pub struct TimestampRewriter {}
-
-impl TreeNodeRewriter for TimestampRewriter {
-    type N = LogicalPlan;
-
-    fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
-        match node {
-            LogicalPlan::Projection(ref mut projection) => {
-                if !has_timestamp_field(projection.schema.clone()) {
-                    projection.schema = add_timestamp_field(projection.schema.clone(), None)
-                        .expect("in projection");
-                    projection.expr.push(Expr::Column(Column {
-                        relation: None,
-                        name: "_timestamp".to_string(),
-                    }));
-                }
-            }
-            LogicalPlan::Unnest(ref mut unnest) => {
-                if !has_timestamp_field(unnest.schema.clone()) {
-                    unnest.schema = add_timestamp_field(unnest.schema.clone(), None).unwrap();
-                }
-            }
-            LogicalPlan::Join(ref mut join) => {
-                let mut fields: Vec<_> = join
-                    .schema
-                    .fields()
-                    .iter()
-                    .filter(|field| field.name() != "_timestamp")
-                    .map(|field| field.clone())
-                    .collect();
-                fields.push(DFField::new_unqualified(
-                    "_timestamp",
-                    DataType::Timestamp(TimeUnit::Nanosecond, None),
-                    false,
-                ));
-                join.schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
-            }
-            LogicalPlan::Union(ref mut union) => {
-                union.schema = add_timestamp_field(union.schema.clone(), None)?;
-            }
-            LogicalPlan::TableScan(ref mut table_scan) => {
-                if !has_timestamp_field(table_scan.projected_schema.clone()) {
-                    table_scan.projected_schema = add_timestamp_field(
-                        table_scan.projected_schema.clone(),
-                        Some(table_scan.table_name.to_owned()),
-                    )?;
-                    table_scan.source = create_table_with_timestamp(
-                        table_scan.table_name.to_string(),
-                        table_scan.source.schema().fields().to_vec(),
-                    );
-                }
-            }
-            LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
-                if !has_timestamp_field(subquery_alias.schema.clone()) {
-                    subquery_alias.schema = add_timestamp_field(
-                        subquery_alias.schema.clone(),
-                        Some(subquery_alias.alias.to_owned()),
-                    )?;
-                }
-            }
-            _ => {}
-        }
-        Ok(node)
-    }
-}
 
 /// Rewrites a logical plan to move projections out of table scans
 /// and into a separate projection node which may include virtual fields,
@@ -180,44 +116,26 @@ impl<'a> SourceRewriter<'a> {
             let event_time_field =
                 event_time_field.alias_qualified(Some(qualifier.clone()), "_timestamp".to_string());
             expressions.push(event_time_field);
-        };
+        } else {
+            expressions.push(Expr::Column(Column::new(
+                Some(qualifier.clone()),
+                TIMESTAMP_FIELD,
+            )))
+        }
         Ok(expressions)
     }
 
     fn projection(&self, table_scan: &TableScan, table: &ConnectorTable) -> DFResult<LogicalPlan> {
         let qualifier = table_scan.table_name.clone();
-        let non_virtual_fields = table
-            .fields
-            .iter()
-            .filter_map(|field| match field {
-                FieldSpec::StructField(f) => Some(f.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
 
-        let table_scan_schema = DFSchema::try_from_qualified_schema(
-            qualifier.clone(),
-            &Schema::new(non_virtual_fields.clone()),
-        )?;
-
-        let table_scan_table_source = self
-            .schema_provider
-            .get_table_source_with_fields(&table.name, non_virtual_fields)
-            .unwrap();
-
-        let input_table_scan = LogicalPlan::TableScan(TableScan {
-            table_name: table_scan.table_name.clone(),
-            source: table_scan_table_source,
-            projection: None, // None because we are taking it out
-            projected_schema: Arc::new(table_scan_schema),
-            filters: table_scan.filters.clone(),
-            fetch: table_scan.fetch,
-        });
+        let table_source_extension = TableSourceExtension::new(qualifier.to_owned(), table.clone());
 
         Ok(LogicalPlan::Projection(
             datafusion_expr::Projection::try_new(
                 Self::projection_expressions(table, &qualifier, &table_scan.projection)?,
-                Arc::new(input_table_scan),
+                Arc::new(LogicalPlan::Extension(Extension {
+                    node: Arc::new(table_source_extension),
+                })),
             )?,
         ))
     }
@@ -240,10 +158,20 @@ impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
         let Table::ConnectorTable(table) = table else {
             return Ok(node);
         };
+        let input = self.projection(&table_scan, table)?;
+        let schema = input.schema().clone();
+        let remote = LogicalPlan::Extension(Extension {
+            node: Arc::new(RemoteTableExtension {
+                input,
+                name: table_scan.table_name.to_owned(),
+                schema,
+            }),
+        });
+
         let watermark_node = WatermarkNode::new(
-            self.projection(&table_scan, table)?,
+            remote,
             table_scan.table_name.clone(),
-            Some(Self::watermark_expression(table)?),
+            Self::watermark_expression(table)?,
         )
         .map_err(|err| {
             DataFusionError::Internal(format!("failed to create watermark expression: {}", err))
@@ -431,17 +359,27 @@ impl<'a> SourceMetadataVisitor<'a> {
 
 impl<'a> SourceMetadataVisitor<'a> {
     fn get_connection_id(&self, node: &LogicalPlan) -> Option<i64> {
-        let LogicalPlan::TableScan(TableScan { table_name, .. }) = node else {
+        let LogicalPlan::Extension(Extension { node }) = node else {
             return None;
         };
-
-        let table = self.schema_provider.get_table(table_name.table())?;
-
-        let Table::ConnectorTable(table) = table else {
-            return None;
+        // extract the name if it is a sink or source.
+        let table_name = match node.name() {
+            "TableSourceExtension" => {
+                let TableSourceExtension { name, .. } =
+                    node.as_any().downcast_ref::<TableSourceExtension>()?;
+                name.to_string()
+            }
+            "SinkExtension" => {
+                let SinkExtension { name, .. } = node.as_any().downcast_ref::<SinkExtension>()?;
+                name.to_string()
+            }
+            _ => return None,
         };
-
-        table.id
+        let table = self.schema_provider.get_table(&table_name)?;
+        match table {
+            Table::ConnectorTable(table) => table.id.clone(),
+            _ => None,
+        }
     }
 }
 

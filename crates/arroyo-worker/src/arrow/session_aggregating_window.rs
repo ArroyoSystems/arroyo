@@ -7,8 +7,8 @@ use std::{
 use anyhow::{anyhow, bail, Context, Result};
 use arrow::{
     compute::{
-        concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices, partition,
-        take, SortColumn,
+        concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices, max,
+        partition, take, SortColumn,
     },
     row::{OwnedRow, RowConverter, SortField},
 };
@@ -76,9 +76,14 @@ impl SessionAggregatingWindowFunc {
             debug!("no watermark, not advancing");
             return Ok(());
         };
-        let results = self.results_at_watermark(watermark).await?;
+        let results = self
+            .results_at_watermark(watermark)
+            .await
+            .context("results at watermark")?;
         if !results.is_empty() {
-            let result_batch = self.to_record_batch(results, ctx)?;
+            let result_batch = self
+                .to_record_batch(results, ctx)
+                .context("should convert to record batch")?;
             debug!("emitting session batch of size {}", result_batch.num_rows());
             ctx.collect(result_batch).await;
         }
@@ -345,8 +350,12 @@ impl SessionAggregatingWindowFunc {
         columns.push(Arc::new(timestamp_array));
         Ok(RecordBatch::try_new(
             ctx.out_schema.as_ref().unwrap().schema.clone(),
-            columns,
-        )?)
+            columns.clone(),
+        )
+        .context(format!(
+            "failed to create batch.\nout schema:\n{:?}\ncolumns:\n{:?}",
+            ctx.out_schema, columns
+        ))?)
     }
 }
 
@@ -829,12 +838,12 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             .await
             .expect("should get table");
 
-        let max_timestamp = sorted
+        let max_timestamp = max(sorted
             .column(self.config.input_schema_ref.timestamp_index)
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
-            .unwrap()
-            .value(sorted.num_rows() - 1);
+            .expect("should have max timestamp"))
+        .unwrap();
         table.insert(from_nanos(max_timestamp as u128), sorted.clone());
 
         self.add_at_watermark(sorted, current_watermark)
@@ -848,7 +857,6 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         ctx: &mut ArrowContext,
     ) -> Option<Watermark> {
         self.advance(ctx).await.unwrap();
-
         Some(watermark)
     }
 
