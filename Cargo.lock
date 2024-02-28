@@ -897,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-df"
-version = "0.8.0"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -921,16 +921,19 @@ dependencies = [
  "datafusion-proto",
  "dlopen2",
  "dlopen2_derive",
+ "glob",
  "petgraph",
  "prettyplease",
  "proc-macro2",
  "prost 0.12.3",
  "quote",
  "regex",
+ "rstest",
  "serde",
  "serde_json",
  "serde_json_path",
  "syn 2.0.48",
+ "test-log",
  "tokio",
  "tokio-stream",
  "toml 0.8.8",
@@ -1019,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-operator"
-version = "0.1.0"
+version = "0.10.0-dev"
 dependencies = [
  "ahash 0.8.7",
  "anyhow",
@@ -1165,7 +1168,6 @@ dependencies = [
  "prometheus",
  "prost 0.12.3",
  "rand",
- "test-case",
  "tokio",
  "tonic",
  "tracing",
@@ -7067,6 +7069,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "relative-path"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e898588f33fdd5b9420719948f9f2a32c922a246964576f71ba7f24f80610fbc"
+
+[[package]]
 name = "reqwest"
 version = "0.11.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7182,6 +7190,35 @@ dependencies = [
  "smallvec",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rstest"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97eeab2f3c0a199bc4be135c36c924b6590b88c377d416494288c14f2db30199"
+dependencies = [
+ "futures",
+ "futures-timer",
+ "rstest_macros",
+ "rustc_version",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d428f8247852f894ee1be110b375111b586d4fa431f6c46e64ba5a0dcccbe605"
+dependencies = [
+ "cfg-if",
+ "glob",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "relative-path",
+ "rustc_version",
+ "syn 2.0.48",
+ "unicode-ident",
 ]
 
 [[package]]

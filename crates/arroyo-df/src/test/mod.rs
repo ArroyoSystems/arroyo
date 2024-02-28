@@ -1,3 +1,5 @@
+mod plan_tests;
+
 use arrow_schema::DataType;
 use arroyo_connectors::{
     nexmark::{NexmarkConnector, NexmarkTable},
@@ -5,11 +7,12 @@ use arroyo_connectors::{
 };
 use arroyo_operator::connector::Connector;
 use arroyo_types::NullableType;
+use test_log::test;
 
 use crate::{parse_and_get_arrow_program, parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
 
 #[ignore]
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_parse() {
     let schema_provider = get_test_schema_provider();
 
@@ -50,7 +53,7 @@ async fn test_parse() {
         .unwrap();
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_program_compilation() {
     let schema_provider = get_test_schema_provider();
 
@@ -70,7 +73,7 @@ async fn test_program_compilation() {
         .unwrap();
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_table_alias() {
     let schema_provider = get_test_schema_provider();
 
@@ -102,7 +105,7 @@ fn get_test_schema_provider() -> ArroyoSchemaProvider {
     schema_provider
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_window_function() {
     let schema_provider = get_test_schema_provider();
 
@@ -121,7 +124,7 @@ async fn test_window_function() {
 }
 
 #[ignore]
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_no_updating_window_functions() {
     let schema_provider = get_test_schema_provider();
     let sql = "SELECT *, row_number() OVER (partition by bid.auction order by bid.datetime desc) as row_num
@@ -135,7 +138,7 @@ async fn test_no_updating_window_functions() {
     );
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_no_virtual_fields_updating() {
     let schema_provider = get_test_schema_provider();
     let sql =  "CREATE table debezium_source (
@@ -160,7 +163,7 @@ async fn test_no_virtual_fields_updating() {
 }
 
 #[ignore]
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_no_inserting_updates_into_non_updating() {
     let schema_provider = get_test_schema_provider();
     let sql = "CREATE table debezium_source (
@@ -191,7 +194,7 @@ async fn test_no_inserting_updates_into_non_updating() {
 }
 
 #[ignore]
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_no_aggregates_in_window() {
     let schema_provider = get_test_schema_provider();
     let sql = "WITH bids as (
@@ -207,12 +210,8 @@ GROUP BY bidder, HOP(INTERVAL '3 second', INTERVAL '10' minute)) WHERE distinct_
         .unwrap();
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_source_rewriter_join() {
-    let _ = tracing_subscriber::fmt()
-        .with_test_writer()
-        .with_max_level(tracing::Level::INFO)
-        .try_init();
     let schema_provider = get_test_schema_provider();
     let sql = "CREATE TABLE impulse WITH(
     connector = 'impulse',
@@ -228,7 +227,7 @@ async fn test_source_rewriter_join() {
         .unwrap();
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_query_parsing() {
     let schema_provider = get_test_schema_provider();
     let sql = "
@@ -242,8 +241,7 @@ async fn test_query_parsing() {
         .unwrap();
 }
 
-#[tokio::test]
-
+#[test(tokio::test)]
 async fn test_udf() {
     let mut schema_provider = get_test_schema_provider();
 
