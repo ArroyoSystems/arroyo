@@ -76,29 +76,29 @@ impl CodeGenerator<JoinPairContext, StructDef, syn::Expr> for JoinType {
         let mut assignments: Vec<_> = vec![];
 
         left_struct.fields.iter().for_each(|field| {
-                let field_name = format_ident!("{}",field.field_name());
-                if self.left_nullable() {
-                    if field.data_type.is_optional() {
-                        assignments.push(quote!(#field_name : #left_ident.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
-                    } else {
-                        assignments.push(quote!(#field_name : #left_ident.as_ref().map(|inner| inner.#field_name.clone())));
-                    }
+            let field_name = format_ident!("{}",field.field_name());
+            if self.left_nullable() {
+                if field.data_type.is_optional() {
+                    assignments.push(quote!(#field_name : #left_ident.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
                 } else {
-                    assignments.push(quote!(#field_name : #left_ident.#field_name.clone()));
+                    assignments.push(quote!(#field_name : #left_ident.as_ref().map(|inner| inner.#field_name.clone())));
                 }
-            });
+            } else {
+                assignments.push(quote!(#field_name : #left_ident.#field_name.clone()));
+            }
+        });
         right_struct.fields.iter().for_each(|field| {
-                let field_name = format_ident!("{}",field.field_name());
-                if self.right_nullable() {
-                    if field.data_type.is_optional() {
-                        assignments.push(quote!(#field_name : #right_ident.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
-                    } else {
-                        assignments.push(quote!(#field_name : #right_ident.as_ref().map(|inner| inner.#field_name.clone())));
-                    }
+            let field_name = format_ident!("{}",field.field_name());
+            if self.right_nullable() {
+                if field.data_type.is_optional() {
+                    assignments.push(quote!(#field_name : #right_ident.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
                 } else {
-                    assignments.push(quote!(#field_name :#right_ident.#field_name.clone()));
+                    assignments.push(quote!(#field_name : #right_ident.as_ref().map(|inner| inner.#field_name.clone())));
                 }
-            });
+            } else {
+                assignments.push(quote!(#field_name :#right_ident.#field_name.clone()));
+            }
+        });
 
         let return_struct = self.expression_type(input_context);
         let return_type = return_struct.get_type();
@@ -1243,6 +1243,7 @@ pub enum BinaryComparison {
     And,
     Or,
 }
+
 impl BinaryComparison {
     fn never_null(&self) -> bool {
         match self {
@@ -1427,7 +1428,6 @@ impl TryFrom<datafusion_expr::Operator> for BinaryMathOperator {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
-
 pub struct BinaryMathExpression {
     left: Box<Expression>,
     op: BinaryMathOperator,
@@ -1515,6 +1515,7 @@ impl StructFieldExpression {
         }
     }
 }
+
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StructFieldExpression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let struct_type = self.struct_expression.expression_type(input_context);
@@ -1563,6 +1564,7 @@ pub enum AggregateComputation {
         computation: RustUdafExpression,
     },
 }
+
 impl AggregateComputation {
     pub fn allows_two_phase(&self) -> bool {
         match self {
@@ -1806,7 +1808,7 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregationExpr
                     .map(|result| (result.1 as f64)/(result.0 as f64))
                     #unwrap
             }),
-            Aggregator::CountDistinct => parse_quote! ({
+            Aggregator::CountDistinct => parse_quote!({
                 #vec_ident.iter()
                     .#map_type(|#single_value_ident| #sub_expr)
                     .collect::<std::collections::HashSet<_>>()
@@ -1872,13 +1874,13 @@ impl CastExpression {
             && (Self::is_numeric(output_data_type) || Self::is_string(output_data_type))
         {
             true
-        // handle date to string casts.
+            // handle date to string casts.
         } else if Self::is_date(input_data_type) && Self::is_string(output_data_type) {
             true
-        // handle string to date casts.
+            // handle string to date casts.
         } else if Self::is_string(input_data_type) && Self::is_date(output_data_type) {
             true
-        // handle timestamp casts
+            // handle timestamp casts
         } else if Self::is_date(input_data_type) && Self::is_date(output_data_type) {
             true
         } else if *input_data_type == DataType::Int64 && Self::is_date(output_data_type) {
@@ -2247,7 +2249,6 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericFunction 
             | NumericFunction::Log2(arg)
             | NumericFunction::Exp(arg)
             | NumericFunction::Cot(arg)
-            | NumericFunction::Iszero(arg)
             | NumericFunction::Isnan(arg) => {
                 let function_name = self.function_name();
                 let argument_expression = arg.generate(input_context);
@@ -2257,10 +2258,15 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericFunction 
                     parse_quote!((#argument_expression as f64).#function_name())
                 }
             }
+            NumericFunction::Iszero(arg) => {
+                let argument_expression = arg.generate(input_context);
+                parse_quote!(arroyo_worker::operators::functions::numeric::is_zero(#argument_expression as f64))
+            }
             NumericFunction::Nanvl(arg1, arg2) => {
                 let expr1 = arg1.generate(input_context);
                 let expr2 = arg2.generate(input_context);
-                parse_quote!(arroyo_worker::operators::functions::numeric::nanvl(#expr1,#expr2))
+
+                parse_quote!(arroyo_worker::operators::functions::numeric::nanvl(#expr1 as f64,#expr2 as f64))
             }
         }
     }
@@ -3228,6 +3234,7 @@ impl StringFunction {
         }
     }
 }
+
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StringFunction {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let function = self.non_null_function_invocation();
@@ -3994,6 +4001,7 @@ impl RustUdafExpression {
         })
     }
 }
+
 impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for RustUdafExpression {
     fn generate(&self, input_context: &VecOfPointersContext) -> syn::Expr {
         let name = format_ident!("{}", &self.name);
