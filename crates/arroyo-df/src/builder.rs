@@ -37,7 +37,6 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use prost::Message;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
-use tracing::info;
 
 use crate::physical::{new_registry, ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use crate::plan::{
@@ -55,12 +54,19 @@ use datafusion_proto::{
 pub(crate) struct PlanToGraphVisitor {
     graph: DiGraph<LogicalNode, LogicalEdge>,
     output_schemas: HashMap<NodeIndex, ArroyoSchema>,
-    named_nodes: HashMap<OwnedTableReference, NodeIndex>,
+    named_nodes: HashMap<NamedNode, NodeIndex>,
     // each node that needs to know its inputs should push an empty vec in pre_visit.
     // In post_visit each node should cleanup its vec and push its index to the last vec, if present.
     traversal: Vec<Vec<NodeIndex>>,
     planner: DefaultPhysicalPlanner,
     session_state: SessionState,
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+enum NamedNode {
+    Source(OwnedTableReference),
+    Watermark(OwnedTableReference),
+    RemoteTable(OwnedTableReference),
 }
 
 impl Default for PlanToGraphVisitor {
@@ -132,7 +138,10 @@ impl PlanToGraphVisitor {
     }
 
     pub fn build_source(&mut self, table_source: &TableSourceExtension) -> DFResult<()> {
-        if let Some(table_index) = self.named_nodes.get(&table_source.name) {
+        if let Some(table_index) = self
+            .named_nodes
+            .get(&NamedNode::Source(table_source.name.to_owned()))
+        {
             self.add_index_to_traversal(*table_index);
             return Ok(());
         }
@@ -149,7 +158,7 @@ impl PlanToGraphVisitor {
         };
         let node_index = self.graph.add_node(node);
         self.named_nodes
-            .insert(table_source.name.clone(), node_index);
+            .insert(NamedNode::Source(table_source.name.clone()), node_index);
         let schema = Arc::new(table_source.schema.as_ref().into());
         self.output_schemas.insert(
             node_index,
@@ -164,6 +173,13 @@ impl PlanToGraphVisitor {
         input_nodes: Vec<NodeIndex>,
         watermark_node: &WatermarkNode,
     ) -> DFResult<()> {
+        if let Some(watermark_index) = self
+            .named_nodes
+            .get(&NamedNode::Watermark(watermark_node.qualifier.clone()))
+        {
+            self.add_index_to_traversal(*watermark_index);
+            return Ok(());
+        }
         let expression = self.planner.create_physical_expr(
             &watermark_node.watermark_expression,
             &watermark_node.schema,
@@ -186,6 +202,10 @@ impl PlanToGraphVisitor {
             .encode_to_vec(),
         });
         self.add_index_to_traversal(node_index);
+        self.named_nodes.insert(
+            NamedNode::Watermark(watermark_node.qualifier.clone()),
+            node_index,
+        );
         let input_index = input_nodes
             .first()
             .ok_or_else(|| DataFusionError::Plan("WatermarkNode must have an input".to_string()))?;
@@ -238,6 +258,7 @@ impl PlanToGraphVisitor {
     pub fn build_value_node(
         &mut self,
         input_nodes: Vec<NodeIndex>,
+        description: Option<String>,
         value_node: &LogicalPlan,
     ) -> DFResult<NodeIndex> {
         let physical_plan = self.sync_plan(&value_node)?;
@@ -251,7 +272,7 @@ impl PlanToGraphVisitor {
         };
         let node_index = self.graph.add_node(LogicalNode {
             operator_id: format!("value_{}", self.graph.node_count()),
-            description: "value".to_string(),
+            description: description.unwrap_or_else(|| "ValueNode".to_string()),
             operator_name: OperatorName::ArrowValue,
             parallelism: 1,
             operator_config: config.encode_to_vec(),
@@ -377,14 +398,6 @@ impl PlanToGraphVisitor {
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
-        info!(
-            "physical partial aggregation plan: {:?}",
-            partial_aggregation_exec_plan
-        );
-        info!(
-            "physical partial aggregation plan schema: {:?}",
-            partial_aggregation_exec_plan.schema()
-        );
 
         let partial_schema = partial_aggregation_exec_plan.schema();
         let final_input_table_provider = ArroyoMemExec {
@@ -787,6 +800,48 @@ impl TreeNodeVisitor for PlanToGraphVisitor {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return Ok(VisitRecursion::Continue);
         };
+        // check for named nodes, which we should only build once.
+        // Docs for the VisitRecursion are confusing, but VisitRecursion::Skip won't call post_visit for the node,
+        // and VisitRecursion::Stop will stop the traversal entirely.
+        match node.name() {
+            "WatermarkNode" => {
+                let watermark_node = node.as_any().downcast_ref::<WatermarkNode>().unwrap();
+                if let Some(watermark_index) = self
+                    .named_nodes
+                    .get(&NamedNode::Watermark(watermark_node.qualifier.clone()))
+                {
+                    self.add_index_to_traversal(*watermark_index);
+                    return Ok(VisitRecursion::Skip);
+                }
+            }
+            "TableSourceExtension" => {
+                let table_source = node
+                    .as_any()
+                    .downcast_ref::<TableSourceExtension>()
+                    .unwrap();
+                if let Some(table_index) = self
+                    .named_nodes
+                    .get(&NamedNode::Source(table_source.name.to_owned()))
+                {
+                    self.add_index_to_traversal(*table_index);
+                    return Ok(VisitRecursion::Skip);
+                }
+            }
+            "RemoteTableExtension" => {
+                let remote_table = node
+                    .as_any()
+                    .downcast_ref::<RemoteTableExtension>()
+                    .unwrap();
+                if let Some(remote_table_index) = self
+                    .named_nodes
+                    .get(&NamedNode::RemoteTable(remote_table.name.to_owned()))
+                {
+                    self.add_index_to_traversal(*remote_table_index);
+                    return Ok(VisitRecursion::Skip);
+                }
+            }
+            _ => {}
+        }
 
         if !node.inputs().is_empty() {
             self.traversal.push(vec![]);
@@ -829,7 +884,7 @@ impl TreeNodeVisitor for PlanToGraphVisitor {
                     _ => {
                         // TODO: this is a bit hacky, should probably separate out computation from the SinkExtension so the input will have been automatically materialized.
                         let input_node =
-                            self.build_value_node(input_nodes, &sink_extension.input)?;
+                            self.build_value_node(input_nodes, None, &sink_extension.input)?;
                         self.build_sink(vec![input_node], sink_extension)?;
                     }
                 }
@@ -850,7 +905,15 @@ impl TreeNodeVisitor for PlanToGraphVisitor {
                     .as_any()
                     .downcast_ref::<RemoteTableExtension>()
                     .unwrap();
-                let node_index = self.build_value_node(input_nodes, &remote_table.input)?;
+                let node_index = self.build_value_node(
+                    input_nodes,
+                    Some(remote_table.name.to_string()),
+                    &remote_table.input,
+                )?;
+                self.named_nodes.insert(
+                    NamedNode::RemoteTable(remote_table.name.clone()),
+                    node_index,
+                );
                 self.add_index_to_traversal(node_index);
                 self.output_schemas.insert(
                     node_index,

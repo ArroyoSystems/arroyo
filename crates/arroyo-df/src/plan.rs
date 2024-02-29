@@ -423,7 +423,11 @@ impl UserDefinedLogicalNodeCore for AggregateExtension {
                 .map(|f| f.qualified_name())
                 .collect::<Vec<_>>()
                 .join(", "),
-            self.window_behavior
+            match &self.window_behavior {
+                WindowBehavior::InData => "InData".to_string(),
+                WindowBehavior::FromOperator { window, .. } =>
+                    format!("FromOperator({:?})", window),
+            }
         )
     }
 

@@ -23,13 +23,16 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
+use datafusion_common::tree_node::TreeNode;
 use datafusion_common::Column;
 use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, LogicalPlan, WriteOp,
+    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
+    WriteOp,
 };
 use tracing::info;
 
+use crate::plan::{ArroyoRewriter, RemoteTableExtension};
 use crate::types::convert_data_type;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
@@ -380,10 +383,6 @@ fn value_to_inner_string(value: &Value) -> Result<String> {
     }
 }
 
-fn qualified_field(f: &DFField) -> Field {
-    Field::new(f.qualified_name(), f.data_type().clone(), f.is_nullable())
-}
-
 impl Table {
     fn schema_from_columns(
         columns: &Vec<ColumnDef>,
@@ -551,10 +550,21 @@ impl Table {
                     input,
                     ..
                 }))) => {
+                    let rewritten_plan = input.as_ref().clone().rewrite(&mut ArroyoRewriter {
+                        schema_provider: &schema_provider,
+                    })?;
+                    let schema = rewritten_plan.schema().clone();
+                    let remote_extension = RemoteTableExtension {
+                        input: rewritten_plan,
+                        name: name.to_owned(),
+                        schema,
+                    };
                     // Return a TableFromQuery
                     Ok(Some(Table::TableFromQuery {
                         name: name.to_string(),
-                        logical_plan: (**input).clone(),
+                        logical_plan: LogicalPlan::Extension(Extension {
+                            node: Arc::new(remote_extension),
+                        }),
                     }))
                 }
                 _ => Ok(None),
@@ -605,7 +615,7 @@ impl Table {
                 ..
             }) => inferred_fields
                 .as_ref()
-                .map(|fs| fs.iter().map(qualified_field).map(Arc::new).collect())
+                .map(|fs| fs.iter().map(|f| f.field().clone()).collect())
                 .unwrap_or_else(|| {
                     fields
                         .iter()
@@ -616,15 +626,13 @@ impl Table {
                 .schema()
                 .fields()
                 .iter()
-                .map(qualified_field)
-                .map(Arc::new)
+                .map(|f| f.field().clone())
                 .collect(),
             Table::PreviewSink { logical_plan } => logical_plan
                 .schema()
                 .fields()
                 .iter()
-                .map(qualified_field)
-                .map(Arc::new)
+                .map(|f| f.field().clone())
                 .collect(),
         }
     }
