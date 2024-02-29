@@ -79,9 +79,9 @@ impl<'a> SourceRewriter<'a> {
                     relation: Some(qualifier.clone()),
                     name: f.name().to_string(),
                 }),
-                FieldSpec::VirtualField { field, expression } => {
-                    expression.clone().alias(field.name().to_string())
-                }
+                FieldSpec::VirtualField { field, expression } => expression
+                    .clone()
+                    .alias_qualified(Some(qualifier.clone()), field.name().to_string()),
             })
             .collect::<Vec<_>>();
 

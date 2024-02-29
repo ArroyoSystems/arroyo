@@ -73,7 +73,7 @@ jobs:
           curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Install Kafka
         run: |
-          wget --progress=dot --show-progress https://downloads.apache.org/kafka/3.5.0/kafka_2.12-3.5.0.tgz
+          wget --progress=dot --show-progress https://downloads.apache.org/kafka/3.7.0/kafka_2.12-3.7.0.tgz
           tar xvfz kafka*.tgz
           mkdir /tmp/kraft-combined-logs
           kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
