@@ -17,7 +17,6 @@ pub mod external;
 pub mod logical;
 pub mod physical;
 mod plan;
-mod plan_graph;
 mod rewriters;
 pub mod schemas;
 mod tables;

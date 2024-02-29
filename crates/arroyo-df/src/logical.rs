@@ -33,7 +33,7 @@ impl TableProvider for LogicalBatchInput {
     }
 
     /// Create an ExecutionPlan that will scan the table.
-    /// The table provider will be usually responsible of grouping
+    /// The table provider will be usually responsible for grouping
     /// the source data into partitions that can be efficiently
     /// parallelized or distributed.
     async fn scan(

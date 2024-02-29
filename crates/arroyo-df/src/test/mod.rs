@@ -54,26 +54,6 @@ async fn test_parse() {
 }
 
 #[test(tokio::test)]
-async fn test_program_compilation() {
-    let schema_provider = get_test_schema_provider();
-
-    let sql = "
-    SELECT * FROM (
-    SELECT ROW_NUMBER()  OVER (
-        PARTITION BY window
-        ORDER BY count DESC) as row_number, auction FROM (
-      SELECT       bid.auction as auction,
-    hop(INTERVAL '10' minute, INTERVAL '20' minute ) as window,
-    count(*) as count
-  FROM (SELECT bid from nexmark where bid is not null)
-  GROUP BY 1, 2)) where row_number = 1 ";
-
-    parse_and_get_program(sql, schema_provider, SqlConfig::default())
-        .await
-        .unwrap();
-}
-
-#[test(tokio::test)]
 async fn test_table_alias() {
     let schema_provider = get_test_schema_provider();
 
@@ -103,24 +83,6 @@ fn get_test_schema_provider() -> ArroyoSchemaProvider {
     schema_provider.add_connector_table(nexmark);
 
     schema_provider
-}
-
-#[test(tokio::test)]
-async fn test_window_function() {
-    let schema_provider = get_test_schema_provider();
-
-    let sql = "SELECT * FROM (
-    SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY window
-        ORDER BY count DESC) as row_num
-    FROM (SELECT count(*) as count,
-        hop(interval '2 seconds', interval '10 seconds') as window
-            FROM nexmark
-            group by window)) WHERE row_num <= 5";
-
-    parse_and_get_program(sql, schema_provider, SqlConfig::default())
-        .await
-        .unwrap();
 }
 
 #[ignore]

@@ -6,6 +6,7 @@ use arrow::datatypes::IntervalMonthDayNanoType;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use datafusion_common::{
+    plan_err,
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion},
     Column, DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference,
     Result as DFResult, ScalarValue,
@@ -1116,7 +1117,59 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 }
                 .mutate(LogicalPlan::TableScan(table_scan));
             }
-            _ => {}
+            LogicalPlan::Filter(_) => {}
+            LogicalPlan::Window(_) => {
+                return plan_err!(
+                    "SQL window functions are not currently supported ({})",
+                    node.display()
+                );
+            }
+            LogicalPlan::Sort(_) => {
+                return plan_err!("ORDER BY is not currently supported ({})", node.display());
+            }
+            LogicalPlan::CrossJoin(_) => {
+                return plan_err!("CROSS JOIN is not currently supported ({})", node.display());
+            }
+            LogicalPlan::Repartition(_) => {
+                return plan_err!(
+                    "Repartitions are not currently supported ({})",
+                    node.display()
+                );
+            }
+            LogicalPlan::Union(_) => {}
+            LogicalPlan::EmptyRelation(_) => {}
+            LogicalPlan::Subquery(_) => {}
+            LogicalPlan::SubqueryAlias(_) => {}
+            LogicalPlan::Limit(_) => {
+                return plan_err!("LIMIT is not currently supported ({})", node.display());
+            }
+            LogicalPlan::Statement(s) => {
+                return plan_err!("Unsupported statement: {}", s.display());
+            }
+            LogicalPlan::Values(_) => {}
+            LogicalPlan::Explain(_) => {
+                return plan_err!("EXPLAIN is not supported ({})", node.display());
+            }
+            LogicalPlan::Analyze(_) => {
+                return plan_err!("ANALYZE is not supported ({})", node.display());
+            }
+            LogicalPlan::Extension(_) => {}
+            LogicalPlan::Distinct(_) => {}
+            LogicalPlan::Prepare(_) => {
+                return plan_err!("Prepared statements are not supported ({})", node.display())
+            }
+            LogicalPlan::Dml(_) => {}
+            LogicalPlan::Ddl(_) => {}
+            LogicalPlan::Copy(_) => {
+                return plan_err!("COPY is not supported ({})", node.display());
+            }
+            LogicalPlan::DescribeTable(_) => {
+                return plan_err!("DESCRIBE is not supported ({})", node.display());
+            }
+            LogicalPlan::Unnest(_) => {}
+            LogicalPlan::RecursiveQuery(_) => {
+                return plan_err!("Recursive CTEs are not supported ({})", node.display());
+            }
         }
         Ok(node)
     }
