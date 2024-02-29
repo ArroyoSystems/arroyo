@@ -19,6 +19,16 @@ fn for_each_file(#[files("src/test/queries/*.sql")] path: PathBuf) {
 async fn validate_query(path: &Path) {
     let query = tokio::fs::read_to_string(path).await.unwrap();
     let fail = query.starts_with("--fail");
+    let error_message = query.starts_with("--fail=").then(|| {
+        query
+            .lines()
+            .next()
+            .unwrap()
+            .splitn(2, '=')
+            .nth(1)
+            .unwrap()
+            .trim()
+    });
 
     let mut schema_provider = get_test_schema_provider();
 
@@ -35,7 +45,15 @@ async fn validate_query(path: &Path) {
     let result = parse_and_get_program(&query, schema_provider, SqlConfig::default()).await;
 
     if fail {
-        result.unwrap_err();
+        let err = result.unwrap_err();
+        if let Some(error_message) = error_message {
+            assert!(
+                err.to_string().contains(error_message),
+                "expected error message '{}' not found; instead got '{}'",
+                error_message,
+                err.to_string()
+            );
+        }
     } else {
         result.unwrap();
     }
