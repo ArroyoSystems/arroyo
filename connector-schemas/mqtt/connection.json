@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "title": "MqttConfig",
+  "properties": {
+    "protocol": {
+      "title": "Protocol",
+      "type": "string",
+      "description": "The protocol to use for your mqtt cluster either tcp or tls",
+      "enum": ["tcp", "tls"],
+      "default": "tcp"
+    },
+    "tls": {
+      "title": "TLS",
+      "type": "object",
+      "properties": {
+        "ca": {
+          "title": "CA",
+          "type": "string",
+          "description": "The path to the CA file",
+          "format": "var-str"
+        },
+        "cert": {
+          "title": "Cert",
+          "type": "string",
+          "description": "The path to the client cert file",
+          "format": "var-str"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string",
+          "description": "The path to the client key file",
+          "format": "var-str"
+        }
+      }
+    },
+    "host": {
+      "title": "Host",
+      "type": "string",
+      "description": "The host for your mqtt cluster"
+    },
+    "port": {
+      "title": "Port",
+      "type": "integer",
+      "description": "The port for your mqtt cluster"
+    },
+    "clientPrefix": {
+      "type": "string",
+      "title": "Client Prefix",
+      "description": "The client prefix to use for this sink"
+    },
+    "username": {
+      "title": "Username",
+      "type": "string",
+      "description": "The username for your mqtt cluster (if using auth)",
+      "format": "var-str"
+    },
+    "password": {
+      "title": "Password",
+      "type": "string",
+      "description": "The password for your mqtt cluster (if using auth)",
+      "format": "var-str"
+    }
+  },
+  "sensitive": ["password"],
+  "required": ["host"]
+}

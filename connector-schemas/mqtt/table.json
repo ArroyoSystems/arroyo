@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "title": "MqttTable",
+  "properties": {
+    "topic": {
+      "title": "Topic",
+      "type": "string",
+      "description": "The Kafka topic to use for this table"
+    },
+    "qos": {
+      "type": "string",
+      "title": "Quality of Service",
+      "description": "The Quality of Service to use for this topic",
+      "enum": ["AtMostOnce", "AtLeastOnce", "ExactlyOnce"]
+    },
+    "type": {
+      "type": "object",
+      "title": "Table Type",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "Source",
+          "properties": {
+            "type": {
+              "type": "string",
+              "title": "Source",
+              "enum": ["Source"]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "Sink",
+          "properties": {
+            "retain": {
+              "type": "string",
+              "title": "Retain",
+              "description": "Whether to retain messages published to this topic",
+              "enum": ["Yes", "No"]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": ["topic", "type"]
+}

@@ -33,6 +33,7 @@ pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
+pub mod mqtt;
 pub mod nexmark;
 pub mod polling_http;
 pub mod redis;
@@ -51,6 +52,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("impulse", Box::new(ImpulseConnector {}));
     m.insert("kafka", Box::new(KafkaConnector {}));
     m.insert("kinesis", Box::new(kinesis::KinesisConnector {}));
+    m.insert("mqtt", Box::new(mqtt::MqttConnector {}));
     m.insert("nexmark", Box::new(NexmarkConnector {}));
     m.insert(
         "polling_http",
