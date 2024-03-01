@@ -90,7 +90,7 @@ pub(crate) fn create_connection(
             }
 
             let builder = ClientConfig::builder()
-                .with_safe_defaults() 
+                .with_safe_defaults()
                 .with_root_certificates(root_cert_store);
 
             let tls_config = if let Some((Some(client_cert), Some(client_key))) = c

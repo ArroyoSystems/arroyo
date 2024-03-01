@@ -15,7 +15,7 @@ use rumqttc::{
 use tokio::sync::mpsc::channel;
 
 use crate::{
-    connectors::mqtt::{MqttConfig, Tls, Protocol},
+    connectors::mqtt::{MqttConfig, Protocol, Tls},
     engine::{Context, OutQueue},
 };
 

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::connectors::mqtt::source;
-use crate::connectors::mqtt::{MqttConfig, Tls, Protocol};
+use crate::connectors::mqtt::{MqttConfig, Protocol, Tls};
 use crate::engine::{Context, OutQueue, QueueItem};
 use crate::RateLimiter;
 

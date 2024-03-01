@@ -63,7 +63,8 @@ impl MqttConnector {
         let cert = options.remove("tls.cert").map(VarStr::new);
         let key = options.remove("tls.key").map(VarStr::new);
 
-        let tls = if protocol == Protocol::Tls && (ca.is_none() || cert.is_none() || key.is_none()) {
+        let tls = if protocol == Protocol::Tls && (ca.is_none() || cert.is_none() || key.is_none())
+        {
             None
         } else {
             Some(Tls { ca, cert, key })
