@@ -430,7 +430,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
 
                 Ok(Arc::new(UnnestExec::new(
                     inputs
-                        .get(0)
+                        .first()
                         .ok_or_else(|| {
                             DataFusionError::Internal("no input for unnest node".to_string())
                         })?

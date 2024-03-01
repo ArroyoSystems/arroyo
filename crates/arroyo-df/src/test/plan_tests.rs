@@ -24,9 +24,9 @@ async fn validate_query(path: &Path) {
             .lines()
             .next()
             .unwrap()
-            .splitn(2, '=')
-            .nth(1)
+            .split_once('=')
             .unwrap()
+            .1
             .trim()
     });
 
@@ -51,7 +51,7 @@ async fn validate_query(path: &Path) {
                 err.to_string().contains(error_message),
                 "expected error message '{}' not found; instead got '{}'",
                 error_message,
-                err.to_string()
+                err
             );
         }
     } else {

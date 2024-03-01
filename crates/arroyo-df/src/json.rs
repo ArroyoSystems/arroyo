@@ -89,7 +89,7 @@ where
             let vs = as_string_array(values);
             ColumnarValue::Array(Arc::new(
                 vs.iter()
-                    .map(|s| s.and_then(|s| f(serde_json::from_str(&s).ok()?, &(*path))))
+                    .map(|s| s.and_then(|s| f(serde_json::from_str(s).ok()?, &path)))
                     .collect::<ArrayT>(),
             ) as ArrayRef)
         }
@@ -103,7 +103,7 @@ where
 
             let result = value
                 .as_ref()
-                .and_then(|v| f(serde_json::from_str(v).ok()?, &(*path)));
+                .and_then(|v| f(serde_json::from_str(v).ok()?, &path));
             ColumnarValue::Scalar(to_scalar(result))
         }
         _ => {
@@ -133,7 +133,7 @@ pub fn extract_json(args: &[ColumnarValue]) -> Result<ColumnarValue> {
 
             let mut builder = ListBuilder::with_capacity(StringBuilder::new(), values.len());
 
-            let queried = values.iter().map(|s| s.and_then(|s| inner(s, &*path)));
+            let queried = values.iter().map(|s| s.and_then(|s| inner(s, &path)));
 
             for v in queried {
                 builder.append_option(v);
@@ -150,7 +150,7 @@ pub fn extract_json(args: &[ColumnarValue]) -> Result<ColumnarValue> {
             };
 
             let mut builder = ListBuilder::with_capacity(StringBuilder::new(), 1);
-            let result = v.as_ref().and_then(|s| inner(s, &*path));
+            let result = v.as_ref().and_then(|s| inner(s, &path));
             builder.append_option(result);
 
             ColumnarValue::Scalar(ScalarValue::List(Arc::new(builder.finish())))

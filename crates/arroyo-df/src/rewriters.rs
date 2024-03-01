@@ -1,8 +1,10 @@
-use crate::plan::{RemoteTableExtension, SinkExtension, TableSourceExtension};
+use crate::extension::remote_table::RemoteTableExtension;
+use crate::extension::sink::SinkExtension;
+use crate::extension::table_source::TableSourceExtension;
+use crate::extension::watermark_node::WatermarkNode;
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
-use crate::watermark_node::WatermarkNode;
 use crate::ArroyoSchemaProvider;
 
 use arrow_schema::DataType;
@@ -145,13 +147,14 @@ impl<'a> SourceRewriter<'a> {
         table_scan: &TableScan,
         table: &ConnectorTable,
     ) -> DFResult<LogicalPlan> {
-        let input = self.projection(&table_scan, table)?;
+        let input = self.projection(table_scan, table)?;
         let schema = input.schema().clone();
         let remote = LogicalPlan::Extension(Extension {
             node: Arc::new(RemoteTableExtension {
                 input,
                 name: table_scan.table_name.to_owned(),
                 schema,
+                materialize: true,
             }),
         });
 
@@ -164,9 +167,9 @@ impl<'a> SourceRewriter<'a> {
             DataFusionError::Internal(format!("failed to create watermark expression: {}", err))
         })?;
 
-        return Ok(LogicalPlan::Extension(Extension {
+        Ok(LogicalPlan::Extension(Extension {
             node: Arc::new(watermark_node),
-        }));
+        }))
     }
 
     fn mutate_table_from_query(
@@ -439,7 +442,7 @@ impl<'a> SourceMetadataVisitor<'a> {
         };
         let table = self.schema_provider.get_table(&table_name)?;
         match table {
-            Table::ConnectorTable(table) => table.id.clone(),
+            Table::ConnectorTable(table) => table.id,
             _ => None,
         }
     }

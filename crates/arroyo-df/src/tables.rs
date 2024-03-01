@@ -32,7 +32,8 @@ use datafusion_expr::{
 };
 use tracing::info;
 
-use crate::plan::{ArroyoRewriter, RemoteTableExtension};
+use crate::extension::remote_table::RemoteTableExtension;
+use crate::plan::ArroyoRewriter;
 use crate::types::convert_data_type;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
@@ -432,7 +433,7 @@ impl Table {
                 .iter()
                 .map(|f| {
                     Ok(DFField::new_unqualified(
-                        &f.name(),
+                        f.name(),
                         f.data_type().clone(),
                         f.is_nullable(),
                     ))
@@ -550,14 +551,16 @@ impl Table {
                     input,
                     ..
                 }))) => {
-                    let rewritten_plan = input.as_ref().clone().rewrite(&mut ArroyoRewriter {
-                        schema_provider: &schema_provider,
-                    })?;
+                    let rewritten_plan = input
+                        .as_ref()
+                        .clone()
+                        .rewrite(&mut ArroyoRewriter { schema_provider })?;
                     let schema = rewritten_plan.schema().clone();
                     let remote_extension = RemoteTableExtension {
                         input: rewritten_plan,
                         name: name.to_owned(),
                         schema,
+                        materialize: true,
                     };
                     // Return a TableFromQuery
                     Ok(Some(Table::TableFromQuery {
