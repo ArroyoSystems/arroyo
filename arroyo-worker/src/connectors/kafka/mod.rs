@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use arroyo_rpc::var_str::VarStr;
@@ -15,6 +16,15 @@ import_types!(
     }
 );
 import_types!(schema = "../connector-schemas/kafka/table.json");
+
+impl KafkaTable {
+    pub fn subject(&self) -> Cow<str> {
+        match &self.value_subject {
+            None => Cow::Owned(format!("{}-value", self.topic)),
+            Some(s) => Cow::Borrowed(s),
+        }
+    }
+}
 
 impl SourceOffset {
     fn get_offset(&self) -> Offset {

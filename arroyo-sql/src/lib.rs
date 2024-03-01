@@ -770,6 +770,7 @@ pub fn get_test_expression(
                     group_id: "test-consumer-group".to_string().try_into().unwrap(),
                 },
                 client_configs: HashMap::new(),
+                value_subject: None,
             },
             Some(&schema),
         )

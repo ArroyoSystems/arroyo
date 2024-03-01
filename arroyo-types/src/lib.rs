@@ -442,6 +442,7 @@ impl<'de> Deserialize<'de> for DebeziumOp {
             "c" => Ok(DebeziumOp::Create),
             "u" => Ok(DebeziumOp::Update),
             "d" => Ok(DebeziumOp::Delete),
+            "r" => Ok(DebeziumOp::Create),
             _ => Err(serde::de::Error::custom(format!(
                 "Invalid DebeziumOp {}",
                 s

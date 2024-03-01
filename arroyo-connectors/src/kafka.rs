@@ -13,6 +13,7 @@ use rdkafka::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -39,6 +40,15 @@ import_types!(
     }
 );
 import_types!(schema = "../connector-schemas/kafka/table.json");
+
+impl KafkaTable {
+    pub fn subject(&self) -> Cow<str> {
+        match &self.value_subject {
+            None => Cow::Owned(format!("{}-value", self.topic)),
+            Some(s) => Cow::Borrowed(s),
+        }
+    }
+}
 
 pub struct KafkaConnector {}
 
@@ -127,6 +137,7 @@ impl KafkaConnector {
                 })
                 .transpose()?
                 .unwrap_or_else(|| HashMap::new()),
+            value_subject: options.remove("value.subject"),
         })
     }
 }
@@ -486,7 +497,7 @@ impl KafkaTester {
                             api_secret,
                         }) => schema_resolver::ConfluentSchemaRegistry::new(
                             endpoint,
-                            &table.topic,
+                            &table.subject(),
                             api_key.clone(),
                             api_secret.clone(),
                         ),
