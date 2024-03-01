@@ -13,6 +13,7 @@ use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
 use datafusion_common::{DFField, OwnedTableReference, ScalarValue};
 pub mod builder;
+pub(crate) mod extension;
 pub mod external;
 pub mod logical;
 pub mod physical;
@@ -21,7 +22,6 @@ mod rewriters;
 pub mod schemas;
 mod tables;
 pub mod types;
-mod watermark_node;
 
 use datafusion::prelude::create_udf;
 
@@ -43,7 +43,8 @@ use schemas::window_arrow_struct;
 use tables::{Insert, Table};
 
 use crate::builder::PlanToGraphVisitor;
-use crate::plan::{ArroyoRewriter, SinkExtension};
+use crate::extension::sink::SinkExtension;
+use crate::plan::ArroyoRewriter;
 use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig};
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::DataFusionError;
@@ -168,7 +169,7 @@ impl ParsedUdf {
                             Field::new("field", vec_type.data_type, vec_type.nullable),
                         ))));
                     } else {
-                        args.push(rust_to_arrow(&*t.ty).ok_or_else(|| {
+                        args.push(rust_to_arrow(&t.ty).ok_or_else(|| {
                             anyhow!(
                                 "Could not convert function {} arg {} into a SQL data type",
                                 name,
@@ -182,7 +183,7 @@ impl ParsedUdf {
 
         let ret = match &function.sig.output {
             ReturnType::Default => bail!("Function {} return type must be specified", name),
-            ReturnType::Type(_, t) => rust_to_arrow(&**t).ok_or_else(|| {
+            ReturnType::Type(_, t) => rust_to_arrow(t).ok_or_else(|| {
                 anyhow!(
                     "Could not convert function {} return type into a SQL data type",
                     name
@@ -248,7 +249,7 @@ impl ArroyoSchemaProvider {
             "unnest".to_string(),
             Arc::new({
                 let return_type: ReturnTypeFunction = Arc::new(move |args| {
-                    match args.get(0).ok_or_else(|| {
+                    match args.first().ok_or_else(|| {
                         DataFusionError::Plan("unnest takes one argument".to_string())
                     })? {
                         DataType::List(t) => Ok(Arc::new(t.data_type().clone())),
@@ -573,21 +574,21 @@ pub async fn parse_and_get_arrow_program(
                 let Table::ConnectorTable(_connector_table) = table else {
                     bail!("expected connector table");
                 };
-                SinkExtension {
-                    name: OwnedTableReference::bare(sink_name),
-                    table: table.clone(),
-                    schema: plan_rewrite.schema().clone(),
-                    input: Arc::new(plan_rewrite),
-                }
+                SinkExtension::new(
+                    OwnedTableReference::bare(sink_name),
+                    table.clone(),
+                    plan_rewrite.schema().clone(),
+                    Arc::new(plan_rewrite),
+                )
             }
-            None => SinkExtension {
-                name: OwnedTableReference::parse_str("preview"),
-                table: Table::PreviewSink {
+            None => SinkExtension::new(
+                OwnedTableReference::parse_str("preview"),
+                Table::PreviewSink {
                     logical_plan: plan_rewrite.clone(),
                 },
-                schema: plan_rewrite.schema().clone(),
-                input: Arc::new(plan_rewrite),
-            },
+                plan_rewrite.schema().clone(),
+                Arc::new(plan_rewrite),
+            ),
         };
         plan_to_graph_visitor.add_plan(LogicalPlan::Extension(Extension {
             node: Arc::new(sink),
