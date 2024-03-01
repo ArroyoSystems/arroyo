@@ -102,9 +102,11 @@ pub fn window_function(columns: &[ColumnarValue]) -> DFResult<ColumnarValue> {
                 None,
             ))))
         }
-        (ColumnarValue::Scalar(start), ColumnarValue::Scalar(end)) => Ok(ColumnarValue::Scalar(
-            ScalarValue::Struct(Some(vec![start.clone(), end.clone()]), fields),
-        )),
+        (ColumnarValue::Scalar(start), ColumnarValue::Scalar(end)) => {
+            Ok(ColumnarValue::Scalar(ScalarValue::Struct(
+                StructArray::new(fields, vec![start.to_array()?, end.to_array()?], None).into(),
+            )))
+        }
     }
 }
 

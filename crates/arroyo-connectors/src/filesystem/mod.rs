@@ -1,3 +1,4 @@
+pub mod delta;
 mod sink;
 mod source;
 

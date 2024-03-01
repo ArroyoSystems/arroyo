@@ -17,7 +17,7 @@ arroyo-operator = { path = "../arroyo-operator" }
 arroyo-state = { path = "../arroyo-state" }
 
 arrow = { workspace = true }
-datafusion = "35.0"
+datafusion = "36.0"
 async-trait = "0.1"
 bincode = "2.0.0-rc.3"
 chrono = "0.4"
@@ -25,6 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+once_cell = "1.17.1"
 typify = "0.0.13"
 schemars = "0.8"
 prost = "0.12"
@@ -73,7 +74,7 @@ uuid = { version = "1.7.0", features = ["v4"] }
 # Filesystem
 parquet = { workspace = true, features = ["async"]}
 object_store = { workspace = true }
-deltalake = {version = "=0.16.4", features = ["s3", "arrow"] }
+deltalake = {version = "0.17", features = ["s3", "datafusion"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 
 [build-dependencies]

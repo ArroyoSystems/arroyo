@@ -16,7 +16,9 @@ use crate::EmptyConfig;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::OperatorNode;
 
-const TABLE_SCHEMA: &str = include_str!("../src/filesystem/table.json");
+use super::sink::{LocalParquetFileSystemSink, ParquetFileSystemSink};
+
+const TABLE_SCHEMA: &str = include_str!("./table.json");
 
 pub struct DeltaLakeConnector {}
 
@@ -152,9 +154,44 @@ impl Connector for DeltaLakeConnector {
     fn make_operator(
         &self,
         _: Self::ProfileT,
-        _: Self::TableT,
-        _: OperatorConfig,
+        table: Self::TableT,
+        config: OperatorConfig,
     ) -> anyhow::Result<OperatorNode> {
-        todo!()
+        let TableType::Sink {
+            write_path,
+            file_settings,
+            format_settings,
+            ..
+        } = &table.table_type
+        else {
+            bail!("Delta Lake connector only supports sink tables");
+        };
+        // confirm commit style is DeltaLake
+        if let Some(CommitStyle::DeltaLake) = file_settings
+            .as_ref()
+            .ok_or_else(|| anyhow!("no file_settings"))?
+            .commit_style
+        {
+            // ok
+        } else {
+            bail!("commit_style must be DeltaLake");
+        }
+
+        let backend_config = BackendConfig::parse_url(&write_path, true)?;
+        let is_local = match &backend_config {
+            BackendConfig::Local { .. } => true,
+            _ => false,
+        };
+        match (&format_settings, is_local) {
+            (Some(FormatSettings::Parquet { .. }), true) => {
+                Ok(OperatorNode::from_operator(Box::new(
+                    LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
+                )))
+            }
+            (Some(FormatSettings::Parquet { .. }), false) => Ok(OperatorNode::from_operator(
+                Box::new(ParquetFileSystemSink::new(table, config)),
+            )),
+            _ => bail!("Delta Lake sink only supports Parquet format"),
+        }
     }
 }
