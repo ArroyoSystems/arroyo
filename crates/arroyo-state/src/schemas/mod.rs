@@ -140,9 +140,13 @@ impl SchemaWithHashAndOperation {
         &mut self,
         record_batch: &RecordBatch,
     ) -> Result<(RecordBatch, ParquetStats)> {
-        let key_batch = record_batch
-            .project(&self.memory_schema.key_indices)
-            .unwrap();
+        let key_batch = self
+            .memory_schema
+            .key_indices
+            .as_ref()
+            .map(|key_indices| record_batch.project(&key_indices))
+            .transpose()?
+            .unwrap_or_else(|| record_batch.project(&vec![]).unwrap());
 
         let mut hash_buffer = vec![0u64; key_batch.num_rows()];
         let _hashes = create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer)?;

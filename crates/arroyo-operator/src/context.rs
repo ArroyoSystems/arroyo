@@ -170,12 +170,12 @@ pub struct ArrowCollector {
 
 fn repartition<'a>(
     record: &'a RecordBatch,
-    keys: &'a Vec<usize>,
+    keys: &'a Option<Vec<usize>>,
     qs: usize,
 ) -> impl Iterator<Item = (usize, RecordBatch)> + 'a {
     let mut buf = vec![0; record.num_rows()];
 
-    if !keys.is_empty() {
+    if let Some(keys) = keys {
         let keys: Vec<_> = keys.iter().map(|i| record.column(*i).clone()).collect();
 
         hash_utils::create_hashes(&keys[..], &get_hasher(), &mut buf).unwrap();
@@ -689,11 +689,7 @@ mod tests {
 
         let mut collector = ArrowCollector {
             task_info,
-            out_schema: Some(ArroyoSchema {
-                schema,
-                timestamp_index: 1,
-                key_indices: vec![0],
-            }),
+            out_schema: Some(ArroyoSchema::new_keyed(schema, 1, vec![0])),
             projection: None,
             out_qs,
             tx_queue_rem_gauges,
