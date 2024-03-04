@@ -41,8 +41,6 @@ use super::{ArroyoExtension, NodeWithIncomingEdges};
 
 pub(crate) const AGGREGATE_EXTENSION_NAME: &'static str = "AggregateExtension";
 
-pub const DUMMY_KEY: &'static str = "_dummy_key";
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AggregateExtension {
     pub(crate) window_behavior: WindowBehavior,

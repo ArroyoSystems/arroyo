@@ -295,6 +295,7 @@ message ArroyoSchema {
   string arrow_schema = 1;
   uint32 timestamp_index = 2;
   repeated uint32 key_indices = 3;
+  bool has_keys = 4;
 }
 
 // Worker

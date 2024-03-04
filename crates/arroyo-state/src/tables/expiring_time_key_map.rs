@@ -878,6 +878,8 @@ pub struct KeyTimeView {
     keyed_data: HashMap<Vec<u8>, BatchData>,
     schema: ArroyoSchemaRef,
     value_schema: ArroyoSchemaRef,
+    // indices of schema that aren't keys, used for projection
+    value_indices: Vec<usize>,
     state_tx: Sender<StateMessage>,
 }
 
@@ -927,18 +929,20 @@ impl KeyTimeView {
 
     fn insert_internal(&mut self, batch: RecordBatch) -> Result<Vec<OwnedRow>> {
         let sorted_batch = self.schema.sort(batch, false)?;
-        let value_indices =
-            (self.schema.key_indices.len()..self.schema.schema.fields().len()).collect::<Vec<_>>();
-        let value_batch = sorted_batch.project(&value_indices)?;
+        let value_batch = sorted_batch.project(&self.value_indices)?;
         let mut rows = vec![];
         for range in self.schema.partition(&sorted_batch, false)? {
             let value_batch = value_batch.slice(range.start, range.end - range.start);
-            let key_row = self.key_converter.convert_columns(
+            let key_columns = if self.schema.key_indices.is_none() {
+                vec![]
+            } else {
                 sorted_batch
                     .slice(range.start, 1)
-                    .project(&self.schema.key_indices)?
-                    .columns(),
-            )?;
+                    .project(&self.schema.key_indices.as_ref().unwrap())?
+                    .columns()
+                    .to_vec()
+            };
+            let key_row = self.key_converter.convert_columns(&key_columns)?;
             rows.push(key_row.clone());
             let contents = self.keyed_data.get_mut(key_row.as_ref());
             let batch = match contents {
@@ -967,11 +971,20 @@ impl KeyTimeView {
         let schema = parent.schema.memory_schema();
         let key_converter = schema.converter(false)?;
         let value_schema = Arc::new(schema.schema_without_keys()?);
+        let value_indices = if schema.key_indices.is_some() {
+            let key_indices = schema.key_indices.as_ref().unwrap();
+            (0..schema.schema.fields().len())
+                .filter(|i| !key_indices.contains(i))
+                .collect()
+        } else {
+            (0..schema.schema.fields().len()).collect()
+        };
         Ok(Self {
             key_converter,
             parent,
             keyed_data: HashMap::new(),
             schema,
+            value_indices,
             value_schema,
             state_tx,
         })

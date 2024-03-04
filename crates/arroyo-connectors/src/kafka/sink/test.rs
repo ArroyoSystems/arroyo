@@ -91,7 +91,7 @@ impl KafkaTopicTester {
             control_rx,
             command_tx,
             1,
-            vec![ArroyoSchema::new(schema(), 0, vec![])],
+            vec![ArroyoSchema::new_unkeyed(schema(), 0)],
             None,
             None,
             vec![vec![]],

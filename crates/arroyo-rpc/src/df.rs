@@ -22,7 +22,7 @@ pub type ArroyoSchemaRef = Arc<ArroyoSchema>;
 pub struct ArroyoSchema {
     pub schema: Arc<Schema>,
     pub timestamp_index: usize,
-    pub key_indices: Vec<usize>,
+    pub key_indices: Option<Vec<usize>>,
 }
 
 impl TryFrom<grpc::ArroyoSchema> for ArroyoSchema {
@@ -30,11 +30,17 @@ impl TryFrom<grpc::ArroyoSchema> for ArroyoSchema {
     fn try_from(schema_proto: grpc::ArroyoSchema) -> anyhow::Result<Self> {
         let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)?;
         let timestamp_index = schema_proto.timestamp_index as usize;
-        let key_indices = schema_proto
-            .key_indices
-            .iter()
-            .map(|index| (*index) as usize)
-            .collect();
+        let key_indices = if schema_proto.has_keys {
+            Some(
+                schema_proto
+                    .key_indices
+                    .iter()
+                    .map(|index| (*index) as usize)
+                    .collect(),
+            )
+        } else {
+            None
+        };
         Ok(Self {
             schema: Arc::new(schema),
             timestamp_index,
@@ -49,15 +55,16 @@ impl TryFrom<ArroyoSchema> for grpc::ArroyoSchema {
     fn try_from(schema: ArroyoSchema) -> anyhow::Result<Self> {
         let arrow_schema = serde_json::to_string(schema.schema.as_ref())?;
         let timestamp_index = schema.timestamp_index as u32;
-        let key_indices = schema
-            .key_indices
-            .iter()
-            .map(|index| (*index) as u32)
-            .collect();
+        let has_keys = schema.key_indices.is_some();
+        let key_indices = match schema.key_indices {
+            Some(indices) => indices.iter().map(|index| (*index) as u32).collect(),
+            None => vec![],
+        };
         Ok(Self {
             arrow_schema,
             timestamp_index,
             key_indices,
+            has_keys,
         })
     }
 }
@@ -67,11 +74,17 @@ impl TryFrom<api::ArroyoSchema> for ArroyoSchema {
     fn try_from(schema_proto: api::ArroyoSchema) -> anyhow::Result<Self> {
         let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)?;
         let timestamp_index = schema_proto.timestamp_index as usize;
-        let key_indices = schema_proto
-            .key_indices
-            .iter()
-            .map(|index| (*index) as usize)
-            .collect();
+        let key_indices = if schema_proto.has_keys {
+            Some(
+                schema_proto
+                    .key_indices
+                    .iter()
+                    .map(|index| (*index) as usize)
+                    .collect(),
+            )
+        } else {
+            None
+        };
         Ok(Self {
             schema: Arc::new(schema),
             timestamp_index,
@@ -86,25 +99,44 @@ impl TryFrom<ArroyoSchema> for api::ArroyoSchema {
     fn try_from(schema: ArroyoSchema) -> anyhow::Result<Self> {
         let arrow_schema = serde_json::to_string(schema.schema.as_ref())?;
         let timestamp_index = schema.timestamp_index as u32;
-        let key_indices = schema
-            .key_indices
-            .iter()
-            .map(|index| (*index) as u32)
-            .collect();
+        let has_keys = schema.key_indices.is_some();
+        let key_indices = match schema.key_indices {
+            Some(indices) => indices.iter().map(|index| (*index) as u32).collect(),
+            None => vec![],
+        };
         Ok(Self {
             arrow_schema,
             timestamp_index,
             key_indices,
+            has_keys,
         })
     }
 }
 
 impl ArroyoSchema {
-    pub fn new(schema: Arc<Schema>, timestamp_index: usize, key_indices: Vec<usize>) -> Self {
+    pub fn new(
+        schema: Arc<Schema>,
+        timestamp_index: usize,
+        key_indices: Option<Vec<usize>>,
+    ) -> Self {
         Self {
             schema,
             timestamp_index,
             key_indices,
+        }
+    }
+    pub fn new_unkeyed(schema: Arc<Schema>, timestamp_index: usize) -> Self {
+        Self {
+            schema,
+            timestamp_index,
+            key_indices: None,
+        }
+    }
+    pub fn new_keyed(schema: Arc<Schema>, timestamp_index: usize, key_indices: Vec<usize>) -> Self {
+        Self {
+            schema,
+            timestamp_index,
+            key_indices: Some(key_indices),
         }
     }
 
@@ -135,7 +167,7 @@ impl ArroyoSchema {
         Ok(Self {
             schema,
             timestamp_index,
-            key_indices,
+            key_indices: Some(key_indices),
         })
     }
 
@@ -178,14 +210,13 @@ impl ArroyoSchema {
     }
 
     pub fn sort_columns(&self, batch: &RecordBatch, with_timestamp: bool) -> Vec<SortColumn> {
-        let mut columns: Vec<_> = self
-            .key_indices
-            .iter()
-            .map(|index| SortColumn {
+        let mut columns = vec![];
+        if let Some(keys) = &self.key_indices {
+            columns.extend(keys.iter().map(|index| SortColumn {
                 values: batch.column(*index).clone(),
                 options: None,
-            })
-            .collect();
+            }));
+        }
         if with_timestamp {
             columns.push(SortColumn {
                 values: batch.column(self.timestamp_index).clone(),
@@ -197,11 +228,12 @@ impl ArroyoSchema {
 
     pub fn sort_fields(&self, with_timestamp: bool) -> Vec<SortField> {
         let mut sort_fields = vec![];
-        sort_fields.extend(
-            self.key_indices
-                .iter()
-                .map(|index| SortField::new(self.schema.field(*index).data_type().clone())),
-        );
+        if let Some(keys) = &self.key_indices {
+            sort_fields.extend(
+                keys.iter()
+                    .map(|index| SortField::new(self.schema.field(*index).data_type().clone())),
+            );
+        }
         if with_timestamp {
             sort_fields.push(SortField::new(DataType::Timestamp(
                 TimeUnit::Nanosecond,
@@ -216,7 +248,7 @@ impl ArroyoSchema {
     }
 
     pub fn sort(&self, batch: RecordBatch, with_timestamp: bool) -> Result<RecordBatch> {
-        if self.key_indices.is_empty() && !with_timestamp {
+        if self.key_indices.is_none() && !with_timestamp {
             return Ok(batch);
         }
         let sort_columns = self.sort_columns(&batch, with_timestamp);
@@ -235,14 +267,13 @@ impl ArroyoSchema {
         batch: &RecordBatch,
         with_timestamp: bool,
     ) -> Result<Vec<Range<usize>>> {
-        if self.key_indices.is_empty() && !with_timestamp {
+        if self.key_indices.is_none() && !with_timestamp {
             return Ok(vec![0..batch.num_rows()]);
         }
-        let mut partition_columns: Vec<_> = self
-            .key_indices
-            .iter()
-            .map(|index| batch.column(*index).clone())
-            .collect();
+        let mut partition_columns = vec![];
+        if let Some(keys) = &self.key_indices {
+            partition_columns.extend(keys.iter().map(|index| batch.column(*index).clone()));
+        }
         if with_timestamp {
             partition_columns.push(batch.column(self.timestamp_index).clone());
         }
@@ -250,19 +281,26 @@ impl ArroyoSchema {
     }
 
     pub fn unkeyed_batch(&self, batch: &RecordBatch) -> Result<RecordBatch> {
+        if self.key_indices.is_none() {
+            return Ok(batch.clone());
+        }
         let columns: Vec<_> = (0..batch.num_columns())
-            .filter(|index| !self.key_indices.contains(index))
+            .filter(|index| !self.key_indices.as_ref().unwrap().contains(index))
             .collect();
         Ok(batch.project(&columns)?)
     }
 
     pub fn schema_without_keys(&self) -> Result<Self> {
+        if self.key_indices.is_none() {
+            return Ok(self.clone());
+        }
+        let key_indices = self.key_indices.as_ref().unwrap();
         let unkeyed_schema = Schema::new(
             self.schema
                 .fields()
                 .iter()
                 .enumerate()
-                .filter(|(index, _field)| !self.key_indices.contains(index))
+                .filter(|(index, _field)| !key_indices.contains(index))
                 .map(|(_, field)| field.as_ref().clone())
                 .collect::<Vec<_>>(),
         );
@@ -270,7 +308,7 @@ impl ArroyoSchema {
         Ok(Self {
             schema: Arc::new(unkeyed_schema),
             timestamp_index: timestamp_index,
-            key_indices: vec![],
+            key_indices: None,
         })
     }
 }
