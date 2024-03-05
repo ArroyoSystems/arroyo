@@ -15,6 +15,7 @@ use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::sql::planner::PlannerContext;
+use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
@@ -482,10 +483,10 @@ impl Table {
             let name: String = name.to_string();
             let mut with_map = HashMap::new();
             for option in with_options {
-                with_map.insert(
-                    option.name.value.to_string(),
-                    value_to_inner_string(&option.value)?,
-                );
+                let sqlparser::ast::Expr::Value(value) = &option.value else {
+                    bail!("Expected a value, found {:?}", option.value)
+                };
+                with_map.insert(option.name.value.to_string(), value_to_inner_string(value)?);
             }
 
             let connector = with_map.remove("connector");

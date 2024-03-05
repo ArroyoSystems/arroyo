@@ -153,6 +153,8 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
     }
 
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
+        let writer: &mut ArrowWriter<SharedBuffer> = self.writer.as_mut().unwrap();
+        writer.flush().unwrap();
         let result = self
             .writer
             .as_mut()

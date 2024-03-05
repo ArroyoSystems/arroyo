@@ -1,20 +1,28 @@
 use super::FinishedFile;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use arrow::datatypes::{Schema, SchemaRef};
 use arroyo_storage::{get_current_credentials, StorageProvider};
 use arroyo_types::to_millis;
 use deltalake::{
-    protocol::{Action, Add, SaveMode},
-    table::{builder::s3_storage_options::AWS_S3_ALLOW_UNSAFE_RENAME, PeekCommit},
+    aws::storage::s3_constants::AWS_S3_ALLOW_UNSAFE_RENAME,
+    kernel::{Action, Add},
+    operations::create::CreateBuilder,
+    protocol::SaveMode,
+    table::PeekCommit,
     DeltaTableBuilder,
 };
 use object_store::{aws::AmazonS3ConfigKey, path::Path};
+use once_cell::sync::Lazy;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     time::SystemTime,
 };
 use tracing::info;
+
+static INIT: Lazy<()> = Lazy::new(|| {
+    deltalake::aws::register_handlers(None);
+});
 
 pub(crate) async fn commit_files_to_delta(
     finished_files: Vec<FinishedFile>,
@@ -52,6 +60,8 @@ async fn load_or_create_table(
     storage_options: HashMap<String, String>,
     schema: &Schema,
 ) -> Result<deltalake::DeltaTable> {
+    Lazy::force(&INIT);
+    deltalake::aws::register_handlers(None);
     match DeltaTableBuilder::from_uri(table_path)
         .with_storage_options(storage_options.clone())
         .load()
@@ -66,20 +76,19 @@ async fn load_or_create_table(
 }
 
 async fn create_new_table(
-    _table_path: &str,
-    _storage_options: HashMap<String, String>,
-    _schema: &Schema,
+    table_path: &str,
+    storage_options: HashMap<String, String>,
+    schema: &Schema,
 ) -> Result<deltalake::DeltaTable> {
-    bail!("delta isn't on 49.0.0 yet");
-    /*
     let delta_object_store = DeltaTableBuilder::from_uri(table_path)
         .with_storage_options(storage_options)
-        .build_storage()?;let delta_schema: deltalake::Schema = (schema).try_into()?;
+        .build_storage()?;
+    let delta_schema: deltalake::kernel::Schema = (schema).try_into()?;
     CreateBuilder::new()
-        .with_object_store(delta_object_store)
-        .with_columns(delta_schema.get_fields().clone())
+        .with_log_store(delta_object_store)
+        .with_columns(delta_schema.fields().clone())
         .await
-        .map_err(Into::into)*/
+        .map_err(Into::into)
 }
 
 async fn configure_storage_options(
@@ -135,7 +144,7 @@ fn create_add_action(file: &FinishedFile, relative_table_path: &Path) -> Result<
             file.filename,
             relative_table_path.to_string()
         ))?;
-    Ok(Action::add(Add {
+    Ok(Action::Add(Add {
         path: subpath.to_string(),
         size: file.size as i64,
         partition_values: HashMap::new(),
@@ -168,7 +177,7 @@ async fn check_existing_files(
     let mut version_to_check = last_version;
     while let PeekCommit::New(version, actions) = table.peek_next_commit(version_to_check).await? {
         for action in actions {
-            if let Action::add(add) = action {
+            if let Action::Add(add) = action {
                 if files.contains(&add.path) {
                     return Ok(Some(version));
                 }
@@ -181,14 +190,14 @@ async fn check_existing_files(
 
 async fn commit_to_delta(table: deltalake::DeltaTable, add_actions: Vec<Action>) -> Result<i64> {
     deltalake::operations::transaction::commit(
-        table.object_store().as_ref(),
+        table.log_store().as_ref(),
         &add_actions,
         deltalake::protocol::DeltaOperation::Write {
             mode: SaveMode::Append,
             partition_by: None,
             predicate: None,
         },
-        table.get_state(),
+        Some(table.snapshot()?),
         None,
     )
     .await

@@ -25,7 +25,6 @@ use self::kafka::KafkaConnector;
 
 pub mod blackhole;
 pub mod confluent;
-pub mod delta;
 pub mod filesystem;
 pub mod fluvio;
 pub mod impulse;
@@ -44,7 +43,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
         Box::new(BlackholeConnector {}),
         Box::new(confluent::ConfluentConnector {}),
-        Box::new(delta::DeltaLakeConnector {}),
+        Box::new(filesystem::delta::DeltaLakeConnector {}),
         Box::new(filesystem::FileSystemConnector {}),
         Box::new(FluvioConnector {}),
         Box::new(ImpulseConnector {}),

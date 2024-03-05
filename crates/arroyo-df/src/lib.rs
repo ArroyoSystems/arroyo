@@ -222,6 +222,7 @@ impl ArroyoSchemaProvider {
                 ],
                 window_return_type.clone(),
                 Volatility::Volatile,
+                #[allow(deprecated)]
                 make_scalar_function(fn_impl),
             )),
         );
@@ -232,6 +233,7 @@ impl ArroyoSchemaProvider {
                 vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
                 window_return_type.clone(),
                 Volatility::Volatile,
+                #[allow(deprecated)]
                 make_scalar_function(fn_impl),
             )),
         );
@@ -264,6 +266,7 @@ impl ArroyoSchemaProvider {
                     // This is marked volatile so that DF doesn't try to optimize constants
                     &Signature::any(1, Volatility::Volatile),
                     &return_type,
+                    #[allow(deprecated)]
                     &make_scalar_function(fn_impl),
                 )
             }),
@@ -345,6 +348,7 @@ impl ArroyoSchemaProvider {
                     parsed.args.iter().map(|t| t.data_type.clone()).collect(),
                     Arc::new(parsed.ret_type.data_type.clone()),
                     Volatility::Volatile,
+                    #[allow(deprecated)]
                     make_scalar_function(fn_impl),
                 )),
             )
