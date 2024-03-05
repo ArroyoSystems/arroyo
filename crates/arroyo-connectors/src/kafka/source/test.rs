@@ -109,7 +109,7 @@ impl KafkaTopicTester {
             command_tx,
             1,
             vec![],
-            Some(ArroyoSchema::new(
+            Some(ArroyoSchema::new_unkeyed(
                 Arc::new(Schema::new(vec![
                     Field::new(
                         "_timestamp",
@@ -119,7 +119,6 @@ impl KafkaTopicTester {
                     Field::new("value", DataType::Utf8, false),
                 ])),
                 0,
-                vec![],
             )),
             None,
             vec![vec![data_tx]],

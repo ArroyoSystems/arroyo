@@ -156,7 +156,7 @@ impl SessionAggregatingWindowFunc {
         sorted_batch: RecordBatch,
         watermark: Option<SystemTime>,
     ) -> Result<()> {
-        let has_keys = !self.config.input_schema_ref.key_indices.is_empty();
+        let has_keys = self.config.input_schema_ref.key_indices.is_some();
         let partition = if !has_keys {
             // if we don't have keys, we can just partition by the whole batch.
             vec![0..sorted_batch.num_rows()]
@@ -165,7 +165,15 @@ impl SessionAggregatingWindowFunc {
                 sorted_batch
                     .columns()
                     .into_iter()
-                    .take(self.config.input_schema_ref.key_indices.len())
+                    // Keys are first in the schema, because of how DataFusion structures aggregates.
+                    .take(
+                        self.config
+                            .input_schema_ref
+                            .key_indices
+                            .as_ref()
+                            .unwrap()
+                            .len(),
+                    )
                     .map(|column| column.clone())
                     .collect::<Vec<_>>()
                     .as_slice(),
@@ -175,12 +183,16 @@ impl SessionAggregatingWindowFunc {
 
         for range in partition {
             let key_batch = sorted_batch.slice(range.start, range.end - range.start);
+            let key_count = self
+                .config
+                .input_schema_ref
+                .key_indices
+                .as_ref()
+                .map(|keys| keys.len())
+                .unwrap_or(0);
             let row = self
                 .row_converter
-                .convert_columns(
-                    &key_batch.slice(0, 1).columns()
-                        [0..(self.config.input_schema_ref.key_indices.len())],
-                )
+                .convert_columns(&key_batch.slice(0, 1).columns()[0..key_count])
                 .context("failed to convert rows")?;
             let key_computation =
                 self.key_computations
@@ -244,23 +256,7 @@ impl SessionAggregatingWindowFunc {
     }
 
     fn sort_columns(&self, batch: &RecordBatch) -> Vec<SortColumn> {
-        let mut columns: Vec<_> = self
-            .config
-            .input_schema_ref
-            .key_indices
-            .iter()
-            .map(|index| SortColumn {
-                values: batch.column(*index).clone(),
-                options: None,
-            })
-            .collect();
-        columns.push(SortColumn {
-            values: batch
-                .column(self.config.input_schema_ref.timestamp_index)
-                .clone(),
-            options: None,
-        });
-        columns
+        self.config.input_schema_ref.sort_columns(batch, true)
     }
 
     fn filter_batch_by_time(
@@ -709,19 +705,20 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
             .input_schema
             .ok_or_else(|| anyhow!("missing input schema"))?
             .try_into()?;
-        let row_converter = if input_schema.key_indices.is_empty() {
+        let row_converter = if input_schema.key_indices.is_none() {
             let array = Arc::new(BooleanArray::from(vec![false]));
             Converter::Empty(
                 RowConverter::new(vec![SortField::new(DataType::Boolean)])?,
                 array,
             )
         } else {
+            let key_count = input_schema.key_indices.as_ref().unwrap().len();
             Converter::RowConverter(RowConverter::new(
                 input_schema
                     .schema
                     .fields()
                     .into_iter()
-                    .take(input_schema.key_indices.len())
+                    .take(key_count)
                     .map(|field| SortField::new(field.data_type().clone()))
                     .collect(),
             )?)

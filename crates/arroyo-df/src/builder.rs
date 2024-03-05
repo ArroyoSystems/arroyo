@@ -155,7 +155,7 @@ impl Planner {
             physical_plan_type: Some(PhysicalPlanType::Aggregate(final_aggregate_proto)),
         };
 
-        let partial_schema = ArroyoSchema::new(
+        let partial_schema = ArroyoSchema::new_keyed(
             add_timestamp_field_arrow(partial_schema.clone()),
             partial_schema.fields().len(),
             key_indices,

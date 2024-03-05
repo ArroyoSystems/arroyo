@@ -171,8 +171,8 @@ impl ArrowOperator for KafkaSinkFunc {
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
         let values = self.serializer.serialize(&batch);
 
-        if !ctx.in_schemas[0].key_indices.is_empty() {
-            let k = batch.project(&ctx.in_schemas[0].key_indices).unwrap();
+        if let Some(key_indices) = &ctx.in_schemas[0].key_indices {
+            let k = batch.project(key_indices).unwrap();
 
             // TODO: we can probably batch this for better performance
             for (k, v) in self.serializer.serialize(&k).zip(values) {
