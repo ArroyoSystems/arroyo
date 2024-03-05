@@ -15,7 +15,7 @@ use rumqttc::{
 use tokio::sync::mpsc::channel;
 
 use crate::{
-    connectors::mqtt::{MqttConfig, Protocol, Tls},
+    connectors::mqtt::{MqttConfig, Tls},
     engine::{Context, OutQueue},
 };
 
@@ -75,10 +75,8 @@ pub struct MqttTopicTester {
 impl MqttTopicTester {
     fn get_config(&self) -> MqttConfig {
         MqttConfig {
-            host: "localhost".to_string(),
-            port: Some(self.port as i64),
+            url: format!("tcp://localhost:{}", self.port),
             client_prefix: Some("test".to_string()),
-            protocol: Protocol::Tcp,
             username: self.username.as_ref().map(|u| VarStr::new(u.clone())),
             password: self.password.as_ref().map(|p| VarStr::new(p.clone())),
             tls: Some(Tls {

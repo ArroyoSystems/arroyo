@@ -552,6 +552,7 @@ dependencies = [
  "tonic",
  "tracing",
  "typify",
+ "url",
 ]
 
 [[package]]
@@ -6572,6 +6573,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-rustls 0.24.1",
+ "url",
 ]
 
 [[package]]

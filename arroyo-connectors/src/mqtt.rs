@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,43 +38,29 @@ impl MqttConnector {
     pub fn connection_from_options(
         options: &mut HashMap<String, String>,
     ) -> anyhow::Result<MqttConfig> {
-        let host = match options.remove("host") {
+        let url = match options.remove("url") {
             Some(host) => host,
-            None => bail!("host is required for mqtt connection"),
+            None => bail!("url is required for mqtt connection"),
         };
         let username = options.remove("username").map(VarStr::new);
         let password = options.remove("password").map(VarStr::new);
-        let protocol = match options.remove("protocol") {
-            Some(type_) => {
-                Protocol::from_str(&type_).map_err(|err| anyhow!("invalid protocol: {}", err))?
-            }
-            None => Protocol::Tcp,
-        };
-        let port = match options.remove("port") {
-            Some(port) => port.parse::<u16>()?,
-            None => match protocol {
-                Protocol::Tcp => 1883,
-                Protocol::Tls => 8883,
-            },
-        };
 
         let ca = options.remove("tls.ca").map(VarStr::new);
         let cert = options.remove("tls.cert").map(VarStr::new);
         let key = options.remove("tls.key").map(VarStr::new);
 
-        let tls = if protocol == Protocol::Tls && (ca.is_none() || cert.is_none() || key.is_none())
-        {
-            None
-        } else {
+        let parsed_url = url::Url::parse(&url)?;
+
+        let tls = if matches!(parsed_url.scheme(), "mqtts" | "ssl") {
             Some(Tls { ca, cert, key })
+        } else {
+            None
         };
 
         Ok(MqttConfig {
-            host,
+            url,
             username,
             password,
-            port: Some(port as i64),
-            protocol,
             tls,
             client_prefix: options.remove("client_prefix"),
         })
@@ -92,10 +77,9 @@ impl MqttConnector {
                 type_: Some(Source::Source),
             },
             "sink" => TableType::Sink {
-                retain: match options.remove("sink.retain") {
-                    Some(retain) => Some(Retain::from_str(&retain).map_err(|err| anyhow!(err))?),
-                    None => None,
-                },
+                retain: options
+                    .remove("sink.retain")
+                    .and_then(|s| s.parse::<bool>().ok()),
             },
             _ => {
                 bail!("type must be one of 'source' or 'sink")
@@ -136,12 +120,7 @@ impl Connector for MqttConnector {
     }
 
     fn config_description(&self, config: Self::ProfileT) -> String {
-        format!(
-            "{}://{}:{}",
-            config.protocol.to_string(),
-            config.host,
-            config.port.unwrap_or(1883)
-        )
+        config.url.clone()
     }
 
     fn from_config(
@@ -270,56 +249,51 @@ async fn test_inner(
         .await
         .unwrap();
 
-    let port = match c.port.map(|p| p as u16) {
-        Some(port) => port,
-        None => match c.protocol {
-            Protocol::Tcp => 1883,
-            Protocol::Tls => 8883,
-        },
-    };
+    let mut url = url::Url::parse(&c.url)?;
+    let ssl = matches!(url.scheme(), "mqtts" | "ssl");
+    url.query_pairs_mut()
+        .append_pair("client_id", "test-arroyo");
 
-    let mut options = MqttOptions::new("test-arroyo", c.host, port);
+    let mut options = MqttOptions::try_from(url)?;
+
     options.set_keep_alive(Duration::from_secs(10));
-    match c.protocol {
-        Protocol::Tcp => (),
-        Protocol::Tls => {
-            let mut root_cert_store = RootCertStore::empty();
-            for cert in load_native_certs().expect("could not load platform certs") {
-                root_cert_store.add(&Certificate(cert.0)).unwrap();
-            }
-
-            if let Some(ca) = c.tls.as_ref().and_then(|tls| tls.ca.as_ref()) {
-                let ca = ca.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
-                let certificates = load_certs(&ca)?;
-                for cert in certificates {
-                    root_cert_store.add(&cert).unwrap();
-                }
-            }
-
-            let tls_config = if let Some((Some(client_cert), Some(client_key))) = c
-                .tls
-                .as_ref()
-                .and_then(|tls| Some((tls.cert.as_ref(), tls.key.as_ref())))
-            {
-                let client_cert = client_cert.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
-                let client_key = client_key.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
-                let certs = load_certs(&client_cert)?;
-                let key = load_private_key(&client_key)?;
-                ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_root_certificates(root_cert_store)
-                    .with_client_auth_cert(certs, key)?
-            } else {
-                ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_root_certificates(root_cert_store)
-                    .with_no_client_auth()
-            };
-
-            options.set_transport(rumqttc::Transport::tls_with_config(
-                rumqttc::TlsConfiguration::Rustls(Arc::new(tls_config)),
-            ));
+    if ssl {
+        let mut root_cert_store = RootCertStore::empty();
+        for cert in load_native_certs().expect("could not load platform certs") {
+            root_cert_store.add(&Certificate(cert.0)).unwrap();
         }
+
+        if let Some(ca) = c.tls.as_ref().and_then(|tls| tls.ca.as_ref()) {
+            let ca = ca.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
+            let certificates = load_certs(&ca)?;
+            for cert in certificates {
+                root_cert_store.add(&cert).unwrap();
+            }
+        }
+
+        let tls_config = if let Some((Some(client_cert), Some(client_key))) = c
+            .tls
+            .as_ref()
+            .and_then(|tls| Some((tls.cert.as_ref(), tls.key.as_ref())))
+        {
+            let client_cert = client_cert.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
+            let client_key = client_key.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
+            let certs = load_certs(&client_cert)?;
+            let key = load_private_key(&client_key)?;
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_root_certificates(root_cert_store)
+                .with_client_auth_cert(certs, key)?
+        } else {
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_root_certificates(root_cert_store)
+                .with_no_client_auth()
+        };
+
+        options.set_transport(rumqttc::Transport::tls_with_config(
+            rumqttc::TlsConfiguration::Rustls(Arc::new(tls_config)),
+        ));
     }
 
     let password = if let Some(password) = c.password {
@@ -350,17 +324,7 @@ async fn test_inner(
                 .unwrap_or(QoS::AtMostOnce);
             if let TableType::Sink { retain, .. } = t.type_ {
                 client
-                    .publish(
-                        topic,
-                        qos,
-                        retain
-                            .and_then(|r| match r {
-                                Retain::Yes => Some(true),
-                                Retain::No => Some(false),
-                            })
-                            .unwrap_or_default(),
-                        "test".as_bytes(),
-                    )
+                    .publish(topic, qos, retain.unwrap_or_default(), "test".as_bytes())
                     .await?;
                 false
             } else {
@@ -377,26 +341,27 @@ async fn test_inner(
         }
     };
 
-    while let Ok(notification) = eventloop.poll().await {
-        match notification {
-            MqttEvent::Incoming(Incoming::Publish(p)) => {
-                let _payload = String::from_utf8(p.payload.to_vec())?;
-                return Ok("Successfully subscribed".to_string());
-            }
-            MqttEvent::Outgoing(Outgoing::Publish(_p)) => {
-                if !wait_for_incomming {
-                    return Ok("Successfully published".to_string());
+    loop {
+        match eventloop.poll().await {
+            Ok(notification) => match notification {
+                MqttEvent::Incoming(Incoming::Publish(p)) => {
+                    let _payload = String::from_utf8(p.payload.to_vec())?;
+                    return Ok("Successfully subscribed".to_string());
                 }
-            }
-            MqttEvent::Incoming(Incoming::Disconnect { .. })
-            | MqttEvent::Outgoing(Outgoing::Disconnect) => {
-                bail!("Disconnected from Mqtt");
-            }
-            _ => (),
+                MqttEvent::Outgoing(Outgoing::Publish(_p)) => {
+                    if !wait_for_incomming {
+                        return Ok("Successfully published".to_string());
+                    }
+                }
+                MqttEvent::Incoming(Incoming::Disconnect { .. })
+                | MqttEvent::Outgoing(Outgoing::Disconnect) => {
+                    bail!("Disconnected from Mqtt");
+                }
+                _ => (),
+            },
+            Err(e) => bail!("Error while reading from Mqtt: {:?}", e),
         }
     }
-
-    bail!("Failed to connect to Mqtt")
 }
 
 fn load_certs(certificates: &str) -> anyhow::Result<Vec<Certificate>> {

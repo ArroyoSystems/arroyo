@@ -17,7 +17,7 @@ use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_types::{Data, Message, UserError, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rumqttc::v5::mqttbytes::QoS;
-use rumqttc::v5::{Event as MqttEvent, Incoming};
+use rumqttc::v5::{ConnectionError, Event as MqttEvent, Incoming};
 use rumqttc::Outgoing;
 
 use serde::de::DeserializeOwned;
@@ -177,6 +177,9 @@ where
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
 
+        let topic = self.topic.clone();
+        let qos = self.qos;
+
         loop {
             select! {
                 event = eventloop.poll() => {
@@ -199,11 +202,22 @@ where
                             self.subscribed.store(true, Ordering::Relaxed);
                         }
                         Ok(_) => (),
-                        Err(e) => {
-                            return Err(UserError {
-                                name: "MqttSourceError".to_string(),
-                                details: format!("Error while reading from Mqtt: {:?}", e),
-                            });
+                        Err(err) => {
+                            if let ConnectionError::Timeout(_) = err {
+                                continue;
+                            }
+                            tracing::error!("Failed to poll mqtt eventloop: {}", err);
+                            if let Err(err) = client
+                                .subscribe(
+                                    topic.clone(),
+                                    qos,
+                                )
+                                .await {
+                                    return Err(UserError {
+                                        name: "MqttSourceError".to_string(),
+                                        details: format!("Error while subscribing to mqtt topic {}: {:?}", topic, err),
+                                    });
+                                }
                         }
                     }
                 }

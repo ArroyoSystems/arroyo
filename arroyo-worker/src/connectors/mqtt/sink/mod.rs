@@ -1,4 +1,6 @@
 use std::marker::PhantomData;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 use arroyo_formats::{DataSerializer, SchemaData};
@@ -9,9 +11,10 @@ use arroyo_rpc::OperatorConfig;
 use arroyo_types::{Key, Record};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::AsyncClient;
+use rumqttc::v5::ConnectionError;
 use serde::Serialize;
 
-use crate::connectors::mqtt::{MqttConfig, MqttTable, QualityOfService, Retain, TableType};
+use crate::connectors::mqtt::{MqttConfig, MqttTable, QualityOfService, TableType};
 use crate::engine::{Context, StreamNode};
 
 #[cfg(test)]
@@ -26,6 +29,7 @@ pub struct MqttSinkFunc<K: Key + Serialize, T: SchemaData> {
     serializer: DataSerializer<T>,
     client: Option<AsyncClient>,
     _t: PhantomData<K>,
+    stopped: Arc<AtomicBool>,
 }
 
 #[process_fn(in_k = K, in_t = T)]
@@ -38,6 +42,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> MqttSinkFunc<K, T> {
             retain,
             serializer: DataSerializer::new(format),
             client: None,
+            stopped: Arc::new(AtomicBool::new(false)),
             _t: PhantomData,
         }
     }
@@ -68,15 +73,11 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> MqttSinkFunc<K, T> {
                 })
                 .unwrap_or(QoS::AtMostOnce),
             topic: table.topic,
-            retain: retain
-                .and_then(|r| match r {
-                    Retain::Yes => Some(true),
-                    Retain::No => Some(false),
-                })
-                .unwrap_or_default(),
+            retain: retain.unwrap_or_default(),
             serializer: DataSerializer::new(
                 config.format.expect("Format must be defined for KafkaSink"),
             ),
+            stopped: Arc::new(AtomicBool::new(false)),
             client: None,
             _t: PhantomData,
         }
@@ -88,12 +89,28 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> MqttSinkFunc<K, T> {
             match super::create_connection(self.config.clone(), ctx.task_info.task_index) {
                 Ok((client, mut eventloop)) => {
                     self.client = Some(client);
+                    let stopped = self.stopped.clone();
                     tokio::spawn(async move {
-                        loop {
-                            let event = eventloop.poll().await;
-                            if let Err(err) = event {
-                                tracing::error!("Error in mqtt event loop: {:?}", err);
-                                panic!("Error in mqtt event loop: {:?}", err);
+                        while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                            match eventloop.poll().await {
+                                Ok(_) => (),
+                                Err(err) => match err {
+                                    ConnectionError::Timeout(_) => (),
+                                    ConnectionError::MqttState(rumqttc::v5::StateError::Io(
+                                        err,
+                                    ))
+                                    | ConnectionError::Io(err)
+                                        if err.kind() == std::io::ErrorKind::ConnectionAborted
+                                            || err.kind()
+                                                == std::io::ErrorKind::ConnectionReset =>
+                                    {
+                                        continue;
+                                    }
+                                    err => {
+                                        tracing::error!("Failed to poll mqtt eventloop: {:?}", err);
+                                        std::thread::sleep(std::time::Duration::from_secs(1));
+                                    }
+                                },
                             }
                         }
                     });
@@ -138,5 +155,12 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> MqttSinkFunc<K, T> {
                 }
             }
         }
+    }
+}
+
+impl<K: Key + Serialize, T: SchemaData + Serialize> Drop for MqttSinkFunc<K, T> {
+    fn drop(&mut self) {
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

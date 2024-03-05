@@ -48,14 +48,9 @@ pub(crate) fn create_connection(
     c: MqttConfig,
     task_id: usize,
 ) -> anyhow::Result<(AsyncClient, EventLoop)> {
-    let port = match c.port.map(|p| p as u16) {
-        Some(port) => port,
-        None => match c.protocol {
-            Protocol::Tcp => 1883,
-            Protocol::Tls => 8883,
-        },
-    };
-
+    // It creates a client id with the format: <client_prefix>_<task_id><current_time_in_millis>
+    // because the client id must be unique for each connection. Otherwise, the broker will only keep one active connection
+    // per client id
     let client_id = format!(
         "{}_{}{}",
         c.client_prefix
@@ -70,48 +65,50 @@ pub(crate) fn create_connection(
             % 100000,
     );
 
-    let mut options = MqttOptions::new(client_id, c.host, port);
+    let mut url = url::Url::parse(&c.url)?;
+    let ssl = matches!(url.scheme(), "mqtts" | "ssl");
+    url.query_pairs_mut().append_pair("client_id", &client_id);
+
+    let mut options = MqttOptions::try_from(url)?;
+
     options.set_keep_alive(Duration::from_secs(10));
-    match c.protocol {
-        Protocol::Tcp => (),
-        Protocol::Tls => {
-            let mut root_cert_store = RootCertStore::empty();
+    if ssl {
+        let mut root_cert_store = RootCertStore::empty();
 
-            if let Some(ca) = c.tls.as_ref().and_then(|tls| tls.ca.as_ref()) {
-                let ca = ca.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
-                let certificates = load_certs(&ca)?;
-                for cert in certificates {
-                    root_cert_store.add(&cert).unwrap();
-                }
-            } else {
-                for cert in load_native_certs().expect("could not load platform certs") {
-                    root_cert_store.add(&Certificate(cert.0)).unwrap();
-                }
+        if let Some(ca) = c.tls.as_ref().and_then(|tls| tls.ca.as_ref()) {
+            let ca = ca.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
+            let certificates = load_certs(&ca)?;
+            for cert in certificates {
+                root_cert_store.add(&cert).unwrap();
             }
-
-            let builder = ClientConfig::builder()
-                .with_safe_defaults()
-                .with_root_certificates(root_cert_store);
-
-            let tls_config = if let Some((Some(client_cert), Some(client_key))) = c
-                .tls
-                .as_ref()
-                .and_then(|tls| Some((tls.cert.as_ref(), tls.key.as_ref())))
-            {
-                let client_cert = client_cert.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
-                let client_key = client_key.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
-                let certs = load_certs(&client_cert)?;
-                let key = load_private_key(&client_key)?;
-
-                builder.with_client_auth_cert(certs, key)?
-            } else {
-                builder.with_no_client_auth()
-            };
-
-            options.set_transport(rumqttc::Transport::tls_with_config(
-                rumqttc::TlsConfiguration::Rustls(Arc::new(tls_config)),
-            ));
+        } else {
+            for cert in load_native_certs().expect("could not load platform certs") {
+                root_cert_store.add(&Certificate(cert.0)).unwrap();
+            }
         }
+
+        let builder = ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(root_cert_store);
+
+        let tls_config = if let Some((Some(client_cert), Some(client_key))) = c
+            .tls
+            .as_ref()
+            .and_then(|tls| Some((tls.cert.as_ref(), tls.key.as_ref())))
+        {
+            let client_cert = client_cert.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
+            let client_key = client_key.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
+            let certs = load_certs(&client_cert)?;
+            let key = load_private_key(&client_key)?;
+
+            builder.with_client_auth_cert(certs, key)?
+        } else {
+            builder.with_no_client_auth()
+        };
+
+        options.set_transport(rumqttc::Transport::tls_with_config(
+            rumqttc::TlsConfiguration::Rustls(Arc::new(tls_config)),
+        ));
     }
 
     let password = if let Some(password) = c.password {
@@ -127,5 +124,5 @@ pub(crate) fn create_connection(
         );
     }
 
-    Ok(AsyncClient::new(options, 10))
+    Ok(AsyncClient::new(options, 100))
 }

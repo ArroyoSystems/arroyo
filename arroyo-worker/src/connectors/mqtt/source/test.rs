@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::connectors::mqtt::source;
-use crate::connectors::mqtt::{MqttConfig, Protocol, Tls};
+use crate::connectors::mqtt::{MqttConfig, Tls};
 use crate::engine::{Context, OutQueue, QueueItem};
 use crate::RateLimiter;
 
@@ -92,10 +92,8 @@ pub struct MqttTopicTester {
 impl MqttTopicTester {
     fn get_config(&self) -> MqttConfig {
         MqttConfig {
-            host: "localhost".to_string(),
-            port: Some(self.port as i64),
+            url: format!("tcp://localhost:{}", self.port),
             client_prefix: Some("test".to_string()),
-            protocol: Protocol::Tcp,
             username: self.username.as_ref().map(|u| VarStr::new(u.clone())),
             password: self.password.as_ref().map(|p| VarStr::new(p.clone())),
             tls: Some(Tls {

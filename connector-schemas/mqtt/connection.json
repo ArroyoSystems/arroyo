@@ -2,13 +2,6 @@
   "type": "object",
   "title": "MqttConfig",
   "properties": {
-    "protocol": {
-      "title": "Protocol",
-      "type": "string",
-      "description": "The protocol to use for your mqtt cluster either tcp or tls",
-      "enum": ["tcp", "tls"],
-      "default": "tcp"
-    },
     "tls": {
       "title": "TLS",
       "type": "object",
@@ -33,20 +26,15 @@
         }
       }
     },
-    "host": {
-      "title": "Host",
+    "url": {
+      "title": "Url",
       "type": "string",
-      "description": "The host for your mqtt cluster"
-    },
-    "port": {
-      "title": "Port",
-      "type": "integer",
-      "description": "The port for your mqtt cluster"
+      "description": "The url of the broker to connect to. e.g. tcp://localhost. Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker. `mqtts://`, `ssl://` will use the native certificates if no ca is specified"
     },
     "clientPrefix": {
       "type": "string",
       "title": "Client Prefix",
-      "description": "The client prefix to use for this sink"
+      "description": "Prefix for the mqtt client id. The client id will be generated as `client_prefix`_`id`_`timestamp`. Defaults to `arroyo-mqtt`"
     },
     "username": {
       "title": "Username",
@@ -62,5 +50,5 @@
     }
   },
   "sensitive": ["password"],
-  "required": ["host"]
+  "required": ["url"]
 }

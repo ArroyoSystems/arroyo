@@ -5,7 +5,7 @@
     "topic": {
       "title": "Topic",
       "type": "string",
-      "description": "The Kafka topic to use for this table"
+      "description": "The MQTT topic to use for this table"
     },
     "qos": {
       "type": "string",
@@ -34,10 +34,9 @@
           "title": "Sink",
           "properties": {
             "retain": {
-              "type": "string",
+              "type": "boolean",
               "title": "Retain",
-              "description": "Whether to retain messages published to this topic",
-              "enum": ["Yes", "No"]
+              "description": "Whether to retain messages published to this topic"
             }
           },
           "additionalProperties": false
