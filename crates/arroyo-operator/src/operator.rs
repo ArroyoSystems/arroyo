@@ -204,7 +204,7 @@ async fn operator_run_behavior(
 
                         match message {
                             ArrowMessage::Data(record) => {
-                                TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
+                                TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc_by(record.num_rows() as u64);
                                 this.process_batch_index(idx, in_partitions, record, ctx)
                                     .instrument(tracing::trace_span!("handle_fn",
                                         name,

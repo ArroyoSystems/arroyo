@@ -228,7 +228,7 @@ fn repartition<'a>(
 
 impl ArrowCollector {
     pub async fn collect(&mut self, record: RecordBatch) {
-        TaskCounters::MessagesSent.for_task(&self.task_info).inc();
+        TaskCounters::MessagesSent.for_task(&self.task_info).inc_by(record.num_rows() as u64);
 
         let out_schema = self.out_schema.as_ref().unwrap();
 
