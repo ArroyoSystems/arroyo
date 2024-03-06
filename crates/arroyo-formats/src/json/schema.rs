@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail};
-use arrow_schema::{DataType, Field};
+use arrow_schema::{DataType, Field, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
 use schemars::schema::{Metadata, RootSchema, Schema};
 use std::sync::Arc;
@@ -98,7 +98,7 @@ fn to_arrow_datatype(
                 "i64" => Int64,
                 "f32" => Float32,
                 "f64" => Float64,
-                "chrono::DateTime<chrono::offset::Utc>" => todo!("JSON timestamps"),
+                "chrono::DateTime<chrono::offset::Utc>" => Timestamp(TimeUnit::Nanosecond, None),
                 _ => {
                     warn!("Unhandled primitive in json-schema: {}", t);
                     return (Utf8, false, Some(ArroyoExtensionType::JSON));

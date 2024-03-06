@@ -18,8 +18,7 @@ use tracing::warn;
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::connector_for_type;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
-use arroyo_formats::avro::schema;
-use arroyo_formats::avro::schema::to_arrow;
+use arroyo_formats::{avro, json};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
@@ -526,7 +525,7 @@ async fn expand_avro_schema(
         );
     }
 
-    let fields: Result<_, String> = schema::to_arrow(&name, &definition)
+    let fields: Result<_, String> = avro::schema::to_arrow(&name, &definition)
         .map_err(|e| bad_request(format!("Invalid avro schema: {}", e)))?
         .fields
         .into_iter()
@@ -578,7 +577,7 @@ async fn expand_json_schema(
 
     if let Some(d) = &schema.definition {
         let arrow = match d {
-            SchemaDefinition::JsonSchema(json) => to_arrow(&name, &json)
+            SchemaDefinition::JsonSchema(json) => json::schema::to_arrow(&name, &json)
                 .map_err(|e| bad_request(format!("Invalid json-schema: {}", e)))?,
             SchemaDefinition::RawSchema(_) => raw_schema(),
             _ => return Err(bad_request("Invalid schema type for json format")),
@@ -673,7 +672,7 @@ pub(crate) async fn test_schema(
 
     match schema_def {
         SchemaDefinition::JsonSchema(schema) => {
-            if let Err(e) = to_arrow(&"test", &schema) {
+            if let Err(e) = json::schema::to_arrow(&"test", &schema) {
                 Err(bad_request(e.to_string()))
             } else {
                 Ok(())
