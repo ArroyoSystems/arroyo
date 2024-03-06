@@ -89,7 +89,7 @@ impl ProcessScheduler {
     }
 }
 
-const SLOTS_PER_NODE: usize = 2;
+const SLOTS_PER_NODE: usize = 32;
 
 pub struct StartPipelineReq {
     pub name: String,
