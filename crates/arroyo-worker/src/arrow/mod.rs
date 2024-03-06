@@ -79,6 +79,7 @@ impl ArrowOperator for ValueExecutionOperator {
         }
 
         let session_context = SessionContext::new();
+        self.execution_plan.reset().expect("reset execution plan");
         let mut records = self
             .execution_plan
             .execute(0, session_context.task_ctx())
@@ -150,6 +151,10 @@ impl ExecutionPlan for RwLockRecordBatchReader {
     fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
         todo!()
     }
+
+    fn reset(&self) -> DFResult<()> {
+        Ok(())
+    }
 }
 
 pub struct KeyExecutionOperator {
@@ -211,6 +216,7 @@ impl ArrowOperator for KeyExecutionOperator {
             *writer = Some(batch.clone());
         }
         let session_context = SessionContext::new();
+        self.execution_plan.reset().expect("reset execution plan");
         let mut records = self
             .execution_plan
             .execute(0, session_context.task_ctx())

@@ -23,11 +23,12 @@ use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
+use datafusion_physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use futures::{lock::Mutex, stream::FuturesUnordered, Future};
 use prost::Message;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::info;
 
 use super::sync::streams::KeyedCloneableStreamFuture;
@@ -37,9 +38,10 @@ pub struct InstantJoin {
     left_input_schema: ArroyoSchemaRef,
     right_input_schema: ArroyoSchemaRef,
     execs: BTreeMap<SystemTime, InstantComputeHolder>,
-    registry: Arc<Registry>,
     futures: Arc<Mutex<FuturesUnordered<NextBatchFuture<SystemTime>>>>,
-    join_physical_plan: PhysicalPlanNode,
+    left_receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
+    right_receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
+    join_exec: Arc<dyn ExecutionPlan>,
 }
 
 struct InstantComputeHolder {
@@ -84,22 +86,13 @@ impl InstantJoin {
         if !self.execs.contains_key(&time) {
             let (left_sender, left_receiver) = unbounded_channel();
             let (right_sender, right_receiver) = unbounded_channel();
-            // regenerate the execution plan with the new time
-            let codec = ArroyoPhysicalExtensionCodec {
-                context: DecodingContext::LockedJoinStream {
-                    left: Arc::new(RwLock::new(Some(left_receiver))),
-                    right: Arc::new(RwLock::new(Some(right_receiver))),
-                },
-            };
-            let join_execution_plan = self.join_physical_plan.try_into_physical_plan(
-                self.registry.as_ref(),
-                &RuntimeEnv::new(RuntimeConfig::new())?,
-                &codec,
-            )?;
+            self.left_receiver.write().unwrap().replace(left_receiver);
+            self.right_receiver.write().unwrap().replace(right_receiver);
+            self.join_exec.reset()?;
 
-            let new_exec = join_execution_plan
-                .execute(0, SessionContext::new().task_ctx())
-                .expect("successfully computed?");
+            let new_exec = self
+                .join_exec
+                .execute(0, SessionContext::new().task_ctx())?;
             let next_batch_future = NextBatchFuture::new(time, new_exec);
             self.futures.lock().await.push(next_batch_future.clone());
             let exec = InstantComputeHolder {
@@ -282,16 +275,6 @@ impl ArrowOperator for InstantJoin {
                         ctx.collect(batch).await;
                     }
                     Err(err) => {
-                        info!(
-                            "failed with {:?}
-                        left input schema:{:?}, 
-                        right input schema:{:?}, 
-                        plan:{:?}",
-                            err,
-                            self.left_input_schema,
-                            self.right_input_schema,
-                            self.join_physical_plan
-                        );
                         panic!("error in future: {:?}", err);
                     }
                 }
@@ -394,13 +377,29 @@ impl OperatorConstructor for InstantJoinConstructor {
         let right_input_schema: Arc<ArroyoSchema> =
             Arc::new(config.right_schema.unwrap().try_into()?);
 
+        let left_receiver = Arc::new(RwLock::new(None));
+        let right_receiver = Arc::new(RwLock::new(None));
+
+        let codec = ArroyoPhysicalExtensionCodec {
+            context: DecodingContext::LockedJoinStream {
+                left: left_receiver.clone(),
+                right: right_receiver.clone(),
+            },
+        };
+        let join_exec = join_physical_plan_node.try_into_physical_plan(
+            registry.as_ref(),
+            &RuntimeEnv::new(RuntimeConfig::new())?,
+            &codec,
+        )?;
+
         Ok(OperatorNode::from_operator(Box::new(InstantJoin {
             left_input_schema,
             right_input_schema,
             execs: BTreeMap::new(),
-            registry,
             futures: Arc::new(Mutex::new(FuturesUnordered::new())),
-            join_physical_plan: join_physical_plan_node,
+            left_receiver,
+            right_receiver,
+            join_exec,
         })))
     }
 }

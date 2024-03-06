@@ -263,6 +263,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
+                self.partial_aggregation_plan.reset().unwrap();
                 let new_exec = self
                     .partial_aggregation_plan
                     .execute(0, SessionContext::new().task_ctx())
@@ -311,6 +312,9 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                         let finished_batches = mem::take(&mut exec.finished_batches);
                         *batches = finished_batches;
                     }
+                    self.finish_execution_plan
+                        .reset()
+                        .expect("reset execution plan");
                     let mut final_exec = self
                         .finish_execution_plan
                         .execute(0, SessionContext::new().task_ctx())
@@ -335,6 +339,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                             let mut batches = self.final_batches_passer.write().unwrap();
                             *batches = aggregate_results;
                         }
+                        final_projection.reset().expect("reset execution plan");
                         let mut final_projection_exec = final_projection
                             .execute(0, SessionContext::new().task_ctx())
                             .unwrap();

@@ -13,9 +13,10 @@ controller:
   image:
     repository: ghcr.io/arroyosystems/arroyo
     pullPolicy: IfNotPresent
-    tag: "dev"
+    tag: "df_deltalake_docker"
   service:
     grpcPort: 9190
+    compilerPort: 9000
     adminPort: 8001
     httpPort: 80
 
@@ -29,7 +30,7 @@ worker:
   image:
     repository: ghcr.io/arroyosystems/arroyo
     pullPolicy: IfNotPresent
-    tag: "dev"
+    tag: "df_deltalake_docker"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster
