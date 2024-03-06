@@ -16,6 +16,7 @@ controller:
     tag: "dev"
   service:
     grpcPort: 9190
+    compilerPort: 9000
     adminPort: 8001
     httpPort: 80
 

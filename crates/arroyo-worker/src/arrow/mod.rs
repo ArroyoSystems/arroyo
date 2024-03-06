@@ -31,6 +31,7 @@ pub mod tumbling_aggregating_window;
 pub struct ValueExecutionOperator {
     name: String,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
+    task_context: Arc<TaskContext>,
     execution_plan: Arc<dyn ExecutionPlan>,
 }
 
@@ -60,6 +61,7 @@ impl OperatorConstructor for ValueExecutionConstructor {
             ValueExecutionOperator {
                 name: config.name,
                 locked_batch,
+                task_context: SessionContext::new().task_ctx(),
                 execution_plan,
             },
         )))
@@ -78,10 +80,10 @@ impl ArrowOperator for ValueExecutionOperator {
             *writer = Some(record_batch);
         }
 
-        let session_context = SessionContext::new();
+        self.execution_plan.reset().expect("reset execution plan");
         let mut records = self
             .execution_plan
-            .execute(0, session_context.task_ctx())
+            .execute(0, self.task_context.clone())
             .expect("successfully computed?");
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
@@ -150,12 +152,17 @@ impl ExecutionPlan for RwLockRecordBatchReader {
     fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
         todo!()
     }
+
+    fn reset(&self) -> DFResult<()> {
+        Ok(())
+    }
 }
 
 pub struct KeyExecutionOperator {
     name: String,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
     execution_plan: Arc<dyn ExecutionPlan>,
+    task_context: Arc<TaskContext>,
     #[allow(unused)]
     key_fields: Vec<usize>,
 }
@@ -188,6 +195,7 @@ impl OperatorConstructor for KeyExecutionConstructor {
                 name: config.name,
                 locked_batch,
                 execution_plan,
+                task_context: SessionContext::new().task_ctx(),
                 key_fields: config
                     .key_fields
                     .into_iter()
@@ -210,10 +218,10 @@ impl ArrowOperator for KeyExecutionOperator {
             let mut writer = self.locked_batch.write().unwrap();
             *writer = Some(batch.clone());
         }
-        let session_context = SessionContext::new();
+        self.execution_plan.reset().expect("reset execution plan");
         let mut records = self
             .execution_plan
-            .execute(0, session_context.task_ctx())
+            .execute(0, self.task_context.clone())
             .expect("successfully computed?");
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");

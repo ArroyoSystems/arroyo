@@ -67,6 +67,8 @@ spec:
           value: {{ .Values.controller.service.adminPort | quote }}
         - name: HTTP_PORT
           value: {{ .Values.controller.service.httpPort | quote }}
+        - name: COMPILER_GRPC_PORT
+          value: {{ .Values.controller.service.compilerPort | quote }}
         - name: PROM_ENDPOINT
           value: "{{ include "arroyo.prometheusEndpoint" .}}"
         - name: API_METRICS_RATE

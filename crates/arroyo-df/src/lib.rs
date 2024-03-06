@@ -10,6 +10,7 @@ use arrow_schema::{Field, Schema};
 use arroyo_datastream::WindowType;
 
 use datafusion::datasource::DefaultTableSource;
+#[allow(deprecated)]
 use datafusion::physical_plan::functions::make_scalar_function;
 use datafusion_common::{DFField, OwnedTableReference, ScalarValue};
 pub mod builder;
@@ -244,6 +245,7 @@ impl ArroyoSchemaProvider {
                 vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
                 window_return_type,
                 Volatility::Volatile,
+                #[allow(deprecated)]
                 make_scalar_function(fn_impl),
             )),
         );
