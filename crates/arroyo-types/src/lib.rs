@@ -124,6 +124,9 @@ pub const COMPILER_FEATURES_ENV: &str = "COMPILER_FEATURES";
 pub const INSTALL_CLANG_ENV: &str = "INSTALL_CLANG";
 pub const INSTALL_RUSTC_ENV: &str = "INSTALL_RUSTC";
 
+// process scheduler
+pub const SLOTS_PER_NODE: &str = "SLOTS_PER_NODE";
+
 // kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
 pub const K8S_WORKER_NAME_ENV: &str = "K8S_WORKER_NAME";
