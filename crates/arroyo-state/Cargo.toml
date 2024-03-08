@@ -19,7 +19,7 @@ datafusion-proto = "36.0"
 datafusion-physical-expr = "36.0"
 datafusion-execution = "36.0"
 
-ahash = "0.8"
+ahash = {workspace = true}
 
 anyhow = "1.0"
 backoff = "0.4.0"

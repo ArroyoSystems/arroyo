@@ -43,9 +43,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.11"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
+checksum = "77c3a9648d43b9cd48db467b3f87fdd6e146bcc88ab0180006cef2179fe11d01"
 dependencies = [
  "cfg-if",
  "const-random",
@@ -256,7 +256,7 @@ name = "arrow-array"
 version = "50.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=50.0.0/parquet_bytes#8be0cb7860cb3053a976ac5ceac559b2beb2de8d"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow-buffer",
  "arrow-data",
  "arrow-schema",
@@ -382,7 +382,7 @@ version = "50.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "007035e17ae09c4e8993e4cb8b5b96edf0afb927cd38e2dff27189b274d83dcf"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
@@ -406,7 +406,7 @@ version = "50.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ce20973c1912de6514348e064829e50947e35977bb9d7fb637dc99ea9ffd78c"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
@@ -659,7 +659,7 @@ dependencies = [
 name = "arroyo-datastream"
 version = "0.10.0-dev"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "anyhow",
  "arrow-schema",
  "arroyo-macro",
@@ -814,7 +814,7 @@ dependencies = [
 name = "arroyo-operator"
 version = "0.10.0-dev"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "anyhow",
  "arrow",
  "arroyo-formats",
@@ -840,7 +840,7 @@ dependencies = [
 name = "arroyo-rpc"
 version = "0.10.0-dev"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "anyhow",
  "apache-avro",
  "arrow",
@@ -927,7 +927,7 @@ dependencies = [
 name = "arroyo-state"
 version = "0.10.0-dev"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "anyhow",
  "arrow",
  "arrow-array",
@@ -996,7 +996,7 @@ dependencies = [
 name = "arroyo-worker"
 version = "0.10.0-dev"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "anyhow",
  "arrow",
  "arrow-array",
@@ -2774,7 +2774,7 @@ version = "35.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4328f5467f76d890fe3f924362dbc3a838c6a733f762b32d87f9e0b7bef5fb49"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-ipc",
@@ -2821,7 +2821,7 @@ name = "datafusion"
 version = "36.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-ipc",
@@ -2871,7 +2871,7 @@ version = "35.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29a7752143b446db4a2cccd9a6517293c6b97e8c39e520ca43ccd07135a4f7e"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -2890,7 +2890,7 @@ name = "datafusion-common"
 version = "36.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -2951,7 +2951,7 @@ version = "35.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8d19598e48a498850fb79f97a9719b1f95e7deb64a7a06f93f313e8fa1d524b"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "datafusion-common 35.0.0",
@@ -2966,7 +2966,7 @@ name = "datafusion-expr"
 version = "36.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "datafusion-common 36.0.0",
@@ -3044,7 +3044,7 @@ version = "35.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e911bca609c89a54e8f014777449d8290327414d3e10c57a3e3c2122e38878d0"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3077,7 +3077,7 @@ name = "datafusion-physical-expr"
 version = "36.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3113,7 +3113,7 @@ version = "35.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e96b546b8a02e9c2ab35ac6420d511f12a4701950c1eb2e568c122b4fefb0be3"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3143,7 +3143,7 @@ name = "datafusion-physical-plan"
 version = "36.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -4456,7 +4456,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
 ]
 
 [[package]]
@@ -4465,7 +4465,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "allocator-api2",
 ]
 
@@ -5260,7 +5260,7 @@ version = "0.84.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6834a4a1f53a8528d5f346cdd141a77dbda31beb33dab4bf24fa4ecf6c508744"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "async-trait",
  "backoff",
  "derivative",
@@ -6240,7 +6240,7 @@ name = "parquet"
 version = "50.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=50.0.0/parquet_bytes#8be0cb7860cb3053a976ac5ceac559b2beb2de8d"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.7",
  "arrow-array",
  "arrow-buffer",
  "arrow-cast",
