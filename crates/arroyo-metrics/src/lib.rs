@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use arroyo_types::{
-    TaskInfo, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS, MESSAGES_RECV, MESSAGES_SENT,
+    TaskInfo, BATCHES_RECV, BATCHES_SENT, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS,
+    MESSAGES_RECV, MESSAGES_SENT,
 };
 use lazy_static::lazy_static;
 use prometheus::{
@@ -65,6 +67,18 @@ lazy_static! {
         &TASK_METRIC_LABELS
     )
     .unwrap();
+    pub static ref BATCHES_RECEIVED_COUNTER: IntCounterVec = register_int_counter_vec!(
+        BATCHES_RECV,
+        "Number of batches received by this subtask",
+        &TASK_METRIC_LABELS
+    )
+    .unwrap();
+    pub static ref BATCHES_SENT_COUNTER: IntCounterVec = register_int_counter_vec!(
+        BATCHES_SENT,
+        "Number of batches sent by this subtask",
+        &TASK_METRIC_LABELS
+    )
+    .unwrap();
     pub static ref DESERIALIZATION_ERRORS_COUNTER: IntCounterVec = register_int_counter_vec!(
         DESERIALIZATION_ERRORS,
         "Count of deserialization errors",
@@ -73,44 +87,57 @@ lazy_static! {
     .unwrap();
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub enum TaskCounters {
     MessagesReceived,
     MessagesSent,
+    BatchesReceived,
+    BatchesSent,
     BytesReceived,
     BytesSent,
     DeserializationErrors,
 }
 
 impl TaskCounters {
-    pub fn for_task(&self, task_info: &TaskInfo) -> IntCounter {
+    fn metric(&self) -> &'static IntCounterVec {
         match self {
-            TaskCounters::MessagesReceived => MESSAGE_RECV_COUNTER.with_label_values(&[
-                &task_info.operator_id,
-                &task_info.task_index.to_string(),
-                &task_info.operator_name,
-            ]),
-            TaskCounters::MessagesSent => MESSAGES_SENT_COUNTER.with_label_values(&[
-                &task_info.operator_id,
-                &task_info.task_index.to_string(),
-                &task_info.operator_name,
-            ]),
-            TaskCounters::BytesReceived => BYTES_RECEIVED_COUNTER.with_label_values(&[
-                &task_info.operator_id,
-                &task_info.task_index.to_string(),
-                &task_info.operator_name,
-            ]),
-            TaskCounters::BytesSent => BYTES_SENT_COUNTER.with_label_values(&[
-                &task_info.operator_id,
-                &task_info.task_index.to_string(),
-                &task_info.operator_name,
-            ]),
-            TaskCounters::DeserializationErrors => DESERIALIZATION_ERRORS_COUNTER
-                .with_label_values(&[
-                    &task_info.operator_id,
-                    &task_info.task_index.to_string(),
-                    &task_info.operator_name,
-                ]),
+            TaskCounters::MessagesReceived => &MESSAGE_RECV_COUNTER,
+            TaskCounters::MessagesSent => &MESSAGES_SENT_COUNTER,
+            TaskCounters::BatchesReceived => &BATCHES_RECEIVED_COUNTER,
+            TaskCounters::BatchesSent => &BATCHES_SENT_COUNTER,
+            TaskCounters::BytesReceived => &BYTES_RECEIVED_COUNTER,
+            TaskCounters::BytesSent => &BYTES_SENT_COUNTER,
+            TaskCounters::DeserializationErrors => &DESERIALIZATION_ERRORS_COUNTER,
         }
+    }
+
+    pub fn for_task<F>(&self, task_info: &Arc<TaskInfo>, f: F)
+    where
+        F: Fn(&IntCounter),
+    {
+        static CACHE: OnceLock<Arc<RwLock<HashMap<(TaskCounters, Arc<TaskInfo>), IntCounter>>>> =
+            OnceLock::new();
+        let cache = CACHE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())));
+
+        {
+            if let Some(counter) = cache.read().unwrap().get(&(*self, task_info.clone())) {
+                f(counter);
+                return;
+            }
+        }
+
+        let counter = self.metric().with_label_values(&[
+            &task_info.operator_id,
+            &task_info.task_index.to_string(),
+            &task_info.operator_name,
+        ]);
+
+        f(&counter);
+
+        cache
+            .write()
+            .unwrap()
+            .insert((*self, task_info.clone()), counter);
     }
 }
 

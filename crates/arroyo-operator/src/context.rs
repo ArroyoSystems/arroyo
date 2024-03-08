@@ -206,7 +206,6 @@ fn repartition<'a>(
             .collect();
         result.into_iter()
     } else {
-        //println!("record: {:?}", record);
         let range_size = record.num_rows() / qs + 1;
         let rotation = rand::thread_rng().gen_range(0..qs);
         let result: Vec<_> = (0..qs)
@@ -228,7 +227,9 @@ fn repartition<'a>(
 
 impl ArrowCollector {
     pub async fn collect(&mut self, record: RecordBatch) {
-        TaskCounters::MessagesSent.for_task(&self.task_info).inc();
+        TaskCounters::MessagesSent
+            .for_task(&self.task_info, |c| c.inc_by(record.num_rows() as u64));
+        TaskCounters::BatchesSent.for_task(&self.task_info, |c| c.inc());
 
         let out_schema = self.out_schema.as_ref().unwrap();
 
@@ -588,9 +589,7 @@ impl ArrowContext {
                                     .unwrap();
                             })
                             .await;
-                        TaskCounters::DeserializationErrors
-                            .for_task(&self.task_info)
-                            .inc();
+                        TaskCounters::DeserializationErrors.for_task(&self.task_info, |c| c.inc())
                     }
                     BadData::Fail {} => {
                         return Err(UserError::new("Deserialization error", details));
