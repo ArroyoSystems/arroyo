@@ -1,4 +1,4 @@
-use crate::context::ArrowContext;
+use crate::context::{ArrowContext, BatchReceiver};
 use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
 use arrow::array::RecordBatch;
@@ -17,7 +17,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::mpsc::Receiver;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
 
@@ -61,7 +60,7 @@ impl OperatorNode {
     async fn run_behavior(
         &mut self,
         ctx: &mut ArrowContext,
-        in_qs: &mut Vec<Receiver<ArrowMessage>>,
+        in_qs: &mut Vec<BatchReceiver>,
     ) -> Option<SignalMessage> {
         match self {
             OperatorNode::Source(s) => {
@@ -77,11 +76,7 @@ impl OperatorNode {
         }
     }
 
-    pub async fn start(
-        mut self: Box<Self>,
-        mut ctx: ArrowContext,
-        mut in_qs: Vec<Receiver<ArrowMessage>>,
-    ) {
+    pub async fn start(mut self: Box<Self>, mut ctx: ArrowContext, mut in_qs: Vec<BatchReceiver>) {
         info!(
             "Starting task {}-{}",
             ctx.task_info.operator_name, ctx.task_info.task_index
@@ -160,7 +155,7 @@ pub trait SourceOperator: Send + 'static {
 async fn operator_run_behavior(
     this: &mut Box<dyn ArrowOperator>,
     ctx: &mut ArrowContext,
-    in_qs: &mut Vec<Receiver<ArrowMessage>>,
+    in_qs: &mut Vec<BatchReceiver>,
 ) -> Option<SignalMessage> {
     this.on_start(ctx).await;
 

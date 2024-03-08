@@ -24,14 +24,16 @@ use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
 pub use arroyo_macro::StreamNode;
-use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver, BatchSender};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;
 use arroyo_operator::ErasedConstructor;
 use arroyo_rpc::grpc::{api, CheckpointMetadata, TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{range_for_server, ArrowMessage, Key, TaskInfo, WorkerId, QUEUE_SIZE};
+use arroyo_types::{
+    range_for_server, u32_config, Key, TaskInfo, WorkerId, DEFAULT_QUEUE_SIZE, QUEUE_SIZE_ENV,
+};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
@@ -88,8 +90,8 @@ struct PhysicalGraphEdge {
     out_logical_idx: usize,
     schema: ArroyoSchema,
     edge: LogicalEdgeType,
-    tx: Option<Sender<QueueItem>>,
-    rx: Option<Receiver<QueueItem>>,
+    tx: Option<BatchSender>,
+    rx: Option<BatchReceiver>,
 }
 
 impl Debug for PhysicalGraphEdge {
@@ -241,6 +243,8 @@ impl Program {
             }
         }
 
+        let queue_size = u32_config(QUEUE_SIZE_ENV, DEFAULT_QUEUE_SIZE);
+
         for idx in logical.edge_indices() {
             let edge = logical.edge_weight(idx).unwrap();
             let (logical_in_node_idx, logical_out_node_idx) = logical.edge_endpoints(idx).unwrap();
@@ -264,7 +268,7 @@ impl Program {
                         panic!("cannot create a forward connection between nodes of different parallelism");
                     }
                     for (f, t) in from_nodes.iter().zip(&to_nodes) {
-                        let (tx, rx) = channel(QUEUE_SIZE);
+                        let (tx, rx) = batch_bounded(queue_size);
                         let edge = PhysicalGraphEdge {
                             edge_idx: 0,
                             in_logical_idx: logical_in_node_idx.index(),
@@ -282,7 +286,7 @@ impl Program {
                 | LogicalEdgeType::RightJoin => {
                     for f in &from_nodes {
                         for (idx, t) in to_nodes.iter().enumerate() {
-                            let (tx, rx) = channel(QUEUE_SIZE);
+                            let (tx, rx) = batch_bounded(queue_size);
                             let edge = PhysicalGraphEdge {
                                 edge_idx: idx,
                                 in_logical_idx: logical_in_node_idx.index(),
@@ -637,8 +641,7 @@ impl Engine {
             node.parallelism
         );
 
-        let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<Receiver<QueueItem>>> =
-            BTreeMap::new();
+        let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<BatchReceiver>> = BTreeMap::new();
 
         for edge in self.program.graph.edge_indices() {
             if self.program.graph.edge_endpoints(edge).unwrap().1 == idx {
@@ -650,8 +653,7 @@ impl Engine {
             }
         }
 
-        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, Sender<ArrowMessage>>> =
-            BTreeMap::new();
+        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, BatchSender>> = BTreeMap::new();
 
         for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
             // is the target of this edge local or remote?

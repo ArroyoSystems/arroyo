@@ -19,10 +19,9 @@ use bytes::{Buf, BufMut};
 use tokio::{
     io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::mpsc::{Receiver, Sender},
 };
 
-use arroyo_operator::context::QueueItem;
+use arroyo_operator::context::{BatchReceiver, BatchSender};
 use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
 
@@ -31,7 +30,7 @@ use arroyo_server_common::shutdown::ShutdownGuard;
 
 #[derive(Clone)]
 struct NetworkSender {
-    tx: Sender<QueueItem>,
+    tx: BatchSender,
     schema: SchemaRef,
 }
 
@@ -47,7 +46,7 @@ impl Senders {
         }
     }
 
-    pub fn add(&mut self, quad: Quad, schema: SchemaRef, tx: Sender<QueueItem>) {
+    pub fn add(&mut self, quad: Quad, schema: SchemaRef, tx: BatchSender) {
         self.senders.insert(quad, NetworkSender { tx, schema });
     }
 
@@ -193,7 +192,7 @@ pub struct Quad {
 
 struct NetworkReceiver {
     quad: Quad,
-    rx: Receiver<QueueItem>,
+    rx: BatchReceiver,
     dictionary_tracker: Arc<Mutex<DictionaryTracker>>,
 }
 
@@ -214,7 +213,7 @@ impl OutNetworkLink {
         }
     }
 
-    pub async fn add_receiver(&mut self, quad: Quad, rx: Receiver<QueueItem>) {
+    pub async fn add_receiver(&mut self, quad: Quad, rx: BatchReceiver) {
         self.receivers.push(NetworkReceiver {
             quad,
             rx,
@@ -353,7 +352,7 @@ impl NetworkManager {
         }
     }
 
-    pub async fn connect(&mut self, addr: String, quad: Quad, rx: Receiver<QueueItem>) {
+    pub async fn connect(&mut self, addr: String, quad: Quad, rx: BatchReceiver) {
         let mut ins = self.out_streams.lock().await;
         if let std::collections::hash_map::Entry::Vacant(e) = ins.entry(quad) {
             e.insert(OutNetworkLink::connect(addr.clone()).await);
@@ -469,9 +468,10 @@ mod test {
     use std::time::SystemTime;
     use std::{pin::Pin, time::Duration};
 
+    use arroyo_operator::context::batch_bounded;
     use arroyo_server_common::shutdown::Shutdown;
     use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
-    use tokio::{sync::mpsc::channel, time::timeout};
+    use tokio::time::timeout;
 
     use crate::network_manager::{MessageType, Quad};
 
@@ -499,7 +499,7 @@ mod test {
 
     #[tokio::test]
     async fn test_client_server() {
-        let (server_tx, mut server_rx) = channel(10);
+        let (server_tx, mut server_rx) = batch_bounded(10);
 
         let mut senders = Senders::new();
 
@@ -537,7 +537,7 @@ mod test {
         let mut nm = NetworkManager::new(0);
         let port = nm.open_listener(shutdown.guard("test")).await;
 
-        let (client_tx, client_rx) = channel(10);
+        let (client_tx, client_rx) = batch_bounded(10);
         nm.connect(format!("localhost:{}", port), quad, client_rx)
             .await;
 

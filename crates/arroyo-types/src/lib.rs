@@ -78,7 +78,8 @@ impl Serialize for Window {
 
 pub const DEFAULT_LINGER: Duration = Duration::from_millis(50);
 pub const DEFAULT_BATCH_SIZE: usize = 128;
-
+pub const QUEUE_SIZE_ENV: &str = "QUEUE_SIZE";
+pub const DEFAULT_QUEUE_SIZE: u32 = 32 * 1024;
 pub const TASK_SLOTS_ENV: &str = "TASK_SLOTS";
 pub const CONTROLLER_ADDR_ENV: &str = "CONTROLLER_ADDR";
 pub const API_ADDR_ENV: &str = "API_ADDR";
@@ -185,8 +186,6 @@ pub fn duration_millis_config(var: &str, default: Duration) -> Duration {
         })
         .unwrap_or(default)
 }
-
-pub const QUEUE_SIZE: usize = 4 * 1024;
 
 // These seeds were randomly generated; changing them will break existing state
 pub const HASH_SEEDS: [u64; 4] = [

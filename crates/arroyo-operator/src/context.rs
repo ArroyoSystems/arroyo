@@ -12,18 +12,23 @@ use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
-    from_micros, should_flush, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo, UserError,
-    Watermark, QUEUE_SIZE,
+    from_micros, should_flush, u32_config, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo,
+    UserError, Watermark, DEFAULT_QUEUE_SIZE, QUEUE_SIZE_ENV,
 };
 use datafusion::common::hash_utils;
 use rand::Rng;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::Notify;
 use tracing::warn;
 
 pub type QueueItem = ArrowMessage;
+
+const QUEUE_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 pub struct WatermarkHolder {
     // This is the last watermark with an actual value; this helps us keep track of the watermark we're at even
@@ -78,6 +83,101 @@ impl WatermarkHolder {
         self.update_watermark();
         Some(self.cur_watermark)
     }
+}
+
+/// A wrapper for an UnboundedSender<QueueItem> that bounds by the number of rows within
+/// a batch rather than the number of batches
+#[derive(Clone)]
+pub struct BatchSender {
+    size: u32,
+    tx: UnboundedSender<QueueItem>,
+    queued_messages: Arc<AtomicU32>,
+    notify: Arc<Notify>,
+}
+
+#[inline]
+fn message_count(item: &QueueItem) -> u32 {
+    match item {
+        QueueItem::Data(d) => d.num_rows() as u32,
+        QueueItem::Signal(_) => 1,
+    }
+}
+
+impl BatchSender {
+    pub async fn send(&self, item: QueueItem) -> Result<(), SendError<QueueItem>> {
+        // Ensure that every message is sendable, even if it's bigger than our max size
+        let count = message_count(&item).min(self.size);
+        loop {
+            if self.tx.is_closed() {
+                return Err(SendError(item));
+            }
+
+            let cur = self.queued_messages.load(Ordering::Acquire);
+            if cur as usize + count as usize <= self.size as usize {
+                match self.queued_messages.compare_exchange(
+                    cur,
+                    cur + count,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => {
+                        return self.tx.send(item);
+                    }
+                    Err(_) => {
+                        // try again
+                        continue;
+                    }
+                }
+            } else {
+                // not enough room in the queue, wait to be notified that the receiver has
+                // consumed
+                self.notify.notified().await;
+            }
+        }
+    }
+
+    pub fn capacity(&self) -> u32 {
+        self.size
+            .checked_sub(self.queued_messages.load(Ordering::Relaxed))
+            .unwrap_or(0)
+    }
+}
+
+pub struct BatchReceiver {
+    rx: UnboundedReceiver<QueueItem>,
+    queued_messages: Arc<AtomicU32>,
+    notify: Arc<Notify>,
+}
+
+impl BatchReceiver {
+    pub async fn recv(&mut self) -> Option<QueueItem> {
+        let item = self.rx.recv().await;
+        if let Some(item) = &item {
+            let size = message_count(&item);
+            self.queued_messages.fetch_sub(size, Ordering::AcqRel);
+            self.notify.notify_waiters();
+        }
+        item
+    }
+}
+
+pub fn batch_bounded(size: u32) -> (BatchSender, BatchReceiver) {
+    let (tx, rx) = unbounded_channel();
+    let notify = Arc::new(Notify::new());
+    let queued_messages = Arc::new(AtomicU32::new(0));
+    (
+        BatchSender {
+            size,
+            tx,
+            queued_messages: queued_messages.clone(),
+            notify: notify.clone(),
+        },
+        BatchReceiver {
+            rx,
+            notify,
+            queued_messages,
+        },
+    )
 }
 
 struct ContextBuffer {
@@ -159,7 +259,7 @@ pub struct ArrowCollector {
     task_info: Arc<TaskInfo>,
     out_schema: Option<ArroyoSchema>,
     projection: Option<Vec<usize>>,
-    out_qs: Vec<Vec<Sender<ArrowMessage>>>,
+    out_qs: Vec<Vec<BatchSender>>,
     tx_queue_rem_gauges: QueueGauges,
     tx_queue_size_gauges: QueueGauges,
 }
@@ -263,7 +363,7 @@ impl ArrowCollector {
 
                 self.tx_queue_size_gauges[i][partition]
                     .iter()
-                    .for_each(|g| g.set(QUEUE_SIZE as i64));
+                    .for_each(|g| g.set(QUEUE_SIZE.load(Ordering::Relaxed) as i64));
             }
         }
     }
@@ -292,7 +392,7 @@ impl ArrowContext {
         in_schemas: Vec<ArroyoSchema>,
         out_schema: Option<ArroyoSchema>,
         projection: Option<Vec<usize>>,
-        out_qs: Vec<Vec<Sender<ArrowMessage>>>,
+        out_qs: Vec<Vec<BatchSender>>,
         tables: HashMap<String, TableConfig>,
     ) -> Self {
         let (watermark, metadata) = if let Some(metadata) = restore_from {
@@ -320,6 +420,11 @@ impl ArrowContext {
         } else {
             (None, None)
         };
+
+        QUEUE_SIZE.store(
+            u32_config(QUEUE_SIZE_ENV, DEFAULT_QUEUE_SIZE as u32) as usize,
+            Ordering::Relaxed,
+        );
 
         let (tx_queue_size_gauges, tx_queue_rem_gauges) =
             register_queue_gauges(&task_info, &out_qs);
@@ -601,7 +706,6 @@ mod tests {
     use arroyo_metrics::register_queue_gauges;
     use arroyo_types::to_nanos;
     use std::time::Duration;
-    use tokio::sync::mpsc::channel;
 
     use super::*;
 
@@ -656,8 +760,8 @@ mod tests {
             ),
         ]));
 
-        let (tx1, mut rx1) = channel(8);
-        let (tx2, mut rx2) = channel(8);
+        let (tx1, mut rx1) = batch_bounded(8);
+        let (tx2, mut rx2) = batch_bounded(8);
 
         let record = RecordBatch::try_new(schema.clone(), columns).unwrap();
 
