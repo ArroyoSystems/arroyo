@@ -137,6 +137,7 @@ impl ArrowDeserializer {
                     arrow_json::reader::ReaderBuilder::new(Arc::new(
                         schema.schema_without_timestamp(),
                     ))
+                    .with_limit_to_batch_size(false)
                     .with_strict_mode(false)
                     .build_decoder()
                     .unwrap(),
