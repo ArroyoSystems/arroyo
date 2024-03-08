@@ -550,6 +550,10 @@ impl ExecutionPlan for RwLockRecordBatchReader {
     fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
         Ok(Statistics::new_unknown(&self.schema))
     }
+
+    fn reset(&self) -> DFResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -617,6 +621,10 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
     fn statistics(&self) -> datafusion_common::Result<datafusion_common::Statistics> {
         Ok(datafusion_common::Statistics::new_unknown(&self.schema))
     }
+
+    fn reset(&self) -> DFResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -679,6 +687,10 @@ impl ExecutionPlan for RecordBatchVecReader {
     fn statistics(&self) -> datafusion_common::Result<datafusion_common::Statistics> {
         Ok(datafusion_common::Statistics::new_unknown(&self.schema))
     }
+
+    fn reset(&self) -> DFResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -734,5 +746,9 @@ impl ExecutionPlan for ArroyoMemExec {
 
     fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
         Ok(datafusion_common::Statistics::new_unknown(&self.schema))
+    }
+
+    fn reset(&self) -> DFResult<()> {
+        Ok(())
     }
 }

@@ -121,6 +121,7 @@ impl JoinWithExpiration {
             self.right_passer.write().unwrap().replace(right);
             self.left_passer.write().unwrap().replace(left);
         }
+        self.join_execution_plan.reset().unwrap();
         let mut records = self
             .join_execution_plan
             .execute(0, SessionContext::new().task_ctx())

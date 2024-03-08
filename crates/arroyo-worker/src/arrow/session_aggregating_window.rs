@@ -382,6 +382,7 @@ impl ActiveSession {
         initial_timestamp: SystemTime,
         sender: UnboundedSender<RecordBatch>,
     ) -> Result<Self> {
+        aggregation_plan.reset()?;
         let result_exec = aggregation_plan.execute(0, SessionContext::new().task_ctx())?;
         Ok(Self {
             data_start: initial_timestamp,
@@ -473,7 +474,7 @@ impl ActiveSession {
             .await?;
         if result_batches.len() != 1 {
             bail!(
-                "expect active session result to be excactly one batch, not {:?}",
+                "expect active session result to be exactly one batch, not {:?}",
                 result_batches
             );
         }

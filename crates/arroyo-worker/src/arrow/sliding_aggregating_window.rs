@@ -161,6 +161,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
                 .tiered_record_batches
                 .batches_for_interval(interval_start, interval_end)?;
         }
+        self.finish_execution_plan.reset()?;
         let mut final_exec = self
             .finish_execution_plan
             .execute(0, SessionContext::new().task_ctx())
@@ -194,10 +195,10 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             let mut batches = self.final_batches_passer.write().unwrap();
             *batches = aggregate_results;
         }
+        self.final_projection.reset()?;
         let mut final_projection_exec = self
             .final_projection
-            .execute(0, SessionContext::new().task_ctx())
-            .unwrap();
+            .execute(0, SessionContext::new().task_ctx())?;
         while let Some(batch) = final_projection_exec.next().await {
             let batch = batch.expect("should be able to compute batch");
             ctx.collector.collect(batch).await;
@@ -623,6 +624,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
+                self.partial_aggregation_plan.reset().expect("reset plan");
                 let new_exec = self
                     .partial_aggregation_plan
                     .execute(0, SessionContext::new().task_ctx())
