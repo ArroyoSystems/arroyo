@@ -5,7 +5,10 @@ use arroyo_rpc::grpc::{
     api, HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq,
     StopWorkerReq, StopWorkerStatus, WorkerFinishedReq,
 };
-use arroyo_types::{NodeId, WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV, SLOTS_PER_NODE};
+use arroyo_types::{
+    NodeId, WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, SLOTS_PER_NODE,
+    TASK_SLOTS_ENV, WORKER_ID_ENV,
+};
 use base64::{engine::general_purpose, Engine as _};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
@@ -106,7 +109,7 @@ impl Scheduler for ProcessScheduler {
         start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
         let slots_per_node = arroyo_types::u32_config(SLOTS_PER_NODE, DEFAULT_SLOTS_PER_NODE);
-        
+
         let workers = (start_pipeline_req.slots as f32 / slots_per_node as f32).ceil() as usize;
 
         let mut slots_scheduled = 0;
@@ -120,7 +123,8 @@ impl Scheduler for ProcessScheduler {
         for _ in 0..workers {
             let path = base_path.clone();
 
-            let slots_here = (start_pipeline_req.slots - slots_scheduled).min(slots_per_node as usize);
+            let slots_here =
+                (start_pipeline_req.slots - slots_scheduled).min(slots_per_node as usize);
 
             let worker_id = self.worker_counter.fetch_add(1, Ordering::SeqCst);
 

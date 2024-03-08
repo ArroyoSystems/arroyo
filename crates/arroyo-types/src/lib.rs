@@ -671,7 +671,7 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
 /// A reference-counted reference to a [TaskInfo].
 pub type TaskInfoRef = Arc<TaskInfo>;
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
 pub struct TaskInfo {
     pub job_id: String,
     pub operator_name: String,
@@ -735,6 +735,8 @@ pub static MESSAGES_RECV: &str = "arroyo_worker_messages_recv";
 pub static MESSAGES_SENT: &str = "arroyo_worker_messages_sent";
 pub static BYTES_RECV: &str = "arroyo_worker_bytes_recv";
 pub static BYTES_SENT: &str = "arroyo_worker_bytes_sent";
+pub static BATCHES_RECV: &str = "arroyo_worker_batches_recv";
+pub static BATCHES_SENT: &str = "arroyo_worker_batches_sent";
 pub static TX_QUEUE_SIZE: &str = "arroyo_worker_tx_queue_size";
 pub static TX_QUEUE_REM: &str = "arroyo_worker_tx_queue_rem";
 pub static DESERIALIZATION_ERRORS: &str = "arroyo_worker_deserialization_errors";
