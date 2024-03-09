@@ -213,7 +213,7 @@ async fn run_and_checkpoint(
     checkpoint_interval: i32,
 ) {
     let program = Program::local_from_logical(job_id.clone(), graph);
-    let tasks_per_operator = program.tasks_per_operator();
+    let tasks_per_operator = program.tasks_per_operator().await;
     let engine = Engine::for_local(program, job_id.clone());
     let (running_engine, mut control_rx) = engine
         .start(StreamConfig {
@@ -300,7 +300,7 @@ async fn run_pipeline_and_assert_outputs(
     .await;
 
     let program = Program::local_from_logical(job_id.clone(), &graph);
-    let tasks_per_operator = program.tasks_per_operator();
+    let tasks_per_operator = program.tasks_per_operator().await;
     let engine = Engine::for_local(program, job_id.clone());
     let (running_engine, mut control_rx) = engine
         .start(StreamConfig {
@@ -329,7 +329,7 @@ async fn run_completely(
     output_location: String,
     golden_output_location: String,
 ) {
-    let tasks_per_operator = program.tasks_per_operator();
+    let tasks_per_operator = program.tasks_per_operator().await;
     let engine = Engine::for_local(program, job_id.clone());
     let (running_engine, mut control_rx) = engine
         .start(StreamConfig {

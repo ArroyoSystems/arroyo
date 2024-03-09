@@ -112,8 +112,8 @@ impl LocalRunner {
 
     pub async fn run(self) {
         let name = format!("{}-0", self.program.name);
-        let total_nodes = self.program.total_nodes();
-        let engine = Engine::for_local(self.program, name);
+        let total_nodes = self.program.total_nodes().await;
+        let engine = Engine::for_local(self.program, name).await;
         let (_running_engine, mut control_rx) = engine
             .start(StreamConfig {
                 restore_epoch: None,
@@ -164,6 +164,7 @@ impl WorkerServer {
             api::ArrowProgram::decode(&graph[..]).expect("ARROYO_PROGRAM is not a valid protobuf");
 
         let logical = LogicalProgram::try_from(graph).expect("Failed to create LogicalProgram");
+
 
         let id = WorkerId::from_env().unwrap_or_else(|| WorkerId(random()));
         let job_id =
@@ -427,15 +428,16 @@ impl WorkerGrpc for WorkerServer {
             registry.add_udf(Arc::new(ScalarUDF::from(dylib)));
         }
 
-        let program = Program::from_logical(
-            self.name.to_string(),
-            &self.logical_graph,
-            &req.tasks,
-            registry,
-        );
 
         let (engine, control_rx) = {
             let network = { self.network.lock().unwrap().take().unwrap() };
+
+            let program = Program::from_logical(
+                self.name.to_string(),
+                &self.logical_graph,
+                &req.tasks,
+                registry,
+            );
 
             let engine = Engine::new(
                 program,
@@ -456,17 +458,17 @@ impl WorkerGrpc for WorkerServer {
             .child("control-thread")
             .into_spawn_task(self.start_control_thread(control_rx, self.id, self.job_id.clone()));
 
-        let sources = engine.source_controls();
-        let sinks = engine.sink_controls();
-        let operator_controls = engine.operator_controls();
-
-        let mut state = self.state.lock().unwrap();
-        *state = Some(EngineState {
-            sources,
-            sinks,
-            operator_controls,
-            shutdown_guard: self.shutdown_guard.child("engine-state"),
-        });
+        // let sources = engine.source_controls().await;
+        // let sinks = engine.sink_controls().await;
+        // let operator_controls = engine.operator_controls().await;
+        // 
+        // let mut state = self.state.lock().unwrap();
+        // *state = Some(EngineState {
+        //     sources,
+        //     sinks,
+        //     operator_controls,
+        //     shutdown_guard: self.shutdown_guard.child("engine-state"),
+        // });
 
         info!("[{:?}] Started execution", self.id);
 

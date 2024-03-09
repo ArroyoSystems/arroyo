@@ -10,7 +10,7 @@ use prost::Message;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
-use tracing::info;
+use tracing::{debug};
 
 pub mod expiring_time_key_map;
 pub mod global_keyed_map;
@@ -257,7 +257,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         let checkpoint_message = checkpoint_message
             .map(|metadata| Self::checked_proto_decode(metadata.table_type(), metadata.data))
             .transpose()?;
-        info!(
+        debug!(
             "restoring from checkpoint message:\n{:#?}",
             checkpoint_message
         );

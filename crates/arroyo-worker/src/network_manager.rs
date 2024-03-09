@@ -45,6 +45,10 @@ impl Senders {
             senders: HashMap::new(),
         }
     }
+    
+    pub fn merge(&mut self, other: Self) {
+        self.senders.extend(other.senders.into_iter())
+    }
 
     pub fn add(&mut self, quad: Quad, schema: SchemaRef, tx: BatchSender) {
         self.senders.insert(quad, NetworkSender { tx, schema });
@@ -352,7 +356,7 @@ impl NetworkManager {
         }
     }
 
-    pub async fn connect(&mut self, addr: String, quad: Quad, rx: BatchReceiver) {
+    pub async fn connect(&self, addr: String, quad: Quad, rx: BatchReceiver) {
         let mut ins = self.out_streams.lock().await;
         if let std::collections::hash_map::Entry::Vacant(e) = ins.entry(quad) {
             e.insert(OutNetworkLink::connect(addr.clone()).await);
