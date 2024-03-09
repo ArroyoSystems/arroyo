@@ -30,16 +30,19 @@ pub trait OperatorConstructor: Send {
 }
 
 pub enum OperatorNode {
-    Source(Box<dyn SourceOperator>),
-    Operator(Box<dyn ArrowOperator>),
+    Source(Box<dyn SourceOperator + Send>),
+    Operator(Box<dyn ArrowOperator + Send>),
 }
 
+// TODO: this is required currently because the FileSystemSink code isn't sync
+unsafe impl Sync for OperatorNode {}
+
 impl OperatorNode {
-    pub fn from_source(source: Box<dyn SourceOperator>) -> Self {
+    pub fn from_source(source: Box<dyn SourceOperator + Send>) -> Self {
         OperatorNode::Source(source)
     }
 
-    pub fn from_operator(operator: Box<dyn ArrowOperator>) -> Self {
+    pub fn from_operator(operator: Box<dyn ArrowOperator + Send>) -> Self {
         OperatorNode::Operator(operator)
     }
 
@@ -153,7 +156,7 @@ pub trait SourceOperator: Send + 'static {
 }
 
 async fn operator_run_behavior(
-    this: &mut Box<dyn ArrowOperator>,
+    this: &mut Box<dyn ArrowOperator + Send>,
     ctx: &mut ArrowContext,
     in_qs: &mut Vec<BatchReceiver>,
 ) -> Option<SignalMessage> {

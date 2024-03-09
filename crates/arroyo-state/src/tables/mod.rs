@@ -10,7 +10,7 @@ use prost::Message;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
-use tracing::{debug};
+use tracing::debug;
 
 pub mod expiring_time_key_map;
 pub mod global_keyed_map;

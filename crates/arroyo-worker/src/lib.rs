@@ -165,7 +165,6 @@ impl WorkerServer {
 
         let logical = LogicalProgram::try_from(graph).expect("Failed to create LogicalProgram");
 
-
         let id = WorkerId::from_env().unwrap_or_else(|| WorkerId(random()));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
@@ -428,7 +427,6 @@ impl WorkerGrpc for WorkerServer {
             registry.add_udf(Arc::new(ScalarUDF::from(dylib)));
         }
 
-
         let (engine, control_rx) = {
             let network = { self.network.lock().unwrap().take().unwrap() };
 
@@ -458,17 +456,17 @@ impl WorkerGrpc for WorkerServer {
             .child("control-thread")
             .into_spawn_task(self.start_control_thread(control_rx, self.id, self.job_id.clone()));
 
-        // let sources = engine.source_controls().await;
-        // let sinks = engine.sink_controls().await;
-        // let operator_controls = engine.operator_controls().await;
-        // 
-        // let mut state = self.state.lock().unwrap();
-        // *state = Some(EngineState {
-        //     sources,
-        //     sinks,
-        //     operator_controls,
-        //     shutdown_guard: self.shutdown_guard.child("engine-state"),
-        // });
+        let sources = engine.source_controls();
+        let sinks = engine.sink_controls();
+        let operator_controls = engine.operator_controls();
+
+        let mut state = self.state.lock().unwrap();
+        *state = Some(EngineState {
+            sources,
+            sinks,
+            operator_controls,
+            shutdown_guard: self.shutdown_guard.child("engine-state"),
+        });
 
         info!("[{:?}] Started execution", self.id);
 

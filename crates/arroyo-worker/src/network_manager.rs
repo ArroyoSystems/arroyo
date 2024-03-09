@@ -16,6 +16,8 @@ use tokio::{
 use tracing::warn;
 
 use bytes::{Buf, BufMut};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use tokio::{
     io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -45,7 +47,7 @@ impl Senders {
             senders: HashMap::new(),
         }
     }
-    
+
     pub fn merge(&mut self, other: Self) {
         self.senders.extend(other.senders.into_iter())
     }
@@ -208,13 +210,26 @@ struct OutNetworkLink {
 
 impl OutNetworkLink {
     pub async fn connect(dest: String) -> Self {
-        let stream = TcpStream::connect(&dest).await.unwrap();
-
-        Self {
-            _dest: dest,
-            stream: BufWriter::new(stream),
-            receivers: vec![],
+        let mut rand = StdRng::from_entropy();
+        for i in 0..10 {
+            match TcpStream::connect(&dest).await {
+                Ok(stream) => {
+                    return Self {
+                        _dest: dest,
+                        stream: BufWriter::new(stream),
+                        receivers: vec![],
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to connect to {dest}: {:?}", e);
+                    tokio::time::sleep(Duration::from_millis(
+                        (i + 1) * (50 + rand.gen_range(1..50)),
+                    ))
+                    .await;
+                }
+            }
         }
+        panic!("failed to connect to {dest}");
     }
 
     pub async fn add_receiver(&mut self, quad: Quad, rx: BatchReceiver) {
@@ -357,9 +372,10 @@ impl NetworkManager {
     }
 
     pub async fn connect(&self, addr: String, quad: Quad, rx: BatchReceiver) {
+        let link = OutNetworkLink::connect(addr.clone()).await;
         let mut ins = self.out_streams.lock().await;
         if let std::collections::hash_map::Entry::Vacant(e) = ins.entry(quad) {
-            e.insert(OutNetworkLink::connect(addr.clone()).await);
+            e.insert(link);
         }
 
         ins.get_mut(&quad)

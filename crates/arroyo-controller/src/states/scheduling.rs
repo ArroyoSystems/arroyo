@@ -119,7 +119,7 @@ async fn handle_worker_connect<'a>(
                 for i in 0..3 {
                     match Channel::from_shared(rpc_address.clone())
                         .unwrap()
-                        .timeout(Duration::from_secs(30))
+                        .timeout(Duration::from_secs(90))
                         .connect()
                         .await
                     {
