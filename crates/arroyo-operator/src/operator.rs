@@ -17,6 +17,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::Notify;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
 
@@ -79,12 +80,19 @@ impl OperatorNode {
         }
     }
 
-    pub async fn start(mut self: Box<Self>, mut ctx: ArrowContext, mut in_qs: Vec<BatchReceiver>) {
+    pub async fn start(
+        mut self: Box<Self>,
+        mut ctx: ArrowContext,
+        mut in_qs: Vec<BatchReceiver>,
+        ready: Arc<Notify>,
+    ) {
         info!(
             "Starting task {}-{}",
             ctx.task_info.operator_name, ctx.task_info.task_index
         );
 
+        // wait until everything is set up
+        ready.notified().await;
         let final_message = self.run_behavior(&mut ctx, &mut in_qs).await;
 
         if let Some(final_message) = final_message {

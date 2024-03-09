@@ -37,7 +37,7 @@ use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use super::sync::streams::KeyedCloneableStreamFuture;
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
@@ -371,7 +371,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         match *data {
             Some((bin, batch_option)) => match batch_option {
                 None => {
-                    info!("future for {} was finished elsewhere", print_time(bin));
+                    debug!("future for {} was finished elsewhere", print_time(bin));
                 }
                 Some((batch, future)) => match self.execs.get_mut(&bin) {
                     Some(exec) => {

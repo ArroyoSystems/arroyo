@@ -41,6 +41,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Notify;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -482,11 +483,17 @@ impl Engine {
 
         let mut senders = Senders::new();
 
+        let ready = Arc::new(Notify::new());
         {
             let mut futures = FuturesUnordered::new();
 
             for idx in node_indexes {
-                futures.push(self.schedule_node(&checkpoint_metadata, &control_tx, idx));
+                futures.push(self.schedule_node(
+                    &checkpoint_metadata,
+                    &control_tx,
+                    idx,
+                    ready.clone(),
+                ));
             }
 
             while let Some(result) = futures.next().await {
@@ -500,6 +507,9 @@ impl Engine {
         for n in self.program.graph.write().unwrap().edge_weights_mut() {
             n.tx = None;
         }
+
+        // start all of the waiting tasks
+        ready.notify_waiters();
 
         self.spawn_metrics_thread();
 
@@ -518,6 +528,7 @@ impl Engine {
         checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
         idx: NodeIndex,
+        ready: Arc<Notify>,
     ) -> Senders {
         let (node, control_rx) = self
             .program
@@ -543,8 +554,15 @@ impl Engine {
         let mut senders = Senders::new();
 
         if assignment.worker_id == self.worker_id.0 {
-            self.run_locally(checkpoint_metadata, control_tx, idx, node, control_rx)
-                .await;
+            self.run_locally(
+                checkpoint_metadata,
+                control_tx,
+                idx,
+                node,
+                control_rx,
+                ready,
+            )
+            .await;
         } else {
             self.connect_to_remote_task(
                 &mut senders,
@@ -632,6 +650,7 @@ impl Engine {
         idx: NodeIndex,
         node: SubtaskNode,
         control_rx: Receiver<ControlMessage>,
+        ready: Arc<Notify>,
     ) {
         info!(
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
@@ -703,7 +722,7 @@ impl Engine {
 
         let operator = Box::new(node.node);
         let join_task = tokio::spawn(async move {
-            operator.start(ctx, in_qs).await;
+            operator.start(ctx, in_qs, ready).await;
         });
 
         let send_copy = control_tx.clone();
