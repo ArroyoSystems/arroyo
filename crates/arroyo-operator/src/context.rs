@@ -96,9 +96,9 @@ pub struct BatchSender {
 }
 
 #[inline]
-fn message_count(item: &QueueItem) -> u32 {
+fn message_count(item: &QueueItem, size: u32) -> u32 {
     match item {
-        QueueItem::Data(d) => d.num_rows() as u32,
+        QueueItem::Data(d) => (d.num_rows() as u32).min(size),
         QueueItem::Signal(_) => 1,
     }
 }
@@ -106,7 +106,7 @@ fn message_count(item: &QueueItem) -> u32 {
 impl BatchSender {
     pub async fn send(&self, item: QueueItem) -> Result<(), SendError<QueueItem>> {
         // Ensure that every message is sendable, even if it's bigger than our max size
-        let count = message_count(&item).min(self.size);
+        let count = message_count(&item, self.size);
         loop {
             if self.tx.is_closed() {
                 return Err(SendError(item));
@@ -147,6 +147,7 @@ impl BatchSender {
 }
 
 pub struct BatchReceiver {
+    size: u32,
     rx: UnboundedReceiver<QueueItem>,
     queued_messages: Arc<AtomicU32>,
     notify: Arc<Notify>,
@@ -156,8 +157,8 @@ impl BatchReceiver {
     pub async fn recv(&mut self) -> Option<QueueItem> {
         let item = self.rx.recv().await;
         if let Some(item) = &item {
-            let size = message_count(&item);
-            self.queued_messages.fetch_sub(size, Ordering::SeqCst);
+            let count = message_count(&item, self.size);
+            self.queued_messages.fetch_sub(count, Ordering::SeqCst);
             self.notify.notify_waiters();
         }
         item
@@ -176,6 +177,7 @@ pub fn batch_bounded(size: u32) -> (BatchSender, BatchReceiver) {
             notify: notify.clone(),
         },
         BatchReceiver {
+            size,
             rx,
             notify,
             queued_messages,
@@ -704,7 +706,7 @@ impl ArrowContext {
 
 #[cfg(test)]
 mod tests {
-    use arrow::array::{ArrayRef, TimestampNanosecondArray, UInt64Array};
+    use arrow::array::{ArrayRef, Int64Array, TimestampNanosecondArray, UInt64Array};
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
     use arroyo_metrics::register_queue_gauges;
     use arroyo_types::to_nanos;
@@ -815,5 +817,25 @@ mod tests {
         for v in &q2[1..] {
             assert_eq!(v2, v);
         }
+    }
+
+    #[tokio::test]
+    async fn test_batch_queues() {
+        let (tx, mut rx) = batch_bounded(8);
+        let msg = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)])),
+            vec![Arc::new(Int64Array::from(vec![1, 2, 3, 4]))],
+        )
+        .unwrap();
+
+        tx.send(ArrowMessage::Data(msg.clone())).await.unwrap();
+        tx.send(ArrowMessage::Data(msg.clone())).await.unwrap();
+
+        assert_eq!(tx.capacity(), 0);
+
+        rx.recv().await.unwrap();
+        rx.recv().await.unwrap();
+
+        assert_eq!(tx.capacity(), 8);
     }
 }
