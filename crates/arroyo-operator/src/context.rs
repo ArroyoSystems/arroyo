@@ -113,12 +113,15 @@ impl BatchSender {
             }
 
             let cur = self.queued_messages.load(Ordering::Acquire);
+            if cur > self.size * 2 {
+                warn!("cur is way too big! {}", cur);
+            }
             if cur as usize + count as usize <= self.size as usize {
                 match self.queued_messages.compare_exchange(
                     cur,
                     cur + count,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
                 ) {
                     Ok(_) => {
                         return self.tx.send(item);
@@ -154,7 +157,7 @@ impl BatchReceiver {
         let item = self.rx.recv().await;
         if let Some(item) = &item {
             let size = message_count(&item);
-            self.queued_messages.fetch_sub(size, Ordering::AcqRel);
+            self.queued_messages.fetch_sub(size, Ordering::SeqCst);
             self.notify.notify_waiters();
         }
         item

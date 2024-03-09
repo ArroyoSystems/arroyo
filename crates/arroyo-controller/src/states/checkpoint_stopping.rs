@@ -1,5 +1,5 @@
 use arroyo_rpc::grpc;
-use tracing::{debug, info};
+use tracing::{debug};
 
 use crate::{states::StateError, JobMessage};
 
