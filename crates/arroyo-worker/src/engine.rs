@@ -436,7 +436,7 @@ impl Engine {
             .count()
     }
 
-    pub async fn for_local(program: Program, job_id: String) -> Self {
+    pub fn for_local(program: Program, job_id: String) -> Self {
         let worker_id = WorkerId(0);
         let assignments = program
             .graph
