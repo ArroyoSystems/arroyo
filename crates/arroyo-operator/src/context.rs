@@ -24,7 +24,7 @@ use std::time::{Instant, SystemTime};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
-use tracing::warn;
+use tracing::{info, warn};
 
 pub type QueueItem = ArrowMessage;
 
@@ -117,6 +117,9 @@ impl BatchSender {
                 warn!("cur is way too big! {}", cur);
             }
             if cur as usize + count as usize <= self.size as usize {
+                if count > self.size {
+                    info!("sending big message: {} rows", count);
+                }
                 match self.queued_messages.compare_exchange(
                     cur,
                     cur + count,
