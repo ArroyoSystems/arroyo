@@ -22,8 +22,6 @@ impl State for CheckpointStopping {
 
         let mut final_checkpoint_started = false;
 
-        info!("in a checkpoint stopping");
-
         loop {
             match job_controller.checkpoint_finished().await {
                 Ok(done) => {

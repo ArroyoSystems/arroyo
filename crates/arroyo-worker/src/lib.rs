@@ -112,7 +112,7 @@ impl LocalRunner {
 
     pub async fn run(self) {
         let name = format!("{}-0", self.program.name);
-        let total_nodes = self.program.total_nodes().await;
+        let total_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name).await;
         let (_running_engine, mut control_rx) = engine
             .start(StreamConfig {

@@ -17,7 +17,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::Notify;
+use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
 
@@ -65,18 +65,24 @@ impl OperatorNode {
         &mut self,
         ctx: &mut ArrowContext,
         in_qs: &mut Vec<BatchReceiver>,
+        ready: Arc<Barrier>,
     ) -> Option<SignalMessage> {
         match self {
             OperatorNode::Source(s) => {
                 s.on_start(ctx).await;
 
+                ready.wait().await;
+                info!(
+                    "Running source {}-{}",
+                    ctx.task_info.operator_name, ctx.task_info.task_index
+                );
                 let result = s.run(ctx).await;
 
                 s.on_close(ctx).await;
 
                 result.into()
             }
-            OperatorNode::Operator(o) => operator_run_behavior(o, ctx, in_qs).await,
+            OperatorNode::Operator(o) => operator_run_behavior(o, ctx, in_qs, ready).await,
         }
     }
 
@@ -84,16 +90,14 @@ impl OperatorNode {
         mut self: Box<Self>,
         mut ctx: ArrowContext,
         mut in_qs: Vec<BatchReceiver>,
-        ready: Arc<Notify>,
+        ready: Arc<Barrier>,
     ) {
         info!(
             "Starting task {}-{}",
             ctx.task_info.operator_name, ctx.task_info.task_index
         );
 
-        // wait until everything is set up
-        ready.notified().await;
-        let final_message = self.run_behavior(&mut ctx, &mut in_qs).await;
+        let final_message = self.run_behavior(&mut ctx, &mut in_qs, ready).await;
 
         if let Some(final_message) = final_message {
             ctx.broadcast(ArrowMessage::Signal(final_message)).await;
@@ -167,8 +171,15 @@ async fn operator_run_behavior(
     this: &mut Box<dyn ArrowOperator + Send>,
     ctx: &mut ArrowContext,
     in_qs: &mut Vec<BatchReceiver>,
+    ready: Arc<Barrier>,
 ) -> Option<SignalMessage> {
     this.on_start(ctx).await;
+
+    ready.wait().await;
+    info!(
+        "Running operator {}-{}",
+        ctx.task_info.operator_name, ctx.task_info.task_index
+    );
 
     let task_info = ctx.task_info.clone();
     let name = this.name();

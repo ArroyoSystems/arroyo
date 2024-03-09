@@ -41,7 +41,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::Notify;
+use tokio::sync::Barrier;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -170,7 +170,7 @@ pub struct Program {
 }
 
 impl Program {
-    pub async fn total_nodes(&self) -> usize {
+    pub fn total_nodes(&self) -> usize {
         self.graph.read().unwrap().node_count()
     }
 
@@ -312,7 +312,7 @@ impl Program {
         }
     }
 
-    pub async fn tasks_per_operator(&self) -> HashMap<String, usize> {
+    pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
         let mut tasks_per_operator = HashMap::new();
         for node in self.graph.read().unwrap().node_weights() {
             let entry = tasks_per_operator.entry(node.id().to_string()).or_insert(0);
@@ -429,6 +429,13 @@ impl Engine {
         }
     }
 
+    fn local_task_count(&self) -> usize {
+        self.assignments
+            .iter()
+            .filter(|(_, a)| a.worker_id == self.worker_id.0)
+            .count()
+    }
+
     pub async fn for_local(program: Program, job_id: String) -> Self {
         let worker_id = WorkerId(0);
         let assignments = program
@@ -483,7 +490,7 @@ impl Engine {
 
         let mut senders = Senders::new();
 
-        let ready = Arc::new(Notify::new());
+        let ready = Arc::new(Barrier::new(self.local_task_count()));
         {
             let mut futures = FuturesUnordered::new();
 
@@ -508,9 +515,6 @@ impl Engine {
             n.tx = None;
         }
 
-        // start all of the waiting tasks
-        ready.notify_waiters();
-
         self.spawn_metrics_thread();
 
         (
@@ -528,7 +532,7 @@ impl Engine {
         checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
         idx: NodeIndex,
-        ready: Arc<Notify>,
+        ready: Arc<Barrier>,
     ) -> Senders {
         let (node, control_rx) = self
             .program
@@ -650,7 +654,7 @@ impl Engine {
         idx: NodeIndex,
         node: SubtaskNode,
         control_rx: Receiver<ControlMessage>,
-        ready: Arc<Notify>,
+        ready: Arc<Barrier>,
     ) {
         info!(
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
