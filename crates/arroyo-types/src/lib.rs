@@ -76,10 +76,10 @@ impl Serialize for Window {
     }
 }
 
-pub const DEFAULT_LINGER: Duration = Duration::from_millis(50);
-pub const DEFAULT_BATCH_SIZE: usize = 128;
+pub const DEFAULT_LINGER: Duration = Duration::from_millis(100);
+pub const DEFAULT_BATCH_SIZE: usize = 512;
 pub const QUEUE_SIZE_ENV: &str = "QUEUE_SIZE";
-pub const DEFAULT_QUEUE_SIZE: u32 = 32 * 1024;
+pub const DEFAULT_QUEUE_SIZE: u32 = 8 * 1024;
 pub const TASK_SLOTS_ENV: &str = "TASK_SLOTS";
 pub const CONTROLLER_ADDR_ENV: &str = "CONTROLLER_ADDR";
 pub const API_ADDR_ENV: &str = "API_ADDR";
