@@ -143,11 +143,13 @@ impl TaskCounters {
 
 pub type QueueGauges = Vec<Vec<Option<IntGauge>>>;
 
-pub fn register_queue_gauges<T>(
+pub fn register_queue_gauge<T>(
+    name: &'static str,
+    help: &'static str,
     task_info: &TaskInfo,
     out_qs: &Vec<Vec<T>>,
-) -> (QueueGauges, QueueGauges) {
-    let tx_queue_size_gauges = out_qs
+) -> QueueGauges {
+    out_qs
         .iter()
         .enumerate()
         .map(|(i, qs)| {
@@ -156,8 +158,8 @@ pub fn register_queue_gauges<T>(
                 .map(|(j, _)| {
                     gauge_for_task(
                         task_info,
-                        "arroyo_worker_tx_queue_size",
-                        "Size of a tx queue",
+                        name,
+                        help,
                         labels! {
                             "next_node".to_string() => format!("{}", i),
                             "next_node_idx".to_string() => format!("{}", j)
@@ -166,28 +168,5 @@ pub fn register_queue_gauges<T>(
                 })
                 .collect()
         })
-        .collect();
-
-    let tx_queue_rem_gauges = out_qs
-        .iter()
-        .enumerate()
-        .map(|(i, qs)| {
-            qs.iter()
-                .enumerate()
-                .map(|(j, _)| {
-                    gauge_for_task(
-                        task_info,
-                        "arroyo_worker_tx_queue_rem",
-                        "Remaining space in a tx queue",
-                        labels! {
-                            "next_node".to_string() => format!("{}", i),
-                            "next_node_idx".to_string() => format!("{}", j)
-                        },
-                    )
-                })
-                .collect()
-        })
-        .collect();
-
-    (tx_queue_size_gauges, tx_queue_rem_gauges)
+        .collect()
 }

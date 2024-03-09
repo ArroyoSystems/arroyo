@@ -3,7 +3,7 @@ use arrow::array::{make_builder, Array, ArrayBuilder, PrimitiveArray, RecordBatc
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::{SchemaRef, UInt64Type};
 use arroyo_formats::de::ArrowDeserializer;
-use arroyo_metrics::{register_queue_gauges, QueueGauges, TaskCounters};
+use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
@@ -12,23 +12,22 @@ use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
-    from_micros, should_flush, u32_config, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo,
-    UserError, Watermark, DEFAULT_QUEUE_SIZE, QUEUE_SIZE_ENV,
+    from_micros, should_flush, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo, UserError,
+    Watermark,
 };
 use datafusion::common::hash_utils;
 use rand::Rng;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::mem::size_of_val;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
-use tracing::{info, warn};
+use tracing::warn;
 
 pub type QueueItem = ArrowMessage;
-
-const QUEUE_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 pub struct WatermarkHolder {
     // This is the last watermark with an actual value; this helps us keep track of the watermark we're at even
@@ -92,6 +91,7 @@ pub struct BatchSender {
     size: u32,
     tx: UnboundedSender<QueueItem>,
     queued_messages: Arc<AtomicU32>,
+    queued_bytes: Arc<AtomicU64>,
     notify: Arc<Notify>,
 }
 
@@ -100,6 +100,14 @@ fn message_count(item: &QueueItem, size: u32) -> u32 {
     match item {
         QueueItem::Data(d) => (d.num_rows() as u32).min(size),
         QueueItem::Signal(_) => 1,
+    }
+}
+
+#[inline]
+fn message_bytes(item: &QueueItem) -> u64 {
+    match item {
+        QueueItem::Data(d) => d.get_array_memory_size() as u64,
+        QueueItem::Signal(s) => size_of_val(s) as u64,
     }
 }
 
@@ -113,13 +121,7 @@ impl BatchSender {
             }
 
             let cur = self.queued_messages.load(Ordering::Acquire);
-            if cur > self.size * 2 {
-                warn!("cur is way too big! {}", cur);
-            }
             if cur as usize + count as usize <= self.size as usize {
-                if count > self.size {
-                    info!("sending big message: {} rows", count);
-                }
                 match self.queued_messages.compare_exchange(
                     cur,
                     cur + count,
@@ -127,6 +129,8 @@ impl BatchSender {
                     Ordering::SeqCst,
                 ) {
                     Ok(_) => {
+                        self.queued_bytes
+                            .fetch_add(message_bytes(&item), Ordering::AcqRel);
                         return self.tx.send(item);
                     }
                     Err(_) => {
@@ -147,12 +151,21 @@ impl BatchSender {
             .checked_sub(self.queued_messages.load(Ordering::Relaxed))
             .unwrap_or(0)
     }
+
+    pub fn queued_bytes(&self) -> u64 {
+        self.queued_bytes.load(Ordering::Relaxed)
+    }
+
+    pub fn size(&self) -> u32 {
+        self.size
+    }
 }
 
 pub struct BatchReceiver {
     size: u32,
     rx: UnboundedReceiver<QueueItem>,
     queued_messages: Arc<AtomicU32>,
+    queued_bytes: Arc<AtomicU64>,
     notify: Arc<Notify>,
 }
 
@@ -162,6 +175,8 @@ impl BatchReceiver {
         if let Some(item) = &item {
             let count = message_count(&item, self.size);
             self.queued_messages.fetch_sub(count, Ordering::SeqCst);
+            self.queued_bytes
+                .fetch_sub(message_bytes(&item), Ordering::AcqRel);
             self.notify.notify_waiters();
         }
         item
@@ -172,17 +187,20 @@ pub fn batch_bounded(size: u32) -> (BatchSender, BatchReceiver) {
     let (tx, rx) = unbounded_channel();
     let notify = Arc::new(Notify::new());
     let queued_messages = Arc::new(AtomicU32::new(0));
+    let queued_bytes = Arc::new(AtomicU64::new(0));
     (
         BatchSender {
             size,
             tx,
             queued_messages: queued_messages.clone(),
+            queued_bytes: queued_bytes.clone(),
             notify: notify.clone(),
         },
         BatchReceiver {
             size,
             rx,
             notify,
+            queued_bytes,
             queued_messages,
         },
     )
@@ -270,6 +288,7 @@ pub struct ArrowCollector {
     out_qs: Vec<Vec<BatchSender>>,
     tx_queue_rem_gauges: QueueGauges,
     tx_queue_size_gauges: QueueGauges,
+    tx_queue_bytes_gauges: QueueGauges,
 }
 
 fn repartition<'a>(
@@ -334,6 +353,9 @@ impl ArrowCollector {
         TaskCounters::MessagesSent
             .for_task(&self.task_info, |c| c.inc_by(record.num_rows() as u64));
         TaskCounters::BatchesSent.for_task(&self.task_info, |c| c.inc());
+        TaskCounters::BytesSent.for_task(&self.task_info, |c| {
+            c.inc_by(record.get_array_memory_size() as u64)
+        });
 
         let out_schema = self.out_schema.as_ref().unwrap();
 
@@ -371,7 +393,11 @@ impl ArrowCollector {
 
                 self.tx_queue_size_gauges[i][partition]
                     .iter()
-                    .for_each(|g| g.set(QUEUE_SIZE.load(Ordering::Relaxed) as i64));
+                    .for_each(|g| g.set(out_q[partition].size() as i64));
+
+                self.tx_queue_bytes_gauges[i][partition]
+                    .iter()
+                    .for_each(|g| g.set(out_q[partition].queued_bytes() as i64));
             }
         }
     }
@@ -429,13 +455,26 @@ impl ArrowContext {
             (None, None)
         };
 
-        QUEUE_SIZE.store(
-            u32_config(QUEUE_SIZE_ENV, DEFAULT_QUEUE_SIZE as u32) as usize,
-            Ordering::Relaxed,
+        let tx_queue_size_gauges = register_queue_gauge(
+            "arroyo_worker_tx_queue_size",
+            "Size of a tx queue",
+            &task_info,
+            &out_qs,
         );
 
-        let (tx_queue_size_gauges, tx_queue_rem_gauges) =
-            register_queue_gauges(&task_info, &out_qs);
+        let tx_queue_rem_gauges = register_queue_gauge(
+            "arroyo_worker_tx_queue_rem",
+            "Remaining space in a tx queue",
+            &task_info,
+            &out_qs,
+        );
+
+        let tx_queue_bytes_gauges = register_queue_gauge(
+            "arroyo_worker_tx_bytes",
+            "Number of bytes queued in a tx queue",
+            &task_info,
+            &out_qs,
+        );
 
         let task_info = Arc::new(task_info);
 
@@ -459,6 +498,7 @@ impl ArrowContext {
                 out_qs,
                 tx_queue_rem_gauges,
                 tx_queue_size_gauges,
+                tx_queue_bytes_gauges,
                 out_schema: out_schema.clone(),
                 projection,
             },
@@ -518,7 +558,9 @@ impl ArrowContext {
 
         if self.buffer.as_ref().unwrap().size() > 0 {
             let buffer = self.buffer.take().unwrap();
-            self.collector.collect(buffer.finish()).await;
+            let batch = buffer.finish();
+            println!("{}\t{}", batch.num_rows(), batch.get_array_memory_size());
+            self.collector.collect(batch).await;
             self.buffer = Some(ContextBuffer::new(
                 self.out_schema.as_ref().map(|t| t.schema.clone()).unwrap(),
             ));
@@ -528,6 +570,7 @@ impl ArrowContext {
             if let Some(buffer) = deserializer.flush_buffer() {
                 match buffer {
                     Ok(batch) => {
+                        println!("{}\t{}", batch.num_rows(), batch.get_array_memory_size());
                         self.collector.collect(batch).await;
                     }
                     Err(e) => {
@@ -711,7 +754,6 @@ impl ArrowContext {
 mod tests {
     use arrow::array::{ArrayRef, Int64Array, TimestampNanosecondArray, UInt64Array};
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-    use arroyo_metrics::register_queue_gauges;
     use arroyo_types::to_nanos;
     use std::time::Duration;
 
@@ -784,8 +826,26 @@ mod tests {
 
         let out_qs = vec![vec![tx1, tx2]];
 
-        let (tx_queue_size_gauges, tx_queue_rem_gauges) =
-            register_queue_gauges(&*task_info, &out_qs);
+        let tx_queue_size_gauges = register_queue_gauge(
+            "arroyo_worker_tx_queue_size",
+            "Size of a tx queue",
+            &task_info,
+            &out_qs,
+        );
+
+        let tx_queue_rem_gauges = register_queue_gauge(
+            "arroyo_worker_tx_queue_rem",
+            "Remaining space in a tx queue",
+            &task_info,
+            &out_qs,
+        );
+
+        let tx_queue_bytes_gauges = register_queue_gauge(
+            "arroyo_worker_tx_bytes",
+            "Number of bytes queued in a tx queue",
+            &task_info,
+            &out_qs,
+        );
 
         let mut collector = ArrowCollector {
             task_info,
@@ -794,6 +854,7 @@ mod tests {
             out_qs,
             tx_queue_rem_gauges,
             tx_queue_size_gauges,
+            tx_queue_bytes_gauges,
         };
 
         collector.collect(record).await;
