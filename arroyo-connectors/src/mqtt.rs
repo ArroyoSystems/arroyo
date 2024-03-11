@@ -70,16 +70,22 @@ impl MqttConnector {
         let typ = pull_opt("type", options)?;
         let qos = options
             .remove("qos")
-            .and_then(|s| QualityOfService::try_from(s).ok());
+            .map(|s| {
+                QualityOfService::try_from(s).map_err(|s| anyhow!("invalid value for 'qos': {s}"))
+            })
+            .transpose()?;
 
         let table_type = match typ.as_str() {
-            "source" => TableType::Source {
-                type_: Some(Source::Source),
-            },
+            "source" => TableType::Source {},
             "sink" => TableType::Sink {
                 retain: options
                     .remove("sink.retain")
-                    .and_then(|s| s.parse::<bool>().ok()),
+                    .map(|s| {
+                        s.parse::<bool>()
+                            .map_err(|_| anyhow!("'sink.retail' must be either 'true' or 'false'"))
+                    })
+                    .transpose()?
+                    .unwrap_or(false),
             },
             _ => {
                 bail!("type must be one of 'source' or 'sink")
@@ -324,7 +330,7 @@ async fn test_inner(
                 .unwrap_or(QoS::AtMostOnce);
             if let TableType::Sink { retain, .. } = t.type_ {
                 client
-                    .publish(topic, qos, retain.unwrap_or_default(), "test".as_bytes())
+                    .publish(topic, qos, retain, "test".as_bytes())
                     .await?;
                 false
             } else {

@@ -73,7 +73,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> MqttSinkFunc<K, T> {
                 })
                 .unwrap_or(QoS::AtMostOnce),
             topic: table.topic,
-            retain: retain.unwrap_or_default(),
+            retain,
             serializer: DataSerializer::new(
                 config.format.expect("Format must be defined for KafkaSink"),
             ),

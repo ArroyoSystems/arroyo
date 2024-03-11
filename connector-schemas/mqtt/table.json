@@ -20,14 +20,8 @@
         {
           "type": "object",
           "title": "Source",
-          "properties": {
-            "type": {
-              "type": "string",
-              "title": "Source",
-              "enum": ["Source"]
-            }
-          },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "properties": {}
         },
         {
           "type": "object",
@@ -39,6 +33,7 @@
               "description": "Whether to retain messages published to this topic"
             }
           },
+          "required": ["retain"],
           "additionalProperties": false
         }
       ]

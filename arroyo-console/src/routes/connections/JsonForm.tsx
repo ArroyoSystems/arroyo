@@ -15,6 +15,7 @@ import {
   Select,
   Spinner,
   Stack,
+  Switch,
   Text,
   Textarea,
   Tooltip,
@@ -153,6 +154,49 @@ function NumberWidget({
         onChange={e => onChange(e)}
         readOnly={readonly}
       />
+      {errors[path] ? (
+        <FormErrorMessage>{errors[path]}</FormErrorMessage>
+      ) : (
+        description && (
+          <FormHelperText>
+            <Markdown>{description}</Markdown>
+          </FormHelperText>
+        )
+      )}
+    </FormControl>
+  );
+}
+
+function BooleanWidget({
+  path,
+  title,
+  description,
+  value,
+  errors,
+  onChange,
+  readonly,
+}: {
+  path: string;
+  title: string;
+  description?: string;
+  value: boolean;
+  errors: any;
+  onChange: (e: React.ChangeEvent<any>) => void;
+  readonly?: boolean;
+}) {
+  useEffect(() => {
+    if (!value) {
+      // @ts-ignore
+      onChange({ target: { name: path, value: false } });
+    }
+  }, [path]);
+
+  return (
+    <FormControl isInvalid={errors[path]}>
+      <HStack alignItems={'middle'}>
+        <FormLabel>{title}</FormLabel>
+        <Switch name={path} isChecked={value} readOnly={readonly} onChange={e => onChange(e)} />
+      </HStack>
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
       ) : (
@@ -764,6 +808,19 @@ export function FormInner({
                     }
                     min={property.minimum}
                     max={property.maximum}
+                    value={traversePath(values, nextPath)}
+                    errors={errors}
+                    onChange={onChange}
+                    readonly={readonly}
+                  />
+                );
+              }
+              case 'boolean': {
+                return (
+                  <BooleanWidget
+                    path={nextPath}
+                    title={property.title || key}
+                    description={property.description}
                     value={traversePath(values, nextPath)}
                     errors={errors}
                     onChange={onChange}
