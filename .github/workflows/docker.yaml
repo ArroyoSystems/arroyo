@@ -179,11 +179,10 @@ jobs:
         name: Inspect image
         run: |
           docker buildx imagetools inspect ghcr.io/arroyosystems/${{ matrix.image_name }}:${{ steps.meta.outputs.version }}
-      # TODO: change this to tip once merged into master
       - name: Push to dev tag.
         working-directory: /tmp/digests/${{ matrix.image_name }}
-        # change to dev before merging
-        if: github.ref == 'refs/heads/df-docker'
+        if: github.ref == 'refs/heads/master'
         run: |
-          docker buildx imagetools create --tag ghcr.io/arroyosystems/${{ matrix.image_name }}:dev \
+          # TODO: change to tip after release
+          docker buildx imagetools create --tag ghcr.io/arroyosystems/${{ matrix.image_name }}:0.10-dev \
             $(printf 'ghcr.io/arroyosystems/${{ matrix.image_name }}@sha256:%s ' *)
