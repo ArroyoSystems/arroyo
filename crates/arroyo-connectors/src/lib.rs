@@ -1,4 +1,13 @@
+use crate::confluent::ConfluentConnector;
+use crate::filesystem::delta::DeltaLakeConnector;
+use crate::filesystem::FileSystemConnector;
+use crate::kinesis::KinesisConnector;
+use crate::mqtt::MqttConnector;
+use crate::polling_http::PollingHTTPConnector;
 use crate::preview::PreviewConnector;
+use crate::redis::RedisConnector;
+use crate::single_file::SingleFileConnector;
+use crate::webhook::WebhookConnector;
 use anyhow::{anyhow, bail, Context};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
@@ -30,6 +39,7 @@ pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
+pub mod mqtt;
 pub mod nexmark;
 pub mod polling_http;
 pub mod preview;
@@ -42,20 +52,21 @@ pub mod websocket;
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
         Box::new(BlackholeConnector {}),
-        Box::new(confluent::ConfluentConnector {}),
-        Box::new(filesystem::delta::DeltaLakeConnector {}),
-        Box::new(filesystem::FileSystemConnector {}),
+        Box::new(ConfluentConnector {}),
+        Box::new(DeltaLakeConnector {}),
+        Box::new(FileSystemConnector {}),
         Box::new(FluvioConnector {}),
         Box::new(ImpulseConnector {}),
         Box::new(KafkaConnector {}),
-        Box::new(kinesis::KinesisConnector {}),
+        Box::new(KinesisConnector {}),
+        Box::new(MqttConnector {}),
         Box::new(NexmarkConnector {}),
-        Box::new(polling_http::PollingHTTPConnector {}),
+        Box::new(PollingHTTPConnector {}),
         Box::new(PreviewConnector {}),
-        Box::new(redis::RedisConnector {}),
-        Box::new(single_file::SingleFileConnector {}),
+        Box::new(RedisConnector {}),
+        Box::new(SingleFileConnector {}),
         Box::new(SSEConnector {}),
-        Box::new(webhook::WebhookConnector {}),
+        Box::new(WebhookConnector {}),
         Box::new(WebsocketConnector {}),
     ];
 
@@ -129,7 +140,7 @@ fn construct_http_client(endpoint: &str, headers: Option<String>) -> anyhow::Res
     };
 
     let headers: anyhow::Result<HeaderMap> =
-        string_to_map(headers.as_ref().map(|t| t.as_str()).unwrap_or(""))
+        string_to_map(headers.as_ref().map(|t| t.as_str()).unwrap_or(""), ':')
             .expect("Invalid header map")
             .into_iter()
             .map(|(k, v)| {
@@ -156,6 +167,7 @@ pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
         &headers
             .map(|t| t.sub_env_vars().expect("Failed to substitute env vars"))
             .unwrap_or("".to_string()),
+        ':',
     )
     .expect("Invalid header map")
 }

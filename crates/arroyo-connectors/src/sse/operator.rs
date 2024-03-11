@@ -41,7 +41,7 @@ impl SSESourceFunc {
 
         Ok(OperatorNode::from_source(Box::new(SSESourceFunc {
             url: table.endpoint,
-            headers: string_to_map(&headers.unwrap_or("".to_string()))
+            headers: string_to_map(&headers.unwrap_or("".to_string()), ':')
                 .expect("Invalid header map")
                 .into_iter()
                 .collect(),

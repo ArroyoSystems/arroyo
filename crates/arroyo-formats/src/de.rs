@@ -201,7 +201,10 @@ impl ArrowDeserializer {
             Format::RawString(_)
             | Format::Json(JsonFormat {
                 unstructured: true, ..
-            }) => self.deserialize_raw_string(buffer, msg),
+            }) => {
+                self.deserialize_raw_string(buffer, msg);
+                add_timestamp(buffer, self.schema.timestamp_index, timestamp);
+            }
             Format::Json(json) => {
                 let msg = if json.confluent_schema_registry {
                     &msg[5..]
@@ -222,8 +225,6 @@ impl ArrowDeserializer {
             Format::Avro(_) => unreachable!("this should not be called for avro"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
         }
-
-        add_timestamp(buffer, self.schema.timestamp_index, timestamp);
 
         Ok(())
     }
