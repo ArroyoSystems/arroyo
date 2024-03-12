@@ -24,7 +24,7 @@ select avg(idle) as idle from (
            WHERE extract_json_string(parsed, '$.name') = 'node_cpu_seconds_total'
 )
   where mode = 'idle'
-  group by cpu, window);
+  group by cpu, window) GROUP BY window;
 
 
 

@@ -710,6 +710,8 @@ impl Insert {
                 ..
             }) => {
                 let sink_name = table_name.to_string();
+                info!("insert logical plan: {:?}", input);
+                info!("insert schema: {:?}", input.schema());
                 Ok(Insert::InsertQuery {
                     sink_name,
                     logical_plan: (**input).clone(),
