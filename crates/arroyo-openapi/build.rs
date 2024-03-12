@@ -17,6 +17,8 @@ fn main() {
         .arg("rust")
         .arg("-i")
         .arg("api-spec.json")
+        .arg("-c")
+        .arg("openapitools.json")
         .arg("-o")
         .arg("client")
         .output()

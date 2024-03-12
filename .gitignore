@@ -4,5 +4,4 @@ target/
 .vscode/
 crates/arroyo-openapi/api-spec.json
 crates/arroyo-openapi/client
-openapitools.json
 
