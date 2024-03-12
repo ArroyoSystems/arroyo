@@ -427,15 +427,15 @@ impl WorkerGrpc for WorkerServer {
             registry.add_udf(Arc::new(ScalarUDF::from(dylib)));
         }
 
-        let program = Program::from_logical(
-            self.name.to_string(),
-            &self.logical_graph,
-            &req.tasks,
-            registry,
-        );
-
         let (engine, control_rx) = {
             let network = { self.network.lock().unwrap().take().unwrap() };
+
+            let program = Program::from_logical(
+                self.name.to_string(),
+                &self.logical_graph,
+                &req.tasks,
+                registry,
+            );
 
             let engine = Engine::new(
                 program,

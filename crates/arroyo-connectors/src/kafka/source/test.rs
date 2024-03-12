@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::kafka::SourceOffset;
-use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
@@ -91,7 +91,7 @@ impl KafkaTopicTester {
 
         let (to_control_tx, control_rx) = channel(128);
         let (command_tx, from_control_rx) = channel(128);
-        let (data_tx, recv) = channel(128);
+        let (data_tx, recv) = batch_bounded(128);
 
         let checkpoint_metadata = restore_from.map(|epoch| CheckpointMetadata {
             job_id: task_info.job_id.to_string(),
@@ -169,7 +169,7 @@ impl KafkaTopicProducer {
 struct KafkaSourceWithReads {
     to_control_tx: Sender<ControlMessage>,
     from_control_rx: Receiver<ControlResp>,
-    data_recv: Receiver<QueueItem>,
+    data_recv: BatchReceiver,
 }
 
 impl KafkaSourceWithReads {

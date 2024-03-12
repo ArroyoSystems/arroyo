@@ -1,5 +1,5 @@
 use arroyo_rpc::grpc;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{states::StateError, JobMessage};
 
@@ -21,8 +21,6 @@ impl State for CheckpointStopping {
         let job_controller = ctx.job_controller.as_mut().unwrap();
 
         let mut final_checkpoint_started = false;
-
-        info!("in a checkpoint stopping");
 
         loop {
             match job_controller.checkpoint_finished().await {

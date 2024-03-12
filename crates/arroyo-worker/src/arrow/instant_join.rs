@@ -29,7 +29,7 @@ use futures::StreamExt;
 use futures::{lock::Mutex, stream::FuturesUnordered, Future};
 use prost::Message;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tracing::info;
+use tracing::debug;
 
 use super::sync::streams::KeyedCloneableStreamFuture;
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
@@ -343,7 +343,7 @@ impl ArrowOperator for InstantJoin {
         match *data {
             Some((bin, batch_option)) => match batch_option {
                 None => {
-                    info!("future for {} was finished elsewhere", print_time(bin));
+                    debug!("future for {} was finished elsewhere", print_time(bin));
                 }
                 Some((batch, future)) => match self.execs.get_mut(&bin) {
                     Some(exec) => {

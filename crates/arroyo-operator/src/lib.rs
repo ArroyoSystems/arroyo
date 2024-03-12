@@ -20,7 +20,6 @@ use tokio_stream::Stream;
 pub mod connector;
 pub mod context;
 pub mod inq_reader;
-pub mod metrics;
 pub mod operator;
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}

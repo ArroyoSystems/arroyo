@@ -16,13 +16,14 @@ use tokio::{
 use tracing::warn;
 
 use bytes::{Buf, BufMut};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use tokio::{
     io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::mpsc::{Receiver, Sender},
 };
 
-use arroyo_operator::context::QueueItem;
+use arroyo_operator::context::{BatchReceiver, BatchSender};
 use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
 
@@ -31,7 +32,7 @@ use arroyo_server_common::shutdown::ShutdownGuard;
 
 #[derive(Clone)]
 struct NetworkSender {
-    tx: Sender<QueueItem>,
+    tx: BatchSender,
     schema: SchemaRef,
 }
 
@@ -47,7 +48,11 @@ impl Senders {
         }
     }
 
-    pub fn add(&mut self, quad: Quad, schema: SchemaRef, tx: Sender<QueueItem>) {
+    pub fn merge(&mut self, other: Self) {
+        self.senders.extend(other.senders.into_iter())
+    }
+
+    pub fn add(&mut self, quad: Quad, schema: SchemaRef, tx: BatchSender) {
         self.senders.insert(quad, NetworkSender { tx, schema });
     }
 
@@ -193,7 +198,7 @@ pub struct Quad {
 
 struct NetworkReceiver {
     quad: Quad,
-    rx: Receiver<QueueItem>,
+    rx: BatchReceiver,
     dictionary_tracker: Arc<Mutex<DictionaryTracker>>,
 }
 
@@ -205,16 +210,29 @@ struct OutNetworkLink {
 
 impl OutNetworkLink {
     pub async fn connect(dest: String) -> Self {
-        let stream = TcpStream::connect(&dest).await.unwrap();
-
-        Self {
-            _dest: dest,
-            stream: BufWriter::new(stream),
-            receivers: vec![],
+        let mut rand = StdRng::from_entropy();
+        for i in 0..10 {
+            match TcpStream::connect(&dest).await {
+                Ok(stream) => {
+                    return Self {
+                        _dest: dest,
+                        stream: BufWriter::new(stream),
+                        receivers: vec![],
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to connect to {dest}: {:?}", e);
+                    tokio::time::sleep(Duration::from_millis(
+                        (i + 1) * (50 + rand.gen_range(1..50)),
+                    ))
+                    .await;
+                }
+            }
         }
+        panic!("failed to connect to {dest}");
     }
 
-    pub async fn add_receiver(&mut self, quad: Quad, rx: Receiver<QueueItem>) {
+    pub async fn add_receiver(&mut self, quad: Quad, rx: BatchReceiver) {
         self.receivers.push(NetworkReceiver {
             quad,
             rx,
@@ -353,10 +371,11 @@ impl NetworkManager {
         }
     }
 
-    pub async fn connect(&mut self, addr: String, quad: Quad, rx: Receiver<QueueItem>) {
+    pub async fn connect(&self, addr: String, quad: Quad, rx: BatchReceiver) {
+        let link = OutNetworkLink::connect(addr.clone()).await;
         let mut ins = self.out_streams.lock().await;
         if let std::collections::hash_map::Entry::Vacant(e) = ins.entry(quad) {
-            e.insert(OutNetworkLink::connect(addr.clone()).await);
+            e.insert(link);
         }
 
         ins.get_mut(&quad)
@@ -469,9 +488,10 @@ mod test {
     use std::time::SystemTime;
     use std::{pin::Pin, time::Duration};
 
+    use arroyo_operator::context::batch_bounded;
     use arroyo_server_common::shutdown::Shutdown;
     use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
-    use tokio::{sync::mpsc::channel, time::timeout};
+    use tokio::time::timeout;
 
     use crate::network_manager::{MessageType, Quad};
 
@@ -499,7 +519,7 @@ mod test {
 
     #[tokio::test]
     async fn test_client_server() {
-        let (server_tx, mut server_rx) = channel(10);
+        let (server_tx, mut server_rx) = batch_bounded(10);
 
         let mut senders = Senders::new();
 
@@ -537,7 +557,7 @@ mod test {
         let mut nm = NetworkManager::new(0);
         let port = nm.open_listener(shutdown.guard("test")).await;
 
-        let (client_tx, client_rx) = channel(10);
+        let (client_tx, client_rx) = batch_bounded(10);
         nm.connect(format!("localhost:{}", port), quad, client_rx)
             .await;
 
