@@ -4,6 +4,7 @@ pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
+pub mod mqtt;
 pub mod nexmark;
 pub mod polling_http;
 pub mod redis;

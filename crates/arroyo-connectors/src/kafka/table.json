@@ -72,6 +72,11 @@
             "additionalProperties": {
                 "type": "string"
             }
+        },
+        "value_subject": {
+            "type": "string",
+            "title": "Schema Registry value subject",
+            "description": "Set this to use a non-standard subject for this topic in Confluent Schema Registry (defaults to `{TOPIC}_value`)"
         }
     },
     "required": [

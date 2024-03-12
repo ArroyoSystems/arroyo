@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "title": "MqttTable",
+  "properties": {
+    "topic": {
+      "title": "Topic",
+      "type": "string",
+      "description": "The MQTT topic to use for this table"
+    },
+    "qos": {
+      "type": "string",
+      "title": "Quality of Service",
+      "description": "The Quality of Service to use for this topic",
+      "enum": ["AtMostOnce", "AtLeastOnce", "ExactlyOnce"]
+    },
+    "type": {
+      "type": "object",
+      "title": "Table Type",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "Source",
+          "additionalProperties": false,
+          "properties": {}
+        },
+        {
+          "type": "object",
+          "title": "Sink",
+          "properties": {
+            "retain": {
+              "type": "boolean",
+              "title": "Retain",
+              "description": "Whether to retain messages published to this topic"
+            }
+          },
+          "required": ["retain"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": ["topic", "type"]
+}

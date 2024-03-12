@@ -1,0 +1,54 @@
+{
+  "type": "object",
+  "title": "MqttConfig",
+  "properties": {
+    "tls": {
+      "title": "TLS",
+      "type": "object",
+      "properties": {
+        "ca": {
+          "title": "CA",
+          "type": "string",
+          "description": "The path to the CA file",
+          "format": "var-str"
+        },
+        "cert": {
+          "title": "Cert",
+          "type": "string",
+          "description": "The path to the client cert file",
+          "format": "var-str"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string",
+          "description": "The path to the client key file",
+          "format": "var-str"
+        }
+      }
+    },
+    "url": {
+      "title": "Url",
+      "type": "string",
+      "description": "The url of the broker to connect to. e.g. tcp://localhost. Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker. `mqtts://`, `ssl://` will use the native certificates if no ca is specified"
+    },
+    "clientPrefix": {
+      "type": "string",
+      "title": "Client Prefix",
+      "description": "Prefix for the mqtt client id. The client id will be generated as `client_prefix`_`id`_`timestamp`. Defaults to `arroyo-mqtt`"
+    },
+    "username": {
+      "title": "Username",
+      "type": "string",
+      "description": "The username for your mqtt cluster (if using auth)",
+      "format": "var-str"
+    },
+    "password": {
+      "title": "Password",
+      "type": "string",
+      "description": "The password for your mqtt cluster (if using auth)",
+      "format": "var-str"
+    }
+  },
+  "sensitive": ["password"],
+  "required": ["url"]
+}

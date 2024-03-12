@@ -207,7 +207,7 @@ async fn try_register_confluent_schema(
     };
 
     let schema_registry =
-        ConfluentSchemaRegistry::new(&endpoint, &table.topic, api_key, api_secret)?;
+        ConfluentSchemaRegistry::new(&endpoint, &table.subject(), api_key, api_secret)?;
 
     match config.format.clone() {
         Some(Format::Avro(mut avro)) => {

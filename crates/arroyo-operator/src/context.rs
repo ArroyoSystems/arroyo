@@ -101,10 +101,6 @@ impl ContextBuffer {
         }
     }
 
-    fn buffer(&mut self) -> &mut Vec<Box<dyn ArrayBuilder>> {
-        &mut self.buffer
-    }
-
     pub fn size(&self) -> usize {
         self.buffer[0].len()
     }
@@ -449,13 +445,6 @@ impl ArrowContext {
                 .as_ref()
                 .map(|d| d.should_flush())
                 .unwrap_or(false)
-    }
-
-    pub fn buffer(&mut self) -> &mut Vec<Box<dyn ArrayBuilder>> {
-        self.buffer
-            .as_mut()
-            .expect("tried to get buffer for node without out schema")
-            .buffer()
     }
 
     pub async fn broadcast(&mut self, message: ArrowMessage) {

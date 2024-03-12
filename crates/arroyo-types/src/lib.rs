@@ -333,14 +333,14 @@ pub fn days_since_epoch(time: SystemTime) -> i32 {
         .div_euclid(86400) as i32
 }
 
-pub fn string_to_map(s: &str) -> Option<HashMap<String, String>> {
+pub fn string_to_map(s: &str, pair_delimeter: char) -> Option<HashMap<String, String>> {
     if s.trim().is_empty() {
         return Some(HashMap::new());
     }
 
     s.split(',')
         .map(|s| {
-            let mut kv = s.trim().split(':');
+            let mut kv = s.trim().split(pair_delimeter);
             Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
         })
         .collect()
@@ -521,6 +521,7 @@ impl<'de> Deserialize<'de> for DebeziumOp {
             "c" => Ok(DebeziumOp::Create),
             "u" => Ok(DebeziumOp::Update),
             "d" => Ok(DebeziumOp::Delete),
+            "r" => Ok(DebeziumOp::Create),
             _ => Err(serde::de::Error::custom(format!(
                 "Invalid DebeziumOp {}",
                 s

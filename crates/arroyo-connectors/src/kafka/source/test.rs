@@ -183,8 +183,6 @@ impl KafkaSourceWithReads {
                             .downcast_ref::<StringArray>()
                             .unwrap();
 
-                        println!("A = {:?}", a);
-
                         for v in a {
                             assert_eq!(
                                 expected_values
