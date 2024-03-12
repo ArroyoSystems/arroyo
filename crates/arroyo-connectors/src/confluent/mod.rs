@@ -4,10 +4,12 @@ use crate::kafka::{
 use crate::{kafka, pull_opt};
 use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
+use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
@@ -185,5 +187,14 @@ impl Connector for ConfluentConnector {
             .client_configs
             .insert("client.id".to_string(), CLIENT_ID.to_string());
         KafkaConnector {}.from_config(id, name, config.into(), table, schema)
+    }
+
+    fn make_operator(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        KafkaConnector {}.make_operator(profile.into(), table, config)
     }
 }

@@ -48,7 +48,8 @@ regex = "1"
 ##########################
 
 # Kafka
-rdkafka = { version = "0.33", features = ["cmake-build"] }
+rdkafka = { version = "0.33", features = ["cmake-build", "tracing"] }
+rdkafka-sys = "4.5.0"
 
 # SSE
 eventsource-client = "0.12.0"
@@ -76,6 +77,12 @@ parquet = { workspace = true, features = ["async"]}
 object_store = { workspace = true }
 deltalake = {version = "0.17", features = ["s3", "datafusion"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
+
+# MQTT
+rumqttc = { version = "0.23.0", features = ["url"] }
+rustls-native-certs =  "0.6"
+rustls-pemfile = "1"
+tokio-rustls = "0.24"
 
 [build-dependencies]
 glob = "0.3"

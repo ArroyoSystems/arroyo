@@ -105,9 +105,7 @@ pub trait Connector: Send {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
-        todo!("constructor")
-    }
+    ) -> anyhow::Result<OperatorNode>;
 }
 
 pub trait ErasedConnector: Send {

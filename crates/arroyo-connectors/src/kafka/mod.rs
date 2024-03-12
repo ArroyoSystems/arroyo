@@ -9,6 +9,7 @@ use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, FailingSchemaResolver, SchemaResolver,
 };
 use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
+use arroyo_types::string_to_map;
 use futures::TryFutureExt;
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
@@ -16,6 +17,7 @@ use rdkafka::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -48,6 +50,15 @@ import_types!(
     }
 );
 import_types!(schema = "src/kafka/table.json");
+
+impl KafkaTable {
+    pub fn subject(&self) -> Cow<str> {
+        match &self.value_subject {
+            None => Cow::Owned(format!("{}-value", self.topic)),
+            Some(s) => Cow::Borrowed(s),
+        }
+    }
+}
 
 pub struct KafkaConnector {}
 
@@ -127,7 +138,16 @@ impl KafkaConnector {
         Ok(KafkaTable {
             topic: pull_opt("topic", options)?,
             type_: table_type,
-            client_configs: HashMap::new(),
+            client_configs: options
+                .remove("client_configs")
+                .map(|c| {
+                    string_to_map(&c, '=').ok_or_else(|| {
+                        anyhow!("invalid client_config: expected comma and equals-separated pairs")
+                    })
+                })
+                .transpose()?
+                .unwrap_or_else(|| HashMap::new()),
+            value_subject: options.remove("value.subject"),
         })
     }
 }
@@ -334,7 +354,7 @@ impl Connector for KafkaConnector {
                         Arc::new(
                             ConfluentSchemaRegistry::new(
                                 &endpoint,
-                                &table.topic,
+                                &table.subject(),
                                 api_key.clone(),
                                 api_secret.clone(),
                             )
@@ -389,7 +409,7 @@ pub struct TopicMetadata {
 }
 
 impl KafkaTester {
-    async fn connect(&self) -> Result<BaseConsumer, String> {
+    async fn connect(&self, table: Option<KafkaTable>) -> Result<BaseConsumer, String> {
         let mut client_config = ClientConfig::new();
         client_config
             .set(
@@ -422,6 +442,12 @@ impl KafkaTester {
             }
         };
 
+        if let Some(table) = table {
+            for (k, v) in table.client_configs {
+                client_config.set(k, v);
+            }
+        }
+
         let client: BaseConsumer = client_config
             .create()
             .map_err(|e| format!("invalid kafka config: {:?}", e))?;
@@ -439,7 +465,10 @@ impl KafkaTester {
 
     #[allow(unused)]
     pub async fn topic_metadata(&self, topic: &str) -> Result<TopicMetadata, Status> {
-        let client = self.connect().await.map_err(Status::failed_precondition)?;
+        let client = self
+            .connect(None)
+            .await
+            .map_err(Status::failed_precondition)?;
 
         let topic = topic.to_string();
         tokio::task::spawn_blocking(move || {
@@ -476,7 +505,7 @@ impl KafkaTester {
     }
 
     async fn fetch_topics(&self) -> anyhow::Result<Vec<(String, usize)>> {
-        let client = self.connect().await.map_err(|e| anyhow!("{}", e))?;
+        let client = self.connect(None).await.map_err(|e| anyhow!("{}", e))?;
 
         tokio::task::spawn_blocking(move || {
             let metadata = client
@@ -548,7 +577,7 @@ impl KafkaTester {
                             api_secret,
                         }) => schema_resolver::ConfluentSchemaRegistry::new(
                             endpoint,
-                            &table.topic,
+                            &table.subject(),
                             api_key.clone(),
                             api_secret.clone(),
                         ),
@@ -637,7 +666,10 @@ impl KafkaTester {
             .and_then(|s| s.format.clone())
             .ok_or_else(|| anyhow!("No format defined for Kafka connection"))?;
 
-        let client = self.connect().await.map_err(|e| anyhow!("{}", e))?;
+        let client = self
+            .connect(Some(table.clone()))
+            .await
+            .map_err(|e| anyhow!("{}", e))?;
 
         self.info(&mut tx, "Connected to Kafka").await;
 
@@ -747,7 +779,7 @@ impl KafkaTester {
 
     #[allow(unused)]
     pub async fn test_connection(&self) -> TestSourceMessage {
-        match self.connect().await {
+        match self.connect(None).await {
             Ok(_) => TestSourceMessage {
                 error: false,
                 done: true,
@@ -829,15 +861,15 @@ pub fn client_configs(connection: &KafkaConfig, table: &KafkaTable) -> HashMap<S
                     .sub_env_vars()
                     .expect("Missing env-vars for Kafka password"),
             );
-
-            client_configs.extend(
-                table
-                    .client_configs
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string())),
-            );
         }
     };
+
+    client_configs.extend(
+        table
+            .client_configs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string())),
+    );
 
     client_configs
 }
