@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::mqtt::{create_connection, MqttConfig, Tls};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-use arroyo_operator::context::{ArrowContext, batch_bounded, BatchReceiver};
+use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
