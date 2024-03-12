@@ -42,13 +42,16 @@ jobs:
           override: true
       - name: Check Formatting
         run: cargo fmt -- --check
-      - name: Setup npm
-        uses: actions/setup-node@v3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2.2.4
         with:
-          node-version: '21'
+          version: 8.3.0
+          run_install: |
+            - recursive: true
+              args: [--frozen-lockfile, --strict-peer-dependencies]        
       - name: Install OpenAPI Generator
         run: |
-          npm install @openapitools/openapi-generator-cli -g
+          pnpm install @openapitools/openapi-generator-cli -g
           cd crates/arroyo-openapi && openapi-generator-cli version
       - name: Setup Postgres
         run: |
@@ -88,7 +91,7 @@ jobs:
         run: cargo build --all-features
       - name: Validate API
         run: |
-          npm install --global ibm-openapi-validator
+          pnpm install --global ibm-openapi-validator
           cd crates/arroyo-openapi
           lint-openapi --errors-only api-spec.json
       - name: Test
