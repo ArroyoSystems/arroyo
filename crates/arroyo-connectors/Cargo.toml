@@ -1,0 +1,88 @@
+[package]
+name = "arroyo-connectors"
+version = "0.10.0-dev"
+edition = "2021"
+
+[features]
+default = []
+kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
+
+[dependencies]
+arroyo-types = { path = "../arroyo-types" }
+arroyo-storage = { path = "../arroyo-storage" }
+arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-datastream = { path = "../arroyo-datastream" }
+arroyo-formats = { path = "../arroyo-formats" }
+arroyo-operator = { path = "../arroyo-operator" }
+arroyo-state = { path = "../arroyo-state" }
+
+arrow = { workspace = true }
+datafusion = "36.0"
+async-trait = "0.1"
+bincode = "2.0.0-rc.3"
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+once_cell = "1.17.1"
+typify = "0.0.13"
+schemars = "0.8"
+prost = "0.12"
+tonic = {workspace = true}
+governor = "0.6.0"
+anyhow = "1.0.71"
+tracing = "0.1.37"
+regress = "0.7.0"
+futures = "0.3.28"
+axum = {version = "0.6.12"}
+rand = "0.8.5"
+base64 = "0.13.1"
+bytes = "1.5.0"
+url = "2.5.0"
+itertools = "0.11.0"
+regex = "1"
+
+##########################
+# connector dependencies #
+##########################
+
+# Kafka
+rdkafka = { version = "0.33", features = ["cmake-build", "tracing"] }
+rdkafka-sys = "4.5.0"
+
+# SSE
+eventsource-client = "0.12.0"
+
+# Websocket
+tokio-tungstenite = { version = "0.20.1", features = ["native-tls"] }
+
+# Webhook
+reqwest = "0.11.20"
+
+# Redis
+redis = { version = "0.24.0", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
+
+# Fluvio
+fluvio = {version = "0.21", features = ["openssl"]}
+fluvio-future = "0.6"
+
+# Kinesis
+aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
+uuid = { version = "1.7.0", features = ["v4"] }
+
+# Filesystem
+parquet = { workspace = true, features = ["async"]}
+object_store = { workspace = true }
+deltalake = {version = "0.17", features = ["s3", "datafusion"] }
+async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
+
+# MQTT
+rumqttc = { version = "0.23.0", features = ["url"] }
+rustls-native-certs =  "0.6"
+rustls-pemfile = "1"
+tokio-rustls = "0.24"
+
+[build-dependencies]
+glob = "0.3"

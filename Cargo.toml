@@ -1,27 +1,28 @@
 [workspace]
 members = [
-    "arroyo",
-    "arroyo-api",
-    "arroyo-compiler-service",
-    "arroyo-controller",
-    "arroyo-connectors",
-    "arroyo-datastream",
-    "arroyo-formats",
-    "arroyo-macro",
-    "arroyo-metrics",
-    "arroyo-node",
-    "arroyo-openapi",
-    "arroyo-rpc",
-    "arroyo-server-common",
-    "arroyo-sql",
-    "arroyo-sql-macro",
-    "arroyo-sql-testing",
-    "arroyo-state",
-    "arroyo-storage",
-    "arroyo-types",
-    "arroyo-worker",
-    "copy-artifacts",
-    "integ",
+    "crates/arroyo",
+    "crates/arroyo-api",
+    "crates/arroyo-bin",
+    "crates/arroyo-compiler-service",
+    "crates/arroyo-controller",
+    "crates/arroyo-connectors",
+    "crates/arroyo-datastream",
+    "crates/arroyo-df",
+    "crates/arroyo-formats",
+    "crates/arroyo-macro",
+    "crates/arroyo-metrics",
+    "crates/arroyo-node",
+    "crates/arroyo-openapi",
+    "crates/arroyo-operator",
+    "crates/arroyo-rpc",
+    "crates/arroyo-sql-testing",
+    "crates/arroyo-server-common",
+    "crates/arroyo-state",
+    "crates/arroyo-storage",
+    "crates/arroyo-types",
+    "crates/arroyo-worker",
+    "crates/copy-artifacts",
+    "crates/integ",
 ]
 
 resolver = "2"
@@ -31,24 +32,39 @@ exclude = [
 ]
 
 [workspace.dependencies]
-tonic = { version = "0.9" }
-tonic-build = { version = "0.9" }
-tonic-web = { version = "0.9" }
-tonic-reflection = { version = "0.9" }
-arrow = { version = "46.0.0" }
-arrow-array = { version = "46.0.0" }
-arrow-schema = { version = "46.0.0" }
-object_store = { version = "0.7.1" }
-parquet = { version = "46.0.0" }
+tonic = { version = "0.11" }
+tonic-build = { version = "0.11" }
+tonic-web = { version = "0.11" }
+tonic-reflection = { version = "0.11" }
+arrow = { version = "50.0.0" }
+arrow-ord = { version = "50.0.0" }
+arrow-array = { version = "50.0.0" }
+arrow-schema = { version = "50.0.0" }
+arrow-json = { version = "50.0.0" }
+object_store = { version = "0.9.0" }
+parquet = { version = "50.0.0" }
+ahash = { version = "=0.8.7" }
 
 [profile.release]
 debug = 1
 
+[profile.dev]
+split-debuginfo = "unpacked"
+
+
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
-parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'object_store/put_part_api'}
+parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
+arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
+arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
+arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
+arrow-json = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/json' }
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '0.9.0/put_part_api'}
+datafusion = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
+datafusion-common = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
+datafusion-execution = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
+datafusion-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
+datafusion-physical-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
+datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
+datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}

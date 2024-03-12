@@ -1,6 +1,6 @@
 
 <h1 align="center">
-    <img src="docs/images/arroyo_logo.png" width="400px" alt="Arroyo" />
+    <img src="images/arroyo_logo.png" width="400px" alt="Arroyo" />
 </h1>
 
 
@@ -36,7 +36,7 @@ on both bounded and unbounded sources, emitting results as soon as they are avai
 
 In short: Arroyo lets you ask complex questions of high-volume real-time data with subsecond results.
 
-![running job](docs/images/header_image.png)
+![running job](images/header_image.png)
 
 ## Features
 

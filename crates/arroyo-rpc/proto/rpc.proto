@@ -1,0 +1,480 @@
+syntax = "proto3";
+package arroyo_rpc;
+
+// Controller
+
+message WorkerResources {
+  uint64 slots = 1;
+}
+
+message RegisterWorkerReq {
+  uint64 worker_id = 1;
+  uint64 node_id = 2;
+  string job_id = 3;
+  string rpc_address = 4;
+  string data_address = 5;
+  WorkerResources resources = 6;
+  uint64 slots = 8;
+}
+
+message RegisterWorkerResp {
+}
+
+message HeartbeatReq {
+  string job_id = 1;
+  uint64 worker_id = 2;
+  uint64 time = 3;
+}
+
+message HeartbeatResp {
+}
+
+enum TaskCheckpointEventType {
+  // got first barrier, waiting for alignment
+  STARTED_ALIGNMENT = 0;
+  // started checkpointing
+  STARTED_CHECKPOINTING = 1;
+  // operator finished setup
+  FINISHED_OPERATOR_SETUP = 2;
+  // finished the synchronous part of checkpointing
+  FINISHED_SYNC = 3;
+  // finished pre-commit
+  FINISHED_COMMIT = 4;
+}
+
+message TaskCheckpointEventReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint32 subtask_index = 5;
+  uint32 epoch = 6;
+  TaskCheckpointEventType event_type = 7;
+}
+
+message TaskCheckpointEventResp {
+}
+
+message TaskCheckpointCompletedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint32 epoch = 5;
+  SubtaskCheckpointMetadata metadata = 6;
+  bool needs_commit = 7;
+}
+
+message TaskCheckpointCompletedResp {
+}
+
+message TaskFinishedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint64 operator_subtask = 5;
+}
+
+message TaskFinishedResp {
+}
+
+message TaskFailedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint64 operator_subtask = 5;
+  string error = 6;
+}
+
+message TaskFailedResp {
+}
+
+
+message TaskStartedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint64 operator_subtask = 5;
+}
+
+message TaskStartedResp {
+}
+
+message RegisterNodeReq {
+  uint64 node_id = 1;
+  uint64 task_slots = 2;
+  string addr = 3;
+}
+
+message RegisterNodeResp {
+}
+
+message HeartbeatNodeReq {
+  uint64 node_id = 1;
+  uint64 time = 2;
+}
+
+message HeartbeatNodeResp {
+}
+
+message SinkDataReq {
+  string job_id = 1;
+  string operator_id = 2;
+  uint32 subtask_index = 3;
+  uint64 timestamp = 4;
+  string value = 6;
+  bool done = 7;
+}
+
+message SinkDataResp {
+}
+
+message WorkerFinishedReq {
+  uint64 node_id = 1;
+  uint64 worker_id = 2;
+  uint64 slots = 3;
+  string job_id = 4;
+}
+
+message WorkerFinishedResp {
+}
+
+message GrpcOutputSubscription {
+  string job_id = 1;
+}
+
+message OutputData {
+  string operator_id = 1;
+  uint64 timestamp = 2;
+  string value = 4;
+  bool done = 5;
+}
+
+message WorkerErrorReq {
+  string job_id = 1;
+  string operator_id = 2;
+  uint32 task_index = 3;
+  string message = 4;
+  string details = 5;
+}
+
+message WorkerErrorRes {
+}
+
+service ControllerGrpc {
+  rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
+  rpc HeartbeatNode(HeartbeatNodeReq) returns (HeartbeatNodeResp);
+  rpc RegisterWorker(RegisterWorkerReq) returns (RegisterWorkerResp);
+  rpc Heartbeat(HeartbeatReq) returns (HeartbeatResp);
+  rpc TaskStarted(TaskStartedReq) returns (TaskStartedResp);
+  rpc TaskCheckpointEvent(TaskCheckpointEventReq) returns (TaskCheckpointEventResp);
+  rpc TaskCheckpointCompleted(TaskCheckpointCompletedReq) returns (TaskCheckpointCompletedResp);
+  rpc TaskFinished(TaskFinishedReq) returns (TaskFinishedResp);
+  rpc TaskFailed(TaskFailedReq) returns (TaskFailedResp);
+  rpc SendSinkData(SinkDataReq) returns (SinkDataResp);
+  // sent from the node to the controller when a worker process exits
+  rpc WorkerFinished(WorkerFinishedReq) returns (WorkerFinishedResp);
+
+  rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
+  rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
+}
+
+// Checkpoint metadata
+message CheckpointMetadata {
+  string job_id = 1;
+  uint32 epoch = 2;
+  uint32 min_epoch = 3;
+  uint64 start_time = 4;
+  uint64 finish_time = 5;
+
+  repeated string operator_ids = 6;
+}
+
+message SubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  uint64 start_time = 2;
+  uint64 finish_time = 3;
+  optional uint64 watermark = 4;
+
+  map<string, TableSubtaskCheckpointMetadata> table_metadata = 10;
+  // TODO: move this into plan?
+  map<string, TableConfig> table_configs = 11;
+}
+
+message GlobalKeyedTableConfig {
+  string table_name = 1;
+  string description = 2;
+  bool uses_two_phase_commit = 3;
+}
+
+message GlobalKeyedTableTaskCheckpointMetadata {
+  repeated string files = 1;
+  map<uint32, bytes> commit_data_by_subtask = 2;
+}
+
+message GlobalKeyedTableSubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  optional string file = 2;
+  optional bytes commit_data = 3;
+}
+
+message ExpiringKeyedTimeTableConfig {
+  string table_name = 1;
+  string description = 2;
+  uint64 retention_micros = 3;
+  ArroyoSchema schema = 4;
+}
+
+message ExpiringKeyedTimeSubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  optional uint64 watermark = 2;
+  repeated ParquetTimeFile files = 3;
+}
+
+message ExpiringKeyedTimeTableCheckpointMetadata {
+  repeated ParquetTimeFile files = 1;
+}
+
+message ParquetTimeFile {
+  uint32 epoch = 1;
+  string file = 2;
+  uint64 min_routing_key = 3;
+  uint64 max_routing_key = 4;
+  uint64 max_timestamp_micros = 5;
+  uint64 generation = 6;
+}
+
+message OperatorCheckpointMetadata {
+  OperatorMetadata operator_metadata = 1;
+  uint64 start_time = 2;
+  uint64 finish_time = 3;
+  map<string, TableCheckpointMetadata> table_checkpoint_metadata = 13;
+  map<string, TableConfig> table_configs = 14;
+}
+
+
+message OperatorMetadata {
+  string job_id = 1;
+  string operator_id = 2;
+  uint32 epoch = 3;
+  optional uint64 min_watermark = 4;
+  optional uint64 max_watermark = 5;
+  uint64 parallelism = 6;
+}
+
+message TableConfig {
+  TableEnum table_type = 1;
+  bytes config = 2;
+}
+
+message TableCheckpointMetadata {
+  TableEnum table_type = 1;
+  // this should be decoded to the appropriate protobuf.
+  bytes data = 2;
+}
+
+message TableSubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  TableEnum table_type = 2;
+  bytes data = 3;
+}
+
+// TODO: call this table type
+enum TableEnum {
+  MissingTableType = 0;
+  GlobalKeyValue = 1;
+  ExpiringKeyedTimeTable = 2;
+}
+
+// TODO: figure out how to share this
+message ArroyoSchema {
+  // json-encoded
+  string arrow_schema = 1;
+  uint32 timestamp_index = 2;
+  repeated uint32 key_indices = 3;
+  bool has_keys = 4;
+}
+
+// Worker
+
+message TaskAssignment {
+  string operator_id = 1;
+  uint64 operator_subtask = 2;
+  uint64 worker_id = 4;
+  string worker_addr = 5;
+}
+
+message StartExecutionReq {
+  optional uint32 restore_epoch = 2;
+  repeated TaskAssignment tasks = 3;
+}
+
+message StartExecutionResp {
+}
+
+message CheckpointReq {
+  uint32 epoch = 1;
+  uint32 min_epoch = 2;
+  uint64 timestamp = 3;
+  // if set, tasks will finish after completing the checkpoint
+  bool then_stop = 4;
+  // if this message is solely to perform a commit.
+  bool is_commit = 5;
+}
+
+message CheckpointResp {
+}
+
+message CommitReq {
+  uint32 epoch = 1;
+  map<string, OperatorCommitData> committing_data = 2;
+}
+
+message CommitResp {
+}
+
+message OperatorCommitData {
+  // map from table name to commit data for that table.
+  map<string, TableCommitData> committing_data = 1;
+}
+
+message TableCommitData {
+  map<uint32, bytes> commit_data_by_subtask = 1;
+}
+
+message LoadCompactedDataReq {
+  string operator_id = 1;
+  map<string, TableCheckpointMetadata> compacted_metadata = 2;
+}
+
+message LoadCompactedDataRes {
+}
+
+enum StopMode {
+  // The stop message flows through the dataflow like a checkpoint, causing every node to stop at a consistent point
+  GRACEFUL = 0;
+  // All tasks will stop immediately
+  IMMEDIATE = 1;
+}
+
+message StopExecutionReq {
+  StopMode stop_mode = 1;
+}
+
+message StopExecutionResp {
+}
+
+message JobFinishedReq {
+}
+
+message JobFinishedResp {
+}
+
+service WorkerGrpc {
+  rpc StartExecution(StartExecutionReq) returns (StartExecutionResp);
+  rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
+  rpc Commit(CommitReq) returns (CommitResp);
+  rpc LoadCompactedData(LoadCompactedDataReq) returns (LoadCompactedDataRes);
+  rpc StopExecution(StopExecutionReq) returns (StopExecutionResp);
+  rpc JobFinished(JobFinishedReq) returns (JobFinishedResp);
+}
+
+// Node
+
+message StartWorkerHeader {
+  string name = 1;
+  string job_id = 2;
+  bytes wasm = 3;
+  uint64 slots = 6;
+  uint64 node_id = 7;
+  uint64 run_id = 8;
+  map<string, string> env_vars = 10;
+  uint64 binary_size = 11;
+}
+
+message StartWorkerData {
+  uint64 part = 1;
+  bytes data = 2;
+  bool has_more = 3;
+}
+
+message StartWorkerReq {
+  oneof msg {
+    StartWorkerHeader header = 2;
+    StartWorkerData data = 3;
+  }
+}
+
+message StartWorkerResp {
+  uint64 worker_id = 1;
+}
+
+message GetWorkersReq {}
+
+
+message WorkerStatus {
+  string name = 1;
+  uint64 slots = 3;
+  bool running = 4;
+}
+
+message GetWorkersResp {
+  repeated WorkerStatus statuses = 1;
+}
+
+message StopWorkerReq {
+  string job_id = 3;
+  uint64 worker_id = 1;
+  bool force = 2;
+}
+
+message StopWorkerResp {
+  StopWorkerStatus status = 1;
+}
+enum StopWorkerStatus {
+  PLACEHOLDER = 0;
+  STOPPED = 1;
+  STOP_FAILED = 2;
+  NOT_FOUND = 3;
+}
+
+service NodeGrpc {
+  rpc StartWorker(stream StartWorkerReq) returns (StartWorkerResp);
+  rpc GetWorkers(GetWorkersReq) returns (GetWorkersResp);
+  rpc StopWorker(StopWorkerReq) returns (StopWorkerResp);
+}
+
+message UdfCrate {
+  string name = 1;
+  string definition = 2;
+  string cargo_toml = 3;
+  string lib_rs = 4;
+}
+
+message BuildUdfReq {
+  UdfCrate udf_crate = 1;
+  bool save = 3;
+}
+
+message BuildUdfResp {
+  repeated string errors = 1;
+  optional string udf_path = 2;
+}
+
+
+message GetUdfPathReq {
+  string name = 1;
+  string definition = 2;
+}
+
+message GetUdfPathResp {
+  optional string udf_path = 1;
+}
+
+service CompilerGrpc {
+  rpc BuildUdf(BuildUdfReq) returns (BuildUdfResp);
+  rpc GetUdfPath(GetUdfPathReq) returns (GetUdfPathResp);
+}

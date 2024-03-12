@@ -21,7 +21,7 @@ spec:
         {{- if .Values.prometheus.setAnnotations }}
         prometheus.io/scrape: "true"
         prometheus.io/path: /metrics
-        prometheus.io/port: "9191"
+        prometheus.io/port: "8001"
         {{- end }}
       {{- with .Values.podAnnotations }}
       {{- toYaml . | nindent 8 }}
@@ -36,13 +36,20 @@ spec:
       imagePullSecrets:
       {{- toYaml . | nindent 10 }}
       {{- end }}
+      initContainers:
+      - name: migrate-database
+        image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+        imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+        command: [ "/app/arroyo-bin", "migrate", "--wait", "300" ]
+        env:
+        {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
       containers:
       - name: arroyo-controller
         securityContext:
         {{- toYaml .Values.securityContext | nindent 12 }}
         image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
         imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
-        args: ["controller"]
+        command: ["/app/arroyo-bin", "cluster"]
 
         env:
         {{- include "arroyo.storageEnvVars" . | nindent 8 }}
@@ -53,9 +60,19 @@ spec:
 
         {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
         - name: CONTROLLER_ADDR
-          value: "http://{{ include "arroyo.fullname" . }}-controller:9190"
-        - name: REMOTE_COMPILER_ENDPOINT
-          value: "http://{{ include "arroyo.fullname" . }}-compiler:9000"
+          value: "http://{{ include "arroyo.fullname" . }}:{{ .Values.controller.service.grpcPort }}"
+        - name: GRPC_PORT
+          value: {{ .Values.controller.service.grpcPort | quote }}
+        - name: ADMIN_PORT
+          value: {{ .Values.controller.service.adminPort | quote }}
+        - name: HTTP_PORT
+          value: {{ .Values.controller.service.httpPort | quote }}
+        - name: COMPILER_GRPC_PORT
+          value: {{ .Values.controller.service.compilerPort | quote }}
+        - name: PROM_ENDPOINT
+          value: "{{ include "arroyo.prometheusEndpoint" .}}"
+        - name: API_METRICS_RATE
+          value: "{{ .Values.prometheus.queryRate }}"
         - name: SCHEDULER
           value: "kubernetes"
         - name: K8S_NAMESPACE
@@ -102,10 +119,12 @@ spec:
         {{- include "arroyo.existingConfigMap" . | nindent 8 }}
 
         ports:
-        - containerPort: 9190
+        - containerPort: {{ .Values.controller.service.grpcPort }}
           name: grpc
-        - containerPort: 9191
+        - containerPort: {{ .Values.controller.service.adminPort }}
           name: admin
+        - containerPort: {{ .Values.controller.service.httpPort }}
+          name: http
         livenessProbe:
           httpGet:
             path: /status
@@ -116,9 +135,6 @@ spec:
             path: /status
             port: admin
           initialDelaySeconds: 5
-        {{- if .Values.compiler.resources }}
-        resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
-        {{- end }}
         volumeMounts:
         {{- if .Values.volumeMounts }}
         {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 10 }}
@@ -140,7 +156,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "arroyo.fullname" . }}-controller
+  name: {{ include "arroyo.fullname" . }}
 spec:
   selector:
     app: {{ include "arroyo.fullname" . }}-controller
@@ -149,7 +165,11 @@ spec:
       protocol: TCP
       port: {{ .Values.controller.service.grpcPort }}
       targetPort: 9190
-    - name: http
+    - name: admin
       protocol: TCP
       port: {{ .Values.controller.service.adminPort }}
       targetPort: 9191
+    - name: http
+      protocol: TCP
+      port: {{ .Values.controller.service.httpPort }}
+      targetPort: 80

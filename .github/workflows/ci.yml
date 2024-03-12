@@ -17,22 +17,8 @@ jobs:
               args: [--frozen-lockfile, --strict-peer-dependencies]
       - name: Run prettier
         run: |
-          cd arroyo-console
+          cd webui
           pnpm check
-
-  check-dockerfiles:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out
-        uses: actions/checkout@v3
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@ec02537da5712d66d4d50a0f33b7eb52773b5ed1
-        with:
-          ruby-version: '3.1'
-      - name: Install dependencies
-        run: gem install toml-rb
-      - name: Check Dockerfiles
-        run: ruby docker/check_dockerfiles.rb
 
   build-rust:
     runs-on: ubicloud-standard-16
@@ -54,12 +40,19 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - name: Setup npm
-        uses: actions/setup-node@v3
+      - name: Check Formatting
+        run: cargo fmt -- --check
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2.2.4
+        with:
+          version: 8.3.0
+          run_install: |
+            - recursive: true
+              args: [--frozen-lockfile, --strict-peer-dependencies]        
       - name: Install OpenAPI Generator
         run: |
-          npm install @openapitools/openapi-generator-cli -g
-          openapi-generator-cli version
+          pnpm install @openapitools/openapi-generator-cli -g
+          cd crates/arroyo-openapi && openapi-generator-cli version
       - name: Setup Postgres
         run: |
           sudo apt-get update
@@ -72,19 +65,7 @@ jobs:
             tar xvfz refinery*.tar.gz
             mv /tmp/refinery*-musl/refinery /tmp
           popd
-          /tmp/refinery migrate -e DATABASE_URL -p arroyo-api/migrations
-      - name: Set up cache
-        uses: actions/cache@v3
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          /tmp/refinery migrate -e DATABASE_URL -p crates/arroyo-api/migrations
       - name: Install dependencies
         run: |
           curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
@@ -110,15 +91,15 @@ jobs:
         run: cargo build --all-features
       - name: Validate API
         run: |
-          npm install --global ibm-openapi-validator
-          cd arroyo-openapi
+          pnpm install --global ibm-openapi-validator
+          cd crates/arroyo-openapi
           lint-openapi --errors-only api-spec.json
       - name: Test
         run: cargo nextest run --jobs 4 --all-features
       - name: Integ
         run: |
           mkdir /tmp/arroyo-integ
-          RUST_LOG=info DISABLE_TELEMETRY=true OUTPUT_DIR=file:///tmp/arroyo-integ DEBUG=true target/debug/integ
+          RUST_LOG=info DISABLE_TELEMETRY=true OUTPUT_DIR=file:///tmp/arroyo-integ ARTIFACT_URL=file:///tmp/artifacts DEBUG=true target/debug/integ
   build-console:
     runs-on: ubuntu-latest
     steps:
@@ -133,5 +114,5 @@ jobs:
               args: [--frozen-lockfile, --strict-peer-dependencies]
       - name: Build console
         run: |
-          cd arroyo-console
+          cd webui
           pnpm build

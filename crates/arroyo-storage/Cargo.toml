@@ -1,0 +1,25 @@
+[package]
+name = "arroyo-storage"
+version = "0.10.0-dev"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = []
+
+[dependencies]
+arroyo-types = { path = "../arroyo-types" }
+bytes = "1.4.0"
+tracing = "0.1"
+# used only for getting local AWS credentials; can be removed once we have a
+# better way to do this
+rusoto_core = "0.48.0"
+
+object_store = {workspace = true, features = ["aws", "gcp"]}
+regex = "1.9.5"
+thiserror = "1"
+tokio = { version = "1", features = ["fs"] }
+tokio-util = {version = "0.7.9", features = ["io"]}
+async-trait = "0.1.73"
+futures = "0.3.28"
+webpki = ">=0.22.2"

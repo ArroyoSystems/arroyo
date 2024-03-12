@@ -1,0 +1,39 @@
+[package]
+name = "arroyo-sql-testing"
+version = "0.10.0-dev"
+edition = "2021"
+
+[features]
+default = ["integration-tests"]
+integration-tests = []
+
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+chrono = "0.4"
+hex = "0.4"
+petgraph = "0.6"
+bincode = "=2.0.0-rc.3"
+bincode_derive = "=2.0.0-rc.3"
+serde = "1.0"
+serde_json = "1.0"
+anyhow = "1.0"
+
+arroyo-types = { path = "../arroyo-types" }
+arroyo-df = { path = "../arroyo-df" }
+arroyo-datastream = { path = "../arroyo-datastream" }
+arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-worker = { path = "../arroyo-worker" }
+arroyo-formats = { path = "../arroyo-formats" }
+tokio = { version = "1.16", features = ["full"] }
+arroyo-state = { path = "../arroyo-state" }
+
+arrow = {workspace = true }
+arrow-array = {workspace = true }
+arrow-schema = {workspace = true }
+tracing = "0.1.37"
+tracing-subscriber = {version = "0.3.17"}
+
+[dev-dependencies]
+test-log = { version = "0.2.12", default-features = false, features = ["trace"] }

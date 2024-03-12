@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "title": "SingleFileTable",
+  "properties": {
+    "path": {
+      "type": "string",
+      "title": "Path"
+    },
+    "table_type": {
+        "type": "string",
+        "title": "Table Type",
+        "description": "Whether it is a source or a sink",
+        "enum": [
+            "source",
+            "sink"
+        ]
+    },
+    "wait_for_control": {
+        "type": "boolean",
+        "title": "Wait for control message",
+        "description": "Whether to wait for a control message after each line"
+    }
+  },
+  "required": ["path", "table_type"],
+  "additionalProperties": false
+}

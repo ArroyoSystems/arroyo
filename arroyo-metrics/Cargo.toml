@@ -1,8 +1,0 @@
-[package]
-name = "arroyo-metrics"
-version = "0.9.0-dev"
-edition = "2021"
-
-[dependencies]
-arroyo-types = { path = "../arroyo-types" }
-prometheus = {version = "0.13", features = ["process"] }

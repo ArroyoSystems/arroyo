@@ -1,0 +1,279 @@
+syntax = "proto3";
+
+package arroyo_api;
+
+// Job management
+
+
+message CreateSqlJob {
+  string query = 1;
+  uint64 parallelism = 2;
+
+  repeated Udf udfs = 5;
+
+  bool preview = 6;
+}
+
+message CreatePipelineReq {
+  string name = 1;
+  oneof config {
+    bytes program = 2;
+    CreateSqlJob sql = 3;
+  }
+}
+
+message Udf {
+  string definition = 2;
+}
+
+message CreateJobReq {
+  string pipeline_id = 1;
+  uint64 checkpoint_interval_micros = 2;
+  bool preview = 3;
+}
+
+// Program
+
+message PipelineProgramUdf {
+  string name = 1;
+  string definition = 2;
+  string dependencies = 3;
+}
+
+message ConnectorOp {
+  string connector = 1;
+  string config = 2;
+  string description = 3;
+}
+
+message ValuePlanOperator {
+  string name = 1;
+  bytes physical_plan = 2;
+}
+
+message KeyPlanOperator {
+  string name = 1;
+  bytes physical_plan = 2;
+  repeated uint64 key_fields = 3;
+}
+
+message WindowAggregateOperator {
+  string name = 1;
+  bytes physical_plan = 2;
+  bytes binning_function = 3;
+  bytes binning_schema = 4;
+  Window window = 5;
+  string window_field_name = 6;
+  uint64 window_index = 7;
+  repeated uint64 key_fields = 8;
+  bytes input_schema = 9;
+}
+
+message TumblingWindowAggregateOperator {
+  string name = 1;
+  uint64 width_micros = 2;
+  bytes binning_function = 3;
+  ArroyoSchema input_schema = 4;
+  ArroyoSchema partial_schema = 5;
+  bytes partial_aggregation_plan = 6;
+  bytes final_aggregation_plan = 7;
+  optional bytes final_projection = 8;
+}
+
+message SlidingWindowAggregateOperator {
+  string name = 1;
+  uint64 width_micros = 2;
+  uint64 slide_micros = 3;
+  bytes binning_function = 4;
+  ArroyoSchema input_schema = 5;
+  ArroyoSchema partial_schema = 6;
+  bytes partial_aggregation_plan = 7;
+  bytes final_aggregation_plan = 8;
+  bytes final_projection = 9;
+}
+
+message SessionWindowAggregateOperator {
+  string name = 1;
+  uint64 gap_micros = 2;
+  string window_field_name = 3;
+  uint64 window_index = 4;
+  ArroyoSchema input_schema = 5;
+  ArroyoSchema unkeyed_aggregate_schema = 6;
+  bytes partial_aggregation_plan = 7;
+  bytes final_aggregation_plan = 8;
+}
+
+message JoinOperator {
+  string name = 1;
+  ArroyoSchema left_schema = 2;
+  ArroyoSchema right_schema = 3;
+  ArroyoSchema output_schema = 4;
+  bytes join_plan = 5;
+}
+
+message WasmUdfs {
+  string name = 1;
+  repeated WasmFunction wasm_functions = 2;
+}
+
+message WasmFunction{
+  WasmBehavior behavior = 1;
+  string name = 2;
+  string key_arg = 3;
+  string key_arg_type = 4;
+  string value_arg = 5;
+  string value_arg_type = 6;
+  string return_type = 7;
+  string body = 8;
+}
+
+enum WasmBehavior {
+  MAP = 0;
+  OPT_MAP = 1;
+  FILTER = 2;
+  TIMESTAMP = 3;
+  KEY_BY = 4;
+}
+
+message Window {
+  oneof window {
+    SlidingWindow sliding_window = 2;
+    TumblingWindow tumbling_window = 3;
+    InstantWindow instant_window = 4;
+    SessionWindow session_window = 5;
+  }
+}
+
+message SlidingWindow {
+  uint64 size_micros = 1;
+  uint64 slide_micros = 2;
+
+}
+message TumblingWindow {
+  uint64 size_micros = 1;
+}
+message InstantWindow {}
+
+message SessionWindow {
+  uint64 gap_micros = 1;
+}
+
+message ExpressionWatermarkConfig {
+  uint64 period_micros = 1;
+  optional uint64 idle_time_micros = 2;
+  ArroyoSchema input_schema = 3;
+  bytes expression = 4;
+}
+
+enum JoinType {
+  INNER = 0;
+  LEFT = 1;
+  RIGHT = 2;
+  FULL = 3;
+}
+
+enum OffsetMode {
+  EARLIEST = 0;
+  LATEST = 1;
+}
+
+enum EdgeType {
+  UNUSED = 0;
+  FORWARD = 1;
+  SHUFFLE = 2;
+  LEFT_JOIN = 3;
+  RIGHT_JOIN = 4;
+}
+
+// Physical extension nodes
+message MemExecNode {
+  string table_name = 1;
+  // json-encoded
+  string schema = 2;
+}
+
+message UnnestExecNode {
+  // json-encoded
+  string schema = 1;
+}
+
+message ArroyoExecNode {
+  oneof node {
+    MemExecNode mem_exec = 1;
+    UnnestExecNode unnest_exec = 2;
+  }
+}
+
+
+// Checkpoints
+
+enum TaskCheckpointEventType {
+  ALIGNMENT_STARTED = 0;
+  CHECKPOINT_STARTED = 1;
+  CHECKPOINT_OPERATOR_FINISHED = 2;
+  CHECKPOINT_SYNC_FINISHED = 3;
+  CHECKPOINT_PRE_COMMIT = 4;
+}
+
+message TaskCheckpointEvent {
+  uint64 time = 1;
+  TaskCheckpointEventType event_type = 2;
+}
+
+message TaskCheckpointDetail {
+  uint32 subtask_index = 1;
+  uint64 start_time = 2;
+  optional uint64 finish_time = 3;
+  optional uint64 bytes = 4;
+  repeated TaskCheckpointEvent events = 5;
+}
+
+message OperatorCheckpointDetail {
+  string operator_id = 1;
+  uint64 start_time = 2;
+  optional uint64 finish_time = 3;
+  bool has_state = 4;
+  map<uint32, TaskCheckpointDetail> tasks = 5;
+}
+
+message ArrowDylibUdfConfig {
+  string dylib_path = 1;
+  repeated bytes arg_types = 2;
+  bytes return_type = 3;
+}
+
+message ArrowProgramConfig {
+  map<string, ArrowDylibUdfConfig> udf_dylibs = 1;
+}
+
+// Arrow
+message ArrowProgram {
+  repeated ArrowNode nodes = 1;
+  repeated ArrowEdge edges = 2;
+  ArrowProgramConfig program_config = 3;
+}
+
+message ArroyoSchema {
+  // json-encoded
+  string arrow_schema = 1;
+  uint32 timestamp_index = 2;
+  repeated uint32 key_indices = 3;
+  bool has_keys = 4;
+}
+
+message ArrowNode {
+  int32 node_index = 1;
+  string node_id = 2;
+  uint32 parallelism = 3;
+  string description = 4;
+  string operator_name = 5;
+  bytes operator_config = 6;
+}
+
+message ArrowEdge {
+  int32 source = 1;
+  int32 target = 2;
+  ArroyoSchema schema = 4;
+  EdgeType edge_type = 5;
+  repeated uint32 projection = 6;
+}
