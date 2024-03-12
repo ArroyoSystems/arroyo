@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::mqtt::{create_connection, MqttConfig, Tls};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::context::{ArrowContext, batch_bounded, BatchReceiver};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
@@ -28,7 +28,7 @@ struct MqttSourceWithReads {
     to_control_tx: Sender<ControlMessage>,
     #[allow(dead_code)]
     from_control_rx: Receiver<ControlResp>,
-    data_recv: Receiver<QueueItem>,
+    data_recv: BatchReceiver,
     subscribed: Arc<AtomicBool>,
 }
 
@@ -129,7 +129,7 @@ impl MqttTopicTester {
 
         let (to_control_tx, control_rx) = channel(128);
         let (command_tx, from_control_rx) = channel(128);
-        let (data_tx, recv) = channel(128);
+        let (data_tx, recv) = batch_bounded(128);
 
         let mut ctx = ArrowContext::new(
             task_info,
