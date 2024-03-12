@@ -1,4 +1,4 @@
-use crate::context::ArrowContext;
+use crate::context::{ArrowContext, BatchReceiver};
 use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
 use arrow::array::RecordBatch;
@@ -17,7 +17,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
 
@@ -31,16 +31,19 @@ pub trait OperatorConstructor: Send {
 }
 
 pub enum OperatorNode {
-    Source(Box<dyn SourceOperator>),
-    Operator(Box<dyn ArrowOperator>),
+    Source(Box<dyn SourceOperator + Send>),
+    Operator(Box<dyn ArrowOperator + Send>),
 }
 
+// TODO: this is required currently because the FileSystemSink code isn't sync
+unsafe impl Sync for OperatorNode {}
+
 impl OperatorNode {
-    pub fn from_source(source: Box<dyn SourceOperator>) -> Self {
+    pub fn from_source(source: Box<dyn SourceOperator + Send>) -> Self {
         OperatorNode::Source(source)
     }
 
-    pub fn from_operator(operator: Box<dyn ArrowOperator>) -> Self {
+    pub fn from_operator(operator: Box<dyn ArrowOperator + Send>) -> Self {
         OperatorNode::Operator(operator)
     }
 
@@ -61,33 +64,40 @@ impl OperatorNode {
     async fn run_behavior(
         &mut self,
         ctx: &mut ArrowContext,
-        in_qs: &mut Vec<Receiver<ArrowMessage>>,
+        in_qs: &mut Vec<BatchReceiver>,
+        ready: Arc<Barrier>,
     ) -> Option<SignalMessage> {
         match self {
             OperatorNode::Source(s) => {
                 s.on_start(ctx).await;
 
+                ready.wait().await;
+                info!(
+                    "Running source {}-{}",
+                    ctx.task_info.operator_name, ctx.task_info.task_index
+                );
                 let result = s.run(ctx).await;
 
                 s.on_close(ctx).await;
 
                 result.into()
             }
-            OperatorNode::Operator(o) => operator_run_behavior(o, ctx, in_qs).await,
+            OperatorNode::Operator(o) => operator_run_behavior(o, ctx, in_qs, ready).await,
         }
     }
 
     pub async fn start(
         mut self: Box<Self>,
         mut ctx: ArrowContext,
-        mut in_qs: Vec<Receiver<ArrowMessage>>,
+        mut in_qs: Vec<BatchReceiver>,
+        ready: Arc<Barrier>,
     ) {
         info!(
             "Starting task {}-{}",
             ctx.task_info.operator_name, ctx.task_info.task_index
         );
 
-        let final_message = self.run_behavior(&mut ctx, &mut in_qs).await;
+        let final_message = self.run_behavior(&mut ctx, &mut in_qs, ready).await;
 
         if let Some(final_message) = final_message {
             ctx.broadcast(ArrowMessage::Signal(final_message)).await;
@@ -158,11 +168,18 @@ pub trait SourceOperator: Send + 'static {
 }
 
 async fn operator_run_behavior(
-    this: &mut Box<dyn ArrowOperator>,
+    this: &mut Box<dyn ArrowOperator + Send>,
     ctx: &mut ArrowContext,
-    in_qs: &mut Vec<Receiver<ArrowMessage>>,
+    in_qs: &mut Vec<BatchReceiver>,
+    ready: Arc<Barrier>,
 ) -> Option<SignalMessage> {
     this.on_start(ctx).await;
+
+    ready.wait().await;
+    info!(
+        "Running operator {}-{}",
+        ctx.task_info.operator_name, ctx.task_info.task_index
+    );
 
     let task_info = ctx.task_info.clone();
     let name = this.name();
@@ -206,6 +223,7 @@ async fn operator_run_behavior(
                             ArrowMessage::Data(record) => {
                                 TaskCounters::BatchesReceived.for_task(&ctx.task_info, |c| c.inc());
                                 TaskCounters::MessagesReceived.for_task(&ctx.task_info, |c| c.inc_by(record.num_rows() as u64));
+                                TaskCounters::BytesReceived.for_task(&ctx.task_info, |c| c.inc_by(record.get_array_memory_size() as u64));
                                 this.process_batch_index(idx, in_partitions, record, ctx)
                                     .instrument(tracing::trace_span!("handle_fn",
                                         name,

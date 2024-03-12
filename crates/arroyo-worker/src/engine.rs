@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::{mem, thread};
 
 use std::time::SystemTime;
@@ -9,6 +9,8 @@ use arroyo_connectors::connectors;
 use arroyo_df::physical::new_registry;
 use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use tracing::{debug, info, warn};
 
 use crate::arrow::instant_join::InstantJoinConstructor;
@@ -24,19 +26,22 @@ use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
 pub use arroyo_macro::StreamNode;
-use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver, BatchSender};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;
 use arroyo_operator::ErasedConstructor;
 use arroyo_rpc::grpc::{api, CheckpointMetadata, TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{range_for_server, ArrowMessage, Key, TaskInfo, WorkerId, QUEUE_SIZE};
+use arroyo_types::{
+    range_for_server, u32_config, Key, TaskInfo, WorkerId, DEFAULT_QUEUE_SIZE, QUEUE_SIZE_ENV,
+};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Barrier;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -88,8 +93,8 @@ struct PhysicalGraphEdge {
     out_logical_idx: usize,
     schema: ArroyoSchema,
     edge: LogicalEdgeType,
-    tx: Option<Sender<QueueItem>>,
-    rx: Option<Receiver<QueueItem>>,
+    tx: Option<BatchSender>,
+    rx: Option<BatchReceiver>,
 }
 
 impl Debug for PhysicalGraphEdge {
@@ -161,12 +166,12 @@ impl SubtaskOrQueueNode {
 
 pub struct Program {
     pub name: String,
-    graph: DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>,
+    graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
 }
 
 impl Program {
     pub fn total_nodes(&self) -> usize {
-        self.graph.node_count()
+        self.graph.read().unwrap().node_count()
     }
 
     pub fn local_from_logical(name: String, logical: &DiGraph<LogicalNode, LogicalEdge>) -> Self {
@@ -241,6 +246,8 @@ impl Program {
             }
         }
 
+        let queue_size = u32_config(QUEUE_SIZE_ENV, DEFAULT_QUEUE_SIZE);
+
         for idx in logical.edge_indices() {
             let edge = logical.edge_weight(idx).unwrap();
             let (logical_in_node_idx, logical_out_node_idx) = logical.edge_endpoints(idx).unwrap();
@@ -264,7 +271,7 @@ impl Program {
                         panic!("cannot create a forward connection between nodes of different parallelism");
                     }
                     for (f, t) in from_nodes.iter().zip(&to_nodes) {
-                        let (tx, rx) = channel(QUEUE_SIZE);
+                        let (tx, rx) = batch_bounded(queue_size);
                         let edge = PhysicalGraphEdge {
                             edge_idx: 0,
                             in_logical_idx: logical_in_node_idx.index(),
@@ -282,7 +289,7 @@ impl Program {
                 | LogicalEdgeType::RightJoin => {
                     for f in &from_nodes {
                         for (idx, t) in to_nodes.iter().enumerate() {
-                            let (tx, rx) = channel(QUEUE_SIZE);
+                            let (tx, rx) = batch_bounded(queue_size);
                             let edge = PhysicalGraphEdge {
                                 edge_idx: idx,
                                 in_logical_idx: logical_in_node_idx.index(),
@@ -301,13 +308,13 @@ impl Program {
 
         Program {
             name,
-            graph: physical,
+            graph: Arc::new(RwLock::new(physical)),
         }
     }
 
     pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
         let mut tasks_per_operator = HashMap::new();
-        for node in self.graph.node_weights() {
+        for node in self.graph.read().unwrap().node_weights() {
             let entry = tasks_per_operator.entry(node.id().to_string()).or_insert(0);
             *entry += 1;
         }
@@ -336,61 +343,45 @@ pub struct RunningEngine {
 
 impl RunningEngine {
     pub fn source_controls(&self) -> Vec<Sender<ControlMessage>> {
-        self.program
-            .graph
+        let graph = self.program.graph.read().unwrap();
+        graph
             .externals(Direction::Incoming)
             .filter(|idx| {
-                let w = self.program.graph.node_weight(*idx).unwrap();
+                let w = graph.node_weight(*idx).unwrap();
                 self.assignments
                     .get(&(w.id().to_string(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
                     == self.worker_id.0
             })
-            .map(|idx| {
-                self.program
-                    .graph
-                    .node_weight(idx)
-                    .unwrap()
-                    .as_queue()
-                    .tx
-                    .clone()
-            })
+            .map(|idx| graph.node_weight(idx).unwrap().as_queue().tx.clone())
             .collect()
     }
 
     pub fn sink_controls(&self) -> Vec<Sender<ControlMessage>> {
-        self.program
-            .graph
+        let graph = self.program.graph.read().unwrap();
+        graph
             .externals(Direction::Outgoing)
             .filter(|idx| {
-                let w = self.program.graph.node_weight(*idx).unwrap();
+                let w = graph.node_weight(*idx).unwrap();
                 self.assignments
                     .get(&(w.id().to_string(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
                     == self.worker_id.0
             })
-            .map(|idx| {
-                self.program
-                    .graph
-                    .node_weight(idx)
-                    .unwrap()
-                    .as_queue()
-                    .tx
-                    .clone()
-            })
+            .map(|idx| graph.node_weight(idx).unwrap().as_queue().tx.clone())
             .collect()
     }
 
     pub fn operator_controls(&self) -> HashMap<String, Vec<Sender<ControlMessage>>> {
         let mut controls = HashMap::new();
+        let graph = self.program.graph.read().unwrap();
 
-        self.program
-            .graph
+        graph
             .node_indices()
             .filter(|idx| {
-                let w = self.program.graph.node_weight(*idx).unwrap();
+                let w = graph.node_weight(*idx).unwrap();
                 self.assignments
                     .get(&(w.id().to_string(), w.subtask_idx()))
                     .unwrap()
@@ -398,19 +389,12 @@ impl RunningEngine {
                     == self.worker_id.0
             })
             .for_each(|idx| {
-                let w = self.program.graph.node_weight(idx).unwrap();
+                let w = graph.node_weight(idx).unwrap();
                 let assignment = self
                     .assignments
                     .get(&(w.id().to_string(), w.subtask_idx()))
                     .unwrap();
-                let tx = self
-                    .program
-                    .graph
-                    .node_weight(idx)
-                    .unwrap()
-                    .as_queue()
-                    .tx
-                    .clone();
+                let tx = graph.node_weight(idx).unwrap().as_queue().tx.clone();
                 controls
                     .entry(assignment.operator_id.clone())
                     .or_insert(vec![])
@@ -445,10 +429,19 @@ impl Engine {
         }
     }
 
+    fn local_task_count(&self) -> usize {
+        self.assignments
+            .iter()
+            .filter(|(_, a)| a.worker_id == self.worker_id.0)
+            .count()
+    }
+
     pub fn for_local(program: Program, job_id: String) -> Self {
         let worker_id = WorkerId(0);
         let assignments = program
             .graph
+            .read()
+            .unwrap()
             .node_weights()
             .map(|n| {
                 (
@@ -490,21 +483,35 @@ impl Engine {
             None
         };
 
-        let node_indexes: Vec<_> = self.program.graph.node_indices().collect();
+        let node_indexes: Vec<_> = self.program.graph.read().unwrap().node_indices().collect();
 
         let (control_tx, control_rx) = channel(128);
-        let mut senders = Senders::new();
         let worker_id = self.worker_id;
 
-        for idx in node_indexes {
-            self.schedule_node(&checkpoint_metadata, &control_tx, &mut senders, idx)
-                .await;
+        let mut senders = Senders::new();
+
+        let ready = Arc::new(Barrier::new(self.local_task_count()));
+        {
+            let mut futures = FuturesUnordered::new();
+
+            for idx in node_indexes {
+                futures.push(self.schedule_node(
+                    &checkpoint_metadata,
+                    &control_tx,
+                    idx,
+                    ready.clone(),
+                ));
+            }
+
+            while let Some(result) = futures.next().await {
+                senders.merge(result);
+            }
         }
 
         self.network_manager.start(senders).await;
 
         // clear all of the TXs in the graph so that we don't leave dangling senders
-        for n in self.program.graph.edge_weights_mut() {
+        for n in self.program.graph.write().unwrap().edge_weights_mut() {
             n.tx = None;
         }
 
@@ -521,15 +528,17 @@ impl Engine {
     }
 
     async fn schedule_node(
-        &mut self,
+        &self,
         checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
-        senders: &mut Senders,
         idx: NodeIndex,
-    ) {
+        ready: Arc<Barrier>,
+    ) -> Senders {
         let (node, control_rx) = self
             .program
             .graph
+            .write()
+            .unwrap()
             .node_weight_mut(idx)
             .unwrap()
             .take_subtask(self.job_id.clone());
@@ -546,12 +555,21 @@ impl Engine {
                 )
             });
 
+        let mut senders = Senders::new();
+
         if assignment.worker_id == self.worker_id.0 {
-            self.run_locally(checkpoint_metadata, control_tx, idx, node, control_rx)
-                .await;
+            self.run_locally(
+                checkpoint_metadata,
+                control_tx,
+                idx,
+                node,
+                control_rx,
+                ready,
+            )
+            .await;
         } else {
             self.connect_to_remote_task(
-                senders,
+                &mut senders,
                 idx,
                 node.id.clone(),
                 node.subtask_idx,
@@ -559,10 +577,12 @@ impl Engine {
             )
             .await;
         }
+
+        senders
     }
 
     async fn connect_to_remote_task(
-        &mut self,
+        &self,
         senders: &mut Senders,
         idx: NodeIndex,
         node_id: String,
@@ -574,58 +594,67 @@ impl Engine {
             node_id, node_subtask_idx, assignment.worker_addr
         );
 
-        for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
-            let target = self.program.graph.node_weight(edge.target()).unwrap();
-
-            let quad = Quad {
-                src_id: edge.weight().in_logical_idx,
-                src_idx: node_subtask_idx,
-                dst_id: edge.weight().out_logical_idx,
-                dst_idx: target.subtask_idx(),
-            };
-
-            senders.add(
-                quad,
-                edge.weight().schema.schema.clone(),
-                edge.weight().tx.as_ref().unwrap().clone(),
-            );
-        }
-
         let mut connects = vec![];
+        {
+            let graph = self.program.graph.read().unwrap();
 
-        for edge in self.program.graph.edges_directed(idx, Direction::Incoming) {
-            let source = self.program.graph.node_weight(edge.source()).unwrap();
+            for edge in graph.edges_directed(idx, Direction::Outgoing) {
+                let target = graph.node_weight(edge.target()).unwrap();
 
-            let quad = Quad {
-                src_id: edge.weight().in_logical_idx,
-                src_idx: source.subtask_idx(),
-                dst_id: edge.weight().out_logical_idx,
-                dst_idx: node_subtask_idx,
-            };
+                let quad = Quad {
+                    src_id: edge.weight().in_logical_idx,
+                    src_idx: node_subtask_idx,
+                    dst_id: edge.weight().out_logical_idx,
+                    dst_idx: target.subtask_idx(),
+                };
 
-            connects.push((edge.id(), quad));
+                senders.add(
+                    quad,
+                    edge.weight().schema.schema.clone(),
+                    edge.weight().tx.as_ref().unwrap().clone(),
+                );
+            }
+
+            for edge in graph.edges_directed(idx, Direction::Incoming) {
+                let source = graph.node_weight(edge.source()).unwrap();
+
+                let quad = Quad {
+                    src_id: edge.weight().in_logical_idx,
+                    src_idx: source.subtask_idx(),
+                    dst_id: edge.weight().out_logical_idx,
+                    dst_idx: node_subtask_idx,
+                };
+
+                connects.push((edge.id(), quad));
+            }
         }
 
         for (id, quad) in connects {
-            let edge = self.program.graph.edge_weight_mut(id).unwrap();
+            let rx = {
+                let mut graph = self.program.graph.write().unwrap();
+                let edge = graph.edge_weight_mut(id).unwrap();
+                edge.rx.take().unwrap()
+            };
 
             self.network_manager
-                .connect(
-                    assignment.worker_addr.clone(),
-                    quad,
-                    edge.rx.take().unwrap(),
-                )
+                .connect(assignment.worker_addr.clone(), quad, rx)
                 .await;
         }
+
+        info!(
+            "Connected to remote task {}-{} running on {}",
+            node_id, node_subtask_idx, assignment.worker_addr
+        );
     }
 
     pub async fn run_locally(
-        &mut self,
+        &self,
         checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
         idx: NodeIndex,
         node: SubtaskNode,
         control_rx: Receiver<ControlMessage>,
+        ready: Arc<Barrier>,
     ) {
         info!(
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
@@ -637,48 +666,40 @@ impl Engine {
             node.parallelism
         );
 
-        let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<Receiver<QueueItem>>> =
-            BTreeMap::new();
-
-        for edge in self.program.graph.edge_indices() {
-            if self.program.graph.edge_endpoints(edge).unwrap().1 == idx {
-                let weight = self.program.graph.edge_weight_mut(edge).unwrap();
-                in_qs_map
-                    .entry((weight.edge.clone(), weight.in_logical_idx))
-                    .or_default()
-                    .push(weight.rx.take().unwrap());
+        let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<BatchReceiver>> = BTreeMap::new();
+        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, BatchSender>> = BTreeMap::new();
+        let task_info = {
+            let mut graph = self.program.graph.write().unwrap();
+            for edge in graph.edge_indices() {
+                if graph.edge_endpoints(edge).unwrap().1 == idx {
+                    let weight = graph.edge_weight_mut(edge).unwrap();
+                    in_qs_map
+                        .entry((weight.edge.clone(), weight.in_logical_idx))
+                        .or_default()
+                        .push(weight.rx.take().unwrap());
+                }
             }
-        }
 
-        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, Sender<ArrowMessage>>> =
-            BTreeMap::new();
+            for edge in graph.edges_directed(idx, Direction::Outgoing) {
+                // is the target of this edge local or remote?
+                let _local = {
+                    let target = graph.node_weight(edge.target()).unwrap();
+                    self.assignments
+                        .get(&(target.id().to_string(), target.subtask_idx()))
+                        .unwrap()
+                        .worker_id
+                        == self.worker_id.0
+                };
 
-        for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
-            // is the target of this edge local or remote?
-            let _local = {
-                let target = self.program.graph.node_weight(edge.target()).unwrap();
-                self.assignments
-                    .get(&(target.id().to_string(), target.subtask_idx()))
-                    .unwrap()
-                    .worker_id
-                    == self.worker_id.0
-            };
+                let tx = edge.weight().tx.as_ref().unwrap().clone();
+                out_qs_map
+                    .entry(edge.weight().out_logical_idx)
+                    .or_default()
+                    .insert(edge.weight().edge_idx, tx);
+            }
 
-            let tx = edge.weight().tx.as_ref().unwrap().clone();
-            out_qs_map
-                .entry(edge.weight().out_logical_idx)
-                .or_default()
-                .insert(edge.weight().edge_idx, tx);
-        }
-
-        let task_info = self
-            .program
-            .graph
-            .node_weight(idx)
-            .unwrap()
-            .as_queue()
-            .task_info
-            .clone();
+            graph.node_weight(idx).unwrap().as_queue().task_info.clone()
+        };
 
         let operator_id = task_info.operator_id.clone();
         let task_index = task_info.task_index;
@@ -705,7 +726,7 @@ impl Engine {
 
         let operator = Box::new(node.node);
         let join_task = tokio::spawn(async move {
-            operator.start(ctx, in_qs).await;
+            operator.start(ctx, in_qs, ready).await;
         });
 
         let send_copy = control_tx.clone();

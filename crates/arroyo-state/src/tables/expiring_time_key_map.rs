@@ -35,7 +35,7 @@ use crate::{
     TableData,
 };
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use tracing::{info, warn};
+use tracing::{debug, info};
 
 use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpointer};
 
@@ -820,7 +820,7 @@ impl ExpiringTimeKeyView {
         let cutoff = watermark
             .map(|watermark| watermark - self.parent.retention)
             .unwrap_or_else(|| SystemTime::UNIX_EPOCH);
-        warn!("CUTOFF IS {}", print_time(cutoff));
+        debug!("CUTOFF IS {}", print_time(cutoff));
         let flushed_range = self.flushed_batches_by_max_timestamp.range(cutoff..);
         let buffered_range = self.batches_to_flush.range(cutoff..);
         flushed_range.chain(buffered_range)
