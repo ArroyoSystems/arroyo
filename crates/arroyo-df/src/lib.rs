@@ -496,6 +496,13 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
                 }
                 let slide = get_duration(&args[0])?;
                 let width = get_duration(&args[1])?;
+                if width.as_nanos() % slide.as_nanos() != 0 {
+                    bail!(
+                        "hop() width {:?} currently must be a multiple of slide {:?}",
+                        width,
+                        slide
+                    );
+                }
                 Ok(Some(WindowType::Sliding { width, slide }))
             }
             "tumble" => {

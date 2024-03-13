@@ -18,6 +18,7 @@ use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
+use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::operators::watermark_generator::WatermarkGeneratorConstructor;
@@ -819,6 +820,7 @@ pub fn construct_operator(
                     panic!("Failed to construct connector {}: {:?}", op.connector, e)
                 });
         }
+        OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
     };
 
     ctor.with_config(config, registry)

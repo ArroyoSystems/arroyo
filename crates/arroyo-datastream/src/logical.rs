@@ -28,6 +28,7 @@ pub enum OperatorName {
     ArrowAggregate,
     Join,
     InstantJoin,
+    WindowFunction,
     TumblingWindowAggregate,
     SlidingWindowAggregate,
     SessionWindowAggregate,

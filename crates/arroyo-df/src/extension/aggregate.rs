@@ -16,8 +16,7 @@ use arroyo_rpc::{
     TIMESTAMP_FIELD,
 };
 use datafusion_common::{
-    Column, DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference,
-    Result as DFResult, ScalarValue,
+    Column, DFField, DFSchema, DFSchemaRef, DataFusionError, Result as DFResult, ScalarValue,
 };
 use datafusion_execution::FunctionRegistry;
 use datafusion_expr::{
@@ -33,11 +32,10 @@ use prost::Message;
 use crate::{
     builder::{NamedNode, Planner, SplitPlanOutput},
     physical::{new_registry, ArroyoPhysicalExtensionCodec},
-    schemas::{add_timestamp_field, has_timestamp_field},
     WindowBehavior,
 };
 
-use super::{ArroyoExtension, NodeWithIncomingEdges};
+use super::{ArroyoExtension, NodeWithIncomingEdges, TimestampAppendExtension};
 
 pub(crate) const AGGREGATE_EXTENSION_NAME: &'static str = "AggregateExtension";
 
@@ -275,8 +273,7 @@ impl AggregateExtension {
     ) -> DFResult<LogicalPlan> {
         let timestamp_field = aggregate_plan.inputs()[0]
             .schema()
-            .field_with_unqualified_name(TIMESTAMP_FIELD)
-            .unwrap()
+            .field_with_unqualified_name(TIMESTAMP_FIELD)?
             .clone();
         let timestamp_append = LogicalPlan::Extension(Extension {
             node: Arc::new(TimestampAppendExtension::new(
@@ -459,62 +456,6 @@ impl ArroyoExtension for AggregateExtension {
 /*
 This is a plan used for appending a _timestamp field to an existing record batch.
  */
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct TimestampAppendExtension {
-    pub(crate) input: LogicalPlan,
-    pub(crate) qualifier: Option<OwnedTableReference>,
-    pub(crate) schema: DFSchemaRef,
-}
-
-impl TimestampAppendExtension {
-    fn new(input: LogicalPlan, qualifier: Option<OwnedTableReference>) -> Self {
-        if has_timestamp_field(input.schema().clone()) {
-            unreachable!("shouldn't be adding timestamp to a plan that already has it");
-        }
-        let schema = add_timestamp_field(input.schema().clone(), qualifier.clone()).unwrap();
-        Self {
-            input,
-            qualifier,
-            schema,
-        }
-    }
-}
-
-impl UserDefinedLogicalNodeCore for TimestampAppendExtension {
-    fn name(&self) -> &str {
-        "TimestampAppendExtension"
-    }
-
-    fn inputs(&self) -> Vec<&LogicalPlan> {
-        vec![&self.input]
-    }
-
-    fn schema(&self) -> &DFSchemaRef {
-        &self.schema
-    }
-
-    fn expressions(&self) -> Vec<Expr> {
-        vec![]
-    }
-
-    fn fmt_for_explain(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "TimestampAppendExtension({:?}): {}",
-            self.qualifier,
-            self.schema
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::new(inputs[0].clone(), self.qualifier.clone())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct WindowAppendExtension {
