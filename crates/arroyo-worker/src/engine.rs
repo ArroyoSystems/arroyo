@@ -26,7 +26,6 @@ use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
-pub use arroyo_macro::StreamNode;
 use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver, BatchSender};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;

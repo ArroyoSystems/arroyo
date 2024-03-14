@@ -667,7 +667,6 @@ dependencies = [
  "ahash 0.8.7",
  "anyhow",
  "arrow-schema",
- "arroyo-macro",
  "arroyo-rpc",
  "arroyo-types",
  "bincode 2.0.0-rc.3",
@@ -760,15 +759,6 @@ dependencies = [
  "tracing",
  "typify",
  "utoipa 4.2.0",
-]
-
-[[package]]
-name = "arroyo-macro"
-version = "0.10.0-dev"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.52",
 ]
 
 [[package]]
@@ -1011,7 +1001,6 @@ dependencies = [
  "arroyo-datastream",
  "arroyo-df",
  "arroyo-formats",
- "arroyo-macro",
  "arroyo-metrics",
  "arroyo-operator",
  "arroyo-rpc",
