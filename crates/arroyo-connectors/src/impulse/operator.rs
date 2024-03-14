@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use arrow::array::builder::{TimestampNanosecondBuilder, UInt64Builder};
 use arrow::array::RecordBatch;
-use arroyo_rpc::grpc::{StopMode, TableConfig};
-use arroyo_rpc::ControlMessage;
+use arroyo_rpc::grpc::TableConfig;
+
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
@@ -14,8 +14,8 @@ use std::time::{Duration, SystemTime};
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
-use tracing::{debug, info};
+use arroyo_types::{from_millis, print_time, to_millis, to_nanos, CheckpointBarrier};
+use tracing::info;
 
 #[derive(Encode, Decode, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ImpulseSourceState {
@@ -36,6 +36,66 @@ pub struct ImpulseSourceFunc {
     pub spec: ImpulseSpec,
     pub limit: usize,
     pub state: ImpulseSourceState,
+    pub batch_builder: ImpulseBatchBuilder,
+}
+
+#[derive(Debug)]
+pub struct ImpulseBatchBuilder {
+    counter_builder: UInt64Builder,
+    timestamp_builder: TimestampNanosecondBuilder,
+    task_index_scalar: ScalarValue,
+    batch_size: usize,
+    items: usize,
+}
+
+impl Default for ImpulseBatchBuilder {
+    fn default() -> Self {
+        Self::new(8192, 0)
+    }
+}
+
+impl ImpulseBatchBuilder {
+    async fn flush(&mut self, ctx: &mut ArrowContext) {
+        if self.items == 0 {
+            return;
+        }
+        let counter_column = self.counter_builder.finish();
+        let task_index_column = self.task_index_scalar.to_array_of_size(self.items).unwrap();
+        let timestamp_column = self.timestamp_builder.finish();
+        ctx.collect(
+            RecordBatch::try_new(
+                ctx.out_schema.as_ref().unwrap().schema.clone(),
+                vec![
+                    Arc::new(counter_column),
+                    Arc::new(task_index_column),
+                    Arc::new(timestamp_column),
+                ],
+            )
+            .unwrap(),
+        )
+        .await;
+        self.items = 0;
+    }
+
+    fn new(batch_size: usize, task_index: u64) -> ImpulseBatchBuilder {
+        Self {
+            counter_builder: UInt64Builder::with_capacity(batch_size),
+            timestamp_builder: TimestampNanosecondBuilder::with_capacity(batch_size),
+            task_index_scalar: ScalarValue::UInt64(Some(task_index)),
+            batch_size,
+            items: 0,
+        }
+    }
+
+    fn insert(&mut self, counter: u64, timestamp: i64) {
+        self.counter_builder.append_value(counter);
+        self.timestamp_builder.append_value(timestamp);
+        self.items += 1;
+    }
+
+    fn should_flush(&self) -> bool {
+        self.batch_size == self.items
+    }
 }
 
 impl ImpulseSourceFunc {
@@ -71,6 +131,7 @@ impl ImpulseSourceFunc {
                 counter: 0,
                 start_time,
             },
+            batch_builder: ImpulseBatchBuilder::new(8192, 0),
         }
     }
 
@@ -116,14 +177,8 @@ impl ImpulseSourceFunc {
 
         let start_time = SystemTime::now() - delay * self.state.counter as u32;
 
-        let schema = ctx.out_schema.as_ref().unwrap().schema.clone();
-
-        let batch_size = self.batch_size(ctx);
-
-        let mut items = 0;
-        let mut counter_builder = UInt64Builder::with_capacity(batch_size);
-        let task_index_scalar = ScalarValue::UInt64(Some(ctx.task_info.task_index as u64));
-        let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(batch_size);
+        self.batch_builder =
+            ImpulseBatchBuilder::new(self.batch_size(ctx), ctx.task_info.task_index as u64);
 
         while self.state.counter < self.limit {
             let timestamp = self
@@ -131,83 +186,18 @@ impl ImpulseSourceFunc {
                 .map(|d| self.state.start_time + d * self.state.counter as u32)
                 .unwrap_or_else(SystemTime::now);
 
-            counter_builder.append_value(self.state.counter as u64);
-            timestamp_builder.append_value(to_nanos(timestamp) as i64);
-            items += 1;
-            if items == batch_size {
-                let counter_column = counter_builder.finish();
-                let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
-                let timestamp_column = timestamp_builder.finish();
-                ctx.collect(
-                    RecordBatch::try_new(
-                        schema.clone(),
-                        vec![
-                            Arc::new(counter_column),
-                            Arc::new(task_index_column),
-                            Arc::new(timestamp_column),
-                        ],
-                    )
-                    .unwrap(),
-                )
-                .await;
-                items = 0;
+            self.batch_builder
+                .insert(self.state.counter as u64, to_nanos(timestamp) as i64);
+
+            if self.batch_builder.should_flush() {
+                self.batch_builder.flush(ctx).await;
             }
 
             self.state.counter += 1;
 
-            match ctx.control_rx.try_recv() {
-                Ok(ControlMessage::Checkpoint(c)) => {
-                    // checkpoint our state
-                    debug!("starting checkpointing {}", ctx.task_info.task_index);
-                    if items > 0 {
-                        let counter_column = counter_builder.finish();
-                        let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
-                        let timestamp_column = timestamp_builder.finish();
-                        ctx.collect(
-                            RecordBatch::try_new(
-                                schema.clone(),
-                                vec![
-                                    Arc::new(counter_column),
-                                    Arc::new(task_index_column),
-                                    Arc::new(timestamp_column),
-                                ],
-                            )
-                            .unwrap(),
-                        )
-                        .await;
-                        items = 0;
-                    }
-                    ctx.table_manager
-                        .get_global_keyed_state("i")
-                        .await
-                        .unwrap()
-                        .insert(ctx.task_info.task_index, self.state)
-                        .await;
-                    if self.start_checkpoint(c, ctx).await {
-                        return SourceFinishType::Immediate;
-                    }
-                }
-                Ok(ControlMessage::Stop { mode }) => {
-                    info!("Stopping impulse source {:?}", mode);
-
-                    match mode {
-                        StopMode::Graceful => {
-                            return SourceFinishType::Graceful;
-                        }
-                        StopMode::Immediate => {
-                            return SourceFinishType::Immediate;
-                        }
-                    }
-                }
-                Ok(ControlMessage::Commit { .. }) => {
-                    unreachable!("sources shouldn't receive commit messages");
-                }
-                Ok(ControlMessage::LoadCompacted { compacted }) => {
-                    ctx.load_compacted(compacted).await;
-                }
-                Ok(ControlMessage::NoOp) => {}
-                Err(_) => {
-                    // no messages
+            if let Ok(control_message) = ctx.control_rx.try_recv() {
+                if let Some(finish_mode) = self.handle_control_message(ctx, control_message).await {
+                    return finish_mode;
                 }
             }
 
@@ -218,23 +208,7 @@ impl ImpulseSourceFunc {
                 }
             }
         }
-        if items > 0 {
-            let counter_column = counter_builder.finish();
-            let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
-            let timestamp_column = timestamp_builder.finish();
-            ctx.collect(
-                RecordBatch::try_new(
-                    schema.clone(),
-                    vec![
-                        Arc::new(counter_column),
-                        Arc::new(task_index_column),
-                        Arc::new(timestamp_column),
-                    ],
-                )
-                .unwrap(),
-            )
-            .await;
-        }
+        self.batch_builder.flush(ctx).await;
 
         SourceFinishType::Final
     }
@@ -264,5 +238,8 @@ impl SourceOperator for ImpulseSourceFunc {
 
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         self.run(ctx).await
+    }
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        self.batch_builder.flush(ctx).await;
     }
 }
