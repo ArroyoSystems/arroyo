@@ -127,9 +127,11 @@ impl BackendFlusher {
             bail!("somehow exited loop without checkpoint_epoch being set");
         };
         let mut metadatas = HashMap::new();
+        let mut bytes = 0;
         for (table_name, checkpointer) in self.table_checkpointers.drain() {
-            if let Some(subtask_checkpoint_data) = checkpointer.finish(&cp).await? {
+            if let Some((subtask_checkpoint_data, size)) = checkpointer.finish(&cp).await? {
                 metadatas.insert(table_name.clone(), subtask_checkpoint_data);
+                bytes += size;
             }
         }
 
@@ -164,6 +166,7 @@ impl BackendFlusher {
             watermark: cp.watermark.map(to_micros),
             table_metadata: metadatas,
             table_configs: self.table_configs.clone(),
+            bytes: bytes as u64,
         };
         self.control_tx
             .send(ControlResp::CheckpointCompleted(CheckpointCompleted {

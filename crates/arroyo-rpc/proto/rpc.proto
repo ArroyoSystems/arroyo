@@ -198,6 +198,7 @@ message SubtaskCheckpointMetadata {
   uint64 start_time = 2;
   uint64 finish_time = 3;
   optional uint64 watermark = 4;
+  uint64 bytes = 5;
 
   map<string, TableSubtaskCheckpointMetadata> table_metadata = 10;
   // TODO: move this into plan?

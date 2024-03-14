@@ -401,7 +401,7 @@ pub trait TableEpochCheckpointer: Send {
     async fn finish(
         self,
         checkpoint: &CheckpointMessage,
-    ) -> Result<Option<Self::SubTableCheckpointMessage>>;
+    ) -> Result<Option<(Self::SubTableCheckpointMessage, usize)>>;
 
     fn table_type() -> TableEnum;
 
@@ -414,7 +414,7 @@ pub trait ErasedCheckpointer: Send {
     async fn finish(
         mut self: Box<Self>,
         checkpoint: &CheckpointMessage,
-    ) -> Result<Option<TableSubtaskCheckpointMetadata>>;
+    ) -> Result<Option<(TableSubtaskCheckpointMetadata, usize)>>;
 }
 
 #[async_trait::async_trait]
@@ -426,13 +426,18 @@ impl<T: TableEpochCheckpointer + Sized> ErasedCheckpointer for T {
     async fn finish(
         mut self: Box<Self>,
         checkpoint: &CheckpointMessage,
-    ) -> Result<Option<TableSubtaskCheckpointMetadata>> {
+    ) -> Result<Option<(TableSubtaskCheckpointMetadata, usize)>> {
         let subtask_index = self.subtask_index();
         let subtask = (*self).finish(checkpoint).await?;
-        Ok(subtask.map(|metadata| TableSubtaskCheckpointMetadata {
-            subtask_index,
-            table_type: T::table_type().into(),
-            data: metadata.encode_to_vec(),
+        Ok(subtask.map(|(metadata, size)| {
+            (
+                TableSubtaskCheckpointMetadata {
+                    subtask_index,
+                    table_type: T::table_type().into(),
+                    data: metadata.encode_to_vec(),
+                },
+                size,
+            )
         }))
     }
 }
