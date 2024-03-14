@@ -779,22 +779,23 @@ impl ExpiringTimeKeyView {
     pub async fn flush(&mut self, watermark: Option<SystemTime>) -> Result<()> {
         while let Some((max_timestamp, mut batches)) = self.batches_to_flush.pop_first() {
             if watermark
-                .map(|watermark| watermark - self.parent.retention < max_timestamp)
-                .unwrap_or(true)
+                .map(|watermark| max_timestamp < watermark - self.parent.retention)
+                .unwrap_or(false)
             {
-                for batch in &batches {
-                    self.state_tx
-                        .send(StateMessage::TableData {
-                            table: self.parent.table_name.to_string(),
-                            data: TableData::RecordBatch(batch.clone()),
-                        })
-                        .await?;
-                }
-                self.flushed_batches_by_max_timestamp
-                    .entry(max_timestamp)
-                    .or_default()
-                    .append(&mut batches);
+                continue;
             }
+            for batch in &batches {
+                self.state_tx
+                    .send(StateMessage::TableData {
+                        table: self.parent.table_name.to_string(),
+                        data: TableData::RecordBatch(batch.clone()),
+                    })
+                    .await?;
+            }
+            self.flushed_batches_by_max_timestamp
+                .entry(max_timestamp)
+                .or_default()
+                .append(&mut batches);
         }
         if let Some(watermark) = watermark {
             let cutoff = watermark - self.parent.retention;

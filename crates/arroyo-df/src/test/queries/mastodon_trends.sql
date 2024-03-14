@@ -1,4 +1,3 @@
---fail
 CREATE TABLE mastodon (
     value TEXT
 ) WITH (

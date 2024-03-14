@@ -706,7 +706,7 @@ async fn suspicious_drivers() -> Result<()> {
 }
 
 #[test(tokio::test)]
-#[ignore] // window functions are not yet supported
+#[ignore] // offset sliding windows not yet supported
 async fn most_active_driver_last_hour_unaligned() -> Result<()> {
     correctness_run_codegen(
         "most_active_driver_last_hour_unaligned",
@@ -735,12 +735,12 @@ CREATE TABLE most_active_driver (
   type = 'sink'
 );
 INSERT INTO most_active_driver
-SELECT * FROM (
+SELECT driver_id, count, window.start, window.end, row_number FROM (
   SELECT *, ROW_NUMBER()  OVER (
-    PARTITION BY hop(INTERVAL '40' minute, INTERVAL '1' hour )
+    PARTITION BY window
     ORDER BY count DESC, driver_id desc) as row_number
   FROM (
-      SELECT driver_id, count, window.start as start, window.end as end FROM (
+      SELECT driver_id, count, window FROM (
   SELECT driver_id,
   hop(INTERVAL '40' minute, INTERVAL '1' hour ) as window,
          count(*) as count
@@ -787,46 +787,44 @@ CREATE TABLE cars_output (
 }
 
 #[test(tokio::test)]
-#[ignore] // window functions are not yet supported
 async fn most_active_driver_last_hour() -> Result<()> {
     correctness_run_codegen(
         "most_active_driver_last_hour",
         "CREATE TABLE cars (
-  timestamp TIMESTAMP,
-  driver_id BIGINT,
-  event_type TEXT,
-  location TEXT
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/cars.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
-);
-CREATE TABLE most_active_driver (
-  driver_id BIGINT,
-  count BIGINT,
-  start TIMESTAMP,
-  end TIMESTAMP,
-  row_number BIGINT
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'json',
-  type = 'sink'
-);
-INSERT INTO most_active_driver
-SELECT * FROM (
-  SELECT *, ROW_NUMBER()  OVER (
-    PARTITION BY hop(INTERVAL '1' minute, INTERVAL '1' hour )
-    ORDER BY count DESC, driver_id desc) as row_number
-  FROM (
-      SELECT driver_id, count, window.start as start, window.end as end FROM (
-  SELECT driver_id,
-  hop(INTERVAL '1' minute, INTERVAL '1' hour ) as window,
-         count(*) as count
-         FROM cars
-         GROUP BY 1,2)) ) where row_number = 1
+          timestamp TIMESTAMP,
+          driver_id BIGINT,
+          event_type TEXT,
+          location TEXT
+        ) WITH (
+          connector = 'single_file',
+          path = '$input_dir/cars.json',
+          format = 'json',
+          type = 'source',
+          event_time_field = 'timestamp'
+        );
+        CREATE TABLE most_active_driver (
+          driver_id BIGINT,
+          count BIGINT,
+          start TIMESTAMP,
+          end TIMESTAMP,
+          row_number BIGINT
+        ) WITH (
+          connector = 'single_file',
+          path = '$output_path',
+          format = 'json',
+          type = 'sink'
+        );
+        INSERT INTO most_active_driver
+        SELECT driver_id, count, window.start, window.end, row_number FROM (
+          SELECT *, ROW_NUMBER()  OVER (
+            PARTITION BY window
+            ORDER BY count DESC, driver_id desc) as row_number
+          FROM (
+          SELECT driver_id,
+          hop(INTERVAL '1' minute, INTERVAL '1' hour ) as window,
+                 count(*) as count
+                 FROM cars
+                 GROUP BY 1,2) ) where row_number = 1
 ",
         200,
     )

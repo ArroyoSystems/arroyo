@@ -152,6 +152,25 @@ impl ArroyoSchema {
         Self::from_schema_keys(Arc::new(Schema::new(fields)), vec![]).unwrap()
     }
 
+    pub fn from_schema_unkeyed(schema: Arc<Schema>) -> anyhow::Result<Self> {
+        let timestamp_index = schema
+            .column_with_name(TIMESTAMP_FIELD)
+            .ok_or_else(|| {
+                anyhow!(
+                    "no {} field in schema, schema is {:?}",
+                    TIMESTAMP_FIELD,
+                    schema
+                )
+            })?
+            .0;
+
+        Ok(Self {
+            schema,
+            timestamp_index,
+            key_indices: None,
+        })
+    }
+
     pub fn from_schema_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> anyhow::Result<Self> {
         let timestamp_index = schema
             .column_with_name(TIMESTAMP_FIELD)
@@ -187,6 +206,14 @@ impl ArroyoSchema {
             .iter()
             .map(|f| make_builder(f.data_type(), 8))
             .collect()
+    }
+
+    pub fn timestamp_column<'a>(&self, batch: &'a RecordBatch) -> &'a TimestampNanosecondArray {
+        batch
+            .column(self.timestamp_index)
+            .as_any()
+            .downcast_ref::<TimestampNanosecondArray>()
+            .unwrap()
     }
 
     pub fn filter_by_time(

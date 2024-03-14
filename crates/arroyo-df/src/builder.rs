@@ -64,6 +64,8 @@ impl Default for Planner {
             .optimizer
             .enable_round_robin_repartition = false;
         config.options_mut().optimizer.repartition_aggregations = false;
+        config.options_mut().optimizer.repartition_windows = false;
+        config.options_mut().optimizer.repartition_sorts = false;
         let session_state =
             SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
                 .with_physical_optimizer_rules(vec![]);

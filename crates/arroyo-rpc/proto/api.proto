@@ -57,18 +57,6 @@ message KeyPlanOperator {
   repeated uint64 key_fields = 3;
 }
 
-message WindowAggregateOperator {
-  string name = 1;
-  bytes physical_plan = 2;
-  bytes binning_function = 3;
-  bytes binning_schema = 4;
-  Window window = 5;
-  string window_field_name = 6;
-  uint64 window_index = 7;
-  repeated uint64 key_fields = 8;
-  bytes input_schema = 9;
-}
-
 message TumblingWindowAggregateOperator {
   string name = 1;
   uint64 width_micros = 2;
@@ -109,6 +97,13 @@ message JoinOperator {
   ArroyoSchema right_schema = 3;
   ArroyoSchema output_schema = 4;
   bytes join_plan = 5;
+}
+
+message WindowFunctionOperator {
+  string name = 1;
+  ArroyoSchema input_schema = 2;
+  bytes binning_function = 3;
+  bytes window_function_plan = 4;
 }
 
 message WasmUdfs {

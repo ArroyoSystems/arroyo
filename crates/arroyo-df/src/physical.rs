@@ -20,7 +20,7 @@ use datafusion::{
     },
 };
 use datafusion_common::{
-    DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
+    plan_err, DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
 };
 
 use crate::json::get_json_functions;
@@ -738,10 +738,10 @@ impl ExecutionPlan for ArroyoMemExec {
 
     fn execute(
         &self,
-        partition: usize,
-        context: Arc<datafusion::execution::TaskContext>,
+        _partition: usize,
+        _context: Arc<datafusion::execution::TaskContext>,
     ) -> DFResult<datafusion::physical_plan::SendableRecordBatchStream> {
-        MemoryExec::try_new(&[], self.schema.clone(), None)?.execute(partition, context)
+        plan_err!("EmptyPartitionStream cannot be executed, this is only used for physical planning before serialization")
     }
 
     fn statistics(&self) -> DFResult<datafusion_common::Statistics> {

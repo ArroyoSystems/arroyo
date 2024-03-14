@@ -3,11 +3,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use arroyo_datastream::logical::{LogicalEdge, LogicalNode};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion_common::{DataFusionError, Result as DFResult};
-use datafusion_expr::UserDefinedLogicalNode;
+use datafusion_common::{DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult};
+use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore};
 use watermark_node::WatermarkNode;
 
 use crate::builder::{NamedNode, Planner};
+use crate::schemas::{add_timestamp_field, has_timestamp_field};
 use join::JoinExtension;
 
 use self::{
@@ -18,6 +19,7 @@ use self::{
     sink::{SinkExtension, SINK_NODE_NAME},
     table_source::{TableSourceExtension, TABLE_SOURCE_NAME},
     watermark_node::WATERMARK_NODE_NAME,
+    window_fn::{WindowFunctionExtension, WINDOW_FUNCTION_EXTENSION_NAME},
 };
 
 pub(crate) mod aggregate;
@@ -27,6 +29,7 @@ pub(crate) mod remote_table;
 pub(crate) mod sink;
 pub(crate) mod table_source;
 pub(crate) mod watermark_node;
+pub(crate) mod window_fn;
 pub(crate) trait ArroyoExtension {
     // if the extension has a name, return it so that we can memoize.
     fn node_name(&self) -> Option<NamedNode>;
@@ -87,7 +90,71 @@ impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtensio
                 let join_extension = node.as_any().downcast_ref::<JoinExtension>().unwrap();
                 Ok(join_extension as &dyn ArroyoExtension)
             }
+            WINDOW_FUNCTION_EXTENSION_NAME => {
+                let window_function_extension = node
+                    .as_any()
+                    .downcast_ref::<WindowFunctionExtension>()
+                    .unwrap();
+                Ok(window_function_extension as &dyn ArroyoExtension)
+            }
             other => Err(DataFusionError::Plan(format!("unexpected node: {}", other))),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TimestampAppendExtension {
+    pub(crate) input: LogicalPlan,
+    pub(crate) qualifier: Option<OwnedTableReference>,
+    pub(crate) schema: DFSchemaRef,
+}
+
+impl TimestampAppendExtension {
+    fn new(input: LogicalPlan, qualifier: Option<OwnedTableReference>) -> Self {
+        if has_timestamp_field(input.schema().clone()) {
+            unreachable!("shouldn't be adding timestamp to a plan that already has it: plan :\n {:?}\n schema: {:?}", input, input.schema());
+        }
+        let schema = add_timestamp_field(input.schema().clone(), qualifier.clone()).unwrap();
+        Self {
+            input,
+            qualifier,
+            schema,
+        }
+    }
+}
+
+impl UserDefinedLogicalNodeCore for TimestampAppendExtension {
+    fn name(&self) -> &str {
+        "TimestampAppendExtension"
+    }
+
+    fn inputs(&self) -> Vec<&LogicalPlan> {
+        vec![&self.input]
+    }
+
+    fn schema(&self) -> &DFSchemaRef {
+        &self.schema
+    }
+
+    fn expressions(&self) -> Vec<Expr> {
+        vec![]
+    }
+
+    fn fmt_for_explain(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "TimestampAppendExtension({:?}): {}",
+            self.qualifier,
+            self.schema
+                .fields()
+                .iter()
+                .map(|f| f.qualified_name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+
+    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
+        Self::new(inputs[0].clone(), self.qualifier.clone())
     }
 }

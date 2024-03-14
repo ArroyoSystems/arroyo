@@ -1,4 +1,3 @@
---fail=SQL window functions are not currently supported
 SELECT * FROM (
     SELECT *, ROW_NUMBER() OVER (
         PARTITION BY window
