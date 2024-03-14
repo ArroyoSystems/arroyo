@@ -9,7 +9,6 @@ members = [
     "crates/arroyo-datastream",
     "crates/arroyo-df",
     "crates/arroyo-formats",
-    "crates/arroyo-macro",
     "crates/arroyo-metrics",
     "crates/arroyo-node",
     "crates/arroyo-openapi",

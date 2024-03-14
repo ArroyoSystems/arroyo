@@ -9,7 +9,6 @@ kafka-sal = ["arroyo-connectors/kafka-sasl"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
-arroyo-macro = { path = "../arroyo-macro" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }

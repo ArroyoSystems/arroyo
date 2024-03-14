@@ -6,7 +6,6 @@ edition = "2021"
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
-arroyo-macro = { path = "../arroyo-macro" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arrow-schema = { workspace = true, features = ["serde"] }
 
