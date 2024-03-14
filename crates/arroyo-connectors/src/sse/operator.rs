@@ -3,10 +3,12 @@ use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{OperatorNode, SourceOperator};
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{StopMode, TableConfig};
-use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
+use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::{ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{string_to_map, ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_types::{
+    string_to_map, ArrowMessage, CheckpointBarrier, SignalMessage, UserError, Watermark,
+};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
@@ -87,51 +89,19 @@ impl SourceOperator for SSESourceFunc {
             }
         }
     }
+
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        debug!("starting checkpointing {}", ctx.task_info.task_index);
+        let s = ctx
+            .table_manager
+            .get_global_keyed_state("e")
+            .await
+            .expect("should be able to get SSE state");
+        s.insert((), self.state.clone()).await;
+    }
 }
 
 impl SSESourceFunc {
-    async fn our_handle_control_message(
-        &mut self,
-        ctx: &mut ArrowContext,
-        msg: Option<ControlMessage>,
-    ) -> Option<SourceFinishType> {
-        match msg? {
-            ControlMessage::Checkpoint(c) => {
-                debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let s = ctx
-                    .table_manager
-                    .get_global_keyed_state("e")
-                    .await
-                    .expect("should be able to get SSE state");
-                s.insert((), self.state.clone()).await;
-
-                if self.start_checkpoint(c, ctx).await {
-                    return Some(SourceFinishType::Immediate);
-                }
-            }
-            ControlMessage::Stop { mode } => {
-                info!("Stopping eventsource source: {:?}", mode);
-
-                match mode {
-                    StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
-                    }
-                    StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
-                    }
-                }
-            }
-            ControlMessage::Commit { .. } => {
-                unreachable!("sources shouldn't receive commit messages");
-            }
-            ControlMessage::LoadCompacted { compacted } => {
-                ctx.load_compacted(compacted).await;
-            }
-            ControlMessage::NoOp => {}
-        }
-        None
-    }
-
     async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
         ctx.initialize_deserializer(
             self.format.clone(),
@@ -199,8 +169,10 @@ impl SSESourceFunc {
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
-                            return Ok(r);
+                        if let Some(control_message) = control_message {
+                            if let Some(finish_type) = self.handle_control_message(ctx, control_message).await {
+                                return Ok(finish_type);
+                            }
                         }
                     }
                     _ = flush_ticker.tick() => {
@@ -218,9 +190,10 @@ impl SSESourceFunc {
             .await;
 
             loop {
-                let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, msg).await {
-                    return Ok(r);
+                if let Some(msg) = ctx.control_rx.recv().await {
+                    if let Some(finish_type) = self.handle_control_message(ctx, msg).await {
+                        return Ok(finish_type);
+                    }
                 }
             }
         }

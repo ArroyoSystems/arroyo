@@ -60,6 +60,7 @@ impl WorkerStatus {
 #[derive(Debug, PartialEq, Eq)]
 pub enum TaskState {
     Running,
+    DataFinished,
     Finished,
     Failed(String),
 }
@@ -216,6 +217,24 @@ impl RunningJobModel {
                         message = "Received checkpoint finished but not checkpointing",
                         job_id = self.job_id
                     )
+                }
+            }
+            RunningMessage::TaskDataFinished {
+                worker_id: _,
+                time: _,
+                operator_id,
+                subtask_index,
+            } => {
+                let key = (operator_id, subtask_index);
+                if let Some(status) = self.tasks.get_mut(&key) {
+                    status.state = TaskState::DataFinished;
+                } else {
+                    warn!(
+                        message = "Received task data finished for unknown task",
+                        job_id = self.job_id,
+                        operator_id = key.0,
+                        subtask_index
+                    );
                 }
             }
             RunningMessage::TaskFinished {
@@ -508,14 +527,11 @@ impl RunningJobModel {
         false
     }
 
-    pub fn any_finished_sources(&self) -> bool {
-        let source_tasks = self.program.sources();
-
-        self.tasks.iter().any(|((operator, _), t)| {
-            source_tasks.contains(operator.as_str()) && t.state == TaskState::Finished
-        })
+    pub fn all_data_finished(&self) -> bool {
+        self.tasks
+            .iter()
+            .all(|(_, t)| t.state == TaskState::DataFinished)
     }
-
     pub fn all_tasks_finished(&self) -> bool {
         self.tasks
             .iter()
@@ -612,7 +628,7 @@ impl JobController {
         }
 
         // have any of our tasks finished?
-        if self.model.any_finished_sources() {
+        if self.model.all_data_finished() {
             return Ok(ControllerProgress::Finishing);
         }
 
@@ -696,6 +712,10 @@ impl JobController {
 
     pub fn finished(&self) -> bool {
         self.model.all_tasks_finished()
+    }
+
+    pub fn data_finished(&self) -> bool {
+        self.model.all_data_finished()
     }
 
     pub async fn checkpoint_finished(&mut self) -> anyhow::Result<bool> {

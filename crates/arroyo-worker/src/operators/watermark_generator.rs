@@ -110,18 +110,15 @@ impl ArrowOperator for WatermarkGenerator {
 
         self.state_cache = state;
     }
-
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut ArrowContext) {
-        if let Some(SignalMessage::EndOfData) = final_message {
-            // send final watermark on close
-            ctx.collector
-                .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
-                    // this is in the year 2554, far enough out be close to inifinity,
-                    // but can still be formatted.
-                    Watermark::EventTime(from_nanos(u64::MAX as u128)),
-                )))
-                .await;
-        }
+    async fn on_end_of_data(&mut self, ctx: &mut ArrowContext) {
+        // send final watermark on close
+        ctx.collector
+            .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                // this is in the year 2554, far enough out be close to inifinity,
+                // but can still be formatted.
+                Watermark::EventTime(from_nanos(u64::MAX as u128)),
+            )))
+            .await;
     }
 
     async fn process_batch(&mut self, record: RecordBatch, ctx: &mut ArrowContext) {

@@ -4,11 +4,8 @@ use arrow::array::RecordBatch;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::{
-    grpc::{StopMode, TableConfig},
-    ControlMessage,
-};
-use arroyo_types::to_nanos;
+use arroyo_rpc::{grpc::TableConfig, ControlMessage};
+use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
@@ -83,7 +80,9 @@ impl SingleFileSourceFunc {
             }
         }
         info!("file source finished");
-        SourceFinishType::Final
+        ctx.broadcast(ArrowMessage::Signal(arroyo_types::SignalMessage::EndOfData))
+            .await;
+        SourceFinishType::Immediate
     }
 
     async fn handle_control(
@@ -91,36 +90,7 @@ impl SingleFileSourceFunc {
         msg: Option<ControlMessage>,
         ctx: &mut ArrowContext,
     ) -> Option<SourceFinishType> {
-        match msg {
-            Some(ControlMessage::Checkpoint(c)) => {
-                let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
-                    String,
-                    usize,
-                > = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
-                state.insert(self.input_file.clone(), self.lines_read).await;
-                // checkpoint our state
-                if self.start_checkpoint(c, ctx).await {
-                    return Some(SourceFinishType::Immediate);
-                }
-            }
-            Some(ControlMessage::Stop { mode }) => {
-                info!("Stopping file source {:?}", mode);
-
-                match mode {
-                    StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
-                    }
-                    StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
-                    }
-                }
-            }
-            Some(ControlMessage::NoOp) => {
-                // No-op messages allow the source to advance and process a record
-            }
-            _ => {}
-        }
-        None
+        self.handle_control_message(ctx, msg?).await
     }
 }
 
@@ -147,5 +117,11 @@ impl SourceOperator for SingleFileSourceFunc {
     }
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         self.run(ctx).await
+    }
+
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
+            ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+        state.insert(self.input_file.clone(), self.lines_read).await;
     }
 }

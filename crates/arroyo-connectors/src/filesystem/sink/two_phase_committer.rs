@@ -5,14 +5,14 @@ use arrow::record_batch::RecordBatch;
 use arroyo_operator::{context::ArrowContext, operator::ArrowOperator};
 use arroyo_rpc::{
     grpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
-    CheckpointEvent, ControlMessage,
+    CheckpointEvent,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{Data, SignalMessage, TaskInfo, Watermark};
+use arroyo_types::{Data, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config;
 use prost::Message;
-use tracing::{info, warn};
+use tracing::info;
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {
     committer: TPC,
@@ -181,14 +181,6 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
             .insert_batch(batch)
             .await
             .expect("record inserted");
-    }
-
-    async fn on_close(&mut self, _final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {
-        if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
-            self.handle_commit(epoch, commit_data, ctx).await;
-        } else {
-            warn!("no commit message received, not committing")
-        }
     }
 
     async fn handle_commit(

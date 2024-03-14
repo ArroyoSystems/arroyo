@@ -369,15 +369,12 @@ pub enum SignalMessage {
     Watermark(Watermark),
     Stop,
     EndOfData,
+    Shutdown,
 }
 
 impl ArrowMessage {
     pub fn is_end(&self) -> bool {
-        matches!(
-            self,
-            ArrowMessage::Signal(SignalMessage::Stop)
-                | ArrowMessage::Signal(SignalMessage::EndOfData)
-        )
+        matches!(self, ArrowMessage::Signal(SignalMessage::Shutdown))
     }
 }
 

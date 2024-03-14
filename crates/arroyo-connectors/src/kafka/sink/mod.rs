@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use arroyo_rpc::grpc::TableConfig;
-use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
+use arroyo_rpc::{CheckpointEvent, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
 
@@ -239,16 +239,5 @@ impl ArrowOperator for KafkaSinkFunc {
             .send(checkpoint_event)
             .await
             .expect("sent commit event");
-    }
-
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
-        if !self.is_committing() {
-            return;
-        }
-        if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
-            self.handle_commit(epoch, &commit_data, ctx).await;
-        } else {
-            warn!("no commit message received, not committing")
-        }
     }
 }

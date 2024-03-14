@@ -8,10 +8,10 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableConfig;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
+
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use tokio::select;
@@ -72,51 +72,18 @@ impl SourceOperator for WebsocketSourceFunc {
             }
         }
     }
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        debug!("starting checkpointing {}", ctx.task_info.task_index);
+        let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
+            .table_manager
+            .get_global_keyed_state("e")
+            .await
+            .expect("couldn't get state for websocket");
+        s.insert((), self.state.clone()).await;
+    }
 }
 
 impl WebsocketSourceFunc {
-    async fn our_handle_control_message(
-        &mut self,
-        ctx: &mut ArrowContext,
-        msg: Option<ControlMessage>,
-    ) -> Option<SourceFinishType> {
-        match msg? {
-            ControlMessage::Checkpoint(c) => {
-                debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
-                    .table_manager
-                    .get_global_keyed_state("e")
-                    .await
-                    .expect("couldn't get state for websocket");
-                s.insert((), self.state.clone()).await;
-
-                if self.start_checkpoint(c, ctx).await {
-                    return Some(SourceFinishType::Immediate);
-                }
-            }
-            ControlMessage::Stop { mode } => {
-                info!("Stopping websocket source: {:?}", mode);
-
-                match mode {
-                    StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
-                    }
-                    StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
-                    }
-                }
-            }
-            ControlMessage::Commit { .. } => {
-                unreachable!("sources shouldn't receive commit messages");
-            }
-            ControlMessage::LoadCompacted { compacted } => {
-                ctx.load_compacted(compacted).await;
-            }
-            ControlMessage::NoOp => {}
-        }
-        None
-    }
-
     async fn handle_message(
         &mut self,
         msg: &[u8],
@@ -241,9 +208,9 @@ impl WebsocketSourceFunc {
                         }
                     }
                     }
-                    control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
-                            return Ok(r);
+                    Some(control_message) = ctx.control_rx.recv() => {
+                        if let Some(finish_type) = self.handle_control_message(ctx, control_message).await {
+                            return Ok(finish_type);
                         }
                     }
                 }
@@ -255,9 +222,10 @@ impl WebsocketSourceFunc {
             )))
             .await;
             loop {
-                let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, msg).await {
-                    return Ok(r);
+                if let Some(msg) = ctx.control_rx.recv().await {
+                    if let Some(finish_type) = self.handle_control_message(ctx, msg).await {
+                        return Ok(finish_type);
+                    }
                 }
             }
         }

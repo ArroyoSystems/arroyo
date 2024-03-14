@@ -6,7 +6,7 @@ use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::SinkDataReq;
-use arroyo_types::{default_controller_addr, from_nanos, to_micros, SignalMessage};
+use arroyo_types::{default_controller_addr, from_nanos, to_micros};
 use tonic::transport::Channel;
 
 #[derive(Default)]
@@ -62,7 +62,8 @@ impl ArrowOperator for PreviewSink {
                 .unwrap();
         }
     }
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+
+    async fn on_close(&mut self, ctx: &mut ArrowContext) {
         self.client
             .as_mut()
             .unwrap()

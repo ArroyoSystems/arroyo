@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use arrow::array::RecordBatch;
 
 use arroyo_rpc::grpc::TableConfig;
-use arroyo_types::{CheckpointBarrier, SignalMessage};
+use arroyo_types::CheckpointBarrier;
 
 use async_trait::async_trait;
 
@@ -77,10 +77,8 @@ impl ArrowOperator for SingleFileSink {
         self.file = Some(file);
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, _ctx: &mut ArrowContext) {
-        if let Some(SignalMessage::EndOfData) = final_message {
-            self.file.as_mut().unwrap().flush().await.unwrap();
-        }
+    async fn on_end_of_data(&mut self, _ctx: &mut ArrowContext) {
+        self.file.as_mut().unwrap().flush().await.unwrap();
     }
 
     async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {

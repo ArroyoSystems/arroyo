@@ -99,6 +99,10 @@ pub enum ControlResp {
         operator_id: String,
         task_index: usize,
     },
+    TaskDataFinished {
+        operator_id: String,
+        task_index: usize,
+    },
     TaskFailed {
         operator_id: String,
         task_index: usize,

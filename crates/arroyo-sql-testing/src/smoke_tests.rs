@@ -305,7 +305,7 @@ async fn run_and_checkpoint(
     for source in running_engine.source_controls() {
         source
             .send(ControlMessage::Stop {
-                mode: StopMode::Graceful,
+                mode: StopMode::Immediate,
             })
             .await
             .unwrap();

@@ -1,10 +1,14 @@
+use arroyo_rpc::grpc::StopMode;
+
 use crate::states::recovering::Recovering;
 use crate::states::scheduling::Scheduling;
-use crate::states::stop_if_desired_non_running;
-use crate::types::public::RestartMode;
-use crate::JobMessage;
 
-use super::{JobContext, State, StateError, Transition};
+use crate::types::public::RestartMode;
+
+use super::{
+    stopping::{StopBehavior, Stopping},
+    JobContext, State, StateError, StoppingCheckpointError, StoppingCheckpointOutcome, Transition,
+};
 
 #[derive(Debug)]
 pub struct Restarting {
@@ -18,59 +22,29 @@ impl State for Restarting {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        let job_controller = ctx.job_controller.as_mut().unwrap();
-
         match self.mode {
-            RestartMode::safe => {
-                if let Err(e) = job_controller.checkpoint(true).await {
-                    return Err(ctx.retryable(self, "failed to initiate final checkpoint", e, 10));
+            RestartMode::safe => match ctx.take_stopping_checkpoint().await {
+                Ok(StoppingCheckpointOutcome::SuccessfullyStopped) => {
+                    Ok(Transition::next(*self, Scheduling {}))
                 }
-
-                loop {
-                    match job_controller.checkpoint_finished().await {
-                        Ok(done) => {
-                            if done && job_controller.finished() {
-                                return Ok(Transition::next(*self, Scheduling {}));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(ctx.retryable(
-                                self,
-                                "failed while monitoring final checkpoint",
-                                e,
-                                10,
-                            ));
-                        }
-                    }
-
-                    match ctx.rx.recv().await.expect("channel closed while receiving") {
-                        JobMessage::RunningMessage(msg) => {
-                            if let Err(e) = job_controller.handle_message(msg).await {
-                                return Err(ctx.retryable(
-                                    self,
-                                    "failed while waiting for job finish",
-                                    e,
-                                    10,
-                                ));
-                            }
-                        }
-                        JobMessage::ConfigUpdate(c) => {
-                            if c.restart_mode == RestartMode::force {
-                                return Ok(Transition::next(
-                                    *self,
-                                    Restarting {
-                                        mode: RestartMode::force,
-                                    },
-                                ));
-                            }
-                            stop_if_desired_non_running!(self, &c);
-                        }
-                        _ => {
-                            // ignore other messages
-                        }
-                    }
-                }
-            }
+                Ok(StoppingCheckpointOutcome::ReceivedImmediateStop) => Ok(Transition::next(
+                    *self,
+                    Stopping {
+                        stop_mode: StopBehavior::StopJob(StopMode::Immediate),
+                    },
+                )),
+                Ok(StoppingCheckpointOutcome::ReceivedForceStop) => Ok(Transition::next(
+                    *self,
+                    Stopping {
+                        stop_mode: StopBehavior::StopWorkers,
+                    },
+                )),
+                Err(StoppingCheckpointError {
+                    message,
+                    source,
+                    retries,
+                }) => Err(ctx.retryable(self, message, source, retries)),
+            },
             RestartMode::force => {
                 if let Err(e) = Recovering::cleanup(ctx).await {
                     return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 10));

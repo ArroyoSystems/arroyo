@@ -198,6 +198,7 @@ impl Connector for ImpulseConnector {
                 counter: 0,
                 start_time: SystemTime::now(),
             },
+            batch_builder: Default::default(),
         })))
     }
 }

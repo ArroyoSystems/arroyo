@@ -2,6 +2,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use std::{fmt::Debug, sync::Arc};
 
+use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::ArrowProgram;
 
 use arroyo_server_common::log_event;
@@ -11,7 +12,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use anyhow::{anyhow, Result};
 
@@ -250,6 +251,8 @@ impl TransitionTo<Finished> for Finishing {
     }
 }
 
+impl TransitionTo<Stopping> for Finishing {}
+
 impl TransitionTo<Restarting> for Running {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -381,6 +384,102 @@ impl<'a> JobContext<'a> {
             retries: retries.saturating_sub(self.retries_attempted),
         }
     }
+
+    async fn take_stopping_checkpoint(
+        &mut self,
+    ) -> Result<StoppingCheckpointOutcome, StoppingCheckpointError> {
+        let job_controller = self.job_controller.as_mut().unwrap();
+
+        let mut final_checkpoint_started = false;
+        let mut shutdown_started = false;
+
+        loop {
+            match job_controller.checkpoint_finished().await {
+                Ok(done) => {
+                    debug!("checked checkpoint, got {}, job_controller.finished(): {}, final_checkpoint_started: {}", done, job_controller.finished(), final_checkpoint_started);
+
+                    if done && final_checkpoint_started {
+                        if job_controller.finished() {
+                            return Ok(StoppingCheckpointOutcome::SuccessfullyStopped);
+                        } else if !shutdown_started {
+                            info!("Starting shutdown");
+                            job_controller
+                                .stop_job(grpc::StopMode::Immediate)
+                                .await
+                                .unwrap();
+                            shutdown_started = true;
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(StoppingCheckpointError {
+                        message: "failed while monitoring final checkpoint".to_string(),
+                        source: e,
+                        retries: 10,
+                    });
+                }
+            }
+
+            if !final_checkpoint_started {
+                info!("Starting final checkpoint");
+                match job_controller.checkpoint(true).await {
+                    Ok(started) => final_checkpoint_started = started,
+                    Err(e) => {
+                        return Err(StoppingCheckpointError {
+                            message: "failed to initiate final checkpoint".to_string(),
+                            source: e,
+                            retries: 10,
+                        });
+                    }
+                }
+            }
+
+            match self
+                .rx
+                .recv()
+                .await
+                .expect("channel closed while receiving")
+            {
+                JobMessage::RunningMessage(msg) => {
+                    if let Err(e) = job_controller.handle_message(msg).await {
+                        return Err(StoppingCheckpointError {
+                            message: "failed while waiting for job finish".to_string(),
+                            source: e,
+                            retries: 10,
+                        });
+                    }
+                }
+                JobMessage::ConfigUpdate(c) => {
+                    match c.stop_mode {
+                        crate::types::public::StopMode::immediate => {
+                            return Ok(StoppingCheckpointOutcome::ReceivedImmediateStop);
+                        }
+                        crate::types::public::StopMode::force => {
+                            return Ok(StoppingCheckpointOutcome::ReceivedForceStop);
+                        }
+                        _ => {
+                            // do nothing, as we're already checkpointing, so graceful and checkpoint are no-ops
+                        }
+                    }
+                }
+                _ => {
+                    // ignore other messages
+                }
+            }
+        }
+    }
+}
+
+enum StoppingCheckpointOutcome {
+    SuccessfullyStopped,
+    ReceivedImmediateStop,
+    ReceivedForceStop,
+}
+
+struct StoppingCheckpointError {
+    message: String,
+    source: anyhow::Error,
+    retries: usize,
 }
 
 #[async_trait::async_trait]

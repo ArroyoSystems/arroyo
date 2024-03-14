@@ -31,9 +31,8 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableConfig;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{to_nanos, UserError};
+use arroyo_types::{to_nanos, CheckpointBarrier, UserError};
 
 #[allow(unused)]
 pub struct FileSystemSourceFunc {
@@ -68,6 +67,16 @@ impl SourceOperator for FileSystemSourceFunc {
 
                 panic!("{}: {}", e.name, e.details);
             }
+        }
+    }
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        for (file, read_state) in &self.file_states {
+            ctx.table_manager
+                .get_global_keyed_state("a")
+                .await
+                .unwrap()
+                .insert(file.clone(), (file.clone(), read_state.clone()))
+                .await;
         }
     }
 }
@@ -347,7 +356,7 @@ impl FileSystemSourceFunc {
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
                         self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
-                        match self.process_control_message(ctx, control_message).await {
+                        match self.handle_control_message(ctx, control_message).await {
                             Some(finish_type) => return Ok(Some(finish_type)),
                             None => ()
                         }
@@ -386,53 +395,13 @@ impl FileSystemSourceFunc {
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
                         self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
-                        match self.process_control_message(ctx, control_message).await {
+                        match self.handle_control_message(ctx, control_message).await {
                             Some(finish_type) => return Ok(Some(finish_type)),
                             None => ()
                         }
                     }
                 }
             }
-        }
-    }
-
-    async fn process_control_message(
-        &mut self,
-        ctx: &mut ArrowContext,
-        control_message: ControlMessage,
-    ) -> Option<SourceFinishType> {
-        match control_message {
-            ControlMessage::Checkpoint(c) => {
-                for (file, read_state) in &self.file_states {
-                    ctx.table_manager
-                        .get_global_keyed_state("a")
-                        .await
-                        .unwrap()
-                        .insert(file.clone(), (file.clone(), read_state.clone()))
-                        .await;
-                }
-                // checkpoint our state
-                if self.start_checkpoint(c, ctx).await {
-                    Some(SourceFinishType::Immediate)
-                } else {
-                    None
-                }
-            }
-            ControlMessage::Stop { mode } => {
-                info!("Stopping FileSystem source {:?}", mode);
-                match mode {
-                    StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
-                    }
-                    StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
-                    }
-                }
-            }
-            ControlMessage::Commit { .. } => {
-                unreachable!("sources shouldn't receive commit messages");
-            }
-            _ => None,
         }
     }
 }

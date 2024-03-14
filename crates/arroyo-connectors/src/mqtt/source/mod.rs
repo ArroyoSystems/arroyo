@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
-use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_rpc::ControlResp;
+use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, UserError, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{ConnectionError, Event as MqttEvent, Incoming};
@@ -63,6 +63,7 @@ impl SourceOperator for MqttSourceFunc {
             }
         }
     }
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, _ctx: &mut ArrowContext) {}
 }
 
 impl MqttSourceFunc {
@@ -175,34 +176,9 @@ impl MqttSourceFunc {
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
-                    match control_message {
-                        Some(ControlMessage::Checkpoint(c)) => {
-                            tracing::debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            if self.start_checkpoint(c, ctx).await {
-                                return Ok(SourceFinishType::Immediate);
-                            }
-                        },
-                        Some(ControlMessage::Stop { mode }) => {
-                            tracing::info!("Stopping Mqtt source: {:?}", mode);
-
-                            match mode {
-                                StopMode::Graceful => {
-                                    return Ok(SourceFinishType::Graceful);
-                                }
-                                StopMode::Immediate => {
-                                    return Ok(SourceFinishType::Immediate);
-                                }
-                            }
-                        }
-                        Some(ControlMessage::Commit { .. }) => {
-                            unreachable!("sources shouldn't receive commit messages");
-                        }
-                        Some(ControlMessage::LoadCompacted {compacted}) => {
-                            ctx.load_compacted(compacted).await;
-                        }
-                        Some(ControlMessage::NoOp) => {}
-                        None => {
-
+                    if let Some(control_message) = control_message {
+                        if let Some(stop_mode) = self.handle_control_message(ctx, control_message).await {
+                            return Ok(stop_mode);
                         }
                     }
                 }
