@@ -25,8 +25,10 @@ use arroyo_storage::StorageProviderRef;
 use arroyo_types::{from_micros, from_nanos, print_time, server_for_hash, to_micros, TaskInfoRef};
 
 use futures::{StreamExt, TryStreamExt};
-use parquet::arrow::{
-    async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder,
+use parquet::{
+    arrow::{async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder},
+    basic::{Compression, ZstdLevel},
+    file::properties::WriterProperties,
 };
 use tokio::{io::AsyncWrite, sync::mpsc::Sender};
 
@@ -656,11 +658,14 @@ impl ExpiringTimeKeyTableCheckpointer {
             .get_backing_store()
             .put_multipart(&self.file_name.clone().into())
             .await?;
+        let writer_properties = WriterProperties::builder()
+            .set_compression(Compression::ZSTD(ZstdLevel::default()))
+            .build();
         self.writer = Some(AsyncArrowWriter::try_new(
             async_writer,
             self.parent.schema.state_schema().schema.clone(),
             1_000_0000,
-            None,
+            Some(writer_properties),
         )?);
         Ok(())
     }
@@ -690,7 +695,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
     async fn finish(
         mut self,
         checkpoint: &CheckpointMessage,
-    ) -> Result<Option<Self::SubTableCheckpointMessage>> {
+    ) -> Result<Option<(Self::SubTableCheckpointMessage, usize)>> {
         let cutoff = checkpoint
             .watermark
             .map(|watermark| to_micros(watermark - self.parent.retention))
@@ -705,11 +710,18 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
                         && *self.parent.task_info.key_range.end() >= file.min_routing_key)
             })
             .collect();
+        let mut bytes = 0;
         if let Some(writer) = self.writer.take() {
-            // TODO: figure out how to get the size from this writer.
             let _result = writer.close().await?;
 
             let stats = self.parquet_stats.expect("should have set parquet stats");
+            let meta = self
+                .parent
+                .storage_provider
+                .get_backing_store()
+                .head(&(self.file_name.clone().into()))
+                .await?;
+            bytes += meta.size;
             let file = ParquetTimeFile {
                 epoch: self.epoch,
                 file: self.file_name,
@@ -723,11 +735,14 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
         if files.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(ExpiringKeyedTimeSubtaskCheckpointMetadata {
-                subtask_index: self.parent.task_info.task_index as u32,
-                watermark: checkpoint.watermark.map(to_micros),
-                files,
-            }))
+            Ok(Some((
+                ExpiringKeyedTimeSubtaskCheckpointMetadata {
+                    subtask_index: self.parent.task_info.task_index as u32,
+                    watermark: checkpoint.watermark.map(to_micros),
+                    files,
+                },
+                bytes,
+            )))
         }
     }
 

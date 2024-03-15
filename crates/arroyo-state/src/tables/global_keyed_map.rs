@@ -260,7 +260,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
     async fn finish(
         self,
         _checkpoint: &CheckpointMessage,
-    ) -> Result<Option<Self::SubTableCheckpointMessage>> {
+    ) -> Result<Option<(Self::SubTableCheckpointMessage, usize)>> {
         let _start_time = to_micros(SystemTime::now());
         let (keys, values): (Vec<_>, Vec<_>) = self
             .latest_values
@@ -283,7 +283,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         writer.write(&batch)?;
         writer.flush()?;
         let parquet_bytes = writer.into_inner().unwrap();
-        let _bytes = parquet_bytes.len() as u64;
+        let bytes = parquet_bytes.len() as u64;
         let path = table_checkpoint_path(
             &self.task_info.job_id,
             &self.task_info.operator_id,
@@ -294,11 +294,14 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         );
         self.storage_provider.put(&path, parquet_bytes).await?;
         let _finish_time = to_micros(SystemTime::now());
-        Ok(Some(GlobalKeyedTableSubtaskCheckpointMetadata {
-            subtask_index: self.task_info.task_index as u32,
-            commit_data: self.commit_data,
-            file: Some(path),
-        }))
+        Ok(Some((
+            GlobalKeyedTableSubtaskCheckpointMetadata {
+                subtask_index: self.task_info.task_index as u32,
+                commit_data: self.commit_data,
+                file: Some(path),
+            },
+            bytes as usize,
+        )))
     }
 
     fn table_type() -> TableEnum {

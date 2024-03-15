@@ -12,7 +12,7 @@ use arroyo_rpc::grpc::{
     TaskCheckpointCompletedReq, TaskCheckpointEventReq,
 };
 use arroyo_types::{from_micros, to_micros};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     committing_state::CommittingState,
@@ -233,6 +233,37 @@ impl CheckpointState {
         debug!(message = "Checkpoint finished", checkpoint_id = self.checkpoint_id, job_id = self.job_id, 
         epoch = self.epoch, min_epoch = self.min_epoch, operator_id = %c.operator_id, subtask_index = c.metadata.as_ref().unwrap().subtask_index, time = c.time);
         // TODO: UI management
+        let metadata = c
+            .metadata
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?;
+        let detail = self
+            .operator_details
+            .entry(c.operator_id.clone())
+            .or_insert_with(|| OperatorCheckpointDetail {
+                operator_id: c.operator_id.clone(),
+                start_time: metadata.start_time,
+                finish_time: None,
+                has_state: false,
+                tasks: HashMap::new(),
+            })
+            .tasks
+            .entry(metadata.subtask_index)
+            .or_insert_with(|| {
+                warn!(
+                    "Received checkpoint completion but no start event {:?}",
+                    metadata
+                );
+                api::TaskCheckpointDetail {
+                    subtask_index: metadata.subtask_index,
+                    start_time: metadata.start_time,
+                    finish_time: None,
+                    bytes: None,
+                    events: vec![],
+                }
+            });
+        detail.bytes = Some(metadata.bytes);
+
         let operator_state = self
             .operator_state
             .get_mut(&c.operator_id)
