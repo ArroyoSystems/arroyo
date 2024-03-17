@@ -794,10 +794,6 @@ pub fn construct_operator(
     let ctor: Box<dyn ErasedConstructor> = match operator {
         OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
         OperatorName::ArrowKey => Box::new(KeyExecutionConstructor),
-        OperatorName::ArrowAggregate => {
-            // TODO: this should not be in a specific window.
-            Box::new(TumblingAggregateWindowConstructor)
-        }
         OperatorName::TumblingWindowAggregate => Box::new(TumblingAggregateWindowConstructor),
         OperatorName::SlidingWindowAggregate => Box::new(SlidingAggregatingWindowConstructor),
         OperatorName::SessionWindowAggregate => Box::new(SessionAggregatingWindowConstructor),
