@@ -45,6 +45,10 @@ UPDATE checkpoints
     set state = 'compacted'
 WHERE job_id = :job_id AND epoch < :epoch;
 
+--! drop_old_checkpoint_rows
+DELETE FROM checkpoints
+WHERE job_id = :job_id AND epoch < :epoch;
+
 --! create_checkpoint
 INSERT INTO checkpoints
 (pub_id, organization_id, job_id, state_backend, epoch, min_epoch, start_time)

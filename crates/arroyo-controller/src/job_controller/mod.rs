@@ -33,6 +33,7 @@ use self::checkpointer::CheckpointingOrCommittingState;
 mod checkpointer;
 
 const CHECKPOINTS_TO_KEEP: u32 = 4;
+const CHECKPOINT_ROWS_TO_KEEP: u32 = 100;
 const COMPACT_EVERY: u32 = 2;
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -778,6 +779,12 @@ impl JobController {
             controller_queries::mark_checkpoints_compacted()
                 .bind(&c, &job_id, &(new_min as i32))
                 .await?;
+
+            if let Some(epoch_to_filter_before) = min_epoch.checked_sub(CHECKPOINT_ROWS_TO_KEEP) {
+                controller_queries::drop_old_checkpoint_rows()
+                    .bind(&c, &job_id, &(epoch_to_filter_before as i32))
+                    .await?;
+            }
 
             info!(
                 message = "Finished cleaning",
