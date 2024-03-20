@@ -48,10 +48,19 @@ impl ArroyoExtension for RemoteTableExtension {
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
-        if input_schemas.len() != 1 {
-            bail!("RemoteTableExtension should have exactly one input");
+        match input_schemas.len() {
+            1 => {}
+            0 => bail!("RemoteTableExtension should have exactly one input"),
+            multiple_inputs => {
+                // check they are all the same
+                let first = input_schemas[0].clone();
+                for i in 1..multiple_inputs {
+                    if input_schemas[i] != first {
+                        bail!("If a node has multiple inputs, they must all have the same schema");
+                    }
+                }
+            }
         }
-        let input_schema = input_schemas[0].clone();
         let physical_plan = planner.sync_plan(&self.input)?;
         let physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
             physical_plan,
@@ -68,11 +77,11 @@ impl ArroyoExtension for RemoteTableExtension {
             parallelism: 1,
             operator_config: config.encode_to_vec(),
         };
-        let edge = LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone());
-        Ok(NodeWithIncomingEdges {
-            node,
-            edges: vec![edge],
-        })
+        let edges = input_schemas
+            .into_iter()
+            .map(|schema| LogicalEdge::project_all(LogicalEdgeType::Forward, (*schema).clone()))
+            .collect();
+        Ok(NodeWithIncomingEdges { node, edges })
     }
 
     fn output_schema(&self) -> ArroyoSchema {

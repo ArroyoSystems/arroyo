@@ -122,7 +122,7 @@ impl SchemaWithHashAndOperation {
             .downcast_ref::<UInt64Array>()
             .ok_or_else(|| anyhow!("should be able to convert hash array to UInt64Array"))?;
         let hash_min = min(&hash_array).expect("should have min hash value");
-        let hash_max = min(&hash_array).expect("should have max hash value");
+        let hash_max = max(&hash_array).expect("should have max hash value");
         let timestamp_array = batch
             .column(self.state_schema.timestamp_index)
             .as_any()
