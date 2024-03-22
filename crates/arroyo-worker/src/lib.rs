@@ -329,6 +329,18 @@ impl WorkerServer {
                                     }
                                 )).await.err()
                             }
+                            Some(ControlResp::TaskDataFinished{operator_id, task_index}) => {
+                                info!(message = "Task data finished", operator_id, task_index);
+                                controller.task_data_finished(Request::new(
+                                    TaskFinishedReq {
+                                        worker_id: worker_id.0,
+                                        job_id: job_id.clone(),
+                                        time: to_micros(SystemTime::now()),
+                                        operator_id: operator_id,
+                                        operator_subtask: task_index as u64,
+                                    }
+                                )).await.err()
+                            }
                             Some(ControlResp::TaskFinished { operator_id, task_index }) => {
                                 info!(message = "Task finished", operator_id, task_index);
                                 controller.task_finished(Request::new(

@@ -172,6 +172,7 @@ service ControllerGrpc {
   rpc TaskStarted(TaskStartedReq) returns (TaskStartedResp);
   rpc TaskCheckpointEvent(TaskCheckpointEventReq) returns (TaskCheckpointEventResp);
   rpc TaskCheckpointCompleted(TaskCheckpointCompletedReq) returns (TaskCheckpointCompletedResp);
+  rpc TaskDataFinished(TaskFinishedReq) returns (TaskFinishedResp);
   rpc TaskFinished(TaskFinishedReq) returns (TaskFinishedResp);
   rpc TaskFailed(TaskFailedReq) returns (TaskFailedResp);
   rpc SendSinkData(SinkDataReq) returns (SinkDataResp);

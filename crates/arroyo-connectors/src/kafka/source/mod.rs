@@ -1,7 +1,7 @@
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
+use arroyo_rpc::ControlResp;
 
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
@@ -27,7 +27,9 @@ pub struct KafkaSourceFunc {
     pub topic: String,
     pub bootstrap_servers: String,
     pub group_id: Option<String>,
+    pub consumer: Option<StreamConsumer>,
     pub offset_mode: super::SourceOffset,
+    pub offsets: HashMap<i32, i64>,
     pub format: Format,
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
@@ -90,7 +92,10 @@ impl KafkaSourceFunc {
                 .map(|(_, p)| {
                     let offset = state
                         .get(&p.id())
-                        .map(|s| Offset::Offset(s.offset))
+                        .map(|s| {
+                            self.offsets.insert(s.partition, s.offset);
+                            Offset::Offset(s.offset)
+                        })
                         .unwrap_or_else(|| {
                             if has_state {
                                 // if we've restored partitions and we don't know about this one, that means it's
@@ -119,15 +124,22 @@ impl KafkaSourceFunc {
     }
 
     async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
-        let consumer = self
-            .get_consumer(ctx)
-            .await
-            .map_err(|e| UserError::new("Could not create Kafka consumer", format!("{:?}", e)))?;
+        self.consumer =
+            Some(self.get_consumer(ctx).await.map_err(|e| {
+                UserError::new("Could not create Kafka consumer", format!("{:?}", e))
+            })?);
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
-        let mut offsets = HashMap::new();
 
-        if consumer.assignment().unwrap().count() == 0 {
+        if self
+            .consumer
+            .as_ref()
+            .unwrap()
+            .assignment()
+            .unwrap()
+            .count()
+            == 0
+        {
             warn!("Kafka Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
                 ctx.task_info.operator_id, ctx.task_info.task_index);
             ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
@@ -148,7 +160,7 @@ impl KafkaSourceFunc {
 
         loop {
             select! {
-                message = consumer.recv() => {
+                message = self.consumer.as_ref().unwrap().recv() => {
                     match message {
                         Ok(msg) => {
                             if let Some(v) = msg.payload() {
@@ -162,7 +174,7 @@ impl KafkaSourceFunc {
                                     ctx.flush_buffer().await?;
                                 }
 
-                                offsets.insert(msg.partition(), msg.offset());
+                                self.offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;
                             }
                         },
@@ -177,51 +189,9 @@ impl KafkaSourceFunc {
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
-                    match control_message {
-                        Some(ControlMessage::Checkpoint(c)) => {
-                            debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            let mut topic_partitions = TopicPartitionList::new();
-                            let s = ctx.table_manager.get_global_keyed_state("k").await
-                                .map_err(|err| UserError::new("failed to get global key value", err.to_string()))?;
-                            for (partition, offset) in &offsets {
-                                s.insert(*partition, KafkaState {
-                                    partition: *partition,
-                                    offset: *offset + 1,
-                                }).await;
-                                topic_partitions.add_partition_offset(
-                                    &self.topic, *partition, Offset::Offset(*offset)).unwrap();
-                            }
-
-                            if let Err(e) = consumer.commit(&topic_partitions, CommitMode::Async) {
-                                // This is just used for progress tracking for metrics, so it's not a fatal error if it
-                                // fails. The actual offset is stored in state.
-                                warn!("Failed to commit offset to Kafka {:?}", e);
-                            }
-                            if self.start_checkpoint(c, ctx).await {
-                                return Ok(SourceFinishType::Immediate);
-                            }
-                        },
-                        Some(ControlMessage::Stop { mode }) => {
-                            info!("Stopping kafka source: {:?}", mode);
-
-                            match mode {
-                                StopMode::Graceful => {
-                                    return Ok(SourceFinishType::Graceful);
-                                }
-                                StopMode::Immediate => {
-                                    return Ok(SourceFinishType::Immediate);
-                                }
-                            }
-                        }
-                        Some(ControlMessage::Commit { .. }) => {
-                            unreachable!("sources shouldn't receive commit messages");
-                        }
-                        Some(ControlMessage::LoadCompacted {compacted}) => {
-                            ctx.load_compacted(compacted).await;
-                        }
-                        Some(ControlMessage::NoOp) => {}
-                        None => {
-
+                    if let Some(control_message) = control_message {
+                        if let Some(stop_mode) = self.handle_control_message(ctx, control_message).await {
+                            return Ok(stop_mode);
                         }
                     }
                 }
@@ -257,5 +227,40 @@ impl SourceOperator for KafkaSourceFunc {
 
     fn tables(&self) -> HashMap<String, TableConfig> {
         arroyo_state::global_table_config("k", "kafka offsets")
+    }
+
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        debug!("starting checkpointing {}", ctx.task_info.task_index);
+        let mut topic_partitions = TopicPartitionList::new();
+        // TODO: return this as a UserError rather than panicking.
+        let s = ctx
+            .table_manager
+            .get_global_keyed_state("k")
+            .await
+            .expect("should be able to get kafka state");
+        for (partition, offset) in &self.offsets {
+            s.insert(
+                *partition,
+                KafkaState {
+                    partition: *partition,
+                    offset: *offset + 1,
+                },
+            )
+            .await;
+            topic_partitions
+                .add_partition_offset(&self.topic, *partition, Offset::Offset(*offset))
+                .unwrap();
+        }
+
+        if let Err(e) = self
+            .consumer
+            .as_ref()
+            .unwrap()
+            .commit(&topic_partitions, CommitMode::Async)
+        {
+            // This is just used for progress tracking for metrics, so it's not a fatal error if it
+            // fails. The actual offset is stored in state.
+            warn!("Failed to commit offset to Kafka {:?}", e);
+        }
     }
 }

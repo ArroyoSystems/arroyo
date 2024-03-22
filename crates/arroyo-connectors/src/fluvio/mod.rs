@@ -179,6 +179,7 @@ impl Connector for FluvioConnector {
                     topic: table.topic,
                     endpoint: table.endpoint.clone(),
                     offset_mode: offset,
+                    offsets: HashMap::new(),
                     format: config
                         .format
                         .ok_or_else(|| anyhow!("format required for fluvio source"))?,

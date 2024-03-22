@@ -342,6 +342,9 @@ pub struct RunningEngine {
 }
 
 impl RunningEngine {
+    pub fn total_tasks(&self) -> usize {
+        self.assignments.len()
+    }
     pub fn source_controls(&self) -> Vec<Sender<ControlMessage>> {
         let graph = self.program.graph.read().unwrap();
         graph
