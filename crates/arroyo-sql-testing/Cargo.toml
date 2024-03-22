@@ -37,3 +37,4 @@ tracing-subscriber = {version = "0.3.17"}
 
 [dev-dependencies]
 test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
+rstest = { version = "0.18.2" }

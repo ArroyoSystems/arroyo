@@ -96,7 +96,7 @@ impl ExpiringTimeKeyTable {
             let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
             let mut stream = reader_builder.build()?;
             // projection to trim the metadata fields. Should probably be factored out.
-            let projection: Vec<_> = (0..(stream.schema().all_fields().len() - 2)).collect();
+            let projection: Vec<_> = (0..(stream.schema().fields().len() - 2)).collect();
             while let Some(batch_result) = stream.next().await {
                 let mut batch = batch_result?;
                 if needs_filtering {
@@ -202,7 +202,7 @@ impl ExpiringTimeKeyTable {
             let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
             let mut stream = reader_builder.build()?;
             // projection to trim the metadata fields. Should probably be factored out.
-            let projection: Vec<_> = (0..(stream.schema().all_fields().len() - 2)).collect();
+            let projection: Vec<_> = (0..(stream.schema().fields().len() - 2)).collect();
             while let Some(batch_result) = stream.next().await {
                 let mut batch = batch_result?;
                 if needs_filtering {
@@ -769,14 +769,7 @@ impl ExpiringTimeKeyTableCheckpointer {
                 self.parquet_stats = Some(parquet_stats);
             }
             Some(current_stats) => {
-                current_stats.min_routing_key = current_stats
-                    .min_routing_key
-                    .min(parquet_stats.min_routing_key);
-                current_stats.max_routing_key = current_stats
-                    .min_routing_key
-                    .max(parquet_stats.max_routing_key);
-                current_stats.max_timestamp =
-                    current_stats.max_timestamp.max(parquet_stats.max_timestamp);
+                current_stats.merge(parquet_stats);
             }
         }
     }
