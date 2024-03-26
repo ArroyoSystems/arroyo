@@ -19,6 +19,7 @@ use arroyo_types::string_to_map;
 use blackhole::BlackholeConnector;
 use fluvio::FluvioConnector;
 use impulse::ImpulseConnector;
+use nats::NatsConnector;
 use nexmark::NexmarkConnector;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
@@ -40,6 +41,7 @@ pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
 pub mod mqtt;
+pub mod nats;
 pub mod nexmark;
 pub mod polling_http;
 pub mod preview;
@@ -60,6 +62,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(KafkaConnector {}),
         Box::new(KinesisConnector {}),
         Box::new(MqttConnector {}),
+        Box::new(NatsConnector {}),
         Box::new(NexmarkConnector {}),
         Box::new(PollingHTTPConnector {}),
         Box::new(PreviewConnector {}),
