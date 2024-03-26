@@ -1,0 +1,45 @@
+{
+    "type": "object",
+    "title": "NatsTable",
+    "properties": {
+        "connectorType": {
+            "type": "object",
+            "title": "Connector Type",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Source",
+                    "properties": {
+                        "stream": {
+                            "type": "string",
+                            "description": "The NATS Jetstream stream to consume from"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                        "subject": {
+                            "type": "string",
+                            "description": "The NATS subject to publish to"
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        },
+        "client_configs": {
+            "type": "object",
+            "title": "Client Configs",
+            "description": "Additional NATS configs to pass to the underlying NATS consumer or producer.",
+            "additionalProperties": {
+                "type": "string"
+            }
+        }
+    },
+    "required": [
+        "connectorType"
+    ]
+}
