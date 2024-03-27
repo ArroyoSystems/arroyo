@@ -1,4 +1,5 @@
-use super::get_client_config;
+use super::get_nats_client;
+use super::get_nats_client_config;
 use super::ConnectorType;
 use super::NatsConfig;
 use super::NatsState;
@@ -15,7 +16,6 @@ use arroyo_rpc::ControlResp;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::UserError;
 use async_nats::jetstream::consumer;
-use async_nats::ServerAddr;
 use async_trait::async_trait;
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -84,7 +84,7 @@ impl NatsSourceFunc {
             _ => panic!("NATS source must have a stream configured"),
         };
 
-        let consumer_default_config = get_client_config(&connection, &table);
+        let consumer_default_config = get_nats_client_config(&connection, &table);
 
         Self {
             stream: stream.clone().unwrap(),
@@ -109,24 +109,9 @@ impl NatsSourceFunc {
         &mut self,
         stream_name: String,
     ) -> async_nats::jetstream::stream::Stream {
-        let servers_str = &self.servers;
-        let servers_vec: Vec<ServerAddr> =
-            servers_str.split(',').map(|s| s.parse().unwrap()).collect();
-        let client = async_nats::ConnectOptions::new()
-            .user_and_password(
-                self.consumer_config
-                    .get("nats.username")
-                    .unwrap()
-                    .to_string(),
-                self.consumer_config
-                    .get("nats.password")
-                    .unwrap()
-                    .to_string(),
-            )
-            .connect(servers_vec)
+        let client = get_nats_client(&self.connection, &self.table)
             .await
             .unwrap();
-
         let jetstream = async_nats::jetstream::new(client);
         let mut stream = jetstream.get_stream(&stream_name).await.unwrap();
         let stream_info = stream.info().await.unwrap();
@@ -194,7 +179,9 @@ impl NatsSourceFunc {
             &ctx.task_info.operator_id.clone().replace("operator_", "")
         );
 
-        // TODO: Replace by client_configs object built in module
+        // TODO: Generate this `consumer_config` via a function that parses
+        // all optional parameters passed in the `client_configs` of the `table.json`
+        // and merges with the default values
         let consumer_config = consumer::pull::Config {
             name: Some(consumer_name.clone()),
             replay_policy: consumer::ReplayPolicy::Instant,
@@ -208,7 +195,9 @@ impl NatsSourceFunc {
 
         match stream.delete_consumer(&consumer_name).await {
             Ok(_) => {
-                info!(">> Existing consumer deleted. Recreating consumer with new `start_sequence`.")
+                info!(
+                    ">> Existing consumer deleted. Recreating consumer with new `start_sequence`."
+                )
             }
             Err(_) => {
                 info!(">> No existing consumer found, proceeding with the creation of a new one.")
@@ -338,7 +327,8 @@ impl NatsSourceFunc {
                             );
 
                             // TODO: Has ACK to happens here at every message? Maybe it can be
-                            // done by ack only the last message before checkpointing
+                            // done by ack only the last message before checkpointing in the below
+                            // `ControlMessage::Checkpoint` match.
                             msg.ack().await.unwrap();
                         },
                         Some(Err(msg)) => {
@@ -369,7 +359,7 @@ impl NatsSourceFunc {
                                 .map(|nats_state| nats_state.stream_sequence_number)
                                 .unwrap();
 
-                            
+
                             if self.start_checkpoint(c, ctx).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
