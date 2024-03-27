@@ -11,6 +11,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::OperatorConfig;
+use async_nats::ServerAddr;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -139,8 +140,9 @@ impl Connector for NatsConnector {
         _: Option<&ConnectionSchema>,
         _tx: Sender<TestSourceMessage>,
     ) {
-        // TODO: Actually test the connection by instantiating a NATS client
-        // and subscribing to the subject at the specified server.
+        // TODO: Implement a full-fledge `NatsTester` struct for testing the client connection,
+        // the stream or subject existence and access permissions, the deserialization of messages
+        // for the specified format, the authentication to the schema registry (if any), etc.
         let (tx, _rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let (_itx, _rx) = tokio::sync::mpsc::channel::<(
@@ -245,7 +247,7 @@ impl Connector for NatsConnector {
                 framing: config.framing,
                 format: config.format.unwrap(),
                 bad_data: config.bad_data,
-                consumer_config: get_client_config(&profile, &table),
+                consumer_config: get_nats_client_config(&profile, &table),
                 messages_per_second: NonZeroU32::new(
                     config
                         .rate_limit
@@ -255,35 +257,36 @@ impl Connector for NatsConnector {
                 .unwrap(),
             })),
             ConnectorType::Sink { .. } => OperatorNode::from_operator(Box::new(NatsSinkFunc {
-                publisher: None,
-                servers: profile.servers.clone(),
                 subject: table.client_configs.get("nats.subject").cloned().unwrap(),
-                client_config: get_client_config(&profile, &table),
+                servers: profile.servers.clone(),
+                connection: profile.clone(),
+                table: table.clone(),
+                publisher: None,
+                client_config: get_nats_client_config(&profile, &table),
                 serializer: ArrowSerializer::new(config.format.unwrap()),
             })),
         })
     }
 }
 
-fn get_client_config(connection: &NatsConfig, table: &NatsTable) -> HashMap<String, String> {
-    let mut consumer_configs: HashMap<String, String> = HashMap::new();
-
+fn get_nats_client_config(connection: &NatsConfig, table: &NatsTable) -> HashMap<String, String> {
+    let mut config: HashMap<String, String> = HashMap::new();
     match &connection.authentication {
         NatsConfigAuthentication::None {} => {}
         NatsConfigAuthentication::Credentials { username, password } => {
-            consumer_configs.insert(
+            config.insert(
                 "nats.username".to_string(),
                 username
                     .sub_env_vars()
                     .expect("Missing env-vars for NATS username"),
             );
-            consumer_configs.insert(
+            config.insert(
                 "nats.password".to_string(),
                 password
                     .sub_env_vars()
                     .expect("Missing env-vars for NATS password"),
             );
-            consumer_configs.extend(
+            config.extend(
                 table
                     .client_configs
                     .iter()
@@ -291,5 +294,23 @@ fn get_client_config(connection: &NatsConfig, table: &NatsTable) -> HashMap<Stri
             );
         }
     };
-    consumer_configs
+    config
+}
+
+async fn get_nats_client(
+    connection: &NatsConfig,
+    table: &NatsTable,
+) -> anyhow::Result<async_nats::Client> {
+    let client_config = get_nats_client_config(connection, table);
+    let servers_str = connection.servers.clone();
+    let servers_vec: Vec<ServerAddr> = servers_str.split(',').map(|s| s.parse().unwrap()).collect();
+    let client = async_nats::ConnectOptions::new()
+        .user_and_password(
+            client_config.get("nats.username").unwrap().to_string(),
+            client_config.get("nats.password").unwrap().to_string(),
+        )
+        .connect(servers_vec)
+        .await
+        .unwrap();
+    Ok(client)
 }
