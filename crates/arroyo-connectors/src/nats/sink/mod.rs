@@ -1,71 +1,26 @@
-use super::get_client_config;
-use super::ConnectorType;
+use super::get_nats_client;
 use super::NatsConfig;
 use super::NatsTable;
-use anyhow::Result;
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_rpc::ControlMessage;
-use arroyo_rpc::{ControlResp, OperatorConfig};
+use arroyo_rpc::ControlResp;
 use arroyo_types::*;
-use async_nats::ServerAddr;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use tracing::info;
 use tracing::warn;
 
 pub struct NatsSinkFunc {
-    pub publisher: Option<async_nats::Client>,
-    pub servers: String,
     pub subject: String,
+    pub servers: String,
+    pub connection: NatsConfig,
+    pub table: NatsTable,
+    pub publisher: Option<async_nats::Client>,
     pub client_config: HashMap<String, String>,
     pub serializer: ArrowSerializer,
-}
-
-impl NatsSinkFunc {
-    async fn get_nats_client(&mut self) -> Result<async_nats::Client> {
-        info!("Creating NATS publisher for {:?}", self.subject);
-        let servers_vec: Vec<ServerAddr> = self
-            .servers
-            .split(',')
-            .map(|s| s.parse::<ServerAddr>().unwrap())
-            .collect();
-        let nats_client: async_nats::Client = async_nats::ConnectOptions::new()
-            .user_and_password(
-                self.client_config.get("nats.username").unwrap().to_string(),
-                self.client_config.get("nats.password").unwrap().to_string(),
-            )
-            .connect(servers_vec)
-            .await
-            .unwrap();
-        Ok(nats_client)
-    }
-
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for NatSinkFunc");
-        let table: NatsTable =
-            serde_json::from_value(config.table).expect("Invalid table config for NatsSinkFunc");
-        let format = config
-            .format
-            .expect("NATS source must have a format configured");
-        let connection: NatsConfig = serde_json::from_value(config.connection)
-            .expect("Invalid connection config for NatsSinkFunc");
-        let subject = match &table.connector_type {
-            ConnectorType::Source { .. } => panic!("NATS sink cannot be created from a source"),
-            ConnectorType::Sink { subject, .. } => subject.clone(),
-        };
-        Self {
-            publisher: None,
-            servers: connection.servers.clone(),
-            subject: subject.unwrap().clone(),
-            client_config: get_client_config(&connection, &table),
-            serializer: ArrowSerializer::new(format),
-        }
-    }
 }
 
 #[async_trait]
@@ -79,9 +34,7 @@ impl ArrowOperator for NatsSinkFunc {
     }
 
     async fn on_start(&mut self, _ctx: &mut ArrowContext) {
-        // TODO: Get the NATS state sequence_number, i.e. what's the last
-        // message that was succesfully published to the NATS server
-        match self.get_nats_client().await {
+        match get_nats_client(&self.connection, &self.table).await {
             Ok(client) => {
                 self.publisher = Some(client);
             }
@@ -100,8 +53,7 @@ impl ArrowOperator for NatsSinkFunc {
     }
 
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut ArrowContext) {
-        // TODO: In order to be generic, we shoudln't reuse the sequence number from the NATS source
-        // but rather a identifier specific to the pipeline. How to increment it?
+        // TODO: Is it necessary to insert any kind of checklpoint in the state for NATS sink?
         // let sequence_number = 1;
         // ctx.table_manager
         //     .get_global_keyed_state("n")
@@ -111,7 +63,7 @@ impl ArrowOperator for NatsSinkFunc {
         //     .insert(ctx.task_info.task_index, sequence_number)
         //     .await;
 
-        // TODO: Is flushing sufficient here to ensure messages are neither 
+        // TODO: Is flushing sufficient here to ensure messages are neither
         // sent twice nor lost before being published successfully?
         self.publisher.as_mut().unwrap().flush().await.unwrap();
     }
