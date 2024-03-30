@@ -345,7 +345,7 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "50.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=50.0.0/json#1b273ba0d3388f85d458d1aacd6fc6fa0266fef4"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=allow_bad_data#e5420bce1719394497a778501d46699f7e2b8aa3"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
