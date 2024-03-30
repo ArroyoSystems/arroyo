@@ -171,18 +171,9 @@ impl ArrowOperator for KafkaSinkFunc {
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
         let values = self.serializer.serialize(&batch);
 
-        if let Some(key_indices) = &ctx.in_schemas[0].key_indices {
-            let k = batch.project(key_indices).unwrap();
-
-            // TODO: we can probably batch this for better performance
-            for (k, v) in self.serializer.serialize(&k).zip(values) {
-                self.publish(Some(k), v, ctx).await;
-            }
-        } else {
-            for v in values {
-                self.publish(None, v, ctx).await;
-            }
-        };
+        for v in values {
+            self.publish(None, v, ctx).await;
+        }
     }
 
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
