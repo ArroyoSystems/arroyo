@@ -91,7 +91,7 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         DataType::List(t) | DataType::FixedSizeList(t, _) | DataType::LargeList(t) => {
             return json!({
                 "type": "array",
-                "items": arrow_to_avro(name, t.data_type())
+                "items": field_to_avro("item", &*t),
             });
         }
         DataType::Struct(fields) => {

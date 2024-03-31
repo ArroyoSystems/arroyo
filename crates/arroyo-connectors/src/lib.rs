@@ -127,6 +127,7 @@ pub(crate) fn source_field(name: &str, field_type: FieldType) -> SourceField {
             sql_name: match field_type.clone() {
                 FieldType::Primitive(p) => Some(primitive_to_sql(p).to_string()),
                 FieldType::Struct(_) => None,
+                FieldType::List(_) => None,
             },
             r#type: field_type,
         },
