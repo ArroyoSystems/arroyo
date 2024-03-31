@@ -1,6 +1,5 @@
 use crate::ports::CONTROLLER_GRPC;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use arrow::util::pretty::pretty_format_batches;
 use arrow_array::RecordBatch;
 use bincode::{Decode, Encode};
 use serde::ser::SerializeStruct;
@@ -317,10 +316,6 @@ pub fn print_time(time: SystemTime) -> String {
     chrono::DateTime::<chrono::Utc>::from(time)
         .format("%Y-%m-%d %H:%M:%S%.3f")
         .to_string()
-}
-
-pub fn print_record_batch(batch: &RecordBatch) -> String {
-    format!("{}", pretty_format_batches(&[batch.clone()]).unwrap())
 }
 
 pub fn single_item_hash_map<I: Into<K>, K: Hash + Eq, V>(key: I, value: V) -> HashMap<K, V> {
