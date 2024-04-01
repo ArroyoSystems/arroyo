@@ -559,7 +559,6 @@ impl ArrowContext {
         if self.buffer.as_ref().unwrap().size() > 0 {
             let buffer = self.buffer.take().unwrap();
             let batch = buffer.finish();
-            println!("{}\t{}", batch.num_rows(), batch.get_array_memory_size());
             self.collector.collect(batch).await;
             self.buffer = Some(ContextBuffer::new(
                 self.out_schema.as_ref().map(|t| t.schema.clone()).unwrap(),
@@ -570,7 +569,6 @@ impl ArrowContext {
             if let Some(buffer) = deserializer.flush_buffer() {
                 match buffer {
                     Ok(batch) => {
-                        println!("{}\t{}", batch.num_rows(), batch.get_array_memory_size());
                         self.collector.collect(batch).await;
                     }
                     Err(e) => {
