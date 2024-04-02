@@ -486,11 +486,16 @@ pub trait ArrowOperator: Send + 'static {
 #[derive(Default)]
 pub struct Registry {
     udfs: HashMap<String, Arc<ScalarUDF>>,
+    udafs: HashMap<String, Arc<AggregateUDF>>,
 }
 
 impl Registry {
     pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {
         self.udfs.insert(udf.name().to_string(), udf);
+    }
+
+    pub fn add_udaf(&mut self, udaf: Arc<AggregateUDF>) {
+        self.udafs.insert(udaf.name().to_string(), udaf);
     }
 }
 
@@ -503,14 +508,14 @@ impl FunctionRegistry for Registry {
         self.udfs
             .get(name)
             .cloned()
-            .ok_or_else(|| DataFusionError::Execution(format!("Udf {} not found", name)))
+            .ok_or_else(|| DataFusionError::Execution(format!("UDF {} not found", name)))
     }
 
     fn udaf(&self, name: &str) -> DFResult<Arc<AggregateUDF>> {
-        Err(DataFusionError::NotImplemented(format!(
-            "udaf {} not implemented",
-            name
-        )))
+        self.udafs
+            .get(name)
+            .cloned()
+            .ok_or_else(|| DataFusionError::Execution(format!("UDAF {name} not found")))
     }
 
     fn udwf(&self, name: &str) -> DFResult<Arc<WindowUDF>> {

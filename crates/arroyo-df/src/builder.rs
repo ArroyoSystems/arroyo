@@ -30,31 +30,46 @@ use tokio::sync::oneshot;
 
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
-use crate::physical::{new_registry, ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
+use crate::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use crate::schemas::add_timestamp_field_arrow;
+use crate::ArroyoSchemaProvider;
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode},
 };
 
-#[derive(Default)]
-pub(crate) struct PlanToGraphVisitor {
+pub(crate) struct PlanToGraphVisitor<'a> {
+    schema_provider: &'a ArroyoSchemaProvider,
     graph: DiGraph<LogicalNode, LogicalEdge>,
     output_schemas: HashMap<NodeIndex, ArroyoSchemaRef>,
     named_nodes: HashMap<NamedNode, NodeIndex>,
     // each node that needs to know its inputs should push an empty vec in pre_visit.
     // In post_visit each node should cleanup its vec and push its index to the last vec, if present.
     traversal: Vec<Vec<NodeIndex>>,
-    planner: Planner,
+    planner: Planner<'a>,
 }
 
-pub(crate) struct Planner {
+impl<'a> PlanToGraphVisitor<'a> {
+    pub fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
+        Self {
+            schema_provider,
+            graph: Default::default(),
+            output_schemas: Default::default(),
+            named_nodes: Default::default(),
+            traversal: vec![],
+            planner: Planner::new(schema_provider),
+        }
+    }
+}
+
+pub(crate) struct Planner<'a> {
+    schema_provider: &'a ArroyoSchemaProvider,
     planner: DefaultPhysicalPlanner,
     session_state: SessionState,
 }
 
-impl Default for Planner {
-    fn default() -> Self {
+impl<'a> Planner<'a> {
+    pub(crate) fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
         let planner = DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(
             ArroyoExtensionPlanner {},
         )]);
@@ -70,13 +85,12 @@ impl Default for Planner {
             SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
                 .with_physical_optimizer_rules(vec![]);
         Self {
+            schema_provider,
             planner,
             session_state,
         }
     }
-}
 
-impl Planner {
     pub(crate) fn sync_plan(&self, plan: &LogicalPlan) -> DFResult<Arc<dyn ExecutionPlan>> {
         let fut = self.planner.create_physical_plan(plan, &self.session_state);
         let (tx, mut rx) = oneshot::channel();
@@ -137,7 +151,7 @@ impl Planner {
 
         // need to convert to ExecutionPlan to get the partial schema.
         let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            &new_registry(),
+            self.schema_provider,
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -228,7 +242,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
     }
 }
 
-impl PlanToGraphVisitor {
+impl<'a> PlanToGraphVisitor<'a> {
     fn add_index_to_traversal(&mut self, index: NodeIndex) {
         if let Some(last) = self.traversal.last_mut() {
             last.push(index);
@@ -286,7 +300,7 @@ impl PlanToGraphVisitor {
     }
 }
 
-impl TreeNodeVisitor for PlanToGraphVisitor {
+impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
     type N = LogicalPlan;
 
     fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {

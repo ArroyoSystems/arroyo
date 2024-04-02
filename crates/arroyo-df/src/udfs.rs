@@ -60,7 +60,7 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
                     };
 
                     quote!(let #id = array::PrimitiveArray::<datatypes::#arrow_type>::from(
-                        args[0usize].clone().child_data()[0].clone()
+                        args.into_iter().next().unwrap()
                     ).iter()#filter.collect();)
                 }
                 _ => {
@@ -164,11 +164,16 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
                 })
                 .collect::<Vec<_>>();
 
+            println!("ARGS2={:?}", args);
             #results_builder
 
             #(#defs;)*
 
+            println!("AFTER DEFS");
+
             #call_loop
+
+            println!("AFTER CALL LOOP");
 
             let (array, schema) = to_ffi(&results_builder.finish().to_data()).unwrap();
             FfiArraySchemaPair(array, schema)

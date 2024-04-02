@@ -189,8 +189,6 @@ impl Program {
         Self::from_logical(name, logical, &assignments, new_registry())
     }
 
-    pub async fn init_udfs() {}
-
     pub fn from_logical(
         name: String,
         logical: &LogicalGraph,

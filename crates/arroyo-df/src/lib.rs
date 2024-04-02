@@ -1,7 +1,21 @@
 #![allow(clippy::new_without_default)]
 
-extern crate dlopen2;
-extern crate dlopen2_derive;
+pub mod builder;
+pub(crate) mod extension;
+pub mod external;
+mod json;
+pub mod logical;
+pub mod physical;
+mod plan;
+mod rewriters;
+pub mod schemas;
+mod tables;
+pub mod types;
+pub mod udafs;
+pub mod udfs;
+
+#[cfg(test)]
+mod test;
 
 use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
@@ -12,17 +26,7 @@ use arroyo_datastream::WindowType;
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::physical_plan::functions::make_scalar_function;
-use datafusion_common::{DFField, OwnedTableReference, ScalarValue};
-pub mod builder;
-pub(crate) mod extension;
-pub mod external;
-pub mod logical;
-pub mod physical;
-mod plan;
-mod rewriters;
-pub mod schemas;
-mod tables;
-pub mod types;
+use datafusion_common::{plan_err, DFField, OwnedTableReference, ScalarValue};
 
 use datafusion::prelude::create_udf;
 
@@ -33,8 +37,8 @@ use datafusion::sql::{planner::ContextProvider, TableReference};
 use datafusion_common::tree_node::TreeNode;
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{
-    Expr, Extension, LogicalPlan, ReturnTypeFunction, ScalarFunctionDefinition, ScalarUDF,
-    Signature, Volatility, WindowUDF,
+    create_udaf, Expr, Extension, LogicalPlan, ReturnTypeFunction, ScalarFunctionDefinition,
+    ScalarUDF, Signature, Volatility, WindowUDF,
 };
 
 use datafusion_expr::{AggregateUDF, TableSource};
@@ -58,10 +62,11 @@ use crate::json::get_json_functions;
 use crate::rewriters::{SourceMetadataVisitor, UnnestRewriter};
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow};
 
+use crate::udafs::EmptyUdaf;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_operator::connector::Connection;
 use arroyo_types::NullableType;
-use datafusion_proto::protobuf::ArrowType;
+use datafusion_execution::FunctionRegistry;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
@@ -70,12 +75,6 @@ use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
-mod json;
-pub mod udfs;
-
-#[cfg(test)]
-mod test;
-
 #[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct UdfDef {
@@ -83,6 +82,7 @@ pub struct UdfDef {
     pub ret: NullableType,
     def: String,
     dependencies: String,
+    aggregate: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -167,7 +167,7 @@ impl ParsedUdf {
                         })?;
 
                         args.push(NullableType::not_null(DataType::List(Arc::new(
-                            Field::new("field", vec_type.data_type, vec_type.nullable),
+                            Field::new("item", vec_type.data_type, vec_type.nullable),
                         ))));
                     } else {
                         args.push(rust_to_arrow(&t.ty).ok_or_else(|| {
@@ -202,6 +202,13 @@ impl ParsedUdf {
             definition: unparse(&file),
             dependencies: parse_dependencies(def)?,
         })
+    }
+}
+
+pub fn inner_type(dt: &DataType) -> Option<DataType> {
+    match dt {
+        DataType::List(f) => Some(f.data_type().clone()),
+        _ => None,
     }
 }
 
@@ -321,41 +328,51 @@ impl ArroyoSchemaProvider {
         }
         let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
-        let arg_types = parsed
-            .args
-            .iter()
-            .map(|arg| ArrowType::try_from(&arg.data_type))
-            .collect();
-
-        let arg_types = match arg_types {
-            Ok(arg_types) => arg_types,
-            Err(e) => bail!("Error converting arg types: {}", e),
-        };
-
         self.dylib_udfs.insert(
             parsed.name.clone(),
             DylibUdfConfig {
                 dylib_path: url.to_string(),
-                arg_types,
-                return_type: ArrowType::try_from(&parsed.ret_type.data_type)?,
+                arg_types: parsed.args.iter().map(|t| t.data_type.clone()).collect(),
+                return_type: parsed.ret_type.data_type.clone(),
+                aggregate: parsed.vec_arguments > 0,
             },
         );
 
-        if self
-            .functions
-            .insert(
-                parsed.name.clone(),
-                Arc::new(create_udf(
-                    &parsed.name,
-                    parsed.args.iter().map(|t| t.data_type.clone()).collect(),
-                    Arc::new(parsed.ret_type.data_type.clone()),
-                    Volatility::Volatile,
-                    #[allow(deprecated)]
-                    make_scalar_function(fn_impl),
-                )),
-            )
-            .is_some()
-        {
+        let replaced = if parsed.vec_arguments > 0 {
+            self.aggregate_functions
+                .insert(
+                    parsed.name.clone(),
+                    Arc::new(create_udaf(
+                        &parsed.name,
+                        parsed
+                            .args
+                            .iter()
+                            .map(|t| inner_type(&t.data_type).expect("udaf arg is not a vec"))
+                            .collect(),
+                        Arc::new(parsed.ret_type.data_type.clone()),
+                        Volatility::Volatile,
+                        Arc::new(|_| Ok(Box::new(EmptyUdaf {}))),
+                        Arc::new(parsed.args.iter().map(|t| t.data_type.clone()).collect()),
+                    )),
+                )
+                .is_some()
+        } else {
+            self.functions
+                .insert(
+                    parsed.name.clone(),
+                    Arc::new(create_udf(
+                        &parsed.name,
+                        parsed.args.iter().map(|t| t.data_type.clone()).collect(),
+                        Arc::new(parsed.ret_type.data_type.clone()),
+                        Volatility::Volatile,
+                        #[allow(deprecated)]
+                        make_scalar_function(fn_impl),
+                    )),
+                )
+                .is_some()
+        };
+
+        if replaced {
             warn!("Global UDF '{}' is being overwritten", parsed.name);
         };
 
@@ -366,6 +383,7 @@ impl ArroyoSchemaProvider {
                 ret: parsed.ret_type,
                 def: parsed.definition,
                 dependencies: parsed.dependencies,
+                aggregate: parsed.vec_arguments > 0,
             },
         );
 
@@ -429,6 +447,41 @@ impl ContextProvider for ArroyoSchemaProvider {
 
     fn get_window_meta(&self, _name: &str) -> Option<Arc<WindowUDF>> {
         None
+    }
+}
+
+// pub fn new_registry() -> Registry {
+//     let mut registry = Registry::default();
+//     registry.add_udf(Arc::new(window_scalar_function()));
+//     for json_function in get_json_functions().values() {
+//         registry.add_udf(json_function.clone());
+//     }
+//     registry
+// }
+
+impl FunctionRegistry for ArroyoSchemaProvider {
+    fn udfs(&self) -> HashSet<String> {
+        self.udf_defs.keys().map(|k| k.to_string()).collect()
+    }
+
+    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+        if let Some(f) = self.functions.get(name) {
+            Ok(Arc::clone(f))
+        } else {
+            plan_err!("No UDF with name {name}")
+        }
+    }
+
+    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+        if let Some(f) = self.aggregate_functions.get(name) {
+            Ok(Arc::clone(f))
+        } else {
+            plan_err!("No UDAF with name {name}")
+        }
+    }
+
+    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+        plan_err!("No UDWF with name {name}")
     }
 }
 
@@ -556,7 +609,7 @@ pub async fn parse_and_get_arrow_program(
     }
 
     let mut used_connections = HashSet::new();
-    let mut plan_to_graph_visitor = PlanToGraphVisitor::default();
+    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider);
 
     for insert in inserts {
         let (plan, sink_name) = match insert {

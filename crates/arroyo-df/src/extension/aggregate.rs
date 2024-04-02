@@ -18,7 +18,6 @@ use arroyo_rpc::{
 use datafusion_common::{
     Column, DFField, DFSchema, DFSchemaRef, DataFusionError, Result as DFResult, ScalarValue,
 };
-use datafusion_execution::FunctionRegistry;
 use datafusion_expr::{
     expr::ScalarFunction, Aggregate, BinaryExpr, Expr, Extension, LogicalPlan,
     ScalarFunctionDefinition, UserDefinedLogicalNodeCore,
@@ -29,9 +28,10 @@ use datafusion_proto::{
 };
 use prost::Message;
 
+use crate::physical::window_scalar_function;
 use crate::{
     builder::{NamedNode, Planner, SplitPlanOutput},
-    physical::{new_registry, ArroyoPhysicalExtensionCodec},
+    physical::ArroyoPhysicalExtensionCodec,
     WindowBehavior,
 };
 
@@ -312,9 +312,8 @@ impl AggregateExtension {
         let timestamp_column =
             Column::new(timestamp_field.qualifier().cloned(), timestamp_field.name());
         aggregate_fields.insert(window_index, window_field.clone());
-        let registry = new_registry();
         let window_expression = Expr::ScalarFunction(ScalarFunction {
-            func_def: ScalarFunctionDefinition::UDF(registry.udf("window")?),
+            func_def: ScalarFunctionDefinition::UDF(Arc::new(window_scalar_function())),
             args: vec![
                 // copy bin_start as first argument
                 Expr::Column(timestamp_column.clone()),

@@ -164,11 +164,12 @@ struct UdfDylibInterface {
     ) -> FfiArraySchemaPair,
 }
 
+#[derive(Clone)]
 pub struct UdfDylib {
-    name: String,
-    signature: Signature,
-    return_type: DataType,
-    udf: Container<UdfDylibInterface>,
+    name: Arc<String>,
+    signature: Arc<Signature>,
+    return_type: Arc<DataType>,
+    udf: Arc<Container<UdfDylibInterface>>,
 }
 
 impl Debug for UdfDylib {
@@ -180,16 +181,7 @@ impl Debug for UdfDylib {
 impl UdfDylib {
     /// Download a UDF dylib from the object store
     pub async fn init(name: &str, config: &DylibUdfConfig) -> Self {
-        let signature = Signature::exact(
-            config
-                .arg_types
-                .iter()
-                .map(|arg| {
-                    DataType::try_from(arg).expect("Failed to convert ArrowType to DataType")
-                })
-                .collect(),
-            Volatility::Volatile,
-        );
+        let signature = Signature::exact(config.arg_types.clone(), Volatility::Volatile);
 
         let udf = StorageProvider::get_url(&config.dylib_path)
             .await
@@ -212,11 +204,10 @@ impl UdfDylib {
         std::fs::write(&local_dylib_path, udf).expect("unable to write dylib to file");
 
         Self {
-            name: name.to_string(),
-            signature,
-            udf: unsafe { Container::load(local_dylib_path).unwrap() },
-            return_type: DataType::try_from(&config.return_type)
-                .expect("Failed to convert ArrowType to DataType"),
+            name: Arc::new(name.to_string()),
+            signature: Arc::new(signature),
+            udf: Arc::new(unsafe { Container::load(local_dylib_path).unwrap() }),
+            return_type: Arc::new(config.return_type.clone()),
         }
     }
 }
@@ -257,7 +248,7 @@ impl ScalarUDFImpl for UdfDylib {
     }
 
     fn return_type(&self, _arg_types: &[DataType]) -> DFResult<DataType> {
-        Ok(self.return_type.clone())
+        Ok((*self.return_type).clone())
     }
 
     fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
