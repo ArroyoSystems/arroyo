@@ -35,6 +35,7 @@ use tracing::info;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::plan::ArroyoRewriter;
+use crate::rewriters::UnnestRewriter;
 use crate::types::convert_data_type;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
@@ -555,6 +556,7 @@ impl Table {
                     let rewritten_plan = input
                         .as_ref()
                         .clone()
+                        .rewrite(&mut UnnestRewriter {})?
                         .rewrite(&mut ArroyoRewriter { schema_provider })?;
                     let schema = rewritten_plan.schema().clone();
                     let remote_extension = RemoteTableExtension {
