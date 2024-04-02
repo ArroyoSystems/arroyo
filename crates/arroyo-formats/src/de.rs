@@ -1,4 +1,5 @@
 use crate::avro::de;
+use arrow::compute::kernels;
 use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
 use arrow_array::{RecordBatch, StringArray};
 use arroyo_rpc::df::ArroyoSchema;
@@ -139,6 +140,7 @@ impl ArrowDeserializer {
                     ))
                     .with_limit_to_batch_size(false)
                     .with_strict_mode(false)
+                    .with_allow_bad_data(matches!(bad_data, BadData::Drop { .. }))
                     .build_decoder()
                     .unwrap(),
                     TimestampNanosecondBuilder::new(),
@@ -180,12 +182,14 @@ impl ArrowDeserializer {
         self.buffered_count = 0;
         Some(
             decoder
-                .flush()
+                .flush_with_bad_data()
                 .map_err(|e| SourceError::bad_data(format!("JSON does not match schema: {:?}", e)))
                 .transpose()?
-                .map(|batch| {
+                .map(|(batch, mask, _)| {
                     let mut columns = batch.columns().to_vec();
-                    columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
+                    let timestamp = kernels::filter::filter(&timestamp.finish(), &mask).unwrap();
+
+                    columns.insert(self.schema.timestamp_index, Arc::new(timestamp));
                     RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                 }),
         )
