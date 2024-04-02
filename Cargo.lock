@@ -910,6 +910,7 @@ dependencies = [
  "hex",
  "petgraph",
  "quote",
+ "rstest",
  "serde",
  "serde_json",
  "syn 2.0.52",

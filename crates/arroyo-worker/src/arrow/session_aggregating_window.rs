@@ -791,8 +791,12 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
                     .expect("should be able to add batch");
             }
         }
+        let Some(watermark) = ctx.last_present_watermark() else {
+            return;
+        };
+
         let evicted_results = self
-            .results_at_watermark(SystemTime::now())
+            .results_at_watermark(watermark)
             .await
             .expect("should be able to get results");
         if evicted_results.len() > 0 {

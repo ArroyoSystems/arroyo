@@ -10,36 +10,87 @@ use arrow_schema::{DataType, TimeUnit};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_types::{from_nanos, to_micros};
 
-fn serialize_column(
+trait SerializeTarget {
+    fn add(&mut self, i: usize, name: &str, value: Value);
+    fn is_some(&self, i: usize) -> bool;
+}
+
+impl SerializeTarget for Vec<Option<Record<'_>>> {
+    fn add(&mut self, i: usize, name: &str, value: Value) {
+        if let Some(r) = &mut self[i] {
+            r.put(name, value);
+        }
+    }
+
+    fn is_some(&self, i: usize) -> bool {
+        self[i].is_some()
+    }
+}
+
+impl SerializeTarget for Vec<Value> {
+    fn add(&mut self, _: usize, _: &str, value: Value) {
+        self.push(value);
+    }
+
+    fn is_some(&self, _: usize) -> bool {
+        true
+    }
+}
+
+fn get_field_schema<'a>(schema: &'a Schema, name: &str, nullable: bool) -> &'a Schema {
+    let Schema::Record(record_schema) = schema else {
+        panic!("invalid avro schema -- struct field {name} should correspond to record schema");
+    };
+
+    let record_field_number = record_schema.lookup.get(name).unwrap();
+    let schema = &record_schema.fields[*record_field_number].schema;
+
+    if nullable {
+        let Schema::Union(__union_schema) = schema else {
+            panic!(
+                "invalid avro schema -- struct field {name} is nullable and should be represented by a union"
+            );
+        };
+        __union_schema.variants().get(1).unwrap_or_else(|| {
+            panic!("invalid avro schema -- struct field {name} should be a union with two variants")
+        })
+    } else {
+        schema
+    }
+}
+
+fn serialize_column<T: SerializeTarget>(
     schema: &Schema,
-    values: &mut Vec<Option<Record>>,
+    values: &mut T,
     name: &str,
     column: &ArrayRef,
     nullable: bool,
 ) {
     macro_rules! write_arrow_value {
         ($as_call:path, $value_variant:path, $converter:expr) => {{
-            $as_call(column)
-                .iter()
-                .zip(values.iter_mut())
-                .for_each(|(v, r)| {
-                    if let Some(r) = r.as_mut() {
-                        if nullable {
-                            r.put(
-                                name,
-                                Value::Union(
-                                    v.is_some() as u32,
-                                    Box::new(
-                                        v.map(|v| $value_variant($converter(v)))
-                                            .unwrap_or(Value::Null),
-                                    ),
+            $as_call(column).iter().enumerate().for_each(|(i, v)| {
+                if values.is_some(i) {
+                    if nullable {
+                        values.add(
+                            i,
+                            name,
+                            Value::Union(
+                                v.is_some() as u32,
+                                Box::new(
+                                    v.map(|v| $value_variant($converter(v)))
+                                        .unwrap_or(Value::Null),
                                 ),
-                            );
-                        } else {
-                            r.put(name, $value_variant($converter(v.expect("cannot be none"))));
-                        }
+                            ),
+                        );
+                    } else {
+                        values.add(
+                            i,
+                            name,
+                            $value_variant($converter(v.expect("cannot be none"))),
+                        );
                     }
-                })
+                }
+            })
         }};
     }
 
@@ -95,30 +146,59 @@ fn serialize_column(
                 .to_vec())
         }
 
-        DataType::Struct(fields) => {
-            let Schema::Record(record_schema) = schema else {
+        DataType::List(item) => {
+            let schema = get_field_schema(schema, name, nullable);
+            let Schema::Array(item_schema) = schema else {
                 panic!(
-                    "invalid avro schema -- struct field {name} should correspond to record schema"
+                    "invalid avro schema -- list field {} should correspond to array schema but is {:?}",
+                    name, schema
                 );
             };
 
-            let record_field_number = record_schema.lookup.get(name).unwrap();
-            let schema = &record_schema.fields[*record_field_number].schema;
+            let item_values: Vec<Option<Vec<Value>>> = if let Some(nulls) = column.nulls() {
+                nulls.iter().map(|null| null.then(|| vec![])).collect()
+            } else {
+                (0..column.len()).map(|_| Some(vec![])).collect()
+            };
 
+            for ((i, mut v), column) in item_values
+                .into_iter()
+                .enumerate()
+                .zip(column.as_list::<i32>().iter())
+            {
+                if let Some(v) = &mut v {
+                    serialize_column(
+                        &*item_schema,
+                        v,
+                        "",
+                        &column.expect("unmasked null in list"),
+                        item.is_nullable(),
+                    )
+                }
+
+                if nullable {
+                    values.add(
+                        i,
+                        name,
+                        Value::Union(
+                            v.is_some() as u32,
+                            Box::new(v.map(|v| Value::Array(v)).unwrap_or_else(|| Value::Null)),
+                        ),
+                    );
+                } else {
+                    values.add(
+                        i,
+                        name,
+                        Value::Array(v.expect("null found in non-nullable list column")),
+                    );
+                }
+            }
+        }
+
+        DataType::Struct(fields) => {
+            let schema = get_field_schema(schema, name, nullable);
             if nullable {
-                let Schema::Union(__union_schema) = schema else {
-                    panic!(
-                        "invalid avro schema -- struct field {name} is nullable and should be represented by a union"
-                    );
-                };
-                let schema = __union_schema
-                    .variants()
-                    .get(1)
-                    .unwrap_or_else(||
-                        panic!("invalid avro schema -- struct field {name} should be a union with two variants")
-                    );
-
-                let mut struct_values = if let Some(nulls) = column.nulls() {
+                let mut struct_values: Vec<_> = if let Some(nulls) = column.nulls() {
                     nulls
                         .iter()
                         .map(|null| null.then(|| Record::new(schema).unwrap()))
@@ -141,20 +221,19 @@ fn serialize_column(
                     );
                 }
 
-                for (struct_v, outer_v) in struct_values.into_iter().zip(values.iter_mut()) {
-                    if let Some(outer_v) = outer_v.as_mut() {
-                        outer_v.put(
-                            name,
-                            Value::Union(
-                                struct_v.is_some() as u32,
-                                Box::new(if let Some(struct_v) = struct_v {
-                                    struct_v.into()
-                                } else {
-                                    Value::Null
-                                }),
-                            ),
-                        );
-                    }
+                for (i, struct_v) in struct_values.into_iter().enumerate() {
+                    values.add(
+                        i,
+                        name,
+                        Value::Union(
+                            struct_v.is_some() as u32,
+                            Box::new(if let Some(struct_v) = struct_v {
+                                struct_v.into()
+                            } else {
+                                Value::Null
+                            }),
+                        ),
+                    );
                 }
             } else {
                 let mut struct_values = (0..column.len())
@@ -173,10 +252,8 @@ fn serialize_column(
                     );
                 }
 
-                for (struct_v, outer_v) in struct_values.into_iter().zip(values.iter_mut()) {
-                    if let Some(outer_v) = outer_v.as_mut() {
-                        outer_v.put(name, Into::<Value>::into(struct_v.expect("not null")));
-                    }
+                for (i, struct_v) in struct_values.into_iter().enumerate() {
+                    values.add(i, name, Into::<Value>::into(struct_v.expect("not null")));
                 }
             }
         }
@@ -209,7 +286,7 @@ pub fn serialize(schema: &Schema, batch: &RecordBatch) -> Vec<Value> {
 mod tests {
     use crate::avro::schema::to_avro;
     use crate::avro::ser::serialize;
-    use arrow_array::builder::{StringBuilder, StructBuilder};
+    use arrow_array::builder::{Int64Builder, ListBuilder, StringBuilder, StructBuilder};
     use arrow_array::RecordBatch;
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
@@ -241,6 +318,11 @@ mod tests {
             Field::new(
                 "second_address",
                 DataType::Struct(second_address_fields.clone().into()),
+                true,
+            ),
+            Field::new(
+                "numbers",
+                DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
                 true,
             ),
         ]));
@@ -321,7 +403,13 @@ mod tests {
             .append_null();
         second_address_builder.append(false);
 
+        let mut numbers = ListBuilder::new(Int64Builder::new());
+        numbers.append_value([Some(1), Some(2), Some(3)]);
+        numbers.append_null();
+        numbers.append_value([Some(4), Some(5)]);
+
         let avro_schema = to_avro("User", &arrow_schema.fields);
+        println!("{}", avro_schema.canonical_form());
 
         let batch = RecordBatch::try_new(
             arrow_schema,
@@ -331,6 +419,7 @@ mod tests {
                 Arc::new(arrow_array::StringArray::from(favorite_colors)),
                 Arc::new(address_builder.finish()),
                 Arc::new(second_address_builder.finish()),
+                Arc::new(numbers.finish()),
             ],
         )
         .unwrap();
@@ -359,6 +448,17 @@ mod tests {
                                 ("street".to_string(), String("321 Pine St".to_string())),
                                 ("city".to_string(), String("Sacramento".to_string())),
                                 ("name".to_string(), Union(0, Box::new(Null))),
+                            ]))
+                        )
+                    ),
+                    (
+                        "numbers".to_string(),
+                        Union(
+                            1,
+                            Box::new(Array(vec![
+                                Union(1, Box::new(Long(1))),
+                                Union(1, Box::new(Long(2))),
+                                Union(1, Box::new(Long(3)))
                             ]))
                         )
                     )
@@ -390,7 +490,8 @@ mod tests {
                                 ),
                             ]))
                         )
-                    )
+                    ),
+                    ("numbers".to_string(), Union(0, Box::new(Null)))
                 ]),
                 Record(vec![
                     ("name".to_string(), String("Charlie".to_string())),
@@ -403,7 +504,17 @@ mod tests {
                             ("city".to_string(), String("Calgary".to_string())),
                         ])
                     ),
-                    ("second_address".to_string(), Union(0, Box::new(Null)))
+                    ("second_address".to_string(), Union(0, Box::new(Null))),
+                    (
+                        "numbers".to_string(),
+                        Union(
+                            1,
+                            Box::new(Array(vec![
+                                Union(1, Box::new(Long(4))),
+                                Union(1, Box::new(Long(5)))
+                            ]))
+                        )
+                    )
                 ]),
             ]
         )

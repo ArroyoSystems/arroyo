@@ -1,2 +1,2 @@
-#[cfg(all(feature = "integration-tests", test))]
+#[cfg(test)]
 mod smoke_tests;

@@ -8,7 +8,7 @@ use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_state::global_table_config;
 use arroyo_types::{
-    from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
+    from_nanos, to_millis, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -116,7 +116,9 @@ impl ArrowOperator for WatermarkGenerator {
             // send final watermark on close
             ctx.collector
                 .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
-                    Watermark::EventTime(from_millis(u64::MAX)),
+                    // this is in the year 2554, far enough out be close to inifinity,
+                    // but can still be formatted.
+                    Watermark::EventTime(from_nanos(u64::MAX as u128)),
                 )))
                 .await;
         }

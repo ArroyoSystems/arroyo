@@ -58,18 +58,23 @@ impl ArrowOperator for SingleFileSink {
             .get(&self.output_path)
             .cloned()
             .unwrap_or_default();
-        self.file = Some(
-            OpenOptions::new()
-                .write(true)
-                .append(offset > 0)
-                .create(offset == 0)
+        let file = if offset > 0 {
+            let file = OpenOptions::new()
+                .append(true)
                 .open(&self.output_path)
                 .await
-                .unwrap(),
-        );
-        if offset > 0 {
-            self.file.as_mut().unwrap().set_len(offset).await.unwrap();
-        }
+                .unwrap();
+            file.set_len(offset).await.unwrap();
+            file
+        } else {
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&self.output_path)
+                .await
+                .unwrap()
+        };
+        self.file = Some(file);
     }
 
     async fn on_close(&mut self, final_message: &Option<SignalMessage>, _ctx: &mut ArrowContext) {

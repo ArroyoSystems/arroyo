@@ -104,6 +104,7 @@ pub struct StructType {
 pub enum FieldType {
     Primitive(PrimitiveType),
     Struct(StructType),
+    List(Box<SourceField>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
@@ -146,6 +147,7 @@ impl From<SourceField> for Field {
                     .map(|t| t.into())
                     .collect::<Vec<Field>>(),
             )),
+            FieldType::List(t) => DataType::List(Arc::new((*t).into())),
         };
 
         Field::new(f.field_name, t, f.nullable)
@@ -188,6 +190,7 @@ impl TryFrom<Field> for SourceField {
 
                 FieldType::Struct(st)
             }
+            DataType::List(item) => FieldType::List(Box::new((**item).clone().try_into()?)),
             dt => {
                 return Err(format!("Unsupported data type {:?}", dt));
             }
