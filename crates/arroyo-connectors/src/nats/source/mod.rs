@@ -109,9 +109,7 @@ impl NatsSourceFunc {
         &mut self,
         stream_name: String,
     ) -> async_nats::jetstream::stream::Stream {
-        let client = get_nats_client(&self.connection, &self.table)
-            .await
-            .unwrap();
+        let client = get_nats_client(&self.connection).await.unwrap();
         let jetstream = async_nats::jetstream::new(client);
         let mut stream = jetstream.get_stream(&stream_name).await.unwrap();
         let stream_info = stream.info().await.unwrap();

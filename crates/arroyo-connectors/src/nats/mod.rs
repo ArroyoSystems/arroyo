@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot::Receiver;
 use typify::import_types;
 
 pub mod sink;
@@ -138,23 +137,18 @@ impl Connector for NatsConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        _tx: Sender<TestSourceMessage>,
+        tx: Sender<TestSourceMessage>,
     ) {
         // TODO: Implement a full-fledge `NatsTester` struct for testing the client connection,
         // the stream or subject existence and access permissions, the deserialization of messages
         // for the specified format, the authentication to the schema registry (if any), etc.
-        let (tx, _rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
-            let (_itx, _rx) = tokio::sync::mpsc::channel::<(
-                Sender<TestSourceMessage>,
-                Receiver<TestSourceMessage>,
-            )>(8);
             let message = TestSourceMessage {
                 error: false,
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message).unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 
@@ -239,32 +233,36 @@ impl Connector for NatsConnector {
         config: OperatorConfig,
     ) -> anyhow::Result<OperatorNode> {
         Ok(match table.connector_type {
-            ConnectorType::Source { .. } => OperatorNode::from_source(Box::new(NatsSourceFunc {
-                stream: table.client_configs.get("nats.stream").cloned().unwrap(),
-                servers: profile.servers.clone(),
-                connection: profile.clone(),
-                table: table.clone(),
-                framing: config.framing,
-                format: config.format.unwrap(),
-                bad_data: config.bad_data,
-                consumer_config: get_nats_client_config(&profile, &table),
-                messages_per_second: NonZeroU32::new(
-                    config
-                        .rate_limit
-                        .map(|l| l.messages_per_second)
-                        .unwrap_or(u32::MAX),
-                )
-                .unwrap(),
-            })),
-            ConnectorType::Sink { .. } => OperatorNode::from_operator(Box::new(NatsSinkFunc {
-                subject: table.client_configs.get("nats.subject").cloned().unwrap(),
-                servers: profile.servers.clone(),
-                connection: profile.clone(),
-                table: table.clone(),
-                publisher: None,
-                client_config: get_nats_client_config(&profile, &table),
-                serializer: ArrowSerializer::new(config.format.unwrap()),
-            })),
+            ConnectorType::Source { ref stream } => {
+                OperatorNode::from_source(Box::new(NatsSourceFunc {
+                    stream: stream.clone().expect("Expected stream for NATS source"),
+                    servers: profile.servers.clone(),
+                    connection: profile.clone(),
+                    table: table.clone(),
+                    framing: config.framing,
+                    format: config.format.unwrap(),
+                    bad_data: config.bad_data,
+                    consumer_config: get_nats_client_config(&profile, &table),
+                    messages_per_second: NonZeroU32::new(
+                        config
+                            .rate_limit
+                            .map(|l| l.messages_per_second)
+                            .unwrap_or(u32::MAX),
+                    )
+                    .unwrap(),
+                }))
+            }
+            ConnectorType::Sink { ref subject } => {
+                OperatorNode::from_operator(Box::new(NatsSinkFunc {
+                    subject: subject.clone().expect("Expected subject for NATS sink"),
+                    servers: profile.servers.clone(),
+                    connection: profile.clone(),
+                    table: table.clone(),
+                    publisher: None,
+                    client_config: get_nats_client_config(&profile, &table),
+                    serializer: ArrowSerializer::new(config.format.unwrap()),
+                }))
+            }
         })
     }
 }
@@ -297,20 +295,25 @@ fn get_nats_client_config(connection: &NatsConfig, table: &NatsTable) -> HashMap
     config
 }
 
-async fn get_nats_client(
-    connection: &NatsConfig,
-    table: &NatsTable,
-) -> anyhow::Result<async_nats::Client> {
-    let client_config = get_nats_client_config(connection, table);
+async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::Client> {
+    let mut opts = async_nats::ConnectOptions::new();
+
     let servers_str = connection.servers.clone();
     let servers_vec: Vec<ServerAddr> = servers_str.split(',').map(|s| s.parse().unwrap()).collect();
-    let client = async_nats::ConnectOptions::new()
-        .user_and_password(
-            client_config.get("nats.username").unwrap().to_string(),
-            client_config.get("nats.password").unwrap().to_string(),
-        )
-        .connect(servers_vec)
-        .await
-        .unwrap();
+
+    match &connection.authentication {
+        NatsConfigAuthentication::None {} => {}
+        NatsConfigAuthentication::Credentials { username, password } => {
+            opts = opts.user_and_password(
+                username
+                    .sub_env_vars()
+                    .expect("Missing env-vars for NATS username"),
+                password
+                    .sub_env_vars()
+                    .expect("Missing env-vars for NATS password"),
+            )
+        }
+    };
+    let client = opts.connect(servers_vec).await.unwrap();
     Ok(client)
 }

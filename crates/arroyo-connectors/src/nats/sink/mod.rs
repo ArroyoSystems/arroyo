@@ -34,7 +34,7 @@ impl ArrowOperator for NatsSinkFunc {
     }
 
     async fn on_start(&mut self, _ctx: &mut ArrowContext) {
-        match get_nats_client(&self.connection, &self.table).await {
+        match get_nats_client(&self.connection).await {
             Ok(client) => {
                 self.publisher = Some(client);
             }
@@ -53,18 +53,8 @@ impl ArrowOperator for NatsSinkFunc {
     }
 
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut ArrowContext) {
-        // TODO: Is it necessary to insert any kind of checklpoint in the state for NATS sink?
-        // let sequence_number = 1;
-        // ctx.table_manager
-        //     .get_global_keyed_state("n")
-        //     .await
-        //     .as_mut()
-        //     .unwrap()
-        //     .insert(ctx.task_info.task_index, sequence_number)
-        //     .await;
-
-        // TODO: Is flushing sufficient here to ensure messages are neither
-        // sent twice nor lost before being published successfully?
+        // TODO: Implement checkpointing of in-progress data to avoid depending on
+        // the downstream NATS availability to flush and checkpoint.
         self.publisher.as_mut().unwrap().flush().await.unwrap();
     }
 
