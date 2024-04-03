@@ -32,7 +32,7 @@ import_types!(
         {type = "string", format = "var-str"} = VarStr
     }
 );
-import_types!(schema = "src/nats//table.json");
+import_types!(schema = "src/nats/table.json");
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
 pub struct NatsState {
@@ -64,17 +64,26 @@ impl NatsConnector {
     }
 
     pub fn table_from_options(options: &mut HashMap<String, String>) -> anyhow::Result<NatsTable> {
-        let mut client_config = HashMap::new();
-        for (k, v) in options.iter() {
-            client_config.insert(k.clone(), v.clone());
-        }
         let conn_type = pull_opt("type", options)?;
         let nats_table_type = match conn_type.as_str() {
-            "source" => ConnectorType::Source {
-                stream: Some(pull_opt("nats.stream", options)?),
+            "source" => {
+                let source_type = match (pull_opt("stream", options).ok(), pull_opt("subject", options).ok()) {
+                    (Some(stream), None) => {
+                        Some(SourceType::Stream(stream))
+                    }
+                    (None, Some(subject)) => {
+                        Some(SourceType::Subject(subject))
+                    }
+                    (Some(_), Some(_)) => bail!("Exactly one of `stream` or `subject` must be set"),
+                    (None, None) => bail!("One of `stream` or `subject` must be set"),
+                };
+                
+                ConnectorType::Source {
+                    source_type,
+                }
             },
             "sink" => ConnectorType::Sink {
-                subject: Some(pull_opt("nats.subject", options)?),
+                subject: pull_opt("subject", options)?,
             },
             _ => bail!("Type must be one of 'source' or 'sink'"),
         };
@@ -161,18 +170,25 @@ impl Connector for NatsConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let stream_or_subject = match &table.connector_type {
-            ConnectorType::Source { stream, .. } => stream.clone(),
-            ConnectorType::Sink { subject, .. } => subject.clone(),
+            ConnectorType::Source { source_type, .. } => {
+                match source_type.as_ref().ok_or_else(|| anyhow!("sourceType is required"))? {
+                    SourceType::Subject(s) => s,
+                    SourceType::Stream(s) => s,
+                }                 
+            },
+            ConnectorType::Sink { subject, .. } => {
+                subject
+            },
         };
 
-        let (connection_type, desc) = match table.connector_type {
+        let (connection_type, desc) = match &table.connector_type {
             ConnectorType::Source { .. } => (
                 ConnectionType::Source,
-                format!("NatsSource<{:?}>", stream_or_subject.clone()),
+                format!("NatsSource<{:?}>", stream_or_subject),
             ),
             ConnectorType::Sink { .. } => (
                 ConnectionType::Sink,
-                format!("NatsSink<{:?}>", stream_or_subject.clone()),
+                format!("NatsSink<{:?}>", stream_or_subject),
             ),
         };
 
@@ -233,9 +249,8 @@ impl Connector for NatsConnector {
         config: OperatorConfig,
     ) -> anyhow::Result<OperatorNode> {
         Ok(match table.connector_type {
-            ConnectorType::Source { ref stream } => {
+            ConnectorType::Source { source_type } => {
                 OperatorNode::from_source(Box::new(NatsSourceFunc {
-                    stream: stream.clone().expect("Expected stream for NATS source"),
                     servers: profile.servers.clone(),
                     connection: profile.clone(),
                     table: table.clone(),
@@ -307,13 +322,14 @@ async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::
             opts = opts.user_and_password(
                 username
                     .sub_env_vars()
-                    .expect("Missing env-vars for NATS username"),
+                    .map_err(|e| e.context("username"))?,
                 password
                     .sub_env_vars()
-                    .expect("Missing env-vars for NATS password"),
+                    .map_err(|e| e.context("password"))?,
             )
         }
     };
-    let client = opts.connect(servers_vec).await.unwrap();
+    let client = opts.connect(servers_vec).await
+        .map_err(|e| anyhow!("Failed to connect to nats: {:?}", e))?;
     Ok(client)
 }

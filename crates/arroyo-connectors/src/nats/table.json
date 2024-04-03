@@ -10,9 +10,37 @@
                     "type": "object",
                     "title": "Source",
                     "properties": {
-                        "stream": {
-                            "type": "string",
-                            "description": "The NATS Jetstream stream to consume from"
+                        "sourceType": {
+                            "type": "object",
+                            "title": "Source Type",
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "title": "Jetstream",
+                                    "properties": {
+                                        "subject": {
+                                            "type": "string",
+                                            "description": "The NATS Jetstream subject to consume from"
+                                        }
+                                    },
+                                    "required": [
+                                        "subject"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "title": "Nats core",
+                                    "properties": {
+                                        "stream": {
+                                            "type": "string",
+                                            "description": "The NATS subject to consume from"
+                                        }
+                                    },
+                                    "required": [
+                                        "stream"
+                                    ]
+                                }
+                            ]
                         }
                     },
                     "additionalProperties": false
@@ -26,11 +54,14 @@
                             "description": "The NATS subject to publish to"
                         }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                        "subject"
+                    ]
                 }
             ]
         },
-        "client_configs": {
+        "clientConfigs": {
             "type": "object",
             "title": "Client Configs",
             "description": "Additional NATS configs to pass to the underlying NATS consumer or producer.",

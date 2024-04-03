@@ -1,4 +1,4 @@
-use super::get_nats_client;
+use super::{get_nats_client, SourceType};
 use super::get_nats_client_config;
 use super::ConnectorType;
 use super::NatsConfig;
@@ -17,7 +17,7 @@ use arroyo_rpc::OperatorConfig;
 use arroyo_types::UserError;
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -26,7 +26,7 @@ use tracing::debug;
 use tracing::info;
 
 pub struct NatsSourceFunc {
-    pub stream: String,
+    pub source_type: SourceType,
     pub servers: String,
     pub connection: NatsConfig,
     pub table: NatsTable,
@@ -40,7 +40,14 @@ pub struct NatsSourceFunc {
 #[async_trait]
 impl SourceOperator for NatsSourceFunc {
     fn name(&self) -> String {
-        format!("NATS-{}", self.stream)
+        format!("nats-source-{}", match &self.source_type {
+            SourceType::Subject(s) => {
+                s
+            }
+            SourceType::Stream(s) => {
+                s
+            }
+        })
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
@@ -80,14 +87,13 @@ impl NatsSourceFunc {
         let framing = config.framing;
 
         let stream = match &table.connector_type {
-            ConnectorType::Source { ref stream, .. } => stream,
+            ConnectorType::Source { source_type, .. } => source_type,
             _ => panic!("NATS source must have a stream configured"),
         };
 
         let consumer_default_config = get_nats_client_config(&connection, &table);
 
         Self {
-            stream: stream.clone().unwrap(),
             servers: connection.servers.clone(),
             connection,
             table,
@@ -258,11 +264,23 @@ impl NatsSourceFunc {
 
     async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
         let start_sequence = self.get_start_sequence_number(ctx).await;
-        let stream = self.get_nats_stream(self.stream.clone()).await;
-        let consumer = self
-            .create_nats_consumer(&stream, start_sequence, ctx)
-            .await;
-        let mut messages = consumer.messages().await.unwrap();
+        let stream: Box<Stream<_>> = match &self.source_type {
+            SourceType::Subject(s) => {
+                let client = get_nats_client(&self.connection).await.unwrap();
+                Box::new(client.subscribe(s.clone()).await.unwrap())
+            }
+            SourceType::Stream(s) => {
+                self
+                    .create_nats_consumer(&self.get_nats_stream(s.clone()).await, start_sequence, ctx)
+                    .await.messages()
+                    .await
+                    .unwrap() 
+            }
+        };
+        
+        let consumer = ;
+        
+        let mut messages = consumer.;
         let mut sequence_numbers: HashMap<String, NatsState> = HashMap::new();
 
         ctx.initialize_deserializer(
