@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use arrow::array::RecordBatch;
 
+use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_types::{CheckpointBarrier, SignalMessage};
 
@@ -16,6 +17,7 @@ use tokio::{
 
 pub struct SingleFileSink {
     pub output_path: String,
+    pub serializer: ArrowSerializer,
     pub file: Option<File>,
 }
 
@@ -30,18 +32,10 @@ impl ArrowOperator for SingleFileSink {
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
-        let json_rows: Vec<_> = arrow::json::writer::record_batches_to_json_rows(&[&batch])
-            .unwrap()
-            .into_iter()
-            .map(|mut r| {
-                r.remove("_timestamp");
-                r
-            })
-            .collect();
+        let values = self.serializer.serialize(&batch);
         let file = self.file.as_mut().unwrap();
-        for map in json_rows {
-            let value = serde_json::to_string(&map).unwrap();
-            file.write_all(value.as_bytes()).await.unwrap();
+        for value in values {
+            file.write_all(&value).await.unwrap();
             file.write_all(b"\n").await.unwrap();
         }
     }

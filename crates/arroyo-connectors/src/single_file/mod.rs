@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use arroyo_formats::ser::ArrowSerializer;
 use std::collections::HashMap;
 use typify::import_types;
 
@@ -152,17 +153,27 @@ impl Connector for SingleFileConnector {
         &self,
         _: Self::ProfileT,
         table: Self::TableT,
-        _: OperatorConfig,
+        config: OperatorConfig,
     ) -> Result<OperatorNode> {
         match table.table_type {
             TableType::Source => Ok(OperatorNode::from_source(Box::new(SingleFileSourceFunc {
                 input_file: table.path,
                 lines_read: 0,
+                format: config
+                    .format
+                    .expect("Format must be set for Single File Source"),
+                framing: config.framing,
+                bad_data: config.bad_data,
                 wait_for_control: table.wait_for_control.unwrap_or(true),
             }))),
             TableType::Sink => Ok(OperatorNode::from_operator(Box::new(SingleFileSink {
                 output_path: table.path,
                 file: None,
+                serializer: ArrowSerializer::new(
+                    config
+                        .format
+                        .expect("Format must be set for Single File Sink"),
+                ),
             }))),
         }
     }
