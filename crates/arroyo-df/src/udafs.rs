@@ -87,7 +87,7 @@ impl Accumulator for ArroyoUdaf {
             })
             .collect();
 
-        let ColumnarValue::Scalar(scalar) = self.udf.invoke(&args?[..]).unwrap() else {
+        let ColumnarValue::Scalar(scalar) = self.udf.invoke(&args?[..])? else {
             return Err(DataFusionError::Execution(format!(
                 "UDAF {} returned an array result",
                 self.udf.name()
@@ -98,7 +98,19 @@ impl Accumulator for ArroyoUdaf {
     }
 
     fn size(&self) -> usize {
-        std::mem::size_of_val(self)
+        let values = self
+            .args
+            .iter()
+            .map(|a| {
+                std::mem::size_of::<ArrayRef>() * a.values.capacity()
+                    + a.values
+                        .iter()
+                        .map(|v| v.get_array_memory_size())
+                        .sum::<usize>()
+            })
+            .sum::<usize>();
+
+        std::mem::size_of_val(self) + values
     }
 
     fn state(&mut self) -> Result<Vec<ScalarValue>> {

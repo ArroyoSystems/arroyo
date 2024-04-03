@@ -324,7 +324,10 @@ impl ArroyoSchemaProvider {
         let parsed = ParsedUdf::try_parse(body)?;
 
         if parsed.vec_arguments > 0 && parsed.vec_arguments != parsed.args.len() {
-            bail!("Function {} arguments must be vectors or none", parsed.name);
+            bail!(
+                "In function {}: for a UDAF, all arguments must be Vec<T>",
+                parsed.name
+            );
         }
         let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
@@ -449,15 +452,6 @@ impl ContextProvider for ArroyoSchemaProvider {
         None
     }
 }
-
-// pub fn new_registry() -> Registry {
-//     let mut registry = Registry::default();
-//     registry.add_udf(Arc::new(window_scalar_function()));
-//     for json_function in get_json_functions().values() {
-//         registry.add_udf(json_function.clone());
-//     }
-//     registry
-// }
 
 impl FunctionRegistry for ArroyoSchemaProvider {
     fn udfs(&self) -> HashSet<String> {
