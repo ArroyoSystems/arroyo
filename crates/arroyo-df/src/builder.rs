@@ -39,7 +39,6 @@ use datafusion_proto::{
 };
 
 pub(crate) struct PlanToGraphVisitor<'a> {
-    schema_provider: &'a ArroyoSchemaProvider,
     graph: DiGraph<LogicalNode, LogicalEdge>,
     output_schemas: HashMap<NodeIndex, ArroyoSchemaRef>,
     named_nodes: HashMap<NamedNode, NodeIndex>,
@@ -52,7 +51,6 @@ pub(crate) struct PlanToGraphVisitor<'a> {
 impl<'a> PlanToGraphVisitor<'a> {
     pub fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
         Self {
-            schema_provider,
             graph: Default::default(),
             output_schemas: Default::default(),
             named_nodes: Default::default(),

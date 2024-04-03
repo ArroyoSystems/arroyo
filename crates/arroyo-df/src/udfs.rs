@@ -25,10 +25,10 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
     let udf_name = format_ident!("{}", parsed.name);
 
     let results_builder = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
-        quote!(let mut results_builder = array::StringBuilder::with_capacity(args[0].len(), args[0].len() * 64);)
+        quote!(let mut results_builder = array::StringBuilder::with_capacity(batch_size, batch_size * 64);)
     } else {
         let return_type = data_type_to_arrow_type_token(parsed.ret_type.data_type.clone())?;
-        quote!(let mut results_builder = array::PrimitiveBuilder::<datatypes::#return_type>::with_capacity(args[0].len());)
+        quote!(let mut results_builder = array::PrimitiveBuilder::<datatypes::#return_type>::with_capacity(batch_size);)
     };
 
     let mut arrow_types = vec![];
@@ -50,7 +50,7 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
             let id = format_ident!("arg_{}", i);
             let def = match &arg_type.data_type {
                 DataType::Utf8 => {
-                    quote!(let #id = array::StringArray::from(args[#i].clone());)
+                    quote!(let #id = array::StringArray::from(args.next().unwrap());)
                 }
                 DataType::List(field) => {
                     let filter = if !field.is_nullable() {
@@ -60,11 +60,11 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
                     };
 
                     quote!(let #id = array::PrimitiveArray::<datatypes::#arrow_type>::from(
-                        args.into_iter().next().unwrap()
+                        args.next().unwrap()
                     ).iter()#filter.collect();)
                 }
                 _ => {
-                    quote!(let #id = array::PrimitiveArray::<datatypes::#arrow_type>::from(args[#i].clone());)
+                    quote!(let #id = array::PrimitiveArray::<datatypes::#arrow_type>::from(args.next().unwrap());)
                 }
             };
 
@@ -151,29 +151,24 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
 
         #[no_mangle]
         pub extern "C" fn run(args_ptr: *mut FfiArraySchemaPair, args_len: usize, args_capacity: usize) -> FfiArraySchemaPair {
-
             let args = unsafe {
                 Vec::from_raw_parts(args_ptr, args_len, args_capacity)
             };
 
-            let args = args
+            let batch_size = args[0].0.len();
+
+            let mut args = args
                 .into_iter()
                 .map(|pair| {
                     let FfiArraySchemaPair(array, schema) = pair;
                     unsafe { from_ffi(array, &schema).unwrap() }
-                })
-                .collect::<Vec<_>>();
+                });
 
-            println!("ARGS2={:?}", args);
             #results_builder
 
             #(#defs;)*
 
-            println!("AFTER DEFS");
-
             #call_loop
-
-            println!("AFTER CALL LOOP");
 
             let (array, schema) = to_ffi(&results_builder.finish().to_data()).unwrap();
             FfiArraySchemaPair(array, schema)

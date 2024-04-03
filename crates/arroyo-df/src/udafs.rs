@@ -1,9 +1,8 @@
 use crate::physical::UdfDylib;
-use arrow::array::ArrayData;
 use arrow::buffer::OffsetBuffer;
 use arrow_array::cast::as_list_array;
-use arrow_array::{make_array, Array, ListArray};
-use arrow_schema::{DataType, FieldRef};
+use arrow_array::{new_empty_array, Array, ListArray};
+use arrow_schema::{DataType, FieldRef, IntervalUnit, TimeUnit};
 use datafusion::arrow::array::ArrayRef;
 use datafusion::scalar::ScalarValue;
 use datafusion::{error::Result, physical_plan::Accumulator};
@@ -12,82 +11,88 @@ use datafusion_expr::{ColumnarValue, ScalarUDFImpl};
 use std::fmt::Debug;
 use std::sync::Arc;
 
-/// An Arroyo UDAF is a scalar function that takes vector arguments. This Accumulator infra
-/// exists to wrap an Arroyo UDAF in a DF UDAF that first accumulates the array of data, then
-/// passes it to the vector-taking UDF.
-#[derive(Debug)]
-pub struct ArroyoUdaf {
+#[derive(Debug, Clone)]
+pub struct UdafArg {
     values: Vec<ArrayRef>,
-    data_type: DataType,
     inner: FieldRef,
-    udf: UdfDylib,
 }
 
-impl ArroyoUdaf {
-    pub fn new(data_type: DataType, udf: UdfDylib) -> Self {
-        println!("creating udaf with datatype {:?}", data_type);
-        let inner = match &data_type {
-            DataType::List(inner) => Arc::clone(inner),
-            _ => panic!("udaf {} type {:?} is not a list", udf.name(), data_type),
-        };
-
-        ArroyoUdaf {
-            data_type,
+impl UdafArg {
+    pub fn new(inner: FieldRef) -> Self {
+        UdafArg {
             values: vec![],
-            udf,
             inner,
         }
     }
-}
 
-impl ArroyoUdaf {
-    fn list_from_arr(&self, arr: ArrayRef) -> ListArray {
-        let offsets = OffsetBuffer::from_lengths([arr.len()]);
-
-        ListArray::new(self.inner.clone(), offsets, arr, None)
-    }
     fn concatenate_array(&self) -> Result<ListArray> {
         let element_arrays: Vec<&dyn Array> = self.values.iter().map(|a| a.as_ref()).collect();
 
         let arr = arrow::compute::concat(&element_arrays)?;
 
-        Ok(self.list_from_arr(arr))
+        Ok(list_from_arr(&self.inner, arr))
+    }
+}
+
+/// An Arroyo UDAF is a scalar function that takes vector arguments. This Accumulator infra
+/// exists to wrap an Arroyo UDAF in a DF UDAF that first accumulates the array of data, then
+/// passes it to the vector-taking UDF.
+#[derive(Debug)]
+pub struct ArroyoUdaf {
+    args: Vec<UdafArg>,
+    output_type: Arc<DataType>,
+    udf: UdfDylib,
+}
+
+impl ArroyoUdaf {
+    pub fn new(args: Vec<UdafArg>, output_type: Arc<DataType>, udf: UdfDylib) -> Self {
+        assert!(
+            args.len() > 0,
+            "UDAF {} has no arguments, but UDAFs must have at least one",
+            udf.name()
+        );
+        ArroyoUdaf {
+            args,
+            output_type,
+            udf,
+        }
     }
 }
 
 impl Accumulator for ArroyoUdaf {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
-        println!("update batch");
         if values.is_empty() {
             return Ok(());
         }
 
-        self.values.push(values[0].clone());
+        for (arg, v) in self.args.iter_mut().zip(values) {
+            arg.values.push(v.clone());
+        }
 
         Ok(())
     }
 
     fn evaluate(&mut self) -> Result<ScalarValue> {
-        if self.values.is_empty() {
-            let data = Arc::new(make_array(ArrayData::new_empty(&self.data_type)));
-            return Ok(ScalarValue::List(Arc::new(self.list_from_arr(data))));
+        if self.args[0].values.is_empty() {
+            return Ok(scalar_none(&self.output_type));
         }
 
-        println!("in eval");
+        let args: Result<Vec<_>> = self
+            .args
+            .iter()
+            .map(|arg| {
+                Ok(ColumnarValue::Scalar(ScalarValue::List(Arc::new(
+                    arg.concatenate_array()?,
+                ))))
+            })
+            .collect();
 
-        let ColumnarValue::Scalar(scalar) = self
-            .udf
-            .invoke(&[ColumnarValue::Scalar(ScalarValue::List(Arc::new(
-                self.concatenate_array()?,
-            )))])
-            .unwrap()
-        else {
+        let ColumnarValue::Scalar(scalar) = self.udf.invoke(&args?[..]).unwrap() else {
             return Err(DataFusionError::Execution(format!(
                 "UDAF {} returned an array result",
                 self.udf.name()
             )));
         };
-        println!("EVALUATED: {:?}", scalar);
 
         Ok(scalar)
     }
@@ -97,7 +102,12 @@ impl Accumulator for ArroyoUdaf {
     }
 
     fn state(&mut self) -> Result<Vec<ScalarValue>> {
-        Ok(vec![ScalarValue::List(Arc::new(self.concatenate_array()?))])
+        let states: Result<Vec<_>> = self
+            .args
+            .iter()
+            .map(|arg| Ok(ScalarValue::List(Arc::new(arg.concatenate_array()?))))
+            .collect();
+        Ok(states?)
     }
 
     fn merge_batch(&mut self, states: &[ArrayRef]) -> Result<()> {
@@ -105,9 +115,10 @@ impl Accumulator for ArroyoUdaf {
             return Ok(());
         }
 
-        let list_arr = as_list_array(&states[0]);
-        for arr in list_arr.iter().flatten() {
-            self.values.push(arr);
+        for (arg, arr) in self.args.iter_mut().zip(states) {
+            for l in as_list_array(&arr).iter().flatten() {
+                arg.values.push(l);
+            }
         }
 
         Ok(())
@@ -136,5 +147,82 @@ impl Accumulator for EmptyUdaf {
 
     fn merge_batch(&mut self, _: &[ArrayRef]) -> Result<()> {
         unreachable!()
+    }
+}
+
+fn list_from_arr(field_ref: &FieldRef, arr: ArrayRef) -> ListArray {
+    let offsets = OffsetBuffer::from_lengths([arr.len()]);
+
+    ListArray::new(field_ref.clone(), offsets, arr, None)
+}
+
+fn scalar_none(datatype: &DataType) -> ScalarValue {
+    match datatype {
+        DataType::Boolean => ScalarValue::Boolean(None),
+        DataType::Int8 => ScalarValue::Int8(None),
+        DataType::Int16 => ScalarValue::Int16(None),
+        DataType::Int32 => ScalarValue::Int32(None),
+        DataType::Int64 => ScalarValue::Int64(None),
+        DataType::UInt8 => ScalarValue::UInt8(None),
+        DataType::UInt16 => ScalarValue::UInt16(None),
+        DataType::UInt32 => ScalarValue::UInt32(None),
+        DataType::UInt64 => ScalarValue::UInt64(None),
+        DataType::Float32 => ScalarValue::Float32(None),
+        DataType::Float64 => ScalarValue::Float64(None),
+        DataType::Timestamp(TimeUnit::Second, tz) => ScalarValue::TimestampSecond(None, tz.clone()),
+        DataType::Timestamp(TimeUnit::Millisecond, tz) => {
+            ScalarValue::TimestampMillisecond(None, tz.clone())
+        }
+        DataType::Timestamp(TimeUnit::Microsecond, tz) => {
+            ScalarValue::TimestampMicrosecond(None, tz.clone())
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, tz) => {
+            ScalarValue::TimestampNanosecond(None, tz.clone())
+        }
+        DataType::Interval(IntervalUnit::YearMonth) => ScalarValue::IntervalYearMonth(None),
+        DataType::Interval(IntervalUnit::DayTime) => ScalarValue::IntervalDayTime(None),
+        DataType::Interval(IntervalUnit::MonthDayNano) => ScalarValue::IntervalMonthDayNano(None),
+        DataType::Duration(TimeUnit::Second) => ScalarValue::DurationSecond(None),
+        DataType::Duration(TimeUnit::Millisecond) => ScalarValue::DurationMillisecond(None),
+        DataType::Duration(TimeUnit::Microsecond) => ScalarValue::DurationMicrosecond(None),
+        DataType::Duration(TimeUnit::Nanosecond) => ScalarValue::DurationNanosecond(None),
+        DataType::Null => ScalarValue::Null,
+        DataType::Date32 => ScalarValue::Date32(None),
+        DataType::Date64 => ScalarValue::Date64(None),
+        DataType::Time32(TimeUnit::Second) => ScalarValue::Time32Second(None),
+        DataType::Time32(TimeUnit::Millisecond) => ScalarValue::Time32Millisecond(None),
+        DataType::Time64(TimeUnit::Microsecond) => ScalarValue::Time64Microsecond(None),
+        DataType::Time64(TimeUnit::Nanosecond) => ScalarValue::Time64Nanosecond(None),
+        DataType::Binary => ScalarValue::Binary(None),
+        DataType::FixedSizeBinary(size) => ScalarValue::FixedSizeBinary(*size, None),
+        DataType::LargeBinary => ScalarValue::LargeBinary(None),
+        DataType::Utf8 => ScalarValue::Utf8(None),
+        DataType::LargeUtf8 => ScalarValue::LargeUtf8(None),
+        DataType::List(item) => ScalarValue::List(Arc::new(list_from_arr(
+            item,
+            new_empty_array(item.data_type()),
+        ))),
+        DataType::FixedSizeList(_, _) => todo!(),
+        DataType::LargeList(_) => todo!(),
+        DataType::Struct(_) => todo!(),
+        DataType::Union(_, _) => todo!(),
+        DataType::Dictionary(_, _) => todo!(),
+        DataType::Decimal128(_, _) => todo!(),
+        DataType::Decimal256(_, _) => todo!(),
+        DataType::Map(_, _) => todo!(),
+        DataType::RunEndEncoded(_, _) => todo!(),
+        DataType::Float16 => unimplemented!("cannot represent float16 as scalar"),
+        DataType::Time32(TimeUnit::Microsecond) => {
+            unimplemented!("cannot represent time32 microseconds as scalar")
+        }
+        DataType::Time32(TimeUnit::Nanosecond) => {
+            unimplemented!("cannot represent time32 nanos as scalar")
+        }
+        DataType::Time64(TimeUnit::Second) => {
+            unimplemented!("cannot represent time64 seconds as scalar")
+        }
+        DataType::Time64(TimeUnit::Millisecond) => {
+            unimplemented!("cannot represent time64 millis as scalar")
+        }
     }
 }
