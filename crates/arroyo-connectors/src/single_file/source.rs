@@ -1,27 +1,27 @@
-use std::{collections::HashMap, io::Cursor, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, time::SystemTime};
 
-use arrow::array::RecordBatch;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
+    formats::{BadData, Format, Framing},
     grpc::{StopMode, TableConfig},
     ControlMessage,
 };
-use arroyo_types::to_nanos;
 use async_trait::async_trait;
-use bincode::{Decode, Encode};
-use datafusion::common::ScalarValue;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
 };
 use tracing::info;
 
-#[derive(Encode, Decode, Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SingleFileSourceFunc {
     pub input_file: String,
     pub lines_read: usize,
+    pub format: Format,
+    pub framing: Option<Framing>,
+    pub bad_data: Option<BadData>,
     pub wait_for_control: bool,
 }
 
@@ -30,6 +30,11 @@ impl SingleFileSourceFunc {
         if ctx.task_info.task_index != 0 {
             return SourceFinishType::Final;
         }
+        ctx.initialize_deserializer(
+            self.format.clone(),
+            self.framing.clone(),
+            self.bad_data.clone(),
+        );
 
         let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
             ctx.table_manager.get_global_keyed_state("f").await.unwrap();
@@ -38,7 +43,6 @@ impl SingleFileSourceFunc {
 
         let file = File::open(&self.input_file).await.expect(&self.input_file);
         let mut lines = BufReader::new(file).lines();
-        let schema_ref = Arc::new(ctx.out_schema.as_ref().unwrap().schema_without_timestamp());
 
         let mut i = 0;
 
@@ -48,24 +52,12 @@ impl SingleFileSourceFunc {
                 continue;
             }
 
-            let cursor = Cursor::new(s);
-            let reader = std::io::BufReader::new(cursor);
-            let builder = arrow::json::reader::ReaderBuilder::new(schema_ref.clone())
-                .with_batch_size(1)
-                .build(reader)
+            ctx.deserialize_slice(s.as_bytes(), SystemTime::now())
+                .await
                 .unwrap();
-            let batch = builder.into_iter().next().unwrap().unwrap();
-            let mut columns = batch.columns().to_vec();
-            let time_scalar =
-                ScalarValue::TimestampNanosecond(Some(to_nanos(SystemTime::now()) as i64), None);
-            columns.push(time_scalar.to_array().unwrap());
-
-            ctx.collector
-                .collect(
-                    RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), columns)
-                        .unwrap(),
-                )
-                .await;
+            if ctx.should_flush() {
+                ctx.flush_buffer().await.unwrap();
+            }
 
             self.lines_read += 1;
             i += 1;
@@ -82,6 +74,7 @@ impl SingleFileSourceFunc {
                 return value;
             }
         }
+        ctx.flush_buffer().await.unwrap();
         info!("file source finished");
         SourceFinishType::Final
     }
@@ -93,6 +86,7 @@ impl SingleFileSourceFunc {
     ) -> Option<SourceFinishType> {
         match msg {
             Some(ControlMessage::Checkpoint(c)) => {
+                ctx.flush_buffer().await.unwrap();
                 let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
                     String,
                     usize,
