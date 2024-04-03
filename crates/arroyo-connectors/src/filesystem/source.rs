@@ -139,7 +139,6 @@ impl FileSystemSourceFunc {
                 let mut hasher = DefaultHasher::new();
                 path.hash(&mut hasher);
                 if (hasher.finish() as usize) % parallelism != task_index {
-                    info!("filtering out path {}", path.to_string());
                     return ready(false);
                 }
 

@@ -361,7 +361,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
     ) -> Option<Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>> {
         let future = self.futures.clone();
         Some(Box::pin(async move {
-            let result: Option<PolledFutureT> = future.lock().await.next().await;
+            let mut future = future.lock().await;
+            let result: Option<PolledFutureT> = if future.is_empty() {
+                futures::future::pending().await
+            } else {
+                future.next().await
+            };
             Box::new(result) as Box<dyn Any + Send>
         }))
     }
