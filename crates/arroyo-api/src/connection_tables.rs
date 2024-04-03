@@ -13,7 +13,7 @@ use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tracing::warn;
+use tracing::debug;
 
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::connector_for_type;
@@ -235,7 +235,7 @@ pub(crate) async fn get_all_connection_tables<C: GenericClient>(
         .map(|t| t.try_into())
         .map(|result| {
             if let Err(err) = &result {
-                warn!("Error building connection table: {}", err);
+                debug!("Error building connection table: {}", err);
             }
             result
         })
@@ -417,7 +417,7 @@ pub(crate) async fn get_connection_tables(
         .map(|t| t.try_into())
         .map(|result| {
             if let Err(err) = &result {
-                warn!("Error building connection table: {}", err);
+                debug!("Error building connection table: {}", err);
             }
             result
         })
