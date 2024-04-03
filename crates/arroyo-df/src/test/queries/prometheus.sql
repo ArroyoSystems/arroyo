@@ -12,7 +12,7 @@ create table metrics (
 
 
 select avg(idle) as idle from (
-  select irate(array_agg(value)) as idle,
+  select irate(value) as idle,
          cpu,
          hop(interval '5 seconds', interval '60 seconds') as window
   from (
@@ -28,7 +28,6 @@ select avg(idle) as idle from (
 
 
 
--- re-enable once we have support for views
 -- CREATE VIEW cpu_metrics AS
 -- SELECT
 --     extract_json_string(parsed, '$.labels.cpu') AS cpu,

@@ -1,6 +1,7 @@
 use datafusion_proto::protobuf::ArrowType;
 
 use anyhow::anyhow;
+use arrow_schema::DataType;
 use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
@@ -177,8 +178,9 @@ pub type LogicalGraph = DiGraph<LogicalNode, LogicalEdge>;
 #[derive(Clone, Debug)]
 pub struct DylibUdfConfig {
     pub dylib_path: String,
-    pub arg_types: Vec<ArrowType>,
-    pub return_type: ArrowType,
+    pub arg_types: Vec<DataType>,
+    pub return_type: DataType,
+    pub aggregate: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -298,8 +300,19 @@ impl From<DylibUdfConfig> for ArrowDylibUdfConfig {
     fn from(from: DylibUdfConfig) -> Self {
         ArrowDylibUdfConfig {
             dylib_path: from.dylib_path,
-            arg_types: from.arg_types.iter().map(|t| t.encode_to_vec()).collect(),
-            return_type: from.return_type.encode_to_vec(),
+            arg_types: from
+                .arg_types
+                .iter()
+                .map(|t| {
+                    ArrowType::try_from(t)
+                        .expect("unsupported data type")
+                        .encode_to_vec()
+                })
+                .collect(),
+            return_type: ArrowType::try_from(&from.return_type)
+                .expect("unsupported data type")
+                .encode_to_vec(),
+            aggregate: from.aggregate,
         }
     }
 }
@@ -311,10 +324,18 @@ impl From<ArrowDylibUdfConfig> for DylibUdfConfig {
             arg_types: from
                 .arg_types
                 .iter()
-                .map(|t| ArrowType::decode(&mut t.as_slice()).expect("invalid arrow type"))
+                .map(|t| {
+                    DataType::try_from(
+                        &ArrowType::decode(&mut t.as_slice()).expect("invalid arrow type"),
+                    )
+                    .expect("invalid arrow type")
+                })
                 .collect(),
-            return_type: ArrowType::decode(&mut from.return_type.as_slice())
-                .expect("invalid arrow type"),
+            return_type: DataType::try_from(
+                &ArrowType::decode(&mut from.return_type.as_slice()).unwrap(),
+            )
+            .expect("invalid arrow type"),
+            aggregate: from.aggregate,
         }
     }
 }

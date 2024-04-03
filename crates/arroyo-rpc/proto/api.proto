@@ -235,6 +235,7 @@ message ArrowDylibUdfConfig {
   string dylib_path = 1;
   repeated bytes arg_types = 2;
   bytes return_type = 3;
+  bool aggregate = 4;
 }
 
 message ArrowProgramConfig {
