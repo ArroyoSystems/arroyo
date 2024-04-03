@@ -3,7 +3,7 @@ use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
 use arrow::array::RecordBatch;
 use arroyo_metrics::TaskCounters;
-use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
+use arroyo_rpc::grpc::{StopMode, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use async_trait::async_trait;
@@ -66,7 +66,7 @@ impl OperatorNode {
         ctx: &mut ArrowContext,
         in_qs: &mut Vec<BatchReceiver>,
         ready: Arc<Barrier>,
-    ) -> Option<SignalMessage> {
+    ) {
         match self {
             OperatorNode::Source(s) => {
                 s.on_start(ctx).await;
@@ -78,9 +78,48 @@ impl OperatorNode {
                 );
                 let result = s.run(ctx).await;
 
-                s.on_close(ctx).await;
+                ctx.control_tx
+                    .send(ControlResp::TaskDataFinished {
+                        operator_id: ctx.task_info.operator_id.clone(),
+                        task_index: ctx.task_info.task_index,
+                    })
+                    .await
+                    .expect("control response unwrap");
 
-                result.into()
+                match result {
+                    SourceFinishType::Graceful => {
+                        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Stop))
+                            .await;
+                    }
+                    SourceFinishType::Immediate => {
+                        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Shutdown))
+                            .await;
+                        return;
+                    }
+                    SourceFinishType::Final => {
+                        ctx.broadcast(ArrowMessage::Signal(SignalMessage::EndOfData))
+                            .await;
+                    }
+                }
+                // keep handling control messages until we get a shutdown
+                loop {
+                    match ctx.control_rx.recv().await {
+                        Some(control_message) => {
+                            if let Some(SourceFinishType::Immediate) =
+                                s.handle_control_message(ctx, control_message).await
+                            {
+                                ctx.broadcast(ArrowMessage::Signal(SignalMessage::Shutdown))
+                                    .await;
+                                return;
+                            }
+                        }
+                        None => {
+                            warn!("source {}-{} received None from control channel, indicating sender has been dropped", 
+                                ctx.task_info.operator_name, ctx.task_info.task_index);
+                            return;
+                        }
+                    }
+                }
             }
             OperatorNode::Operator(o) => operator_run_behavior(o, ctx, in_qs, ready).await,
         }
@@ -97,11 +136,7 @@ impl OperatorNode {
             ctx.task_info.operator_name, ctx.task_info.task_index
         );
 
-        let final_message = self.run_behavior(&mut ctx, &mut in_qs, ready).await;
-
-        if let Some(final_message) = final_message {
-            ctx.broadcast(ArrowMessage::Signal(final_message)).await;
-        }
+        self.run_behavior(&mut ctx, &mut in_qs, ready).await;
 
         info!(
             "Task finished {}-{}",
@@ -149,8 +184,7 @@ pub trait SourceOperator: Send + 'static {
 
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType;
 
-    #[allow(unused_variables)]
-    async fn on_close(&mut self, ctx: &mut ArrowContext) {}
+    async fn flush_before_checkpoint(&mut self, cp: CheckpointBarrier, ctx: &mut ArrowContext);
 
     async fn start_checkpoint(
         &mut self,
@@ -165,6 +199,35 @@ pub trait SourceOperator: Send + 'static {
 
         run_checkpoint(checkpoint_barrier, ctx).await
     }
+
+    async fn handle_control_message(
+        &mut self,
+        ctx: &mut ArrowContext,
+        control_message: ControlMessage,
+    ) -> Option<SourceFinishType> {
+        match control_message {
+            ControlMessage::Checkpoint(cp) => {
+                self.flush_before_checkpoint(cp, ctx).await;
+                if self.start_checkpoint(cp, ctx).await {
+                    Some(SourceFinishType::Graceful)
+                } else {
+                    None
+                }
+            }
+            ControlMessage::Stop { mode } => match mode {
+                StopMode::Graceful => Some(SourceFinishType::Graceful),
+                StopMode::Immediate => Some(SourceFinishType::Immediate),
+            },
+            ControlMessage::Commit { .. } => {
+                unreachable!("sources don't commit");
+            }
+            ControlMessage::LoadCompacted { compacted } => {
+                ctx.load_compacted(compacted).await;
+                None
+            }
+            ControlMessage::NoOp => None,
+        }
+    }
 }
 
 async fn operator_run_behavior(
@@ -172,7 +235,7 @@ async fn operator_run_behavior(
     ctx: &mut ArrowContext,
     in_qs: &mut Vec<BatchReceiver>,
     ready: Arc<Barrier>,
-) -> Option<SignalMessage> {
+) {
     this.on_start(ctx).await;
 
     ready.wait().await;
@@ -185,6 +248,7 @@ async fn operator_run_behavior(
     let name = this.name();
     let mut counter = CheckpointCounter::new(in_qs.len());
     let mut closed: HashSet<usize> = HashSet::new();
+    let mut finished: HashSet<usize> = HashSet::new();
     let mut sel = InQReader::new();
     let in_partitions = in_qs.len();
 
@@ -197,12 +261,13 @@ async fn operator_run_behavior(
         sel.push(Box::pin(stream));
     }
     let mut blocked = vec![];
-    let mut final_message = None;
 
     let mut ticks = 0u64;
     let mut interval =
         tokio::time::interval(this.tick_interval().unwrap_or(Duration::from_secs(60)));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    let mut operator_state = OperatorState::Running;
 
     loop {
         let operator_future: OptionFuture<_> = this.future_to_poll().into();
@@ -221,6 +286,10 @@ async fn operator_run_behavior(
 
                         match message {
                             ArrowMessage::Data(record) => {
+                                if operator_state != OperatorState::Running {
+                                    unreachable!("operator {}-{} received data while in state {:?}. data is {:?}",
+                                        ctx.task_info.operator_name, ctx.task_info.task_index, operator_state, record);
+                                }
                                 TaskCounters::BatchesReceived.for_task(&ctx.task_info, |c| c.inc());
                                 TaskCounters::MessagesReceived.for_task(&ctx.task_info, |c| c.inc_by(record.num_rows() as u64));
                                 TaskCounters::BytesReceived.for_task(&ctx.task_info, |c| c.inc_by(record.get_array_memory_size() as u64));
@@ -232,20 +301,38 @@ async fn operator_run_behavior(
                                 ).await;
                             }
                             ArrowMessage::Signal(signal) => {
-                                match this.handle_control_message(idx, &signal, &mut counter, &mut closed, in_partitions, ctx).await {
+                                match this.handle_control_message(idx, &signal, &mut counter, &mut closed,&mut finished, in_partitions, ctx).await {
                                     ControlOutcome::Continue => {}
-                                    ControlOutcome::Stop => {
-                                        // just stop; the stop will have already been broadcast for example by
-                                        // a final checkpoint
-                                        break;
+                                    ControlOutcome::FinishedStoppingCheckpoint => {
+                                        info!("finished stopping checkpoint in operator {}-{}, waiting for terminate",
+                                            ctx.task_info.operator_name, ctx.task_info.task_index);
+                                        operator_state = OperatorState::WaitingForTerminate;
                                     }
-                                    ControlOutcome::Finish => {
-                                        final_message = Some(SignalMessage::EndOfData);
-                                        break;
+                                    ControlOutcome::NoMoreData { end_of_data } => {
+                                        if operator_state != OperatorState::Running {
+                                            warn!("received no more data update in operator {}-{} while in state {:?}",
+                                                ctx.task_info.operator_name, ctx.task_info.task_index, operator_state);
+                                        }
+                                        if end_of_data {
+                                            this.on_end_of_data(ctx).await;
+                                            ctx.broadcast(ArrowMessage::Signal(SignalMessage::EndOfData)).await;
+                                        } else {
+                                            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Stop)).await;
+                                        }
+
+                                        ctx.control_tx.send(ControlResp::TaskDataFinished {
+                                            operator_id: ctx.task_info.operator_id.clone(),
+                                            task_index: ctx.task_info.task_index }).await.unwrap();
+                                            info!("received NoMoreData, stopping operator {}-{}", ctx.task_info.operator_name, ctx.task_info.task_index);
+                                        operator_state = OperatorState::WaitingForStoppingCheckpoint;
                                     }
-                                    ControlOutcome::StopAndSendStop => {
-                                        final_message = Some(SignalMessage::Stop);
-                                        break;
+                                    ControlOutcome::Shutdown => {
+                                        if operator_state != OperatorState::WaitingForTerminate {
+                                            warn!("shutting down operator {}-{} while in state {:?}",
+                                                ctx.task_info.operator_name, ctx.task_info.task_index, operator_state);
+                                        }
+                                        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Shutdown)).await;
+                                        return;
                                     }
                                 }
                             }
@@ -277,8 +364,13 @@ async fn operator_run_behavior(
             }
         }
     }
-    this.on_close(&final_message, ctx).await;
-    final_message
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum OperatorState {
+    Running,
+    WaitingForStoppingCheckpoint,
+    WaitingForTerminate,
 }
 
 #[async_trait::async_trait]
@@ -334,6 +426,7 @@ pub trait ArrowOperator: Send + 'static {
         message: &SignalMessage,
         counter: &mut CheckpointCounter,
         closed: &mut HashSet<usize>,
+        finished: &mut HashSet<usize>,
         in_partitions: usize,
         ctx: &mut ArrowContext,
     ) -> ControlOutcome {
@@ -377,7 +470,7 @@ pub trait ArrowOperator: Send + 'static {
                         .await;
 
                     if run_checkpoint(*t, ctx).await {
-                        return ControlOutcome::Stop;
+                        return ControlOutcome::FinishedStoppingCheckpoint;
                     }
                 }
             }
@@ -405,14 +498,21 @@ pub trait ArrowOperator: Send + 'static {
             SignalMessage::Stop => {
                 closed.insert(idx);
                 if closed.len() == in_partitions {
-                    return ControlOutcome::StopAndSendStop;
+                    return ControlOutcome::NoMoreData { end_of_data: false };
                 }
             }
             SignalMessage::EndOfData => {
                 closed.insert(idx);
+                finished.insert(idx);
                 if closed.len() == in_partitions {
-                    return ControlOutcome::Finish;
+                    if finished.len() == in_partitions {
+                        return ControlOutcome::NoMoreData { end_of_data: true };
+                    }
+                    return ControlOutcome::NoMoreData { end_of_data: false };
                 }
+            }
+            SignalMessage::Shutdown => {
+                return ControlOutcome::Shutdown;
             }
         }
         ControlOutcome::Continue
@@ -480,7 +580,10 @@ pub trait ArrowOperator: Send + 'static {
     async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {}
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
+    async fn on_end_of_data(&mut self, ctx: &mut ArrowContext) {}
+
+    #[allow(unused_variables)]
+    async fn on_close(&mut self, ctx: &mut ArrowContext) {}
 }
 
 #[derive(Default)]

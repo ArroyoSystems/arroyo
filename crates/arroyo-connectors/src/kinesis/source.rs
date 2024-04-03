@@ -12,10 +12,10 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableConfig;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
+
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{from_nanos, UserError};
+use arroyo_types::{from_nanos, CheckpointBarrier, UserError};
 use async_trait::async_trait;
 use aws_config::from_env;
 use aws_sdk_kinesis::{
@@ -31,7 +31,7 @@ use tokio::{
     select,
     time::{Duration, MissedTickBehavior},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::SourceOffset;
 
@@ -183,6 +183,14 @@ impl SourceOperator for KinesisSourceFunc {
                 ctx.report_error(name.clone(), details.clone()).await;
                 panic!("{}: {}", name, details);
             }
+        }
+    }
+
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        debug!("starting checkpointing {}", ctx.task_info.task_index);
+        let s = ctx.table_manager.get_global_keyed_state("k").await.unwrap();
+        for (shard_id, shard_state) in &self.shards {
+            s.insert(shard_id.clone(), shard_state.clone()).await;
         }
     }
 }
@@ -392,37 +400,9 @@ impl KinesisSourceFunc {
                      }
                 }
                 control_message = ctx.control_rx.recv() => {
-                    match control_message {
-                        Some(ControlMessage::Checkpoint(c)) => {
-                            debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            let s = ctx.table_manager.get_global_keyed_state("k").await.unwrap();
-                            for (shard_id, shard_state) in &self.shards {
-                                s.insert(shard_id.clone(), shard_state.clone()).await;
-                            }
-                            if self.start_checkpoint(c, ctx).await {
-                                return Ok(SourceFinishType::Immediate);
-                            }
-                        },
-                        Some(ControlMessage::Stop { mode }) => {
-                            info!("Stopping kinesis source: {:?}", mode);
-
-                            match mode {
-                                StopMode::Graceful => {
-                                    return Ok(SourceFinishType::Graceful);
-                                }
-                                StopMode::Immediate => {
-                                    return Ok(SourceFinishType::Immediate);
-                                }
-                            }
-                        }
-                        Some(ControlMessage::Commit { .. }) => {
-                            unreachable!("sources shouldn't receive commit messages");
-                        }
-                        Some(ControlMessage::LoadCompacted { compacted }) => {
-                            ctx.load_compacted(compacted).await;
-                        },
-                        Some(ControlMessage::NoOp ) => {}
-                        None => {
+                    if let Some(control_message) = control_message {
+                        if let Some(stop_mode) = self.handle_control_message(ctx, control_message).await {
+                            return Ok(stop_mode);
                         }
                     }
                 }

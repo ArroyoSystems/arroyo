@@ -4,7 +4,7 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableConfig;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
+
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::*;
@@ -23,6 +23,7 @@ use super::SourceOffset;
 
 pub struct FluvioSourceFunc {
     pub topic: String,
+    pub offsets: HashMap<u32, i64>,
     pub endpoint: Option<String>,
     pub offset_mode: SourceOffset,
     pub format: Format,
@@ -62,6 +63,25 @@ impl SourceOperator for FluvioSourceFunc {
 
                 panic!("{}: {}", e.name, e.details);
             }
+        }
+    }
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        debug!("starting checkpointing {}", ctx.task_info.task_index);
+        let s = ctx
+            .table_manager
+            .get_global_keyed_state("f")
+            .await
+            .expect("should be able to get fluvio state");
+        for (partition, offset) in &self.offsets {
+            let partition2 = partition;
+            s.insert(
+                *partition,
+                FluvioState {
+                    partition: *partition2,
+                    offset: *offset + 1,
+                },
+            )
+            .await;
         }
     }
 }
@@ -115,7 +135,10 @@ impl FluvioSourceFunc {
             .map(|i| {
                 let offset = state
                     .get(&(i as u32))
-                    .map(|s| Offset::absolute(s.offset).unwrap())
+                    .map(|s| {
+                        self.offsets.insert(i as u32, s.offset);
+                        Offset::absolute(s.offset).unwrap()
+                    })
                     .unwrap_or_else(|| {
                         if has_state {
                             // if we've restored partitions and we don't know about this one, that means it's
@@ -179,48 +202,11 @@ impl FluvioSourceFunc {
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
-                    match control_message {
-                        Some(ControlMessage::Checkpoint(c)) => {
-                            debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            let s = ctx.table_manager.get_global_keyed_state("f")
-                               .await
-                               .expect("should be able to get fluvio state");
-                            for (partition, offset) in &offsets {
-                                let partition2 = partition;
-                                s.insert(*partition, FluvioState {
-                                    partition: *partition2,
-                                    offset: *offset + 1,
-                                }).await;
-                            }
-
-                            if self.start_checkpoint(c, ctx).await {
-                                return Ok(SourceFinishType::Immediate);
-                            }
-                        },
-                        Some(ControlMessage::Stop { mode }) => {
-                            info!("Stopping Fluvio source: {:?}", mode);
-
-                            match mode {
-                                StopMode::Graceful => {
-                                    return Ok(SourceFinishType::Graceful);
-                                }
-                                StopMode::Immediate => {
-                                    return Ok(SourceFinishType::Immediate);
-                                }
-                            }
-                        }
-                        Some(ControlMessage::Commit{..}) => {
-                            return Err(UserError::new("Fluvio source does not support committing", ""));
-                        }
-                        Some(ControlMessage::LoadCompacted {compacted}) => {
-                            ctx.load_compacted(compacted).await;
-                        }
-                        Some(ControlMessage::NoOp ) => {}
-                        None => {
-
+                    if let Some(control_message) = control_message {
+                        if let Some(stop_mode) = self.handle_control_message(ctx, control_message).await {
+                            return Ok(stop_mode);
                         }
                     }
-
                 }
             }
         }

@@ -1,6 +1,13 @@
+use anyhow::anyhow;
+use arroyo_rpc::grpc::StopMode;
+
 use crate::states::StateError;
 
-use super::{Finished, JobContext, State, Transition};
+use super::{
+    fatal,
+    stopping::{StopBehavior, Stopping},
+    Finished, JobContext, State, StoppingCheckpointError, StoppingCheckpointOutcome, Transition,
+};
 
 #[derive(Debug)]
 pub struct Finishing {}
@@ -12,16 +19,45 @@ impl State for Finishing {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        if let Err(e) = ctx
+        // check that the tasks have all finished their data processing
+        if !ctx
             .job_controller
-            .as_mut()
-            .unwrap()
-            .wait_for_finish(ctx.rx)
-            .await
+            .as_ref()
+            .ok_or_else(|| {
+                fatal(
+                    "missing controller",
+                    anyhow!("missing controller in Finishing state"),
+                )
+            })?
+            .data_finished()
         {
-            return Err(ctx.retryable(self, "failed while waiting for job to finish", e, 10));
+            return Err(fatal(
+                "tasks not finished",
+                anyhow!("tasks not finished in Finishing state"),
+            ));
         }
-
-        Ok(Transition::next(*self, Finished {}))
+        match ctx.take_stopping_checkpoint().await {
+            Ok(StoppingCheckpointOutcome::SuccessfullyStopped) => {
+                // determine if Stopping is necessary here.
+                Ok(Transition::next(*self, Finished {}))
+            }
+            Ok(StoppingCheckpointOutcome::ReceivedImmediateStop) => Ok(Transition::next(
+                *self,
+                Stopping {
+                    stop_mode: StopBehavior::StopJob(StopMode::Immediate),
+                },
+            )),
+            Ok(StoppingCheckpointOutcome::ReceivedForceStop) => Ok(Transition::next(
+                *self,
+                Stopping {
+                    stop_mode: StopBehavior::StopWorkers,
+                },
+            )),
+            Err(StoppingCheckpointError {
+                message,
+                source,
+                retries,
+            }) => Err(ctx.retryable(self, message, source, retries)),
+        }
     }
 }

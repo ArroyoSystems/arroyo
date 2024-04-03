@@ -5,9 +5,9 @@ use arrow::array::{
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::grpc::{StopMode, TableConfig};
-use arroyo_rpc::ControlMessage;
-use arroyo_types::{should_flush, to_millis, to_nanos};
+use arroyo_rpc::grpc::TableConfig;
+
+use arroyo_types::{should_flush, to_millis, to_nanos, CheckpointBarrier};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use rand::{
@@ -17,9 +17,9 @@ use rand::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::{sync::mpsc::error::TryRecvError, time::sleep};
-use tracing::debug;
-use tracing::{info, log::warn};
+use tokio::time::sleep;
+
+use tracing::info;
 
 const HOT_AUCTION_RATIO: u64 = 100;
 const HOT_BIDDER_RATIO: u64 = 100;
@@ -170,6 +170,7 @@ pub struct NexmarkSourceFunc {
     first_event_rate: f64,
     num_events: Option<u64>,
     state: Option<NexmarkSourceState>,
+    batch_builder: NexmarkBatchBuilder,
 }
 
 #[derive(Debug, Encode, Decode, Clone, PartialEq)]
@@ -185,6 +186,7 @@ impl NexmarkSourceFunc {
             first_event_rate: first_event_rate as f64,
             num_events,
             state: None,
+            batch_builder: NexmarkBatchBuilder::new(),
         }
     }
 
@@ -195,7 +197,57 @@ impl NexmarkSourceFunc {
                 .runtime
                 .map(|time| (table.event_rate * time).floor() as u64),
             state: None,
+            batch_builder: NexmarkBatchBuilder::new(),
         }
+    }
+}
+
+struct NexmarkBatchBuilder {
+    person_builder: StructBuilder,
+    auction_builder: StructBuilder,
+    bid_builder: StructBuilder,
+    timestamp_builder: TimestampNanosecondBuilder,
+    items: usize,
+}
+
+impl NexmarkBatchBuilder {
+    fn new() -> Self {
+        Self {
+            person_builder: StructBuilder::from_fields(person_fields(), 128),
+            auction_builder: StructBuilder::from_fields(auction_fields(), 128),
+            bid_builder: StructBuilder::from_fields(bid_fields(), 128),
+            timestamp_builder: TimestampNanosecondBuilder::with_capacity(128),
+            items: 0,
+        }
+    }
+
+    fn add_next_event(&mut self, event: TimedEvent) {
+        self.items += 1;
+        event.person.as_ref().write_into(&mut self.person_builder);
+        event.auction.as_ref().write_into(&mut self.auction_builder);
+        event.bid.as_ref().write_into(&mut self.bid_builder);
+        self.timestamp_builder
+            .append_value(to_nanos(event.event_timetamp) as i64);
+    }
+
+    async fn flush(&mut self, ctx: &mut ArrowContext) {
+        if self.items == 0 {
+            return;
+        }
+        ctx.collect(
+            RecordBatch::try_new(
+                ctx.out_schema.as_ref().unwrap().schema.clone(),
+                vec![
+                    Arc::new(self.person_builder.finish()),
+                    Arc::new(self.auction_builder.finish()),
+                    Arc::new(self.bid_builder.finish()),
+                    Arc::new(self.timestamp_builder.finish()),
+                ],
+            )
+            .unwrap(),
+        )
+        .await;
+        self.items = 0;
     }
 }
 
@@ -249,12 +301,7 @@ impl SourceOperator for NexmarkSourceFunc {
         let mut random = SmallRng::seed_from_u64(ctx.task_info.task_index as u64);
         let mut last_check = Instant::now();
 
-        let mut records = 0;
         let mut flush_time = Instant::now();
-        let mut person_builder = StructBuilder::from_fields(person_fields(), 128);
-        let mut auction_builder = StructBuilder::from_fields(auction_fields(), 128);
-        let mut bid_builder = StructBuilder::from_fields(bid_fields(), 128);
-        let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(128);
 
         while generator.has_next() {
             let now = SystemTime::now();
@@ -263,74 +310,33 @@ impl SourceOperator for NexmarkSourceFunc {
                 sleep(next_event.wallclock_timestamp.duration_since(now).unwrap()).await;
             }
 
-            records += 1;
-            next_event.person.as_ref().write_into(&mut person_builder);
-            next_event.auction.as_ref().write_into(&mut auction_builder);
-            next_event.bid.as_ref().write_into(&mut bid_builder);
-            timestamp_builder.append_value(to_nanos(next_event.event_timetamp) as i64);
+            self.batch_builder.add_next_event(next_event);
 
-            if should_flush(records, flush_time) {
-                ctx.collect(
-                    RecordBatch::try_new(
-                        ctx.out_schema.as_ref().unwrap().schema.clone(),
-                        vec![
-                            Arc::new(person_builder.finish()),
-                            Arc::new(auction_builder.finish()),
-                            Arc::new(bid_builder.finish()),
-                            Arc::new(timestamp_builder.finish()),
-                        ],
-                    )
-                    .unwrap(),
-                )
-                .await;
-                records = 0;
+            if should_flush(self.batch_builder.items, flush_time) {
+                self.batch_builder.flush(ctx).await;
                 flush_time = Instant::now();
             }
 
             // TODO: rewrite this as a select with the sleep
             if last_check.elapsed() > Duration::from_millis(10) {
-                match ctx.control_rx.try_recv() {
-                    Ok(ControlMessage::Checkpoint(c)) => {
-                        // checkpoint our state
-                        ctx.table_manager
-                            .get_global_keyed_state::<usize, NexmarkSourceState>("s")
-                            .await
-                            .expect("should be able to get nexmark state")
-                            .insert(
-                                ctx.task_info.task_index,
-                                NexmarkSourceState {
-                                    config: state.config.clone(),
-                                    event_count: generator.events_count_so_far as usize,
-                                },
-                            )
-                            .await;
-                        debug!("starting checkpointing {}", ctx.task_info.task_index);
-                        if self.start_checkpoint(c, ctx).await {
-                            return SourceFinishType::Immediate;
-                        }
-                    }
-                    Ok(ControlMessage::Stop { mode }) => {
-                        info!("Stopping nexmark source");
-                        match mode {
-                            StopMode::Graceful => {
-                                return SourceFinishType::Graceful;
-                            }
-                            StopMode::Immediate => {
-                                return SourceFinishType::Immediate;
-                            }
-                        }
-                    }
-                    Err(TryRecvError::Empty) => {}
-                    x => {
-                        warn!("{:?}", x);
+                if let Ok(control_message) = ctx.control_rx.try_recv() {
+                    if let Some(finish_mode) =
+                        self.handle_control_message(ctx, control_message).await
+                    {
+                        return finish_mode;
                     }
                 }
                 last_check = Instant::now();
             }
         }
+        self.batch_builder.flush(ctx).await;
 
         info!("finished generating nexmark data");
         SourceFinishType::Final
+    }
+
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        self.batch_builder.flush(ctx).await;
     }
 }
 

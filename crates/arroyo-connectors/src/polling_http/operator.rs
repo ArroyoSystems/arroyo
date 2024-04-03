@@ -1,3 +1,4 @@
+use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
@@ -7,7 +8,6 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use arroyo_rpc::ControlMessage;
 use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
 
 use tokio::select;
@@ -18,9 +18,9 @@ use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{StopMode, TableConfig};
+use arroyo_rpc::grpc::TableConfig;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 const MAX_BODY_SIZE: usize = 5 * 1024 * 1024; // 5M ought to be enough for anybody
 
@@ -74,58 +74,22 @@ impl SourceOperator for PollingHttpSourceFunc {
             }
         }
     }
+
+    async fn flush_before_checkpoint(&mut self, _cp: CheckpointBarrier, ctx: &mut ArrowContext) {
+        if ctx.task_info.task_index == 0 {
+            debug!("starting checkpointing {}", ctx.task_info.task_index);
+            let state = self.state.clone();
+            let s = ctx
+                .table_manager
+                .get_global_keyed_state("s")
+                .await
+                .expect("should be able to get http state");
+            s.insert((), state).await;
+        }
+    }
 }
 
 impl PollingHttpSourceFunc {
-    async fn our_handle_control_message(
-        &mut self,
-        ctx: &mut ArrowContext,
-        msg: Option<ControlMessage>,
-    ) -> Option<SourceFinishType> {
-        ctx.initialize_deserializer(
-            self.format.clone(),
-            self.framing.clone(),
-            self.bad_data.clone(),
-        );
-
-        match msg? {
-            ControlMessage::Checkpoint(c) => {
-                debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let state = self.state.clone();
-                let s = ctx
-                    .table_manager
-                    .get_global_keyed_state("s")
-                    .await
-                    .expect("should be able to get http state");
-                s.insert((), state).await;
-
-                if self.start_checkpoint(c, ctx).await {
-                    return Some(SourceFinishType::Immediate);
-                }
-            }
-            ControlMessage::Stop { mode } => {
-                info!("Stopping polling http source: {:?}", mode);
-
-                match mode {
-                    StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
-                    }
-                    StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
-                    }
-                }
-            }
-            ControlMessage::Commit { .. } => {
-                unreachable!("sources shouldn't receive commit messages");
-            }
-            ControlMessage::LoadCompacted { compacted } => {
-                ctx.load_compacted(compacted).await;
-            }
-            ControlMessage::NoOp => {}
-        }
-        None
-    }
-
     async fn request(&mut self) -> Result<Vec<u8>, UserError> {
         let mut request = self
             .client
@@ -237,8 +201,10 @@ impl PollingHttpSourceFunc {
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
-                            return Ok(r);
+                        if let Some(control_message) = control_message {
+                            if let Some(r) = self.handle_control_message(ctx, control_message).await {
+                                return Ok(r);
+                            }
                         }
                     }
                 }
@@ -250,9 +216,10 @@ impl PollingHttpSourceFunc {
             )))
             .await;
             loop {
-                let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, msg).await {
-                    return Ok(r);
+                if let Some(msg) = ctx.control_rx.recv().await {
+                    if let Some(finish_type) = self.handle_control_message(ctx, msg).await {
+                        return Ok(finish_type);
+                    }
                 }
             }
         }

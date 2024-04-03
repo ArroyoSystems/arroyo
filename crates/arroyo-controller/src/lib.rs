@@ -126,6 +126,12 @@ impl JobStatus {
 pub enum RunningMessage {
     TaskCheckpointEvent(TaskCheckpointEventReq),
     TaskCheckpointFinished(TaskCheckpointCompletedReq),
+    TaskDataFinished {
+        worker_id: WorkerId,
+        time: SystemTime,
+        operator_id: String,
+        subtask_index: u32,
+    },
     TaskFinished {
         worker_id: WorkerId,
         time: SystemTime,
@@ -273,6 +279,26 @@ impl ControllerGrpc for ControllerServer {
         .await?;
 
         Ok(Response::new(TaskCheckpointCompletedResp {}))
+    }
+
+    async fn task_data_finished(
+        &self,
+        request: Request<TaskFinishedReq>,
+    ) -> Result<Response<TaskFinishedResp>, Status> {
+        let req = request.into_inner();
+
+        self.send_to_job_queue(
+            &req.job_id,
+            JobMessage::RunningMessage(RunningMessage::TaskDataFinished {
+                worker_id: WorkerId(req.worker_id),
+                time: from_micros(req.time),
+                operator_id: req.operator_id,
+                subtask_index: req.operator_subtask as u32,
+            }),
+        )
+        .await?;
+
+        Ok(Response::new(TaskFinishedResp {}))
     }
 
     async fn task_finished(

@@ -60,9 +60,9 @@ impl From<SourceFinishType> for Option<SignalMessage> {
 
 pub enum ControlOutcome {
     Continue,
-    Stop,
-    StopAndSendStop,
-    Finish,
+    FinishedStoppingCheckpoint,
+    NoMoreData { end_of_data: bool },
+    Shutdown,
 }
 
 #[derive(Debug)]

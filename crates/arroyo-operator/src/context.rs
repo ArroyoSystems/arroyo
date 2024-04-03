@@ -406,10 +406,12 @@ impl ArrowCollector {
         for out_node in &self.out_qs {
             for q in out_node {
                 q.send(message.clone()).await.unwrap_or_else(|e| {
-                    panic!(
-                        "failed to broadcast message <{:?}> for operator {}: {}",
-                        message, self.task_info.operator_id, e
-                    )
+                    if !e.0.is_end() {
+                        panic!(
+                            "failed to broadcast message <{:?}> for operator {}: {}",
+                            message, self.task_info.operator_id, e
+                        )
+                    }
                 });
             }
         }
