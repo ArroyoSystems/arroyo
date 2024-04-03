@@ -157,7 +157,7 @@ pub fn window_scalar_function() -> ScalarUDF {
 
 #[derive(WrapperApi)]
 struct UdfDylibInterface {
-    run: unsafe extern "C" fn(
+    run: unsafe extern "C-unwind" fn(
         args_ptr: *mut FfiArraySchemaPair,
         args_len: usize,
         args_capacity: usize,

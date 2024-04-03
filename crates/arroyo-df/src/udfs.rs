@@ -150,7 +150,7 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
         pub struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
 
         #[no_mangle]
-        pub extern "C" fn run(args_ptr: *mut FfiArraySchemaPair, args_len: usize, args_capacity: usize) -> FfiArraySchemaPair {
+        pub extern "C-unwind" fn run(args_ptr: *mut FfiArraySchemaPair, args_len: usize, args_capacity: usize) -> FfiArraySchemaPair {
             let args = unsafe {
                 Vec::from_raw_parts(args_ptr, args_len, args_capacity)
             };
