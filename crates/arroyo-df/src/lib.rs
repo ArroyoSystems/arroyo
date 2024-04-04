@@ -512,6 +512,7 @@ enum WindowBehavior {
         window: WindowType,
         window_field: DFField,
         window_index: usize,
+        is_nested: bool,
     },
     InData,
 }
