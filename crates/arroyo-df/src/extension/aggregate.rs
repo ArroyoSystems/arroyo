@@ -171,6 +171,7 @@ impl AggregateExtension {
             window: WindowType::Session { gap },
             window_index,
             window_field,
+            is_nested: false,
         } = &self.window_behavior
         else {
             bail!("expected sliding window")
@@ -227,12 +228,24 @@ impl AggregateExtension {
         planner: &Planner,
         index: usize,
         input_schema: DFSchemaRef,
+        use_final_projection: bool,
     ) -> Result<LogicalNode> {
         let binning_function = planner.create_physical_expr(
             &Expr::Column(Column::new_unqualified("_timestamp".to_string())),
             &input_schema,
         )?;
         let binning_function_proto = PhysicalExprNode::try_from(binning_function)?;
+
+        let final_projection = use_final_projection
+            .then(|| {
+                let final_physical_plan = planner.sync_plan(&self.final_calculation)?;
+                let final_physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
+                    final_physical_plan,
+                    &ArroyoPhysicalExtensionCodec::default(),
+                )?;
+                Ok::<Vec<u8>, anyhow::Error>(final_physical_plan_node.encode_to_vec())
+            })
+            .transpose()?;
 
         let SplitPlanOutput {
             partial_aggregation_plan,
@@ -254,7 +267,7 @@ impl AggregateExtension {
             partial_schema: Some(partial_schema.try_into()?),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),
-            final_projection: None,
+            final_projection,
         };
 
         Ok(LogicalNode {
@@ -286,15 +299,16 @@ impl AggregateExtension {
             .iter()
             .map(|field| Expr::Column(field.qualified_column()))
             .collect();
-        let (window_field, window_index, width) = match window_behavior {
+        let (window_field, window_index, width, is_nested) = match window_behavior {
             WindowBehavior::InData => return Ok(timestamp_append),
             WindowBehavior::FromOperator {
                 window,
                 window_field,
                 window_index,
+                is_nested,
             } => match window {
                 WindowType::Tumbling { width, .. } | WindowType::Sliding { width, .. } => {
-                    (window_field, window_index, width)
+                    (window_field, window_index, width, is_nested)
                 }
                 WindowType::Session { .. } => {
                     return Ok(LogicalPlan::Extension(Extension {
@@ -308,7 +322,14 @@ impl AggregateExtension {
                 WindowType::Instant => return Ok(timestamp_append),
             },
         };
-
+        if is_nested {
+            return Self::nested_final_projection(
+                timestamp_append,
+                window_field,
+                window_index,
+                width,
+            );
+        }
         let timestamp_column =
             Column::new(timestamp_field.qualifier().cloned(), timestamp_field.name());
         aggregate_fields.insert(window_index, window_field.clone());
@@ -350,6 +371,62 @@ impl AggregateExtension {
                     HashMap::new(),
                 )?),
             )?,
+        ))
+    }
+
+    fn nested_final_projection(
+        aggregate_plan: LogicalPlan,
+        window_field: DFField,
+        window_index: usize,
+        width: Duration,
+    ) -> DFResult<LogicalPlan> {
+        let timestamp_field = aggregate_plan
+            .schema()
+            .field_with_unqualified_name(TIMESTAMP_FIELD)
+            .unwrap()
+            .clone();
+        let timestamp_column =
+            Column::new(timestamp_field.qualifier().cloned(), timestamp_field.name());
+
+        let mut aggregate_fields = aggregate_plan.schema().fields().clone();
+        let mut aggregate_expressions: Vec<_> = aggregate_fields
+            .iter()
+            .map(|field| Expr::Column(field.qualified_column()))
+            .collect();
+        aggregate_fields.insert(window_index, window_field.clone());
+        let window_expression = Expr::ScalarFunction(ScalarFunction {
+            func_def: ScalarFunctionDefinition::UDF(Arc::new(window_scalar_function())),
+            args: vec![
+                // calculate the start of the bin
+                Expr::BinaryExpr(BinaryExpr {
+                    left: Box::new(Expr::Column(timestamp_column.clone())),
+                    op: datafusion_expr::Operator::Minus,
+                    right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                        IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64 - 1),
+                    )))),
+                }),
+                // add 1 nanosecond to the timestamp
+                Expr::BinaryExpr(BinaryExpr {
+                    left: Box::new(Expr::Column(timestamp_column.clone())),
+                    op: datafusion_expr::Operator::Plus,
+                    right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                        IntervalMonthDayNanoType::make_value(0, 0, 1),
+                    )))),
+                }),
+            ],
+        });
+        aggregate_expressions.insert(
+            window_index,
+            window_expression
+                .alias_qualified(window_field.qualifier().cloned(), window_field.name()),
+        );
+        Ok(LogicalPlan::Projection(
+            datafusion_expr::Projection::try_new_with_schema(
+                aggregate_expressions,
+                Arc::new(aggregate_plan),
+                Arc::new(DFSchema::new_with_metadata(aggregate_fields, HashMap::new()).unwrap()),
+            )
+            .unwrap(),
         ))
     }
 }
@@ -421,22 +498,33 @@ impl ArroyoExtension for AggregateExtension {
                 window,
                 window_field: _,
                 window_index: _,
-            } => match window {
-                WindowType::Tumbling { width } => {
-                    self.tumbling_window_config(planner, index, input_df_schema, *width)?
+                is_nested,
+            } => {
+                if *is_nested {
+                    self.instant_window_config(planner, index, input_df_schema, true)?
+                } else {
+                    match window {
+                        WindowType::Tumbling { width } => {
+                            self.tumbling_window_config(planner, index, input_df_schema, *width)?
+                        }
+                        WindowType::Sliding { width, slide } => self.sliding_window_config(
+                            planner,
+                            index,
+                            input_df_schema,
+                            *width,
+                            *slide,
+                        )?,
+                        WindowType::Instant => {
+                            bail!("instant window not supported in aggregate extension")
+                        }
+                        WindowType::Session { gap: _ } => {
+                            self.session_window_config(planner, index, input_df_schema)?
+                        }
+                    }
                 }
-                WindowType::Sliding { width, slide } => {
-                    self.sliding_window_config(planner, index, input_df_schema, *width, *slide)?
-                }
-                WindowType::Instant => {
-                    bail!("instant window not supported in aggregate extension")
-                }
-                WindowType::Session { gap: _ } => {
-                    self.session_window_config(planner, index, input_df_schema)?
-                }
-            },
+            }
             WindowBehavior::InData => self
-                .instant_window_config(planner, index, input_df_schema)
+                .instant_window_config(planner, index, input_df_schema, false)
                 .map_err(|err| DataFusionError::Plan(format!("instant window error: {}", err)))?,
         };
         let edge = LogicalEdge::project_all(LogicalEdgeType::Shuffle, (*input_schema).clone());

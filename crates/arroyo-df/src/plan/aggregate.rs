@@ -3,7 +3,7 @@ use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
 use crate::{find_window, WindowBehavior};
 use datafusion_common::tree_node::{TreeNode, TreeNodeRewriter};
-use datafusion_common::{DFField, DFSchema, DataFusionError, Result as DFResult};
+use datafusion_common::{plan_err, DFField, DFSchema, DataFusionError, Result as DFResult};
 use datafusion_expr::{Aggregate, Expr, Extension, LogicalPlan};
 use std::sync::Arc;
 
@@ -70,8 +70,24 @@ impl TreeNodeRewriter for AggregateRewriter {
                         "window in group by does not match input window".to_string(),
                     ));
                 }
-                group_expr[window_index] = Expr::Column(window_detecting_visitor.fields.iter().next().unwrap().qualified_column());
-                WindowBehavior::InData
+                let matching_field = window_detecting_visitor.fields.iter().next();
+                match matching_field {
+                    Some(field) => {
+                        group_expr[window_index] = Expr::Column(field.qualified_column());
+                        WindowBehavior::InData
+                    }
+                    None => {
+                        if matches!(input_window, arroyo_datastream::WindowType::Session { .. }) {
+                            return plan_err!(
+                                "can't reinvoke session window in nested aggregates. Need to pass the window struct up from the source query."
+                            );
+                        }
+                        group_expr.remove(window_index);
+                        key_fields.remove(window_index);
+                        let window_field = schema.field(window_index).clone();
+                        WindowBehavior::FromOperator { window: input_window, window_field, window_index, is_nested: true }
+                    }
+                }
             }
             (true, false) => WindowBehavior::InData,
             (false, true) => {
@@ -84,6 +100,7 @@ impl TreeNodeRewriter for AggregateRewriter {
                     window: window_type,
                     window_field,
                     window_index,
+                    is_nested: false,
                 }
             }
             (false, false) => {
@@ -128,6 +145,7 @@ impl TreeNodeRewriter for AggregateRewriter {
             window: _,
             window_field: _,
             window_index,
+            is_nested: _,
         } = &window_behavior
         {
             aggregate_schema_fields.remove(*window_index);

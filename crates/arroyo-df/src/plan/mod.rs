@@ -182,8 +182,9 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                             window,
                             window_field,
                             window_index: _,
+                            is_nested,
                         } => {
-                            if self.window.is_some() {
+                            if self.window.is_some() && !*is_nested {
                                 return Err(DataFusionError::Plan(
                                     "aggregate node should not be recalculating window, as input is windowed.".to_string(),
                                 ));
