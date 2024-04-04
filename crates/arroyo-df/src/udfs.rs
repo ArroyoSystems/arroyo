@@ -149,29 +149,43 @@ pub fn lib_rs(definition: &str) -> anyhow::Result<String> {
         #[repr(C)]
         pub struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
 
+        #[repr(C)]
+        pub struct FfiArrayResult(FFI_ArrowArray, FFI_ArrowSchema, bool);
+
         #[no_mangle]
-        pub extern "C-unwind" fn run(args_ptr: *mut FfiArraySchemaPair, args_len: usize, args_capacity: usize) -> FfiArraySchemaPair {
+        pub extern "C-unwind" fn run(args_ptr: *mut FfiArraySchemaPair, args_len: usize, args_capacity: usize) -> FfiArrayResult {
             let args = unsafe {
                 Vec::from_raw_parts(args_ptr, args_len, args_capacity)
             };
 
             let batch_size = args[0].0.len();
 
-            let mut args = args
+            let result = std::panic::catch_unwind(|| {
+                let mut args = args
                 .into_iter()
                 .map(|pair| {
                     let FfiArraySchemaPair(array, schema) = pair;
                     unsafe { from_ffi(array, &schema).unwrap() }
                 });
 
-            #results_builder
+                #results_builder
 
-            #(#defs;)*
+                #(#defs;)*
 
-            #call_loop
+                #call_loop
 
-            let (array, schema) = to_ffi(&results_builder.finish().to_data()).unwrap();
-            FfiArraySchemaPair(array, schema)
+                to_ffi(&results_builder.finish().to_data()).unwrap()
+            });
+
+
+            match result {
+                Ok((array, schema)) => {
+                    FfiArrayResult(array, schema, true)
+                }
+                Err(e) => {
+                    FfiArrayResult(FFI_ArrowArray::empty(), FFI_ArrowSchema::empty(), false)
+                }
+            }
         }
     }))
 }

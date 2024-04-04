@@ -161,7 +161,7 @@ struct UdfDylibInterface {
         args_ptr: *mut FfiArraySchemaPair,
         args_len: usize,
         args_capacity: usize,
-    ) -> FfiArraySchemaPair,
+    ) -> FfiArrayResult,
 }
 
 #[derive(Clone)]
@@ -215,6 +215,9 @@ impl UdfDylib {
 #[repr(C)]
 #[derive(Debug)]
 struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
+
+#[repr(C)]
+pub struct FfiArrayResult(FFI_ArrowArray, FFI_ArrowSchema, bool);
 
 fn scalar_value_to_array(scalar: &ScalarValue, length: usize) -> ArrayRef {
     match scalar {
@@ -278,11 +281,18 @@ impl ScalarUDFImpl for UdfDylib {
             })
             .collect::<Vec<_>>();
 
-        let FfiArraySchemaPair(result_array, result_schema) =
-            unsafe { (self.udf.run)(args.as_mut_ptr(), args.len(), args.capacity()) };
+        let len = args.len();
+        let capacity = args.capacity();
+        // the UDF dylib is responsible for freeing the memory of the args -- we leak it before
+        // calling the udf so that if it panics, we don't try to double-free the args
+        let ptr = args.leak();
 
-        // the UDF dylib is responsible for freeing the memory of the args
-        mem::forget(args);
+        let FfiArrayResult(result_array, result_schema, valid) =
+            unsafe { (self.udf.run)(ptr.as_mut_ptr(), len, capacity) };
+
+        if !valid {
+            panic!("panic in UDF {}", self.name);
+        }
 
         let result_array = unsafe { from_ffi(result_array, &result_schema).unwrap() };
 
