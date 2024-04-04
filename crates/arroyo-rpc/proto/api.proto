@@ -192,10 +192,22 @@ message UnnestExecNode {
   string schema = 1;
 }
 
+message DebeziumDecodeNode {
+  // json-encoded
+  string schema = 1;
+}
+
+message DebeziumEncodeNode {
+  // json-encoded
+  string schema = 1;
+}
+
 message ArroyoExecNode {
   oneof node {
     MemExecNode mem_exec = 1;
     UnnestExecNode unnest_exec = 2;
+    DebeziumDecodeNode debezium_decode = 3;
+    DebeziumEncodeNode debezium_encode = 4;
   }
 }
 

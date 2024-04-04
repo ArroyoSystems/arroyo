@@ -716,6 +716,7 @@ dependencies = [
  "datafusion-proto 36.0.0",
  "dlopen2",
  "dlopen2_derive",
+ "futures",
  "glob",
  "petgraph",
  "prettyplease",

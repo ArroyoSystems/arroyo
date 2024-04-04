@@ -1,4 +1,4 @@
---fail=can't read from a source with virtual fields and update mode
+--fail=Failed to construct table 'debezium_source': can't use virtual fields with debezium format
 CREATE table debezium_source (
     bids_auction int,
     price int,

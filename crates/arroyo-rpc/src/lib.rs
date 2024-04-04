@@ -197,6 +197,7 @@ pub fn error_chain(e: anyhow::Error) -> String {
 }
 
 pub const TIMESTAMP_FIELD: &str = "_timestamp";
+pub const IS_RETRACT_FIELD: &str = "_is_retract";
 // need to handle the empty case as a row converter without sort fields emits empty Rows.
 #[derive(Debug)]
 pub enum Converter {

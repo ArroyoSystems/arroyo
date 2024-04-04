@@ -11,6 +11,10 @@ use crate::builder::{NamedNode, Planner};
 use crate::schemas::{add_timestamp_field, has_timestamp_field};
 use join::JoinExtension;
 
+use self::debezium::{
+    DebeziumUnrollingExtension, ToDebeziumExtension, DEBEZIUM_UNROLLING_EXTENSION_NAME,
+    TO_DEBEZIUM_EXTENSION_NAME,
+};
 use self::{
     aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
     join::JOIN_NODE_NAME,
@@ -23,6 +27,7 @@ use self::{
 };
 
 pub(crate) mod aggregate;
+pub(crate) mod debezium;
 pub(crate) mod join;
 pub(crate) mod key_calculation;
 pub(crate) mod remote_table;
@@ -40,6 +45,9 @@ pub(crate) trait ArroyoExtension {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges>;
     fn output_schema(&self) -> ArroyoSchema;
+    fn transparent(&self) -> bool {
+        false
+    }
 }
 
 pub(crate) struct NodeWithIncomingEdges {
@@ -47,10 +55,10 @@ pub(crate) struct NodeWithIncomingEdges {
     pub edges: Vec<LogicalEdge>,
 }
 
-impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtension {
+impl<'a> TryFrom<&'a dyn UserDefinedLogicalNode> for &'a dyn ArroyoExtension {
     type Error = DataFusionError;
 
-    fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> DFResult<Self, Self::Error> {
+    fn try_from(node: &'a dyn UserDefinedLogicalNode) -> DFResult<Self, Self::Error> {
         match node.name() {
             TABLE_SOURCE_NAME => {
                 let table_source_extension = node
@@ -97,8 +105,28 @@ impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtensio
                     .unwrap();
                 Ok(window_function_extension as &dyn ArroyoExtension)
             }
+            DEBEZIUM_UNROLLING_EXTENSION_NAME => {
+                let debezium_unrolling_extension = node
+                    .as_any()
+                    .downcast_ref::<DebeziumUnrollingExtension>()
+                    .unwrap();
+                Ok(debezium_unrolling_extension as &dyn ArroyoExtension)
+            }
+            TO_DEBEZIUM_EXTENSION_NAME => {
+                let to_debezium_extension =
+                    node.as_any().downcast_ref::<ToDebeziumExtension>().unwrap();
+                Ok(to_debezium_extension as &dyn ArroyoExtension)
+            }
             other => Err(DataFusionError::Plan(format!("unexpected node: {}", other))),
         }
+    }
+}
+
+impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtension {
+    type Error = DataFusionError;
+
+    fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> DFResult<Self, Self::Error> {
+        TryFrom::try_from(&**node)
     }
 }
 

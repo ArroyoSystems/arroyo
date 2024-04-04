@@ -1,3 +1,4 @@
+use crate::extension::debezium::DebeziumUnrollingExtension;
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::extension::sink::SinkExtension;
 use crate::extension::table_source::TableSourceExtension;
@@ -9,6 +10,7 @@ use crate::tables::Table;
 use crate::ArroyoSchemaProvider;
 
 use arrow_schema::DataType;
+use arroyo_rpc::IS_RETRACT_FIELD;
 use arroyo_rpc::TIMESTAMP_FIELD;
 
 use datafusion_common::plan_err;
@@ -27,6 +29,7 @@ use datafusion_expr::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::info;
 
 /// Rewrites a logical plan to move projections out of table scans
 /// and into a separate projection node which may include virtual fields,
@@ -126,20 +129,53 @@ impl<'a> SourceRewriter<'a> {
                 TIMESTAMP_FIELD,
             )))
         }
+        if table.is_updating() {
+            expressions.push(Expr::Column(Column::new(
+                Some(qualifier.clone()),
+                IS_RETRACT_FIELD,
+            )))
+        }
         Ok(expressions)
     }
 
     fn projection(&self, table_scan: &TableScan, table: &ConnectorTable) -> DFResult<LogicalPlan> {
         let qualifier = table_scan.table_name.clone();
 
-        let table_source_extension = TableSourceExtension::new(qualifier.to_owned(), table.clone());
+        let table_source_extension = LogicalPlan::Extension(Extension {
+            node: Arc::new(TableSourceExtension::new(
+                qualifier.to_owned(),
+                table.clone(),
+            )),
+        });
+
+        info!(
+            "table source schema: {:?}",
+            table_source_extension.schema().fields()
+        );
+
+        let (projection_input, projection) = if table.is_updating() {
+            let mut projection_offsets = table_scan.projection.clone();
+            projection_offsets
+                .as_mut()
+                .map(|offsets| offsets.push(table.fields.len()));
+            info!(
+                "table source schema: {:?}",
+                table_source_extension.schema().fields()
+            );
+            (
+                LogicalPlan::Extension(Extension {
+                    node: Arc::new(DebeziumUnrollingExtension::try_new(table_source_extension)?),
+                }),
+                None,
+            )
+        } else {
+            (table_source_extension, table_scan.projection.clone())
+        };
 
         Ok(LogicalPlan::Projection(
             datafusion_expr::Projection::try_new(
-                Self::projection_expressions(table, &qualifier, &table_scan.projection)?,
-                Arc::new(LogicalPlan::Extension(Extension {
-                    node: Arc::new(table_source_extension),
-                })),
+                Self::projection_expressions(table, &qualifier, &projection)?,
+                Arc::new(projection_input),
             )?,
         ))
     }
@@ -150,6 +186,9 @@ impl<'a> SourceRewriter<'a> {
         table: &ConnectorTable,
     ) -> DFResult<LogicalPlan> {
         let input = self.projection(table_scan, table)?;
+
+        info!("table scan plan:\n{:?}", input);
+
         let schema = input.schema().clone();
         let remote = LogicalPlan::Extension(Extension {
             node: Arc::new(RemoteTableExtension {

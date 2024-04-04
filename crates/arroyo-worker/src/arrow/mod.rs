@@ -85,7 +85,7 @@ impl ArrowOperator for ValueExecutionOperator {
         let mut records = self
             .execution_plan
             .execute(0, self.task_context.clone())
-            .expect("successfully computed?");
+            .expect(format!("operator {} should've succeeded", ctx.task_info.operator_id).as_str());
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
             ctx.collect(batch).await;

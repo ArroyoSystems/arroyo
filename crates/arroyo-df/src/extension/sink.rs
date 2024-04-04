@@ -3,8 +3,11 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
-use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion_common::{DFSchemaRef, DataFusionError, OwnedTableReference};
+use arroyo_rpc::{
+    df::{ArroyoSchema, ArroyoSchemaRef},
+    IS_RETRACT_FIELD,
+};
+use datafusion_common::{DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult};
 
 use datafusion_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 
@@ -15,7 +18,10 @@ use crate::{
     tables::Table,
 };
 
-use super::{remote_table::RemoteTableExtension, ArroyoExtension, NodeWithIncomingEdges};
+use super::{
+    debezium::ToDebeziumExtension, remote_table::RemoteTableExtension, ArroyoExtension,
+    NodeWithIncomingEdges,
+};
 
 pub(crate) const SINK_NODE_NAME: &'static str = "SinkExtension";
 
@@ -31,33 +37,57 @@ impl SinkExtension {
     pub fn new(
         name: OwnedTableReference,
         table: Table,
-        schema: DFSchemaRef,
-        input: Arc<LogicalPlan>,
-    ) -> Self {
-        let remote_input = match input.as_ref() {
-            // we only segment operators at extension points,
-            // so this is necessary to make sure everything between the sink and the prior extension is calculated.
-            LogicalPlan::Extension(_) => input.clone(),
-            _ => {
-                let remote_table_extension = RemoteTableExtension {
-                    input: input.as_ref().clone(),
-                    name: name.clone(),
-                    schema: schema.clone(),
-                    materialize: false,
-                };
-                LogicalPlan::Extension(Extension {
-                    node: Arc::new(remote_table_extension),
-                })
-                .into()
+        mut schema: DFSchemaRef,
+        mut input: Arc<LogicalPlan>,
+    ) -> DFResult<Self> {
+        if input
+            .schema()
+            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+        {
+            if let Table::ConnectorTable(connector_table) = &table {
+                if connector_table.is_updating() {
+                    let to_debezium_extension =
+                        ToDebeziumExtension::try_new(input.as_ref().clone())?;
+                    input = Arc::new(LogicalPlan::Extension(Extension {
+                        node: Arc::new(to_debezium_extension),
+                    }));
+                    schema = input.schema().clone();
+                }
             }
-        };
+        }
+        Self::add_remote_if_necessary(&name, &schema, &mut input);
 
-        Self {
+        Ok(Self {
             name,
             table,
             schema,
-            input: remote_input,
+            input,
+        })
+    }
+
+    /* The input to a sink needs to be a non-transparent logical plan extension.
+      If it isn't, wrap the input in a RemoteTableExtension.
+    */
+    pub fn add_remote_if_necessary(
+        name: &OwnedTableReference,
+        schema: &DFSchemaRef,
+        input: &mut Arc<LogicalPlan>,
+    ) {
+        if let LogicalPlan::Extension(node) = input.as_ref() {
+            let arroyo_extension: &dyn ArroyoExtension = (&node.node).try_into().unwrap();
+            if !arroyo_extension.transparent() {
+                return;
+            }
         }
+        let remote_table_extension = RemoteTableExtension {
+            input: input.as_ref().clone(),
+            name: name.clone(),
+            schema: schema.clone(),
+            materialize: false,
+        };
+        *input = Arc::new(LogicalPlan::Extension(Extension {
+            node: Arc::new(remote_table_extension),
+        }));
     }
 }
 

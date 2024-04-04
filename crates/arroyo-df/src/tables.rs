@@ -11,7 +11,7 @@ use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
-use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::sql::planner::PlannerContext;
@@ -169,7 +169,24 @@ impl ConnectorTable {
 
         let framing = Framing::from_opts(options).map_err(|e| anyhow!("invalid framing: '{e}'"))?;
 
-        let schema_fields: Result<Vec<SourceField>> = fields
+        let mut input_to_schema_fields = fields.clone();
+
+        if let Some(Format::Json(JsonFormat { debezium: true, .. })) = &format {
+            // check that there are no virtual fields in fields
+            if fields.iter().any(|f| f.is_virtual()) {
+                bail!("can't use virtual fields with debezium format")
+            }
+            let df_struct_type =
+                DataType::Struct(fields.iter().map(|f| f.field().clone()).collect());
+            let before_field_spec =
+                FieldSpec::StructField(Field::new("before", df_struct_type.clone(), true));
+            let after_field_spec =
+                FieldSpec::StructField(Field::new("after", df_struct_type, true));
+            let op_field_spec = FieldSpec::StructField(Field::new("op", DataType::Utf8, false));
+            input_to_schema_fields = vec![before_field_spec, after_field_spec, op_field_spec];
+        }
+
+        let schema_fields: Vec<SourceField> = input_to_schema_fields
             .iter()
             .filter(|f| !f.is_virtual())
             .map(|f| {
@@ -182,7 +199,7 @@ impl ConnectorTable {
                     )
                 })
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let bad_data =
             BadData::from_opts(options).map_err(|e| anyhow!("Invalid bad_data: '{e}'"))?;
 
@@ -191,7 +208,7 @@ impl ConnectorTable {
             bad_data,
             framing,
             None,
-            schema_fields?,
+            schema_fields,
             None,
             Some(fields.is_empty()),
         )?;
@@ -350,6 +367,14 @@ impl ConnectorTable {
             timestamp_override,
             watermark_column,
         })
+    }
+
+    pub(crate) fn is_updating(&self) -> bool {
+        if let Some(Format::Json(JsonFormat { debezium: true, .. })) = &self.format {
+            true
+        } else {
+            false
+        }
     }
 }
 
