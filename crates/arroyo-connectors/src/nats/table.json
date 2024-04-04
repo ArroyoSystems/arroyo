@@ -10,9 +10,37 @@
                     "type": "object",
                     "title": "Source",
                     "properties": {
-                        "stream": {
-                            "type": "string",
-                            "description": "The NATS Jetstream stream to consume from"
+                        "sourceType": {
+                            "type": "object",
+                            "title": "Source Type",
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "title": "NATS Jetstream",
+                                    "properties": {
+                                        "stream": {
+                                            "type": "string",
+                                            "description": "The NATS Jetstream stream to consume from"
+                                        }
+                                    },
+                                    "required": [
+                                        "stream"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "title": "NATS Core",
+                                    "properties": {
+                                        "subject": {
+                                            "type": "string",
+                                            "description": "The NATS Core subject to consume from"
+                                        }
+                                    },
+                                    "required": [
+                                        "subject"
+                                    ]
+                                }
+                            ]
                         }
                     },
                     "additionalProperties": false
@@ -21,16 +49,31 @@
                     "type": "object",
                     "title": "Sink",
                     "properties": {
-                        "subject": {
-                            "type": "string",
-                            "description": "The NATS subject to publish to"
+                        "sinkType": {
+                            "type": "object",
+                            "title": "Sink Type",
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "title": "Nats Core",
+                                    "properties": {
+                                        "subject": {
+                                            "type": "string",
+                                            "description": "The NATS subject to publish to"
+                                        }
+                                    },
+                                    "required": [
+                                        "subject"
+                                    ]
+                                }
+                            ]
                         }
                     },
                     "additionalProperties": false
                 }
             ]
         },
-        "client_configs": {
+        "clientConfigs": {
             "type": "object",
             "title": "Client Configs",
             "description": "Additional NATS configs to pass to the underlying NATS consumer or producer.",

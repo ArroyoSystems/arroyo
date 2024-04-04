@@ -1,9 +1,8 @@
-use super::get_nats_client;
-use super::get_nats_client_config;
 use super::ConnectorType;
 use super::NatsConfig;
 use super::NatsState;
 use super::NatsTable;
+use super::{get_nats_client, SourceType};
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
@@ -21,26 +20,36 @@ use futures::StreamExt;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::time::Duration;
+use std::time::SystemTime;
 use tokio::select;
 use tracing::debug;
 use tracing::info;
 
 pub struct NatsSourceFunc {
-    pub stream: String,
+    pub source_type: SourceType,
     pub servers: String,
     pub connection: NatsConfig,
     pub table: NatsTable,
     pub format: Format,
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
-    pub consumer_config: HashMap<String, String>,
     pub messages_per_second: NonZeroU32,
 }
 
 #[async_trait]
 impl SourceOperator for NatsSourceFunc {
     fn name(&self) -> String {
-        format!("NATS-{}", self.stream)
+        format!(
+            "nats-source-{}",
+            match &self.source_type {
+                SourceType::Subject(s) => {
+                    s
+                }
+                SourceType::Stream(s) => {
+                    s
+                }
+            }
+        )
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
@@ -80,21 +89,18 @@ impl NatsSourceFunc {
         let framing = config.framing;
 
         let stream = match &table.connector_type {
-            ConnectorType::Source { ref stream, .. } => stream,
+            ConnectorType::Source { source_type, .. } => source_type.as_ref().unwrap(),
             _ => panic!("NATS source must have a stream configured"),
         };
 
-        let consumer_default_config = get_nats_client_config(&connection, &table);
-
         Self {
-            stream: stream.clone().unwrap(),
+            source_type: stream.clone(),
             servers: connection.servers.clone(),
             connection,
             table,
             format,
             framing,
             bad_data: config.bad_data,
-            consumer_config: consumer_default_config,
             messages_per_second: NonZeroU32::new(
                 config
                     .rate_limit
@@ -107,9 +113,9 @@ impl NatsSourceFunc {
 
     async fn get_nats_stream(
         &mut self,
+        client: async_nats::Client,
         stream_name: String,
     ) -> async_nats::jetstream::stream::Stream {
-        let client = get_nats_client(&self.connection).await.unwrap();
         let jetstream = async_nats::jetstream::new(client);
         let mut stream = jetstream.get_stream(&stream_name).await.unwrap();
         let stream_info = stream.info().await.unwrap();
@@ -173,8 +179,15 @@ impl NatsSourceFunc {
 
         let consumer_name = format!(
             "{}-{}",
-            self.stream.clone(),
-            &ctx.task_info.operator_id.clone().replace("operator_", "")
+            match &self.source_type {
+                SourceType::Subject(s) => {
+                    s
+                }
+                SourceType::Stream(s) => {
+                    s
+                }
+            },
+            &ctx.task_info.operator_id.replace("operator_", "")
         );
 
         // TODO: Generate this `consumer_config` via a function that parses
@@ -257,136 +270,198 @@ impl NatsSourceFunc {
     }
 
     async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
-        let start_sequence = self.get_start_sequence_number(ctx).await;
-        let stream = self.get_nats_stream(self.stream.clone()).await;
-        let consumer = self
-            .create_nats_consumer(&stream, start_sequence, ctx)
-            .await;
-        let mut messages = consumer.messages().await.unwrap();
-        let mut sequence_numbers: HashMap<String, NatsState> = HashMap::new();
-
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
         );
 
-        loop {
-            select! {
-                message = messages.next() => {
-                    match message {
-                        Some(Ok(msg)) => {
-                            let payload = msg.payload.as_ref();
-                            let message_info = msg.info().unwrap();
-                            let timestamp = message_info.published.into() ;
+        let nats_client = get_nats_client(&self.connection).await.unwrap();
 
-                            ctx.deserialize_slice(&payload, timestamp).await?;
+        match self.source_type.clone() {
+            SourceType::Stream(s) => {
+                let start_sequence = self.get_start_sequence_number(ctx).await;
+                let nats_stream = &self.get_nats_stream(nats_client.clone(), s.clone()).await;
+                let mut messages = self
+                    .create_nats_consumer(nats_stream, start_sequence, ctx)
+                    .await
+                    .messages()
+                    .await
+                    .unwrap();
+                let mut sequence_numbers: HashMap<String, NatsState> = HashMap::new();
 
-                            debug!("---------------------------------------------->");
-                            debug!(
-                                "Delivered stream sequence: {}",
-                                message_info.stream_sequence
-                            );
-                            debug!(
-                                "Delivered consumer sequence: {}",
-                                message_info.consumer_sequence
-                            );
-                            debug!(
-                                "Delivered message stream: {}",
-                                message_info.stream
-                            );
-                            debug!(
-                                "Delivered message consumer: {}",
-                                message_info.consumer
-                            );
-                            debug!(
-                                "Delivered message published: {}",
-                                message_info.published
-                            );
-                            debug!(
-                                "Delivered message pending: {}",
-                                message_info.pending
-                            );
-                            debug!(
-                                "Delivered message delivered: {}",
-                                message_info.delivered
-                            );
+                loop {
+                    select! {
+                        message = messages.next() => {
+                            match message {
+                                Some(Ok(msg)) => {
+                                    let payload = msg.payload.as_ref();
+                                    let message_info = msg.info().unwrap();
+                                    let timestamp = message_info.published.into() ;
 
-                            if ctx.should_flush() {
-                                ctx.flush_buffer().await?;
+                                    ctx.deserialize_slice(&payload, timestamp).await?;
+
+                                    debug!("---------------------------------------------->");
+                                    debug!(
+                                        "Delivered stream sequence: {}",
+                                        message_info.stream_sequence
+                                    );
+                                    debug!(
+                                        "Delivered consumer sequence: {}",
+                                        message_info.consumer_sequence
+                                    );
+                                    debug!(
+                                        "Delivered message stream: {}",
+                                        message_info.stream
+                                    );
+                                    debug!(
+                                        "Delivered message consumer: {}",
+                                        message_info.consumer
+                                    );
+                                    debug!(
+                                        "Delivered message published: {}",
+                                        message_info.published
+                                    );
+                                    debug!(
+                                        "Delivered message pending: {}",
+                                        message_info.pending
+                                    );
+                                    debug!(
+                                        "Delivered message delivered: {}",
+                                        message_info.delivered
+                                    );
+
+                                    if ctx.should_flush() {
+                                        ctx.flush_buffer().await?;
+                                    }
+
+                                    sequence_numbers.insert(
+                                        ctx.task_info.operator_id.clone(),
+                                        NatsState {
+                                            stream_name: s.clone(),
+                                            stream_sequence_number: message_info.stream_sequence.clone()
+                                        }
+                                    );
+
+                                    // TODO: Has ACK to happens here at every message? Maybe it can be
+                                    // done by ack only the last message before checkpointing in the below
+                                    // `ControlMessage::Checkpoint` match.
+                                    msg.ack().await.unwrap();
+                                },
+                                Some(Err(msg)) => {
+                                    return Err(UserError::new("NATS message error", msg.to_string()));
+                                },
+                                None => {
+                                    break
+                                    info!("Finished reading message from {}", s.clone());
+                                },
                             }
+                        }
+                        control_message = ctx.control_rx.recv() => {
+                            match control_message {
+                                Some(ControlMessage::Checkpoint(c)) => {
+                                    debug!("Starting checkpointing {}", ctx.task_info.task_index);
+                                    let state = ctx.table_manager
+                                        .get_global_keyed_state("n")
+                                        .await
+                                        .map_err(|err| UserError::new("failed to get global key value", err.to_string()))?;
 
-                            sequence_numbers.insert(
-                                ctx.task_info.operator_id.clone(),
-                                NatsState {
-                                    stream_name: self.stream.clone(),
-                                    stream_sequence_number: message_info.stream_sequence.clone()
+                                    // TODO: Should this be parallelized?
+                                    for (stream_name, sequence_number) in &sequence_numbers {
+                                        state.insert(stream_name.clone(), sequence_number.clone()).await;
+                                    }
+
+                                    let state_sequence_number = state
+                                        .get(&ctx.task_info.operator_id)
+                                        .map(|nats_state| nats_state.stream_sequence_number)
+                                        .unwrap();
+
+
+                                    if self.start_checkpoint(c, ctx).await {
+                                        return Ok(SourceFinishType::Immediate);
+                                    }
+
+                                    info!("Checkpoint done at sequence number #{}", state_sequence_number);
                                 }
-                            );
-
-                            // TODO: Has ACK to happens here at every message? Maybe it can be
-                            // done by ack only the last message before checkpointing in the below
-                            // `ControlMessage::Checkpoint` match.
-                            msg.ack().await.unwrap();
-                        },
-                        Some(Err(msg)) => {
-                            return Err(UserError::new("NATS message error", msg.to_string()));
-                        },
-                        None => {
-                            break
-                            info!("Finished reading message from {}", self.stream);
-                        },
+                                Some(ControlMessage::Stop { mode }) => {
+                                    info!("Stopping NATS source: {:?}", mode);
+                                    match mode {
+                                        StopMode::Graceful => {
+                                            return Ok(SourceFinishType::Graceful);
+                                        }
+                                        StopMode::Immediate => {
+                                            return Ok(SourceFinishType::Immediate);
+                                        }
+                                    }
+                                }
+                                Some(ControlMessage::Commit { .. }) => {
+                                    unreachable!("Sources shouldn't receive commit messages");
+                                }
+                                Some(ControlMessage::LoadCompacted {compacted}) => {
+                                    ctx.load_compacted(compacted).await;
+                                }
+                                Some(ControlMessage::NoOp) => {}
+                                None => {}
+                            }
+                        }
                     }
                 }
-                control_message = ctx.control_rx.recv() => {
-                    match control_message {
-                        Some(ControlMessage::Checkpoint(c)) => {
-                            debug!("Starting checkpointing {}", ctx.task_info.task_index);
-                            let state = ctx.table_manager
-                                .get_global_keyed_state("n")
-                                .await
-                                .map_err(|err| UserError::new("failed to get global key value", err.to_string()))?;
-
-                            // TODO: Should this be parallelized?
-                            for (stream_name, sequence_number) in &sequence_numbers {
-                                state.insert(stream_name.clone(), sequence_number.clone()).await;
+                Ok(SourceFinishType::Graceful)
+            }
+            SourceType::Subject(s) => {
+                let mut messages = nats_client.subscribe(s.clone()).await.unwrap();
+                loop {
+                    select! {
+                        message = messages.next() => {
+                            match message {
+                                Some(msg) => {
+                                    let payload = msg.payload.as_ref();
+                                    let timestamp = SystemTime::now();
+                                    ctx.deserialize_slice(&payload, timestamp).await?;
+                                    if ctx.should_flush() {
+                                        ctx.flush_buffer().await?;
+                                    }
+                                },
+                                None => {
+                                    break
+                                    info!("Finished reading message from {}", s.clone());
+                                },
                             }
-
-                            let state_sequence_number = state
-                                .get(&ctx.task_info.operator_id)
-                                .map(|nats_state| nats_state.stream_sequence_number)
-                                .unwrap();
-
-
-                            if self.start_checkpoint(c, ctx).await {
-                                return Ok(SourceFinishType::Immediate);
-                            }
-
-                            info!("Checkpoint done at sequence number #{}", state_sequence_number);
                         }
-                        Some(ControlMessage::Stop { mode }) => {
-                            info!("Stopping NATS source: {:?}", mode);
-                            match mode {
-                                StopMode::Graceful => {
-                                    return Ok(SourceFinishType::Graceful);
+                        control_message = ctx.control_rx.recv() => {
+                            match control_message {
+                                Some(ControlMessage::Checkpoint(c)) => {
+                                    // TODO: Is checkpointing necessary for subjects?
+                                    debug!("Starting checkpointing {}", ctx.task_info.task_index);
+                                    if self.start_checkpoint(c, ctx).await {
+                                        return Ok(SourceFinishType::Immediate);
+                                    }
                                 }
-                                StopMode::Immediate => {
-                                    return Ok(SourceFinishType::Immediate);
+                                Some(ControlMessage::Stop { mode }) => {
+                                    info!("Stopping NATS source: {:?}", mode);
+                                    match mode {
+                                        StopMode::Graceful => {
+                                            return Ok(SourceFinishType::Graceful);
+                                        }
+                                        StopMode::Immediate => {
+                                            return Ok(SourceFinishType::Immediate);
+                                        }
+                                    }
                                 }
+                                Some(ControlMessage::Commit { .. }) => {
+                                    unreachable!("Sources shouldn't receive commit messages");
+                                }
+                                Some(ControlMessage::LoadCompacted {compacted}) => {
+                                    ctx.load_compacted(compacted).await;
+                                }
+                                Some(ControlMessage::NoOp) => {}
+                                None => {}
                             }
                         }
-                        Some(ControlMessage::Commit { .. }) => {
-                            unreachable!("Sources shouldn't receive commit messages");
-                        }
-                        Some(ControlMessage::LoadCompacted {compacted}) => {
-                            ctx.load_compacted(compacted).await;
-                        }
-                        Some(ControlMessage::NoOp) => {}
-                        None => {}
                     }
                 }
+                Ok(SourceFinishType::Graceful)
             }
         }
-        Ok(SourceFinishType::Graceful)
     }
 }

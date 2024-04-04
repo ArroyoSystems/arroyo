@@ -1,6 +1,6 @@
-use super::get_nats_client;
 use super::NatsConfig;
 use super::NatsTable;
+use super::{get_nats_client, SinkType};
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
@@ -14,19 +14,25 @@ use std::collections::HashMap;
 use tracing::warn;
 
 pub struct NatsSinkFunc {
-    pub subject: String,
+    pub sink_type: SinkType,
     pub servers: String,
     pub connection: NatsConfig,
     pub table: NatsTable,
     pub publisher: Option<async_nats::Client>,
-    pub client_config: HashMap<String, String>,
     pub serializer: ArrowSerializer,
 }
 
 #[async_trait]
 impl ArrowOperator for NatsSinkFunc {
     fn name(&self) -> String {
-        format!("nats-publisher-{}", self.subject)
+        format!(
+            "nats-publisher-{}",
+            match &self.sink_type {
+                SinkType::Subject(s) => {
+                    s
+                }
+            }
+        )
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
@@ -59,7 +65,10 @@ impl ArrowOperator for NatsSinkFunc {
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
-        let nats_subject = async_nats::Subject::from(self.subject.clone());
+        let s = match &self.sink_type {
+            SinkType::Subject(s) => s,
+        };
+        let nats_subject = async_nats::Subject::from(s.clone());
         for msg in self.serializer.serialize(&batch) {
             match self
                 .publisher
