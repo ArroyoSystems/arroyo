@@ -58,7 +58,7 @@ arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/par
 arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
 arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
 arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes'}
-arrow-json = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'timestamp_formats'}
+arrow-json = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/json'}
 object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '0.9.0/put_part_api'}
 datafusion = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
 datafusion-common = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'reset_execs_36'}
