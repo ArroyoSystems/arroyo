@@ -267,7 +267,7 @@ impl ScalarUDFImpl for UdfDylib {
             .max()
             .unwrap();
 
-        let mut args = args
+        let args = args
             .iter()
             .map(|arg| {
                 let (array, schema) = match arg {
