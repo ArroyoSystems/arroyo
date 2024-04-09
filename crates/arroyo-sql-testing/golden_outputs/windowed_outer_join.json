@@ -23,4 +23,4 @@
 {"hour":"2023-09-19T12:00:00","drivers":101,"pickups":100}
 {"hour":"2023-09-19T13:00:00","drivers":99,"pickups":100}
 {"hour":"2023-09-19T14:00:00","drivers":99,"pickups":62}
-{"hour":"2023-09-19T15:00:00","drivers":10}
+{"hour":"2023-09-19T15:00:00","drivers":10,"pickups":null}
