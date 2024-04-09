@@ -142,6 +142,9 @@ pub const K8S_WORKER_VOLUMES_ENV: &str = "K8S_WORKER_VOLUMES";
 pub const K8S_WORKER_VOLUME_MOUNTS_ENV: &str = "K8S_WORKER_VOLUME_MOUNTS";
 pub const K8S_WORKER_CONFIG_MAP_ENV: &str = "K8S_WORKER_CONFIG_MAP";
 
+// node
+pub const NODE_SLOTS_ENV: &str = "NODE_SLOTS";
+
 // telemetry configuration
 pub const DISABLE_TELEMETRY_ENV: &str = "DISABLE_TELEMETRY";
 pub const POSTHOG_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";

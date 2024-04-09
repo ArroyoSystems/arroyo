@@ -39,6 +39,9 @@ enum Commands {
     /// Starts an Arroyo compiler
     Compiler {},
 
+    /// Starts an Arroyo node server
+    Node {},
+
     /// Runs database migrations on the configure Postgres database
     Migrate {
         /// If set, waits for the specified number of seconds until Postgres is ready before running migrations
@@ -91,6 +94,9 @@ async fn main() {
                 error!("{}", e);
                 exit(1);
             }
+        }
+        Commands::Node { .. } => {
+            start_node().await;
         }
     };
 }
@@ -272,6 +278,17 @@ async fn start_worker() {
             token.cancel();
         }
     });
+
+    let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
+}
+
+async fn start_node() {
+    let shutdown = Shutdown::new("node");
+    let id = arroyo_node::start_server(shutdown.guard("node")).await;
+
+    let _guard = arroyo_server_common::init_logging(&format!("node-{}", id.0,));
+
+    shutdown.spawn_task("admin", start_admin_server("worker", 0));
 
     let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
 }

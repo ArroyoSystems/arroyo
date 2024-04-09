@@ -1,35 +1,34 @@
+use std::env::current_exe;
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use arroyo_rpc::grpc::{
     controller_grpc_client::ControllerGrpcClient, node_grpc_server::NodeGrpc,
-    node_grpc_server::NodeGrpcServer, start_worker_req, GetWorkersReq, GetWorkersResp,
-    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq,
-    StopWorkerResp, StopWorkerStatus, WorkerFinishedReq,
+    node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp, HeartbeatNodeReq,
+    RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq, StopWorkerResp,
+    StopWorkerStatus, WorkerFinishedReq,
 };
-use arroyo_server_common::shutdown::Shutdown;
+use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{
-    grpc_port, ports, to_millis, NodeId, WorkerId, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV,
-    RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
+    default_controller_addr, grpc_port, ports, to_millis, NodeId, WorkerId, ARROYO_PROGRAM_ENV,
+    CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
 };
+use base64::engine::general_purpose;
+use base64::Engine;
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
-use rand::Rng;
-use std::os::unix::fs::PermissionsExt;
+use rand::random;
 use std::process::exit;
 use tokio::sync::mpsc::{channel, Sender};
-use tokio::{fs::File, io::AsyncWriteExt, process::Command, select};
-use tokio_stream::StreamExt;
-use tonic::{Request, Response, Status, Streaming};
+use tokio::{process::Command, select};
+use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
-
-const MAX_BIN_SIZE: usize = 300 * 1024 * 1024;
 
 lazy_static! {
     static ref WORKERS: Gauge = register_gauge!(
@@ -53,34 +52,6 @@ pub struct NodeServer {
     workers: Arc<Mutex<HashMap<WorkerId, WorkerStatus>>>,
 }
 
-async fn create_file_if_needed(path: &Path, contents: &[u8], mode: Option<u32>) {
-    for i in 0..10 {
-        if path.exists() {
-            return;
-        }
-        match File::create(&path).await {
-            Ok(mut file) => {
-                file.write_all(contents).await.unwrap();
-                if let Some(mode) = mode {
-                    let mut perms = file.metadata().await.unwrap().permissions();
-                    perms.set_mode(mode);
-                    file.set_permissions(perms).await.unwrap();
-                }
-                return;
-            }
-            Err(err) => {
-                if err.kind() == tokio::io::ErrorKind::AlreadyExists {
-                    return;
-                } else {
-                    warn!("Failed to create file on attempt {}: {:?}", i, err);
-                }
-            }
-        };
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("Exhausted attempts to create file");
-}
-
 async fn signal_process(signal: &str, pid: u32) -> bool {
     tokio::process::Command::new("kill")
         .arg("-s")
@@ -93,93 +64,50 @@ async fn signal_process(signal: &str, pid: u32) -> bool {
 }
 
 impl NodeServer {
-    async fn start_worker_int(&self, mut s: Streaming<StartWorkerReq>) -> anyhow::Result<WorkerId> {
-        let start_worker_req::Msg::Header(header) = s
-            .next()
-            .await
-            .ok_or_else(|| anyhow!("Didn't receive header"))??
-            .msg
-            .unwrap()
-        else {
-            bail!("First message was not a header");
-        };
-
-        if header.node_id != self.id.0 {
+    async fn start_worker_int(&self, req: StartWorkerReq) -> anyhow::Result<WorkerId> {
+        if req.node_id != self.id.0 {
             warn!(
                 "incorrect node id for job {}, expected {}, got {}",
-                header.job_id, self.id.0, header.node_id
+                req.job_id, self.id.0, req.node_id
             );
             bail!(
                 "incorrect node_id, expected {}, got {}",
                 self.id.0,
-                header.node_id
+                req.node_id
             );
         }
 
-        info!("Receiving binary for job {}", header.job_id);
-
-        let dir = PathBuf::from_str(&format!("/tmp/arroyo-node-{}/{}", self.id.0, header.job_id,))
-            .unwrap();
+        let dir =
+            PathBuf::from_str(&format!("/tmp/arroyo-node-{}/{}", self.id.0, req.job_id,)).unwrap();
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
-        let wasm = dir.join("wasm_fns_bg.wasm");
-        create_file_if_needed(&wasm, &header.wasm, None).await;
-
-        // TODO: write the file as bytes are streamed in
-
-        let mut buf = vec![0; (header.binary_size as usize).min(MAX_BIN_SIZE)];
-        let mut bytes = 0;
-        let mut next_part = 0;
-        loop {
-            let next = s
-                .next()
-                .await
-                .ok_or_else(|| anyhow!("Closed before sending all parts"))??;
-
-            let start_worker_req::Msg::Data(data) = next.msg.unwrap() else {
-                bail!("Expected data message");
-            };
-
-            if next_part != data.part {
-                bail!("Expected part {}, received part {}", next_part, data.part);
-            }
-            next_part += 1;
-
-            buf[bytes..bytes + data.data.len()].copy_from_slice(&data.data);
-            bytes += data.data.len();
-
-            if !data.has_more {
-                break;
-            }
-        }
-
-        let bin = dir.join("pipeline");
-        create_file_if_needed(&bin, &buf, Some(0o776)).await;
-        drop(buf);
-
-        info!("Starting worker for job {}", header.job_id);
+        info!("Starting worker for job {}", req.job_id);
 
         // TODO: Check that we have enough slots to schedule this
-        let slots = header.slots;
+        let slots = req.slots;
         let state = Arc::clone(&self.workers);
-        let worker_id = WorkerId(rand::thread_rng().gen());
+        let worker_id = WorkerId(random());
         let node_id = self.id;
         let finished_tx = self.worker_finished_tx.clone();
+        let program = general_purpose::STANDARD_NO_PAD.encode(&req.program);
 
         let mut workers = self.workers.lock().unwrap();
 
-        let mut command = Command::new("./pipeline");
-        for (env, value) in header.env_vars {
+        let mut command = Command::new(current_exe().expect("Could not get path of worker binary"));
+
+        for (env, value) in req.env_vars {
             command.env(env, value);
         }
+
         let mut child = command
+            .arg("worker")
             .env("RUST_LOG", "info")
             .env(WORKER_ID_ENV, format!("{}", worker_id.0))
             .env(NODE_ID_ENV, format!("{}", node_id.0))
-            .env(JOB_ID_ENV, header.job_id.clone())
+            .env(JOB_ID_ENV, req.job_id.clone())
             .env(TASK_SLOTS_ENV, format!("{}", slots))
-            .env(RUN_ID_ENV, format!("{}", header.run_id))
-            .current_dir(&dir)
+            .env(RUN_ID_ENV, format!("{}", req.run_id))
+            .env(ARROYO_PROGRAM_ENV, program)
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| Status::internal(format!("Failed to start worker: {:?}", e)))?;
@@ -187,8 +115,8 @@ impl NodeServer {
         workers.insert(
             worker_id,
             WorkerStatus {
-                name: header.name,
-                job_id: header.job_id.clone(),
+                name: req.name,
+                job_id: req.job_id.clone(),
                 slots: slots as usize,
                 running: true,
                 pid: child
@@ -197,13 +125,12 @@ impl NodeServer {
             },
         );
 
-        let job_id = header.job_id;
+        let job_id = req.job_id;
         tokio::spawn(async move {
             let status = child.wait().await;
 
             info!(
                 message = "child exited",
-                path = format!("{:?}", bin),
                 code = status.map(|s| s.code()).unwrap_or(None),
                 job_id
             );
@@ -233,12 +160,12 @@ impl NodeServer {
 impl NodeGrpc for NodeServer {
     async fn start_worker(
         &self,
-        request: Request<Streaming<StartWorkerReq>>,
+        request: Request<StartWorkerReq>,
     ) -> Result<Response<StartWorkerResp>, Status> {
-        let in_stream = request.into_inner();
+        let req = request.into_inner();
 
         let worker_id = self
-            .start_worker_int(in_stream)
+            .start_worker_int(req)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -313,10 +240,9 @@ impl NodeGrpc for NodeServer {
     }
 }
 
-#[tokio::main]
-pub async fn main() {
+pub async fn start_server(guard: ShutdownGuard) -> NodeId {
     let controller_addr =
-        std::env::var(CONTROLLER_ADDR_ENV).expect("CONTROLLER_ADDR env variable not set");
+        std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| default_controller_addr());
 
     let task_slots = std::env::var("NODE_SLOTS")
         .map(|s| usize::from_str(&s).unwrap())
@@ -324,9 +250,8 @@ pub async fn main() {
 
     let grpc = grpc_port("node", ports::NODE_GRPC);
 
-    let node_id = NodeId(rand::thread_rng().gen());
+    let node_id = NodeId(random());
 
-    let _guard = arroyo_server_common::init_logging(&format!("node-{}", node_id.0));
     let (worker_finished_tx, mut worker_finished_rx) = channel(128);
 
     let server = NodeServer {
@@ -340,15 +265,7 @@ pub async fn main() {
         "Starting node server on {} with {} slots",
         bind_addr, task_slots
     );
-
-    let shutdown = Shutdown::new("node");
-
-    shutdown.spawn_task(
-        "admin",
-        arroyo_server_common::start_admin_server("node", ports::NODE_ADMIN),
-    );
-
-    shutdown.spawn_task(
+    guard.spawn_task(
         "grpc",
         arroyo_server_common::grpc_server()
             .max_frame_size(Some((1 << 24) - 1)) // 16MB
@@ -359,14 +276,15 @@ pub async fn main() {
     let req_addr = format!("{}:{}", local_ip_address::local_ip().unwrap(), grpc);
 
     // TODO: replace this with some sort of hook on server startup
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    if shutdown.is_canceled() {
+    if guard.is_cancelled() {
         // don't register if the server failed to bind
-        exit(1);
+        guard.cancel();
+        return node_id;
     }
 
-    shutdown.spawn_task("connect-thread", async move {
+    guard.into_spawn_task(async move {
         let mut attempts = 0;
         loop {
             match ControllerGrpcClient::connect(controller_addr.clone()).await {
@@ -420,5 +338,5 @@ pub async fn main() {
         }
     });
 
-    let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
+    node_id
 }

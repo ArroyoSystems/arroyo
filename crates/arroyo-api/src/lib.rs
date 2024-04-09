@@ -37,7 +37,8 @@ use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipeline
 use arroyo_rpc::formats::*;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_types::{
-    ports, service_port, COMPILER_ADDR_ENV, COMPILER_PORT_ENV, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
+    default_controller_addr, ports, service_port, COMPILER_ADDR_ENV, COMPILER_PORT_ENV,
+    CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
 };
 
 mod cloud;
@@ -151,8 +152,8 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
 }
 
 pub async fn start_server(pool: Pool) {
-    let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
-        .unwrap_or_else(|_| format!("http://localhost:{}", ports::CONTROLLER_GRPC));
+    let controller_addr =
+        std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| default_controller_addr());
 
     let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
     let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
