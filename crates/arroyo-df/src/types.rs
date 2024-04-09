@@ -178,7 +178,11 @@ fn convert_simple_data_type(
             3 => Ok(DataType::Timestamp(TimeUnit::Millisecond, None)),
             6 => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
             9 => Ok(DataType::Timestamp(TimeUnit::Nanosecond, None)),
-            _ => bail!("unsupported precision {}", precision),
+            _ => bail!(
+                "unsupported precision {} -- supported precisions are 0 (seconds), \
+            3 (milliseconds), 6 (microseconds), and 9 (nanoseconds)",
+                precision
+            ),
         },
         SQLDataType::Date => Ok(DataType::Date32),
         SQLDataType::Time(None, tz_info) => {

@@ -2,9 +2,9 @@ use crate::avro::schema;
 use crate::{avro, json};
 use arrow_array::cast::AsArray;
 use arrow_array::RecordBatch;
-use arrow_json::writer::record_batches_to_json_rows;
+use arrow_json::writer::record_batches_to_json_rows_opts;
 use arrow_schema::{DataType, Field};
-use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, RawStringFormat};
+use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, RawStringFormat, TimestampFormat};
 use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
 use std::sync::Arc;
@@ -97,7 +97,15 @@ impl ArrowSerializer {
             v
         });
 
-        let rows = record_batches_to_json_rows(&[batch]).unwrap();
+        let rows = record_batches_to_json_rows_opts(
+            &[batch],
+            true,
+            match json.timestamp_format {
+                TimestampFormat::RFC3339 => arrow_json::writer::TimestampFormat::RFC3339,
+                TimestampFormat::UnixMillis => arrow_json::writer::TimestampFormat::UnixMillis,
+            },
+        )
+        .unwrap();
 
         let include_schema = json.include_schema.then(|| self.kafka_schema.clone());
 
@@ -195,8 +203,9 @@ impl ArrowSerializer {
 #[cfg(test)]
 mod tests {
     use crate::ser::ArrowSerializer;
+    use arrow_array::builder::TimestampNanosecondBuilder;
     use arrow_schema::{Schema, TimeUnit};
-    use arroyo_rpc::formats::{Format, RawStringFormat};
+    use arroyo_rpc::formats::{Format, RawStringFormat, TimestampFormat};
     use arroyo_types::to_nanos;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
@@ -291,5 +300,56 @@ mod tests {
         assert_eq!(iter.next().unwrap(), br#"{"value":"blah","number":3}"#);
         assert_eq!(iter.next().unwrap(), br#"{"value":"whatever","number":4}"#);
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_json_unix_ts() {
+        let mut serializer = ArrowSerializer::new(Format::Json(arroyo_rpc::formats::JsonFormat {
+            confluent_schema_registry: false,
+            schema_id: None,
+            include_schema: false,
+            debezium: false,
+            unstructured: false,
+            timestamp_format: TimestampFormat::UnixMillis,
+        }));
+
+        let mut timestamp_array = TimestampNanosecondBuilder::new();
+        timestamp_array.append_value(1612274910045331968);
+        timestamp_array.append_null();
+        timestamp_array.append_value(1712274910045331968);
+        let ts = Arc::new(timestamp_array.finish());
+
+        let event_times: Vec<_> = ts
+            .iter()
+            .enumerate()
+            .map(|(i, _)| to_nanos(SystemTime::now() + Duration::from_secs(i as u64)) as i64)
+            .collect();
+
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new(
+                "value",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                true,
+            ),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let batch = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![
+                ts,
+                Arc::new(arrow_array::TimestampNanosecondArray::from(event_times)),
+            ],
+        )
+        .unwrap();
+
+        let mut iter = serializer.serialize(&batch);
+        assert_eq!(iter.next().unwrap(), br#"{"value":1612274910045.332}"#);
+        assert_eq!(iter.next().unwrap(), br#"{"value":null}"#);
+        assert_eq!(iter.next().unwrap(), br#"{"value":1712274910045.332}"#);
     }
 }
