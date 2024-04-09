@@ -106,6 +106,21 @@ message WindowFunctionOperator {
   bytes window_function_plan = 4;
 }
 
+enum AsyncUdfOrdering {
+  UNORDERED = 0;
+  ORDERED = 1;
+}
+
+message AsyncUdfOperator {
+  string name = 1;
+  ArrowDylibUdfConfig udf = 2;
+  bytes arg_projection = 3;
+  bytes final_projection = 4;
+  repeated uint32 input_columns = 5;
+  AsyncUdfOrdering ordering = 6;
+  uint32 max_concurrency = 7;
+}
+
 message WasmUdfs {
   string name = 1;
   repeated WasmFunction wasm_functions = 2;

@@ -6,7 +6,6 @@ use std::{mem, thread};
 use std::time::SystemTime;
 
 use arroyo_connectors::connectors;
-use arroyo_df::physical::new_registry;
 use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
 use futures::stream::FuturesUnordered;
@@ -21,7 +20,6 @@ use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructo
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operators::watermark_generator::WatermarkGeneratorConstructor;
 use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
@@ -42,6 +40,8 @@ use petgraph::Direction;
 use prometheus::labels;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
+use arroyo_df::physical::new_registry;
+use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {

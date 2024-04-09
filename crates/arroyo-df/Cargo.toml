@@ -46,8 +46,6 @@ apache-avro = "0.16.0"
 prettyplease = "0.2.4"
 unicase = "2.7.0"
 toml = "0.8.8"
-dlopen2 = "0.7"
-dlopen2_derive = "0.4"
 
 [dev-dependencies]
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}

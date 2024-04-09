@@ -9,17 +9,23 @@ use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
-use datafusion::logical_expr::{AggregateUDF, ScalarUDF, WindowUDF};
+use datafusion::logical_expr::{AggregateUDF, ScalarUDF, Signature, Volatility, WindowUDF};
 use futures::future::OptionFuture;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::Barrier;
+use anyhow::anyhow;
+use dlopen2::wrapper::Container;
+use tokio::sync::{Barrier, Mutex};
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
+use arroyo_datastream::logical::DylibUdfConfig;
+use arroyo_storage::StorageProvider;
+use crate::udfs::UdfDylib;
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -485,11 +491,53 @@ pub trait ArrowOperator: Send + 'static {
 
 #[derive(Default)]
 pub struct Registry {
+    dylibs: Arc<Mutex<HashMap<String, Arc<UdfDylib>>>>,
     udfs: HashMap<String, Arc<ScalarUDF>>,
     udafs: HashMap<String, Arc<AggregateUDF>>,
 }
 
 impl Registry {
+    pub async fn load_dylib(&self, name: &str, config: &DylibUdfConfig) -> anyhow::Result<Arc<UdfDylib>> {
+        let mut dylibs = self.dylibs.lock().await;
+        if let Some(dylib) = dylibs.get(&config.dylib_path) {
+            return Ok(Arc::clone(dylib));
+        }
+        
+        // Download a UDF dylib from the object store
+        let signature = Signature::exact(config.arg_types.clone(), Volatility::Volatile);
+
+        let udf = StorageProvider::get_url(&config.dylib_path)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Unable to fetch UDF dylib from '{}': {:?}",
+                    config.dylib_path, e
+                )
+            });
+
+        // write the dylib to a local file
+        let local_udfs_dir = "/tmp/arroyo/local_udfs";
+        tokio::fs::create_dir_all(local_udfs_dir)
+            .await
+            .map_err(|e| anyhow!("unable to create local udfs dir: {:?}", e))?;
+
+        let dylib_file_name = Path::new(&config.dylib_path)
+            .file_name()
+            .ok_or_else(|| anyhow!("Invalid dylib path: {}", config.dylib_path))?;
+        let local_dylib_path = Path::new(local_udfs_dir).join(dylib_file_name);
+
+        tokio::fs::write(&local_dylib_path, udf)
+            .await
+            .map_err(|e| anyhow!("unable to write dylib to file: {:?}", e))?;
+
+        let container = unsafe { Container::load(local_dylib_path).unwrap() };
+        
+        let udf = Arc::new(UdfDylib::new(name.to_string(), signature, config.return_type.clone(), container));
+        dylibs.insert(name.to_string(), udf.clone());
+        
+        Ok(udf)
+    } 
+    
     pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {
         self.udfs.insert(udf.name().to_string(), udf);
     }

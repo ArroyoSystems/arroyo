@@ -713,8 +713,6 @@ dependencies = [
  "datafusion-expr 36.0.0",
  "datafusion-physical-expr 36.0.0",
  "datafusion-proto 36.0.0",
- "dlopen2",
- "dlopen2_derive",
  "glob",
  "petgraph",
  "prettyplease",
@@ -812,15 +810,19 @@ dependencies = [
  "ahash 0.8.7",
  "anyhow",
  "arrow",
+ "arroyo-datastream",
  "arroyo-formats",
  "arroyo-metrics",
  "arroyo-rpc",
  "arroyo-state",
+ "arroyo-storage",
  "arroyo-types",
+ "async-ffi",
  "async-stream",
  "async-trait",
  "bincode 2.0.0-rc.3",
  "datafusion 36.0.0",
+ "dlopen2",
  "futures",
  "prost 0.12.3",
  "rand",
@@ -1010,6 +1012,7 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "async-compression",
+ "async-ffi",
  "async-stream",
  "async-trait",
  "aws-config",
@@ -1025,6 +1028,8 @@ dependencies = [
  "datafusion-physical-expr 36.0.0",
  "datafusion-physical-plan 36.0.0",
  "datafusion-proto 36.0.0",
+ "dlopen2",
+ "dlopen2_derive",
  "futures",
  "governor",
  "hex",
@@ -1117,6 +1122,12 @@ dependencies = [
  "futures-lite 2.2.0",
  "slab",
 ]
+
+[[package]]
+name = "async-ffi"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4de21c0feef7e5a556e51af767c953f0501f7f300ba785cc99c47bdc8081a50"
 
 [[package]]
 name = "async-global-executor"

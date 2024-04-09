@@ -4,7 +4,7 @@
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
@@ -16,8 +16,8 @@ use arroyo_rpc::grpc::{
     TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
 use arroyo_types::{
-    default_controller_addr, from_millis, grpc_port, to_micros, CheckpointBarrier, NodeId,
-    WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV,
+    ARROYO_PROGRAM_ENV, CheckpointBarrier, default_controller_addr, from_millis, grpc_port, JOB_ID_ENV,
+    NodeId, RUN_ID_ENV, to_micros, WorkerId,
 };
 use local_ip_address::local_ip;
 use rand::random;
@@ -45,15 +45,14 @@ use prost::Message;
 
 use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
 use arroyo_df::inner_type;
-use arroyo_df::physical::{new_registry, UdfDylib};
-use arroyo_df::udafs::{ArroyoUdaf, UdafArg};
+use arroyo_df::physical::new_registry;
+use arroyo_operator::udfs::{ArroyoUdaf, SyncUdfDylib, UdafArg, UdfDylib};
 use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod arrow;
 
 pub mod engine;
 mod network_manager;
-pub mod operators;
 
 pub const PROMETHEUS_PUSH_GATEWAY: &str = "localhost:9091";
 pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);
@@ -426,7 +425,11 @@ impl WorkerGrpc for WorkerServer {
         let mut registry = new_registry();
 
         for (udf_name, dylib_config) in self.program_config.udf_dylibs.iter() {
-            let dylib = UdfDylib::init(udf_name, dylib_config).await;
+            let dylib: SyncUdfDylib = (&*registry.load_dylib(udf_name, dylib_config).await?)
+                .try_into()
+                .map_err(|e| e.context(format!("loading UDF {udf_name}")))?;
+            
+            let dylib = Arc::new(dylib);
 
             if dylib_config.aggregate {
                 let output_type = Arc::new(dylib_config.return_type.clone());

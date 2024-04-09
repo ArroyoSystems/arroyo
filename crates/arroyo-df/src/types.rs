@@ -92,31 +92,6 @@ pub fn rust_to_arrow(typ: &Type) -> Option<NullableType> {
     }
 }
 
-pub fn array_to_columnar_value(array: ArrayData, data_type: &DataType) -> ColumnarValue {
-    if array.len() != 1 {
-        return ColumnarValue::Array(make_array(array));
-    }
-
-    let scalar = match data_type {
-        DataType::Utf8 => {
-            ScalarValue::Utf8(Some(array::StringArray::from(array).value(0).to_string()))
-        }
-        DataType::Boolean => ScalarValue::Boolean(Some(array::BooleanArray::from(array).value(0))),
-        DataType::Int8 => ScalarValue::Int8(Some(array::Int8Array::from(array).value(0))),
-        DataType::Int16 => ScalarValue::Int16(Some(array::Int16Array::from(array).value(0))),
-        DataType::Int32 => ScalarValue::Int32(Some(array::Int32Array::from(array).value(0))),
-        DataType::Int64 => ScalarValue::Int64(Some(array::Int64Array::from(array).value(0))),
-        DataType::UInt8 => ScalarValue::UInt8(Some(array::UInt8Array::from(array).value(0))),
-        DataType::UInt16 => ScalarValue::UInt16(Some(array::UInt16Array::from(array).value(0))),
-        DataType::UInt32 => ScalarValue::UInt32(Some(array::UInt32Array::from(array).value(0))),
-        DataType::UInt64 => ScalarValue::UInt64(Some(array::UInt64Array::from(array).value(0))),
-        DataType::Float32 => ScalarValue::Float32(Some(array::Float32Array::from(array).value(0))),
-        DataType::Float64 => ScalarValue::Float64(Some(array::Float64Array::from(array).value(0))),
-        _ => panic!("Unsupported DataType: {:?}", data_type),
-    };
-    ColumnarValue::Scalar(scalar)
-}
-
 // Pulled from DataFusion
 
 pub(crate) fn convert_data_type(
