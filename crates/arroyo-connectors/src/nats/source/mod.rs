@@ -69,6 +69,7 @@ impl SourceOperator for NatsSourceFunc {
                     })
                     .await
                     .unwrap();
+                // TODO: Fix panicking `NATS message error: missed idle heartbeat`
                 panic!("{}: {}", err.name, err.details);
             }
         }
@@ -88,13 +89,15 @@ impl NatsSourceFunc {
             .expect("NATS source must have a format configured");
         let framing = config.framing;
 
-        let stream = match &table.connector_type {
-            ConnectorType::Source { source_type, .. } => source_type.as_ref().unwrap(),
-            _ => panic!("NATS source must have a stream configured"),
+        let source = match &table.connector_type {
+            ConnectorType::Source { source_type, .. } => source_type,
+            _ => panic!("NATS source must have a source type configured"),
         };
 
         Self {
-            source_type: stream.clone(),
+            source_type: source
+                .clone()
+                .expect("Either a stream or a subject must be configured as NATS source"),
             servers: connection.servers.clone(),
             connection,
             table,
@@ -117,8 +120,18 @@ impl NatsSourceFunc {
         stream_name: String,
     ) -> async_nats::jetstream::stream::Stream {
         let jetstream = async_nats::jetstream::new(client);
-        let mut stream = jetstream.get_stream(&stream_name).await.unwrap();
-        let stream_info = stream.info().await.unwrap();
+
+        // TODO: Intentional panicking constructs, should the error
+        // handling be more explicit or informative?
+        let mut stream = jetstream
+            .get_stream(&stream_name)
+            .await
+            .expect("Stream couldn't be instatiated correctly");
+
+        let stream_info = stream
+            .info()
+            .await
+            .expect("No information could be obtained from stream");
 
         info!("<---------------------------------------------->");
         info!("Stream - timestamp of creation: {}", &stream_info.created);
@@ -218,9 +231,13 @@ impl NatsSourceFunc {
         let mut consumer = stream
             .create_consumer(consumer_config.clone())
             .await
-            .unwrap();
+            .expect("Something went wrong instantiating the NATS consumer.");
 
-        let consumer_info = consumer.info().await.unwrap();
+        let consumer_info = consumer
+            .info()
+            .await
+            .expect("Failed to get info from the NATS consumer.");
+
         info!(
             "Consumer - timestamp of creation: {}",
             &consumer_info.created
@@ -249,23 +266,24 @@ impl NatsSourceFunc {
         consumer
     }
 
-    async fn get_start_sequence_number(&self, ctx: &mut ArrowContext) -> u64 {
-        let state = ctx
+    async fn get_start_sequence_number(&self, ctx: &mut ArrowContext) -> anyhow::Result<u64> {
+        let state: Vec<_> = ctx
             .table_manager
             .get_global_keyed_state::<String, NatsState>("n")
-            .await
-            .map_err(|err| UserError::new("failed to get global key value", err.to_string()))
-            .unwrap()
-            .get_all();
+            .await?
+            .get_all()
+            .values()
+            .collect();
 
         if !state.is_empty() {
             let state_sequence_number = state
-                .get(&ctx.task_info.operator_id)
+                .iter()
                 .map(|nats_state| nats_state.stream_sequence_number)
-                .unwrap();
-            state_sequence_number + 1
+                .max()
+                .expect("No sequence number could be fetched from the state");
+            Ok(state_sequence_number + 1)
         } else {
-            1
+            Ok(1)
         }
     }
 
@@ -276,18 +294,24 @@ impl NatsSourceFunc {
             self.bad_data.clone(),
         );
 
-        let nats_client = get_nats_client(&self.connection).await.unwrap();
+        let nats_client = get_nats_client(&self.connection)
+            .await
+            .expect("Failed instantiating NATS client");
 
         match self.source_type.clone() {
             SourceType::Stream(s) => {
-                let start_sequence = self.get_start_sequence_number(ctx).await;
+                let start_sequence = self
+                    .get_start_sequence_number(ctx)
+                    .await
+                    .expect("Failed to get start sequence number");
                 let nats_stream = &self.get_nats_stream(nats_client.clone(), s.clone()).await;
                 let mut messages = self
                     .create_nats_consumer(nats_stream, start_sequence, ctx)
                     .await
                     .messages()
                     .await
-                    .unwrap();
+                    .expect("No stream of messages found for consumer");
+
                 let mut sequence_numbers: HashMap<String, NatsState> = HashMap::new();
 
                 loop {
@@ -296,7 +320,7 @@ impl NatsSourceFunc {
                             match message {
                                 Some(Ok(msg)) => {
                                     let payload = msg.payload.as_ref();
-                                    let message_info = msg.info().unwrap();
+                                    let message_info = msg.info().expect("Couldn't get message information");
                                     let timestamp = message_info.published.into() ;
 
                                     ctx.deserialize_slice(&payload, timestamp).await?;
@@ -346,7 +370,12 @@ impl NatsSourceFunc {
                                     // TODO: Has ACK to happens here at every message? Maybe it can be
                                     // done by ack only the last message before checkpointing in the below
                                     // `ControlMessage::Checkpoint` match.
-                                    msg.ack().await.unwrap();
+                                    match msg.ack().await {
+                                        Ok(_) => (),
+                                        Err(e) => {
+                                            return Err(UserError::new("NATS message acknowledgmnent error: {}", e.to_string()));
+                                        }
+                                    }
                                 },
                                 Some(Err(msg)) => {
                                     return Err(UserError::new("NATS message error", msg.to_string()));
@@ -374,14 +403,14 @@ impl NatsSourceFunc {
                                     let state_sequence_number = state
                                         .get(&ctx.task_info.operator_id)
                                         .map(|nats_state| nats_state.stream_sequence_number)
-                                        .unwrap();
-
+                                        .ok_or_else(|| UserError::new("No sequence number could be fetched from the state", "")
+                                    );
 
                                     if self.start_checkpoint(c, ctx).await {
                                         return Ok(SourceFinishType::Immediate);
                                     }
 
-                                    info!("Checkpoint done at sequence number #{}", state_sequence_number);
+                                    info!("Checkpoint done at sequence number #{:?}", state_sequence_number);
                                 }
                                 Some(ControlMessage::Stop { mode }) => {
                                     info!("Stopping NATS source: {:?}", mode);
@@ -409,7 +438,10 @@ impl NatsSourceFunc {
                 Ok(SourceFinishType::Graceful)
             }
             SourceType::Subject(s) => {
-                let mut messages = nats_client.subscribe(s.clone()).await.unwrap();
+                let mut messages = nats_client
+                    .subscribe(s.clone())
+                    .await
+                    .expect("Failed subscribing to NATS subject");
                 loop {
                     select! {
                         message = messages.next() => {

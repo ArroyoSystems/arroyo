@@ -268,7 +268,7 @@ impl Connector for NatsConnector {
                     connection: profile.clone(),
                     table: table.clone(),
                     framing: config.framing,
-                    format: config.format.unwrap(),
+                    format: config.format.expect("Format must be set for NATS source"),
                     bad_data: config.bad_data,
                     messages_per_second: NonZeroU32::new(
                         config
@@ -288,7 +288,9 @@ impl Connector for NatsConnector {
                     connection: profile.clone(),
                     table: table.clone(),
                     publisher: None,
-                    serializer: ArrowSerializer::new(config.format.unwrap()),
+                    serializer: ArrowSerializer::new(
+                        config.format.expect("Format must be set for NATS source"),
+                    ),
                 }))
             }
         })
@@ -299,7 +301,13 @@ async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::
     let mut opts = async_nats::ConnectOptions::new();
 
     let servers_str = connection.servers.clone();
-    let servers_vec: Vec<ServerAddr> = servers_str.split(',').map(|s| s.parse().unwrap()).collect();
+    let servers_vec: Vec<ServerAddr> = servers_str
+        .split(',')
+        .map(|s| {
+            s.parse::<ServerAddr>()
+                .expect("Something went wrong while parsing servers string")
+        })
+        .collect();
 
     match &connection.authentication {
         NatsConfigAuthentication::None {} => {}

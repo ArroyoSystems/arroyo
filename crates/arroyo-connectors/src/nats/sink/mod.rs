@@ -61,7 +61,17 @@ impl ArrowOperator for NatsSinkFunc {
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut ArrowContext) {
         // TODO: Implement checkpointing of in-progress data to avoid depending on
         // the downstream NATS availability to flush and checkpoint.
-        self.publisher.as_mut().unwrap().flush().await.unwrap();
+        let publisher = self
+            .publisher
+            .as_mut()
+            .expect("Something went wrong while instantiating the publisher.");
+
+        match publisher.flush().await {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("Failed to flush NATS publisher: {:?}", e);
+            }
+        }
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
@@ -70,13 +80,12 @@ impl ArrowOperator for NatsSinkFunc {
         };
         let nats_subject = async_nats::Subject::from(s.clone());
         for msg in self.serializer.serialize(&batch) {
-            match self
+            let publisher = self
                 .publisher
                 .as_mut()
-                .unwrap()
-                .publish(nats_subject.clone(), msg.into())
-                .await
-            {
+                .expect("Something went wrong while instantiating the publisher.");
+
+            match publisher.publish(nats_subject.clone(), msg.into()).await {
                 Ok(_) => {}
                 Err(e) => {
                     ctx.control_tx
@@ -87,7 +96,7 @@ impl ArrowOperator for NatsSinkFunc {
                             details: e.to_string(),
                         })
                         .await
-                        .unwrap();
+                        .expect("Something went wrong, data will never be received.");
                     panic!("Panicked while processing element: {}", e.to_string());
                 }
             }
