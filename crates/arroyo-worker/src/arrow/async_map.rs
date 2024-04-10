@@ -8,6 +8,7 @@ use arrow_array::RecordBatch;
 use async_ffi::FfiFuture;
 use datafusion_expr::ScalarUDFImpl;
 use datafusion_physical_plan::ExecutionPlan;
+use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::executor::block_on;
 use tokio::time::error::Elapsed;
 use tracing::{debug, info, warn};
@@ -19,46 +20,13 @@ use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_state::global_table_config;
 
-pub enum FuturesEnum {
-    Ordered(FuturesOrdered<FfiFuture<FfiArraySchemaPair>>),
-    Unordered(FuturesUnordered<FfiFuture<FfiArraySchemaPair>>),
-}
 
-impl FuturesEnum {
-    pub fn push_back(&mut self, f: FfiFuture<FfiArraySchemaPair>) {
-        match self {
-            FuturesEnum::Ordered(futures) => futures.push_back(f),
-            FuturesEnum::Unordered(futures) => futures.push(f),
-        }
-    }
-
-    pub async fn next(&mut self) -> Option<FfiArraySchemaPair> {
-        match self {
-            FuturesEnum::Ordered(futures) => futures.next().await,
-            FuturesEnum::Unordered(futures) => futures.next().await,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            FuturesEnum::Ordered(futures) => futures.len(),
-            FuturesEnum::Unordered(futures) => futures.len(),
-        }
-    }
-    pub fn is_ordered(&self) -> bool {
-        match self {
-            FuturesEnum::Ordered(_) => true,
-            FuturesEnum::Unordered(_) => false,
-        }
-    }
-}
 
 pub struct AsyncMapOperator{
     name: String,
     udf: Arc<UdfDylib>,
-    futures: FuturesEnum,
     max_concurrency: u64,
-
+    
     input_projection: Box<dyn ExecutionPlan>,
     final_projection: Box<dyn ExecutionPlan>,
     next_id: usize, // i.e. inputs received so far, should start at 0
@@ -79,20 +47,8 @@ impl OperatorConstructor for AsyncMapOperator {
         // TODO: figure out a better strategy here
         let udf = block_on(registry.load_dylib(&config.name, &udf_config))?;
         
-        let input_projection = 
-        
-        Ok(OperatorNode::from_operator(
-            Box::new(Self::new(config.name, udf, ordered, config.max_concurrency as u64))))
-    }
-}
+        let input_projection = PhysicalPlanNode::decode(&mut config.)
 
-impl AsyncMapOperator {
-    pub fn new(
-        name: String,
-        udf: Arc<UdfDylib>,
-        ordered: bool,
-        max_concurrency: u64,
-    ) -> Self {
         let futures = if ordered {
             info!("Using ordered futures");
             FuturesEnum::Ordered(FuturesOrdered::new())
@@ -101,7 +57,8 @@ impl AsyncMapOperator {
             FuturesEnum::Unordered(FuturesUnordered::new())
         };
 
-        Self {
+        Ok(OperatorNode::from_operator(
+            Box::new(Self {
             name,
             udf,
             futures,
@@ -109,9 +66,11 @@ impl AsyncMapOperator {
             next_id: 0,
             inputs: VecDeque::new(),
             watermarks: VecDeque::new(),
-        }
+        })))
     }
+}
 
+impl AsyncMapOperator {
     async fn on_collect(&mut self, id: usize, ctx: &mut ArrowContext) {
         // mark the input as collected by setting it to None,
         // then pop all the Nones from the front of the queue
@@ -131,40 +90,6 @@ impl AsyncMapOperator {
         }
     }
     
-    async fn handle_future(
-        &mut self,
-        id: usize,
-        result: Result<OutT, Elapsed>,
-        ctx: &mut ArrowContext,
-    ) {
-        match result {
-            Ok(value) => {
-                let index = self.inputs.len() - (self.next_id - id);
-                let input = self.inputs[index].clone().unwrap();
-                ctx.collector
-                    .collect(Record {
-                        timestamp: input.timestamp,
-                        key: input.key.clone(),
-                        value,
-                    })
-                    .await;
-                self.on_collect(id, ctx).await;
-            }
-            Err(_e) => {
-                if self.futures.is_ordered() {
-                    unimplemented!(
-                        "Ordered Async UDF timed out, currently panic to preserve ordering"
-                    );
-                }
-                warn!("Unordered Async UDF timed out, retrying");
-                self.futures.push_back((self.udf)(
-                    id,
-                    self.inputs[id].clone().unwrap().value.clone(),
-                    self.udf_context.clone(),
-                ));
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -216,6 +141,10 @@ impl ArrowOperator for AsyncMapOperator {
             self.udf_context.clone(),
         ));
         self.next_id += 1;
+    }
+
+    async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {
+        
     }
 
     async fn handle_watermark(

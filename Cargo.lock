@@ -991,6 +991,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-udf"
+version = "0.10.0-dev"
+dependencies = [
+ "arrow",
+ "async-ffi",
+ "futures",
+ "tokio",
+]
+
+[[package]]
 name = "arroyo-worker"
 version = "0.10.0-dev"
 dependencies = [
@@ -1128,6 +1138,20 @@ name = "async-ffi"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4de21c0feef7e5a556e51af767c953f0501f7f300ba785cc99c47bdc8081a50"
+dependencies = [
+ "async-ffi-macros",
+]
+
+[[package]]
+name = "async-ffi-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfca27fc54e6a22790dbc90b1ffe3c0cff0008976035bb4123408f862a452d29"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.52",
+]
 
 [[package]]
 name = "async-global-executor"
