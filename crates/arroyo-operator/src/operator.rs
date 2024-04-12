@@ -25,7 +25,6 @@ use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_storage::StorageProvider;
-use crate::udfs::UdfDylib;
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;

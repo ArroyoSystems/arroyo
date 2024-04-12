@@ -5,21 +5,14 @@ use std::{
 
 use anyhow::bail;
 use anyhow::Result;
-use arrow::array;
-use arrow::array::ArrayData;
 use arrow::datatypes::{DataType, Field, IntervalMonthDayNanoType};
-use arrow_array::make_array;
 
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
 use datafusion::sql::sqlparser::ast::{
     ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
 };
-use datafusion_common::ScalarValue;
-use datafusion_expr::ColumnarValue;
 
-use arroyo_types::{ArroyoExtensionType, NullableType};
-use syn::PathArguments::AngleBracketed;
-use syn::{GenericArgument, Type};
+use arroyo_types::{ArroyoExtensionType};
 
 /* this returns a duration with the same length as the postgres interval. */
 pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration {
@@ -32,65 +25,6 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
 }
 
-pub fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
-    match typ {
-        Type::Path(pat) => {
-            let path: Vec<String> = pat
-                .path
-                .segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect();
-
-            match path.join("::").as_str() {
-                "bool" => Some(DataType::Boolean),
-                "i8" => Some(DataType::Int8),
-                "i16" => Some(DataType::Int16),
-                "i32" => Some(DataType::Int32),
-                "i64" => Some(DataType::Int64),
-                "u8" => Some(DataType::UInt8),
-                "u16" => Some(DataType::UInt16),
-                "u32" => Some(DataType::UInt32),
-                "u64" => Some(DataType::UInt64),
-                "f16" => Some(DataType::Float16),
-                "f32" => Some(DataType::Float32),
-                "f64" => Some(DataType::Float64),
-                "String" => Some(DataType::Utf8),
-                "Vec<u8>" => Some(DataType::Binary),
-                "SystemTime" | "std::time::SystemTime" => {
-                    Some(DataType::Timestamp(TimeUnit::Microsecond, None))
-                }
-                "Duration" | "std::time::Duration" => {
-                    Some(DataType::Duration(TimeUnit::Microsecond))
-                }
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-pub fn rust_to_arrow(typ: &Type) -> Option<NullableType> {
-    match typ {
-        Type::Path(pat) => {
-            let last = pat.path.segments.last().unwrap();
-            if last.ident == "Option" {
-                let AngleBracketed(args) = &last.arguments else {
-                    return None;
-                };
-
-                let GenericArgument::Type(inner) = args.args.first()? else {
-                    return None;
-                };
-
-                Some(rust_to_arrow(inner)?.with_nullability(true))
-            } else {
-                Some(NullableType::not_null(rust_primitive_to_arrow(typ)?))
-            }
-        }
-        _ => None,
-    }
-}
 
 // Pulled from DataFusion
 

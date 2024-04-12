@@ -19,10 +19,12 @@ members = [
     "crates/arroyo-state",
     "crates/arroyo-storage",
     "crates/arroyo-types",
-    "crates/arroyo-udf",
+    "crates/arroyo-udf/arroyo-udf-common",
+    "crates/arroyo-udf/arroyo-udf-plugin",
+    "crates/arroyo-udf/arroyo-udf-host",
     "crates/arroyo-worker",
     "crates/copy-artifacts",
-    "crates/integ",
+    "crates/integ", "crates/arroyo-udf/arroyo-udf-macros",
 ]
 
 resolver = "2"

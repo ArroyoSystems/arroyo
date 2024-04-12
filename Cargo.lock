@@ -150,9 +150,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.80"
+version = "1.0.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
+checksum = "f538837af36e6f6a9be0faa67f9a314f8119e4e4b5867c6ab40ed60360142519"
 dependencies = [
  "backtrace",
 ]
@@ -705,6 +705,7 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-storage",
  "arroyo-types",
+ "arroyo-udf-host",
  "async-trait",
  "bincode 2.0.0-rc.3",
  "datafusion 36.0.0",
@@ -817,6 +818,7 @@ dependencies = [
  "arroyo-state",
  "arroyo-storage",
  "arroyo-types",
+ "arroyo-udf-common",
  "async-ffi",
  "async-stream",
  "async-trait",
@@ -991,10 +993,49 @@ dependencies = [
 ]
 
 [[package]]
-name = "arroyo-udf"
+name = "arroyo-udf-common"
 version = "0.10.0-dev"
 dependencies = [
+ "anyhow",
  "arrow",
+ "async-ffi",
+ "regex",
+ "syn 2.0.52",
+ "tokio",
+]
+
+[[package]]
+name = "arroyo-udf-host"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-udf-common",
+ "arroyo-udf-macros",
+ "arroyo-udf-plugin",
+ "async-ffi",
+ "datafusion 36.0.0",
+ "dlopen2",
+ "tokio",
+]
+
+[[package]]
+name = "arroyo-udf-macros"
+version = "0.10.0-dev"
+dependencies = [
+ "arrow-schema",
+ "arroyo-udf-common",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.52",
+]
+
+[[package]]
+name = "arroyo-udf-plugin"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arroyo-udf-common",
  "async-ffi",
  "futures",
  "tokio",

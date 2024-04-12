@@ -1,9 +1,11 @@
 [package]
-name = "arroyo-udf"
-version = "0.10.0-dev"
+name = "arroyo-udf-plugin"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+arroyo-udf-common = { path = "../arroyo-udf-common" }
+
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 futures = "0.3"
 arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes', features = ["ffi"]}

@@ -1,0 +1,18 @@
+[package]
+name = "arroyo-udf-host"
+version = "0.1.0"
+edition = "2021"
+description = "safe interface for interacting with dynamically-linked UDFs"
+
+[dependencies]
+arroyo-udf-common = { path = "../arroyo-udf-common" }
+dlopen2 = { version = "0.7", features = ["derive"] }
+anyhow = "1.0.82"
+datafusion = "36"
+async-ffi = { version = "0.5", features = ["macros"] }
+arrow = { workspace = true, features = ["ffi"]}
+
+[dev-dependencies]
+arroyo-udf-macros = { path = "../arroyo-udf-macros" }
+arroyo-udf-plugin = { path = "../arroyo-udf-plugin" }
+tokio = { version = "1", features = ["full"] }

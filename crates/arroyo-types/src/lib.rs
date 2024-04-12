@@ -939,32 +939,3 @@ mod tests {
     }
 }
 
-/// An Arrow DataType that also carries around its own nullability info
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NullableType {
-    pub data_type: DataType,
-    pub nullable: bool,
-}
-
-impl NullableType {
-    pub fn null(data_type: DataType) -> Self {
-        Self {
-            data_type,
-            nullable: true,
-        }
-    }
-
-    pub fn not_null(data_type: DataType) -> Self {
-        Self {
-            data_type,
-            nullable: false,
-        }
-    }
-
-    pub fn with_nullability(&self, nullable: bool) -> Self {
-        Self {
-            data_type: self.data_type.clone(),
-            nullable,
-        }
-    }
-}

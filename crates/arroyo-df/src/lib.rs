@@ -60,30 +60,21 @@ use std::fmt::Debug;
 
 use crate::json::get_json_functions;
 use crate::rewriters::{SourceMetadataVisitor, UnnestRewriter};
-use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow};
+use crate::types::{interval_month_day_nanos_to_duration};
 
 use crate::udafs::EmptyUdaf;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_operator::connector::Connection;
-use arroyo_types::NullableType;
 use datafusion_execution::FunctionRegistry;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
+use arroyo_udf_host::parse::{inner_type, ParsedUdf, UdfDef};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
-#[allow(unused)]
-#[derive(Clone, Debug)]
-pub struct UdfDef {
-    pub args: Vec<NullableType>,
-    pub ret: NullableType,
-    def: String,
-    dependencies: String,
-    aggregate: bool,
-}
 
 #[derive(Clone, Debug)]
 pub struct CompiledSql {
@@ -104,113 +95,6 @@ pub struct ArroyoSchemaProvider {
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
 }
 
-pub struct ParsedUdf {
-    pub name: String,
-    pub args: Vec<NullableType>,
-    pub vec_arguments: usize,
-    pub ret_type: NullableType,
-    pub definition: String,
-    pub dependencies: String,
-}
-
-impl ParsedUdf {
-    fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
-        if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
-            if let Some(segment) = path.segments.last() {
-                if segment.ident == "Vec" {
-                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                        if args.args.len() == 1 {
-                            if let syn::GenericArgument::Type(inner_ty) = &args.args[0] {
-                                return Some(inner_ty.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    pub fn try_parse(def: &str) -> anyhow::Result<ParsedUdf> {
-        let mut file = parse_file(def)?;
-
-        let mut functions = file.items.iter_mut().filter_map(|item| match item {
-            Item::Fn(function) => Some(function),
-            _ => None,
-        });
-
-        let function = match (functions.next(), functions.next()) {
-            (Some(function), None) => function,
-            _ => bail!("UDF definition must contain exactly 1 function."),
-        };
-
-        let name = function.sig.ident.to_string();
-        let mut args = vec![];
-        let mut vec_arguments = 0;
-        for (i, arg) in function.sig.inputs.iter().enumerate() {
-            match arg {
-                FnArg::Receiver(_) => {
-                    bail!(
-                        "Function {} has a 'self' argument, which is not allowed",
-                        name
-                    )
-                }
-                FnArg::Typed(t) => {
-                    if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
-                        vec_arguments += 1;
-                        let vec_type = rust_to_arrow(&vec_type).ok_or_else(|| {
-                            anyhow!(
-                                "Could not convert function {} inner vector arg {} into an Arrow data type",
-                                name,
-                                i
-                            )
-                        })?;
-
-                        args.push(NullableType::not_null(DataType::List(Arc::new(
-                            Field::new("item", vec_type.data_type, vec_type.nullable),
-                        ))));
-                    } else {
-                        args.push(rust_to_arrow(&t.ty).ok_or_else(|| {
-                            anyhow!(
-                                "Could not convert function {} arg {} into a SQL data type",
-                                name,
-                                i
-                            )
-                        })?);
-                    }
-                }
-            }
-        }
-
-        let ret = match &function.sig.output {
-            ReturnType::Default => bail!("Function {} return type must be specified", name),
-            ReturnType::Type(_, t) => rust_to_arrow(t).ok_or_else(|| {
-                anyhow!(
-                    "Could not convert function {} return type into a SQL data type",
-                    name
-                )
-            })?,
-        };
-
-        function.vis = Visibility::Public(Default::default());
-
-        Ok(ParsedUdf {
-            name,
-            args,
-            vec_arguments,
-            ret_type: ret,
-            definition: unparse(&file),
-            dependencies: parse_dependencies(def)?,
-        })
-    }
-}
-
-pub fn inner_type(dt: &DataType) -> Option<DataType> {
-    match dt {
-        DataType::List(f) => Some(f.data_type().clone()),
-        _ => None,
-    }
-}
 
 impl ArroyoSchemaProvider {
     pub fn new() -> Self {
@@ -392,23 +276,6 @@ impl ArroyoSchemaProvider {
 
         Ok(parsed.name)
     }
-}
-
-pub fn parse_dependencies(definition: &str) -> Result<String> {
-    // get content of dependencies comment using regex
-    let re = Regex::new(r"\/\*\n(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
-    if re.find_iter(definition).count() > 1 {
-        bail!("Only one dependencies definition is allowed in a UDF");
-    }
-
-    return if let Some(captures) = re.captures(definition) {
-        if captures.len() != 2 {
-            bail!("Error parsing dependencies");
-        }
-        Ok(captures.get(1).unwrap().as_str().to_string())
-    } else {
-        Ok("[dependencies]\n# none defined\n".to_string())
-    };
 }
 
 fn create_table(table_name: String, schema: Arc<Schema>) -> Arc<dyn TableSource> {
@@ -732,66 +599,4 @@ pub fn has_duplicate_udf_names<'a>(definitions: impl Iterator<Item = &'a String>
         }
     }
     false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_dependencies_valid() {
-        let definition = r#"
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-pub fn my_udf() -> i64 {
-    1
-}
-        "#;
-
-        assert_eq!(
-            parse_dependencies(definition).unwrap(),
-            r#"[dependencies]
-serde = "1.0"
-"#
-        );
-    }
-
-    #[test]
-    fn test_parse_dependencies_none() {
-        let definition = r#"
-pub fn my_udf() -> i64 {
-    1
-}
-        "#;
-
-        assert_eq!(
-            parse_dependencies(definition).unwrap(),
-            r#"[dependencies]
-# none defined
-"#
-        );
-    }
-
-    #[test]
-    fn test_parse_dependencies_multiple() {
-        let definition = r#"
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-pub fn my_udf() -> i64 {
-    1
-
-        "#;
-        assert!(parse_dependencies(definition).is_err());
-    }
 }
