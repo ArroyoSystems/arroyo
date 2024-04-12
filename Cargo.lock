@@ -345,7 +345,7 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "50.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=timestamp_formats#6f9ca64cc65b23c5ca9350b57f37560a0b9863fa"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=50.0.0/json#8b568ec317aa1f2ab7d1e33ea6fef1fc5697c5fc"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
