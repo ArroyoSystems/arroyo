@@ -251,6 +251,7 @@ message ArrowDylibUdfConfig {
   repeated bytes arg_types = 2;
   bytes return_type = 3;
   bool aggregate = 4;
+  bool is_async = 5;
 }
 
 message ArrowProgramConfig {

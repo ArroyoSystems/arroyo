@@ -12,7 +12,7 @@ use datafusion::sql::sqlparser::ast::{
     ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
 };
 
-use arroyo_types::{ArroyoExtensionType};
+use arroyo_types::ArroyoExtensionType;
 
 /* this returns a duration with the same length as the postgres interval. */
 pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration {
@@ -24,7 +24,6 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     let nanos = nanos as u64;
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
 }
-
 
 // Pulled from DataFusion
 

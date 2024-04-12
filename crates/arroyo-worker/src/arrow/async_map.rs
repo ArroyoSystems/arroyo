@@ -24,7 +24,7 @@ use arroyo_state::global_table_config;
 
 pub struct AsyncMapOperator{
     name: String,
-    udf: Arc<UdfDylib>,
+    udf: Arc<AsyncUdfDylib>,
     max_concurrency: u64,
     
     input_projection: Box<dyn ExecutionPlan>,

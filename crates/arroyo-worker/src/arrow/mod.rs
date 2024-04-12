@@ -28,7 +28,7 @@ pub mod sliding_aggregating_window;
 pub(crate) mod sync;
 pub mod tumbling_aggregating_window;
 pub mod window_fn;
-pub mod async_map;
+//pub mod async_map;
 pub mod watermark_generator;
 
 pub struct ValueExecutionOperator {

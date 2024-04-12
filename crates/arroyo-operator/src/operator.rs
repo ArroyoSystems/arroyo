@@ -1,15 +1,20 @@
 use crate::context::{ArrowContext, BatchReceiver};
 use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
+use anyhow::anyhow;
 use arrow::array::RecordBatch;
+use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_metrics::TaskCounters;
 use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_storage::StorageProvider;
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
+use arroyo_udf_host::{ContainerOrLocal, SyncUdfDylib, UdfDylib, UdfInterface};
 use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{AggregateUDF, ScalarUDF, Signature, Volatility, WindowUDF};
+use dlopen2::wrapper::Container;
 use futures::future::OptionFuture;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -18,13 +23,9 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use anyhow::anyhow;
-use dlopen2::wrapper::Container;
 use tokio::sync::{Barrier, Mutex};
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
-use arroyo_datastream::logical::DylibUdfConfig;
-use arroyo_storage::StorageProvider;
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -496,12 +497,16 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub async fn load_dylib(&self, name: &str, config: &DylibUdfConfig) -> anyhow::Result<Arc<UdfDylib>> {
+    pub async fn load_dylib(
+        &self,
+        name: &str,
+        config: &DylibUdfConfig,
+    ) -> anyhow::Result<Arc<UdfDylib>> {
         let mut dylibs = self.dylibs.lock().await;
         if let Some(dylib) = dylibs.get(&config.dylib_path) {
             return Ok(Arc::clone(dylib));
         }
-        
+
         // Download a UDF dylib from the object store
         let signature = Signature::exact(config.arg_types.clone(), Volatility::Volatile);
 
@@ -529,14 +534,27 @@ impl Registry {
             .await
             .map_err(|e| anyhow!("unable to write dylib to file: {:?}", e))?;
 
-        let container = unsafe { Container::load(local_dylib_path).unwrap() };
-        
-        let udf = Arc::new(UdfDylib::new(name.to_string(), signature, config.return_type.clone(), container));
+        let interface = if config.is_async {
+            UdfInterface::Async(Arc::new(ContainerOrLocal::Container(unsafe {
+                Container::load(local_dylib_path).unwrap()
+            })))
+        } else {
+            UdfInterface::Sync(Arc::new(ContainerOrLocal::Container(unsafe {
+                Container::load(local_dylib_path).unwrap()
+            })))
+        };
+
+        let udf = Arc::new(UdfDylib::new(
+            name.to_string(),
+            signature,
+            config.return_type.clone(),
+            interface,
+        ));
         dylibs.insert(name.to_string(), udf.clone());
-        
+
         Ok(udf)
-    } 
-    
+    }
+
     pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {
         self.udfs.insert(udf.name().to_string(), udf);
     }

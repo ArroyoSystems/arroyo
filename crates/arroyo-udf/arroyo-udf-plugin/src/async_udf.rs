@@ -1,16 +1,16 @@
+use arrow::array::{Array, ArrayBuilder, ArrayData, UInt64Builder};
+use arroyo_udf_common::async_udf::{FfiAsyncUdfHandle, OutputT, QueueData, ResultMutex};
+use arroyo_udf_common::{ArrowDatum, FfiArrays};
+use futures::stream::StreamExt;
+use futures::stream::{FuturesOrdered, FuturesUnordered};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use arrow::array::{Array, ArrayBuilder, ArrayData, UInt64Builder};
-use futures::stream::{FuturesOrdered, FuturesUnordered};
-use futures::stream::StreamExt;
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::error::Elapsed;
-use arroyo_udf_common::{ArrowDatum, FfiArrays};
-use arroyo_udf_common::async_udf::{FfiAsyncUdfHandle, OutputT, QueueData, ResultMutex};
 
-pub use arroyo_udf_common::async_udf::{SendableFfiAsyncUdfHandle, DrainResult};
+pub use arroyo_udf_common::async_udf::{DrainResult, SendableFfiAsyncUdfHandle};
 pub use async_ffi;
 
 pub enum FuturesEnum<F: Future + Send + 'static> {
@@ -18,7 +18,7 @@ pub enum FuturesEnum<F: Future + Send + 'static> {
     Unordered(FuturesUnordered<F>),
 }
 
-impl <T: Send, F: Future<Output = T> + Send + 'static> FuturesEnum<F> {
+impl<T: Send, F: Future<Output = T> + Send + 'static> FuturesEnum<F> {
     pub fn push_back(&mut self, f: F) {
         match self {
             FuturesEnum::Ordered(futures) => futures.push_back(f),
@@ -55,9 +55,8 @@ pub struct AsyncUdfHandle {
 impl AsyncUdfHandle {
     pub fn into_ffi(self) -> *mut FfiAsyncUdfHandle {
         Box::leak(Box::new(self)) as *mut AsyncUdfHandle as *mut FfiAsyncUdfHandle
-    } 
+    }
 }
-
 
 pub async fn send(handle: SendableFfiAsyncUdfHandle, id: usize, arrays: FfiArrays) -> bool {
     let args = arrays.into_vec();
@@ -65,7 +64,9 @@ pub async fn send(handle: SendableFfiAsyncUdfHandle, id: usize, arrays: FfiArray
     unsafe {
         let handle = handle.ptr as *mut AsyncUdfHandle;
         (&mut *handle).tx.send((id, args))
-    }.await.is_ok()
+    }
+    .await
+    .is_ok()
 }
 
 pub fn drain_results(handle: SendableFfiAsyncUdfHandle) -> DrainResult {
@@ -76,13 +77,11 @@ pub fn drain_results(handle: SendableFfiAsyncUdfHandle) -> DrainResult {
                 return DrainResult::None;
             }
 
-            let results = data.0.finish();
-            let ids = data.1.finish();
-            DrainResult::Data(FfiArrays::from_vec(vec![results.to_data(), ids.to_data()]))
+            let ids = data.0.finish();
+            let results = data.1.finish();
+            DrainResult::Data(FfiArrays::from_vec(vec![ids.to_data(), results.to_data()]))
         }
-        Err(_) => {
-            DrainResult::Error
-        }
+        Err(_) => DrainResult::Error,
     }
 }
 
@@ -92,7 +91,10 @@ pub fn stop_runtime(handle: SendableFfiAsyncUdfHandle) {
     drop(handle);
 }
 
-pub struct AsyncUdf<F: Future<Output = OutputT> + Send + 'static, FnT: Fn(usize, Vec<ArrayData>) -> F + Send> {
+pub struct AsyncUdf<
+    F: Future<Output = OutputT> + Send + 'static,
+    FnT: Fn(usize, Vec<ArrayData>) -> F + Send,
+> {
     futures: FuturesEnum<F>,
     rx: Receiver<QueueData>,
     results: ResultMutex,
@@ -100,35 +102,43 @@ pub struct AsyncUdf<F: Future<Output = OutputT> + Send + 'static, FnT: Fn(usize,
     func: FnT,
 }
 
-impl <F: Future<Output = OutputT> + Send + 'static, FnT: Fn(usize, Vec<ArrayData>) -> F + Send + 'static> AsyncUdf<F, FnT> {
+impl<
+        F: Future<Output = OutputT> + Send + 'static,
+        FnT: Fn(usize, Vec<ArrayData>) -> F + Send + 'static,
+    > AsyncUdf<F, FnT>
+{
     pub fn new(ordered: bool, builder: Box<dyn ArrayBuilder>, func: FnT) -> (Self, AsyncUdfHandle) {
         let (tx, rx) = channel(16);
 
-        let results = Arc::new(Mutex::new((builder, UInt64Builder::new())));
+        let results = Arc::new(Mutex::new((UInt64Builder::new(), builder)));
 
         let handle = AsyncUdfHandle {
             tx,
-            results: results.clone()
+            results: results.clone(),
         };
 
-        (Self {
-            futures: if ordered {
-                FuturesEnum::Ordered(FuturesOrdered::new())
-            } else {
-                FuturesEnum::Unordered(FuturesUnordered::new())
+        (
+            Self {
+                futures: if ordered {
+                    FuturesEnum::Ordered(FuturesOrdered::new())
+                } else {
+                    FuturesEnum::Unordered(FuturesUnordered::new())
+                },
+                rx,
+                results,
+                inputs: HashMap::new(),
+                func,
             },
-            rx,
-            results,
-            inputs: HashMap::new(),
-            func,
-        }, handle)
+            handle,
+        )
     }
 
     pub fn start(self) {
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
-                .build().unwrap();
+                .build()
+                .unwrap();
             runtime.block_on(async move {
                 self.run().await;
             })
@@ -153,17 +163,13 @@ impl <F: Future<Output = OutputT> + Send + 'static, FnT: Fn(usize, Vec<ArrayData
         }
     }
 
-    async fn handle_future(
-        &mut self,
-        id: usize,
-        result: Result<ArrowDatum, Elapsed>,
-    ) {
+    async fn handle_future(&mut self, id: usize, result: Result<ArrowDatum, Elapsed>) {
         let mut results = self.results.lock().unwrap();
         match result {
             Ok(value) => {
                 self.inputs.remove(&id);
-                value.append_to(&mut results.0);
-                results.1.append_value(id as u64);
+                results.0.append_value(id as u64);
+                value.append_to(&mut results.1);
             }
             Err(_) => {
                 if self.futures.is_ordered() {

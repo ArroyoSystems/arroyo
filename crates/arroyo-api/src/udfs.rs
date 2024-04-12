@@ -8,18 +8,25 @@ use crate::rest_utils::{
     BearerAuth, ErrorResp,
 };
 use crate::{compiler_service, to_micros};
-use arroyo_df::{parse_dependencies, udfs, ParsedUdf};
 use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfPost, UdfValidationResult, ValidateUdfPost};
 use arroyo_rpc::api_types::GlobalUdfCollection;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::{BuildUdfReq, UdfCrate};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_server_common::VERSION;
+use arroyo_types::{bool_config, USE_LOCAL_UDF_LIB_ENV};
+use arroyo_udf_host::ParsedUdfFile;
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::Params;
 use tonic::transport::Channel;
 use tracing::error;
+
+const LOCAL_UDF_LIB_CRATE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../arroyo-udf/arroyo-udf-plugin"
+);
 
 impl Into<GlobalUdf> for DbUdf {
     fn into(self) -> GlobalUdf {
@@ -68,7 +75,7 @@ pub async fn create_udf(
     }
 
     let udf_name = build_udf_resp.name.expect("udf name not set for valid UDF");
-    let udf_url = build_udf_resp.url.expect("udf URL not set ofr valid UDF");
+    let udf_url = build_udf_resp.url.expect("udf URL not set for valid UDF");
 
     // check for duplicates
     let duplicate = api_queries::get_udf_by_name()
@@ -212,31 +219,34 @@ pub async fn build_udf(
     udf_definition: &str,
     save: bool,
 ) -> Result<UdfResp, ErrorResp> {
-    let dependencies = match parse_dependencies(udf_definition) {
-        Ok(dependencies) => dependencies,
-        Err(e) => {
-            return Ok(e.into());
-        }
-    };
-
     // use the ArroyoSchemaProvider to do some validation and to get the function name
-    let function_name = match ParsedUdf::try_parse(udf_definition) {
-        Ok(function_name) => function_name.name,
+    let file = match ParsedUdfFile::try_parse(udf_definition) {
+        Ok(p) => p,
         Err(e) => return Ok(e.into()),
     };
 
-    let cargo_toml = udfs::cargo_toml(&dependencies);
+    let mut dependencies = file.dependencies;
+    let plugin_dep = if bool_config(USE_LOCAL_UDF_LIB_ENV, false) {
+        toml::Value::Table(
+            [(
+                "path".to_string(),
+                toml::Value::String(LOCAL_UDF_LIB_CRATE.to_string()),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    } else {
+        toml::Value::String(VERSION.to_string())
+    };
+
+    dependencies.insert("arroyo-udf-plugin".to_string(), plugin_dep);
 
     let check_udfs_resp = match compiler_service
         .build_udf(BuildUdfReq {
             udf_crate: Some(UdfCrate {
-                name: function_name.clone(),
+                name: file.udf.name.clone(),
                 definition: udf_definition.to_string(),
-                cargo_toml,
-                lib_rs: match udfs::lib_rs(&udf_definition) {
-                    Ok(lib_rs) => lib_rs,
-                    Err(e) => return Ok(e.into()),
-                },
+                dependencies: dependencies.to_string(),
             }),
             save,
         })
@@ -254,7 +264,7 @@ pub async fn build_udf(
 
     Ok(UdfResp {
         errors: check_udfs_resp.errors,
-        name: Some(function_name),
+        name: Some(file.udf.name),
         url: check_udfs_resp.udf_path,
     })
 }

@@ -1,3 +1,5 @@
 pub mod async_udf;
 
-pub use arroyo_udf_common::{FfiArraySchema, FfiArrays, RunResult, ArrowDatum};
+pub use arrow;
+pub use arroyo_udf_common::{ArrowDatum, FfiArraySchema, FfiArrays, RunResult};
+pub use arroyo_udf_macros::udf;

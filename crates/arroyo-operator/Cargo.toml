@@ -13,7 +13,7 @@ arroyo-state = { path = "../arroyo-state" }
 arroyo-types = { path = "../arroyo-types" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-storage = { path = "../arroyo-storage" }
-arroyo-udf-common = { path = "../arroyo-udf/arroyo-udf-common" }
+arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 
 anyhow = "1.0.71"
 arrow = { workspace = true, features = ["ffi"] }

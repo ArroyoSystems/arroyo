@@ -1,11 +1,9 @@
-use std::sync::Arc;
 use anyhow::{anyhow, bail};
 use arrow::datatypes::{DataType, Field, TimeUnit};
-use syn::{FnArg, GenericArgument, Item, ItemFn, parse_file, ReturnType, Type, Visibility};
+use std::sync::Arc;
 use syn::PathArguments::AngleBracketed;
-use regex::Regex;
-use syn::__private::{Span, ToTokens};
-use syn::parse::{Parse, ParseStream};
+use syn::__private::ToTokens;
+use syn::{FnArg, GenericArgument, ItemFn, ReturnType, Type};
 
 /// An Arrow DataType that also carries around its own nullability info
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,65 +99,16 @@ fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
 pub struct UdfDef {
     pub args: Vec<NullableType>,
     pub ret: NullableType,
-    pub def: String,
-    pub dependencies: String,
     pub aggregate: bool,
 }
 
-pub struct ParsedUdfFile {
-    pub udf: ParsedUdf,
-    pub definition: String,
-    pub dependencies: String,
-}
-
-impl ParsedUdfFile {
-    pub fn try_parse(def: &str) -> anyhow::Result<Self> {
-        let mut file = parse_file(def)?;
-
-        let mut functions = file.items.iter_mut().filter_map(|item| match item {
-            Item::Fn(function) => Some(function),
-            _ => None,
-        });
-
-        let function = match (functions.next(), functions.next()) {
-            (Some(function), None) => function,
-            _ => bail!("UDF definition must contain exactly 1 function."),
-        };
-
-        let udf = ParsedUdf::try_parse(function)?;
-        function.vis = Visibility::Public(Default::default());
-
-        Ok(ParsedUdfFile {
-            udf,
-            definition: function.into_token_stream().to_string(),
-            dependencies: parse_dependencies(def)?,
-        })
-    }
-}
-
 pub struct ParsedUdf {
-    pub function: ItemFn,
+    pub function: String,
     pub name: String,
     pub args: Vec<NullableType>,
     pub vec_arguments: usize,
     pub ret_type: NullableType,
-}
-
-fn parse_dependencies(definition: &str) -> anyhow::Result<String> {
-    // get content of dependencies comment using regex
-    let re = Regex::new(r"/\*\n(\[dependencies]\n[\s\S]*?)\*/").unwrap();
-    if re.find_iter(definition).count() > 1 {
-        bail!("Only one dependencies definition is allowed in a UDF");
-    }
-
-    return if let Some(captures) = re.captures(definition) {
-        if captures.len() != 2 {
-            bail!("Error parsing dependencies");
-        }
-        Ok(captures.get(1).unwrap().as_str().to_string())
-    } else {
-        Ok("[dependencies]\n# none defined\n".to_string())
-    };
+    pub is_async: bool,
 }
 
 impl ParsedUdf {
@@ -179,7 +128,7 @@ impl ParsedUdf {
         }
         None
     }
-    
+
     pub fn try_parse(function: &ItemFn) -> anyhow::Result<ParsedUdf> {
         let name = function.sig.ident.to_string();
         let mut args = vec![];
@@ -229,22 +178,14 @@ impl ParsedUdf {
             })?,
         };
 
-
         Ok(ParsedUdf {
-            function: function.clone(),
+            function: function.into_token_stream().to_string(),
             name,
             args,
             vec_arguments,
             ret_type: ret,
+            is_async: function.sig.asyncness.is_some(),
         })
-    }
-}
-
-impl Parse for ParsedUdf {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let function: ItemFn = input.parse()?;
-        ParsedUdf::try_parse(&function)
-            .map_err(|e| syn::Error::new(Span::call_site(), e.to_string()))
     }
 }
 
@@ -252,67 +193,5 @@ pub fn inner_type(dt: &DataType) -> Option<DataType> {
     match dt {
         DataType::List(f) => Some(f.data_type().clone()),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_dependencies_valid() {
-        let definition = r#"
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-pub fn my_udf() -> i64 {
-    1
-}
-        "#;
-
-        assert_eq!(
-            parse_dependencies(definition).unwrap(),
-            r#"[dependencies]
-serde = "1.0"
-"#
-        );
-    }
-
-    #[test]
-    fn test_parse_dependencies_none() {
-        let definition = r#"
-pub fn my_udf() -> i64 {
-    1
-}
-        "#;
-
-        assert_eq!(
-            parse_dependencies(definition).unwrap(),
-            r#"[dependencies]
-# none defined
-"#
-        );
-    }
-
-    #[test]
-    fn test_parse_dependencies_multiple() {
-        let definition = r#"
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-pub fn my_udf() -> i64 {
-    1
-
-        "#;
-        assert!(parse_dependencies(definition).is_err());
     }
 }

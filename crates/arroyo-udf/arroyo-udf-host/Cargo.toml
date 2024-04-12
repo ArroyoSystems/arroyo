@@ -11,6 +11,9 @@ anyhow = "1.0.82"
 datafusion = "36"
 async-ffi = { version = "0.5", features = ["macros"] }
 arrow = { workspace = true, features = ["ffi"]}
+toml = "0.8"
+syn = { version = "2", features = ["full"] }
+regex = "1.10.3"
 
 [dev-dependencies]
 arroyo-udf-macros = { path = "../arroyo-udf-macros" }

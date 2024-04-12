@@ -9,13 +9,13 @@ use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
-        DisplayAs,
-        ExecutionPlan,
-        memory::{MemoryExec, MemoryStream}, Partitioning, stream::RecordBatchStreamAdapter,
+        memory::{MemoryExec, MemoryStream},
+        stream::RecordBatchStreamAdapter,
+        DisplayAs, ExecutionPlan, Partitioning,
     },
 };
 use datafusion_common::{
-    DataFusionError, plan_err, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
+    plan_err, DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
 };
 
 use crate::json::get_json_functions;
@@ -24,16 +24,14 @@ use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
 use datafusion::physical_plan::unnest::UnnestExec;
-use datafusion_expr::{
-    ColumnarValue, ScalarUDF, Signature, TypeSignature,
-};
+use datafusion_expr::{ColumnarValue, ScalarUDF, Signature, TypeSignature};
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
+use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 
 pub fn window_function(columns: &[ColumnarValue]) -> DFResult<ColumnarValue> {
     if columns.len() != 2 {

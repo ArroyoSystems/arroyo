@@ -181,6 +181,7 @@ pub struct DylibUdfConfig {
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
     pub aggregate: bool,
+    pub is_async: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -313,6 +314,7 @@ impl From<DylibUdfConfig> for ArrowDylibUdfConfig {
                 .expect("unsupported data type")
                 .encode_to_vec(),
             aggregate: from.aggregate,
+            is_async: from.is_async,
         }
     }
 }
@@ -336,6 +338,7 @@ impl From<ArrowDylibUdfConfig> for DylibUdfConfig {
             )
             .expect("invalid arrow type"),
             aggregate: from.aggregate,
+            is_async: from.is_async,
         }
     }
 }

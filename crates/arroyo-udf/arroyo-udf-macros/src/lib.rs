@@ -1,8 +1,9 @@
 use arrow_schema::DataType;
-use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
-use syn::{parse_quote, Visibility};
 use arroyo_udf_common::parse::ParsedUdf;
+use proc_macro2::{Span, TokenStream};
+use quote::{format_ident, quote};
+use syn::parse::{Parse, ParseStream};
+use syn::{parse_quote, ItemFn};
 
 fn data_type_to_arrow_type_token(data_type: &DataType) -> TokenStream {
     match data_type {
@@ -23,10 +24,26 @@ fn data_type_to_arrow_type_token(data_type: &DataType) -> TokenStream {
     }
 }
 
+struct ParsedFunction(ParsedUdf, ItemFn);
+
+impl Parse for ParsedFunction {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let function: ItemFn = input.parse()?;
+        Ok(ParsedFunction(
+            ParsedUdf::try_parse(&function)
+                .map_err(|e| syn::Error::new(Span::call_site(), e.to_string()))?,
+            function,
+        ))
+    }
+}
+
 #[proc_macro_attribute]
-pub fn udf(_attr: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let mut parsed: ParsedUdf = syn::parse(input).unwrap();
-    if parsed.function.sig.asyncness.is_some() {
+pub fn udf(
+    _attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let parsed: ParsedFunction = syn::parse(input).unwrap();
+    if parsed.0.is_async {
         async_udf(parsed)
     } else {
         sync_udf(parsed)
@@ -52,12 +69,12 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
                         quote!()
                     };
 
-                    quote!(let #id = arrow::array::PrimitiveArray::<arrow::datatypes::#arrow_type>::from(
+                    quote!(let #id = arroyo_udf_plugin::arrow::array::PrimitiveArray::<arroyo_udf_plugin::arrow::datatypes::#arrow_type>::from(
                         args.next().unwrap()
                     ).iter()#filter.collect();)
                 }
                 _ => {
-                    quote!(let #id = arrow::array::PrimitiveArray::<arrow::datatypes::#arrow_type>::from(args.next().unwrap());)
+                    quote!(let #id = arroyo_udf_plugin::arrow::array::PrimitiveArray::<arroyo_udf_plugin::arrow::datatypes::#arrow_type>::from(args.next().unwrap());)
                 }
             };
 
@@ -67,14 +84,15 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
         .unzip()
 }
 
-fn sync_udf(mut parsed: ParsedUdf) -> proc_macro::TokenStream {
+fn sync_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
+    let (parsed, item) = (parsed.0, parsed.1);
     let udf_name = format_ident!("{}", parsed.name);
 
     let results_builder = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
-        quote!(let mut results_builder = arrow::array::StringBuilder::with_capacity(batch_size, batch_size * 8);)
+        quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::StringBuilder::with_capacity(batch_size, batch_size * 8);)
     } else {
         let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
-        quote!(let mut results_builder = arrow::array::PrimitiveBuilder::<arrow::datatypes::#return_type>::with_capacity(batch_size);)
+        quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::PrimitiveBuilder::<arroyo_udf_plugin::arrow::datatypes::#return_type>::with_capacity(batch_size);)
     };
 
     let (defs, args) = arg_vars(&parsed);
@@ -150,11 +168,8 @@ fn sync_udf(mut parsed: ParsedUdf) -> proc_macro::TokenStream {
         }
     };
 
-    parsed.function.vis = Visibility::Public(Default::default());
-    let function = &mut parsed.function;
-
     (quote! {
-        #function
+        #item
 
         #[no_mangle]
         pub extern "C-unwind" fn run(args: arroyo_udf_plugin::FfiArrays) -> arroyo_udf_plugin::RunResult {
@@ -169,7 +184,7 @@ fn sync_udf(mut parsed: ParsedUdf) -> proc_macro::TokenStream {
 
                 #call_loop
 
-                arrow::array::Array::to_data(&results_builder.finish())
+                arroyo_udf_plugin::arrow::array::Array::to_data(&results_builder.finish())
             });
 
 
@@ -185,11 +200,13 @@ fn sync_udf(mut parsed: ParsedUdf) -> proc_macro::TokenStream {
     }).into()
 }
 
-fn async_udf(parsed: ParsedUdf) -> proc_macro::TokenStream {
+fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
+    let (parsed, item) = (parsed.0, parsed.1);
     let (defs, args) = arg_vars(&parsed);
 
     let name = format_ident!("{}", parsed.name);
-    let call_args: Vec<_> = args.iter()
+    let call_args: Vec<_> = args
+        .iter()
         .zip(parsed.args)
         .map(|(arg, dt)| match dt.data_type {
             DataType::Utf8 => {
@@ -199,7 +216,7 @@ fn async_udf(parsed: ParsedUdf) -> proc_macro::TokenStream {
                 quote!(#arg.value(0).clone())
             }
             _ => {
-                quote!(#arg.value(0))                
+                quote!(#arg.value(0))
             }
         })
         .collect();
@@ -225,7 +242,7 @@ fn async_udf(parsed: ParsedUdf) -> proc_macro::TokenStream {
     };
 
     let wrapper = quote! {
-        async fn wrapper(id: usize, args: Vec<arrow::array::ArrayData>) ->
+        async fn wrapper(id: usize, args: Vec<arroyo_udf_plugin::arrow::array::ArrayData>) ->
            (usize, Result<arroyo_udf_plugin::ArrowDatum, tokio::time::error::Elapsed>) {
             let mut args = args.into_iter();
 
@@ -238,10 +255,10 @@ fn async_udf(parsed: ParsedUdf) -> proc_macro::TokenStream {
     };
 
     let results_builder = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
-        quote!(arrow::array::StringBuilder::new())
+        quote!(arroyo_udf_plugin::arrow::array::StringBuilder::new())
     } else {
         let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
-        quote!(arrow::array::PrimitiveBuilder::<arrow::datatypes::#return_type>::new())
+        quote!(arroyo_udf_plugin::arrow::array::PrimitiveBuilder::<arroyo_udf_plugin::arrow::datatypes::#return_type>::new())
     };
 
     let start = quote! {
@@ -256,26 +273,24 @@ fn async_udf(parsed: ParsedUdf) -> proc_macro::TokenStream {
         }
     };
 
-    let function = &parsed.function;
-
     (quote!{
-        #function
+        #item
 
         #wrapper
 
         #start
-        
+
         #[arroyo_udf_plugin::async_udf::async_ffi::async_ffi]
         pub async extern "C-unwind" fn send(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle, 
             id: usize, arrays: arroyo_udf_plugin::FfiArrays) -> bool {
             arroyo_udf_plugin::async_udf::send(handle, id, arrays).await
         }
-        
+
         #[no_mangle]
         pub extern "C-unwind" fn drain_results(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle) -> arroyo_udf_plugin::async_udf::DrainResult {
             arroyo_udf_plugin::async_udf::drain_results(handle)
         }
-        
+
         #[no_mangle]
         pub extern "C-unwind" fn stop_runtime(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle) {
             arroyo_udf_plugin::async_udf::stop_runtime(handle);

@@ -12,7 +12,6 @@ pub mod schemas;
 mod tables;
 pub mod types;
 pub mod udafs;
-pub mod udfs;
 
 #[cfg(test)]
 mod test;
@@ -53,28 +52,26 @@ use crate::plan::ArroyoRewriter;
 use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig};
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::DataFusionError;
-use prettyplease::unparse;
-use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::json::get_json_functions;
 use crate::rewriters::{SourceMetadataVisitor, UnnestRewriter};
-use crate::types::{interval_month_day_nanos_to_duration};
+use crate::types::interval_month_day_nanos_to_duration;
 
 use crate::udafs::EmptyUdaf;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_operator::connector::Connection;
+use arroyo_udf_host::parse::{inner_type, UdfDef};
+use arroyo_udf_host::ParsedUdfFile;
 use datafusion_execution::FunctionRegistry;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
-use arroyo_udf_host::parse::{inner_type, ParsedUdf, UdfDef};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
-
 
 #[derive(Clone, Debug)]
 pub struct CompiledSql {
@@ -94,7 +91,6 @@ pub struct ArroyoSchemaProvider {
     config_options: datafusion::config::ConfigOptions,
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
 }
-
 
 impl ArroyoSchemaProvider {
     pub fn new() -> Self {
@@ -205,52 +201,71 @@ impl ArroyoSchemaProvider {
     }
 
     pub fn add_rust_udf(&mut self, body: &str, url: &str) -> Result<String> {
-        let parsed = ParsedUdf::try_parse(body)?;
+        let parsed = ParsedUdfFile::try_parse(body)?;
 
-        if parsed.vec_arguments > 0 && parsed.vec_arguments != parsed.args.len() {
+        if parsed.udf.vec_arguments > 0 && parsed.udf.vec_arguments != parsed.udf.args.len() {
             bail!(
                 "In function {}: for a UDAF, all arguments must be Vec<T>",
-                parsed.name
+                parsed.udf.name
             );
         }
         let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
         self.dylib_udfs.insert(
-            parsed.name.clone(),
+            parsed.udf.name.clone(),
             DylibUdfConfig {
                 dylib_path: url.to_string(),
-                arg_types: parsed.args.iter().map(|t| t.data_type.clone()).collect(),
-                return_type: parsed.ret_type.data_type.clone(),
-                aggregate: parsed.vec_arguments > 0,
+                arg_types: parsed
+                    .udf
+                    .args
+                    .iter()
+                    .map(|t| t.data_type.clone())
+                    .collect(),
+                return_type: parsed.udf.ret_type.data_type.clone(),
+                aggregate: parsed.udf.vec_arguments > 0,
+                is_async: parsed.udf.is_async,
             },
         );
 
-        let replaced = if parsed.vec_arguments > 0 {
+        let replaced = if parsed.udf.vec_arguments > 0 {
             self.aggregate_functions
                 .insert(
-                    parsed.name.clone(),
+                    parsed.udf.name.clone(),
                     Arc::new(create_udaf(
-                        &parsed.name,
+                        &parsed.udf.name,
                         parsed
+                            .udf
                             .args
                             .iter()
                             .map(|t| inner_type(&t.data_type).expect("udaf arg is not a vec"))
                             .collect(),
-                        Arc::new(parsed.ret_type.data_type.clone()),
+                        Arc::new(parsed.udf.ret_type.data_type.clone()),
                         Volatility::Volatile,
                         Arc::new(|_| Ok(Box::new(EmptyUdaf {}))),
-                        Arc::new(parsed.args.iter().map(|t| t.data_type.clone()).collect()),
+                        Arc::new(
+                            parsed
+                                .udf
+                                .args
+                                .iter()
+                                .map(|t| t.data_type.clone())
+                                .collect(),
+                        ),
                     )),
                 )
                 .is_some()
         } else {
             self.functions
                 .insert(
-                    parsed.name.clone(),
+                    parsed.udf.name.clone(),
                     Arc::new(create_udf(
-                        &parsed.name,
-                        parsed.args.iter().map(|t| t.data_type.clone()).collect(),
-                        Arc::new(parsed.ret_type.data_type.clone()),
+                        &parsed.udf.name,
+                        parsed
+                            .udf
+                            .args
+                            .iter()
+                            .map(|t| t.data_type.clone())
+                            .collect(),
+                        Arc::new(parsed.udf.ret_type.data_type.clone()),
                         Volatility::Volatile,
                         #[allow(deprecated)]
                         make_scalar_function(fn_impl),
@@ -260,21 +275,19 @@ impl ArroyoSchemaProvider {
         };
 
         if replaced {
-            warn!("Global UDF '{}' is being overwritten", parsed.name);
+            warn!("Global UDF '{}' is being overwritten", parsed.udf.name);
         };
 
         self.udf_defs.insert(
-            parsed.name.clone(),
+            parsed.udf.name.clone(),
             UdfDef {
-                args: parsed.args,
-                ret: parsed.ret_type,
-                def: parsed.definition,
-                dependencies: parsed.dependencies,
-                aggregate: parsed.vec_arguments > 0,
+                args: parsed.udf.args,
+                ret: parsed.udf.ret_type,
+                aggregate: parsed.udf.vec_arguments > 0,
             },
         );
 
-        Ok(parsed.name)
+        Ok(parsed.udf.name)
     }
 }
 

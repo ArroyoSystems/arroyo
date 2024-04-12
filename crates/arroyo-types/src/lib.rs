@@ -105,6 +105,7 @@ pub const COMPILER_PORT_ENV: &str = "COMPILER_PORT";
 
 pub const BATCH_SIZE_ENV: &str = "BATCH_SIZE";
 pub const BATCH_LINGER_MS_ENV: &str = "BATCH_LINGER_MS";
+pub const USE_LOCAL_UDF_LIB_ENV: &str = "USE_LOCAL_UDF_LIB";
 
 pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
 // Endpoint that the frontend should query for the API
@@ -938,4 +939,3 @@ mod tests {
         );
     }
 }
-

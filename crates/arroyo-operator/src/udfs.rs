@@ -1,17 +1,13 @@
-use arrow::datatypes::{DataType, FieldRef, IntervalUnit, TimeUnit};
-use datafusion::common::{DataFusionError, Result, Result as DFResult, ScalarValue};
-use std::sync::Arc;
-use arrow::buffer::OffsetBuffer;
-use arrow::array::{Array, ArrayData, ArrayRef, ListArray, make_array, new_empty_array, RecordBatch};
 use arrow::array::cast::as_list_array;
-use datafusion::logical_expr::{Accumulator, ColumnarValue, ScalarUDFImpl, Signature};
-use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema, from_ffi, to_ffi};
+use arrow::array::{new_empty_array, Array, ArrayRef, ListArray};
+use arrow::buffer::OffsetBuffer;
+use arrow::datatypes::{DataType, FieldRef, IntervalUnit, TimeUnit};
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
+use arroyo_udf_host::SyncUdfDylib;
+use datafusion::common::{DataFusionError, Result, ScalarValue};
+use datafusion::logical_expr::{Accumulator, ColumnarValue, ScalarUDFImpl};
 use std::fmt::Debug;
-use std::any::Any;
-use anyhow::bail;
-use arrow::array;
-use async_ffi::FfiFuture;
-use dlopen2::wrapper::{Container, WrapperApi};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct UdafArg {
@@ -51,7 +47,7 @@ impl ArroyoUdaf {
         assert!(
             args.len() > 0,
             "UDAF {} has no arguments, but UDAFs must have at least one",
-            udf.name
+            udf.name()
         );
         ArroyoUdaf {
             args,
@@ -216,12 +212,9 @@ fn scalar_none(datatype: &DataType) -> ScalarValue {
     }
 }
 
-
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
 
 #[repr(C)]
 pub struct FfiArrayResult(FFI_ArrowArray, FFI_ArrowSchema, bool);
-

@@ -17,6 +17,7 @@ use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
+use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
@@ -24,6 +25,7 @@ use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
+use arroyo_df::physical::new_registry;
 use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver, BatchSender};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;
@@ -40,8 +42,6 @@ use petgraph::Direction;
 use prometheus::labels;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
-use arroyo_df::physical::new_registry;
-use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {

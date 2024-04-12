@@ -451,8 +451,7 @@ service NodeGrpc {
 message UdfCrate {
   string name = 1;
   string definition = 2;
-  string cargo_toml = 3;
-  string lib_rs = 4;
+  string dependencies = 3;
 }
 
 message BuildUdfReq {

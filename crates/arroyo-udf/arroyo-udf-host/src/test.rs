@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use crate::{AsyncUdfDylib, AsyncUdfDylibInterface, SyncUdfDylib, UdfDylibInterface};
 use arrow::array::{Array, Int32Array, StringArray};
 use arrow::datatypes::DataType;
 use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, Signature, Volatility};
-use crate::{AsyncUdfDylib, AsyncUdfDylibInterface, SyncUdfDylib, UdfDylibInterface};
+use std::sync::Arc;
 
 mod test_udf_1 {
     use arroyo_udf_macros::udf;
@@ -21,21 +21,25 @@ fn test() {
     let interface = UdfDylibInterface {
         run: test_udf_1::run,
     };
-    
-    let udf = SyncUdfDylib::new("my_udf".to_string(), 
-                                Signature::exact(vec![DataType::Int32, DataType::Utf8], Volatility::Volatile),
-                                DataType::Utf8,
-                                interface);
 
-    let result = udf.invoke(&vec![
-        ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
-        ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"])))
-    ]).unwrap();
+    let udf = SyncUdfDylib::new(
+        "my_udf".to_string(),
+        Signature::exact(vec![DataType::Int32, DataType::Utf8], Volatility::Volatile),
+        DataType::Utf8,
+        interface,
+    );
+
+    let result = udf
+        .invoke(&vec![
+            ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
+            ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
+        ])
+        .unwrap();
 
     let ColumnarValue::Array(a) = result else {
         panic!("not an array");
     };
-    
+
     let result = a.as_any().downcast_ref::<StringArray>().unwrap();
     assert_eq!(result.len(), 3);
     assert!(result.is_null(0));
@@ -44,8 +48,8 @@ fn test() {
 }
 
 mod test_async_udf {
-    use std::time::Duration;
     use arroyo_udf_macros::udf;
+    use std::time::Duration;
 
     #[udf]
     async fn my_udf(a: u64, b: String) -> u32 {
@@ -53,10 +57,10 @@ mod test_async_udf {
         a as u32 + b.len() as u32
     }
 }
-    
-use std::time::{Duration};
-use arrow::array::{PrimitiveArray};
+
+use arrow::array::PrimitiveArray;
 use arrow::datatypes::{UInt32Type, UInt64Type};
+use std::time::Duration;
 use tokio::time::Instant;
 
 #[tokio::test]
@@ -67,15 +71,19 @@ async fn test_async() {
         drain_results: test_async_udf::drain_results,
         stop_runtime: test_async_udf::stop_runtime,
     };
-    let mut udf = AsyncUdfDylib::new("my_udf".to_string(),
-                                Signature::exact(vec![DataType::Int32, DataType::Utf8], Volatility::Volatile),
-                                DataType::Utf8,
-                                interface);
+    let mut udf = AsyncUdfDylib::new(
+        "my_udf".to_string(),
+        Signature::exact(vec![DataType::Int32, DataType::Utf8], Volatility::Volatile),
+        DataType::Utf8,
+        interface,
+    );
     udf.start(false);
 
     let arg1 = PrimitiveArray::<UInt64Type>::from(vec![2]);
     let arg2 = StringArray::from(vec!["hello"]);
-    udf.send(5, vec![arg1.to_data(), arg2.to_data()]).await.unwrap();
+    udf.send(5, vec![arg1.to_data(), arg2.to_data()])
+        .await
+        .unwrap();
 
     let start_time = Instant::now();
     loop {
@@ -95,6 +103,5 @@ async fn test_async() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
-
     }
 }

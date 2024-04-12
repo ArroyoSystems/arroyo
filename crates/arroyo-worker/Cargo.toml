@@ -19,6 +19,7 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-df = { path = "../arroyo-df" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 
 ahash = { workspace = true }
 rand = "0.8"
