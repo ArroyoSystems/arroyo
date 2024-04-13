@@ -604,7 +604,7 @@ pub async fn parse_and_get_arrow_program(
     }
 
     let mut used_connections = HashSet::new();
-    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider);
+    let mut extensions = vec![];
 
     for insert in inserts {
         let (plan, sink_name) = match insert {
@@ -630,17 +630,29 @@ pub async fn parse_and_get_arrow_program(
         let sink = match sink_name {
             Some(sink_name) => {
                 let table = schema_provider
-                    .get_table(&sink_name)
+                    .get_table_mut(&sink_name)
                     .ok_or_else(|| anyhow!("Connection {} not found", sink_name))?;
-                let Table::ConnectorTable(_connector_table) = table else {
-                    bail!("expected connector table");
-                };
-                SinkExtension::new(
-                    OwnedTableReference::bare(sink_name),
-                    table.clone(),
-                    plan_rewrite.schema().clone(),
-                    Arc::new(plan_rewrite),
-                )
+                match table {
+                    Table::ConnectorTable(_) => SinkExtension::new(
+                        OwnedTableReference::bare(sink_name),
+                        table.clone(),
+                        plan_rewrite.schema().clone(),
+                        Arc::new(plan_rewrite),
+                    ),
+                    Table::MemoryTable { logical_plan, .. } => {
+                        if logical_plan.is_some() {
+                            bail!("Can only insert into a memory table once");
+                        }
+                        logical_plan.replace(plan_rewrite);
+                        continue;
+                    }
+                    Table::TableFromQuery { .. } => {
+                        bail!("Shouldn't be inserting more data into a table made with CREATE TABLE AS");
+                    }
+                    Table::PreviewSink { .. } => {
+                        bail!("queries shouldn't be able insert into preview sink.")
+                    }
+                }
             }
             None => SinkExtension::new(
                 OwnedTableReference::parse_str("preview"),
@@ -651,9 +663,13 @@ pub async fn parse_and_get_arrow_program(
                 Arc::new(plan_rewrite),
             ),
         };
-        plan_to_graph_visitor.add_plan(LogicalPlan::Extension(Extension {
+        extensions.push(LogicalPlan::Extension(Extension {
             node: Arc::new(sink),
-        }))?;
+        }));
+    }
+    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider);
+    for extension in extensions {
+        plan_to_graph_visitor.add_plan(extension)?;
     }
     let graph = plan_to_graph_visitor.into_graph();
     let program = LogicalProgram {

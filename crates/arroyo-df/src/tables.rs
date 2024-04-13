@@ -367,6 +367,7 @@ pub enum Table {
     MemoryTable {
         name: String,
         fields: Vec<FieldRef>,
+        logical_plan: Option<LogicalPlan>,
     },
     TableFromQuery {
         name: String,
@@ -513,6 +514,7 @@ impl Table {
                             .into_iter()
                             .map(|f| Arc::new(f.field().clone()))
                             .collect(),
+                        logical_plan: None,
                     }))
                 }
                 Some(connector) => {
@@ -588,7 +590,7 @@ impl Table {
 
     pub fn set_inferred_fields(&mut self, fields: Vec<DFField>) -> Result<()> {
         let Table::ConnectorTable(t) = self else {
-            bail!("can only infer schema for connector tables");
+            return Ok(());
         };
 
         if !t.fields.is_empty() {
