@@ -580,7 +580,7 @@ pub async fn post_pipeline(
         .await
         .map_err(log_and_map)?;
 
-    let (pipeline_id, _program) = pipelines::create_pipeline(
+    let (pipeline_id, program) = pipelines::create_pipeline(
         &create_pipeline_req,
         &pipeline_pub_id,
         auth_data.clone(),
@@ -615,7 +615,7 @@ pub async fn post_pipeline(
             "has_udfs": pipeline_post.udfs.map(|e| !e.is_empty() && !e[0].definition.trim().is_empty())
               .unwrap_or(false),
             // TODO: program features
-            //"features": program.features(),
+            "features": program.features(),
         }),
     );
 
