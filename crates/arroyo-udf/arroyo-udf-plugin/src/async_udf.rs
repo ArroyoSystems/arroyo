@@ -58,7 +58,7 @@ impl AsyncUdfHandle {
     }
 }
 
-pub async fn send(handle: SendableFfiAsyncUdfHandle, id: usize, arrays: FfiArrays) -> bool {
+pub async fn send(handle: SendableFfiAsyncUdfHandle, id: u64, arrays: FfiArrays) -> bool {
     let args = arrays.into_vec();
 
     unsafe {
@@ -93,18 +93,18 @@ pub fn stop_runtime(handle: SendableFfiAsyncUdfHandle) {
 
 pub struct AsyncUdf<
     F: Future<Output = OutputT> + Send + 'static,
-    FnT: Fn(usize, Vec<ArrayData>) -> F + Send,
+    FnT: Fn(u64, Vec<ArrayData>) -> F + Send,
 > {
     futures: FuturesEnum<F>,
     rx: Receiver<QueueData>,
     results: ResultMutex,
-    inputs: HashMap<usize, Vec<ArrayData>>,
+    inputs: HashMap<u64, Vec<ArrayData>>,
     func: FnT,
 }
 
 impl<
         F: Future<Output = OutputT> + Send + 'static,
-        FnT: Fn(usize, Vec<ArrayData>) -> F + Send + 'static,
+        FnT: Fn(u64, Vec<ArrayData>) -> F + Send + 'static,
     > AsyncUdf<F, FnT>
 {
     pub fn new(ordered: bool, builder: Box<dyn ArrayBuilder>, func: FnT) -> (Self, AsyncUdfHandle) {
@@ -163,7 +163,7 @@ impl<
         }
     }
 
-    async fn handle_future(&mut self, id: usize, result: Result<ArrowDatum, Elapsed>) {
+    async fn handle_future(&mut self, id: u64, result: Result<ArrowDatum, Elapsed>) {
         let mut results = self.results.lock().unwrap();
         match result {
             Ok(value) => {

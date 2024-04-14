@@ -5,7 +5,7 @@ use crate::extension::watermark_node::WatermarkNode;
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
-use crate::ArroyoSchemaProvider;
+use crate::{ArroyoSchemaProvider, ASYNC_RESULT_FIELD};
 
 use arrow_schema::DataType;
 use arroyo_rpc::TIMESTAMP_FIELD;
@@ -14,7 +14,7 @@ use datafusion_common::tree_node::{
     Transformed, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
 };
 use datafusion_common::{
-    Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
+    plan_err, Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
     ScalarValue,
 };
 use datafusion_expr::expr::ScalarFunction;
@@ -405,6 +405,87 @@ impl TreeNodeRewriter for UnnestRewriter {
         } else {
             Ok(LogicalPlan::Projection(projection.clone()))
         }
+    }
+}
+
+pub struct AsyncUdfRewriter<'a> {
+    provider: &'a ArroyoSchemaProvider,
+}
+
+impl<'a> AsyncUdfRewriter<'a> {
+    fn split_async(
+        expr: Expr,
+        provider: &ArroyoSchemaProvider,
+    ) -> DFResult<(Expr, Option<(String, Vec<Expr>)>)> {
+        let mut c: Option<(String, Vec<Expr>)> = None;
+        let expr = expr.transform_up_mut(&mut |e| {
+            match &e {
+                Expr::ScalarFunction(ScalarFunction {
+                    func_def: ScalarFunctionDefinition::UDF(udf),
+                    args,
+                }) => {
+                    if provider
+                        .udf_defs
+                        .get(udf.name())
+                        .map(|udf| udf.is_async)
+                        .unwrap_or(false)
+                    {
+                        if c.replace((udf.name().to_string(), args.clone())).is_some() {
+                            return plan_err!(
+                                "multiple async calls in the same expression, which is not allowed"
+                            );
+                        }
+                        return Ok(Transformed::Yes(Expr::Column(Column::new_unqualified(
+                            ASYNC_RESULT_FIELD,
+                        ))));
+                    }
+                }
+                _ => {}
+            }
+            Ok(Transformed::No(e))
+        })?;
+
+        Ok((expr, c))
+    }
+}
+
+impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
+    type N = LogicalPlan;
+
+    fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
+        let LogicalPlan::Projection(projection) = &mut node else {
+            for e in node.expressions() {
+                if let (_, Some((udf, _))) = Self::split_async(e.clone(), &self.provider)? {
+                    return plan_err!(
+                        "async UDF {udf} used in a non-SELECT statement, which is not supported"
+                    );
+                }
+            }
+            return Ok(node);
+        };
+
+        let mut args = None;
+
+        for e in projection.expr.iter_mut() {
+            let (new_e, Some((_, udf))) = Self::split_async(e.clone(), &self.provider)? else {
+                continue;
+            };
+
+            if args.replace(udf).is_some() {
+                return plan_err!(
+                    "projection {} contains multiple async UDFs, which is not supported",
+                    node.display()
+                );
+            }
+
+            *e = new_e;
+        }
+
+        let Some(args) = args else {
+            return Ok(node);
+        };
+
+        OK(())
     }
 }
 

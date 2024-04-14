@@ -100,6 +100,7 @@ pub struct UdfDef {
     pub args: Vec<NullableType>,
     pub ret: NullableType,
     pub aggregate: bool,
+    pub is_async: bool,
 }
 
 pub struct ParsedUdf {

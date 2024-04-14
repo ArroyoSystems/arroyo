@@ -3,7 +3,7 @@ use arrow::array::{ArrayBuilder, ArrayData, UInt64Builder};
 use std::sync::{Arc, Mutex};
 use tokio::time::error::Elapsed;
 
-pub type QueueData = (usize, Vec<ArrayData>);
+pub type QueueData = (u64, Vec<ArrayData>);
 pub type ResultMutex = Arc<Mutex<(UInt64Builder, Box<dyn ArrayBuilder>)>>;
 
 #[repr(C)]
@@ -19,6 +19,7 @@ pub struct SendableFfiAsyncUdfHandle {
 }
 
 unsafe impl Send for SendableFfiAsyncUdfHandle {}
+unsafe impl Sync for SendableFfiAsyncUdfHandle {}
 
 #[repr(C)]
 pub enum DrainResult {
@@ -27,4 +28,4 @@ pub enum DrainResult {
     Error,
 }
 
-pub type OutputT = (usize, Result<ArrowDatum, Elapsed>);
+pub type OutputT = (u64, Result<ArrowDatum, Elapsed>);

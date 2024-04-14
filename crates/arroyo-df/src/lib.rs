@@ -72,6 +72,7 @@ use tracing::{info, warn};
 use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
+pub const ASYNC_RESULT_FIELD: &str = "__async_result";
 
 #[derive(Clone, Debug)]
 pub struct CompiledSql {

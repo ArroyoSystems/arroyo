@@ -114,11 +114,10 @@ enum AsyncUdfOrdering {
 message AsyncUdfOperator {
   string name = 1;
   ArrowDylibUdfConfig udf = 2;
-  bytes arg_projection = 3;
-  bytes final_projection = 4;
-  repeated uint32 input_columns = 5;
-  AsyncUdfOrdering ordering = 6;
-  uint32 max_concurrency = 7;
+  repeated bytes arg_exprs = 3;
+  repeated bytes final_exprs = 4;
+  AsyncUdfOrdering ordering = 5;
+  uint32 max_concurrency = 6;
 }
 
 message WasmUdfs {

@@ -486,12 +486,12 @@ pub trait ArrowOperator: Send + 'static {
     async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {}
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
 }
 
 #[derive(Default)]
 pub struct Registry {
-    dylibs: Arc<Mutex<HashMap<String, Arc<UdfDylib>>>>,
+    dylibs: Arc<std::sync::Mutex<HashMap<String, Arc<UdfDylib>>>>,
     udfs: HashMap<String, Arc<ScalarUDF>>,
     udafs: HashMap<String, Arc<AggregateUDF>>,
 }
@@ -502,9 +502,11 @@ impl Registry {
         name: &str,
         config: &DylibUdfConfig,
     ) -> anyhow::Result<Arc<UdfDylib>> {
-        let mut dylibs = self.dylibs.lock().await;
-        if let Some(dylib) = dylibs.get(&config.dylib_path) {
-            return Ok(Arc::clone(dylib));
+        {
+            let dylibs = self.dylibs.lock().unwrap();
+            if let Some(dylib) = dylibs.get(&config.dylib_path) {
+                return Ok(Arc::clone(dylib));
+            }
         }
 
         // Download a UDF dylib from the object store
@@ -550,9 +552,17 @@ impl Registry {
             config.return_type.clone(),
             interface,
         ));
-        dylibs.insert(name.to_string(), udf.clone());
+
+        self.dylibs
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), udf.clone());
 
         Ok(udf)
+    }
+
+    pub fn get_dylib(&self, path: &str) -> Option<Arc<UdfDylib>> {
+        self.dylibs.lock().unwrap().get(path).map(|t| Arc::clone(t))
     }
 
     pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {

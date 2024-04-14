@@ -27,6 +27,7 @@ pub enum OperatorName {
     ArrowValue,
     ArrowKey,
     ArrowAggregate,
+    AsyncUdf,
     Join,
     InstantJoin,
     WindowFunction,
@@ -175,7 +176,7 @@ impl Debug for LogicalNode {
 
 pub type LogicalGraph = DiGraph<LogicalNode, LogicalEdge>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DylibUdfConfig {
     pub dylib_path: String,
     pub arg_types: Vec<DataType>,

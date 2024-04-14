@@ -102,7 +102,7 @@ pub struct AsyncUdfDylibInterface {
     start: unsafe extern "C-unwind" fn(ordered: bool) -> SendableFfiAsyncUdfHandle,
     send: unsafe extern "C-unwind" fn(
         handle: SendableFfiAsyncUdfHandle,
-        id: usize,
+        id: u64,
         arrays: FfiArrays,
     ) -> FfiFuture<bool>,
     drain_results: unsafe extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle) -> DrainResult,
@@ -250,6 +250,10 @@ impl AsyncUdfDylib {
         &self.name
     }
 
+    pub fn return_type(&self) -> &DataType {
+        &self.return_type
+    }
+
     /// Starts the async UDF runtime; must be called before any data is sent into the UDF
     pub fn start(&mut self, ordered: bool) {
         if self.handle.is_none() {
@@ -260,7 +264,7 @@ impl AsyncUdfDylib {
     /// Sends a record into the UDF for processing. Each ArrayData must have a single item
     /// representing the value for the argument at its position in the vec. The given id will be
     /// returned back with the result.
-    pub async fn send(&mut self, id: usize, data: Vec<ArrayData>) -> anyhow::Result<()> {
+    pub async fn send(&mut self, id: u64, data: Vec<ArrayData>) -> anyhow::Result<()> {
         assert!(data.iter().all(|d| d.len() == 1));
         let handle = self
             .handle
