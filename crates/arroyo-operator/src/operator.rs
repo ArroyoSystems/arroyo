@@ -556,7 +556,7 @@ impl Registry {
         self.dylibs
             .lock()
             .unwrap()
-            .insert(name.to_string(), udf.clone());
+            .insert(config.dylib_path.clone(), udf.clone());
 
         Ok(udf)
     }

@@ -269,10 +269,17 @@ impl UserDefinedLogicalNodeCore for AsyncUDFExtension {
 
     fn from_template(&self, exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
         assert_eq!(inputs.len(), 1, "input size inconsistent");
-        eprintln!(
-            "can't recreate with new exprs {:?} {:?} {:?}",
-            self.arg_exprs, self.final_exprs, exprs
-        );
-        self.clone()
+        assert_eq!(&UserDefinedLogicalNode::expressions(self), exprs, "Tried to recreate async UDF node with different expressions");
+
+        Self {
+            input: Arc::new(inputs[0].clone()),
+            name: self.name.clone(),
+            udf: self.udf.clone(),
+            arg_exprs: self.arg_exprs.clone(),
+            final_exprs: self.final_exprs.clone(),
+            ordered: self.ordered,
+            max_concurrency: self.max_concurrency,
+            final_schema: self.final_schema.clone(),
+        }
     }
 }

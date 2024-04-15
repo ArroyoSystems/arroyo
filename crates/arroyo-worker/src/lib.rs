@@ -426,6 +426,7 @@ impl WorkerGrpc for WorkerServer {
         let mut registry = new_registry();
 
         for (udf_name, dylib_config) in &self.program_config.udf_dylibs {
+            println!("Loading UDF {}", udf_name);
             let dylib = registry
                 .load_dylib(udf_name, dylib_config)
                 .await

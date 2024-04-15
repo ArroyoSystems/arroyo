@@ -1,6 +1,6 @@
 use crate::arrow::StatelessPhysicalExecutor;
 use anyhow::anyhow;
-use arrow::row::{OwnedRow, Row, RowConverter};
+use arrow::row::{OwnedRow, Row, RowConverter, SortField};
 use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
 use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
@@ -19,6 +19,7 @@ use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::warn;
 
 enum InputOrOutput {
@@ -64,8 +65,8 @@ impl OperatorConstructor for AsyncUdfConstructor {
 
         let udf = registry.get_dylib(&udf_config.dylib_path).ok_or_else(|| {
             anyhow!(
-                "Async map operator configured to use UDF {} which was not loaded at startup",
-                config.name
+                "Async map operator configured to use UDF {} at {} which was not loaded at startup",
+                config.name, udf_config.dylib_path,
             )
         })?;
 
@@ -119,6 +120,11 @@ impl ArrowOperator for AsyncUdfOperator {
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        self.row_converter = RowConverter::new(ctx.in_schemas[0].schema.fields.iter()
+                .map(|f| SortField::new(f.data_type().clone()))
+                .collect()
+        ).unwrap();
+        
         let mut input_fields = ctx.in_schemas[0].schema.fields.to_vec();
         input_fields.push(Arc::new(Field::new(
             ASYNC_RESULT_FIELD,
@@ -190,6 +196,10 @@ impl ArrowOperator for AsyncUdfOperator {
         //     });
     }
 
+    fn tick_interval(&self) -> Option<Duration> {
+        Some(Duration::from_millis(50))
+    }
+
     async fn process_batch(&mut self, batch: RecordBatch, _: &mut ArrowContext) {
         let arg_batch: Vec<_> = self
             .input_exprs
@@ -223,6 +233,7 @@ impl ArrowOperator for AsyncUdfOperator {
     }
 
     async fn handle_tick(&mut self, _: u64, ctx: &mut ArrowContext) {
+        println!("HANDLIN TICK");
         let Some((ids, results)) = self
             .udf
             .drain_results()
@@ -231,6 +242,8 @@ impl ArrowOperator for AsyncUdfOperator {
             return;
         };
 
+        println!("GOT RESULTS: {:?}", ids);
+        
         let mut rows = vec![];
         for id in ids.values() {
             let InputOrOutput::Input(row) = self.inputs.get(id).expect("missing input record")

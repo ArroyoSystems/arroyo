@@ -460,19 +460,21 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
     }
 }
 
+#[allow(unused)]
+fn inspect_plan(logical_plan: LogicalPlan) -> LogicalPlan {
+    info!("logical plan = {}", logical_plan.display_graphviz());
+    logical_plan
+}
+
 pub fn rewrite_plan(
     plan: LogicalPlan,
     schema_provider: &ArroyoSchemaProvider,
 ) -> DFResult<LogicalPlan> {
-    let p1 = plan.rewrite(&mut UnnestRewriter {})?;
-    println!("p1 = {}", p1.display_graphviz());
-    let p2 = p1.rewrite(&mut AsyncUdfRewriter::new(&schema_provider))?;
-    println!("p2 = {}", p2.display_graphviz());
-    let p3 = p2.rewrite(&mut ArroyoRewriter {
-        schema_provider: &schema_provider,
-    })?;
-    println!("p3 = {}", p3.display_graphviz());
-    Ok(p3)
+    plan.rewrite(&mut UnnestRewriter {})?
+        .rewrite(&mut ArroyoRewriter {
+            schema_provider: &schema_provider,
+        })?
+        .rewrite(&mut AsyncUdfRewriter::new(&schema_provider))
 }
 
 pub async fn parse_and_get_arrow_program(
