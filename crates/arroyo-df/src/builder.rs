@@ -14,7 +14,8 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
 use datafusion_common::tree_node::{TreeNode, TreeNodeVisitor, VisitRecursion};
 use datafusion_common::{
-    DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult, ScalarValue,
+    plan_err, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
+    ScalarValue,
 };
 use datafusion_execution::config::SessionConfig;
 use datafusion_execution::runtime_env::{RuntimeConfig, RuntimeEnv};
@@ -271,6 +272,10 @@ impl<'a> PlanToGraphVisitor<'a> {
                 )));
             }
         }
+        println!(
+            "building extension for {:?}, inputs: {:?}",
+            extension, input_nodes
+        );
         let input_schemas = input_nodes
             .iter()
             .map(|index| {
@@ -307,7 +312,7 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
         };
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
-            .map_err(|e| DataFusionError::Plan(format!("error converting extension: {}", e)))?;
+            .map_err(|e: DataFusionError| e.context("converting extension"))?;
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(node_index) = self.named_nodes.get(&name) {
                 self.add_index_to_traversal(*node_index);
@@ -335,9 +340,9 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
         };
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
-            .map_err(|e| DataFusionError::Plan(format!("error converting extension: {}", e)))?;
+            .map_err(|e: DataFusionError| e.context("converting extension"))?;
         self.build_extension(input_nodes, arroyo_extension)
-            .map_err(|e| DataFusionError::Plan(format!("error building extension: {}", e)))?;
+            .map_err(|e| e.context("building extension"))?;
 
         Ok(VisitRecursion::Continue)
     }

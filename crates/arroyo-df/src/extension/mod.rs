@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -22,14 +22,9 @@ use crate::ASYNC_RESULT_FIELD;
 use join::JoinExtension;
 
 use self::{
-    aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
-    join::JOIN_NODE_NAME,
-    key_calculation::{KeyCalculationExtension, KEY_CALCULATION_NAME},
-    remote_table::{RemoteTableExtension, REMOTE_TABLE_NAME},
-    sink::{SinkExtension, SINK_NODE_NAME},
-    table_source::{TableSourceExtension, TABLE_SOURCE_NAME},
-    watermark_node::WATERMARK_NODE_NAME,
-    window_fn::{WindowFunctionExtension, WINDOW_FUNCTION_EXTENSION_NAME},
+    aggregate::AggregateExtension, key_calculation::KeyCalculationExtension,
+    remote_table::RemoteTableExtension, sink::SinkExtension, table_source::TableSourceExtension,
+    window_fn::WindowFunctionExtension,
 };
 
 pub(crate) mod aggregate;
@@ -40,7 +35,7 @@ pub(crate) mod sink;
 pub(crate) mod table_source;
 pub(crate) mod watermark_node;
 pub(crate) mod window_fn;
-pub(crate) trait ArroyoExtension {
+pub(crate) trait ArroyoExtension: Debug {
     // if the extension has a name, return it so that we can memoize.
     fn node_name(&self) -> Option<NamedNode>;
     fn plan_node(
@@ -57,58 +52,29 @@ pub(crate) struct NodeWithIncomingEdges {
     pub edges: Vec<LogicalEdge>,
 }
 
+fn try_from_t<'a, T: ArroyoExtension + 'static>(
+    node: &'a Arc<dyn UserDefinedLogicalNode>,
+) -> Result<&'a dyn ArroyoExtension, ()> {
+    node.as_any()
+        .downcast_ref::<T>()
+        .map(|t| t as &dyn ArroyoExtension)
+        .ok_or_else(|| ())
+}
+
 impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtension {
     type Error = DataFusionError;
 
     fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> DFResult<Self, Self::Error> {
-        match node.name() {
-            TABLE_SOURCE_NAME => {
-                let table_source_extension = node
-                    .as_any()
-                    .downcast_ref::<TableSourceExtension>()
-                    .unwrap();
-                Ok(table_source_extension as &dyn ArroyoExtension)
-            }
-            WATERMARK_NODE_NAME => {
-                let watermark_node = node.as_any().downcast_ref::<WatermarkNode>().unwrap();
-                Ok(watermark_node as &dyn ArroyoExtension)
-            }
-            SINK_NODE_NAME => {
-                let sink_extension = node.as_any().downcast_ref::<SinkExtension>().unwrap();
-                Ok(sink_extension as &dyn ArroyoExtension)
-            }
-            KEY_CALCULATION_NAME => {
-                let key_calculation_extension = node
-                    .as_any()
-                    .downcast_ref::<KeyCalculationExtension>()
-                    .unwrap();
-                Ok(key_calculation_extension as &dyn ArroyoExtension)
-            }
-            AGGREGATE_EXTENSION_NAME => {
-                let aggregate_extension =
-                    node.as_any().downcast_ref::<AggregateExtension>().unwrap();
-                Ok(aggregate_extension as &dyn ArroyoExtension)
-            }
-            REMOTE_TABLE_NAME => {
-                let remote_table_extension = node
-                    .as_any()
-                    .downcast_ref::<RemoteTableExtension>()
-                    .unwrap();
-                Ok(remote_table_extension as &dyn ArroyoExtension)
-            }
-            JOIN_NODE_NAME => {
-                let join_extension = node.as_any().downcast_ref::<JoinExtension>().unwrap();
-                Ok(join_extension as &dyn ArroyoExtension)
-            }
-            WINDOW_FUNCTION_EXTENSION_NAME => {
-                let window_function_extension = node
-                    .as_any()
-                    .downcast_ref::<WindowFunctionExtension>()
-                    .unwrap();
-                Ok(window_function_extension as &dyn ArroyoExtension)
-            }
-            other => Err(DataFusionError::Plan(format!("unexpected node: {}", other))),
-        }
+        try_from_t::<TableSourceExtension>(node)
+            .or_else(|_| try_from_t::<WatermarkNode>(node))
+            .or_else(|_| try_from_t::<SinkExtension>(node))
+            .or_else(|_| try_from_t::<KeyCalculationExtension>(node))
+            .or_else(|_| try_from_t::<AggregateExtension>(node))
+            .or_else(|_| try_from_t::<RemoteTableExtension>(node))
+            .or_else(|_| try_from_t::<JoinExtension>(node))
+            .or_else(|_| try_from_t::<WindowFunctionExtension>(node))
+            .or_else(|_| try_from_t::<AsyncUDFExtension>(node))
+            .map_err(|_| DataFusionError::Plan(format!("unexpected node: {}", node.name())))
     }
 }
 
@@ -171,7 +137,7 @@ impl UserDefinedLogicalNodeCore for TimestampAppendExtension {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AsyncUDFExtension {
-    pub(crate) input: LogicalPlan,
+    pub(crate) input: Arc<LogicalPlan>,
     pub(crate) name: String,
     pub(crate) udf: DylibUdfConfig,
     pub(crate) arg_exprs: Vec<Expr>,
@@ -303,6 +269,10 @@ impl UserDefinedLogicalNodeCore for AsyncUDFExtension {
 
     fn from_template(&self, exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
         assert_eq!(inputs.len(), 1, "input size inconsistent");
-        todo!()
+        eprintln!(
+            "can't recreate with new exprs {:?} {:?} {:?}",
+            self.arg_exprs, self.final_exprs, exprs
+        );
+        self.clone()
     }
 }

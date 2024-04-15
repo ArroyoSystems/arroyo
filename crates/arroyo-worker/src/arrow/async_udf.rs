@@ -1,21 +1,24 @@
 use crate::arrow::StatelessPhysicalExecutor;
 use anyhow::anyhow;
 use arrow::row::{OwnedRow, Row, RowConverter};
-use arrow_array::{make_array, Array, RecordBatch};
+use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
 use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_df::ASYNC_RESULT_FIELD;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
-use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
+use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_state::global_table_config;
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::AsyncUdfDylib;
 use async_trait::async_trait;
+use datafusion_physical_expr::PhysicalExpr;
+use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
+use datafusion_proto::protobuf::PhysicalExprNode;
+use prost::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tokio_stream::StreamExt;
 use tracing::warn;
 
 enum InputOrOutput {
@@ -23,13 +26,15 @@ enum InputOrOutput {
     Output(OwnedRow),
 }
 
-pub struct AsyncMapOperator {
+pub struct AsyncUdfOperator {
     name: String,
-    udf: Arc<AsyncUdfDylib>,
+    udf: AsyncUdfDylib,
     ordered: bool,
     max_concurrency: u32,
-    input_executor: StatelessPhysicalExecutor,
-    final_executor: StatelessPhysicalExecutor,
+    config: api::AsyncUdfOperator,
+    registry: Arc<Registry>,
+    input_exprs: Vec<Arc<dyn PhysicalExpr>>,
+    final_exprs: Vec<Arc<dyn PhysicalExpr>>,
     next_id: u64, // i.e. inputs received so far, should start at 0
     inputs: HashMap<u64, InputOrOutput>,
     watermarks: VecDeque<(u64, Watermark)>,
@@ -37,20 +42,24 @@ pub struct AsyncMapOperator {
     input_schema: Option<Arc<Schema>>,
 }
 
-pub struct AsyncMapOperatorConstructor;
+pub struct AsyncUdfConstructor;
 
-impl OperatorConstructor for AsyncMapOperatorConstructor {
-    type ConfigT = AsyncUdfOperator;
+impl OperatorConstructor for AsyncUdfConstructor {
+    type ConfigT = api::AsyncUdfOperator;
 
     fn with_config(
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<OperatorNode> {
-        let udf_config: DylibUdfConfig = config.udf.ok_or_else(|| anyhow!("no UDF config"))?.into();
-        let ordered = match AsyncUdfOrdering::try_from(config.ordering) {
-            Err(_) | Ok(AsyncUdfOrdering::Ordered) => true,
-            Ok(AsyncUdfOrdering::Unordered) => false,
+        let udf_config: DylibUdfConfig = config
+            .udf
+            .clone()
+            .ok_or_else(|| anyhow!("no UDF config"))?
+            .into();
+        let ordered = match api::AsyncUdfOrdering::try_from(config.ordering) {
+            Err(_) | Ok(api::AsyncUdfOrdering::Ordered) => true,
+            Ok(api::AsyncUdfOrdering::Unordered) => false,
         };
 
         let udf = registry.get_dylib(&udf_config.dylib_path).ok_or_else(|| {
@@ -60,16 +69,15 @@ impl OperatorConstructor for AsyncMapOperatorConstructor {
             )
         })?;
 
-        let input_executor = StatelessPhysicalExecutor::new(&config.arg_projection, &registry)?;
-        let final_executor = StatelessPhysicalExecutor::new(&config.final_projection, &registry)?;
-
-        Ok(OperatorNode::from_operator(Box::new(AsyncMapOperator {
-            name: config.name,
-            udf: Arc::new((&*udf).try_into()?),
+        Ok(OperatorNode::from_operator(Box::new(AsyncUdfOperator {
+            name: config.name.clone(),
+            udf: (&*udf).try_into()?,
             ordered,
             max_concurrency: config.max_concurrency,
-            input_executor,
-            final_executor,
+            config,
+            registry,
+            input_exprs: vec![],
+            final_exprs: vec![],
             next_id: 0,
             inputs: HashMap::new(),
             watermarks: VecDeque::new(),
@@ -79,7 +87,7 @@ impl OperatorConstructor for AsyncMapOperatorConstructor {
     }
 }
 
-impl AsyncMapOperator {
+impl AsyncUdfOperator {
     async fn on_collect(&mut self, id: usize, ctx: &mut ArrowContext) {
         // mark the input as collected by setting it to None,
         // then pop all the Nones from the front of the queue
@@ -101,7 +109,7 @@ impl AsyncMapOperator {
 }
 
 #[async_trait]
-impl ArrowOperator for AsyncMapOperator {
+impl ArrowOperator for AsyncUdfOperator {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -117,7 +125,45 @@ impl ArrowOperator for AsyncMapOperator {
             self.udf.return_type().clone(),
             true,
         )));
-        self.input_schema = Some(Arc::new(Schema::new(input_fields)));
+
+        let mut post_udf_fields = input_fields.clone();
+        post_udf_fields.push(Arc::new(Field::new(
+            ASYNC_RESULT_FIELD,
+            self.udf.return_type().clone(),
+            true,
+        )));
+        let input_schema = Arc::new(Schema::new(input_fields));
+        let post_udf_schema = Arc::new(Schema::new(post_udf_fields));
+
+        self.input_exprs = self
+            .config
+            .arg_exprs
+            .iter()
+            .map(|expr| {
+                parse_physical_expr(
+                    &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
+                    &*self.registry,
+                    &input_schema,
+                )
+                .unwrap()
+            })
+            .collect();
+
+        self.final_exprs = self
+            .config
+            .final_exprs
+            .iter()
+            .map(|expr| {
+                parse_physical_expr(
+                    &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
+                    &*self.registry,
+                    &post_udf_schema,
+                )
+                .unwrap()
+            })
+            .collect();
+
+        self.input_schema = Some(input_schema);
 
         // TODO: state
         self.udf.start(self.ordered);
@@ -145,17 +191,31 @@ impl ArrowOperator for AsyncMapOperator {
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, _: &mut ArrowContext) {
-        let arg_batch = self.input_executor.process_single(batch.clone()).await;
+        let arg_batch: Vec<_> = self
+            .input_exprs
+            .iter()
+            .map(|expr| {
+                expr.evaluate(&batch)
+                    .unwrap()
+                    .into_array(batch.num_rows())
+                    .unwrap()
+            })
+            .collect();
+
         let rows = self.row_converter.convert_columns(batch.columns()).unwrap();
         for (i, row) in rows.iter().enumerate() {
-            let args = arg_batch.project(&[i]).unwrap();
+            let args: Vec<_> = arg_batch
+                .iter()
+                .map(|v| {
+                    arrow::compute::take(&*v, &UInt64Array::from(vec![i as u64]), None)
+                        .unwrap()
+                        .to_data()
+                })
+                .collect();
             self.inputs
                 .insert(self.next_id, InputOrOutput::Input(row.owned()));
             self.udf
-                .send(
-                    self.next_id,
-                    args.columns().iter().map(|c| c.to_data()).collect(),
-                )
+                .send(self.next_id, args)
                 .await
                 .expect("failed to send data to async UDF runtime");
             self.next_id += 1;
@@ -188,10 +248,21 @@ impl ArrowOperator for AsyncMapOperator {
         let batch = RecordBatch::try_new(self.input_schema.as_ref().unwrap().clone(), cols)
             .expect("could not construct record batch from async UDF result");
 
-        let mut results = self.final_executor.process_batch(batch).await;
-        while let Some(result) = results.next().await {
-            ctx.collector.collect(result.unwrap()).await;
-        }
+        let result: Vec<_> = self
+            .final_exprs
+            .iter()
+            .map(|expr| {
+                expr.evaluate(&batch)
+                    .unwrap()
+                    .into_array(batch.num_rows())
+                    .unwrap()
+            })
+            .collect();
+
+        let result =
+            RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), result).unwrap();
+
+        ctx.collector.collect(result).await;
     }
 
     async fn handle_watermark(

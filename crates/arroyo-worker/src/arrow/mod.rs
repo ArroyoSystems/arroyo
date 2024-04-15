@@ -20,9 +20,8 @@ use futures::StreamExt;
 use prost::Message as ProstMessage;
 use std::sync::Arc;
 use std::sync::RwLock;
-use tokio_stream::StreamExt;
 
-pub mod async_map;
+pub mod async_udf;
 pub mod instant_join;
 pub mod join_with_expiration;
 pub mod session_aggregating_window;

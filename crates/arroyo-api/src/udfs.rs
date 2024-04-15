@@ -20,6 +20,7 @@ use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::Params;
+use toml::toml;
 use tonic::transport::Channel;
 use tracing::error;
 
@@ -240,6 +241,14 @@ pub async fn build_udf(
     };
 
     dependencies.insert("arroyo-udf-plugin".to_string(), plugin_dep);
+    dependencies.insert(
+        "async-ffi".to_string(),
+        toml! {
+            version = "0.5.0"
+            features = ["macros"]
+        }
+        .into(),
+    );
 
     let check_udfs_resp = match compiler_service
         .build_udf(BuildUdfReq {

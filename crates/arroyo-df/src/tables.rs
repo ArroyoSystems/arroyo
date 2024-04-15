@@ -35,13 +35,13 @@ use tracing::info;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::plan::ArroyoRewriter;
-use crate::rewriters::UnnestRewriter;
+use crate::rewriters::{AsyncUdfRewriter, UnnestRewriter};
 use crate::types::convert_data_type;
-use crate::DEFAULT_IDLE_TIME;
 use crate::{
     external::{ProcessingMode, SqlSource},
     ArroyoSchemaProvider,
 };
+use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -553,11 +553,7 @@ impl Table {
                     input,
                     ..
                 }))) => {
-                    let rewritten_plan = input
-                        .as_ref()
-                        .clone()
-                        .rewrite(&mut UnnestRewriter {})?
-                        .rewrite(&mut ArroyoRewriter { schema_provider })?;
+                    let rewritten_plan = rewrite_plan(input.as_ref().clone(), &schema_provider)?;
                     let schema = rewritten_plan.schema().clone();
                     let remote_extension = RemoteTableExtension {
                         input: rewritten_plan,

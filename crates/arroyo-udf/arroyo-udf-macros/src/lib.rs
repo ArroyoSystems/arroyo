@@ -242,8 +242,8 @@ fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
     };
 
     let wrapper = quote! {
-        async fn wrapper(id: usize, args: Vec<arroyo_udf_plugin::arrow::array::ArrayData>) ->
-           (usize, Result<arroyo_udf_plugin::ArrowDatum, tokio::time::error::Elapsed>) {
+        async fn wrapper(id: u64, args: Vec<arroyo_udf_plugin::arrow::array::ArrayData>) ->
+           (u64, Result<arroyo_udf_plugin::ArrowDatum, tokio::time::error::Elapsed>) {
             let mut args = args.into_iter();
 
             #(#defs;)*
@@ -262,6 +262,7 @@ fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
     };
 
     let start = quote! {
+        #[no_mangle]
         pub extern "C-unwind" fn start(ordered: bool) -> arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle {
             let (x, handle) = arroyo_udf_plugin::async_udf::AsyncUdf::new(
                 ordered, Box::new(#results_builder), wrapper
@@ -280,9 +281,10 @@ fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
 
         #start
 
-        #[arroyo_udf_plugin::async_udf::async_ffi::async_ffi]
+        #[no_mangle]
+        #[async_ffi::async_ffi]
         pub async extern "C-unwind" fn send(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle, 
-            id: usize, arrays: arroyo_udf_plugin::FfiArrays) -> bool {
+            id: u64, arrays: arroyo_udf_plugin::FfiArrays) -> bool {
             arroyo_udf_plugin::async_udf::send(handle, id, arrays).await
         }
 

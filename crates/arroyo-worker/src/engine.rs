@@ -12,6 +12,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use tracing::{debug, info, warn};
 
+use crate::arrow::async_udf::AsyncUdfConstructor;
 use crate::arrow::instant_join::InstantJoinConstructor;
 use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
@@ -798,12 +799,14 @@ pub fn construct_operator(
             // TODO: this should not be in a specific window.
             Box::new(TumblingAggregateWindowConstructor)
         }
+        OperatorName::AsyncUdf => Box::new(AsyncUdfConstructor),
         OperatorName::TumblingWindowAggregate => Box::new(TumblingAggregateWindowConstructor),
         OperatorName::SlidingWindowAggregate => Box::new(SlidingAggregatingWindowConstructor),
         OperatorName::SessionWindowAggregate => Box::new(SessionAggregatingWindowConstructor),
         OperatorName::ExpressionWatermark => Box::new(WatermarkGeneratorConstructor),
         OperatorName::Join => Box::new(JoinWithExpirationConstructor),
         OperatorName::InstantJoin => Box::new(InstantJoinConstructor),
+        OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut config.as_slice()).unwrap();
             return connectors()
@@ -817,7 +820,6 @@ pub fn construct_operator(
                     panic!("Failed to construct connector {}: {:?}", op.connector, e)
                 });
         }
-        OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
     };
 
     ctor.with_config(config, registry)

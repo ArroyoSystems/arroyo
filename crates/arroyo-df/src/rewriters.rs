@@ -10,6 +10,7 @@ use crate::{ArroyoSchemaProvider, ASYNC_RESULT_FIELD};
 use arrow_schema::DataType;
 use arroyo_rpc::TIMESTAMP_FIELD;
 
+use crate::extension::AsyncUDFExtension;
 use datafusion_common::tree_node::{
     Transformed, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
 };
@@ -413,6 +414,10 @@ pub struct AsyncUdfRewriter<'a> {
 }
 
 impl<'a> AsyncUdfRewriter<'a> {
+    pub fn new(provider: &'a ArroyoSchemaProvider) -> Self {
+        Self { provider }
+    }
+
     fn split_async(
         expr: Expr,
         provider: &ArroyoSchemaProvider,
@@ -452,12 +457,12 @@ impl<'a> AsyncUdfRewriter<'a> {
 impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
     type N = LogicalPlan;
 
-    fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
-        let LogicalPlan::Projection(projection) = &mut node else {
+    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+        let LogicalPlan::Projection(mut projection) = node else {
             for e in node.expressions() {
                 if let (_, Some((udf, _))) = Self::split_async(e.clone(), &self.provider)? {
                     return plan_err!(
-                        "async UDF {udf} used in a non-SELECT statement, which is not supported"
+                        "async UDFs are only supported in projections, but {udf} was called in another context"
                     );
                 }
             }
@@ -467,25 +472,38 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
         let mut args = None;
 
         for e in projection.expr.iter_mut() {
-            let (new_e, Some((_, udf))) = Self::split_async(e.clone(), &self.provider)? else {
+            let (new_e, Some(udf)) = Self::split_async(e.clone(), &self.provider)? else {
                 continue;
             };
 
             if args.replace(udf).is_some() {
                 return plan_err!(
                     "projection {} contains multiple async UDFs, which is not supported",
-                    node.display()
+                    LogicalPlan::Projection(projection).display_indent()
                 );
             }
 
             *e = new_e;
         }
 
-        let Some(args) = args else {
-            return Ok(node);
+        let Some((name, args)) = args else {
+            return Ok(LogicalPlan::Projection(projection));
         };
 
-        OK(())
+        let udf = self.provider.dylib_udfs.get(&name).unwrap().clone();
+
+        Ok(LogicalPlan::Extension(Extension {
+            node: Arc::new(AsyncUDFExtension {
+                input: projection.input,
+                name,
+                udf,
+                arg_exprs: args,
+                final_exprs: projection.expr,
+                ordered: false,
+                max_concurrency: 100,
+                final_schema: projection.schema,
+            }),
+        }))
     }
 }
 

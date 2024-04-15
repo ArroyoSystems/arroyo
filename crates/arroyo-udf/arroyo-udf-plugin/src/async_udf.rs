@@ -11,7 +11,6 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::error::Elapsed;
 
 pub use arroyo_udf_common::async_udf::{DrainResult, SendableFfiAsyncUdfHandle};
-pub use async_ffi;
 
 pub enum FuturesEnum<F: Future + Send + 'static> {
     Ordered(FuturesOrdered<F>),

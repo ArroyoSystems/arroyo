@@ -25,7 +25,7 @@ use arroyo_datastream::WindowType;
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::physical_plan::functions::make_scalar_function;
-use datafusion_common::{plan_err, DFField, OwnedTableReference, ScalarValue};
+use datafusion_common::{plan_err, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
 
 use datafusion::prelude::create_udf;
 
@@ -56,7 +56,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::json::get_json_functions;
-use crate::rewriters::{SourceMetadataVisitor, UnnestRewriter};
+use crate::rewriters::{AsyncUdfRewriter, SourceMetadataVisitor, UnnestRewriter};
 use crate::types::interval_month_day_nanos_to_duration;
 
 use crate::udafs::EmptyUdaf;
@@ -285,6 +285,7 @@ impl ArroyoSchemaProvider {
                 args: parsed.udf.args,
                 ret: parsed.udf.ret_type,
                 aggregate: parsed.udf.vec_arguments > 0,
+                is_async: parsed.udf.is_async,
             },
         );
 
@@ -459,6 +460,21 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
     }
 }
 
+pub fn rewrite_plan(
+    plan: LogicalPlan,
+    schema_provider: &ArroyoSchemaProvider,
+) -> DFResult<LogicalPlan> {
+    let p1 = plan.rewrite(&mut UnnestRewriter {})?;
+    println!("p1 = {}", p1.display_graphviz());
+    let p2 = p1.rewrite(&mut AsyncUdfRewriter::new(&schema_provider))?;
+    println!("p2 = {}", p2.display_graphviz());
+    let p3 = p2.rewrite(&mut ArroyoRewriter {
+        schema_provider: &schema_provider,
+    })?;
+    println!("p3 = {}", p3.display_graphviz());
+    Ok(p3)
+}
+
 pub async fn parse_and_get_arrow_program(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
@@ -497,10 +513,7 @@ pub async fn parse_and_get_arrow_program(
             Insert::Anonymous { logical_plan } => (logical_plan, None),
         };
 
-        let plan_rewrite = plan.rewrite(&mut UnnestRewriter {})?;
-        let plan_rewrite = plan_rewrite.rewrite(&mut ArroyoRewriter {
-            schema_provider: &schema_provider,
-        })?;
+        let plan_rewrite = rewrite_plan(plan, &schema_provider)?;
 
         let mut metadata = SourceMetadataVisitor::new(&schema_provider);
         plan_rewrite.visit(&mut metadata)?;
