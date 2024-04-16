@@ -19,7 +19,7 @@ mod test;
 use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType};
-use arrow_schema::{Field, Schema};
+use arrow_schema::Schema;
 use arroyo_datastream::WindowType;
 
 use datafusion::datasource::DefaultTableSource;
@@ -67,7 +67,7 @@ use arroyo_udf_host::ParsedUdfFile;
 use datafusion_execution::FunctionRegistry;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
-use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
+use syn::{FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
 
@@ -224,7 +224,7 @@ impl ArroyoSchemaProvider {
                     .collect(),
                 return_type: parsed.udf.ret_type.data_type.clone(),
                 aggregate: parsed.udf.vec_arguments > 0,
-                is_async: parsed.udf.is_async,
+                is_async: parsed.udf.udf_type.is_async(),
             },
         );
 
@@ -238,7 +238,7 @@ impl ArroyoSchemaProvider {
                             .udf
                             .args
                             .iter()
-                            .map(|t| inner_type(&t.data_type).expect("udaf arg is not a vec"))
+                            .map(|t| inner_type(&t.data_type).expect("UDAF arg is not a vec"))
                             .collect(),
                         Arc::new(parsed.udf.ret_type.data_type.clone()),
                         Volatility::Volatile,
@@ -285,7 +285,7 @@ impl ArroyoSchemaProvider {
                 args: parsed.udf.args,
                 ret: parsed.udf.ret_type,
                 aggregate: parsed.udf.vec_arguments > 0,
-                is_async: parsed.udf.is_async,
+                udf_type: parsed.udf.udf_type,
             },
         );
 

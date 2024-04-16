@@ -6,8 +6,8 @@ use arroyo_connectors::{
     EmptyConfig,
 };
 use arroyo_operator::connector::Connector;
-use arroyo_types::NullableType;
 use test_log::test;
+use arroyo_udf_host::parse::NullableType;
 
 use crate::{parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
 
@@ -37,11 +37,11 @@ async fn test_udf() {
     let mut schema_provider = get_test_schema_provider();
 
     schema_provider
-        .add_rust_udf("fn my_sqr(x: i64) -> i64 { x * x }", "")
+        .add_rust_udf("#[udf] fn my_sqr(x: i64) -> i64 { x * x }", "")
         .unwrap();
 
     schema_provider
-        .add_rust_udf("fn my_sqr_opt(x: i64) -> Option<i64> { Some(x * x) }", "")
+        .add_rust_udf("#[udf] fn my_sqr_opt(x: i64) -> Option<i64> { Some(x * x) }", "")
         .unwrap();
 
     let def = schema_provider.udf_defs.get("my_sqr").unwrap();

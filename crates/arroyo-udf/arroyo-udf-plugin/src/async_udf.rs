@@ -1,16 +1,17 @@
 use arrow::array::{Array, ArrayBuilder, ArrayData, UInt64Builder};
-use arroyo_udf_common::async_udf::{FfiAsyncUdfHandle, OutputT, QueueData, ResultMutex};
+use arroyo_udf_common::async_udf::{FfiAsyncUdfHandle, QueueData, ResultMutex};
 use arroyo_udf_common::{ArrowDatum, FfiArrays};
 use futures::stream::StreamExt;
 use futures::stream::{FuturesOrdered, FuturesUnordered};
-use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::error::Elapsed;
 
 pub use arroyo_udf_common::async_udf::{DrainResult, SendableFfiAsyncUdfHandle};
+pub use tokio;
 
 pub enum FuturesEnum<F: Future + Send + 'static> {
     Ordered(FuturesOrdered<F>),
@@ -90,23 +91,30 @@ pub fn stop_runtime(handle: SendableFfiAsyncUdfHandle) {
     drop(handle);
 }
 
+pub type OutputT = (u64, Result<ArrowDatum, Elapsed>);
+
 pub struct AsyncUdf<
     F: Future<Output = OutputT> + Send + 'static,
-    FnT: Fn(u64, Vec<ArrayData>) -> F + Send,
+    FnT: Fn(u64, Duration, Vec<ArrayData>) -> F + Send,
 > {
     futures: FuturesEnum<F>,
     rx: Receiver<QueueData>,
     results: ResultMutex,
-    inputs: HashMap<u64, Vec<ArrayData>>,
     func: FnT,
+    timeout: Duration,
 }
 
 impl<
         F: Future<Output = OutputT> + Send + 'static,
-        FnT: Fn(u64, Vec<ArrayData>) -> F + Send + 'static,
+        FnT: Fn(u64, Duration, Vec<ArrayData>) -> F + Send + 'static,
     > AsyncUdf<F, FnT>
 {
-    pub fn new(ordered: bool, builder: Box<dyn ArrayBuilder>, func: FnT) -> (Self, AsyncUdfHandle) {
+    pub fn new(
+        ordered: bool,
+        timeout: Duration,
+        builder: Box<dyn ArrayBuilder>,
+        func: FnT,
+    ) -> (Self, AsyncUdfHandle) {
         let (tx, rx) = channel(16);
 
         let results = Arc::new(Mutex::new((UInt64Builder::new(), builder)));
@@ -125,8 +133,8 @@ impl<
                 },
                 rx,
                 results,
-                inputs: HashMap::new(),
                 func,
+                timeout,
             },
             handle,
         )
@@ -152,8 +160,7 @@ impl<
                         break;
                     };
 
-                    self.inputs.insert(id, args.clone());
-                    self.futures.push_back((self.func)(id, args));
+                    self.futures.push_back((self.func)(id, self.timeout, args));
                 }
                 Some((id, result)) = self.futures.next() => {
                     self.handle_future(id, result).await;
@@ -166,21 +173,14 @@ impl<
         let mut results = self.results.lock().unwrap();
         match result {
             Ok(value) => {
-                self.inputs.remove(&id);
                 results.0.append_value(id as u64);
                 value.append_to(&mut results.1);
             }
             Err(_) => {
                 if self.futures.is_ordered() {
-                    unimplemented!(
-                        "Ordered Async UDF timed out, currently panic to preserve ordering"
-                    );
+                    panic!("Ordered Async UDF timed out, currently panic to preserve ordering");
                 }
-                eprintln!("Unordered Async UDF timed out, retrying");
-                self.futures.push_back((self.func)(
-                    id,
-                    (*self.inputs.get(&id).as_ref().expect("missing input")).clone(),
-                ));
+                panic!("Async UDF timed out");
             }
         }
     }

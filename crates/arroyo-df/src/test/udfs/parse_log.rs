@@ -8,6 +8,7 @@ use access_log_parser::{parse, AccessLogError, LogType, LogEntry};
 use serde_json::json;
 use std::time::{UNIX_EPOCH, Duration};
 
+#[udf]
 pub fn parse_log(input: String) -> Option<String> {
     let LogEntry::CommonLog(entry) =
         parse(LogType::CommonLog, &input).ok()? else {

@@ -4,7 +4,7 @@
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
 
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
@@ -48,7 +48,7 @@ use arroyo_df::physical::new_registry;
 use arroyo_operator::udfs::{ArroyoUdaf, UdafArg};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_udf_host::parse::inner_type;
-use arroyo_udf_host::{SyncUdfDylib, UdfDylib};
+use arroyo_udf_host::SyncUdfDylib;
 
 pub mod arrow;
 
@@ -439,7 +439,7 @@ impl WorkerGrpc for WorkerServer {
                 continue;
             }
 
-            let dylib: SyncUdfDylib = (&*dylib).try_into().map_err(|e| {
+            let dylib: SyncUdfDylib = (&*dylib).try_into().map_err(|_| {
                 Status::failed_precondition(format!(
                     "trying to use async UDF {} as a sync UDF",
                     udf_name

@@ -1,7 +1,6 @@
-use crate::{ArrowDatum, FfiArrays};
+use crate::FfiArrays;
 use arrow::array::{ArrayBuilder, ArrayData, UInt64Builder};
 use std::sync::{Arc, Mutex};
-use tokio::time::error::Elapsed;
 
 pub type QueueData = (u64, Vec<ArrayData>);
 pub type ResultMutex = Arc<Mutex<(UInt64Builder, Box<dyn ArrayBuilder>)>>;
@@ -27,5 +26,3 @@ pub enum DrainResult {
     None,
     Error,
 }
-
-pub type OutputT = (u64, Result<ArrowDatum, Elapsed>);

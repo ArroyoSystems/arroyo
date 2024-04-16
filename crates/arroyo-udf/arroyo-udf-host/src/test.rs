@@ -51,7 +51,7 @@ mod test_async_udf {
     use arroyo_udf_macros::udf;
     use std::time::Duration;
 
-    #[udf]
+    #[udf(ordered, timeout = "5s", allowed_in_flight = 100)]
     async fn my_udf(a: u64, b: String) -> u32 {
         tokio::time::sleep(Duration::from_millis(10)).await;
         a as u32 + b.len() as u32
@@ -71,13 +71,8 @@ async fn test_async() {
         drain_results: test_async_udf::drain_results,
         stop_runtime: test_async_udf::stop_runtime,
     };
-    let mut udf = AsyncUdfDylib::new(
-        "my_udf".to_string(),
-        Signature::exact(vec![DataType::Int32, DataType::Utf8], Volatility::Volatile),
-        DataType::Utf8,
-        interface,
-    );
-    udf.start(false);
+    let mut udf = AsyncUdfDylib::new("my_udf".to_string(), DataType::Utf8, interface);
+    udf.start(false, Duration::from_secs(1));
 
     let arg1 = PrimitiveArray::<UInt64Type>::from(vec![2]);
     let arg2 = StringArray::from(vec!["hello"]);

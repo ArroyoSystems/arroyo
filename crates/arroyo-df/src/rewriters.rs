@@ -11,6 +11,7 @@ use arrow_schema::DataType;
 use arroyo_rpc::TIMESTAMP_FIELD;
 
 use crate::extension::AsyncUDFExtension;
+use arroyo_udf_host::parse::{AsyncOptions, UdfType};
 use datafusion_common::tree_node::{
     Transformed, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
 };
@@ -421,21 +422,20 @@ impl<'a> AsyncUdfRewriter<'a> {
     fn split_async(
         expr: Expr,
         provider: &ArroyoSchemaProvider,
-    ) -> DFResult<(Expr, Option<(String, Vec<Expr>)>)> {
-        let mut c: Option<(String, Vec<Expr>)> = None;
+    ) -> DFResult<(Expr, Option<(String, AsyncOptions, Vec<Expr>)>)> {
+        let mut c: Option<(String, AsyncOptions, Vec<Expr>)> = None;
         let expr = expr.transform_up_mut(&mut |e| {
             match &e {
                 Expr::ScalarFunction(ScalarFunction {
                     func_def: ScalarFunctionDefinition::UDF(udf),
                     args,
                 }) => {
-                    if provider
-                        .udf_defs
-                        .get(udf.name())
-                        .map(|udf| udf.is_async)
-                        .unwrap_or(false)
+                    if let Some(UdfType::Async(opts)) =
+                        provider.udf_defs.get(udf.name()).map(|udf| udf.udf_type)
                     {
-                        if c.replace((udf.name().to_string(), args.clone())).is_some() {
+                        if c.replace((udf.name().to_string(), opts, args.clone()))
+                            .is_some()
+                        {
                             return plan_err!(
                                 "multiple async calls in the same expression, which is not allowed"
                             );
@@ -460,7 +460,7 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
     fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
         let LogicalPlan::Projection(mut projection) = node else {
             for e in node.expressions() {
-                if let (_, Some((udf, _))) = Self::split_async(e.clone(), &self.provider)? {
+                if let (_, Some((udf, _, _))) = Self::split_async(e.clone(), &self.provider)? {
                     return plan_err!(
                         "async UDFs are only supported in projections, but {udf} was called in another context"
                     );
@@ -486,7 +486,7 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
             *e = new_e;
         }
 
-        let Some((name, args)) = args else {
+        let Some((name, opts, args)) = args else {
             return Ok(LogicalPlan::Projection(projection));
         };
 
@@ -499,8 +499,9 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
                 udf,
                 arg_exprs: args,
                 final_exprs: projection.expr,
-                ordered: false,
-                max_concurrency: 100,
+                ordered: opts.ordered,
+                max_concurrency: opts.max_concurrency,
+                timeout: opts.timeout,
                 final_schema: projection.schema,
             }),
         }))

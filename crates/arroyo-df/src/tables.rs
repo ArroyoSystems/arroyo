@@ -24,7 +24,6 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
-use datafusion_common::tree_node::TreeNode;
 use datafusion_common::Column;
 use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
@@ -34,8 +33,6 @@ use datafusion_expr::{
 use tracing::info;
 
 use crate::extension::remote_table::RemoteTableExtension;
-use crate::plan::ArroyoRewriter;
-use crate::rewriters::{AsyncUdfRewriter, UnnestRewriter};
 use crate::types::convert_data_type;
 use crate::{
     external::{ProcessingMode, SqlSource},

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use arroyo_datastream::logical::{
@@ -144,6 +145,7 @@ pub(crate) struct AsyncUDFExtension {
     pub(crate) final_exprs: Vec<Expr>,
     pub(crate) ordered: bool,
     pub(crate) max_concurrency: usize,
+    pub(crate) timeout: Duration,
     pub(crate) final_schema: DFSchemaRef,
 }
 
@@ -202,7 +204,8 @@ impl ArroyoExtension for AsyncUDFExtension {
             } else {
                 AsyncUdfOrdering::Unordered as i32
             },
-            max_concurrency: 0,
+            max_concurrency: self.max_concurrency as u32,
+            timeout_micros: self.timeout.as_micros() as u64,
         };
 
         let node = LogicalNode {
@@ -269,7 +272,11 @@ impl UserDefinedLogicalNodeCore for AsyncUDFExtension {
 
     fn from_template(&self, exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
         assert_eq!(inputs.len(), 1, "input size inconsistent");
-        assert_eq!(&UserDefinedLogicalNode::expressions(self), exprs, "Tried to recreate async UDF node with different expressions");
+        assert_eq!(
+            &UserDefinedLogicalNode::expressions(self),
+            exprs,
+            "Tried to recreate async UDF node with different expressions"
+        );
 
         Self {
             input: Arc::new(inputs[0].clone()),
@@ -279,6 +286,7 @@ impl UserDefinedLogicalNodeCore for AsyncUDFExtension {
             final_exprs: self.final_exprs.clone(),
             ordered: self.ordered,
             max_concurrency: self.max_concurrency,
+            timeout: self.timeout,
             final_schema: self.final_schema.clone(),
         }
     }

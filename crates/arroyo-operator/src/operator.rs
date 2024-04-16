@@ -9,7 +9,7 @@ use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
-use arroyo_udf_host::{ContainerOrLocal, SyncUdfDylib, UdfDylib, UdfInterface};
+use arroyo_udf_host::{ContainerOrLocal, UdfDylib, UdfInterface};
 use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
@@ -23,7 +23,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::{Barrier, Mutex};
+use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
 

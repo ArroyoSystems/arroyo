@@ -1019,6 +1019,7 @@ dependencies = [
  "async-ffi",
  "datafusion 36.0.0",
  "dlopen2",
+ "quote",
  "regex",
  "syn 2.0.52",
  "tokio",

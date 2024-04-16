@@ -1,6 +1,5 @@
-use crate::arrow::StatelessPhysicalExecutor;
 use anyhow::anyhow;
-use arrow::row::{OwnedRow, Row, RowConverter, SortField};
+use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
 use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
@@ -10,7 +9,7 @@ use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_state::global_table_config;
-use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
+use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::AsyncUdfDylib;
 use async_trait::async_trait;
 use datafusion_physical_expr::PhysicalExpr;
@@ -20,7 +19,7 @@ use prost::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::warn;
+use tracing::{info, warn};
 
 enum InputOrOutput {
     Input(OwnedRow),
@@ -32,6 +31,7 @@ pub struct AsyncUdfOperator {
     udf: AsyncUdfDylib,
     ordered: bool,
     max_concurrency: u32,
+    timeout: Duration,
     config: api::AsyncUdfOperator,
     registry: Arc<Registry>,
     input_exprs: Vec<Arc<dyn PhysicalExpr>>,
@@ -66,7 +66,8 @@ impl OperatorConstructor for AsyncUdfConstructor {
         let udf = registry.get_dylib(&udf_config.dylib_path).ok_or_else(|| {
             anyhow!(
                 "Async map operator configured to use UDF {} at {} which was not loaded at startup",
-                config.name, udf_config.dylib_path,
+                config.name,
+                udf_config.dylib_path,
             )
         })?;
 
@@ -75,6 +76,7 @@ impl OperatorConstructor for AsyncUdfConstructor {
             udf: (&*udf).try_into()?,
             ordered,
             max_concurrency: config.max_concurrency,
+            timeout: Duration::from_micros(config.timeout_micros),
             config,
             registry,
             input_exprs: vec![],
@@ -120,11 +122,17 @@ impl ArrowOperator for AsyncUdfOperator {
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        self.row_converter = RowConverter::new(ctx.in_schemas[0].schema.fields.iter()
+        info!("Starting async UDF with timeout {:?}", self.timeout);
+        self.row_converter = RowConverter::new(
+            ctx.in_schemas[0]
+                .schema
+                .fields
+                .iter()
                 .map(|f| SortField::new(f.data_type().clone()))
-                .collect()
-        ).unwrap();
-        
+                .collect(),
+        )
+        .unwrap();
+
         let mut input_fields = ctx.in_schemas[0].schema.fields.to_vec();
         input_fields.push(Arc::new(Field::new(
             ASYNC_RESULT_FIELD,
@@ -172,7 +180,7 @@ impl ArrowOperator for AsyncUdfOperator {
         self.input_schema = Some(input_schema);
 
         // TODO: state
-        self.udf.start(self.ordered);
+        self.udf.start(self.ordered, self.timeout);
 
         // let gs = ctx
         //     .table_manager
@@ -233,7 +241,6 @@ impl ArrowOperator for AsyncUdfOperator {
     }
 
     async fn handle_tick(&mut self, _: u64, ctx: &mut ArrowContext) {
-        println!("HANDLIN TICK");
         let Some((ids, results)) = self
             .udf
             .drain_results()
@@ -242,8 +249,6 @@ impl ArrowOperator for AsyncUdfOperator {
             return;
         };
 
-        println!("GOT RESULTS: {:?}", ids);
-        
         let mut rows = vec![];
         for id in ids.values() {
             let InputOrOutput::Input(row) = self.inputs.get(id).expect("missing input record")

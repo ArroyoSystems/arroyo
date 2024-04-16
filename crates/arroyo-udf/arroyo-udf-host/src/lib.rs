@@ -11,17 +11,17 @@ use async_ffi::FfiFuture;
 use datafusion::error::Result as DFResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, Signature};
 use dlopen2::wrapper::{Container, WrapperApi};
+use quote::{format_ident, ToTokens};
 use std::any::Any;
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
-use syn::__private::ToTokens;
+use std::time::Duration;
 use syn::{parse_file, Item};
 
 pub use arroyo_udf_common::parse;
 use arroyo_udf_common::parse::ParsedUdf;
 use regex::Regex;
-use syn::__private::quote::format_ident;
 use toml::Table;
 
 pub fn parse_dependencies(definition: &str) -> anyhow::Result<Table> {
@@ -99,7 +99,10 @@ pub struct UdfDylibInterface {
 
 #[derive(WrapperApi)]
 pub struct AsyncUdfDylibInterface {
-    start: unsafe extern "C-unwind" fn(ordered: bool) -> SendableFfiAsyncUdfHandle,
+    start: unsafe extern "C-unwind" fn(
+        ordered: bool,
+        timeout_micros: u64,
+    ) -> SendableFfiAsyncUdfHandle,
     send: unsafe extern "C-unwind" fn(
         handle: SendableFfiAsyncUdfHandle,
         id: u64,
@@ -206,7 +209,6 @@ impl TryFrom<&UdfDylib> for SyncUdfDylib {
 
 pub struct AsyncUdfDylib {
     name: Arc<String>,
-    signature: Arc<Signature>,
     return_type: Arc<DataType>,
     handle: Option<SendableFfiAsyncUdfHandle>,
     udf: Arc<ContainerOrLocal<AsyncUdfDylibInterface>>,
@@ -222,7 +224,6 @@ impl TryFrom<&UdfDylib> for AsyncUdfDylib {
 
         Ok(Self {
             name: value.name.clone(),
-            signature: value.signature.clone(),
             handle: None,
             return_type: value.return_type.clone(),
             udf: udf.clone(),
@@ -231,15 +232,9 @@ impl TryFrom<&UdfDylib> for AsyncUdfDylib {
 }
 
 impl AsyncUdfDylib {
-    pub fn new(
-        name: String,
-        signature: Signature,
-        return_type: DataType,
-        udf: AsyncUdfDylibInterface,
-    ) -> Self {
+    pub fn new(name: String, return_type: DataType, udf: AsyncUdfDylibInterface) -> Self {
         Self {
             name: Arc::new(name),
-            signature: Arc::new(signature),
             return_type: Arc::new(return_type),
             udf: Arc::new(ContainerOrLocal::Local(udf)),
             handle: None,
@@ -255,9 +250,10 @@ impl AsyncUdfDylib {
     }
 
     /// Starts the async UDF runtime; must be called before any data is sent into the UDF
-    pub fn start(&mut self, ordered: bool) {
+    pub fn start(&mut self, ordered: bool, timeout: Duration) {
         if self.handle.is_none() {
-            self.handle = Some(unsafe { self.udf.inner().start(ordered) });
+            self.handle =
+                Some(unsafe { self.udf.inner().start(ordered, timeout.as_micros() as u64) });
         }
     }
 
@@ -364,6 +360,7 @@ impl ScalarUDFImpl for SyncUdfDylib {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arroyo_udf_common::parse::{AsyncOptions, UdfType};
 
     #[test]
     fn test_parse_dependencies_valid() {
@@ -425,5 +422,50 @@ pub fn my_udf() -> i64 {
 
         "#;
         assert!(parse_dependencies(definition).is_err());
+    }
+
+    #[test]
+    fn test_attributes() {
+        let s = r#"
+            use arroyo_udf_plugin::udf;
+            use std::time::Duration;
+            
+            #[udf(timeout="10ms", ordered, allowed_in_flight=100)]
+            async fn hello(x: u64) -> i64 {
+                tokio::time::sleep(Duration::from_millis(x * 100)).await;
+                (x * 3) as i64
+            }
+        "#;
+
+        let parsed = ParsedUdfFile::try_parse(s).unwrap();
+        assert_eq!(
+            parsed.udf.udf_type,
+            UdfType::Async(AsyncOptions {
+                ordered: true,
+                timeout: Duration::from_millis(10),
+                max_concurrency: 100,
+            })
+        );
+
+        assert_eq!(parsed.udf.name.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_defaults() {
+        let s = r#"
+            use arroyo_udf_plugin::udf;
+            use std::time::Duration;
+            
+            #[udf]
+            async fn hello(x: u64) -> i64 {
+                tokio::time::sleep(Duration::from_millis(x * 100)).await;
+                (x * 3) as i64
+            }
+        "#;
+
+        let parsed = ParsedUdfFile::try_parse(s).unwrap();
+        assert_eq!(parsed.udf.udf_type, UdfType::Async(AsyncOptions::default()));
+
+        assert_eq!(parsed.udf.name.as_str(), "hello");
     }
 }

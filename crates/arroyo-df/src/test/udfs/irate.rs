@@ -1,3 +1,4 @@
+#[udf]
 fn irate(values: Vec<f32>) -> Option<f32> {
     let start = values.first()?;
     let end = values.last()?;

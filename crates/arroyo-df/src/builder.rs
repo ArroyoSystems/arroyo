@@ -14,8 +14,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
 use datafusion_common::tree_node::{TreeNode, TreeNodeVisitor, VisitRecursion};
 use datafusion_common::{
-    plan_err, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
-    ScalarValue,
+    DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult, ScalarValue,
 };
 use datafusion_execution::config::SessionConfig;
 use datafusion_execution::runtime_env::{RuntimeConfig, RuntimeEnv};
