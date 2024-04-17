@@ -349,8 +349,8 @@ pub fn string_to_map(s: &str, pair_delimeter: char) -> Option<HashMap<String, St
 pub trait Key: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static {}
 impl<T: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static> Key for T {}
 
-pub trait Data: Debug + Clone + Encode + Decode + Send + PartialEq + 'static {}
-impl<T: Debug + Clone + Encode + Decode + Send + PartialEq + 'static> Data for T {}
+pub trait Data: Debug + Clone + Encode + Decode + Send + 'static {}
+impl<T: Debug + Clone + Encode + Decode + Send + 'static> Data for T {}
 
 #[derive(Debug, Copy, Clone, Encode, Decode, PartialEq, Eq)]
 pub enum Watermark {
@@ -539,111 +539,6 @@ impl Serialize for DebeziumOp {
             DebeziumOp::Create => serializer.serialize_str("c"),
             DebeziumOp::Update => serializer.serialize_str("u"),
             DebeziumOp::Delete => serializer.serialize_str("d"),
-        }
-    }
-}
-
-impl<T: Data> UpdatingData<T> {
-    // Applies a function to the inner data,
-    // returning the result unless the Update becomes a no-op.
-    pub fn map_over_inner<F, R: Data>(&self, f: F) -> Option<UpdatingData<R>>
-    where
-        F: Fn(&T) -> R,
-    {
-        match self {
-            UpdatingData::Retract(before) => Some(UpdatingData::Retract(f(before))),
-            UpdatingData::Update { old, new } => {
-                let old = f(old);
-                let new = f(new);
-                if old == new {
-                    None
-                } else {
-                    Some(UpdatingData::Update { old, new })
-                }
-            }
-            UpdatingData::Append(after) => Some(UpdatingData::Append(f(after))),
-        }
-    }
-
-    // Applies a filter to the inner data,
-    // returning None if no inner data passes the filter.
-    pub fn filter<F>(&self, f: F) -> Option<UpdatingData<T>>
-    where
-        F: Fn(&T) -> bool,
-    {
-        match self {
-            UpdatingData::Retract(before) => {
-                if f(before) {
-                    Some(UpdatingData::Retract(before.clone()))
-                } else {
-                    None
-                }
-            }
-            UpdatingData::Update { old, new } => {
-                let old_passes = f(old);
-                let new_passes = f(new);
-                match (old_passes, new_passes) {
-                    (true, true) => Some(UpdatingData::Update {
-                        old: old.clone(),
-                        new: new.clone(),
-                    }),
-                    (true, false) => Some(UpdatingData::Retract(old.clone())),
-                    (false, true) => Some(UpdatingData::Append(new.clone())),
-                    (false, false) => None,
-                }
-            }
-            UpdatingData::Append(after) => {
-                if f(after) {
-                    Some(UpdatingData::Append(after.clone()))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-}
-
-impl<T: Data> From<UpdatingData<T>> for Debezium<T> {
-    fn from(value: UpdatingData<T>) -> Self {
-        match value {
-            UpdatingData::Retract(before) => Debezium {
-                before: Some(before),
-                after: None,
-                op: DebeziumOp::Delete,
-            },
-            UpdatingData::Update { old, new } => Debezium {
-                before: Some(old),
-                after: Some(new),
-                op: DebeziumOp::Update,
-            },
-            UpdatingData::Append(after) => Debezium {
-                before: None,
-                after: Some(after),
-                op: DebeziumOp::Create,
-            },
-        }
-    }
-}
-
-impl<T: Data> From<T> for Debezium<T> {
-    fn from(value: T) -> Self {
-        Debezium {
-            before: None,
-            after: Some(value),
-            op: DebeziumOp::Create,
-        }
-    }
-}
-
-impl<T: Data> From<Debezium<T>> for UpdatingData<T> {
-    fn from(value: Debezium<T>) -> Self {
-        match value.op {
-            DebeziumOp::Delete => UpdatingData::Retract(value.before.unwrap()),
-            DebeziumOp::Update => UpdatingData::Update {
-                old: value.before.unwrap(),
-                new: value.after.unwrap(),
-            },
-            DebeziumOp::Create => UpdatingData::Append(value.after.unwrap()),
         }
     }
 }
