@@ -2,8 +2,8 @@ use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
-    api, HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq,
-    StopWorkerReq, StopWorkerStatus, WorkerFinishedReq,
+    api, HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
+    WorkerFinishedReq,
 };
 use arroyo_types::{
     NodeId, WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, SLOTS_PER_NODE,
@@ -15,7 +15,6 @@ use prometheus::{register_gauge, Gauge};
 use prost::Message;
 use std::collections::HashMap;
 use std::env::current_exe;
-use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,8 +41,6 @@ lazy_static! {
     )
     .unwrap();
 }
-
-const NODE_PART_SIZE: usize = 2 * 1024 * 1024;
 
 #[async_trait::async_trait]
 pub trait Scheduler: Send + Sync {
@@ -149,7 +146,6 @@ impl Scheduler for ProcessScheduler {
             let program = start_pipeline_req.program.clone();
             let program = general_purpose::STANDARD_NO_PAD
                 .encode(api::ArrowProgram::from(program).encode_to_vec());
-            fs::write("/tmp/program", &program).unwrap();
 
             tokio::spawn(async move {
                 let mut command =
@@ -472,13 +468,6 @@ impl Scheduler for NodeScheduler {
         &self,
         start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
-        todo!("node scheduler");
-        // let (binary, wasm) = get_binaries(&start_pipeline_req)
-        //     .await
-        //     .map_err(|_| SchedulerError::CompilationNeeded)?;
-        //
-        // let binary = Arc::new(binary);
-
         // TODO: make this locking more fine-grained
         let mut state = self.state.lock().await;
 
@@ -538,45 +527,19 @@ impl Scheduler for NodeScheduler {
                     ))
                 })?;
 
-            let header = StartWorkerReq {
-                msg: Some(arroyo_rpc::grpc::start_worker_req::Msg::Header(
-                    StartWorkerHeader {
-                        name: start_pipeline_req.name.clone(),
-                        job_id: start_pipeline_req.job_id.clone(),
-                        wasm: todo!(),
-                        slots: slots_for_this_one as u64,
-                        node_id: node.id.0,
-                        run_id: start_pipeline_req.run_id as u64,
-                        env_vars: start_pipeline_req.env_vars.clone(),
-                        binary_size: todo!(),
-                    },
-                )),
-            };
-
-            let binary: Vec<u8> = todo!();
-            let outbound = async_stream::stream! {
-                yield header;
-
-                let mut part = 0;
-                let mut sent = 0;
-
-                for chunk in binary.chunks(NODE_PART_SIZE) {
-                    sent += chunk.len();
-
-                    yield StartWorkerReq {
-                        msg: Some(arroyo_rpc::grpc::start_worker_req::Msg::Data(StartWorkerData {
-                            part,
-                            data: chunk.to_vec(),
-                            has_more: sent < binary.len(),
-                        }))
-                    };
-
-                    part += 1;
-                }
+            let req = StartWorkerReq {
+                name: start_pipeline_req.name.clone(),
+                job_id: start_pipeline_req.job_id.clone(),
+                slots: slots_for_this_one as u64,
+                node_id: node.id.0,
+                run_id: start_pipeline_req.run_id as u64,
+                env_vars: start_pipeline_req.env_vars.clone(),
+                program: api::ArrowProgram::from(start_pipeline_req.program.clone())
+                    .encode_to_vec(),
             };
 
             let res = client
-                .start_worker(Request::new(outbound))
+                .start_worker(Request::new(req))
                 .await
                 .map_err(|e| {
                     // release back slots already scheduled.

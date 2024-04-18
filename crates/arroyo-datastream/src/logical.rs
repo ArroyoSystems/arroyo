@@ -26,7 +26,6 @@ pub enum OperatorName {
     ExpressionWatermark,
     ArrowValue,
     ArrowKey,
-    ArrowAggregate,
     AsyncUdf,
     Join,
     InstantJoin,
@@ -240,6 +239,42 @@ impl LogicalProgram {
             tasks_per_operator.insert(node.operator_id.clone(), node.parallelism);
         }
         tasks_per_operator
+    }
+
+    pub fn features(&self) -> HashSet<String> {
+        let mut s = HashSet::new();
+
+        for t in self.graph.node_weights() {
+            let feature = match &t.operator_name {
+                OperatorName::AsyncUdf => "async-udf".to_string(),
+                OperatorName::ExpressionWatermark
+                | OperatorName::ArrowValue
+                | OperatorName::ArrowKey => continue,
+                OperatorName::Join => "join-with-expiration".to_string(),
+                OperatorName::InstantJoin => "windowed-join".to_string(),
+                OperatorName::WindowFunction => "sql-window-function".to_string(),
+                OperatorName::TumblingWindowAggregate => {
+                    "sql-tumbling-window-aggregate".to_string()
+                }
+                OperatorName::SlidingWindowAggregate => "sql-sliding-window-aggregate".to_string(),
+                OperatorName::SessionWindowAggregate => "sql-session-window-aggregate".to_string(),
+                OperatorName::ConnectorSource => {
+                    let Ok(connector_op) = ConnectorOp::decode(&t.operator_config[..]) else {
+                        continue;
+                    };
+                    format!("{}-source", connector_op.connector)
+                }
+                OperatorName::ConnectorSink => {
+                    let Ok(connector_op) = ConnectorOp::decode(&t.operator_config[..]) else {
+                        continue;
+                    };
+                    format!("{}-sink", connector_op.connector)
+                }
+            };
+            s.insert(feature);
+        }
+
+        s
     }
 }
 

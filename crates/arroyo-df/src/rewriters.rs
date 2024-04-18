@@ -2,6 +2,7 @@ use crate::extension::remote_table::RemoteTableExtension;
 use crate::extension::sink::SinkExtension;
 use crate::extension::table_source::TableSourceExtension;
 use crate::extension::watermark_node::WatermarkNode;
+use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
@@ -224,7 +225,7 @@ impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
     type N = LogicalPlan;
 
     fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
-        let LogicalPlan::TableScan(table_scan) = node else {
+        let LogicalPlan::TableScan(mut table_scan) = node else {
             return Ok(node);
         };
 
@@ -236,9 +237,25 @@ impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
 
         match table {
             Table::ConnectorTable(table) => self.mutate_connector_table(&table_scan, table),
-            Table::MemoryTable { .. } => Err(DataFusionError::Plan(
-                "Memory tables are not supported yet".to_string(),
-            )),
+            Table::MemoryTable {
+                name,
+                fields: _,
+                logical_plan,
+            } => {
+                let Some(logical_plan) = logical_plan else {
+                    return plan_err!(
+                        "Can't query from memory table {} without first inserting into it.",
+                        name
+                    );
+                };
+                // this can only be done here, otherwise the query planner will be upset about the timestamp column.
+                table_scan.projected_schema = add_timestamp_field(
+                    table_scan.projected_schema.clone(),
+                    Some(table_scan.table_name.clone()),
+                )?;
+
+                self.mutate_table_from_query(&table_scan, logical_plan)
+            }
             Table::TableFromQuery {
                 name: _,
                 logical_plan,
