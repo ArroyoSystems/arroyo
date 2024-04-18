@@ -46,7 +46,7 @@ impl NatsConnector {
     pub fn connection_from_options(
         options: &mut HashMap<String, String>,
     ) -> anyhow::Result<NatsConfig> {
-        let nats_servers = pull_opt("servers", options)?;
+        let nats_servers = VarStr::new(pull_opt("servers", options)?);
         let nats_auth = options.remove("auth.type");
         let nats_auth: NatsConfigAuthentication = match nats_auth.as_ref().map(|t| t.as_str()) {
             Some("none") | None => NatsConfigAuthentication::None {},
@@ -123,7 +123,12 @@ impl Connector for NatsConnector {
     }
 
     fn config_description(&self, config: Self::ProfileT) -> String {
-        (*config.servers).to_string()
+        (*config
+            .servers
+            .sub_env_vars()
+            .map_err(|e| e.context("servers"))
+            .unwrap())
+        .to_string()
     }
 
     fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
@@ -264,7 +269,11 @@ impl Connector for NatsConnector {
                     source_type: source_type
                         .clone()
                         .ok_or_else(|| anyhow!("`sourceType` is required"))?,
-                    servers: profile.servers.clone(),
+                    servers: profile
+                        .servers
+                        .sub_env_vars()
+                        .map_err(|e| e.context("servers"))?
+                        .clone(),
                     connection: profile.clone(),
                     table: table.clone(),
                     framing: config.framing,
@@ -284,7 +293,11 @@ impl Connector for NatsConnector {
                     sink_type: sink_type
                         .clone()
                         .ok_or_else(|| anyhow!("`sinkType` is required"))?,
-                    servers: profile.servers.clone(),
+                    servers: profile
+                        .servers
+                        .sub_env_vars()
+                        .map_err(|e| e.context("servers"))?
+                        .clone(),
                     connection: profile.clone(),
                     table: table.clone(),
                     publisher: None,
@@ -300,7 +313,11 @@ impl Connector for NatsConnector {
 async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::Client> {
     let mut opts = async_nats::ConnectOptions::new();
 
-    let servers_str = connection.servers.clone();
+    let servers_str = connection
+        .servers
+        .sub_env_vars()
+        .map_err(|e| e.context("servers"))?
+        .clone();
     let servers_vec: Vec<ServerAddr> = servers_str
         .split(',')
         .map(|s| {

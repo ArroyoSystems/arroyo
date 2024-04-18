@@ -5,6 +5,7 @@
         "servers": {
             "type": "string",
             "title": "NATS Servers",
+            "format": "var-str",
             "description": "Comma-separated list of NATS servers to connect to",
             "examples": [
                 "nats-1:4222,nats-2:4222"

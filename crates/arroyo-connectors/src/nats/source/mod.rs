@@ -98,7 +98,12 @@ impl NatsSourceFunc {
             source_type: source
                 .clone()
                 .expect("Either a stream or a subject must be configured as NATS source"),
-            servers: connection.servers.clone(),
+            servers: connection
+                .servers
+                .sub_env_vars()
+                .map_err(|e| e.context("servers"))
+                .unwrap()
+                .clone(),
             connection,
             table,
             format,
@@ -209,9 +214,9 @@ impl NatsSourceFunc {
         let consumer_config = consumer::pull::Config {
             name: Some(consumer_name.clone()),
             replay_policy: consumer::ReplayPolicy::Instant,
-            inactive_threshold: Duration::from_secs(60),
+            inactive_threshold: Duration::from_secs(3600),
             ack_policy: consumer::AckPolicy::Explicit,
-            ack_wait: Duration::from_secs(60),
+            ack_wait: Duration::from_secs(120),
             num_replicas: 1,
             deliver_policy,
             ..Default::default()
