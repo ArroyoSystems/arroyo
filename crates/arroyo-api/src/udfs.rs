@@ -13,7 +13,6 @@ use arroyo_rpc::api_types::GlobalUdfCollection;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::{BuildUdfReq, UdfCrate};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_server_common::VERSION;
 use arroyo_types::{bool_config, USE_LOCAL_UDF_LIB_ENV};
 use arroyo_udf_host::ParsedUdfFile;
 use axum::extract::{Path, State};
@@ -22,6 +21,8 @@ use axum_extra::extract::WithRejection;
 use cornucopia_async::Params;
 use tonic::transport::Channel;
 use tracing::error;
+
+const PLUGIN_VERSION: &str = "0.1.0";
 
 const LOCAL_UDF_LIB_CRATE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -236,7 +237,7 @@ pub async fn build_udf(
             .collect(),
         )
     } else {
-        toml::Value::String(VERSION.to_string())
+        toml::Value::String(PLUGIN_VERSION.to_string())
     };
 
     dependencies.insert("arroyo-udf-plugin".to_string(), plugin_dep);
