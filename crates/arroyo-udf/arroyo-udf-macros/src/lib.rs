@@ -43,11 +43,72 @@ pub fn udf(
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let parsed: ParsedFunction = syn::parse(input).unwrap();
-    if parsed.0.udf_type.is_async() {
-        async_udf(parsed)
+    let mangle = Some(quote! { #[no_mangle] });
+    let tokens = if parsed.0.udf_type.is_async() {
+        async_udf(parsed, mangle)
     } else {
-        sync_udf(parsed)
-    }
+        sync_udf(parsed, mangle)
+    };
+
+    (quote! {
+        #tokens
+    })
+    .into()
+}
+
+/// Used to generate a statically-linked UDF for testing
+#[proc_macro_attribute]
+pub fn local_udf(
+    attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let input_str = input.to_string();
+    let def = format!("#[udf({})]{}", attr.to_string(), input_str);
+    let parsed: ParsedFunction = syn::parse(input).unwrap();
+    let name = parsed.0.name.clone();
+
+    let (tokens, interface) = if parsed.0.udf_type.is_async() {
+        let tokens = async_udf(parsed, None);
+        let interface = quote! {
+            arroyo_udf_host::UdfInterface::Async(std::sync::Arc::new(arroyo_udf_host::ContainerOrLocal::Local(
+                arroyo_udf_host::AsyncUdfDylibInterface::new(
+                    __start,
+                    __send,
+                    __drain_results,
+                    __stop_runtime,
+                ))))
+        };
+        (tokens, interface)
+    } else {
+        let tokens = sync_udf(parsed, None);
+        let interface = quote! {
+            arroyo_udf_host::UdfInterface::Sync(std::sync::Arc::new(arroyo_udf_host::ContainerOrLocal::Local(
+                arroyo_udf_host::UdfDylibInterface::new(__run))))
+        };
+        (tokens, interface)
+    };
+
+    (quote!(
+        #tokens
+
+        pub fn __local() -> arroyo_udf_host::LocalUdf {
+            let config = arroyo_udf_host::parse::ParsedUdf::try_parse(&syn::parse_str(#input_str).unwrap()).unwrap();
+
+            arroyo_udf_host::LocalUdf {
+                def: #def,
+                config: arroyo_udf_host::UdfDylib::new(
+                    #name.to_string(),
+                    datafusion::logical_expr::Signature::exact(
+                        config.args.into_iter().map(|a| a.data_type).collect(),
+                        datafusion::logical_expr::Volatility::Volatile),
+                    config.ret_type.data_type,
+                    #interface,
+                ),
+                is_aggregate: config.vec_arguments > 0,
+                is_async: config.udf_type.is_async(),
+            }
+        }
+    )).into()
 }
 
 fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
@@ -60,7 +121,7 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
             let id = format_ident!("arg_{}", i);
             let def = match &arg_type.data_type {
                 DataType::Utf8 => {
-                    quote!(let #id = arrow::array::StringArray::from(args.next().unwrap());)
+                    quote!(let #id = arroyo_udf_plugin::arrow::array::StringArray::from(args.next().unwrap());)
                 }
                 DataType::List(field) => {
                     let filter = if !field.is_nullable() {
@@ -84,7 +145,7 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
         .unzip()
 }
 
-fn sync_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
+fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream {
     let (parsed, item) = (parsed.0, parsed.1);
     let udf_name = format_ident!("{}", parsed.name);
 
@@ -168,11 +229,11 @@ fn sync_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
         }
     };
 
-    (quote! {
+    quote! {
         #item
 
-        #[no_mangle]
-        pub extern "C-unwind" fn run(args: arroyo_udf_plugin::FfiArrays) -> arroyo_udf_plugin::RunResult {
+        #mangle
+        pub extern "C-unwind" fn __run(args: arroyo_udf_plugin::FfiArrays) -> arroyo_udf_plugin::RunResult {
             let args = args.into_vec();
             let batch_size = args[0].len();
 
@@ -197,10 +258,10 @@ fn sync_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
                 }
             }
         }
-    }).into()
+    }
 }
 
-fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
+fn async_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream {
     let (parsed, item) = (parsed.0, parsed.1);
     let (defs, args) = arg_vars(&parsed);
 
@@ -242,7 +303,7 @@ fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
     };
 
     let wrapper = quote! {
-        async fn wrapper(id: u64, timeout: std::time::Duration, args: Vec<arroyo_udf_plugin::arrow::array::ArrayData>) ->
+        async fn __wrapper(id: u64, timeout: std::time::Duration, args: Vec<arroyo_udf_plugin::arrow::array::ArrayData>) ->
            (u64, Result<arroyo_udf_plugin::ArrowDatum, arroyo_udf_plugin::async_udf::tokio::time::error::Elapsed>) {
             let mut args = args.into_iter();
 
@@ -263,10 +324,10 @@ fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
     };
 
     let start = quote! {
-        #[no_mangle]
-        pub extern "C-unwind" fn start(ordered: bool, timeout_micros: u64) -> arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle {
+        #mangle
+        pub extern "C-unwind" fn __start(ordered: bool, timeout_micros: u64, allowed_in_flight: u32) -> arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle {
             let (x, handle) = arroyo_udf_plugin::async_udf::AsyncUdf::new(
-                ordered, std::time::Duration::from_micros(timeout_micros), Box::new(#results_builder), wrapper
+                ordered, std::time::Duration::from_micros(timeout_micros), allowed_in_flight, Box::new(#results_builder), __wrapper
             );
 
             x.start();
@@ -275,28 +336,28 @@ fn async_udf(parsed: ParsedFunction) -> proc_macro::TokenStream {
         }
     };
 
-    (quote!{
+    quote! {
         #item
 
         #wrapper
 
         #start
 
-        #[no_mangle]
-        #[async_ffi::async_ffi]
-        pub async extern "C-unwind" fn send(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle, 
-            id: u64, arrays: arroyo_udf_plugin::FfiArrays) -> bool {
-            arroyo_udf_plugin::async_udf::send(handle, id, arrays).await
+        #mangle
+        pub extern "C-unwind" fn __send(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle,
+            id: u64, arrays: arroyo_udf_plugin::FfiArrays) -> arroyo_udf_plugin::async_udf::async_ffi::FfiFuture<bool> {
+            use arroyo_udf_plugin::async_udf::async_ffi::FutureExt;
+            arroyo_udf_plugin::async_udf::send(handle, id, arrays).into_ffi()
         }
 
-        #[no_mangle]
-        pub extern "C-unwind" fn drain_results(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle) -> arroyo_udf_plugin::async_udf::DrainResult {
+        #mangle
+        pub extern "C-unwind" fn __drain_results(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle) -> arroyo_udf_plugin::async_udf::DrainResult {
             arroyo_udf_plugin::async_udf::drain_results(handle)
         }
 
-        #[no_mangle]
-        pub extern "C-unwind" fn stop_runtime(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle) {
+        #mangle
+        pub extern "C-unwind" fn __stop_runtime(handle: arroyo_udf_plugin::async_udf::SendableFfiAsyncUdfHandle) {
             arroyo_udf_plugin::async_udf::stop_runtime(handle);
         }
-    }).into()
+    }
 }

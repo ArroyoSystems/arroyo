@@ -18,7 +18,7 @@ use tokio::sync::{
     oneshot,
 };
 
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{tables::global_keyed_map::GlobalKeyedTable, StateMessage};
 use crate::{CheckpointMessage, TableData};
@@ -70,6 +70,7 @@ impl BackendFlusher {
                         }
                     }
                     Err(err) => {
+                        error!("Failed to flush state file: {:?}", err);
                         self.control_tx
                             .send(ControlResp::TaskFailed {
                                 operator_id: self.task_info.operator_id.clone(),

@@ -271,10 +271,6 @@ impl<'a> PlanToGraphVisitor<'a> {
                 )));
             }
         }
-        println!(
-            "building extension for {:?}, inputs: {:?}",
-            extension, input_nodes
-        );
         let input_schemas = input_nodes
             .iter()
             .map(|index| {

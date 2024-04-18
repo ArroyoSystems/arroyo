@@ -2,12 +2,13 @@
 mod test;
 
 use anyhow::{anyhow, bail};
-use arrow::array::{make_array, ArrayData, UInt64Array};
+use arrow::array::{make_array, Array, ArrayData, ArrayRef, UInt64Array};
 use arrow::datatypes::DataType;
 use arrow::ffi::from_ffi;
 use arroyo_udf_common::async_udf::{DrainResult, SendableFfiAsyncUdfHandle};
 use arroyo_udf_common::{FfiArraySchema, FfiArrays, RunResult};
 use async_ffi::FfiFuture;
+use datafusion::common::ScalarValue;
 use datafusion::error::Result as DFResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, Signature};
 use dlopen2::wrapper::{Container, WrapperApi};
@@ -94,22 +95,55 @@ impl ParsedUdfFile {
 
 #[derive(WrapperApi)]
 pub struct UdfDylibInterface {
-    run: unsafe extern "C-unwind" fn(args: FfiArrays) -> RunResult,
+    __run: unsafe extern "C-unwind" fn(args: FfiArrays) -> RunResult,
+}
+
+impl UdfDylibInterface {
+    pub fn new(run: unsafe extern "C-unwind" fn(FfiArrays) -> RunResult) -> Self {
+        Self { __run: run }
+    }
 }
 
 #[derive(WrapperApi)]
 pub struct AsyncUdfDylibInterface {
-    start: unsafe extern "C-unwind" fn(
+    __start: unsafe extern "C-unwind" fn(
         ordered: bool,
         timeout_micros: u64,
+        allowed_in_flight: u32,
     ) -> SendableFfiAsyncUdfHandle,
-    send: unsafe extern "C-unwind" fn(
+    __send: unsafe extern "C-unwind" fn(
         handle: SendableFfiAsyncUdfHandle,
         id: u64,
         arrays: FfiArrays,
     ) -> FfiFuture<bool>,
-    drain_results: unsafe extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle) -> DrainResult,
-    stop_runtime: unsafe extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle),
+    __drain_results: unsafe extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle) -> DrainResult,
+    __stop_runtime: unsafe extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle),
+}
+
+impl AsyncUdfDylibInterface {
+    pub fn new(
+        __start: unsafe extern "C-unwind" fn(
+            ordered: bool,
+            timeout_micros: u64,
+            allowed_in_flight: u32,
+        ) -> SendableFfiAsyncUdfHandle,
+        __send: unsafe extern "C-unwind" fn(
+            handle: SendableFfiAsyncUdfHandle,
+            id: u64,
+            arrays: FfiArrays,
+        ) -> FfiFuture<bool>,
+        __drain_results: unsafe extern "C-unwind" fn(
+            handle: SendableFfiAsyncUdfHandle,
+        ) -> DrainResult,
+        __stop_runtime: unsafe extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle),
+    ) -> Self {
+        Self {
+            __start,
+            __send,
+            __drain_results,
+            __stop_runtime,
+        }
+    }
 }
 
 pub enum ContainerOrLocal<T: WrapperApi> {
@@ -134,10 +168,10 @@ pub enum UdfInterface {
 
 #[derive(Clone)]
 pub struct UdfDylib {
-    name: Arc<String>,
-    signature: Arc<Signature>,
-    return_type: Arc<DataType>,
-    udf: UdfInterface,
+    pub name: Arc<String>,
+    pub signature: Arc<Signature>,
+    pub return_type: Arc<DataType>,
+    pub udf: UdfInterface,
 }
 
 impl UdfDylib {
@@ -250,10 +284,13 @@ impl AsyncUdfDylib {
     }
 
     /// Starts the async UDF runtime; must be called before any data is sent into the UDF
-    pub fn start(&mut self, ordered: bool, timeout: Duration) {
+    pub fn start(&mut self, ordered: bool, timeout: Duration, allowed_in_flight: u32) {
         if self.handle.is_none() {
-            self.handle =
-                Some(unsafe { self.udf.inner().start(ordered, timeout.as_micros() as u64) });
+            self.handle = Some(unsafe {
+                self.udf
+                    .inner()
+                    .__start(ordered, timeout.as_micros() as u64, allowed_in_flight)
+            });
         }
     }
 
@@ -268,7 +305,7 @@ impl AsyncUdfDylib {
         unsafe {
             self.udf
                 .inner()
-                .send(handle, id, FfiArrays::from_vec(data))
+                .__send(handle, id, FfiArrays::from_vec(data))
                 .await
         }
         .then(|| ())
@@ -281,7 +318,7 @@ impl AsyncUdfDylib {
         let handle = self
             .handle
             .ok_or_else(|| anyhow!("async UDF {} has not been started", self.name))?;
-        match unsafe { self.udf.inner().drain_results(handle) } {
+        match unsafe { self.udf.inner().__drain_results(handle) } {
             DrainResult::Data(data) => {
                 let mut v = data.into_vec().into_iter();
                 Ok(Some((
@@ -301,7 +338,26 @@ impl Drop for AsyncUdfDylib {
     fn drop(&mut self) {
         eprintln!("dropping");
         if let Some(handle) = self.handle {
-            unsafe { self.udf.inner().stop_runtime(handle) };
+            unsafe { self.udf.inner().__stop_runtime(handle) };
+        }
+    }
+}
+
+impl SyncUdfDylib {
+    pub fn invoke_udaf(&self, args: &[ArrayRef]) -> DFResult<ScalarValue> {
+        let data: Vec<_> = args.into_iter().map(|a| a.to_data()).collect();
+
+        let args = FfiArrays::from_vec(data);
+
+        match unsafe { self.udf.inner().__run(args) } {
+            RunResult::Ok(FfiArraySchema(array, schema)) => {
+                let result_array = make_array(unsafe { from_ffi(array, &schema).unwrap() });
+                assert_eq!(result_array.len(), 1);
+                Ok(ScalarValue::try_from_array(result_array.as_ref(), 0).unwrap())
+            }
+            RunResult::Err => {
+                panic!("panic in UDF {}", self.name);
+            }
         }
     }
 }
@@ -343,7 +399,7 @@ impl ScalarUDFImpl for SyncUdfDylib {
 
         let args = FfiArrays::from_vec(args);
 
-        let result = unsafe { (self.udf.inner().run)(args) };
+        let result = unsafe { (self.udf.inner().__run)(args) };
 
         match result {
             RunResult::Ok(FfiArraySchema(array, schema)) => {
@@ -355,6 +411,13 @@ impl ScalarUDFImpl for SyncUdfDylib {
             }
         }
     }
+}
+
+pub struct LocalUdf {
+    pub def: &'static str,
+    pub config: UdfDylib,
+    pub is_aggregate: bool,
+    pub is_async: bool,
 }
 
 #[cfg(test)]

@@ -37,6 +37,7 @@ use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
     range_for_server, u32_config, Key, TaskInfo, WorkerId, DEFAULT_QUEUE_SIZE, QUEUE_SIZE_ENV,
 };
+use arroyo_udf_host::LocalUdf;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
@@ -83,12 +84,12 @@ impl Debug for QueueNode {
 }
 
 #[derive(Debug)]
-enum SubtaskOrQueueNode {
+pub enum SubtaskOrQueueNode {
     SubtaskNode(SubtaskNode),
     QueueNode(QueueNode),
 }
 
-struct PhysicalGraphEdge {
+pub struct PhysicalGraphEdge {
     edge_idx: usize,
     in_logical_idx: usize,
     out_logical_idx: usize,
@@ -167,7 +168,7 @@ impl SubtaskOrQueueNode {
 
 pub struct Program {
     pub name: String,
-    graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
+    pub graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
 }
 
 impl Program {
@@ -175,7 +176,11 @@ impl Program {
         self.graph.read().unwrap().node_count()
     }
 
-    pub fn local_from_logical(name: String, logical: &DiGraph<LogicalNode, LogicalEdge>) -> Self {
+    pub fn local_from_logical(
+        name: String,
+        logical: &DiGraph<LogicalNode, LogicalEdge>,
+        udfs: &[LocalUdf],
+    ) -> Self {
         let assignments = logical
             .node_weights()
             .flat_map(|weight| {
@@ -187,7 +192,12 @@ impl Program {
                 })
             })
             .collect();
-        Self::from_logical(name, logical, &assignments, new_registry())
+
+        let mut registry = new_registry();
+        for udf in udfs {
+            registry.add_local_udf(&udf);
+        }
+        Self::from_logical(name, logical, &assignments, registry)
     }
 
     pub fn from_logical(

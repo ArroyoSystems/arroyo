@@ -4,8 +4,8 @@ use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, FieldRef, IntervalUnit, TimeUnit};
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arroyo_udf_host::SyncUdfDylib;
-use datafusion::common::{DataFusionError, Result, ScalarValue};
-use datafusion::logical_expr::{Accumulator, ColumnarValue, ScalarUDFImpl};
+use datafusion::common::{Result, ScalarValue};
+use datafusion::logical_expr::Accumulator;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -79,20 +79,13 @@ impl Accumulator for ArroyoUdaf {
             .args
             .iter()
             .map(|arg| {
-                Ok(ColumnarValue::Scalar(ScalarValue::List(Arc::new(
-                    arg.concatenate_array()?,
-                ))))
+                let element_arrays: Vec<&dyn Array> =
+                    arg.values.iter().map(|a| a.as_ref()).collect();
+                Ok(arrow::compute::concat(&element_arrays)?)
             })
             .collect();
 
-        let ColumnarValue::Scalar(scalar) = self.udf.invoke(&args?[..])? else {
-            return Err(DataFusionError::Execution(format!(
-                "UDAF {} returned an array result",
-                self.udf.name()
-            )));
-        };
-
-        Ok(scalar)
+        self.udf.invoke_udaf(&args?[..])
     }
 
     fn size(&self) -> usize {

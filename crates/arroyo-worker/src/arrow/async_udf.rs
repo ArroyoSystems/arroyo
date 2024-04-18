@@ -9,7 +9,7 @@ use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_state::global_table_config;
-use arroyo_types::{from_millis, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::AsyncUdfDylib;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -20,14 +20,13 @@ use prost::Message;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use tonic::IntoRequest;
-use tracing::{info, warn};
+use tracing::info;
 
 pub struct AsyncUdfOperator {
     name: String,
     udf: AsyncUdfDylib,
     ordered: bool,
-    max_concurrency: u32,
+    allowed_in_flight: u32,
     timeout: Duration,
     config: api::AsyncUdfOperator,
     registry: Arc<Registry>,
@@ -83,7 +82,7 @@ impl OperatorConstructor for AsyncUdfConstructor {
             name: config.name.clone(),
             udf: (&*udf).try_into()?,
             ordered,
-            max_concurrency: config.max_concurrency,
+            allowed_in_flight: config.max_concurrency,
             timeout: Duration::from_micros(config.timeout_micros),
             config,
             registry,
@@ -180,7 +179,8 @@ impl ArrowOperator for AsyncUdfOperator {
 
         self.input_schema = Some(input_schema);
 
-        self.udf.start(self.ordered, self.timeout);
+        self.udf
+            .start(self.ordered, self.timeout, self.allowed_in_flight);
 
         let gs = ctx
             .table_manager
@@ -266,6 +266,7 @@ impl ArrowOperator for AsyncUdfOperator {
             .input_row_converter
             .convert_columns(batch.columns())
             .unwrap();
+
         for (i, row) in rows.iter().enumerate() {
             let args: Vec<_> = arg_batch
                 .iter()
@@ -326,7 +327,6 @@ impl ArrowOperator for AsyncUdfOperator {
             .expect("could not convert output columns to rows");
 
         for (row, id) in out_rows.into_iter().zip(ids.values()) {
-            info!("Finished {}", id);
             self.outputs.insert(*id, row.owned());
             self.inputs.remove(id);
         }
@@ -339,7 +339,6 @@ impl ArrowOperator for AsyncUdfOperator {
         watermark: Watermark,
         _ctx: &mut ArrowContext,
     ) -> Option<Watermark> {
-        info!("Received watermark id {}", self.next_id);
         self.watermarks.push_back((self.next_id, watermark));
         None
     }
@@ -401,12 +400,10 @@ impl AsyncUdfOperator {
                 };
 
                 if id >= watermark_id {
-                    info!("{id} >= {watermark_id}, breaking");
                     self.outputs.insert(id, row);
                     break;
                 }
 
-                info!("Emitting row {}", id);
                 rows.push(row);
             }
 

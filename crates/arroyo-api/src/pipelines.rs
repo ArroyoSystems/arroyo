@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context};
 use arrow_schema::SchemaRef;
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
-use axum::{debug_handler, Json};
+use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};

@@ -11,6 +11,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::error::Elapsed;
 
 pub use arroyo_udf_common::async_udf::{DrainResult, SendableFfiAsyncUdfHandle};
+pub use async_ffi;
 pub use tokio;
 
 pub enum FuturesEnum<F: Future + Send + 'static> {
@@ -102,6 +103,7 @@ pub struct AsyncUdf<
     results: ResultMutex,
     func: FnT,
     timeout: Duration,
+    allowed_in_flight: usize,
 }
 
 impl<
@@ -112,10 +114,11 @@ impl<
     pub fn new(
         ordered: bool,
         timeout: Duration,
+        allowed_in_flight: u32,
         builder: Box<dyn ArrayBuilder>,
         func: FnT,
     ) -> (Self, AsyncUdfHandle) {
-        let (tx, rx) = channel(16);
+        let (tx, rx) = channel(1);
 
         let results = Arc::new(Mutex::new((UInt64Builder::new(), builder)));
 
@@ -135,6 +138,7 @@ impl<
                 results,
                 func,
                 timeout,
+                allowed_in_flight: allowed_in_flight as usize,
             },
             handle,
         )
@@ -155,7 +159,7 @@ impl<
     async fn run(mut self) {
         loop {
             select! {
-                item = self.rx.recv() => {
+                item = self.rx.recv(), if self.futures.len() < self.allowed_in_flight => {
                     let Some((id, args)) = item else {
                         break;
                     };

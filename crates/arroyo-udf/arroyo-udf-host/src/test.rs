@@ -1,12 +1,14 @@
-use crate::{AsyncUdfDylib, AsyncUdfDylibInterface, SyncUdfDylib, UdfDylibInterface};
-use arrow::array::{Array, Int32Array, StringArray};
+use crate::{AsyncUdfDylib, AsyncUdfDylibInterface, SyncUdfDylib};
+use arrow::array::{Array, ArrayRef, Int32Array, StringArray, UInt64Array};
 use arrow::datatypes::DataType;
-use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, Signature, Volatility};
+use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl};
 use std::sync::Arc;
 
 mod test_udf_1 {
-    use arroyo_udf_macros::udf;
-    #[udf]
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
+
+    #[local_udf]
     fn my_udf(x: i32, y: String) -> Option<String> {
         if x < 5 {
             None
@@ -17,19 +19,10 @@ mod test_udf_1 {
 }
 
 #[test]
-fn test() {
-    let interface = UdfDylibInterface {
-        run: test_udf_1::run,
-    };
-
-    let udf = SyncUdfDylib::new(
-        "my_udf".to_string(),
-        Signature::exact(vec![DataType::Int32, DataType::Utf8], Volatility::Volatile),
-        DataType::Utf8,
-        interface,
-    );
-
-    let result = udf
+fn test_udf() {
+    let udf = test_udf_1::__local().config;
+    let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
+    let result = sync_udf
         .invoke(&vec![
             ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
             ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
@@ -47,6 +40,29 @@ fn test() {
     assert_eq!(result.value(2), "20-c");
 }
 
+mod test_udaf {
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
+
+    #[local_udf]
+    fn my_udaf(x: Vec<u64>) -> u64 {
+        x.len() as u64
+    }
+}
+
+#[test]
+fn test_udaf() {
+    let udf = test_udaf::__local().config;
+    let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
+    let result = sync_udf
+        .invoke_udaf(&vec![
+            Arc::new(UInt64Array::from(vec![1, 10, 20])) as ArrayRef
+        ])
+        .unwrap();
+
+    assert_eq!(result, ScalarValue::UInt64(Some(3)));
+}
+
 mod test_async_udf {
     use arroyo_udf_macros::udf;
     use std::time::Duration;
@@ -60,19 +76,20 @@ mod test_async_udf {
 
 use arrow::array::PrimitiveArray;
 use arrow::datatypes::{UInt32Type, UInt64Type};
+use datafusion::common::ScalarValue;
 use std::time::Duration;
 use tokio::time::Instant;
 
 #[tokio::test]
 async fn test_async() {
     let interface = AsyncUdfDylibInterface {
-        start: test_async_udf::start,
-        send: test_async_udf::send,
-        drain_results: test_async_udf::drain_results,
-        stop_runtime: test_async_udf::stop_runtime,
+        __start: test_async_udf::__start,
+        __send: test_async_udf::__send,
+        __drain_results: test_async_udf::__drain_results,
+        __stop_runtime: test_async_udf::__stop_runtime,
     };
     let mut udf = AsyncUdfDylib::new("my_udf".to_string(), DataType::Utf8, interface);
-    udf.start(false, Duration::from_secs(1));
+    udf.start(false, Duration::from_secs(1), 100);
 
     let arg1 = PrimitiveArray::<UInt64Type>::from(vec![2]);
     let arg2 = StringArray::from(vec!["hello"]);

@@ -10,3 +10,4 @@ tokio = { version = "1", features = ["time", "sync"] }
 syn = { version = "2", features = ["full"] }
 anyhow = "1.0.82"
 regex = "1.10.3"
+serde = { version = "1.0.197", features = ["derive"] }

@@ -67,7 +67,7 @@ use arroyo_udf_host::ParsedUdfFile;
 use datafusion_execution::FunctionRegistry;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
-use syn::{FnArg, Item, ReturnType, Visibility};
+use syn::Item;
 use tracing::{info, warn};
 use unicase::UniCase;
 
