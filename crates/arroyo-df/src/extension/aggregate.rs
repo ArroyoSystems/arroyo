@@ -468,6 +468,8 @@ impl UserDefinedLogicalNodeCore for AggregateExtension {
 
     fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
         assert_eq!(inputs.len(), 1, "input size inconsistent");
+
+        println!("EXPRS: {:?}", _exprs);
         Self::new(
             self.window_behavior.clone(),
             inputs[0].clone(),

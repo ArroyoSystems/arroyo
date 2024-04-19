@@ -88,7 +88,7 @@ pub(crate) struct TimestampAppendExtension {
 
 impl TimestampAppendExtension {
     fn new(input: LogicalPlan, qualifier: Option<OwnedTableReference>) -> Self {
-        if has_timestamp_field(input.schema().clone()) {
+        if has_timestamp_field(&input.schema()) {
             unreachable!("shouldn't be adding timestamp to a plan that already has it: plan :\n {:?}\n schema: {:?}", input, input.schema());
         }
         let schema = add_timestamp_field(input.schema().clone(), qualifier.clone()).unwrap();

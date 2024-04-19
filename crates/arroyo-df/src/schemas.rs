@@ -25,7 +25,7 @@ pub(crate) fn add_timestamp_field(
     schema: DFSchemaRef,
     qualifier: Option<OwnedTableReference>,
 ) -> DFResult<DFSchemaRef> {
-    if has_timestamp_field(schema.clone()) {
+    if has_timestamp_field(&schema) {
         return Ok(schema);
     }
 
@@ -41,7 +41,7 @@ pub(crate) fn add_timestamp_field(
     )?)?))
 }
 
-pub(crate) fn has_timestamp_field(schema: DFSchemaRef) -> bool {
+pub(crate) fn has_timestamp_field(schema: &DFSchemaRef) -> bool {
     schema
         .fields()
         .iter()
