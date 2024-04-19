@@ -493,10 +493,12 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
                 continue;
             };
 
-            if args.replace(udf).is_some() {
+            if let Some((prev, _, _)) = args.replace(udf) {
                 return plan_err!(
-                    "projection {} contains multiple async UDFs, which is not supported",
-                    LogicalPlan::Projection(projection).display_indent()
+                    "Projection contains multiple async UDFs, which is not supported \
+                    \n(hint: two async UDFs calls, {} and {}, appear in the same SELECT statement)",
+                    prev,
+                    args.unwrap().0
                 );
             }
 
