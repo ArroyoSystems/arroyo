@@ -167,7 +167,7 @@ pub struct ParsedUdf {
 }
 
 impl ParsedUdf {
-    fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
+    pub fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
         if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
             if let Some(segment) = path.segments.last() {
                 if segment.ident == "Vec" {

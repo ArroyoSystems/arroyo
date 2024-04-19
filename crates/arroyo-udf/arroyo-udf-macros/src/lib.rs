@@ -3,7 +3,8 @@ use arroyo_udf_common::parse::ParsedUdf;
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_quote, ItemFn};
+use syn::spanned::Spanned;
+use syn::{parse_quote, FnArg, ItemFn};
 
 fn data_type_to_arrow_type_token(data_type: &DataType) -> TokenStream {
     match data_type {
@@ -29,6 +30,25 @@ struct ParsedFunction(ParsedUdf, ItemFn);
 impl Parse for ParsedFunction {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let function: ItemFn = input.parse()?;
+
+        if function.sig.asyncness.is_some() {
+            if let Some(vec) = function.sig.inputs.iter().find_map(|t| match t {
+                FnArg::Receiver(_) => None,
+                FnArg::Typed(t) => {
+                    if ParsedUdf::vec_inner_type(&t.ty).is_some() {
+                        Some(t.ty.span())
+                    } else {
+                        None
+                    }
+                }
+            }) {
+                return Err(syn::Error::new(
+                    vec.span(),
+                    "Async UDAFs are not supported (hint: remove the Vec<_> args)",
+                ));
+            }
+        }
+
         Ok(ParsedFunction(
             ParsedUdf::try_parse(&function)
                 .map_err(|e| syn::Error::new(Span::call_site(), e.to_string()))?,
@@ -42,7 +62,13 @@ pub fn udf(
     _attr: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let parsed: ParsedFunction = syn::parse(input).unwrap();
+    let parsed: ParsedFunction = match syn::parse(input) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            return e.to_compile_error().into();
+        }
+    };
+
     let mangle = Some(quote! { #[no_mangle] });
     let tokens = if parsed.0.udf_type.is_async() {
         async_udf(parsed, mangle)
@@ -263,6 +289,7 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
 
 fn async_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream {
     let (parsed, item) = (parsed.0, parsed.1);
+
     let (defs, args) = arg_vars(&parsed);
 
     let name = format_ident!("{}", parsed.name);

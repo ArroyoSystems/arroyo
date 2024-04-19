@@ -1,7 +1,6 @@
 use anyhow::Result;
 use arroyo_datastream::logical::{
-    DylibUdfConfig, LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram,
-    OperatorName, ProgramConfig,
+    LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
 use arroyo_df::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
@@ -19,11 +18,11 @@ use arroyo_rpc::grpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEvent
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_types::{to_micros, CheckpointBarrier};
-use arroyo_udf_host::{LocalUdf, UdfInterface};
+use arroyo_udf_host::LocalUdf;
 use arroyo_worker::engine::{Engine, StreamConfig};
 use arroyo_worker::engine::{Program, RunningEngine};
 use petgraph::{Direction, Graph};
-use serde_json::{ser, Value};
+use serde_json::Value;
 use test_log::test as test_log;
 use tokio::fs::read_to_string;
 use tokio::sync::mpsc::error::TryRecvError;
