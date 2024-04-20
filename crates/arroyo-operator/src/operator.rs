@@ -1,19 +1,30 @@
 use crate::context::{ArrowContext, BatchReceiver};
 use crate::inq_reader::InQReader;
+use crate::udfs::{ArroyoUdaf, UdafArg};
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
+use anyhow::anyhow;
 use arrow::array::RecordBatch;
+use arrow::datatypes::DataType;
+use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_metrics::TaskCounters;
 use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_storage::StorageProvider;
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
+use arroyo_udf_host::parse::inner_type;
+use arroyo_udf_host::{ContainerOrLocal, LocalUdf, SyncUdfDylib, UdfDylib, UdfInterface};
 use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
-use datafusion::logical_expr::{AggregateUDF, ScalarUDF, WindowUDF};
+use datafusion::logical_expr::{
+    create_udaf, AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
+};
+use dlopen2::wrapper::Container;
 use futures::future::OptionFuture;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -480,16 +491,165 @@ pub trait ArrowOperator: Send + 'static {
     async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {}
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
 }
 
 #[derive(Default)]
 pub struct Registry {
+    dylibs: Arc<std::sync::Mutex<HashMap<String, Arc<UdfDylib>>>>,
     udfs: HashMap<String, Arc<ScalarUDF>>,
     udafs: HashMap<String, Arc<AggregateUDF>>,
 }
 
 impl Registry {
+    pub async fn load_dylib(
+        &mut self,
+        name: &str,
+        config: &DylibUdfConfig,
+    ) -> anyhow::Result<Arc<UdfDylib>> {
+        {
+            let dylibs = self.dylibs.lock().unwrap();
+            if let Some(dylib) = dylibs.get(&config.dylib_path) {
+                return Ok(Arc::clone(dylib));
+            }
+        }
+
+        // Download a UDF dylib from the object store
+        let signature = Signature::exact(config.arg_types.clone(), Volatility::Volatile);
+
+        let udf = StorageProvider::get_url(&config.dylib_path)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Unable to fetch UDF dylib from '{}': {:?}",
+                    config.dylib_path, e
+                )
+            });
+
+        // write the dylib to a local file
+        let local_udfs_dir = "/tmp/arroyo/local_udfs";
+        tokio::fs::create_dir_all(local_udfs_dir)
+            .await
+            .map_err(|e| anyhow!("unable to create local udfs dir: {:?}", e))?;
+
+        let dylib_file_name = Path::new(&config.dylib_path)
+            .file_name()
+            .ok_or_else(|| anyhow!("Invalid dylib path: {}", config.dylib_path))?;
+        let local_dylib_path = Path::new(local_udfs_dir).join(dylib_file_name);
+
+        tokio::fs::write(&local_dylib_path, udf)
+            .await
+            .map_err(|e| anyhow!("unable to write dylib to file: {:?}", e))?;
+
+        let interface = if config.is_async {
+            UdfInterface::Async(Arc::new(ContainerOrLocal::Container(unsafe {
+                Container::load(local_dylib_path).unwrap()
+            })))
+        } else {
+            UdfInterface::Sync(Arc::new(ContainerOrLocal::Container(unsafe {
+                Container::load(local_dylib_path).unwrap()
+            })))
+        };
+
+        let udf = Arc::new(UdfDylib::new(
+            name.to_string(),
+            signature,
+            config.return_type.clone(),
+            interface,
+        ));
+
+        self.dylibs
+            .lock()
+            .unwrap()
+            .insert(config.dylib_path.clone(), udf.clone());
+
+        if !config.is_async {
+            self.add_udfs(&udf, config);
+        }
+
+        Ok(udf)
+    }
+
+    pub fn add_local_udf(&mut self, local_udf: &LocalUdf) {
+        let udf = Arc::new(UdfDylib::new(
+            (*local_udf.config.name).to_string(),
+            (*local_udf.config.signature).clone(),
+            (*local_udf.config.return_type).clone(),
+            local_udf.config.udf.clone(),
+        ));
+
+        self.dylibs
+            .lock()
+            .unwrap()
+            .insert(local_udf.config.name.to_string(), udf.clone());
+
+        if !local_udf.is_async {
+            self.add_udfs(
+                &udf,
+                &DylibUdfConfig {
+                    dylib_path: local_udf.config.name.to_string(),
+                    arg_types: match &local_udf.config.signature.type_signature {
+                        TypeSignature::Exact(exact) => exact.clone(),
+                        _ => {
+                            panic!("only exact type signatures are supported for udfs")
+                        }
+                    },
+                    return_type: (*local_udf.config.return_type).clone(),
+                    aggregate: local_udf.is_aggregate,
+                    is_async: local_udf.is_async,
+                },
+            );
+        }
+    }
+
+    fn add_udfs(&mut self, dylib: &UdfDylib, config: &DylibUdfConfig) {
+        let dylib: SyncUdfDylib = dylib.try_into().unwrap();
+        if config.aggregate {
+            let output_type = Arc::new(config.return_type.clone());
+
+            let args: Vec<_> = config
+                .arg_types
+                .iter()
+                .map(|arg| {
+                    UdafArg::new(match arg {
+                        DataType::List(f) => Arc::clone(f),
+                        _ => {
+                            panic!("arg type {:?} for UDAF {} is not a list", arg, dylib.name())
+                        }
+                    })
+                })
+                .collect();
+
+            let name = dylib.name().to_string();
+            let udaf = Arc::new(create_udaf(
+                &name,
+                config
+                    .arg_types
+                    .iter()
+                    .map(|t| inner_type(t).expect("UDAF arg is not a vec"))
+                    .collect(),
+                Arc::new(config.return_type.clone()),
+                Volatility::Volatile,
+                Arc::new(move |_| {
+                    Ok(Box::new(ArroyoUdaf::new(
+                        args.clone(),
+                        output_type.clone(),
+                        Arc::new(dylib.clone()),
+                    )))
+                }),
+                Arc::new(config.arg_types.clone()),
+            ));
+            self.udafs.insert(name, udaf);
+        } else {
+            self.udfs
+                .insert(dylib.name().to_string(), Arc::new(ScalarUDF::from(dylib)));
+        }
+    }
+
+    pub fn get_dylib(&self, path: &str) -> Option<Arc<UdfDylib>> {
+        self.dylibs.lock().unwrap().get(path).map(|t| Arc::clone(t))
+    }
+
     pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {
         self.udfs.insert(udf.name().to_string(), udf);
     }

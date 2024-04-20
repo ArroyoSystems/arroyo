@@ -137,7 +137,9 @@ export const getLocalUdfsContextValue = () => {
       `/*\n` +
       `[dependencies]\n\n` +
       `*/\n\n` +
-      `pub fn ${functionName}(x: i64) -> i64 {\n` +
+      `use arroyo_udf_plugin::udf;\n\n` +
+      `#[udf]\n` +
+      `fn ${functionName}(x: i64) -> i64 {\n` +
       '    // Write your function here\n' +
       '    // Tip: rename the function to something descriptive\n\n' +
       '}';

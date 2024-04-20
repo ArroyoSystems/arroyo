@@ -22,6 +22,7 @@ use dlopen2::utils::PLATFORM_FILE_EXTENSION;
 use serde_json::Value;
 use tokio::time::timeout;
 use tokio::{process::Command, sync::Mutex};
+use toml::{toml, Table};
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
@@ -71,8 +72,7 @@ async fn binary_present(bin: &str) -> bool {
 
 impl CompileService {
     pub async fn new() -> anyhow::Result<Self> {
-        let build_dir =
-            std::env::var("BUILD_DIR").unwrap_or("/tmp/arroyo/udf_build_dir".to_string());
+        let build_dir = env::var("BUILD_DIR").unwrap_or("/tmp/arroyo/udf_build".to_string());
 
         let artifact_url = env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
 
@@ -89,35 +89,28 @@ impl CompileService {
     }
 
     async fn write_udf_crate(&self, udf_crate: UdfCrate) -> anyhow::Result<()> {
-        let udf_build_dir = self.build_dir.join("udfs_dir/udf");
+        tokio::fs::create_dir_all(&self.build_dir.join("src")).await?;
+        tokio::fs::write(self.build_dir.join("src/lib.rs"), &udf_crate.definition).await?;
 
-        tokio::fs::create_dir_all(&udf_build_dir.join("src")).await?;
-        tokio::fs::write(udf_build_dir.join("src/lib.rs"), &udf_crate.definition).await?;
-        tokio::fs::write(udf_build_dir.join("Cargo.toml"), &udf_crate.cargo_toml).await?;
+        let mut cargo_toml = toml! {
+            [package]
+            name = "udf"
+            version = "1.0.0"
+            edition = "2021"
 
-        let udf_wrapper_dir = self.build_dir.join("udfs_dir").join("udf_wrapper");
-        tokio::fs::create_dir_all(&udf_wrapper_dir.join("src")).await?;
-        tokio::fs::write(udf_wrapper_dir.join("src/lib.rs"), &udf_crate.lib_rs).await?;
+            [lib]
+            crate-type = ["cdylib"]
+        };
 
-        let udf_wrapper_cargo_toml = format!(
-            r#"
-[package]
-name = "udf_wrapper"
-version = "0.1.0"
-edition = "2021"
+        let dependencies: Table = toml::from_str(&udf_crate.dependencies)
+            .map_err(|e| anyhow!("Invalid dependency in RPC: {:?}", e))?;
 
+        cargo_toml.insert("dependencies".to_string(), toml::Value::Table(dependencies));
 
-[dependencies]
-udf = {{ path = "../udf" }}
-arrow = {{ version = "50.0.0", features = ["ffi"] }}
+        tokio::fs::write(self.build_dir.join("Cargo.toml"), &cargo_toml.to_string()).await?;
 
-
-[lib]
-crate-type = ["cdylib", "rlib"]
-"#,
-        );
-        tokio::fs::write(udf_wrapper_dir.join("Cargo.toml"), udf_wrapper_cargo_toml).await?;
-
+        tokio::fs::create_dir_all(&self.build_dir.join("src")).await?;
+        tokio::fs::write(self.build_dir.join("src/lib.rs"), &udf_crate.definition).await?;
         Ok(())
     }
 
@@ -268,13 +261,11 @@ impl CompilerGrpc for CompileService {
             .await
             .map_err(|e| Status::internal(format!("Writing UDFs failed: {}", e)))?;
 
-        let udf_build_dir = self.build_dir.join("udfs_dir").join("udf_wrapper");
-
         let cargo_command = if req.save { "build" } else { "check" };
 
         info!("{}ing udf", cargo_command);
         let output = Command::new(&*self.cargo_path.lock().await)
-            .current_dir(&udf_build_dir)
+            .current_dir(&self.build_dir)
             .arg(cargo_command)
             .arg("--release")
             .arg("--message-format=json")
@@ -298,9 +289,10 @@ impl CompilerGrpc for CompileService {
             let udf_path = if req.save {
                 // save dylib to storage
                 let dylib = tokio::fs::read(
-                    &udf_build_dir
+                    &self
+                        .build_dir
                         .join("target/release/")
-                        .join(format!("libudf_wrapper.{}", PLATFORM_FILE_EXTENSION)),
+                        .join(format!("libudf.{}", PLATFORM_FILE_EXTENSION)),
                 )
                 .await?;
 

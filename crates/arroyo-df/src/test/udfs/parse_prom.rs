@@ -4,6 +4,7 @@ regex = "1.10.2"
 serde_json = "1.0"
 */
 
+#[udf]
 fn parse_prom(s: String) -> Option<String> {
     use regex::Regex;
     use std::collections::HashMap;

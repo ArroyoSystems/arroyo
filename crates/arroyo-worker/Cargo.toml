@@ -19,6 +19,7 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-df = { path = "../arroyo-df" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 
 ahash = { workspace = true }
 rand = "0.8"
@@ -85,6 +86,9 @@ datafusion-common = "36.0"
 datafusion-execution = "36.0"
 base64 = "0.21.5"
 itertools = "0.12.0"
+async-ffi = "0.5.0"
+dlopen2 = "0.7.0"
+dlopen2_derive = "0.4.0"
 
 
 [dev-dependencies]

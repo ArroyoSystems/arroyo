@@ -5,21 +5,14 @@ use std::{
 
 use anyhow::bail;
 use anyhow::Result;
-use arrow::array;
-use arrow::array::ArrayData;
 use arrow::datatypes::{DataType, Field, IntervalMonthDayNanoType};
-use arrow_array::make_array;
 
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
 use datafusion::sql::sqlparser::ast::{
     ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
 };
-use datafusion_common::ScalarValue;
-use datafusion_expr::ColumnarValue;
 
-use arroyo_types::{ArroyoExtensionType, NullableType};
-use syn::PathArguments::AngleBracketed;
-use syn::{GenericArgument, Type};
+use arroyo_types::ArroyoExtensionType;
 
 /* this returns a duration with the same length as the postgres interval. */
 pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration {
@@ -30,91 +23,6 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     let days_to_seconds = ((year_hours + 24 * (day + 30 * extra_month)) as u64) * 60 * 60;
     let nanos = nanos as u64;
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
-}
-
-pub fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
-    match typ {
-        Type::Path(pat) => {
-            let path: Vec<String> = pat
-                .path
-                .segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect();
-
-            match path.join("::").as_str() {
-                "bool" => Some(DataType::Boolean),
-                "i8" => Some(DataType::Int8),
-                "i16" => Some(DataType::Int16),
-                "i32" => Some(DataType::Int32),
-                "i64" => Some(DataType::Int64),
-                "u8" => Some(DataType::UInt8),
-                "u16" => Some(DataType::UInt16),
-                "u32" => Some(DataType::UInt32),
-                "u64" => Some(DataType::UInt64),
-                "f16" => Some(DataType::Float16),
-                "f32" => Some(DataType::Float32),
-                "f64" => Some(DataType::Float64),
-                "String" => Some(DataType::Utf8),
-                "Vec<u8>" => Some(DataType::Binary),
-                "SystemTime" | "std::time::SystemTime" => {
-                    Some(DataType::Timestamp(TimeUnit::Microsecond, None))
-                }
-                "Duration" | "std::time::Duration" => {
-                    Some(DataType::Duration(TimeUnit::Microsecond))
-                }
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-pub fn rust_to_arrow(typ: &Type) -> Option<NullableType> {
-    match typ {
-        Type::Path(pat) => {
-            let last = pat.path.segments.last().unwrap();
-            if last.ident == "Option" {
-                let AngleBracketed(args) = &last.arguments else {
-                    return None;
-                };
-
-                let GenericArgument::Type(inner) = args.args.first()? else {
-                    return None;
-                };
-
-                Some(rust_to_arrow(inner)?.with_nullability(true))
-            } else {
-                Some(NullableType::not_null(rust_primitive_to_arrow(typ)?))
-            }
-        }
-        _ => None,
-    }
-}
-
-pub fn array_to_columnar_value(array: ArrayData, data_type: &DataType) -> ColumnarValue {
-    if array.len() != 1 {
-        return ColumnarValue::Array(make_array(array));
-    }
-
-    let scalar = match data_type {
-        DataType::Utf8 => {
-            ScalarValue::Utf8(Some(array::StringArray::from(array).value(0).to_string()))
-        }
-        DataType::Boolean => ScalarValue::Boolean(Some(array::BooleanArray::from(array).value(0))),
-        DataType::Int8 => ScalarValue::Int8(Some(array::Int8Array::from(array).value(0))),
-        DataType::Int16 => ScalarValue::Int16(Some(array::Int16Array::from(array).value(0))),
-        DataType::Int32 => ScalarValue::Int32(Some(array::Int32Array::from(array).value(0))),
-        DataType::Int64 => ScalarValue::Int64(Some(array::Int64Array::from(array).value(0))),
-        DataType::UInt8 => ScalarValue::UInt8(Some(array::UInt8Array::from(array).value(0))),
-        DataType::UInt16 => ScalarValue::UInt16(Some(array::UInt16Array::from(array).value(0))),
-        DataType::UInt32 => ScalarValue::UInt32(Some(array::UInt32Array::from(array).value(0))),
-        DataType::UInt64 => ScalarValue::UInt64(Some(array::UInt64Array::from(array).value(0))),
-        DataType::Float32 => ScalarValue::Float32(Some(array::Float32Array::from(array).value(0))),
-        DataType::Float64 => ScalarValue::Float64(Some(array::Float64Array::from(array).value(0))),
-        _ => panic!("Unsupported DataType: {:?}", data_type),
-    };
-    ColumnarValue::Scalar(scalar)
 }
 
 // Pulled from DataFusion

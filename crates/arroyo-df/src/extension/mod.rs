@@ -1,25 +1,31 @@
+use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::Result;
-use arroyo_datastream::logical::{LogicalEdge, LogicalNode};
+use anyhow::{anyhow, Result};
+use arroyo_datastream::logical::{
+    DylibUdfConfig, LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName,
+};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion_common::{DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult};
+use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
+use datafusion_common::{
+    DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
+};
 use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore};
+use datafusion_proto::protobuf::{PhysicalExprNode, ProjectionNode};
+use prost::Message;
 use watermark_node::WatermarkNode;
 
 use crate::builder::{NamedNode, Planner};
 use crate::schemas::{add_timestamp_field, has_timestamp_field};
+use crate::ASYNC_RESULT_FIELD;
 use join::JoinExtension;
 
 use self::{
-    aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
-    join::JOIN_NODE_NAME,
-    key_calculation::{KeyCalculationExtension, KEY_CALCULATION_NAME},
-    remote_table::{RemoteTableExtension, REMOTE_TABLE_NAME},
-    sink::{SinkExtension, SINK_NODE_NAME},
-    table_source::{TableSourceExtension, TABLE_SOURCE_NAME},
-    watermark_node::WATERMARK_NODE_NAME,
-    window_fn::{WindowFunctionExtension, WINDOW_FUNCTION_EXTENSION_NAME},
+    aggregate::AggregateExtension, key_calculation::KeyCalculationExtension,
+    remote_table::RemoteTableExtension, sink::SinkExtension, table_source::TableSourceExtension,
+    window_fn::WindowFunctionExtension,
 };
 
 pub(crate) mod aggregate;
@@ -30,7 +36,7 @@ pub(crate) mod sink;
 pub(crate) mod table_source;
 pub(crate) mod watermark_node;
 pub(crate) mod window_fn;
-pub(crate) trait ArroyoExtension {
+pub(crate) trait ArroyoExtension: Debug {
     // if the extension has a name, return it so that we can memoize.
     fn node_name(&self) -> Option<NamedNode>;
     fn plan_node(
@@ -47,58 +53,29 @@ pub(crate) struct NodeWithIncomingEdges {
     pub edges: Vec<LogicalEdge>,
 }
 
+fn try_from_t<'a, T: ArroyoExtension + 'static>(
+    node: &'a Arc<dyn UserDefinedLogicalNode>,
+) -> Result<&'a dyn ArroyoExtension, ()> {
+    node.as_any()
+        .downcast_ref::<T>()
+        .map(|t| t as &dyn ArroyoExtension)
+        .ok_or_else(|| ())
+}
+
 impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtension {
     type Error = DataFusionError;
 
     fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> DFResult<Self, Self::Error> {
-        match node.name() {
-            TABLE_SOURCE_NAME => {
-                let table_source_extension = node
-                    .as_any()
-                    .downcast_ref::<TableSourceExtension>()
-                    .unwrap();
-                Ok(table_source_extension as &dyn ArroyoExtension)
-            }
-            WATERMARK_NODE_NAME => {
-                let watermark_node = node.as_any().downcast_ref::<WatermarkNode>().unwrap();
-                Ok(watermark_node as &dyn ArroyoExtension)
-            }
-            SINK_NODE_NAME => {
-                let sink_extension = node.as_any().downcast_ref::<SinkExtension>().unwrap();
-                Ok(sink_extension as &dyn ArroyoExtension)
-            }
-            KEY_CALCULATION_NAME => {
-                let key_calculation_extension = node
-                    .as_any()
-                    .downcast_ref::<KeyCalculationExtension>()
-                    .unwrap();
-                Ok(key_calculation_extension as &dyn ArroyoExtension)
-            }
-            AGGREGATE_EXTENSION_NAME => {
-                let aggregate_extension =
-                    node.as_any().downcast_ref::<AggregateExtension>().unwrap();
-                Ok(aggregate_extension as &dyn ArroyoExtension)
-            }
-            REMOTE_TABLE_NAME => {
-                let remote_table_extension = node
-                    .as_any()
-                    .downcast_ref::<RemoteTableExtension>()
-                    .unwrap();
-                Ok(remote_table_extension as &dyn ArroyoExtension)
-            }
-            JOIN_NODE_NAME => {
-                let join_extension = node.as_any().downcast_ref::<JoinExtension>().unwrap();
-                Ok(join_extension as &dyn ArroyoExtension)
-            }
-            WINDOW_FUNCTION_EXTENSION_NAME => {
-                let window_function_extension = node
-                    .as_any()
-                    .downcast_ref::<WindowFunctionExtension>()
-                    .unwrap();
-                Ok(window_function_extension as &dyn ArroyoExtension)
-            }
-            other => Err(DataFusionError::Plan(format!("unexpected node: {}", other))),
-        }
+        try_from_t::<TableSourceExtension>(node)
+            .or_else(|_| try_from_t::<WatermarkNode>(node))
+            .or_else(|_| try_from_t::<SinkExtension>(node))
+            .or_else(|_| try_from_t::<KeyCalculationExtension>(node))
+            .or_else(|_| try_from_t::<AggregateExtension>(node))
+            .or_else(|_| try_from_t::<RemoteTableExtension>(node))
+            .or_else(|_| try_from_t::<JoinExtension>(node))
+            .or_else(|_| try_from_t::<WindowFunctionExtension>(node))
+            .or_else(|_| try_from_t::<AsyncUDFExtension>(node))
+            .map_err(|_| DataFusionError::Plan(format!("unexpected node: {}", node.name())))
     }
 }
 
@@ -111,7 +88,7 @@ pub(crate) struct TimestampAppendExtension {
 
 impl TimestampAppendExtension {
     fn new(input: LogicalPlan, qualifier: Option<OwnedTableReference>) -> Self {
-        if has_timestamp_field(input.schema().clone()) {
+        if has_timestamp_field(&input.schema()) {
             unreachable!("shouldn't be adding timestamp to a plan that already has it: plan :\n {:?}\n schema: {:?}", input, input.schema());
         }
         let schema = add_timestamp_field(input.schema().clone(), qualifier.clone()).unwrap();
@@ -156,5 +133,161 @@ impl UserDefinedLogicalNodeCore for TimestampAppendExtension {
 
     fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
         Self::new(inputs[0].clone(), self.qualifier.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct AsyncUDFExtension {
+    pub(crate) input: Arc<LogicalPlan>,
+    pub(crate) name: String,
+    pub(crate) udf: DylibUdfConfig,
+    pub(crate) arg_exprs: Vec<Expr>,
+    pub(crate) final_exprs: Vec<Expr>,
+    pub(crate) ordered: bool,
+    pub(crate) max_concurrency: usize,
+    pub(crate) timeout: Duration,
+    pub(crate) final_schema: DFSchemaRef,
+}
+
+impl ArroyoExtension for AsyncUDFExtension {
+    fn node_name(&self) -> Option<NamedNode> {
+        None
+    }
+
+    fn plan_node(
+        &self,
+        planner: &Planner,
+        index: usize,
+        input_schemas: Vec<ArroyoSchemaRef>,
+    ) -> Result<NodeWithIncomingEdges> {
+        let arg_exprs = self
+            .arg_exprs
+            .iter()
+            .map(|e| {
+                let p = planner.create_physical_expr(&e, self.input.schema())?;
+                Ok(PhysicalExprNode::try_from(p)?.encode_to_vec())
+            })
+            .collect::<DFResult<Vec<_>>>()
+            .map_err(|e| anyhow!("failed to build async udf extension: {:?}", e))?;
+
+        let mut final_fields = self.input.schema().fields().clone();
+        final_fields.push(DFField::new_unqualified(
+            ASYNC_RESULT_FIELD,
+            self.udf.return_type.clone(),
+            true,
+        ));
+        let post_udf_schema = DFSchema::new_with_metadata(final_fields, HashMap::new())?;
+
+        let final_exprs = self
+            .final_exprs
+            .iter()
+            .map(|e| {
+                let p = planner.create_physical_expr(e, &post_udf_schema)?;
+                Ok(PhysicalExprNode::try_from(p)?.encode_to_vec())
+            })
+            .collect::<DFResult<Vec<_>>>()
+            .map_err(|e| anyhow!("failed to build async udf extension: {:?}", e))?;
+
+        ProjectionNode {
+            input: None,
+            expr: vec![],
+            optional_alias: None,
+        };
+
+        let config = AsyncUdfOperator {
+            name: self.name.clone(),
+            udf: Some(self.udf.clone().into()),
+            arg_exprs,
+            final_exprs,
+            ordering: if self.ordered {
+                AsyncUdfOrdering::Ordered as i32
+            } else {
+                AsyncUdfOrdering::Unordered as i32
+            },
+            max_concurrency: self.max_concurrency as u32,
+            timeout_micros: self.timeout.as_micros() as u64,
+        };
+
+        let node = LogicalNode {
+            operator_id: format!("async_udf_{}", index),
+            description: format!("async_udf<{}>", self.name),
+            operator_name: OperatorName::AsyncUdf,
+            operator_config: config.encode_to_vec(),
+            parallelism: 1,
+        };
+
+        let incoming_edge =
+            LogicalEdge::project_all(LogicalEdgeType::Forward, input_schemas[0].as_ref().clone());
+        Ok(NodeWithIncomingEdges {
+            node,
+            edges: vec![incoming_edge],
+        })
+    }
+
+    fn output_schema(&self) -> ArroyoSchema {
+        ArroyoSchema::from_fields(
+            self.final_schema
+                .fields()
+                .into_iter()
+                .map(|f| (**f.field()).clone())
+                .collect(),
+        )
+    }
+}
+
+impl UserDefinedLogicalNodeCore for AsyncUDFExtension {
+    fn name(&self) -> &str {
+        "AsyncUDFNode"
+    }
+
+    fn inputs(&self) -> Vec<&LogicalPlan> {
+        vec![&self.input]
+    }
+
+    fn schema(&self) -> &DFSchemaRef {
+        &self.final_schema
+    }
+
+    fn expressions(&self) -> Vec<Expr> {
+        self.arg_exprs
+            .iter()
+            .chain(self.final_exprs.iter())
+            .map(|e| e.to_owned())
+            .collect()
+    }
+
+    fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "AsyncUdfExtension<{}>: {}",
+            self.name,
+            self.final_schema
+                .fields()
+                .iter()
+                .map(|f| f.qualified_name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+
+    fn from_template(&self, exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
+        assert_eq!(inputs.len(), 1, "input size inconsistent");
+        assert_eq!(
+            &UserDefinedLogicalNode::expressions(self),
+            exprs,
+            "Tried to recreate async UDF node with different expressions"
+        );
+
+        Self {
+            input: Arc::new(inputs[0].clone()),
+            name: self.name.clone(),
+            udf: self.udf.clone(),
+            arg_exprs: self.arg_exprs.clone(),
+            final_exprs: self.final_exprs.clone(),
+            ordered: self.ordered,
+            max_concurrency: self.max_concurrency,
+            timeout: self.timeout,
+            final_schema: self.final_schema.clone(),
+        }
     }
 }

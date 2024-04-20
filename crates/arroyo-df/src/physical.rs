@@ -1,16 +1,11 @@
-use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray};
-use dlopen2::wrapper::WrapperApi;
 use std::{
     any::Any,
     mem,
     sync::{Arc, RwLock},
 };
 
-use crate::types::array_to_columnar_value;
-use arrow_array::{Array, ArrayRef, RecordBatch, StructArray};
-use arrow_schema::ffi::FFI_ArrowSchema;
+use arrow_array::{Array, RecordBatch, StructArray};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
-use arroyo_datastream::logical::DylibUdfConfig;
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
@@ -25,22 +20,16 @@ use datafusion_common::{
 
 use crate::json::get_json_functions;
 use crate::rewriters::UNNESTED_COL;
-use arrow::array;
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
-use arroyo_storage::StorageProvider;
 use datafusion::physical_plan::unnest::UnnestExec;
-use datafusion_expr::{
-    ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
-};
+use datafusion_expr::{ColumnarValue, ScalarUDF, Signature, TypeSignature};
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
-use dlopen2::wrapper::Container;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use std::path::Path;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 
@@ -153,151 +142,6 @@ pub fn window_scalar_function() -> ScalarUDF {
         &window_return_type(),
         &tumble_function_implementation(),
     )
-}
-
-#[derive(WrapperApi)]
-struct UdfDylibInterface {
-    run: unsafe extern "C-unwind" fn(
-        args_ptr: *mut FfiArraySchemaPair,
-        args_len: usize,
-        args_capacity: usize,
-    ) -> FfiArrayResult,
-}
-
-#[derive(Clone)]
-pub struct UdfDylib {
-    name: Arc<String>,
-    signature: Arc<Signature>,
-    return_type: Arc<DataType>,
-    udf: Arc<Container<UdfDylibInterface>>,
-}
-
-impl Debug for UdfDylib {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UdfDylib").finish()
-    }
-}
-
-impl UdfDylib {
-    /// Download a UDF dylib from the object store
-    pub async fn init(name: &str, config: &DylibUdfConfig) -> Self {
-        let signature = Signature::exact(config.arg_types.clone(), Volatility::Volatile);
-
-        let udf = StorageProvider::get_url(&config.dylib_path)
-            .await
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Unable to fetch UDF dylib from '{}': {:?}",
-                    config.dylib_path, e
-                )
-            });
-
-        // write the dylib to a local file
-        let local_udfs_dir = "/tmp/arroyo/local_udfs";
-        std::fs::create_dir_all(local_udfs_dir).expect("unable to create local udfs dir");
-
-        let dylib_file_name = Path::new(&config.dylib_path)
-            .file_name()
-            .expect("Invalid dylib path");
-        let local_dylib_path = Path::new(local_udfs_dir).join(dylib_file_name);
-
-        std::fs::write(&local_dylib_path, udf).expect("unable to write dylib to file");
-
-        Self {
-            name: Arc::new(name.to_string()),
-            signature: Arc::new(signature),
-            udf: Arc::new(unsafe { Container::load(local_dylib_path).unwrap() }),
-            return_type: Arc::new(config.return_type.clone()),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug)]
-struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
-
-#[repr(C)]
-pub struct FfiArrayResult(FFI_ArrowArray, FFI_ArrowSchema, bool);
-
-fn scalar_value_to_array(scalar: &ScalarValue, length: usize) -> ArrayRef {
-    match scalar {
-        ScalarValue::Boolean(v) => Arc::new(array::BooleanArray::from(vec![*v; length])),
-        ScalarValue::Float32(v) => Arc::new(array::Float32Array::from(vec![*v; length])),
-        ScalarValue::Float64(v) => Arc::new(array::Float64Array::from(vec![*v; length])),
-        ScalarValue::Int8(v) => Arc::new(array::Int8Array::from(vec![*v; length])),
-        ScalarValue::Int16(v) => Arc::new(array::Int16Array::from(vec![*v; length])),
-        ScalarValue::Int32(v) => Arc::new(array::Int32Array::from(vec![*v; length])),
-        ScalarValue::Int64(v) => Arc::new(array::Int64Array::from(vec![*v; length])),
-        ScalarValue::UInt8(v) => Arc::new(array::UInt8Array::from(vec![*v; length])),
-        ScalarValue::UInt16(v) => Arc::new(array::UInt16Array::from(vec![*v; length])),
-        ScalarValue::UInt32(v) => Arc::new(array::UInt32Array::from(vec![*v; length])),
-        ScalarValue::UInt64(v) => Arc::new(array::UInt64Array::from(vec![*v; length])),
-        ScalarValue::Utf8(v) => Arc::new(array::StringArray::from(vec![v.clone(); length])),
-        _ => panic!("Unsupported scalar type : {:?}", scalar),
-    }
-}
-
-impl ScalarUDFImpl for UdfDylib {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DFResult<DataType> {
-        Ok((*self.return_type).clone())
-    }
-
-    fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
-        let batch_length = args
-            .iter()
-            .map(|arg| {
-                if let ColumnarValue::Array(array) = arg {
-                    array.len()
-                } else {
-                    1
-                }
-            })
-            .max()
-            .unwrap();
-
-        let args = args
-            .iter()
-            .map(|arg| {
-                let (array, schema) = match arg {
-                    ColumnarValue::Array(array) => to_ffi(&(array.to_data())).unwrap(),
-                    ColumnarValue::Scalar(s) => match s {
-                        ScalarValue::List(l) => to_ffi(&l.values().to_data()).unwrap(),
-                        _ => to_ffi(&scalar_value_to_array(s, batch_length).to_data()).unwrap(),
-                    },
-                };
-                FfiArraySchemaPair(array, schema)
-            })
-            .collect::<Vec<_>>();
-
-        let len = args.len();
-        let capacity = args.capacity();
-        // the UDF dylib is responsible for freeing the memory of the args -- we leak it before
-        // calling the udf so that if it panics, we don't try to double-free the args
-        let ptr = args.leak();
-
-        let FfiArrayResult(result_array, result_schema, valid) =
-            unsafe { (self.udf.run)(ptr.as_mut_ptr(), len, capacity) };
-
-        if !valid {
-            panic!("panic in UDF {}", self.name);
-        }
-
-        let result_array = unsafe { from_ffi(result_array, &result_schema).unwrap() };
-
-        Ok(array_to_columnar_value(result_array, &self.return_type))
-    }
 }
 
 #[derive(Debug)]

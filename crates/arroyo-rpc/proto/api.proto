@@ -106,6 +106,21 @@ message WindowFunctionOperator {
   bytes window_function_plan = 4;
 }
 
+enum AsyncUdfOrdering {
+  UNORDERED = 0;
+  ORDERED = 1;
+}
+
+message AsyncUdfOperator {
+  string name = 1;
+  ArrowDylibUdfConfig udf = 2;
+  repeated bytes arg_exprs = 3;
+  repeated bytes final_exprs = 4;
+  AsyncUdfOrdering ordering = 5;
+  uint32 max_concurrency = 6;
+  uint64 timeout_micros = 7;
+}
+
 message WasmUdfs {
   string name = 1;
   repeated WasmFunction wasm_functions = 2;
@@ -231,11 +246,14 @@ message OperatorCheckpointDetail {
   map<uint32, TaskCheckpointDetail> tasks = 5;
 }
 
+
+
 message ArrowDylibUdfConfig {
   string dylib_path = 1;
   repeated bytes arg_types = 2;
   bytes return_type = 3;
   bool aggregate = 4;
+  bool is_async = 5;
 }
 
 message ArrowProgramConfig {

@@ -6,17 +6,18 @@ use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
-use crate::ArroyoSchemaProvider;
+use crate::{ArroyoSchemaProvider, ASYNC_RESULT_FIELD};
 
 use arrow_schema::DataType;
 use arroyo_rpc::TIMESTAMP_FIELD;
 
-use datafusion_common::plan_err;
+use crate::extension::AsyncUDFExtension;
+use arroyo_udf_host::parse::{AsyncOptions, UdfType};
 use datafusion_common::tree_node::{
     Transformed, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
 };
 use datafusion_common::{
-    Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
+    plan_err, Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
     ScalarValue,
 };
 use datafusion_expr::expr::ScalarFunction;
@@ -423,6 +424,106 @@ impl TreeNodeRewriter for UnnestRewriter {
         } else {
             Ok(LogicalPlan::Projection(projection.clone()))
         }
+    }
+}
+
+pub struct AsyncUdfRewriter<'a> {
+    provider: &'a ArroyoSchemaProvider,
+}
+
+impl<'a> AsyncUdfRewriter<'a> {
+    pub fn new(provider: &'a ArroyoSchemaProvider) -> Self {
+        Self { provider }
+    }
+
+    fn split_async(
+        expr: Expr,
+        provider: &ArroyoSchemaProvider,
+    ) -> DFResult<(Expr, Option<(String, AsyncOptions, Vec<Expr>)>)> {
+        let mut c: Option<(String, AsyncOptions, Vec<Expr>)> = None;
+        let expr = expr.transform_up_mut(&mut |e| {
+            match &e {
+                Expr::ScalarFunction(ScalarFunction {
+                    func_def: ScalarFunctionDefinition::UDF(udf),
+                    args,
+                }) => {
+                    if let Some(UdfType::Async(opts)) =
+                        provider.udf_defs.get(udf.name()).map(|udf| udf.udf_type)
+                    {
+                        if c.replace((udf.name().to_string(), opts, args.clone()))
+                            .is_some()
+                        {
+                            return plan_err!(
+                                "multiple async calls in the same expression, which is not allowed"
+                            );
+                        }
+                        return Ok(Transformed::Yes(Expr::Column(Column::new_unqualified(
+                            ASYNC_RESULT_FIELD,
+                        ))));
+                    }
+                }
+                _ => {}
+            }
+            Ok(Transformed::No(e))
+        })?;
+
+        Ok((expr, c))
+    }
+}
+
+impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
+    type N = LogicalPlan;
+
+    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+        let LogicalPlan::Projection(mut projection) = node else {
+            for e in node.expressions() {
+                if let (_, Some((udf, _, _))) = Self::split_async(e.clone(), &self.provider)? {
+                    return plan_err!(
+                        "async UDFs are only supported in projections, but {udf} was called in another context"
+                    );
+                }
+            }
+            return Ok(node);
+        };
+
+        let mut args = None;
+
+        for e in projection.expr.iter_mut() {
+            let (new_e, Some(udf)) = Self::split_async(e.clone(), &self.provider)? else {
+                continue;
+            };
+
+            if let Some((prev, _, _)) = args.replace(udf) {
+                return plan_err!(
+                    "Projection contains multiple async UDFs, which is not supported \
+                    \n(hint: two async UDFs calls, {} and {}, appear in the same SELECT statement)",
+                    prev,
+                    args.unwrap().0
+                );
+            }
+
+            *e = new_e;
+        }
+
+        let Some((name, opts, args)) = args else {
+            return Ok(LogicalPlan::Projection(projection));
+        };
+
+        let udf = self.provider.dylib_udfs.get(&name).unwrap().clone();
+
+        Ok(LogicalPlan::Extension(Extension {
+            node: Arc::new(AsyncUDFExtension {
+                input: projection.input,
+                name,
+                udf,
+                arg_exprs: args,
+                final_exprs: projection.expr,
+                ordered: opts.ordered,
+                max_concurrency: opts.max_concurrency,
+                timeout: opts.timeout,
+                final_schema: projection.schema,
+            }),
+        }))
     }
 }
 

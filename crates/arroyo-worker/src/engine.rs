@@ -6,26 +6,27 @@ use std::{mem, thread};
 use std::time::SystemTime;
 
 use arroyo_connectors::connectors;
-use arroyo_df::physical::new_registry;
 use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use tracing::{debug, info, warn};
 
+use crate::arrow::async_udf::AsyncUdfConstructor;
 use crate::arrow::instant_join::InstantJoinConstructor;
 use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
+use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operators::watermark_generator::WatermarkGeneratorConstructor;
 use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
+use arroyo_df::physical::new_registry;
 use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver, BatchSender};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;
@@ -36,6 +37,7 @@ use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
     range_for_server, u32_config, Key, TaskInfo, WorkerId, DEFAULT_QUEUE_SIZE, QUEUE_SIZE_ENV,
 };
+use arroyo_udf_host::LocalUdf;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
@@ -82,12 +84,12 @@ impl Debug for QueueNode {
 }
 
 #[derive(Debug)]
-enum SubtaskOrQueueNode {
+pub enum SubtaskOrQueueNode {
     SubtaskNode(SubtaskNode),
     QueueNode(QueueNode),
 }
 
-struct PhysicalGraphEdge {
+pub struct PhysicalGraphEdge {
     edge_idx: usize,
     in_logical_idx: usize,
     out_logical_idx: usize,
@@ -166,7 +168,7 @@ impl SubtaskOrQueueNode {
 
 pub struct Program {
     pub name: String,
-    graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
+    pub graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
 }
 
 impl Program {
@@ -174,7 +176,11 @@ impl Program {
         self.graph.read().unwrap().node_count()
     }
 
-    pub fn local_from_logical(name: String, logical: &DiGraph<LogicalNode, LogicalEdge>) -> Self {
+    pub fn local_from_logical(
+        name: String,
+        logical: &DiGraph<LogicalNode, LogicalEdge>,
+        udfs: &[LocalUdf],
+    ) -> Self {
         let assignments = logical
             .node_weights()
             .flat_map(|weight| {
@@ -186,7 +192,12 @@ impl Program {
                 })
             })
             .collect();
-        Self::from_logical(name, logical, &assignments, new_registry())
+
+        let mut registry = new_registry();
+        for udf in udfs {
+            registry.add_local_udf(&udf);
+        }
+        Self::from_logical(name, logical, &assignments, registry)
     }
 
     pub fn from_logical(
@@ -794,12 +805,14 @@ pub fn construct_operator(
     let ctor: Box<dyn ErasedConstructor> = match operator {
         OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
         OperatorName::ArrowKey => Box::new(KeyExecutionConstructor),
+        OperatorName::AsyncUdf => Box::new(AsyncUdfConstructor),
         OperatorName::TumblingWindowAggregate => Box::new(TumblingAggregateWindowConstructor),
         OperatorName::SlidingWindowAggregate => Box::new(SlidingAggregatingWindowConstructor),
         OperatorName::SessionWindowAggregate => Box::new(SessionAggregatingWindowConstructor),
         OperatorName::ExpressionWatermark => Box::new(WatermarkGeneratorConstructor),
         OperatorName::Join => Box::new(JoinWithExpirationConstructor),
         OperatorName::InstantJoin => Box::new(InstantJoinConstructor),
+        OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut config.as_slice()).unwrap();
             return connectors()
@@ -813,7 +826,6 @@ pub fn construct_operator(
                     panic!("Failed to construct connector {}: {:?}", op.connector, e)
                 });
         }
-        OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
     };
 
     ctor.with_config(config, registry)

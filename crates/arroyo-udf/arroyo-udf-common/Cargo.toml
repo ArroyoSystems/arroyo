@@ -1,0 +1,13 @@
+[package]
+name = "arroyo-udf-common"
+version = "0.10.0-dev"
+edition = "2021"
+
+[dependencies]
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes', features = ["ffi"]}
+async-ffi = { version = "0.5.0", features = ["macros"] }
+tokio = { version = "1", features = ["time", "sync"] }
+syn = { version = "2", features = ["full"] }
+anyhow = "1.0.82"
+regex = "1.10.3"
+serde = { version = "1.0.197", features = ["derive"] }

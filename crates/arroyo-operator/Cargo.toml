@@ -11,9 +11,12 @@ arroyo-metrics = { path = "../arroyo-metrics" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-types = { path = "../arroyo-types" }
+arroyo-datastream = { path = "../arroyo-datastream" }
+arroyo-storage = { path = "../arroyo-storage" }
+arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 
 anyhow = "1.0.71"
-arrow = { workspace = true }
+arrow = { workspace = true, features = ["ffi"] }
 ahash = { workspace = true }
 async-trait = "0.1.68"
 bincode = "2.0.0-rc.3"
@@ -27,3 +30,5 @@ tracing = "0.1"
 async-stream = "0.3.5"
 serde_json = "1.0.111"
 serde = "1.0.195"
+dlopen2 = "0.7.0"
+async-ffi = "0.5.0"

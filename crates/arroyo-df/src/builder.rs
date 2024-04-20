@@ -307,7 +307,7 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
         };
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
-            .map_err(|e| DataFusionError::Plan(format!("error converting extension: {}", e)))?;
+            .map_err(|e: DataFusionError| e.context("converting extension"))?;
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(node_index) = self.named_nodes.get(&name) {
                 self.add_index_to_traversal(*node_index);
@@ -335,9 +335,9 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
         };
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
-            .map_err(|e| DataFusionError::Plan(format!("error converting extension: {}", e)))?;
+            .map_err(|e: DataFusionError| e.context("converting extension"))?;
         self.build_extension(input_nodes, arroyo_extension)
-            .map_err(|e| DataFusionError::Plan(format!("error building extension: {}", e)))?;
+            .map_err(|e| e.context("building extension"))?;
 
         Ok(VisitRecursion::Continue)
     }

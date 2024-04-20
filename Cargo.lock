@@ -52,7 +52,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "version_check",
- "zerocopy",
+ "zerocopy 0.7.32",
 ]
 
 [[package]]
@@ -150,9 +150,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.80"
+version = "1.0.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
+checksum = "f538837af36e6f6a9be0faa67f9a314f8119e4e4b5867c6ab40ed60360142519"
 dependencies = [
  "backtrace",
 ]
@@ -169,7 +169,7 @@ dependencies = [
  "log",
  "num-bigint",
  "quad-rand",
- "rand",
+ "rand 0.8.5",
  "regex-lite",
  "serde",
  "serde_json",
@@ -461,6 +461,7 @@ dependencies = [
  "arroyo-server-common",
  "arroyo-state",
  "arroyo-types",
+ "arroyo-udf-host",
  "async-trait",
  "axum",
  "axum-extra",
@@ -482,8 +483,8 @@ dependencies = [
  "prometheus-http-query",
  "prost 0.12.3",
  "quote",
- "rand",
- "rand_chacha",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "regress 0.6.0",
  "reqwest",
  "schemars",
@@ -495,6 +496,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-stream",
+ "toml 0.8.12",
  "tonic",
  "tonic-reflection",
  "tonic-web",
@@ -547,6 +549,7 @@ dependencies = [
  "prost 0.12.3",
  "serde_json",
  "tokio",
+ "toml 0.8.12",
  "tonic",
  "tracing",
 ]
@@ -586,7 +589,7 @@ dependencies = [
  "once_cell",
  "parquet",
  "prost 0.12.3",
- "rand",
+ "rand 0.8.5",
  "rdkafka",
  "rdkafka-sys",
  "redis",
@@ -643,7 +646,7 @@ dependencies = [
  "prometheus",
  "prost 0.12.3",
  "quote",
- "rand",
+ "rand 0.8.5",
  "regex",
  "reqwest",
  "serde",
@@ -679,14 +682,14 @@ dependencies = [
  "proc-macro2",
  "prost 0.12.3",
  "quote",
- "rand",
+ "rand 0.8.5",
  "regex",
  "serde",
  "serde_json",
  "strum 0.25.0",
  "syn 2.0.52",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.12",
  "tonic",
 ]
 
@@ -706,6 +709,7 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-storage",
  "arroyo-types",
+ "arroyo-udf-host",
  "async-trait",
  "bincode 2.0.0-rc.3",
  "datafusion 36.0.0",
@@ -714,8 +718,6 @@ dependencies = [
  "datafusion-expr 36.0.0",
  "datafusion-physical-expr 36.0.0",
  "datafusion-proto 36.0.0",
- "dlopen2",
- "dlopen2_derive",
  "glob",
  "petgraph",
  "prettyplease",
@@ -731,7 +733,7 @@ dependencies = [
  "test-log",
  "tokio",
  "tokio-stream",
- "toml 0.8.11",
+ "toml 0.8.12",
  "tracing",
  "tracing-subscriber",
  "unicase",
@@ -785,7 +787,7 @@ dependencies = [
  "local-ip-address",
  "prometheus",
  "prost 0.12.3",
- "rand",
+ "rand 0.8.5",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -814,18 +816,23 @@ dependencies = [
  "ahash 0.8.7",
  "anyhow",
  "arrow",
+ "arroyo-datastream",
  "arroyo-formats",
  "arroyo-metrics",
  "arroyo-rpc",
  "arroyo-state",
+ "arroyo-storage",
  "arroyo-types",
+ "arroyo-udf-host",
+ "async-ffi",
  "async-stream",
  "async-trait",
  "bincode 2.0.0-rc.3",
  "datafusion 36.0.0",
+ "dlopen2",
  "futures",
  "prost 0.12.3",
- "rand",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "tokio",
@@ -904,10 +911,14 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-state",
  "arroyo-types",
+ "arroyo-udf-host",
+ "arroyo-udf-macros",
+ "arroyo-udf-plugin",
  "arroyo-worker",
  "bincode 2.0.0-rc.3",
  "bincode_derive",
  "chrono",
+ "datafusion 36.0.0",
  "hex",
  "petgraph",
  "quote",
@@ -955,7 +966,7 @@ dependencies = [
  "parquet",
  "prometheus",
  "prost 0.12.3",
- "rand",
+ "rand 0.8.5",
  "tokio",
  "tonic",
  "tracing",
@@ -991,6 +1002,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-udf-common"
+version = "0.10.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "async-ffi",
+ "regex",
+ "serde",
+ "syn 2.0.52",
+ "tokio",
+]
+
+[[package]]
+name = "arroyo-udf-host"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-udf-common",
+ "arroyo-udf-macros",
+ "arroyo-udf-plugin",
+ "async-ffi",
+ "datafusion 36.0.0",
+ "dlopen2",
+ "quote",
+ "regex",
+ "syn 2.0.52",
+ "tokio",
+ "toml 0.8.12",
+]
+
+[[package]]
+name = "arroyo-udf-macros"
+version = "0.10.0-dev"
+dependencies = [
+ "arrow-schema",
+ "arroyo-udf-common",
+ "proc-macro2",
+ "quote",
+ "rand 0.9.0-alpha.1",
+ "syn 2.0.52",
+]
+
+[[package]]
+name = "arroyo-udf-plugin"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arroyo-udf-common",
+ "arroyo-udf-macros",
+ "async-ffi",
+ "futures",
+ "tokio",
+]
+
+[[package]]
 name = "arroyo-worker"
 version = "0.10.0-dev"
 dependencies = [
@@ -1011,7 +1078,9 @@ dependencies = [
  "arroyo-state",
  "arroyo-storage",
  "arroyo-types",
+ "arroyo-udf-host",
  "async-compression",
+ "async-ffi",
  "async-stream",
  "async-trait",
  "aws-config",
@@ -1027,6 +1096,8 @@ dependencies = [
  "datafusion-physical-expr 36.0.0",
  "datafusion-physical-plan 36.0.0",
  "datafusion-proto 36.0.0",
+ "dlopen2",
+ "dlopen2_derive",
  "futures",
  "governor",
  "hex",
@@ -1042,7 +1113,7 @@ dependencies = [
  "petgraph",
  "prometheus",
  "prost 0.12.3",
- "rand",
+ "rand 0.8.5",
  "regex",
  "regress 0.6.0",
  "reqwest",
@@ -1118,6 +1189,26 @@ dependencies = [
  "fastrand 2.0.1",
  "futures-lite 2.2.0",
  "slab",
+]
+
+[[package]]
+name = "async-ffi"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4de21c0feef7e5a556e51af767c953f0501f7f300ba785cc99c47bdc8081a50"
+dependencies = [
+ "async-ffi-macros",
+]
+
+[[package]]
+name = "async-ffi-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfca27fc54e6a22790dbc90b1ffe3c0cff0008976035bb4123408f862a452d29"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.52",
 ]
 
 [[package]]
@@ -1737,7 +1828,7 @@ dependencies = [
  "getrandom",
  "instant",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "tokio",
 ]
 
@@ -2605,7 +2696,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
 dependencies = [
  "generic-array",
- "rand_core",
+ "rand_core 0.6.4",
  "subtle",
  "zeroize",
 ]
@@ -2808,7 +2899,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parquet",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "sqlparser 0.41.0",
  "tempfile",
  "tokio",
@@ -2857,7 +2948,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parquet",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "sqlparser 0.43.1",
  "tempfile",
  "tokio",
@@ -2923,7 +3014,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot 0.12.1",
- "rand",
+ "rand 0.8.5",
  "tempfile",
  "url",
 ]
@@ -2943,7 +3034,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot 0.12.1",
- "rand",
+ "rand 0.8.5",
  "tempfile",
  "url",
 ]
@@ -3068,7 +3159,7 @@ dependencies = [
  "md-5 0.10.6",
  "paste",
  "petgraph",
- "rand",
+ "rand 0.8.5",
  "regex",
  "sha2 0.10.8",
  "unicode-segmentation",
@@ -3103,7 +3194,7 @@ dependencies = [
  "md-5 0.10.6",
  "paste",
  "petgraph",
- "rand",
+ "rand 0.8.5",
  "regex",
  "sha2 0.10.8",
  "unicode-segmentation",
@@ -3136,7 +3227,7 @@ dependencies = [
  "once_cell",
  "parking_lot 0.12.1",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "tokio",
  "uuid",
 ]
@@ -3166,7 +3257,7 @@ dependencies = [
  "once_cell",
  "parking_lot 0.12.1",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "tokio",
  "uuid",
 ]
@@ -3353,7 +3444,7 @@ dependencies = [
  "parquet",
  "percent-encoding",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "regex",
  "roaring",
  "serde",
@@ -3618,7 +3709,7 @@ dependencies = [
  "hkdf",
  "pem-rfc7468 0.7.0",
  "pkcs8 0.10.2",
- "rand_core",
+ "rand_core 0.6.4",
  "sec1",
  "subtle",
  "zeroize",
@@ -3746,7 +3837,7 @@ dependencies = [
  "hyper-timeout",
  "log",
  "pin-project",
- "rand",
+ "rand 0.8.5",
  "tokio",
 ]
 
@@ -3787,7 +3878,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded41244b729663b1e574f1b4fb731469f69f79c17667b5d776b16cda0479449"
 dependencies = [
- "rand_core",
+ "rand_core 0.6.4",
  "subtle",
 ]
 
@@ -3911,7 +4002,7 @@ dependencies = [
  "siphasher 1.0.0",
  "thiserror",
  "tokio",
- "toml 0.8.11",
+ "toml 0.8.12",
  "tracing",
 ]
 
@@ -3954,7 +4045,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "thiserror",
- "toml 0.8.11",
+ "toml 0.8.12",
  "tracing",
 ]
 
@@ -4412,7 +4503,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "portable-atomic",
  "quanta",
- "rand",
+ "rand 0.8.5",
  "smallvec",
  "spinning_top",
 ]
@@ -4424,7 +4515,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
  "ff",
- "rand_core",
+ "rand_core 0.6.4",
  "subtle",
 ]
 
@@ -4947,7 +5038,7 @@ dependencies = [
  "arroyo-openapi",
  "arroyo-rpc",
  "arroyo-types",
- "rand",
+ "rand 0.8.5",
  "refinery",
  "serde_json",
  "tokio",
@@ -5139,7 +5230,7 @@ dependencies = [
  "k256",
  "p256",
  "p384",
- "rand",
+ "rand 0.8.5",
  "rsa",
  "serde",
  "serde_json",
@@ -5744,7 +5835,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bddcd3bf5144b6392de80e04c347cd7fab2508f6df16a85fc496ecd5cec39bc"
 dependencies = [
  "clap 3.2.25",
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -5753,7 +5844,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ffa00dec017b5b1a8b7cf5e2c008bfda1aa7e0697ac1508b491fdf2622fb4d8"
 dependencies = [
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -5890,7 +5981,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand",
+ "rand 0.8.5",
  "smallvec",
  "zeroize",
 ]
@@ -6029,7 +6120,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "percent-encoding",
  "quick-xml",
- "rand",
+ "rand 0.8.5",
  "reqwest",
  "ring 0.17.8",
  "rustls-pemfile 2.1.1",
@@ -6299,7 +6390,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
 dependencies = [
  "base64ct",
- "rand_core",
+ "rand_core 0.6.4",
  "subtle",
 ]
 
@@ -6396,7 +6487,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e4cc64c2ad9ebe670cb8fd69dd50ae301650392e81c05f9bfcb2d5bdbc24b0"
 dependencies = [
  "phf_shared",
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -6564,7 +6655,7 @@ dependencies = [
  "hmac 0.12.1",
  "md-5 0.10.6",
  "memchr",
- "rand",
+ "rand 0.8.5",
  "sha2 0.10.8",
  "stringprep",
 ]
@@ -6904,8 +6995,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
- "rand_chacha",
- "rand_core",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
+version = "0.9.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d31e63ea85be51c423e52ba8f2e68a3efd53eed30203ee029dd09947333693e"
+dependencies = [
+ "rand_chacha 0.9.0-alpha.1",
+ "rand_core 0.9.0-alpha.1",
+ "zerocopy 0.8.0-alpha.6",
 ]
 
 [[package]]
@@ -6915,7 +7017,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.9.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78674ef918c19451dbd250f8201f8619b494f64c9aa6f3adb28fd8a0f1f6da46"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.9.0-alpha.1",
 ]
 
 [[package]]
@@ -6925,6 +7037,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.9.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc89dffba8377c5ec847d12bb41492bda235dba31a25e8b695cd0fe6589eb8c9"
+dependencies = [
+ "getrandom",
+ "zerocopy 0.8.0-alpha.6",
 ]
 
 [[package]]
@@ -7007,7 +7129,7 @@ dependencies = [
  "log",
  "percent-encoding",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "rustls 0.21.10",
  "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
@@ -7077,7 +7199,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-postgres",
- "toml 0.8.11",
+ "toml 0.8.12",
  "url",
  "walkdir",
 ]
@@ -7307,7 +7429,7 @@ dependencies = [
  "num-traits",
  "pkcs1",
  "pkcs8 0.9.0",
- "rand_core",
+ "rand_core 0.6.4",
  "signature 1.6.4",
  "smallvec",
  "subtle",
@@ -8177,7 +8299,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c"
 dependencies = [
  "digest 0.10.7",
- "rand_core",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -8187,7 +8309,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
- "rand_core",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -8844,7 +8966,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-protocol",
  "postgres-types",
- "rand",
+ "rand 0.8.5",
  "socket2 0.5.6",
  "tokio",
  "tokio-util",
@@ -8858,7 +8980,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f57eb36ecbe0fc510036adff84824dd3c24bb781e21bfa67b69d556aa85214f"
 dependencies = [
  "pin-project",
- "rand",
+ "rand 0.8.5",
  "tokio",
 ]
 
@@ -8936,27 +9058,15 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.8"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd79e69d3b627db300ff956027cc6c3798cef26d22526befdfcd12feeb6d2257"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "toml"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af06656561d28735e9c1cd63dfd57132c8155426aa6af24f36a00a351f88c48e"
+checksum = "e9dd1545e8208b4a5af1aa9bbd0b4cf7e9ea08fabc5d0a5c67fcaafa17433aa3"
 dependencies = [
  "indexmap 2.2.5",
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.22.7",
+ "toml_edit 0.22.9",
 ]
 
 [[package]]
@@ -8975,17 +9085,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap 2.2.5",
- "serde",
- "serde_spanned",
  "toml_datetime",
  "winnow 0.5.40",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.22.7"
+version = "0.22.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18769cd1cec395d70860ceb4d932812a0b4d06b1a4bb336745a4d21b9496e992"
+checksum = "8e40bb779c5187258fd7aad0eb68cb8706a0a81fa712fbea808ab43c4b8374c4"
 dependencies = [
  "indexmap 2.2.5",
  "serde",
@@ -9078,7 +9186,7 @@ dependencies = [
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
- "rand",
+ "rand 0.8.5",
  "slab",
  "tokio",
  "tokio-util",
@@ -9239,7 +9347,7 @@ dependencies = [
  "httparse",
  "log",
  "native-tls",
- "rand",
+ "rand 0.8.5",
  "sha1",
  "thiserror",
  "url",
@@ -9913,7 +10021,7 @@ dependencies = [
  "memfd",
  "memoffset",
  "paste",
- "rand",
+ "rand 0.8.5",
  "rustix 0.37.27",
  "sptr",
  "wasmtime-asm-macros",
@@ -10361,7 +10469,16 @@ version = "0.7.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74d4d3961e53fa4c9a25a8637fc2bfaf2595b3d3ae34875568a5cf64787716be"
 dependencies = [
- "zerocopy-derive",
+ "zerocopy-derive 0.7.32",
+]
+
+[[package]]
+name = "zerocopy"
+version = "0.8.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db678a6ee512bd06adf35c35be471cae2f9c82a5aed2b5d15e03628c98bddd57"
+dependencies = [
+ "zerocopy-derive 0.8.0-alpha.6",
 ]
 
 [[package]]
@@ -10369,6 +10486,17 @@ name = "zerocopy-derive"
 version = "0.7.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ce1b18ccd8e73a9321186f97e46f9f04b778851177567b1975109d26a08d2a6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.52",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "201585ea96d37ee69f2ac769925ca57160cef31acb137c16f38b02b76f4c1e62"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -18,7 +18,7 @@ use std::time::SystemTime;
 
 pub type ArroyoSchemaRef = Arc<ArroyoSchema>;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ArroyoSchema {
     pub schema: Arc<Schema>,
     pub timestamp_index: usize,

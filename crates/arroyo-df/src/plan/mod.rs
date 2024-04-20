@@ -12,6 +12,7 @@ use aggregate::AggregateRewriter;
 use datafusion_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan};
 use join::JoinRewriter;
 
+use crate::rewriters::AsyncUdfRewriter;
 use crate::{
     extension::{
         aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
@@ -256,7 +257,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
     fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
         match node {
             LogicalPlan::Projection(ref mut projection) => {
-                if !has_timestamp_field(projection.schema.clone()) {
+                if !has_timestamp_field(&projection.schema) {
                     let timestamp_field = projection
                         .input
                         .schema()
@@ -273,6 +274,8 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         name: "_timestamp".to_string(),
                     }));
                 }
+
+                return AsyncUdfRewriter::new(self.schema_provider).mutate(node);
             }
             LogicalPlan::Aggregate(aggregate) => {
                 return AggregateRewriter {}.mutate(LogicalPlan::Aggregate(aggregate));

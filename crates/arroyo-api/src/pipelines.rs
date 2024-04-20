@@ -30,7 +30,7 @@ use arroyo_rpc::grpc::api::{
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalProgram, OperatorName};
-use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, ParsedUdf, SqlConfig};
+use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
@@ -38,6 +38,7 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 use arroyo_rpc::{error_chain, OperatorConfig};
 use arroyo_server_common::log_event;
+use arroyo_udf_host::ParsedUdfFile;
 use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
@@ -104,8 +105,8 @@ where
             .map_err(|e| anyhow!("{}", e.message))?;
 
         for udf in local_udfs {
-            let parsed =
-                ParsedUdf::try_parse(&udf.definition).map_err(|e| anyhow!("invalid UDF: {e}"))?;
+            let parsed = ParsedUdfFile::try_parse(&udf.definition)
+                .map_err(|e| anyhow!("invalid UDF: {e}"))?;
 
             let url = if !validate_only {
                 let res = build_udf(&mut compiler_service, &udf.definition, true)
@@ -123,7 +124,7 @@ where
 
             schema_provider
                 .add_rust_udf(&parsed.definition, &url)
-                .map_err(|e| anyhow!("Invalid UDF {}: {}", parsed.name, e))?;
+                .map_err(|e| anyhow!("Invalid UDF {}: {}", parsed.udf.name, e))?;
         }
     }
 

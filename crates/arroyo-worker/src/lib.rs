@@ -22,10 +22,8 @@ use arroyo_types::{
 use local_ip_address::local_ip;
 use rand::random;
 
-use arrow_schema::DataType;
 use base64::engine::general_purpose;
 use base64::Engine as Base64Engine;
-use datafusion_expr::{create_udaf, ScalarUDF, Volatility};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
@@ -44,16 +42,13 @@ pub use ordered_float::OrderedFloat;
 use prost::Message;
 
 use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
-use arroyo_df::inner_type;
-use arroyo_df::physical::{new_registry, UdfDylib};
-use arroyo_df::udafs::{ArroyoUdaf, UdafArg};
+use arroyo_df::physical::new_registry;
 use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod arrow;
 
 pub mod engine;
 mod network_manager;
-pub mod operators;
 
 pub const PROMETHEUS_PUSH_GATEWAY: &str = "localhost:9091";
 pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);
@@ -425,45 +420,18 @@ impl WorkerGrpc for WorkerServer {
         let req = request.into_inner();
         let mut registry = new_registry();
 
-        for (udf_name, dylib_config) in self.program_config.udf_dylibs.iter() {
-            let dylib = UdfDylib::init(udf_name, dylib_config).await;
-
-            if dylib_config.aggregate {
-                let output_type = Arc::new(dylib_config.return_type.clone());
-
-                let args: Vec<_> = dylib_config
-                    .arg_types
-                    .iter()
-                    .map(|arg| {
-                        UdafArg::new(match arg {
-                            DataType::List(f) => Arc::clone(f),
-                            _ => {
-                                panic!("arg type {:?} for UDAF {} is not a list", arg, udf_name)
-                            }
-                        })
-                    })
-                    .collect();
-
-                registry.add_udaf(Arc::new(create_udaf(
-                    &udf_name,
-                    dylib_config
-                        .arg_types
-                        .iter()
-                        .map(|t| inner_type(t).expect("UDAF arg is not a vec"))
-                        .collect(),
-                    Arc::new(dylib_config.return_type.clone()),
-                    Volatility::Volatile,
-                    Arc::new(move |_| {
-                        Ok(Box::new(ArroyoUdaf::new(
-                            args.clone(),
-                            output_type.clone(),
-                            dylib.clone(),
-                        )))
-                    }),
-                    Arc::new(dylib_config.arg_types.clone()),
-                )));
-            } else {
-                registry.add_udf(Arc::new(ScalarUDF::from(dylib)));
+        for (udf_name, dylib_config) in &self.program_config.udf_dylibs {
+            info!("Loading UDF {}", udf_name);
+            registry
+                .load_dylib(udf_name, dylib_config)
+                .await
+                .map_err(|e| {
+                    Status::failed_precondition(
+                        e.context(format!("loading UDF {udf_name}")).to_string(),
+                    )
+                })?;
+            if dylib_config.is_async {
+                continue;
             }
         }
 

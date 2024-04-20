@@ -26,6 +26,7 @@ pub enum OperatorName {
     ExpressionWatermark,
     ArrowValue,
     ArrowKey,
+    AsyncUdf,
     Join,
     InstantJoin,
     WindowFunction,
@@ -174,12 +175,13 @@ impl Debug for LogicalNode {
 
 pub type LogicalGraph = DiGraph<LogicalNode, LogicalEdge>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DylibUdfConfig {
     pub dylib_path: String,
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
     pub aggregate: bool,
+    pub is_async: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -244,6 +246,7 @@ impl LogicalProgram {
 
         for t in self.graph.node_weights() {
             let feature = match &t.operator_name {
+                OperatorName::AsyncUdf => "async-udf".to_string(),
                 OperatorName::ExpressionWatermark
                 | OperatorName::ArrowValue
                 | OperatorName::ArrowKey => continue,
@@ -347,6 +350,7 @@ impl From<DylibUdfConfig> for ArrowDylibUdfConfig {
                 .expect("unsupported data type")
                 .encode_to_vec(),
             aggregate: from.aggregate,
+            is_async: from.is_async,
         }
     }
 }
@@ -370,6 +374,7 @@ impl From<ArrowDylibUdfConfig> for DylibUdfConfig {
             )
             .expect("invalid arrow type"),
             aggregate: from.aggregate,
+            is_async: from.is_async,
         }
     }
 }
