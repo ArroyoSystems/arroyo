@@ -718,6 +718,7 @@ dependencies = [
  "datafusion-expr 36.0.0",
  "datafusion-physical-expr 36.0.0",
  "datafusion-proto 36.0.0",
+ "futures",
  "glob",
  "petgraph",
  "prettyplease",
@@ -2913,7 +2914,7 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -2982,7 +2983,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3022,7 +3023,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "arrow",
  "chrono",
@@ -3058,7 +3059,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3073,7 +3074,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "arrow",
  "base64 0.21.7",
@@ -3087,7 +3088,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-array"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "arrow",
  "datafusion-common 36.0.0",
@@ -3118,7 +3119,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3169,7 +3170,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3235,7 +3236,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3280,7 +3281,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "arrow",
  "chrono",
@@ -3308,7 +3309,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "36.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#ac33c34268424edf3f7eafa694a14bd5ee4027ea"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=reset_execs_36#d54ac5e555c29a353563474e6650c63a8892a931"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -4793,7 +4794,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.6",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -6843,7 +6844,7 @@ checksum = "c55e02e35260070b6f716a2423c2ff1c3bb1642ddca6f99e1f26d06268a0e2d2"
 dependencies = [
  "bytes",
  "heck",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -6877,7 +6878,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efb6c9a1dd1def8e2124d17e83a20af56f1570d6c2d2bd9e266ccb768df3840e"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.52",

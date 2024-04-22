@@ -12,7 +12,7 @@ use crate::api_types::connections::PrimitiveType;
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::Result;
-use arrow::row::{OwnedRow, RowConverter, SortField};
+use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::DataType;
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
@@ -197,6 +197,7 @@ pub fn error_chain(e: anyhow::Error) -> String {
 }
 
 pub const TIMESTAMP_FIELD: &str = "_timestamp";
+pub const IS_RETRACT_FIELD: &str = "_is_retract";
 // need to handle the empty case as a row converter without sort fields emits empty Rows.
 #[derive(Debug)]
 pub enum Converter {
@@ -229,9 +230,38 @@ impl Converter {
         }
     }
 
+    pub fn convert_all_columns(
+        &self,
+        columns: &[Arc<dyn Array>],
+        num_rows: usize,
+    ) -> anyhow::Result<Rows> {
+        match self {
+            Converter::RowConverter(row_converter) => Ok(row_converter.convert_columns(columns)?),
+            Converter::Empty(row_converter, _array) => {
+                let array = Arc::new(BooleanArray::from(vec![false; num_rows]));
+                Ok(row_converter.convert_columns(&[array])?)
+            }
+        }
+    }
+
     pub fn convert_rows(&self, rows: Vec<arrow::row::Row<'_>>) -> anyhow::Result<Vec<ArrayRef>> {
         match self {
             Converter::RowConverter(row_converter) => Ok(row_converter.convert_rows(rows)?),
+            Converter::Empty(_row_converter, _array) => Ok(vec![]),
+        }
+    }
+
+    pub fn convert_raw_rows(&self, row_bytes: Vec<&[u8]>) -> anyhow::Result<Vec<ArrayRef>> {
+        match self {
+            Converter::RowConverter(row_converter) => {
+                let parser = row_converter.parser();
+                let mut row_list = vec![];
+                for bytes in row_bytes {
+                    let row = parser.parse(bytes);
+                    row_list.push(row);
+                }
+                Ok(row_converter.convert_rows(row_list)?)
+            }
             Converter::Empty(_row_converter, _array) => Ok(vec![]),
         }
     }

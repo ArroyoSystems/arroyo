@@ -1,14 +1,122 @@
 use crate::extension::aggregate::AggregateExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
+use crate::extension::updating_aggregate::UpdatingAggregateExtension;
 use crate::plan::WindowDetectingVisitor;
 use crate::{find_window, WindowBehavior};
+use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion_common::tree_node::{TreeNode, TreeNodeRewriter};
 use datafusion_common::{plan_err, DFField, DFSchema, DataFusionError, Result as DFResult};
-use datafusion_expr::{Aggregate, Expr, Extension, LogicalPlan};
+use datafusion_expr::expr::AggregateFunction;
+use datafusion_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
 use std::sync::Arc;
+use tracing::info;
 
 #[derive(Debug, Default)]
 pub struct AggregateRewriter {}
+
+impl AggregateRewriter {
+    pub fn rewrite_non_windowed_aggregate(
+        input: Arc<LogicalPlan>,
+        mut key_fields: Vec<DFField>,
+        group_expr: Vec<Expr>,
+        mut aggr_expr: Vec<Expr>,
+        schema: Arc<DFSchema>,
+    ) -> DFResult<LogicalPlan> {
+        if input
+            .schema()
+            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+        {
+            return plan_err!("can't currently nest updating aggregates");
+        }
+
+        let key_count = key_fields.len();
+        key_fields.extend(input.schema().fields().clone());
+
+        let key_schema = Arc::new(DFSchema::new_with_metadata(
+            key_fields,
+            schema.metadata().clone(),
+        )?);
+
+        let mut key_projection_expressions = group_expr.clone();
+        key_projection_expressions.extend(
+            input
+                .schema()
+                .fields()
+                .iter()
+                .map(|field| Expr::Column(field.qualified_column())),
+        );
+
+        let key_projection =
+            LogicalPlan::Projection(datafusion_expr::Projection::try_new_with_schema(
+                key_projection_expressions.clone(),
+                input.clone(),
+                key_schema.clone(),
+            )?);
+
+        info!(
+            "key projection fields: {:?}",
+            key_projection
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name())
+                .collect::<Vec<_>>()
+        );
+
+        let key_plan = LogicalPlan::Extension(Extension {
+            node: Arc::new(KeyCalculationExtension::new(
+                key_projection,
+                (0..key_count).collect(),
+            )),
+        });
+        let Some(timestamp_field) = key_plan
+            .schema()
+            .fields()
+            .iter()
+            .find(|field| field.name() == TIMESTAMP_FIELD)
+        else {
+            return plan_err!("no timestamp field found in schema");
+        };
+        let column = timestamp_field.qualified_column();
+        aggr_expr.push(Expr::AggregateFunction(AggregateFunction::new(
+            aggregate_function::AggregateFunction::Max,
+            vec![Expr::Column(column.clone())],
+            false,
+            None,
+            None,
+        )));
+        let mut output_schema_fields = schema.fields().clone();
+        output_schema_fields.push(timestamp_field.clone());
+        let output_schema = Arc::new(DFSchema::new_with_metadata(
+            output_schema_fields,
+            schema.metadata().clone(),
+        )?);
+        let aggregate = Aggregate::try_new_with_schema(
+            Arc::new(key_plan),
+            group_expr,
+            aggr_expr,
+            output_schema,
+        )?;
+        info!(
+            "aggregate field names: {:?}",
+            aggregate
+                .schema
+                .fields()
+                .iter()
+                .map(|f| f.name())
+                .collect::<Vec<_>>()
+        );
+        let updating_aggregate_extension = UpdatingAggregateExtension::new(
+            LogicalPlan::Aggregate(aggregate),
+            (0..key_count).collect(),
+            column.relation,
+        );
+        let final_plan = LogicalPlan::Extension(Extension {
+            node: Arc::new(updating_aggregate_extension),
+        });
+        Ok(final_plan)
+    }
+}
 
 impl TreeNodeRewriter for AggregateRewriter {
     type N = LogicalPlan;
@@ -85,7 +193,12 @@ impl TreeNodeRewriter for AggregateRewriter {
                         group_expr.remove(window_index);
                         key_fields.remove(window_index);
                         let window_field = schema.field(window_index).clone();
-                        WindowBehavior::FromOperator { window: input_window, window_field, window_index, is_nested: true }
+                        WindowBehavior::FromOperator {
+                            window: input_window,
+                            window_field,
+                            window_index,
+                            is_nested: true,
+                        }
                     }
                 }
             }
@@ -104,9 +217,9 @@ impl TreeNodeRewriter for AggregateRewriter {
                 }
             }
             (false, false) => {
-                return Err(DataFusionError::NotImplemented(
-                    format!("must have window in aggregate. Make sure you are calling one of the windowing functions (hop, tumble, session) or using the window field of the input"),
-                ))
+                return Self::rewrite_non_windowed_aggregate(
+                    input, key_fields, group_expr, aggr_expr, schema,
+                );
             }
         };
 

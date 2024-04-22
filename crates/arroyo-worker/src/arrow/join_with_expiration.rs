@@ -57,7 +57,7 @@ impl JoinWithExpiration {
         let mut right_batches = vec![];
         for row in left_rows {
             if let Some(batch) = right_table
-                .get_batch(row.row())
+                .get_batch(row.as_ref())
                 .expect("shouldn't error getting batch")
             {
                 right_batches.push(batch.clone());
@@ -95,7 +95,7 @@ impl JoinWithExpiration {
         let mut left_batches = vec![];
         for row in right_rows {
             if let Some(batch) = left_table
-                .get_batch(row.row())
+                .get_batch(row.as_ref())
                 .expect("shouldn't error getting batch")
             {
                 left_batches.push(batch.clone());
@@ -170,6 +170,7 @@ impl ArrowOperator for JoinWithExpiration {
                 "left",
                 "left join data",
                 self.left_expiration,
+                false,
                 self.left_input_schema.clone(),
             ),
         );
@@ -179,6 +180,7 @@ impl ArrowOperator for JoinWithExpiration {
                 "right",
                 "right join data",
                 self.right_expiration,
+                false,
                 self.right_input_schema.clone(),
             ),
         );

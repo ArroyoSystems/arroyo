@@ -1,11 +1,11 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use arroyo_datastream::WindowType;
-use arroyo_rpc::TIMESTAMP_FIELD;
+use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion_common::{
     plan_err,
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion},
-    Column, DFField, DataFusionError, Result as DFResult,
+    Column, DFField, DFSchema, DataFusionError, Result as DFResult,
 };
 
 use aggregate::AggregateRewriter;
@@ -273,6 +273,31 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         relation: timestamp_field.qualifier().cloned(),
                         name: "_timestamp".to_string(),
                     }));
+                }
+                if projection
+                    .input
+                    .schema()
+                    .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+                    && !projection
+                        .schema
+                        .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+                {
+                    let field = projection
+                        .input
+                        .schema()
+                        .field_with_unqualified_name(IS_RETRACT_FIELD)?;
+                    let mut output_fields = projection
+                        .schema
+                        .fields()
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    output_fields.push(field.clone());
+                    projection.schema = Arc::new(DFSchema::new_with_metadata(
+                        output_fields,
+                        projection.schema.metadata().clone(),
+                    )?);
+                    projection.expr.push(Expr::Column(field.qualified_column()));
                 }
 
                 return AsyncUdfRewriter::new(self.schema_provider).mutate(node);

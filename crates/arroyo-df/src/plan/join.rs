@@ -2,10 +2,11 @@ use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
 use arroyo_datastream::WindowType;
+use arroyo_rpc::IS_RETRACT_FIELD;
 use datafusion_common::tree_node::TreeNodeRewriter;
 use datafusion_common::{
-    Column, DFField, DFSchema, DataFusionError, JoinConstraint, JoinType, Result as DFResult,
-    ScalarValue,
+    plan_err, Column, DFSchema, DataFusionError, JoinConstraint, JoinType, OwnedTableReference,
+    Result as DFResult, ScalarValue,
 };
 use datafusion_expr::expr::{Alias, ScalarFunction};
 use datafusion_expr::{
@@ -55,13 +56,39 @@ impl JoinRewriter {
         }
     }
 
+    fn check_updating(left: &LogicalPlan, right: &LogicalPlan) -> DFResult<()> {
+        if left
+            .schema()
+            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+        {
+            return plan_err!("can't handle updating left side of join");
+        }
+        if right
+            .schema()
+            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+        {
+            return plan_err!("can't handle updating right side of join");
+        }
+        Ok(())
+    }
+
     fn create_join_key_plan(
         &self,
         input: Arc<LogicalPlan>,
-        mut join_expressions: Vec<Expr>,
+        join_expressions: Vec<Expr>,
         name: &'static str,
     ) -> DFResult<LogicalPlan> {
         let key_count = join_expressions.len();
+        let mut join_expressions: Vec<_> = join_expressions
+            .into_iter()
+            .enumerate()
+            .map(|(index, expr)| {
+                expr.alias_qualified(
+                    Some(OwnedTableReference::bare("_arroyo")),
+                    format!("_key_{}", index),
+                )
+            })
+            .collect();
         join_expressions.extend(
             input
                 .schema()
@@ -70,30 +97,7 @@ impl JoinRewriter {
                 .map(|field| Expr::Column(Column::new(field.qualifier().cloned(), field.name()))),
         );
         // Calculate initial projection with default names
-        let mut projection = Projection::try_new(join_expressions, input)?;
-        let fields = projection
-            .schema
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(index, field)| {
-                // rename to avoid collisions
-                if index < key_count {
-                    DFField::new(
-                        field.qualifier().cloned(),
-                        &format!("_key_{}", field.name()),
-                        field.data_type().clone(),
-                        field.is_nullable(),
-                    )
-                } else {
-                    field.clone()
-                }
-            });
-        let rewritten_schema = Arc::new(DFSchema::new_with_metadata(
-            fields.collect(),
-            projection.schema.metadata().clone(),
-        )?);
-        projection.schema = rewritten_schema;
+        let projection = Projection::try_new(join_expressions, input)?;
         let key_calculation_extension = KeyCalculationExtension::new_named_and_trimmed(
             LogicalPlan::Projection(projection),
             (0..key_count).collect(),
@@ -204,6 +208,7 @@ impl TreeNodeRewriter for JoinRewriter {
                 "can't handle join constraint other than ON".into(),
             ));
         };
+        Self::check_updating(&left, &right)?;
 
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();

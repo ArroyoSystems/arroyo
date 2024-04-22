@@ -16,7 +16,7 @@ pub mod udafs;
 #[cfg(test)]
 mod test;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType};
 use arrow_schema::Schema;
@@ -486,9 +486,7 @@ pub async fn parse_and_get_arrow_program(
     let dialect = PostgreSqlDialect {};
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
-        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)
-            .context("failed in try_from statement")?
-        {
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
             schema_provider.insert_table(table);
         } else {
             inserts.push(Insert::try_from_statement(
@@ -560,7 +558,7 @@ pub async fn parse_and_get_arrow_program(
             ),
         };
         extensions.push(LogicalPlan::Extension(Extension {
-            node: Arc::new(sink),
+            node: Arc::new(sink?),
         }));
     }
     let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider);

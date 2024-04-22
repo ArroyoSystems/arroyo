@@ -15,7 +15,7 @@ CREATE table sink (
     bootstrap_servers = 'localhost:9092',
     type = 'sink',
     topic = 'sink',
-    format = 'json'
+    format = 'debezium_json'
 );
 
 INSERT into sink

@@ -887,6 +887,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
                 "session",
                 // TODO: something better
                 self.config.gap * 100,
+                false,
                 self.config.input_schema_ref.as_ref().clone(),
             ),
         );

@@ -16,11 +16,6 @@ pub mod expiring_time_key_map;
 pub mod global_keyed_map;
 pub mod table_manager;
 
-pub enum Compactor {
-    TimeKeyMap,
-    KeyTimeMultiMap,
-}
-
 pub(crate) fn table_checkpoint_path(
     job_id: &str,
     operator_id: &str,

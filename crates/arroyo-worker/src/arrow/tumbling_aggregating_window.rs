@@ -436,6 +436,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 "t",
                 "tumbling_intermediate",
                 self.width,
+                false,
                 self.partial_schema.clone(),
             ),
         )]

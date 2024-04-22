@@ -205,6 +205,7 @@ impl ArrowOperator for WindowFunctionOperator {
                 "input",
                 "window function input",
                 Duration::ZERO,
+                false,
                 self.input_schema.as_ref().clone(),
             ),
         );

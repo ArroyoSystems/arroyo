@@ -4,11 +4,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use arrow_schema::{DataType, TimeUnit};
 use arroyo_datastream::logical::{
     DylibUdfConfig, LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName,
 };
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
+use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion_common::{
     DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
 };
@@ -22,6 +24,8 @@ use crate::schemas::{add_timestamp_field, has_timestamp_field};
 use crate::ASYNC_RESULT_FIELD;
 use join::JoinExtension;
 
+use self::debezium::{DebeziumUnrollingExtension, ToDebeziumExtension};
+use self::updating_aggregate::UpdatingAggregateExtension;
 use self::{
     aggregate::AggregateExtension, key_calculation::KeyCalculationExtension,
     remote_table::RemoteTableExtension, sink::SinkExtension, table_source::TableSourceExtension,
@@ -29,11 +33,13 @@ use self::{
 };
 
 pub(crate) mod aggregate;
+pub(crate) mod debezium;
 pub(crate) mod join;
 pub(crate) mod key_calculation;
 pub(crate) mod remote_table;
 pub(crate) mod sink;
 pub(crate) mod table_source;
+pub(crate) mod updating_aggregate;
 pub(crate) mod watermark_node;
 pub(crate) mod window_fn;
 pub(crate) trait ArroyoExtension: Debug {
@@ -46,6 +52,9 @@ pub(crate) trait ArroyoExtension: Debug {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges>;
     fn output_schema(&self) -> ArroyoSchema;
+    fn transparent(&self) -> bool {
+        false
+    }
 }
 
 pub(crate) struct NodeWithIncomingEdges {
@@ -54,7 +63,7 @@ pub(crate) struct NodeWithIncomingEdges {
 }
 
 fn try_from_t<'a, T: ArroyoExtension + 'static>(
-    node: &'a Arc<dyn UserDefinedLogicalNode>,
+    node: &'a dyn UserDefinedLogicalNode,
 ) -> Result<&'a dyn ArroyoExtension, ()> {
     node.as_any()
         .downcast_ref::<T>()
@@ -62,10 +71,10 @@ fn try_from_t<'a, T: ArroyoExtension + 'static>(
         .ok_or_else(|| ())
 }
 
-impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtension {
+impl<'a> TryFrom<&'a dyn UserDefinedLogicalNode> for &'a dyn ArroyoExtension {
     type Error = DataFusionError;
 
-    fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> DFResult<Self, Self::Error> {
+    fn try_from(node: &'a dyn UserDefinedLogicalNode) -> DFResult<Self, Self::Error> {
         try_from_t::<TableSourceExtension>(node)
             .or_else(|_| try_from_t::<WatermarkNode>(node))
             .or_else(|_| try_from_t::<SinkExtension>(node))
@@ -75,7 +84,18 @@ impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtensio
             .or_else(|_| try_from_t::<JoinExtension>(node))
             .or_else(|_| try_from_t::<WindowFunctionExtension>(node))
             .or_else(|_| try_from_t::<AsyncUDFExtension>(node))
+            .or_else(|_| try_from_t::<ToDebeziumExtension>(node))
+            .or_else(|_| try_from_t::<DebeziumUnrollingExtension>(node))
+            .or_else(|_| try_from_t::<UpdatingAggregateExtension>(node))
             .map_err(|_| DataFusionError::Plan(format!("unexpected node: {}", node.name())))
+    }
+}
+
+impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtension {
+    type Error = DataFusionError;
+
+    fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> DFResult<Self, Self::Error> {
+        TryFrom::try_from(node.as_ref())
     }
 }
 
@@ -232,6 +252,68 @@ impl ArroyoExtension for AsyncUDFExtension {
                 .map(|f| (**f.field()).clone())
                 .collect(),
         )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct IsRetractExtension {
+    pub(crate) input: LogicalPlan,
+    pub(crate) schema: DFSchemaRef,
+    pub(crate) timestamp_qualifier: Option<OwnedTableReference>,
+}
+
+impl IsRetractExtension {
+    pub(crate) fn new(
+        input: LogicalPlan,
+        timestamp_qualifier: Option<OwnedTableReference>,
+    ) -> Self {
+        let mut output_fields = input.schema().fields().clone();
+        let timestamp_index = output_fields.len() - 1;
+        output_fields[timestamp_index] = DFField::new(
+            timestamp_qualifier.clone(),
+            TIMESTAMP_FIELD,
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        );
+        output_fields.push(DFField::new_unqualified(
+            IS_RETRACT_FIELD,
+            DataType::Boolean,
+            false,
+        ));
+        let schema = Arc::new(
+            DFSchema::new_with_metadata(output_fields, input.schema().metadata().clone()).unwrap(),
+        );
+        Self {
+            input,
+            schema,
+            timestamp_qualifier,
+        }
+    }
+}
+
+impl UserDefinedLogicalNodeCore for IsRetractExtension {
+    fn name(&self) -> &str {
+        "IsRetractExtension"
+    }
+
+    fn inputs(&self) -> Vec<&LogicalPlan> {
+        vec![&self.input]
+    }
+
+    fn schema(&self) -> &DFSchemaRef {
+        &self.schema
+    }
+
+    fn expressions(&self) -> Vec<Expr> {
+        vec![]
+    }
+
+    fn fmt_for_explain(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "IsRetractExtension")
+    }
+
+    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
+        Self::new(inputs[0].clone(), self.timestamp_qualifier.clone())
     }
 }
 

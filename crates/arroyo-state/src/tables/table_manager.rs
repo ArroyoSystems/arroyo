@@ -23,7 +23,9 @@ use tracing::{debug, error, info, warn};
 use crate::{tables::global_keyed_map::GlobalKeyedTable, StateMessage};
 use crate::{CheckpointMessage, TableData};
 
-use super::expiring_time_key_map::{ExpiringTimeKeyTable, ExpiringTimeKeyView, KeyTimeView};
+use super::expiring_time_key_map::{
+    ExpiringTimeKeyTable, ExpiringTimeKeyView, KeyTimeView, LastKeyValueView,
+};
 use super::global_keyed_map::GlobalKeyedView;
 use super::{ErasedCheckpointer, ErasedTable};
 
@@ -455,6 +457,35 @@ impl TableManager {
         }
         let cache = self.caches.get_mut(table_name).unwrap();
         let cache: &mut KeyTimeView = cache
+            .downcast_mut()
+            .ok_or_else(|| anyhow!("Failed to downcast table {}", table_name))?;
+        Ok(cache)
+    }
+
+    pub async fn get_last_key_value_table(
+        &mut self,
+        table_name: &str,
+        watermark: Option<SystemTime>,
+    ) -> Result<&mut LastKeyValueView> {
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            self.caches.entry(table_name.to_string())
+        {
+            let table_implementation = self
+                .tables
+                .get(table_name)
+                .ok_or_else(|| anyhow!("no registered table {}", table_name))?;
+            let expiring_time_key_table = table_implementation
+                .as_any()
+                .downcast_ref::<ExpiringTimeKeyTable>()
+                .ok_or_else(|| anyhow!("wrong table type for table {}", table_name))?;
+            let saved_data = expiring_time_key_table
+                .get_last_key_value_view(self.writer.sender.clone(), watermark)
+                .await?;
+            let cache: Box<dyn Any + Send> = Box::new(saved_data);
+            e.insert(cache);
+        }
+        let cache = self.caches.get_mut(table_name).unwrap();
+        let cache: &mut LastKeyValueView = cache
             .downcast_mut()
             .ok_or_else(|| anyhow!("Failed to downcast table {}", table_name))?;
         Ok(cache)
