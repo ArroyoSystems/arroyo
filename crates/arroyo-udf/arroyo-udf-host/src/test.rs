@@ -23,7 +23,7 @@ fn test_udf() {
     let udf = test_udf_1::__local().config;
     let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
     let result = sync_udf
-        .invoke(&vec![
+        .invoke(&[
             ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
             ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
         ])
@@ -55,9 +55,7 @@ fn test_udaf() {
     let udf = test_udaf::__local().config;
     let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
     let result = sync_udf
-        .invoke_udaf(&vec![
-            Arc::new(UInt64Array::from(vec![1, 10, 20])) as ArrayRef
-        ])
+        .invoke_udaf(&[Arc::new(UInt64Array::from(vec![1, 10, 20])) as ArrayRef])
         .unwrap();
 
     assert_eq!(result, ScalarValue::UInt64(Some(3)));

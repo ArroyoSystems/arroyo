@@ -23,10 +23,10 @@ use std::env;
 use std::time::Duration;
 use tonic::Status;
 
-const CLUSTER_LABEL: &'static str = "cluster";
-const JOB_ID_LABEL: &'static str = "job_id";
-const RUN_ID_LABEL: &'static str = "run_id";
-const JOB_NAME_LABEL: &'static str = "job_name";
+const CLUSTER_LABEL: &str = "cluster";
+const JOB_ID_LABEL: &str = "job_id";
+const RUN_ID_LABEL: &str = "run_id";
+const JOB_NAME_LABEL: &str = "job_name";
 
 pub struct KubernetesScheduler {
     client: Option<Client>,
@@ -167,7 +167,7 @@ impl KubernetesScheduler {
             "apiVersion": "apps/v1",
             "kind": "ReplicaSet",
             "metadata": {
-                "name": format!("{}-{}-{}", self.name, req.job_id.to_ascii_lowercase().replace("_", "-"), req.run_id),
+                "name": format!("{}-{}-{}", self.name, req.job_id.to_ascii_lowercase().replace('_', "-"), req.run_id),
                 "namespace": self.namespace,
                 "labels": labels,
                 "annotations": annotations,
@@ -283,7 +283,7 @@ impl Scheduler for KubernetesScheduler {
         for i in 0..20 {
             tokio::time::sleep(Duration::from_millis(i * 10)).await;
 
-            if self.workers_for_job(&job_id, run_id).await?.len() == 0 {
+            if self.workers_for_job(job_id, run_id).await?.is_empty() {
                 return Ok(());
             }
         }
@@ -321,16 +321,16 @@ impl Scheduler for KubernetesScheduler {
 
 #[cfg(test)]
 mod test {
+    use arroyo_datastream::logical::LogicalProgram;
+
     use crate::schedulers::kubernetes::KubernetesScheduler;
     use crate::schedulers::StartPipelineReq;
 
-    #[ignore]
     #[test]
-    #[allow(unreachable_code, unused)]
     fn test_resource_creation() {
         let req = StartPipelineReq {
             name: "test_pipeline".to_string(),
-            program: todo!(),
+            program: LogicalProgram::default(),
             wasm_path: "file:///wasm".to_string(),
             job_id: "job123".to_string(),
             hash: "12123123h".to_string(),

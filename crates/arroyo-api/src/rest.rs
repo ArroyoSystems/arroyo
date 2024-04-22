@@ -84,7 +84,7 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
         Ok::<_, _>(res)
     });
 
-    let serve_dir = ServeDir::new(&asset_dir).not_found_service(fallback);
+    let serve_dir = ServeDir::new(asset_dir).not_found_service(fallback);
 
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()

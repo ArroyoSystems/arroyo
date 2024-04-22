@@ -20,7 +20,7 @@ use crate::{
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
-pub(crate) const KEY_CALCULATION_NAME: &'static str = "KeyCalculationExtension";
+pub(crate) const KEY_CALCULATION_NAME: &str = "KeyCalculationExtension";
 
 /* Calculation for computing keyed data, with a vec of keys
    that will be used for shuffling data to the correct nodes.

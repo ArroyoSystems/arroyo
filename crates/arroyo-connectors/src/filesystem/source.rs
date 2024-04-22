@@ -78,9 +78,7 @@ impl FileSystemSourceFunc {
         match &self.table {
             TableType::Source {
                 compression_format, ..
-            } => compression_format
-                .clone()
-                .unwrap_or(CompressionFormat::None),
+            } => (*compression_format).unwrap_or(CompressionFormat::None),
             TableType::Sink { .. } => unreachable!(),
         }
     }
@@ -94,14 +92,14 @@ impl FileSystemSourceFunc {
                 regex_pattern,
             } => {
                 let storage_provider =
-                    StorageProvider::for_url_with_options(&path, storage_options.clone())
+                    StorageProvider::for_url_with_options(path, storage_options.clone())
                         .await
                         .map_err(|err| {
                             UserError::new("failed to create storage provider", err.to_string())
                         })?;
                 let matcher = regex_pattern
                     .as_ref()
-                    .map(|pattern| Regex::new(&pattern))
+                    .map(|pattern| Regex::new(pattern))
                     .transpose()
                     .map_err(|err| {
                         UserError::new(
@@ -143,7 +141,7 @@ impl FileSystemSourceFunc {
                 }
 
                 if let Some(matcher) = &regex_pattern {
-                    ready(matcher.is_match(&path.to_string()))
+                    ready(matcher.is_match(path.as_ref()))
                 } else {
                     ready(true)
                 }
@@ -166,9 +164,8 @@ impl FileSystemSourceFunc {
                 continue;
             }
 
-            match self.read_file(ctx, &storage_provider, &obj_key).await? {
-                Some(finish_type) => return Ok(finish_type),
-                None => (),
+            if let Some(finish_type) = self.read_file(ctx, &storage_provider, &obj_key).await? {
+                return Ok(finish_type);
             }
         }
         info!("FileSystem source finished");
@@ -347,9 +344,8 @@ impl FileSystemSourceFunc {
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
                         self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
-                        match self.process_control_message(ctx, control_message).await {
-                            Some(finish_type) => return Ok(Some(finish_type)),
-                            None => ()
+                        if let Some(finish_type) = self.process_control_message(ctx, control_message).await {
+                             return Ok(Some(finish_type))
                         }
                     }
                 }
@@ -386,9 +382,8 @@ impl FileSystemSourceFunc {
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
                         self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
-                        match self.process_control_message(ctx, control_message).await {
-                            Some(finish_type) => return Ok(Some(finish_type)),
-                            None => ()
+                        if let Some(finish_type) = self.process_control_message(ctx, control_message).await {
+                            return Ok(Some(finish_type))
                         }
                     }
                 }
@@ -421,12 +416,8 @@ impl FileSystemSourceFunc {
             ControlMessage::Stop { mode } => {
                 info!("Stopping FileSystem source {:?}", mode);
                 match mode {
-                    StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
-                    }
-                    StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
-                    }
+                    StopMode::Graceful => Some(SourceFinishType::Graceful),
+                    StopMode::Immediate => Some(SourceFinishType::Immediate),
                 }
             }
             ControlMessage::Commit { .. } => {

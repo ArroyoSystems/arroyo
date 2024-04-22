@@ -18,7 +18,7 @@ pub fn gauge_for_task(
     mut labels: HashMap<String, String>,
 ) -> Option<IntGauge> {
     let mut opts = Opts::new(name, help);
-    labels.extend(task_info.metric_label_map().into_iter());
+    labels.extend(task_info.metric_label_map());
 
     opts.const_labels = labels;
 
@@ -32,7 +32,7 @@ pub fn histogram_for_task(
     mut labels: HashMap<String, String>,
     buckets: Vec<f64>,
 ) -> Option<Histogram> {
-    labels.extend(task_info.metric_label_map().into_iter());
+    labels.extend(task_info.metric_label_map());
     let opts = HistogramOpts::new(name, help)
         .const_labels(labels)
         .buckets(buckets);
@@ -98,6 +98,7 @@ pub enum TaskCounters {
     DeserializationErrors,
 }
 
+#[allow(clippy::type_complexity)]
 impl TaskCounters {
     fn metric(&self) -> &'static IntCounterVec {
         match self {
@@ -147,7 +148,7 @@ pub fn register_queue_gauge<T>(
     name: &'static str,
     help: &'static str,
     task_info: &TaskInfo,
-    out_qs: &Vec<Vec<T>>,
+    out_qs: &[Vec<T>],
 ) -> QueueGauges {
     out_qs
         .iter()

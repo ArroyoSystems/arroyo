@@ -252,10 +252,9 @@ impl TableManager {
         let tables = table_configs
             .iter()
             .map(|(table_name, table_config)| {
-                let table_restore_from = checkpoint_metadata
-                    .as_ref()
-                    .map(|metadata| metadata.table_checkpoint_metadata.get(table_name).cloned())
-                    .flatten();
+                let table_restore_from = checkpoint_metadata.as_ref().and_then(|metadata| {
+                    metadata.table_checkpoint_metadata.get(table_name).cloned()
+                });
                 let erased_table = match table_config.table_type() {
                     TableEnum::MissingTableType => bail!("should have table type"),
                     TableEnum::GlobalKeyValue => {

@@ -23,12 +23,12 @@ fn main() {
             .iter()
             .map(|src| {
                 let src = src.clone();
-                let name = src.split("/").last().unwrap();
-                let dst = PathBuf::from_str(&dst).unwrap().join(name);
+                let name = src.split('/').last().unwrap();
+                let dst = PathBuf::from_str(dst).unwrap().join(name);
                 tokio::spawn(async move {
                     let data: Vec<u8> = StorageProvider::get_url(&src)
                         .await
-                        .expect(&format!("Failed to download {}", src))
+                        .unwrap_or_else(|_| panic!("Failed to download {}", src))
                         .into();
 
                     tokio::fs::write(&dst, data).await.unwrap();

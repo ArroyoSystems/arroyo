@@ -136,23 +136,22 @@ pub(crate) fn source_field(name: &str, field_type: FieldType) -> SourceField {
 }
 
 fn construct_http_client(endpoint: &str, headers: Option<String>) -> anyhow::Result<Client> {
-    if let Err(e) = reqwest::Url::parse(&endpoint) {
+    if let Err(e) = reqwest::Url::parse(endpoint) {
         bail!("invalid endpoint '{}': {:?}", endpoint, e)
     };
 
-    let headers: anyhow::Result<HeaderMap> =
-        string_to_map(headers.as_ref().map(|t| t.as_str()).unwrap_or(""), ':')
-            .expect("Invalid header map")
-            .into_iter()
-            .map(|(k, v)| {
-                Ok((
-                    TryInto::<HeaderName>::try_into(&k)
-                        .map_err(|_| anyhow!("invalid header name {}", k))?,
-                    TryInto::<HeaderValue>::try_into(&v)
-                        .map_err(|_| anyhow!("invalid header value {}", v))?,
-                ))
-            })
-            .collect();
+    let headers: anyhow::Result<HeaderMap> = string_to_map(headers.as_deref().unwrap_or(""), ':')
+        .expect("Invalid header map")
+        .into_iter()
+        .map(|(k, v)| {
+            Ok((
+                TryInto::<HeaderName>::try_into(&k)
+                    .map_err(|_| anyhow!("invalid header name {}", k))?,
+                TryInto::<HeaderValue>::try_into(&v)
+                    .map_err(|_| anyhow!("invalid header value {}", v))?,
+            ))
+        })
+        .collect();
 
     let client = reqwest::ClientBuilder::new()
         .default_headers(headers?)

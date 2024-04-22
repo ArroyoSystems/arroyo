@@ -113,7 +113,7 @@ where
                     .await
                     .map_err(|e| anyhow!("Failed to reach compiler service: {}", e.message))?;
 
-                if res.errors.len() > 0 {
+                if !res.errors.is_empty() {
                     bail!("Failed to build UDF: {}", res.errors.join("\n"));
                 }
 
@@ -213,7 +213,7 @@ async fn try_register_confluent_schema(
     match config.format.clone() {
         Some(Format::Avro(mut avro)) => {
             if avro.confluent_schema_registry && avro.schema_id.is_none() {
-                let avro_schema = ArrowSerializer::avro_schema(&*schema);
+                let avro_schema = ArrowSerializer::avro_schema(schema);
 
                 let id = schema_registry
                     .write_schema(avro_schema.canonical_form(), ConfluentSchemaType::Avro)
@@ -225,7 +225,7 @@ async fn try_register_confluent_schema(
         }
         Some(Format::Json(mut json)) => {
             if json.confluent_schema_registry && json.schema_id.is_none() {
-                let json_schema = ArrowSerializer::json_schema(&*schema);
+                let json_schema = ArrowSerializer::json_schema(schema);
 
                 let id = schema_registry
                     .write_schema(json_schema.to_string(), ConfluentSchemaType::Json)
@@ -381,7 +381,7 @@ pub(crate) async fn create_pipeline<'a>(
             ),
         })?;
 
-    let proto_program: ArrowProgram = compiled.program.clone().try_into().map_err(log_and_map)?;
+    let proto_program: ArrowProgram = compiled.program.clone().into();
 
     let program_bytes = proto_program.encode_to_vec();
 
@@ -464,7 +464,7 @@ impl TryInto<Pipeline> for DbPipeline {
             stop,
             created_at: to_micros(self.created_at),
             graph: program.try_into().map_err(log_and_map)?,
-            action: action.map(|a| a.into()),
+            action,
             action_text,
             action_in_progress,
             preview: self.ttl_micros.is_some(),
@@ -472,18 +472,18 @@ impl TryInto<Pipeline> for DbPipeline {
     }
 }
 
-impl Into<Job> for DbPipelineJob {
-    fn into(self) -> Job {
+impl From<DbPipelineJob> for Job {
+    fn from(val: DbPipelineJob) -> Self {
         Job {
-            id: self.id,
-            running_desired: self.stop == StopMode::none,
-            state: self.state.unwrap_or_else(|| "Created".to_string()),
-            run_id: self.run_id.unwrap_or(0) as u64,
-            start_time: self.start_time.map(to_micros),
-            finish_time: self.finish_time.map(to_micros),
-            tasks: self.tasks.map(|t| t as u64),
-            failure_message: self.failure_message,
-            created_at: to_micros(self.created_at),
+            id: val.id,
+            running_desired: val.stop == StopMode::none,
+            state: val.state.unwrap_or_else(|| "Created".to_string()),
+            run_id: val.run_id.unwrap_or(0) as u64,
+            start_time: val.start_time.map(to_micros),
+            finish_time: val.finish_time.map(to_micros),
+            tasks: val.tasks.map(|t| t as u64),
+            failure_message: val.failure_message,
+            created_at: to_micros(val.created_at),
         }
     }
 }
@@ -700,7 +700,7 @@ pub async fn patch_pipeline(
             &client,
             &OffsetDateTime::now_utc(),
             &auth_data.user_id,
-            &stop,
+            stop,
             &interval.map(|i| i.as_micros() as i64),
             &parallelism_overrides,
             &job_id,

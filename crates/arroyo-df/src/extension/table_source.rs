@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
-pub(crate) const TABLE_SOURCE_NAME: &'static str = "TableSourceExtension";
+pub(crate) const TABLE_SOURCE_NAME: &str = "TableSourceExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TableSourceExtension {

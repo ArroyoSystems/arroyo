@@ -13,7 +13,7 @@ use datafusion_proto::physical_plan::AsExecutionPlan;
 use prost::Message;
 use std::sync::Arc;
 
-pub(crate) const JOIN_NODE_NAME: &'static str = "JoinNode";
+pub(crate) const JOIN_NODE_NAME: &str = "JoinNode";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JoinExtension {

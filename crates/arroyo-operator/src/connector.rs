@@ -22,6 +22,7 @@ pub struct Connection {
     pub description: String,
 }
 
+#[allow(clippy::wrong_self_convention)]
 pub trait Connector: Send {
     type ProfileT: DeserializeOwned + Serialize;
     type TableT: DeserializeOwned + Serialize;
@@ -107,7 +108,8 @@ pub trait Connector: Send {
         config: OperatorConfig,
     ) -> anyhow::Result<OperatorNode>;
 }
-
+#[allow(clippy::type_complexity)]
+#[allow(clippy::wrong_self_convention)]
 pub trait ErasedConnector: Send {
     fn name(&self) -> &'static str;
 

@@ -372,13 +372,10 @@ impl KinesisSourceFunc {
             select! {
                 result = futures.select_next_some() => {
                     let shard_id = result.name;
-                    match self.handle_async_result_split(shard_id,
+                    if let Some(future) = self.handle_async_result_split(shard_id,
                         result.result.map_err(|e| UserError::new("Fatal Kinesis error", e.to_string()))?, ctx).await? {
-                        Some(future) => {
                             futures.push(future);
-                        },
-                        None => {}
-                    }
+                        }
                 },
                 _ = shard_poll_interval.tick() => {
                     match self.sync_shards(ctx).await {

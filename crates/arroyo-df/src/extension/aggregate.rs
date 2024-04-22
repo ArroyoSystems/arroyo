@@ -37,7 +37,7 @@ use crate::{
 
 use super::{ArroyoExtension, NodeWithIncomingEdges, TimestampAppendExtension};
 
-pub(crate) const AGGREGATE_EXTENSION_NAME: &'static str = "AggregateExtension";
+pub(crate) const AGGREGATE_EXTENSION_NAME: &str = "AggregateExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AggregateExtension {

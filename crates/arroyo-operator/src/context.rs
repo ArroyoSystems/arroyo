@@ -58,19 +58,17 @@ impl WatermarkHolder {
     }
 
     fn update_watermark(&mut self) {
-        self.cur_watermark = self
-            .watermarks
-            .iter()
-            .fold(Some(Watermark::Idle), |current, next| {
-                match (current?, (*next)?) {
+        self.cur_watermark =
+            self.watermarks
+                .iter()
+                .try_fold(Watermark::Idle, |current, next| match (current, (*next)?) {
                     (Watermark::EventTime(cur), Watermark::EventTime(next)) => {
                         Some(Watermark::EventTime(cur.min(next)))
                     }
                     (Watermark::Idle, Watermark::EventTime(t))
                     | (Watermark::EventTime(t), Watermark::Idle) => Some(Watermark::EventTime(t)),
                     (Watermark::Idle, Watermark::Idle) => Some(Watermark::Idle),
-                }
-            });
+                });
 
         if let Some(Watermark::EventTime(t)) = self.cur_watermark {
             self.last_present_watermark = Some(t);
@@ -148,8 +146,7 @@ impl BatchSender {
 
     pub fn capacity(&self) -> u32 {
         self.size
-            .checked_sub(self.queued_messages.load(Ordering::Relaxed))
-            .unwrap_or(0)
+            .saturating_sub(self.queued_messages.load(Ordering::Relaxed))
     }
 
     pub fn queued_bytes(&self) -> u64 {
@@ -173,10 +170,10 @@ impl BatchReceiver {
     pub async fn recv(&mut self) -> Option<QueueItem> {
         let item = self.rx.recv().await;
         if let Some(item) = &item {
-            let count = message_count(&item, self.size);
+            let count = message_count(item, self.size);
             self.queued_messages.fetch_sub(count, Ordering::SeqCst);
             self.queued_bytes
-                .fetch_sub(message_bytes(&item), Ordering::AcqRel);
+                .fetch_sub(message_bytes(item), Ordering::AcqRel);
             self.notify.notify_waiters();
         }
         item
@@ -332,7 +329,6 @@ fn repartition<'a>(
         let range_size = record.num_rows() / qs + 1;
         let rotation = rand::thread_rng().gen_range(0..qs);
         let result: Vec<_> = (0..qs)
-            .into_iter()
             .filter_map(|i| {
                 let start = i * range_size;
                 let end = (i + 1) * range_size;
@@ -360,7 +356,7 @@ impl ArrowCollector {
         let out_schema = self.out_schema.as_ref().unwrap();
 
         let record = if let Some(projection) = &self.projection {
-            record.project(&projection).unwrap_or_else(|e| {
+            record.project(projection).unwrap_or_else(|e| {
                 panic!(
                     "failed to project for operator {}: {}",
                     self.task_info.operator_id, e
@@ -417,6 +413,7 @@ impl ArrowCollector {
 }
 
 impl ArrowContext {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         task_info: TaskInfo,
         restore_from: Option<CheckpointMetadata>,

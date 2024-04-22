@@ -171,8 +171,8 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                     self.fields.insert(schema.field(index).clone());
                 }
             }
-            LogicalPlan::Extension(Extension { node }) => match node.name() {
-                AGGREGATE_EXTENSION_NAME => {
+            LogicalPlan::Extension(Extension { node }) => {
+                if node.name() == AGGREGATE_EXTENSION_NAME {
                     let aggregate_extension = node
                         .as_any()
                         .downcast_ref::<AggregateExtension>()
@@ -209,8 +209,7 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                         }
                     }
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
         Ok(VisitRecursion::Continue)
@@ -220,26 +219,24 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return Ok(VisitRecursion::Continue);
         };
-        match node.name() {
-            // handle Join in the pre-join, as each side needs to be checked separately.
-            JOIN_NODE_NAME => {
-                let input_windows: HashSet<_> = node
-                    .inputs()
-                    .iter()
-                    .map(|input| Self::get_window(input))
-                    .collect::<DFResult<HashSet<_>>>()?;
-                if input_windows.len() > 1 {
-                    return Err(DataFusionError::Plan(
-                        "can't handle mixed windowing between left and right".to_string(),
-                    ));
-                }
-                self.window = input_windows
-                    .into_iter()
-                    .next()
-                    .expect("join has at least one input");
-                return Ok(VisitRecursion::Skip);
+
+        // handle Join in the pre-join, as each side needs to be checked separately.
+        if node.name() == JOIN_NODE_NAME {
+            let input_windows: HashSet<_> = node
+                .inputs()
+                .iter()
+                .map(|input| Self::get_window(input))
+                .collect::<DFResult<HashSet<_>>>()?;
+            if input_windows.len() > 1 {
+                return Err(DataFusionError::Plan(
+                    "can't handle mixed windowing between left and right".to_string(),
+                ));
             }
-            _ => {}
+            self.window = input_windows
+                .into_iter()
+                .next()
+                .expect("join has at least one input");
+            return Ok(VisitRecursion::Skip);
         }
         Ok(VisitRecursion::Continue)
     }
@@ -286,12 +283,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         .input
                         .schema()
                         .field_with_unqualified_name(IS_RETRACT_FIELD)?;
-                    let mut output_fields = projection
-                        .schema
-                        .fields()
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<_>>();
+                    let mut output_fields = projection.schema.fields().to_vec();
                     output_fields.push(field.clone());
                     projection.schema = Arc::new(DFSchema::new_with_metadata(
                         output_fields,

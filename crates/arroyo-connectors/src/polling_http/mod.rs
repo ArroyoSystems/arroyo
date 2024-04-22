@@ -117,7 +117,7 @@ impl Connector for PollingHTTPConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        ConnectionType::Source
     }
 
     fn test(
@@ -176,7 +176,7 @@ impl Connector for PollingHTTPConnector {
             EmptyConfig {},
             PollingHttpTable {
                 endpoint,
-                headers: headers.map(|s| VarStr::new(s)),
+                headers: headers.map(VarStr::new),
                 method,
                 body,
                 poll_interval_ms: interval,
@@ -254,9 +254,9 @@ impl Connector for PollingHTTPConnector {
         .map(|(k, v)| {
             (
                 (&k).try_into()
-                    .expect(&format!("invalid header name {}", k)),
+                    .unwrap_or_else(|_| panic!("invalid header name {}", k)),
                 (&v).try_into()
-                    .expect(&format!("invalid header value {}", v)),
+                    .unwrap_or_else(|_| panic!("invalid header value {}", v)),
             )
         })
         .collect();

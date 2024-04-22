@@ -122,7 +122,7 @@ impl Connector for NexmarkConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        ConnectionType::Source
     }
 
     fn get_schema(

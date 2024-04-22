@@ -244,7 +244,8 @@ impl ParquetBackend {
                     .get(table_name)
                     .unwrap()
                     .clone();
-                let files = match table_config.table_type() {
+
+                match table_config.table_type() {
                     grpc::TableEnum::MissingTableType => todo!("should handle error"),
                     grpc::TableEnum::GlobalKeyValue => {
                         GlobalKeyedTable::files_to_keep(table_config, metadata.clone()).unwrap()
@@ -252,8 +253,7 @@ impl ParquetBackend {
                     grpc::TableEnum::ExpiringKeyedTimeTable => {
                         ExpiringTimeKeyTable::files_to_keep(table_config, metadata.clone()).unwrap()
                     }
-                };
-                files
+                }
             })
             .collect();
 
@@ -279,7 +279,8 @@ impl ParquetBackend {
                         .ok_or_else(|| anyhow::anyhow!("missing table config for operator {}, table {}, metadata is {:?}, operator_metadata is {:?}",
                          operator_id, table_name, metadata, operator_metadata)).unwrap()
                         .clone();
-                    let files = match table_config.table_type() {
+
+                    match table_config.table_type() {
                         grpc::TableEnum::MissingTableType => todo!("should handle error"),
                         grpc::TableEnum::GlobalKeyValue => {
                             GlobalKeyedTable::files_to_keep(table_config, metadata.clone()).unwrap()
@@ -288,8 +289,7 @@ impl ParquetBackend {
                             ExpiringTimeKeyTable::files_to_keep(table_config, metadata.clone())
                                 .unwrap()
                         }
-                    };
-                    files
+                    }
                 })
             {
                 if !paths_to_keep.contains(&file) && !deleted_paths.contains(&file) {

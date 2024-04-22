@@ -156,9 +156,9 @@ impl<'a> SourceRewriter<'a> {
 
         let (projection_input, projection) = if table.is_updating() {
             let mut projection_offsets = table_scan.projection.clone();
-            projection_offsets
-                .as_mut()
-                .map(|offsets| offsets.push(table.fields.len()));
+            if let Some(offsets) = projection_offsets.as_mut() {
+                offsets.push(table.fields.len())
+            }
             info!(
                 "table source schema: {:?}",
                 table_source_extension.schema().fields()
@@ -315,35 +315,33 @@ impl UnnestRewriter {
         let mut c: Option<Expr> = None;
 
         let expr = expr.transform_up_mut(&mut |e| {
-            match &e {
-                Expr::ScalarFunction(ScalarFunction {
-                    func_def: ScalarFunctionDefinition::UDF(udf),
-                    args,
-                }) => {
-                    if udf.name() == "unnest" {
-                        match args.len() {
-                            1 => {
-                                if c.replace(args[0].clone()).is_some() {
-                                    return Err(DataFusionError::Plan(
-                                        "Multiple unnests in expression, which is not allowed"
-                                            .to_string(),
-                                    ));
-                                };
+            if let Expr::ScalarFunction(ScalarFunction {
+                func_def: ScalarFunctionDefinition::UDF(udf),
+                args,
+            }) = &e
+            {
+                if udf.name() == "unnest" {
+                    match args.len() {
+                        1 => {
+                            if c.replace(args[0].clone()).is_some() {
+                                return Err(DataFusionError::Plan(
+                                    "Multiple unnests in expression, which is not allowed"
+                                        .to_string(),
+                                ));
+                            };
 
-                                return Ok(Transformed::Yes(Expr::Column(
-                                    Column::new_unqualified(UNNESTED_COL),
-                                )));
-                            }
-                            n => {
-                                panic!(
-                                    "Unnest has wrong number of arguments (expected 1, found {})",
-                                    n
-                                );
-                            }
+                            return Ok(Transformed::Yes(Expr::Column(Column::new_unqualified(
+                                UNNESTED_COL,
+                            ))));
+                        }
+                        n => {
+                            panic!(
+                                "Unnest has wrong number of arguments (expected 1, found {})",
+                                n
+                            );
                         }
                     }
                 }
-                _ => {}
             };
             Ok(Transformed::No(e))
         })?;
@@ -470,6 +468,8 @@ pub struct AsyncUdfRewriter<'a> {
     provider: &'a ArroyoSchemaProvider,
 }
 
+type AsyncSplitResult = (String, AsyncOptions, Vec<Expr>);
+
 impl<'a> AsyncUdfRewriter<'a> {
     pub fn new(provider: &'a ArroyoSchemaProvider) -> Self {
         Self { provider }
@@ -478,30 +478,28 @@ impl<'a> AsyncUdfRewriter<'a> {
     fn split_async(
         expr: Expr,
         provider: &ArroyoSchemaProvider,
-    ) -> DFResult<(Expr, Option<(String, AsyncOptions, Vec<Expr>)>)> {
+    ) -> DFResult<(Expr, Option<AsyncSplitResult>)> {
         let mut c: Option<(String, AsyncOptions, Vec<Expr>)> = None;
         let expr = expr.transform_up_mut(&mut |e| {
-            match &e {
-                Expr::ScalarFunction(ScalarFunction {
-                    func_def: ScalarFunctionDefinition::UDF(udf),
-                    args,
-                }) => {
-                    if let Some(UdfType::Async(opts)) =
-                        provider.udf_defs.get(udf.name()).map(|udf| udf.udf_type)
+            if let Expr::ScalarFunction(ScalarFunction {
+                func_def: ScalarFunctionDefinition::UDF(udf),
+                args,
+            }) = &e
+            {
+                if let Some(UdfType::Async(opts)) =
+                    provider.udf_defs.get(udf.name()).map(|udf| udf.udf_type)
+                {
+                    if c.replace((udf.name().to_string(), opts, args.clone()))
+                        .is_some()
                     {
-                        if c.replace((udf.name().to_string(), opts, args.clone()))
-                            .is_some()
-                        {
-                            return plan_err!(
-                                "multiple async calls in the same expression, which is not allowed"
-                            );
-                        }
-                        return Ok(Transformed::Yes(Expr::Column(Column::new_unqualified(
-                            ASYNC_RESULT_FIELD,
-                        ))));
+                        return plan_err!(
+                            "multiple async calls in the same expression, which is not allowed"
+                        );
                     }
+                    return Ok(Transformed::Yes(Expr::Column(Column::new_unqualified(
+                        ASYNC_RESULT_FIELD,
+                    ))));
                 }
-                _ => {}
             }
             Ok(Transformed::No(e))
         })?;
@@ -516,7 +514,7 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
     fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
         let LogicalPlan::Projection(mut projection) = node else {
             for e in node.expressions() {
-                if let (_, Some((udf, _, _))) = Self::split_async(e.clone(), &self.provider)? {
+                if let (_, Some((udf, _, _))) = Self::split_async(e.clone(), self.provider)? {
                     return plan_err!(
                         "async UDFs are only supported in projections, but {udf} was called in another context"
                     );
@@ -528,7 +526,7 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
         let mut args = None;
 
         for e in projection.expr.iter_mut() {
-            let (new_e, Some(udf)) = Self::split_async(e.clone(), &self.provider)? else {
+            let (new_e, Some(udf)) = Self::split_async(e.clone(), self.provider)? else {
                 continue;
             };
 

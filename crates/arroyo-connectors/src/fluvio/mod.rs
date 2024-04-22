@@ -97,7 +97,7 @@ impl Connector for FluvioConnector {
             "source" => {
                 let offset = options.remove("source.offset");
                 TableType::Source {
-                    offset: match offset.as_ref().map(|f| f.as_str()) {
+                    offset: match offset.as_deref() {
                         Some("earliest") => SourceOffset::Earliest,
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
@@ -116,7 +116,7 @@ impl Connector for FluvioConnector {
             type_: table_type,
         };
 
-        Self::from_config(&self, None, name, EmptyConfig {}, table, schema)
+        Self::from_config(self, None, name, EmptyConfig {}, table, schema)
     }
 
     fn from_config(

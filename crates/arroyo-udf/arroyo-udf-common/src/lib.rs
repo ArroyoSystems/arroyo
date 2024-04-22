@@ -55,12 +55,9 @@ impl FfiArrays {
     pub fn into_vec(self) -> Vec<ArrayData> {
         let vec = unsafe { Vec::from_raw_parts(self.ptr, self.len, self.capacity) };
 
-        let args = vec
-            .into_iter()
+        vec.into_iter()
             .map(|FfiArraySchema(array, schema)| unsafe { from_ffi(array, &schema).unwrap() })
-            .collect();
-
-        args
+            .collect()
     }
 }
 

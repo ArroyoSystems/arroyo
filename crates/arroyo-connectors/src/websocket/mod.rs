@@ -210,7 +210,7 @@ impl Connector for WebsocketConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        ConnectionType::Source
     }
 
     fn from_config(
@@ -299,7 +299,7 @@ impl Connector for WebsocketConnector {
             EmptyConfig {},
             WebsocketTable {
                 endpoint,
-                headers: headers.map(|s| VarStr::new(s)),
+                headers: headers.map(VarStr::new),
                 subscription_message: None,
                 subscription_messages,
             },
@@ -327,14 +327,7 @@ impl Connector for WebsocketConnector {
 
         let headers = header_map(table.headers)
             .into_iter()
-            .map(|(k, v)| {
-                (
-                    (&k).try_into()
-                        .expect(&format!("invalid header name {}", k)),
-                    (&v).try_into()
-                        .expect(&format!("invalid header value {}", v)),
-                )
-            })
+            .map(|(k, v)| ((&k).into(), (&v).into()))
             .collect();
 
         Ok(OperatorNode::from_source(Box::new(WebsocketSourceFunc {

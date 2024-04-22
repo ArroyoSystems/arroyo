@@ -419,6 +419,7 @@ impl Transition {
     }
 }
 
+#[allow(clippy::needless_lifetimes)]
 async fn execute_state<'a>(
     state: Box<dyn State>,
     mut ctx: JobContext<'a>,
@@ -596,10 +597,10 @@ impl StateMachine {
     }
 
     fn decode_program(bs: &[u8]) -> anyhow::Result<LogicalProgram> {
-        Ok(ArrowProgram::decode(&bs[..])
+        ArrowProgram::decode(bs)
             .map_err(|e| anyhow!("Failed to decode program: {:?}", e))?
             .try_into()
-            .map_err(|e| anyhow!("Failed to construct graph from program: {:?}", e))?)
+            .map_err(|e| anyhow!("Failed to construct graph from program: {:?}", e))
     }
 
     async fn get_program(

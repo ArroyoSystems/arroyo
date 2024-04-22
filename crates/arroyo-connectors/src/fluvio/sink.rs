@@ -59,10 +59,7 @@ impl FluvioSinkFunc {
     async fn get_producer(&mut self) -> anyhow::Result<TopicProducer> {
         info!("Creating fluvio producer for {:?}", self.endpoint);
 
-        let config: Option<FluvioConfig> = self
-            .endpoint
-            .as_ref()
-            .map(|endpoint| FluvioConfig::new(endpoint));
+        let config: Option<FluvioConfig> = self.endpoint.as_ref().map(FluvioConfig::new);
 
         let client = if let Some(config) = &config {
             Fluvio::connect_with_config(config).await?
@@ -70,6 +67,6 @@ impl FluvioSinkFunc {
             Fluvio::connect().await?
         };
 
-        Ok(client.topic_producer(&self.topic).await?)
+        client.topic_producer(&self.topic).await
     }
 }

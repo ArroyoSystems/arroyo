@@ -40,6 +40,14 @@ impl<T: Send, F: Future<Output = T> + Send + 'static> FuturesEnum<F> {
             FuturesEnum::Unordered(futures) => futures.len(),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            FuturesEnum::Ordered(futures) => futures.is_empty(),
+            FuturesEnum::Unordered(futures) => futures.is_empty(),
+        }
+    }
+
     pub fn is_ordered(&self) -> bool {
         match self {
             FuturesEnum::Ordered(_) => true,
@@ -64,7 +72,7 @@ pub async fn send(handle: SendableFfiAsyncUdfHandle, id: u64, arrays: FfiArrays)
 
     unsafe {
         let handle = handle.ptr as *mut AsyncUdfHandle;
-        (&mut *handle).tx.send((id, args))
+        (*handle).tx.send((id, args))
     }
     .await
     .is_ok()
@@ -177,7 +185,7 @@ impl<
         let mut results = self.results.lock().unwrap();
         match result {
             Ok(value) => {
-                results.0.append_value(id as u64);
+                results.0.append_value(id);
                 value.append_to(&mut results.1);
             }
             Err(_) => {

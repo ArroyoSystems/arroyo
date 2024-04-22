@@ -475,16 +475,16 @@ impl<T: Data> TryFrom<DebeziumShadow<T>> for Debezium<T> {
     fn try_from(value: DebeziumShadow<T>) -> Result<Self, Self::Error> {
         match (value.op, &value.before, &value.after) {
             (DebeziumOp::Create, _, None) => {
-                return Err("`after` must be set for Debezium create messages");
+                Err("`after` must be set for Debezium create messages")
             }
             (DebeziumOp::Update, None, _) => {
-                return Err("`before` must be set for Debezium update messages; for Postgres you may need to set REPLICA IDENTIFY FULL on your database");
+                Err("`before` must be set for Debezium update messages; for Postgres you may need to set REPLICA IDENTIFY FULL on your database")
             }
             (DebeziumOp::Update, _, None) => {
-                return Err("`after` must be set for Debezium update messages");
+                Err("`after` must be set for Debezium update messages")
             }
             (DebeziumOp::Delete, None, _) => {
-                return Err("`before` must be set for Debezium delete messages");
+                Err("`before` must be set for Debezium delete messages")
             }
             _ => Ok(Debezium {
                 before: value.before,

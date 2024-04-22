@@ -63,6 +63,7 @@ impl ArrowOperator for SingleFileSink {
         } else {
             OpenOptions::new()
                 .write(true)
+                .truncate(true)
                 .create(true)
                 .open(&self.output_path)
                 .await

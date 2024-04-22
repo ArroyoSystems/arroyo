@@ -109,11 +109,8 @@ impl Connector for FileSystemConnector {
                     bail!("commit_style must be Direct");
                 };
 
-                let backend_config = BackendConfig::parse_url(&write_path, true)?;
-                let is_local = match &backend_config {
-                    BackendConfig::Local { .. } => true,
-                    _ => false,
-                };
+                let backend_config = BackendConfig::parse_url(write_path, true)?;
+                let is_local = backend_config.is_local();
                 let description = match (format_settings, is_local) {
                     (Some(FormatSettings::Parquet { .. }), true) => {
                         "LocalFileSystem<Parquet>".to_string()
@@ -226,12 +223,8 @@ impl Connector for FileSystemConnector {
                 storage_options: _,
                 write_path,
             } => {
-                let backend_config = BackendConfig::parse_url(&write_path, true)?;
-                let is_local = match &backend_config {
-                    BackendConfig::Local { .. } => true,
-                    _ => false,
-                };
-                match (format_settings, is_local) {
+                let backend_config = BackendConfig::parse_url(write_path, true)?;
+                match (format_settings, backend_config.is_local()) {
                     (Some(FormatSettings::Parquet { .. }), true) => {
                         Ok(OperatorNode::from_operator(Box::new(
                             LocalParquetFileSystemSink::new(write_path.to_string(), table, config),

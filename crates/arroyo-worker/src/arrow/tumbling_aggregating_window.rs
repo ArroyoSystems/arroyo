@@ -65,8 +65,8 @@ impl<K: Copy> TumblingAggregatingWindowFunc<K> {
         }
         let mut nanos = to_nanos(timestamp);
         nanos -= nanos % self.width.as_nanos();
-        let result = from_nanos(nanos);
-        result
+
+        from_nanos(nanos)
     }
 }
 
@@ -98,11 +98,8 @@ impl TumblingAggregatingWindowFunc<SystemTime> {
         let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
         let mut columns = batch.columns().to_vec();
         columns.push(timestamp_array);
-        Ok(
-            RecordBatch::try_new(schema.clone(), columns).map_err(|err| {
-                anyhow::anyhow!("schema: {:?}\nbatch:{:?}\nerr:{}", schema, batch, err)
-            })?,
-        )
+        RecordBatch::try_new(schema.clone(), columns)
+            .map_err(|err| anyhow::anyhow!("schema: {:?}\nbatch:{:?}\nerr:{}", schema, batch, err))
     }
 }
 
@@ -373,8 +370,8 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
 
     async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, _: &mut ArrowContext) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
-        match *data {
-            Some((bin, batch_option)) => match batch_option {
+        if let Some((bin, batch_option)) = *data {
+            match batch_option {
                 None => {
                     debug!("future for {} was finished elsewhere", print_time(bin));
                 }
@@ -388,19 +385,17 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                         "FuturesUnordered returned a batch, but we can't find the exec"
                     ),
                 },
-            },
-            None => {}
+            }
         }
     }
 
     async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
         let watermark = ctx
             .watermark()
-            .map(|watermark: Watermark| match watermark {
+            .and_then(|watermark: Watermark| match watermark {
                 Watermark::EventTime(watermark) => Some(watermark),
                 Watermark::Idle => None,
-            })
-            .flatten();
+            });
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)

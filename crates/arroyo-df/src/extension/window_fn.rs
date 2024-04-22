@@ -14,7 +14,7 @@ use crate::physical::ArroyoPhysicalExtensionCodec;
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
-pub(crate) const WINDOW_FUNCTION_EXTENSION_NAME: &'static str = "WindowFunctionExtension";
+pub(crate) const WINDOW_FUNCTION_EXTENSION_NAME: &str = "WindowFunctionExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct WindowFunctionExtension {

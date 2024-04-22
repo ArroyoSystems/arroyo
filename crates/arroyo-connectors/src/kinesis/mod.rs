@@ -70,10 +70,10 @@ impl Connector for KinesisConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
-        return match table.type_ {
+        match table.type_ {
             TableType::Source { .. } => ConnectionType::Source,
             TableType::Sink { .. } => ConnectionType::Sink,
-        };
+        }
     }
 
     fn from_config(
@@ -118,7 +118,7 @@ impl Connector for KinesisConnector {
             connector: self.name(),
             name: name.to_string(),
             connection_type,
-            schema: schema,
+            schema,
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
@@ -136,7 +136,7 @@ impl Connector for KinesisConnector {
             "source" => {
                 let offset: Option<String> = options.remove("source.offset");
                 TableType::Source {
-                    offset: match offset.as_ref().map(|f| f.as_str()) {
+                    offset: match offset.as_deref() {
                         Some("earliest") => SourceOffset::Earliest,
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
@@ -166,7 +166,7 @@ impl Connector for KinesisConnector {
             aws_region: options.remove("aws_region").map(|s| s.to_string()),
         };
 
-        Self::from_config(&self, None, name, EmptyConfig {}, table, schema)
+        Self::from_config(self, None, name, EmptyConfig {}, table, schema)
     }
 
     fn make_operator(

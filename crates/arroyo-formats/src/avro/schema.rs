@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 /// Computes an avro schema from an arrow schema
 pub fn to_avro(name: &str, fields: &Fields) -> Schema {
-    let fields: Vec<_> = fields.iter().map(|f| field_to_avro(name, &**f)).collect();
+    let fields: Vec<_> = fields.iter().map(|f| field_to_avro(name, f)).collect();
 
     let schema = json!({
         "type": "record",
@@ -20,11 +20,11 @@ pub fn to_avro(name: &str, fields: &Fields) -> Schema {
 }
 
 /// Computes an arrow schema from an avro schema
-pub fn to_arrow(name: &str, schema: &str) -> anyhow::Result<arrow_schema::Schema> {
+pub fn to_arrow(schema: &str) -> anyhow::Result<arrow_schema::Schema> {
     let schema =
         Schema::parse_str(schema).map_err(|e| anyhow!("avro schema is not valid: {:?}", e))?;
 
-    let (dt, _, _) = to_arrow_datatype(name, &schema);
+    let (dt, _, _) = to_arrow_datatype(&schema);
     let fields = match dt {
         DataType::Struct(fields) => fields,
         _ => {
@@ -91,7 +91,7 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         DataType::List(t) | DataType::FixedSizeList(t, _) | DataType::LargeList(t) => {
             return json!({
                 "type": "array",
-                "items": field_to_avro("item", &*t),
+                "items": field_to_avro("item", t),
             });
         }
         DataType::Struct(fields) => {
@@ -111,10 +111,7 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
     })
 }
 
-fn to_arrow_datatype(
-    source_name: &str,
-    schema: &Schema,
-) -> (DataType, bool, Option<ArroyoExtensionType>) {
+fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtensionType>) {
     match schema {
         Schema::Null => (DataType::Null, false, None),
         Schema::Boolean => (DataType::Boolean, false, None),
@@ -138,7 +135,7 @@ fn to_arrow_datatype(
                 .partition(|v| matches!(v, Schema::Null));
 
             if nulls.len() == 1 && not_nulls.len() == 1 {
-                let (dt, _, ext) = to_arrow_datatype(source_name, not_nulls[0]);
+                let (dt, _, ext) = to_arrow_datatype(not_nulls[0]);
                 (dt, true, ext)
             } else {
                 (DataType::Utf8, false, Some(ArroyoExtensionType::JSON))
@@ -149,7 +146,7 @@ fn to_arrow_datatype(
                 .fields
                 .iter()
                 .map(|f| {
-                    let (dt, nullable, extension) = to_arrow_datatype(source_name, &f.schema);
+                    let (dt, nullable, extension) = to_arrow_datatype(&f.schema);
                     Arc::new(ArroyoExtensionType::add_metadata(
                         extension,
                         Field::new(&f.name, dt, nullable),

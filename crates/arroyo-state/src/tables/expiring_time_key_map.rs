@@ -462,6 +462,7 @@ struct TimeTableCompactor {
 }
 
 impl TimeTableCompactor {
+    #[allow(clippy::too_many_arguments)]
     async fn compact_files(
         table: String,
         epoch: u32,
@@ -502,7 +503,7 @@ impl TimeTableCompactor {
                 server_for_hash(file.min_routing_key, operator_metadata.parallelism as usize);
             let last_partition =
                 server_for_hash(file.max_routing_key, operator_metadata.parallelism as usize);
-            let multiple_partitions = !(first_partition == last_partition);
+            let multiple_partitions = first_partition != last_partition;
             let reader_builder = ParquetRecordBatchStreamBuilder::new(reader).await?;
             let mut stream = reader_builder.build()?;
             // projection to trim the metadata fields. Should probably be factored out.
@@ -555,7 +556,7 @@ impl TimeTableCompactor {
     }
 
     async fn write_batch(&mut self, partition: usize, record_batch: RecordBatch) -> Result<()> {
-        if !self.writers.contains_key(&partition) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.writers.entry(partition) {
             let file_name = table_checkpoint_path(
                 &self.operator_metadata.job_id,
                 &self.operator_metadata.operator_id,
@@ -572,18 +573,15 @@ impl TimeTableCompactor {
             let writer = Some(AsyncArrowWriter::try_new(
                 async_writer,
                 self.schema.state_schema().schema.clone(),
-                1_000_0000,
+                10_000_000,
                 None,
             )?);
-            self.writers.insert(
-                partition,
-                CompactedFileWriter {
-                    file_name,
-                    schema: self.schema.clone(),
-                    writer,
-                    parquet_stats: None,
-                },
-            );
+            e.insert(CompactedFileWriter {
+                file_name,
+                schema: self.schema.clone(),
+                writer,
+                parquet_stats: None,
+            });
         }
         let writer = self.writers.get_mut(&partition).unwrap();
 
@@ -678,7 +676,7 @@ impl ExpiringTimeKeyTableCheckpointer {
         self.writer = Some(AsyncArrowWriter::try_new(
             async_writer,
             self.parent.schema.state_schema().schema.clone(),
-            1_000_0000,
+            10_000_000,
             Some(writer_properties),
         )?);
         Ok(())
@@ -977,7 +975,7 @@ impl KeyTimeView {
             } else {
                 sorted_batch
                     .slice(range.start, 1)
-                    .project(&self.schema.key_indices.as_ref().unwrap())?
+                    .project(self.schema.key_indices.as_ref().unwrap())?
                     .columns()
                     .to_vec()
             };

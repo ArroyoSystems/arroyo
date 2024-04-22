@@ -29,17 +29,17 @@ const LOCAL_UDF_LIB_CRATE: &str = concat!(
     "/../arroyo-udf/arroyo-udf-plugin"
 );
 
-impl Into<GlobalUdf> for DbUdf {
-    fn into(self) -> GlobalUdf {
+impl From<DbUdf> for GlobalUdf {
+    fn from(val: DbUdf) -> Self {
         GlobalUdf {
-            id: self.pub_id,
-            prefix: self.prefix,
-            name: self.name,
-            created_at: to_micros(self.created_at),
-            definition: self.definition,
-            updated_at: to_micros(self.updated_at),
-            description: self.description,
-            dylib_url: self.dylib_url,
+            id: val.pub_id,
+            prefix: val.prefix,
+            name: val.name,
+            created_at: to_micros(val.created_at),
+            definition: val.definition,
+            updated_at: to_micros(val.updated_at),
+            description: val.description,
+            dylib_url: val.dylib_url,
         }
     }
 }
@@ -71,7 +71,7 @@ pub async fn create_udf(
     // build udf
     let build_udf_resp = build_udf(&mut compiler_service().await?, &req.definition, true).await?;
 
-    if build_udf_resp.errors.len() > 0 {
+    if !build_udf_resp.errors.is_empty() {
         return Err(bad_request("UDF is invalid"));
     }
 

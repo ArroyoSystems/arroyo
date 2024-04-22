@@ -190,7 +190,6 @@ impl Default for OperatorConfig {
 
 pub fn error_chain(e: anyhow::Error) -> String {
     e.chain()
-        .into_iter()
         .map(|e| e.to_string())
         .collect::<Vec<_>>()
         .join(": ")
@@ -224,7 +223,7 @@ impl Converter {
                 Ok(row_converter.convert_columns(columns)?.row(0).owned())
             }
             Converter::Empty(row_converter, array) => Ok(row_converter
-                .convert_columns(&vec![array.clone()])?
+                .convert_columns(&[array.clone()])?
                 .row(0)
                 .owned()),
         }

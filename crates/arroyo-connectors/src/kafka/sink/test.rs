@@ -146,7 +146,7 @@ async fn test_kafka_checkpoint_flushes() {
     let mut sink_with_writes = kafka_topic_tester.get_sink_with_writes().await;
     let mut consumer = kafka_topic_tester.get_consumer("0");
 
-    for chunk in &(1u32..200).into_iter().chunks(7) {
+    for chunk in &(1u32..200).chunks(7) {
         let array = UInt32Array::from_iter_values(chunk.into_iter());
         let batch = RecordBatch::try_new(schema(), vec![Arc::new(array)]).unwrap();
 

@@ -37,7 +37,10 @@ use arroyo_rpc::{
     IS_RETRACT_FIELD, TIMESTAMP_FIELD,
 };
 use datafusion::physical_plan::unnest::UnnestExec;
-use datafusion_expr::{ColumnarValue, ScalarUDF, Signature, TypeSignature};
+use datafusion_expr::{
+    ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, Signature,
+    TypeSignature,
+};
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use futures::{
@@ -116,8 +119,7 @@ pub fn window_function(columns: &[ColumnarValue]) -> DFResult<ColumnarValue> {
     }
 }
 
-fn tumble_function_implementation(
-) -> Arc<dyn Fn(&[ColumnarValue]) -> DFResult<ColumnarValue> + Send + Sync> {
+fn tumble_function_implementation() -> ScalarFunctionImplementation {
     Arc::new(window_function)
 }
 
@@ -131,7 +133,7 @@ fn tumble_signature() -> Signature {
     )
 }
 
-fn window_return_type() -> Arc<dyn Fn(&[DataType]) -> DFResult<Arc<DataType>> + Send + Sync> {
+fn window_return_type() -> ReturnTypeFunction {
     Arc::new(|_| {
         Ok(Arc::new(DataType::Struct(
             vec![
@@ -820,7 +822,7 @@ impl DebeziumUnrollingStream {
             })?;
 
         let num_rows = batch.num_rows();
-        let combined_array = concat(&vec![before, after])?;
+        let combined_array = concat(&[before, after])?;
         let mut take_indices = UInt32Builder::with_capacity(2 * num_rows);
         let mut is_retract_builder = BooleanBuilder::with_capacity(2 * num_rows);
         let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(2 * num_rows);
@@ -866,8 +868,8 @@ impl Stream for DebeziumUnrollingStream {
     type Item = DFResult<RecordBatch>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let result = ready!(self.input.poll_next_unpin(cx))
-            .map(|result| Ok::<RecordBatch, DataFusionError>(self.unroll_batch(&result?)?));
+        let result =
+            ready!(self.input.poll_next_unpin(cx)).map(|result| self.unroll_batch(&result?));
         Poll::Ready(result)
     }
 }
@@ -976,7 +978,6 @@ impl ExecutionPlan for ToDebeziumExec {
         let is_retract_index: usize = self.input.schema().index_of(IS_RETRACT_FIELD)?;
         let timestamp_index = self.input.schema().index_of(TIMESTAMP_FIELD)?;
         let struct_projection = (0..self.input.schema().fields().len())
-            .into_iter()
             .filter(|index| *index != is_retract_index && *index != timestamp_index)
             .collect();
         Ok(Box::pin(ToDebeziumStream {
@@ -1002,7 +1003,7 @@ struct ToDebeziumStream {
 }
 
 impl ToDebeziumStream {
-    fn to_debezium_batch(&mut self, batch: &RecordBatch) -> DFResult<RecordBatch> {
+    fn as_debezium_batch(&mut self, batch: &RecordBatch) -> DFResult<RecordBatch> {
         let value_struct = batch.project(&self.struct_projection)?;
         let is_retract = batch
             .column(self.is_retract_index)
@@ -1021,8 +1022,8 @@ impl ToDebeziumStream {
             value_struct.columns().to_vec(),
             before_nullability,
         )?;
-        let append_datum = StringArray::new_scalar("c".to_string());
-        let retract_datum = StringArray::new_scalar("d".to_string());
+        let append_datum = StringArray::new_scalar("c");
+        let retract_datum = StringArray::new_scalar("d");
         let op_array = zip::zip(is_retract, &retract_datum, &append_datum)?;
         let timestamp_column = batch.column(self.timestamp_index).clone();
 
@@ -1041,8 +1042,8 @@ impl Stream for ToDebeziumStream {
     type Item = DFResult<RecordBatch>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let result = ready!(self.input.poll_next_unpin(cx))
-            .map(|result| Ok::<RecordBatch, DataFusionError>(self.to_debezium_batch(&result?)?));
+        let result =
+            ready!(self.input.poll_next_unpin(cx)).map(|result| self.as_debezium_batch(&result?));
         Poll::Ready(result)
     }
 }

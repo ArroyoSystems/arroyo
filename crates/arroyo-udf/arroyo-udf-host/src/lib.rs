@@ -308,7 +308,7 @@ impl AsyncUdfDylib {
                 .__send(handle, id, FfiArrays::from_vec(data))
                 .await
         }
-        .then(|| ())
+        .then_some(())
         .ok_or_else(|| anyhow!("cannot send; Aync UDF {} has shut down", self.name))
     }
 
@@ -345,7 +345,7 @@ impl Drop for AsyncUdfDylib {
 
 impl SyncUdfDylib {
     pub fn invoke_udaf(&self, args: &[ArrayRef]) -> DFResult<ScalarValue> {
-        let data: Vec<_> = args.into_iter().map(|a| a.to_data()).collect();
+        let data: Vec<_> = args.iter().map(|a| a.to_data()).collect();
 
         let args = FfiArrays::from_vec(data);
 

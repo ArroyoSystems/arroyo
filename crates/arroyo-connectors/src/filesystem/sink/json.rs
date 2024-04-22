@@ -62,8 +62,7 @@ impl BatchBufferingWriter for JsonWriter {
     }
 
     fn evict_current_buffer(&mut self) -> Vec<u8> {
-        let result = std::mem::take(&mut self.current_buffer);
-        result
+        std::mem::take(&mut self.current_buffer)
     }
 
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {

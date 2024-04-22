@@ -185,12 +185,12 @@ pub struct DylibUdfConfig {
     pub is_async: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ProgramConfig {
     pub udf_dylibs: HashMap<String, DylibUdfConfig>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LogicalProgram {
     pub graph: LogicalGraph,
     pub program_config: ProgramConfig,
@@ -439,7 +439,7 @@ impl From<LogicalProgram> for ArrowProgram {
                         .projection
                         .as_ref()
                         .map(|p| p.iter().map(|v| *v as u32).collect())
-                        .unwrap_or(vec![]),
+                        .unwrap_or_default(),
                 }
             })
             .collect();

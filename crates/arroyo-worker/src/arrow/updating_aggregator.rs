@@ -102,10 +102,9 @@ impl UpdatingAggregatingFunc {
             let (sender, receiver) = unbounded_channel();
             sender.send(final_input_batch)?;
             self.receiver.write().unwrap().replace(receiver);
-            let final_exec = self
-                .finish_execution_plan
-                .execute(0, SessionContext::new().task_ctx())?;
-            final_exec
+
+            self.finish_execution_plan
+                .execute(0, SessionContext::new().task_ctx())?
         };
         let final_output_table = ctx
             .table_manager
@@ -249,9 +248,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
     fn future_to_poll(
         &mut self,
     ) -> Option<Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>> {
-        if self.sender.is_none() {
-            return None;
-        }
+        self.sender.as_ref()?;
         let exec = self.exec.clone();
         Some(Box::pin(async move {
             let batch = exec.lock().await.as_mut().unwrap().next().await;

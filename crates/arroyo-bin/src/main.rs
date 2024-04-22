@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail};
-use arroyo_compiler_service;
+
 use arroyo_server_common::shutdown::Shutdown;
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{ports, DatabaseConfig};
@@ -119,13 +119,12 @@ async fn db_pool() -> Pool {
             exit(1);
         });
 
-    match pool
-        .get()
-        .await
-        .unwrap_or_else(|e| {
-            error!("Unable to create database connection for {} {}", config, e);
-            exit(1);
-        })
+    let object_manager = pool.get().await.unwrap_or_else(|e| {
+        error!("Unable to create database connection for {} {}", config, e);
+        exit(1);
+    });
+
+    match object_manager
         .query_one("select id from cluster_info", &[])
         .await
     {

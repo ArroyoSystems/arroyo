@@ -65,9 +65,7 @@ impl GlobalKeyedTable {
             .as_any()
             .downcast_ref::<arrow_array::BinaryArray>()
             .ok_or_else(|| anyhow!("failed to downcast value column to BinaryArray"))?;
-        Ok(cast_key_column
-            .into_iter()
-            .zip(cast_value_column.into_iter()))
+        Ok(cast_key_column.into_iter().zip(cast_value_column))
     }
     pub async fn memory_view<K: Key, V: Data>(
         &self,
@@ -78,7 +76,7 @@ impl GlobalKeyedTable {
             let contents = self.storage_provider.get(file).await?;
             let reader = ParquetRecordBatchReaderBuilder::try_new(contents)?.build()?;
             for batch in reader {
-                for (key, value) in self.get_key_value_iterator(&batch?)?.into_iter() {
+                for (key, value) in self.get_key_value_iterator(&batch?)? {
                     let key =
                         key.ok_or_else(|| anyhow!("unexpected null key from record batch"))?;
                     let value =

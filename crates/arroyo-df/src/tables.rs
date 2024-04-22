@@ -366,11 +366,10 @@ impl ConnectorTable {
     }
 
     pub(crate) fn is_updating(&self) -> bool {
-        if let Some(Format::Json(JsonFormat { debezium: true, .. })) = &self.format {
-            true
-        } else {
-            false
-        }
+        matches!(
+            &self.format,
+            Some(Format::Json(JsonFormat { debezium: true, .. }))
+        )
     }
 }
 
@@ -382,6 +381,7 @@ pub struct SourceOperator {
     pub watermark_column: Option<Expr>,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Table {
     ConnectorTable(ConnectorTable),
@@ -410,7 +410,7 @@ fn value_to_inner_string(value: &Value) -> Result<String> {
 
 impl Table {
     fn schema_from_columns(
-        columns: &Vec<ColumnDef>,
+        columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Vec<FieldSpec>> {
         let struct_field_pairs = columns
@@ -576,7 +576,7 @@ impl Table {
                     input,
                     ..
                 }))) => {
-                    let rewritten_plan = rewrite_plan(input.as_ref().clone(), &schema_provider)?;
+                    let rewritten_plan = rewrite_plan(input.as_ref().clone(), schema_provider)?;
                     let schema = rewritten_plan.schema().clone();
                     let remote_extension = RemoteTableExtension {
                         input: rewritten_plan,
@@ -686,11 +686,11 @@ pub enum Insert {
 }
 
 fn infer_sink_schema(
-    source: &Box<Query>,
+    source: &Query,
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
 ) -> Result<()> {
-    let plan = produce_optimized_plan(&Statement::Query(source.clone()), schema_provider)
+    let plan = produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)
         .context("failed to produce optimized plan")?;
     let table = schema_provider
         .get_table_mut(&table_name)

@@ -8,7 +8,7 @@ pub mod schema;
 
 pub fn deserialize_slice_json(
     schema: &SchemaRef,
-    buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+    buffer: &mut [Box<dyn ArrayBuilder>],
     format: &JsonFormat,
     msg: &[u8],
 ) -> Result<(), String> {
@@ -29,7 +29,7 @@ pub fn deserialize_slice_json(
 
         if format.include_schema {
             // we need to deserialize it to pull out the payload
-            let v: Value = serde_json::from_slice(&msg)
+            let v: Value = serde_json::from_slice(msg)
                 .map_err(|e| format!("Failed to deserialize json: {:?}", e))?;
             let payload = v.get("payload").ok_or_else(|| {
                 "`include_schema` set to true, but record does not have a payload field".to_string()
@@ -95,7 +95,7 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         arrow::datatypes::DataType::List(t)
         | arrow::datatypes::DataType::FixedSizeList(t, _)
         | arrow::datatypes::DataType::LargeList(t) => {
-            json! {{"type": "array", "items": field_to_json_schema(&*t) }}
+            json! {{"type": "array", "items": field_to_json_schema(t) }}
         }
         arrow::datatypes::DataType::Struct(s) => arrow_to_json_schema(s),
         arrow::datatypes::DataType::Union(_, _) => todo!(),
@@ -162,13 +162,13 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
         List(t) | FixedSizeList(t, _) | LargeList(t) => {
             return json! {{
                 "type": "array",
-                "items": field_to_kafka_json(&*t),
+                "items": field_to_kafka_json(t),
                 "field": field.name().clone(),
                 "optional": field.is_nullable(),
             }};
         }
         Struct(s) => {
-            let fields: Vec<_> = s.iter().map(|f| field_to_kafka_json(&*f)).collect();
+            let fields: Vec<_> = s.iter().map(|f| field_to_kafka_json(f)).collect();
             return json! {{
                 "type": "struct",
                 "fields": fields,
@@ -194,7 +194,7 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
 // For some reason Kafka uses it's own bespoke almost-but-not-quite JSON schema format
 // https://www.confluent.io/blog/kafka-connect-deep-dive-converters-serialization-explained/#json-schemas
 pub fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
-    let fields: Vec<_> = fields.iter().map(|f| field_to_kafka_json(&*f)).collect();
+    let fields: Vec<_> = fields.iter().map(|f| field_to_kafka_json(f)).collect();
     json! {{
         "type": "struct",
         "name": name,

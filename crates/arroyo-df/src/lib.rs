@@ -472,9 +472,7 @@ pub fn rewrite_plan(
 ) -> DFResult<LogicalPlan> {
     plan.rewrite(&mut UnnestRewriter {})?
         // .rewrite(&mut AsyncUdfRewriter::new(&schema_provider))?
-        .rewrite(&mut ArroyoRewriter {
-            schema_provider: &schema_provider,
-        })
+        .rewrite(&mut ArroyoRewriter { schema_provider })
 }
 
 pub async fn parse_and_get_arrow_program(

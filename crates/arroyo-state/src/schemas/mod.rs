@@ -61,7 +61,7 @@ impl SchemaWithHashAndOperation {
         ));
         let state_schema = Arc::new(ArroyoSchema::new(
             state_schema,
-            memory_schema.timestamp_index.clone(),
+            memory_schema.timestamp_index,
             memory_schema.key_indices.clone(),
         ));
         Self {
@@ -141,8 +141,8 @@ impl SchemaWithHashAndOperation {
             .as_any()
             .downcast_ref::<UInt64Array>()
             .ok_or_else(|| anyhow!("should be able to convert hash array to UInt64Array"))?;
-        let hash_min = min(&hash_array).expect("should have min hash value");
-        let hash_max = max(&hash_array).expect("should have max hash value");
+        let hash_min = min(hash_array).expect("should have min hash value");
+        let hash_max = max(hash_array).expect("should have max hash value");
         let timestamp_array = batch
             .column(self.state_schema.timestamp_index)
             .as_any()
@@ -164,9 +164,9 @@ impl SchemaWithHashAndOperation {
             .memory_schema
             .key_indices
             .as_ref()
-            .map(|key_indices| record_batch.project(&key_indices))
+            .map(|key_indices| record_batch.project(key_indices))
             .transpose()?
-            .unwrap_or_else(|| record_batch.project(&vec![]).unwrap());
+            .unwrap_or_else(|| record_batch.project(&[]).unwrap());
 
         let mut hash_buffer = vec![0u64; key_batch.num_rows()];
         let _hashes = create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer)?;

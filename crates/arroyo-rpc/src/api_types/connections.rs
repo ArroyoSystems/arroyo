@@ -260,14 +260,16 @@ impl ConnectionSchema {
         match &self.format {
             Some(Format::RawString(_)) => {
                 if self.fields.len() != 1
-                    || self.fields.get(0).unwrap().field_type.r#type
+                    || self.fields.first().unwrap().field_type.r#type
                         != FieldType::Primitive(PrimitiveType::String)
-                    || self.fields.get(0).unwrap().field_name != "value"
+                    || self.fields.first().unwrap().field_name != "value"
                 {
                     bail!("raw_string format requires a schema with a single field called `value` of type TEXT");
                 }
             }
-            _ => {}
+            _ => {
+                // Right now only RawString has checks, but we may add checks for other formats in the future
+            }
         }
 
         Ok(self)
@@ -278,9 +280,9 @@ impl ConnectionSchema {
     }
 }
 
-impl Into<ArroyoSchema> for ConnectionSchema {
-    fn into(self) -> ArroyoSchema {
-        let fields: Vec<Field> = self.fields.into_iter().map(|f| f.into()).collect();
+impl From<ConnectionSchema> for ArroyoSchema {
+    fn from(val: ConnectionSchema) -> Self {
+        let fields: Vec<Field> = val.fields.into_iter().map(|f| f.into()).collect();
         ArroyoSchema::from_fields(fields)
     }
 }

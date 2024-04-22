@@ -151,6 +151,7 @@ impl SessionAggregatingWindowFunc {
             .map(|(start_time, _keys)| *start_time)
     }
 
+    #[allow(clippy::single_range_in_vec_init)]
     async fn add_at_watermark(
         &mut self,
         sorted_batch: RecordBatch,
@@ -164,7 +165,7 @@ impl SessionAggregatingWindowFunc {
             partition(
                 sorted_batch
                     .columns()
-                    .into_iter()
+                    .iter()
                     // Keys are first in the schema, because of how DataFusion structures aggregates.
                     .take(
                         self.config
@@ -174,7 +175,7 @@ impl SessionAggregatingWindowFunc {
                             .unwrap()
                             .len(),
                     )
-                    .map(|column| column.clone())
+                    .cloned()
                     .collect::<Vec<_>>()
                     .as_slice(),
             )?
@@ -301,7 +302,7 @@ impl SessionAggregatingWindowFunc {
             .flat_map(|(owned_row, session_results)| {
                 let row = owned_row.row();
                 session_results
-                    .into_iter()
+                    .iter()
                     .map(move |session_result| (row, session_result))
             })
             .unzip();
@@ -344,14 +345,14 @@ impl SessionAggregatingWindowFunc {
         columns.insert(self.config.window_index, Arc::new(window_struct_array));
         columns.extend_from_slice(merged_batch.columns());
         columns.push(Arc::new(timestamp_array));
-        Ok(RecordBatch::try_new(
+        RecordBatch::try_new(
             ctx.out_schema.as_ref().unwrap().schema.clone(),
             columns.clone(),
         )
         .context(format!(
             "failed to create batch.\nout schema:\n{:?}\ncolumns:\n{:?}",
             ctx.out_schema, columns
-        ))?)
+        ))
     }
 }
 
@@ -759,7 +760,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         let start_time = start_times_map
             .get_all()
             .values()
-            .filter_map(|earliest| earliest.clone())
+            .filter_map(|earliest| *earliest)
             .min();
         if start_time.is_none() {
             // each subtask only writes None if it has no data at all, e.g. key_computations is empty.
@@ -799,7 +800,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             .results_at_watermark(watermark)
             .await
             .expect("should be able to get results");
-        if evicted_results.len() > 0 {
+        if !evicted_results.is_empty() {
             warn!(
                 "evicted {} results when restoring from state.",
                 evicted_results.len()

@@ -115,7 +115,7 @@ impl CompileService {
     }
 
     async fn check_cargo(&self) -> anyhow::Result<()> {
-        if binary_present(&*self.cargo_path.lock().await).await {
+        if binary_present(&self.cargo_path.lock().await).await {
             return Ok(());
         }
 
@@ -326,7 +326,7 @@ impl CompilerGrpc for CompileService {
         // parse output.stdout as json
         let mut errors = vec![];
         for line in lines {
-            let line_json: serde_json::Result<Value> = serde_json::from_str(&line.to_string());
+            let line_json: serde_json::Result<Value> = serde_json::from_str(line);
             if let Ok(line_json) = line_json {
                 if line_json["reason"] == "compiler-message"
                     && line_json["message"]["level"] == "error"

@@ -67,7 +67,7 @@ impl KafkaConnector {
         options: &mut HashMap<String, String>,
     ) -> anyhow::Result<KafkaConfig> {
         let auth = options.remove("auth.type");
-        let auth = match auth.as_ref().map(|t| t.as_str()) {
+        let auth = match auth.as_deref() {
             Some("none") | None => KafkaConfigAuthentication::None {},
             Some("sasl") => KafkaConfigAuthentication::Sasl {
                 mechanism: pull_opt("auth.mechanism", options)?,
@@ -102,17 +102,13 @@ impl KafkaConnector {
             "source" => {
                 let offset = options.remove("source.offset");
                 TableType::Source {
-                    offset: match offset.as_ref().map(|f| f.as_str()) {
+                    offset: match offset.as_deref() {
                         Some("earliest") => SourceOffset::Earliest,
                         Some("group") => SourceOffset::Group,
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
-                    read_mode: match options
-                        .remove("source.read_mode")
-                        .as_ref()
-                        .map(|f| f.as_str())
-                    {
+                    read_mode: match options.remove("source.read_mode").as_deref() {
                         Some("read_committed") => Some(ReadMode::ReadCommitted),
                         Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
@@ -123,7 +119,7 @@ impl KafkaConnector {
             "sink" => {
                 let commit_mode = options.remove("sink.commit_mode");
                 TableType::Sink {
-                    commit_mode: match commit_mode.as_ref().map(|f| f.as_str()) {
+                    commit_mode: match commit_mode.as_deref() {
                         Some("at_least_once") | None => SinkCommitMode::AtLeastOnce,
                         Some("exactly_once") => SinkCommitMode::ExactlyOnce,
                         Some(other) => bail!("invalid value for commit_mode '{}'", other),
@@ -146,7 +142,7 @@ impl KafkaConnector {
                     })
                 })
                 .transpose()?
-                .unwrap_or_else(|| HashMap::new()),
+                .unwrap_or_else(HashMap::new),
             value_subject: options.remove("value.subject"),
         })
     }
@@ -250,7 +246,7 @@ impl Connector for KafkaConnector {
                             topics
                                 .into_iter()
                                 .map(|(name, _)| name)
-                                .filter(|name| !name.starts_with("_"))
+                                .filter(|name| !name.starts_with('_'))
                                 .collect(),
                         );
                         map
@@ -323,7 +319,7 @@ impl Connector for KafkaConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(&self, None, name, connection, table, schema)
+        Self::from_config(self, None, name, connection, table, schema)
     }
 
     fn make_operator(
@@ -353,7 +349,7 @@ impl Connector for KafkaConnector {
                     {
                         Arc::new(
                             ConfluentSchemaRegistry::new(
-                                &endpoint,
+                                endpoint,
                                 &table.subject(),
                                 api_key.clone(),
                                 api_secret.clone(),
@@ -387,7 +383,7 @@ impl Connector for KafkaConnector {
                 Ok(OperatorNode::from_operator(Box::new(KafkaSinkFunc {
                     bootstrap_servers: profile.bootstrap_servers.to_string(),
                     producer: None,
-                    consistency_mode: commit_mode.clone().into(),
+                    consistency_mode: (*commit_mode).into(),
                     write_futures: vec![],
                     client_config: client_configs(&profile, &table),
                     topic: table.topic,
@@ -523,21 +519,16 @@ impl KafkaTester {
     }
 
     pub async fn test_schema_registry(&self) -> anyhow::Result<()> {
-        match &self.connection.schema_registry_enum {
-            Some(SchemaRegistry::ConfluentSchemaRegistry {
-                api_key,
-                api_secret,
-                endpoint,
-            }) => {
-                let client = ConfluentSchemaRegistryClient::new(
-                    endpoint,
-                    api_key.clone(),
-                    api_secret.clone(),
-                )?;
+        if let Some(SchemaRegistry::ConfluentSchemaRegistry {
+            api_key,
+            api_secret,
+            endpoint,
+        }) = &self.connection.schema_registry_enum
+        {
+            let client =
+                ConfluentSchemaRegistryClient::new(endpoint, api_key.clone(), api_secret.clone())?;
 
-                client.test().await?;
-            }
-            _ => {}
+            client.test().await?;
         }
 
         Ok(())
@@ -682,7 +673,7 @@ impl KafkaTester {
         self.info(&mut tx, "Fetched topic metadata").await;
 
         {
-            let topic_metadata = metadata.topics().get(0).ok_or_else(|| {
+            let topic_metadata = metadata.topics().first().ok_or_else(|| {
                 anyhow!(
                     "Returned metadata was empty; unable to subscribe to topic '{}'",
                     topic
