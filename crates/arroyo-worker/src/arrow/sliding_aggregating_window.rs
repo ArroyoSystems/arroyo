@@ -169,7 +169,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             .execute(0, SessionContext::new().task_ctx())
             .unwrap();
         self.tiered_record_batches
-            .delete_before(bin_end - self.width)?;
+            .delete_before(bin_end + self.slide - self.width)?;
 
         self.state = if self.tiered_record_batches.is_empty() {
             match partial_table.get_min_time() {
