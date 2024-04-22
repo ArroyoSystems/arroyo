@@ -310,6 +310,7 @@ impl ArrowOperator for InstantJoin {
                 "left",
                 "left join data",
                 Duration::ZERO,
+                false,
                 self.left_input_schema.as_ref().clone(),
             ),
         );
@@ -319,6 +320,7 @@ impl ArrowOperator for InstantJoin {
                 "right",
                 "right join data",
                 Duration::ZERO,
+                false,
                 self.right_input_schema.as_ref().clone(),
             ),
         );

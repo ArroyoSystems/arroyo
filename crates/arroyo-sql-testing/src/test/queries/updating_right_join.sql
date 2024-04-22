@@ -1,4 +1,4 @@
---fail=This feature is not implemented: must have window in aggregate. Make sure you are calling one of the windowing functions (hop, tumble, session) or using the window field of the input
+--fail=Error during planning: can't handle updating right side of join
 CREATE TABLE impulse (
       timestamp TIMESTAMP,
       counter bigint unsigned not null,

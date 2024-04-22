@@ -707,6 +707,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                 "t",
                 "Sliding_intermediate",
                 self.width,
+                false,
                 self.partial_schema.clone(),
             ),
         )]

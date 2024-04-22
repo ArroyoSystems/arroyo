@@ -1,4 +1,4 @@
---fail=This feature is not implemented: must have window in aggregate. Make sure you are calling one of the windowing functions (hop, tumble, session) or using the window field of the input
+--fail=This feature is not implemented: can't handle non-inner joins without windows
 CREATE TABLE impulse (
       timestamp TIMESTAMP,
       counter bigint unsigned not null,

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
@@ -373,19 +373,70 @@ async fn run_completely(
     }
 }
 
+// return the inner value and whether it is a retract
+fn decode_debezium(value: &Value) -> Result<(Value, bool)> {
+    if !is_debezium(value) {
+        bail!("not a debezium record");
+    }
+    let op = value.get("op").unwrap().as_str().unwrap();
+    match op {
+        "c" => Ok((value.get("after").unwrap().clone(), false)),
+        "d" => Ok((value.get("before").unwrap().clone(), true)),
+        _ => bail!("unknown op {}", op),
+    }
+}
+
+fn is_debezium(value: &Value) -> bool {
+    let Some(op) = value.get("op") else {
+        return false;
+    };
+    op.as_str().is_some()
+}
+
+fn check_debezium(
+    output_location: String,
+    golden_output_location: String,
+    output_lines: Vec<Value>,
+    golden_output_lines: Vec<Value>,
+) {
+    let output_deduped = dedup_debezium(output_lines);
+    let golden_output_deduped = dedup_debezium(golden_output_lines);
+    assert_eq!(
+        output_deduped, golden_output_deduped,
+        "failed to check debezium equality for\noutput: {}\ngolden: {}",
+        output_location, golden_output_location
+    );
+}
+
+fn dedup_debezium(values: Vec<Value>) -> HashMap<String, i64> {
+    let mut deduped = HashMap::new();
+    for value in &values {
+        let (row_data, value) = decode_debezium(value).unwrap();
+        let row_data_str = roundtrip(&row_data);
+        let count = deduped.entry(row_data_str.clone()).or_insert(0);
+        if value {
+            *count -= 1;
+        } else {
+            *count += 1;
+        }
+        if *count == 0 {
+            deduped.remove(&row_data_str);
+        }
+    }
+    deduped
+}
+
+fn roundtrip(v: &Value) -> String {
+    // round trip string through a btreemap to get consistent key ordering
+    serde_json::to_string(&serde_json::from_value::<BTreeMap<String, Value>>(v.clone()).unwrap())
+        .unwrap()
+}
+
 async fn check_output_files(
     check_name: &str,
     output_location: String,
     golden_output_location: String,
 ) {
-    fn roundtrip(v: &Value) -> String {
-        // round trip string through a btreemap to get consistent key ordering
-        serde_json::to_string(
-            &serde_json::from_value::<BTreeMap<String, Value>>(v.clone()).unwrap(),
-        )
-        .unwrap()
-    }
-
     let mut output_lines: Vec<Value> = read_to_string(output_location.clone())
         .await
         .expect(&format!("output file not found at {}", output_location))
@@ -406,8 +457,28 @@ async fn check_output_files(
         .map(|s| serde_json::from_str(s).unwrap())
         .collect();
     if output_lines.len() != golden_output_lines.len() {
+        // might be updating, in which case lets see if we can cancel out rows
+        let Some(first_output) = output_lines.first() else {
+            panic!(
+                "failed at check {}, output has 0 lines, expect {} lines.\noutput: {}\ngolden: {}",
+                check_name,
+                golden_output_lines.len(),
+                output_location,
+                golden_output_location
+            );
+        };
+        if is_debezium(first_output) {
+            check_debezium(
+                output_location,
+                golden_output_location,
+                output_lines,
+                golden_output_lines,
+            );
+            return;
+        }
+
         panic!(
-            "failed at check {}, output has {} lines, expect {} lines.\ngolden: {}\noutput: {}",
+            "failed at check {}, output has {} lines, expect {} lines.\noutput: {}\ngolden: {}",
             check_name,
             output_lines.len(),
             golden_output_lines.len(),

@@ -73,6 +73,7 @@ pub fn timestamp_table_config(
     name: impl Into<String>,
     description: impl Into<String>,
     retention: Duration,
+    generational: bool,
     schema: ArroyoSchema,
 ) -> TableConfig {
     TableConfig {
@@ -81,6 +82,7 @@ pub fn timestamp_table_config(
             table_name: name.into(),
             description: description.into(),
             retention_micros: retention.as_micros() as u64,
+            generational,
             schema: Some(schema.try_into().unwrap()),
         }
         .encode_to_vec(),

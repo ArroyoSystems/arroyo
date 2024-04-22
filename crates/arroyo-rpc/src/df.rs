@@ -256,22 +256,71 @@ impl ArroyoSchema {
     pub fn sort_fields(&self, with_timestamp: bool) -> Vec<SortField> {
         let mut sort_fields = vec![];
         if let Some(keys) = &self.key_indices {
-            sort_fields.extend(
-                keys.iter()
-                    .map(|index| SortField::new(self.schema.field(*index).data_type().clone())),
-            );
+            sort_fields.extend(keys.iter());
         }
         if with_timestamp {
-            sort_fields.push(SortField::new(DataType::Timestamp(
-                TimeUnit::Nanosecond,
-                None,
-            )));
+            sort_fields.push(self.timestamp_index);
         }
-        sort_fields
+        self.sort_fields_by_indices(&sort_fields)
+    }
+
+    fn sort_fields_by_indices(&self, indices: &[usize]) -> Vec<SortField> {
+        indices
+            .iter()
+            .map(|index| SortField::new(self.schema.field(*index).data_type().clone()))
+            .collect()
     }
 
     pub fn converter(&self, with_timestamp: bool) -> Result<Converter> {
         Converter::new(self.sort_fields(with_timestamp))
+    }
+
+    pub fn value_converter(
+        &self,
+        with_timestamp: bool,
+        generation_index: usize,
+    ) -> Result<Converter> {
+        match &self.key_indices {
+            None => {
+                let mut indices = (0..self.schema.fields().len()).collect::<Vec<_>>();
+                indices.remove(generation_index);
+                if !with_timestamp {
+                    indices.remove(self.timestamp_index);
+                }
+                Converter::new(self.sort_fields_by_indices(&indices))
+            }
+            Some(keys) => {
+                let indices = (0..self.schema.fields().len())
+                    .filter(|index| {
+                        !keys.contains(index)
+                            && (with_timestamp || *index != self.timestamp_index)
+                            && !(*index == generation_index)
+                    })
+                    .collect::<Vec<_>>();
+                Converter::new(self.sort_fields_by_indices(&indices))
+            }
+        }
+    }
+    pub fn value_indices(&self, with_timestamp: bool) -> Vec<usize> {
+        let field_count = self.schema.fields().len();
+        match &self.key_indices {
+            None => {
+                let mut indices = (0..field_count).collect::<Vec<_>>();
+
+                if !with_timestamp {
+                    indices.remove(self.timestamp_index);
+                }
+                indices
+            }
+            Some(keys) => {
+                let indices = (0..field_count)
+                    .filter(|index| {
+                        !keys.contains(index) && (with_timestamp || *index != self.timestamp_index)
+                    })
+                    .collect::<Vec<_>>();
+                indices
+            }
+        }
     }
 
     pub fn sort(&self, batch: RecordBatch, with_timestamp: bool) -> Result<RecordBatch> {

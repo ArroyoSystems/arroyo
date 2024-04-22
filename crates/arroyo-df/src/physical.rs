@@ -1,10 +1,18 @@
+use arrow::{
+    array::{AsArray, BooleanBuilder, TimestampNanosecondBuilder, UInt32Builder},
+    buffer::NullBuffer,
+    compute::{concat, kernels::zip, not, take},
+};
+use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
 use std::{
     any::Any,
     mem,
+    pin::Pin,
     sync::{Arc, RwLock},
+    task::{Context, Poll},
 };
 
-use arrow_array::{Array, RecordBatch, StructArray};
+use arrow_array::{array, Array, BooleanArray, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::{
     execution::TaskContext,
@@ -21,17 +29,26 @@ use datafusion_common::{
 use crate::json::get_json_functions;
 use crate::rewriters::UNNESTED_COL;
 use arroyo_operator::operator::Registry;
-use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
-use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
+use arroyo_rpc::grpc::api::{
+    arroyo_exec_node, ArroyoExecNode, DebeziumEncodeNode, MemExecNode, UnnestExecNode,
+};
+use arroyo_rpc::{
+    grpc::api::{arroyo_exec_node::Node, DebeziumDecodeNode},
+    IS_RETRACT_FIELD, TIMESTAMP_FIELD,
+};
 use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion_expr::{ColumnarValue, ScalarUDF, Signature, TypeSignature};
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
+use futures::{
+    ready,
+    stream::{Stream, StreamExt},
+};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub fn window_function(columns: &[ColumnarValue]) -> DFResult<ColumnarValue> {
     if columns.len() != 2 {
@@ -287,6 +304,34 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                     UnnestOptions::default(),
                 )))
             }
+            Node::DebeziumDecode(debezium) => {
+                let schema: Schema = serde_json::from_str(&debezium.schema).map_err(|e| {
+                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
+                })?;
+                Ok(Arc::new(DebeziumUnrollingExec {
+                    input: inputs
+                        .first()
+                        .ok_or_else(|| {
+                            DataFusionError::Internal("no input for debezium node".to_string())
+                        })?
+                        .clone(),
+                    schema: Arc::new(schema),
+                }))
+            }
+            Node::DebeziumEncode(debezium) => {
+                let schema: Schema = serde_json::from_str(&debezium.schema).map_err(|e| {
+                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
+                })?;
+                Ok(Arc::new(ToDebeziumExec {
+                    input: inputs
+                        .first()
+                        .ok_or_else(|| {
+                            DataFusionError::Internal("no input for debezium node".to_string())
+                        })?
+                        .clone(),
+                    schema: Arc::new(schema),
+                }))
+            }
         }
     }
 
@@ -312,6 +357,23 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::UnnestExec(UnnestExecNode {
                     schema: serde_json::to_string(&unnest.schema()).unwrap(),
+                })),
+            });
+        }
+        let debezium_decode: Option<&DebeziumUnrollingExec> = node.as_any().downcast_ref();
+        if let Some(decode) = debezium_decode {
+            proto = Some(ArroyoExecNode {
+                node: Some(arroyo_exec_node::Node::DebeziumDecode(DebeziumDecodeNode {
+                    schema: serde_json::to_string(&decode.schema).unwrap(),
+                })),
+            });
+        }
+
+        let debezium_encode: Option<&ToDebeziumExec> = node.as_any().downcast_ref();
+        if let Some(encode) = debezium_encode {
+            proto = Some(ArroyoExecNode {
+                node: Some(arroyo_exec_node::Node::DebeziumEncode(DebeziumEncodeNode {
+                    schema: serde_json::to_string(&encode.schema).unwrap(),
                 })),
             });
         }
@@ -595,5 +657,398 @@ impl ExecutionPlan for ArroyoMemExec {
 
     fn reset(&self) -> DFResult<()> {
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct DebeziumUnrollingExec {
+    input: Arc<dyn ExecutionPlan>,
+    schema: SchemaRef,
+}
+
+impl DebeziumUnrollingExec {
+    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> DFResult<Self> {
+        let input_schema = input.schema();
+        // confirm that the input schema has before, after and op columns, and before and after match
+        let before_index = input_schema.index_of("before")?;
+        let after_index = input_schema.index_of("after")?;
+        let op_index = input_schema.index_of("op")?;
+        let _timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
+        let before_type = input_schema.field(before_index).data_type();
+        let after_type = input_schema.field(after_index).data_type();
+        if before_type != after_type {
+            return Err(DataFusionError::Internal(
+                "before and after columns must have the same type".to_string(),
+            ));
+        }
+        // check that op is a string
+        let op_type = input_schema.field(op_index).data_type();
+        if *op_type != DataType::Utf8 {
+            return Err(DataFusionError::Internal(
+                "op column must be a string".to_string(),
+            ));
+        }
+        // create the output schema
+        let DataType::Struct(fields) = before_type else {
+            return Err(DataFusionError::Internal(
+                "before and after columns must be structs".to_string(),
+            ));
+        };
+        let mut fields = fields.to_vec();
+        fields.push(Arc::new(arrow::datatypes::Field::new(
+            IS_RETRACT_FIELD,
+            DataType::Boolean,
+            false,
+        )));
+        fields.push(Arc::new(arrow::datatypes::Field::new(
+            TIMESTAMP_FIELD,
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        )));
+
+        let schema = Schema::new(fields);
+        Ok(Self {
+            input,
+            schema: Arc::new(schema),
+        })
+    }
+}
+
+impl DisplayAs for DebeziumUnrollingExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "DebeziumUnrollingExec")
+    }
+}
+
+impl ExecutionPlan for DebeziumUnrollingExec {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
+    }
+
+    fn output_partitioning(&self) -> Partitioning {
+        Partitioning::UnknownPartitioning(1)
+    }
+
+    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
+        None
+    }
+
+    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
+        vec![self.input.clone()]
+    }
+
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> DFResult<Arc<dyn ExecutionPlan>> {
+        if children.len() != 1 {
+            return Err(DataFusionError::Internal(
+                "DebeziumUnrollingExec wrong number of children".to_string(),
+            ));
+        }
+        Ok(Arc::new(DebeziumUnrollingExec {
+            input: children[0].clone(),
+            schema: self.schema.clone(),
+        }))
+    }
+
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> DFResult<SendableRecordBatchStream> {
+        Ok(Box::pin(DebeziumUnrollingStream::try_new(
+            self.input.execute(partition, context)?,
+            self.schema.clone(),
+        )?))
+    }
+
+    fn reset(&self) -> DFResult<()> {
+        self.input.reset()
+    }
+}
+
+struct DebeziumUnrollingStream {
+    input: SendableRecordBatchStream,
+    schema: SchemaRef,
+    before_index: usize,
+    after_index: usize,
+    op_index: usize,
+    timestamp_index: usize,
+}
+
+impl DebeziumUnrollingStream {
+    fn try_new(input: SendableRecordBatchStream, schema: SchemaRef) -> DFResult<Self> {
+        let input_schema = input.schema();
+        let before_index = input_schema.index_of("before")?;
+        let after_index = input_schema.index_of("after")?;
+        let op_index = input_schema.index_of("op")?;
+        let timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
+
+        Ok(Self {
+            input,
+            schema,
+            before_index,
+            after_index,
+            op_index,
+            timestamp_index,
+        })
+    }
+    fn unroll_batch(&self, batch: &RecordBatch) -> DFResult<RecordBatch> {
+        let before = batch.column(self.before_index).as_ref();
+        let after = batch.column(self.after_index).as_ref();
+        let op = batch
+            .column(self.op_index)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| DataFusionError::Internal("op column is not a string".to_string()))?;
+
+        let timestamp = batch
+            .column(self.timestamp_index)
+            .as_any()
+            .downcast_ref::<array::TimestampNanosecondArray>()
+            .ok_or_else(|| {
+                DataFusionError::Internal("timestamp column is not a timestamp".to_string())
+            })?;
+
+        let num_rows = batch.num_rows();
+        let combined_array = concat(&vec![before, after])?;
+        let mut take_indices = UInt32Builder::with_capacity(2 * num_rows);
+        let mut is_retract_builder = BooleanBuilder::with_capacity(2 * num_rows);
+        let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(2 * num_rows);
+        for i in 0..num_rows {
+            let op = op.value(i);
+            match op {
+                "c" | "r" => {
+                    take_indices.append_value((i + num_rows) as u32);
+                    is_retract_builder.append_value(false);
+                    timestamp_builder.append_value(timestamp.value(i));
+                }
+                "u" => {
+                    take_indices.append_value(i as u32);
+                    is_retract_builder.append_value(true);
+                    timestamp_builder.append_value(timestamp.value(i));
+                    take_indices.append_value((i + num_rows) as u32);
+                    is_retract_builder.append_value(false);
+                    timestamp_builder.append_value(timestamp.value(i));
+                }
+                "d" => {
+                    take_indices.append_value(i as u32);
+                    is_retract_builder.append_value(true);
+                    timestamp_builder.append_value(timestamp.value(i));
+                }
+                _ => {
+                    return Err(DataFusionError::Internal(format!(
+                        "unexpected op value: {}",
+                        op
+                    )));
+                }
+            }
+        }
+        let take_indices = take_indices.finish();
+        let unrolled_array = take(&combined_array, &take_indices, None)?;
+        let mut columns = unrolled_array.as_struct().columns().to_vec();
+        columns.push(Arc::new(is_retract_builder.finish()));
+        columns.push(Arc::new(timestamp_builder.finish()));
+        Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
+    }
+}
+
+impl Stream for DebeziumUnrollingStream {
+    type Item = DFResult<RecordBatch>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let result = ready!(self.input.poll_next_unpin(cx))
+            .map(|result| Ok::<RecordBatch, DataFusionError>(self.unroll_batch(&result?)?));
+        Poll::Ready(result)
+    }
+}
+
+impl RecordBatchStream for DebeziumUnrollingStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
+    }
+}
+
+#[derive(Debug)]
+pub struct ToDebeziumExec {
+    input: Arc<dyn ExecutionPlan>,
+    schema: SchemaRef,
+}
+
+impl ToDebeziumExec {
+    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> DFResult<Self> {
+        let input_schema = input.schema();
+        let timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
+        let struct_fields: Vec<_> = input_schema
+            .fields()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, field)| {
+                if field.name() == IS_RETRACT_FIELD || index == timestamp_index {
+                    None
+                } else {
+                    Some(field.clone())
+                }
+            })
+            .collect();
+        let struct_data_type = DataType::Struct(struct_fields.into());
+        let before_field = Arc::new(arrow::datatypes::Field::new(
+            "before",
+            struct_data_type.clone(),
+            true,
+        ));
+        let after_field = Arc::new(arrow::datatypes::Field::new(
+            "after",
+            struct_data_type,
+            true,
+        ));
+        let op_field = Arc::new(arrow::datatypes::Field::new("op", DataType::Utf8, false));
+        let timestamp_field = Arc::new(input_schema.field(timestamp_index).clone());
+
+        let output_schema = Schema::new(vec![before_field, after_field, op_field, timestamp_field]);
+
+        Ok(Self {
+            input,
+            schema: Arc::new(output_schema),
+        })
+    }
+}
+
+impl DisplayAs for ToDebeziumExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "ToDebeziumExec")
+    }
+}
+
+impl ExecutionPlan for ToDebeziumExec {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
+    }
+
+    fn output_partitioning(&self) -> Partitioning {
+        Partitioning::UnknownPartitioning(1)
+    }
+
+    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
+        None
+    }
+
+    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
+        vec![self.input.clone()]
+    }
+
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> DFResult<Arc<dyn ExecutionPlan>> {
+        if children.len() != 1 {
+            return Err(DataFusionError::Internal(
+                "DebeziumUnrollingExec wrong number of children".to_string(),
+            ));
+        }
+        Ok(Arc::new(DebeziumUnrollingExec::try_new(
+            children[0].clone(),
+        )?))
+    }
+
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> DFResult<SendableRecordBatchStream> {
+        let is_retract_index: usize = self.input.schema().index_of(IS_RETRACT_FIELD)?;
+        let timestamp_index = self.input.schema().index_of(TIMESTAMP_FIELD)?;
+        let struct_projection = (0..self.input.schema().fields().len())
+            .into_iter()
+            .filter(|index| *index != is_retract_index && *index != timestamp_index)
+            .collect();
+        Ok(Box::pin(ToDebeziumStream {
+            input: self.input.execute(partition, context)?,
+            schema: self.schema.clone(),
+            is_retract_index,
+            timestamp_index,
+            struct_projection,
+        }))
+    }
+
+    fn reset(&self) -> DFResult<()> {
+        self.input.reset()
+    }
+}
+
+struct ToDebeziumStream {
+    input: SendableRecordBatchStream,
+    schema: SchemaRef,
+    is_retract_index: usize,
+    timestamp_index: usize,
+    struct_projection: Vec<usize>,
+}
+
+impl ToDebeziumStream {
+    fn to_debezium_batch(&mut self, batch: &RecordBatch) -> DFResult<RecordBatch> {
+        let value_struct = batch.project(&self.struct_projection)?;
+        let is_retract = batch
+            .column(self.is_retract_index)
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        let after_nullability = Some(NullBuffer::new(not(is_retract)?.values().clone()));
+        let after_array = StructArray::try_new(
+            value_struct.schema().fields().clone(),
+            value_struct.columns().to_vec(),
+            after_nullability,
+        )?;
+        let before_nullability = Some(NullBuffer::new(is_retract.values().clone()));
+        let before_array = StructArray::try_new(
+            value_struct.schema().fields().clone(),
+            value_struct.columns().to_vec(),
+            before_nullability,
+        )?;
+        let append_datum = StringArray::new_scalar("c".to_string());
+        let retract_datum = StringArray::new_scalar("d".to_string());
+        let op_array = zip::zip(is_retract, &retract_datum, &append_datum)?;
+        let timestamp_column = batch.column(self.timestamp_index).clone();
+
+        let columns = vec![
+            Arc::new(before_array),
+            Arc::new(after_array),
+            op_array,
+            timestamp_column,
+        ];
+
+        Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
+    }
+}
+
+impl Stream for ToDebeziumStream {
+    type Item = DFResult<RecordBatch>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let result = ready!(self.input.poll_next_unpin(cx))
+            .map(|result| Ok::<RecordBatch, DataFusionError>(self.to_debezium_batch(&result?)?));
+        Poll::Ready(result)
+    }
+}
+
+impl RecordBatchStream for ToDebeziumStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
     }
 }

@@ -23,27 +23,42 @@ use crate::{parquet::ParquetStats, DataOperation};
 pub struct SchemaWithHashAndOperation {
     state_schema: ArroyoSchemaRef,
     memory_schema: ArroyoSchemaRef,
+    generation_index: Option<usize>,
     hash_index: usize,
     operation_index: usize,
 }
 
 #[allow(unused)]
 impl SchemaWithHashAndOperation {
-    pub(crate) fn new(memory_schema: ArroyoSchemaRef) -> Self {
+    pub(crate) fn new(mut memory_schema: ArroyoSchemaRef, with_generation: bool) -> Self {
         let mut fields = memory_schema.schema.fields().to_vec();
-        //TODO: we could have the additional columns at the start, rather than the end
+        let generation_index = if with_generation {
+            fields.push(Arc::new(Field::new("_generation", DataType::UInt64, false)));
+            memory_schema = Arc::new(ArroyoSchema::new(
+                Arc::new(Schema::new_with_metadata(
+                    fields.clone(),
+                    memory_schema.schema.metadata().clone(),
+                )),
+                memory_schema.timestamp_index,
+                memory_schema.key_indices.clone(),
+            ));
+            Some(fields.len() - 1)
+        } else {
+            None
+        };
+
         fields.push(Arc::new(Field::new("_key_hash", DataType::UInt64, false)));
+        let hash_index = fields.len() - 1;
         fields.push(Arc::new(Field::new(
             "_operation",
             arrow::datatypes::DataType::Binary,
             false,
         )));
+        let operation_index = fields.len() - 1;
         let state_schema = Arc::new(Schema::new_with_metadata(
             fields,
             memory_schema.schema.metadata.clone(),
         ));
-        let hash_index = memory_schema.schema.fields().len();
-        let operation_index = hash_index + 1;
         let state_schema = Arc::new(ArroyoSchema::new(
             state_schema,
             memory_schema.timestamp_index.clone(),
@@ -52,6 +67,7 @@ impl SchemaWithHashAndOperation {
         Self {
             state_schema,
             memory_schema,
+            generation_index,
             hash_index,
             operation_index,
         }
@@ -79,6 +95,10 @@ impl SchemaWithHashAndOperation {
 
     pub(crate) fn hash_index(&self) -> usize {
         self.hash_index
+    }
+
+    pub(crate) fn generation_index(&self) -> Option<usize> {
+        self.generation_index
     }
 
     pub(crate) fn filter_by_hash_index(

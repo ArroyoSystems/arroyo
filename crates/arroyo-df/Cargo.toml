@@ -30,6 +30,7 @@ bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = "0.6"
 tokio = "1.27"
 tokio-stream = { version = "0.1", features = ["full"] }
+futures = "0.3"
 quote = "1.0"
 regex = "1"
 arrow = { workspace = true, features = ["ffi"] }

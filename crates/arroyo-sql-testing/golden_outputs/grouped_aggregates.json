@@ -1,0 +1,5 @@
+{"after":{"avg":47.5,"count":20,"counter_mod":0,"max":95,"min":0,"sum":950},"before":null,"op":"c"}
+{"after":{"avg":48.5,"count":20,"counter_mod":1,"max":96,"min":1,"sum":970},"before":null,"op":"c"}
+{"after":{"avg":49.5,"count":20,"counter_mod":2,"max":97,"min":2,"sum":990},"before":null,"op":"c"}
+{"after":{"avg":50.5,"count":20,"counter_mod":3,"max":98,"min":3,"sum":1010},"before":null,"op":"c"}
+{"after":{"avg":51.5,"count":20,"counter_mod":4,"max":99,"min":4,"sum":1030},"before":null,"op":"c"}

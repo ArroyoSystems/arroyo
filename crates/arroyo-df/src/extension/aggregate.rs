@@ -78,7 +78,7 @@ impl AggregateExtension {
             partial_aggregation_plan,
             partial_schema,
             finish_plan,
-        } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate)?;
+        } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate, true)?;
 
         let final_physical_plan = planner.sync_plan(&self.final_calculation)?;
         let final_physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
@@ -126,7 +126,7 @@ impl AggregateExtension {
             partial_aggregation_plan,
             partial_schema,
             finish_plan,
-        } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate)?;
+        } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate, true)?;
 
         let final_physical_plan = planner.sync_plan(&self.final_calculation)?;
         let final_physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
@@ -251,7 +251,7 @@ impl AggregateExtension {
             partial_aggregation_plan,
             partial_schema,
             finish_plan,
-        } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate)?;
+        } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate, true)?;
 
         let config = TumblingWindowAggregateOperator {
             name: "InstantWindow".to_string(),

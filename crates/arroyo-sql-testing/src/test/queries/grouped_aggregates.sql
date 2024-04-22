@@ -9,11 +9,12 @@ CREATE TABLE impulse_source (
       type = 'source'
     );
     CREATE TABLE aggregates (
+      counter_mod BIGINT,
       min BIGINT,
       max BIGINT,
       sum BIGINT,
       count BIGINT,
-      avg DOUBLE
+      avg DOUBLE,
     ) WITH (
       connector = 'single_file',
       path = '$output_path',
@@ -21,4 +22,6 @@ CREATE TABLE impulse_source (
       type = 'sink'
     );
 
-INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source
+INSERT INTO aggregates SELECT counter % 5, min(counter), max(counter), sum(counter), count(*), avg(counter)
+   FROM impulse_source
+GROUP BY 1

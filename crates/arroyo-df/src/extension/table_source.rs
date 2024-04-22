@@ -16,7 +16,7 @@ use crate::{
     tables::ConnectorTable,
 };
 
-use super::{ArroyoExtension, NodeWithIncomingEdges};
+use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
 pub(crate) const TABLE_SOURCE_NAME: &'static str = "TableSourceExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -38,8 +38,14 @@ impl TableSourceExtension {
                 crate::tables::FieldSpec::VirtualField { .. } => None,
             })
             .collect::<Vec<_>>();
-        let schema =
+        let base_schema =
             Arc::new(DFSchema::new_with_metadata(physical_fields, HashMap::new()).unwrap());
+        let schema = if table.is_updating() {
+            DebeziumUnrollingExtension::as_debezium_schema(&base_schema, Some(name.clone()))
+                .unwrap()
+        } else {
+            base_schema
+        };
         let schema = add_timestamp_field(schema, Some(name.clone())).unwrap();
         Self {
             name,

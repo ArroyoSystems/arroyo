@@ -1,4 +1,4 @@
---fail=This feature is not implemented: must have window in aggregate. Make sure you are calling one of the windowing functions (hop, tumble, session) or using the window field of the input
+--fail=Error during planning: can't currently nest updating aggregates
 CREATE TABLE cars(
       timestamp TIMESTAMP,
       driver_id BIGINT,

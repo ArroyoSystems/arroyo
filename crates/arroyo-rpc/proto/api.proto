@@ -121,6 +121,16 @@ message AsyncUdfOperator {
   uint64 timeout_micros = 7;
 }
 
+message UpdatingAggregateOperator {
+  string name = 1;
+  ArroyoSchema partial_schema = 2;
+  ArroyoSchema state_partial_schema = 3;
+  ArroyoSchema state_final_schema = 4;
+  bytes partial_aggregation_plan = 5;
+  bytes combine_plan = 6;
+  bytes final_aggregation_plan = 7;
+}
+
 message WasmUdfs {
   string name = 1;
   repeated WasmFunction wasm_functions = 2;
@@ -207,10 +217,22 @@ message UnnestExecNode {
   string schema = 1;
 }
 
+message DebeziumDecodeNode {
+  // json-encoded
+  string schema = 1;
+}
+
+message DebeziumEncodeNode {
+  // json-encoded
+  string schema = 1;
+}
+
 message ArroyoExecNode {
   oneof node {
     MemExecNode mem_exec = 1;
     UnnestExecNode unnest_exec = 2;
+    DebeziumDecodeNode debezium_decode = 3;
+    DebeziumEncodeNode debezium_encode = 4;
   }
 }
 

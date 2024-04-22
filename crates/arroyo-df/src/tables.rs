@@ -11,7 +11,7 @@ use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
-use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::sql::planner::PlannerContext;
@@ -30,7 +30,6 @@ use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
     WriteOp,
 };
-use tracing::info;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -96,15 +95,15 @@ fn produce_optimized_plan(
     let optimizer_config = OptimizerContext::default();
     let analyzer = Analyzer::default();
     let mut optimizer = Optimizer::new();
-    optimizer
-        .rules
-        // This rule can drop event time calculation fields if they aren't used elsewhere.
-        .retain(|rule| rule.name() != "optimize_projections");
+    optimizer.rules.retain(|rule|
+            // This rule can drop event time calculation fields if they aren't used elsewhere.
+            rule.name() != "optimize_projections"
+            // This rule creates nested aggregates off of count(distinct value), which we don't support.
+            && rule.name() != "single_distinct_aggregation_to_group_by");
     let analyzed_plan =
         analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
 
     let plan = optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
-    info!("optimized plan: {:?}", plan);
     Ok(plan)
 }
 
@@ -166,7 +165,24 @@ impl ConnectorTable {
 
         let framing = Framing::from_opts(options).map_err(|e| anyhow!("invalid framing: '{e}'"))?;
 
-        let schema_fields: Result<Vec<SourceField>> = fields
+        let mut input_to_schema_fields = fields.clone();
+
+        if let Some(Format::Json(JsonFormat { debezium: true, .. })) = &format {
+            // check that there are no virtual fields in fields
+            if fields.iter().any(|f| f.is_virtual()) {
+                bail!("can't use virtual fields with debezium format")
+            }
+            let df_struct_type =
+                DataType::Struct(fields.iter().map(|f| f.field().clone()).collect());
+            let before_field_spec =
+                FieldSpec::StructField(Field::new("before", df_struct_type.clone(), true));
+            let after_field_spec =
+                FieldSpec::StructField(Field::new("after", df_struct_type, true));
+            let op_field_spec = FieldSpec::StructField(Field::new("op", DataType::Utf8, false));
+            input_to_schema_fields = vec![before_field_spec, after_field_spec, op_field_spec];
+        }
+
+        let schema_fields: Vec<SourceField> = input_to_schema_fields
             .iter()
             .filter(|f| !f.is_virtual())
             .map(|f| {
@@ -179,7 +195,7 @@ impl ConnectorTable {
                     )
                 })
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let bad_data =
             BadData::from_opts(options).map_err(|e| anyhow!("Invalid bad_data: '{e}'"))?;
 
@@ -188,7 +204,7 @@ impl ConnectorTable {
             bad_data,
             framing,
             None,
-            schema_fields?,
+            schema_fields,
             None,
             Some(fields.is_empty()),
         )?;
@@ -347,6 +363,14 @@ impl ConnectorTable {
             timestamp_override,
             watermark_column,
         })
+    }
+
+    pub(crate) fn is_updating(&self) -> bool {
+        if let Some(Format::Json(JsonFormat { debezium: true, .. })) = &self.format {
+            true
+        } else {
+            false
+        }
     }
 }
 
