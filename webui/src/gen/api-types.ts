@@ -327,6 +327,8 @@ export interface components {
       primitive: components["schemas"]["PrimitiveType"];
     }, {
       struct: components["schemas"]["StructType"];
+    }, {
+      list: components["schemas"]["SourceField"];
     }]>;
     Format: OneOf<[{
       json: components["schemas"]["JsonFormat"];
@@ -348,6 +350,7 @@ export interface components {
       createdAt: number;
       definition: string;
       description?: string | null;
+      dylibUrl: string;
       id: string;
       name: string;
       prefix: string;
