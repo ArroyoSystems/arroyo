@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import useLocalStorage from 'use-local-storage';
 import { GlobalUdf, useGlobalUdfs } from './lib/data_fetching';
 import { generate_udf_id } from './lib/util';
@@ -49,12 +49,9 @@ export const LocalUdfsContext = React.createContext<{
 export const getLocalUdfsContextValue = () => {
   const [localUdfs, setLocalUdfs] = useLocalStorage<LocalUdf[]>('localUdfs', []);
   const { globalUdfs, deleteGlobalUdf: apiDeleteGlobalUdf } = useGlobalUdfs();
-  const [openedGlobalUdfs, setOpenedGlobalUdfs] = useLocalStorage<GlobalUdf[]>(
-    'openedGlobalUdfs',
-    []
-  );
-  const [editorTab, setEditorTab] = useLocalStorage('editorTabIndex', 0);
-  const [selectedUdfId, setSelectedUdfId] = useLocalStorage('selectedUdfId', '');
+  const [openedGlobalUdfs, setOpenedGlobalUdfs] = useState<GlobalUdf[]>([]);
+  const [editorTab, setEditorTab] = useState(0);
+  const [selectedUdfId, setSelectedUdfId] = useState<string | undefined>('');
 
   const openedUdfs = [...localUdfs.filter(u => u.open), ...openedGlobalUdfs];
   const openedUdfsIds = openedUdfs.map(u => u.id);

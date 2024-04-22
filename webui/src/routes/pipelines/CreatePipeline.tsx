@@ -57,7 +57,6 @@ import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import PipelineEditorTabs from './PipelineEditorTabs';
 import ResourcePanel from './ResourcePanel';
-import useLocalStorage from 'use-local-storage';
 import { LocalUdf, LocalUdfsContext } from '../../udf_state';
 import UdfLabel from '../udfs/UdfLabel';
 import { PiFileSqlDuotone } from 'react-icons/pi';
@@ -100,7 +99,7 @@ export function CreatePipeline() {
   );
   const hasUdfValidationErrors = localUdfs.some(u => u.errors?.length);
   const hasValidationErrors = queryValidation?.errors?.length || hasUdfValidationErrors;
-  const [resourcePanelTab, setResourcePanelTab] = useLocalStorage('resourcePanelTabIndex', 0);
+  const [resourcePanelTab, setResourcePanelTab] = useState(0);
   const [udfValidationApiError, setUdfValidationApiError] = useState<any | undefined>(undefined);
   const [validationInProgress, setValidationInProgress] = useState<boolean>(false);
   const [startingPreview, setStartingPreview] = useState<boolean>(false);
