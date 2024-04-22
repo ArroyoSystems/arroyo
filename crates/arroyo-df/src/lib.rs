@@ -56,7 +56,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::json::get_json_functions;
-use crate::rewriters::{SourceMetadataVisitor, UnnestRewriter};
+use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 use crate::types::interval_month_day_nanos_to_duration;
 
 use crate::udafs::EmptyUdaf;
@@ -470,9 +470,12 @@ pub fn rewrite_plan(
     plan: LogicalPlan,
     schema_provider: &ArroyoSchemaProvider,
 ) -> DFResult<LogicalPlan> {
-    plan.rewrite(&mut UnnestRewriter {})?
-        // .rewrite(&mut AsyncUdfRewriter::new(&schema_provider))?
-        .rewrite(&mut ArroyoRewriter { schema_provider })
+    let rewritten_plan = plan
+        .rewrite(&mut UnnestRewriter {})?
+        .rewrite(&mut ArroyoRewriter { schema_provider })?;
+    // check for window functions
+    rewritten_plan.visit(&mut TimeWindowUdfChecker {})?;
+    Ok(rewritten_plan)
 }
 
 pub async fn parse_and_get_arrow_program(

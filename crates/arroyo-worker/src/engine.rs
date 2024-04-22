@@ -828,6 +828,10 @@ pub fn construct_operator(
         }
     };
 
-    ctor.with_config(config, registry)
-        .unwrap_or_else(|_| panic!("Failed to construct operator {:?}", operator))
+    ctor.with_config(config, registry).unwrap_or_else(|e| {
+        panic!(
+            "Failed to construct operator {:?}, with error:\n{:?}",
+            operator, e
+        )
+    })
 }

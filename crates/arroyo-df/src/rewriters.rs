@@ -614,3 +614,39 @@ impl<'a> TreeNodeVisitor for SourceMetadataVisitor<'a> {
         Ok(VisitRecursion::Continue)
     }
 }
+
+struct TimeWindowExprChecker {}
+
+pub struct TimeWindowUdfChecker {}
+
+impl TreeNodeVisitor for TimeWindowExprChecker {
+    type N = Expr;
+
+    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+        if let Expr::ScalarFunction(ScalarFunction { func_def, args: _ }) = node {
+            match func_def.name() {
+                "tumble" | "hop" | "session" => {
+                    return plan_err!(
+                        "Time window function {} are not allowed in this context. Are you missing a GROUP BY clause?",
+                        func_def.name()
+                    );
+                }
+                _ => {}
+            }
+        }
+        Ok(VisitRecursion::Continue)
+    }
+}
+
+impl TreeNodeVisitor for TimeWindowUdfChecker {
+    type N = LogicalPlan;
+
+    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+        node.expressions().iter().try_for_each(|expr| {
+            let mut checker = TimeWindowExprChecker {};
+            expr.visit(&mut checker)?;
+            Ok::<(), DataFusionError>(())
+        })?;
+        Ok(VisitRecursion::Continue)
+    }
+}
