@@ -262,7 +262,7 @@ impl ParsedUdf {
                         } else {
                             return Err(meta.error(format!(
                                 "unsupported attribute '{}'",
-                                meta.path.to_token_stream().to_string()
+                                meta.path.to_token_stream()
                             )));
                         }
                         Ok(())

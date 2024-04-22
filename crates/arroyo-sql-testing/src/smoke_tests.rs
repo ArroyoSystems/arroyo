@@ -199,12 +199,10 @@ async fn run_until_finished(engine: &RunningEngine, control_rx: &mut Receiver<Co
 fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, parallelism: usize) {
     let watermark_nodes: HashSet<_> = graph
         .node_indices()
-        .filter(
-            |index| match graph.node_weight(*index).unwrap().operator_name {
-                OperatorName::ExpressionWatermark => true,
-                _ => false,
-            },
-        )
+        .filter(|index| {
+            let operator_name = graph.node_weight(*index).unwrap().operator_name;
+            matches!(operator_name, OperatorName::ExpressionWatermark)
+        })
         .collect();
     let indices: Vec<_> = graph
         .node_indices()
@@ -321,7 +319,7 @@ async fn run_pipeline_and_assert_outputs(
     }
 
     let get_program =
-        |graph: &LogicalGraph| Program::local_from_logical(job_id.to_string(), &graph, &udfs);
+        |graph: &LogicalGraph| Program::local_from_logical(job_id.to_string(), graph, udfs);
 
     run_completely(
         job_id,
@@ -439,20 +437,19 @@ async fn check_output_files(
 ) {
     let mut output_lines: Vec<Value> = read_to_string(output_location.clone())
         .await
-        .expect(&format!("output file not found at {}", output_location))
+        .unwrap_or_else(|_| panic!("output file not found at {}", output_location))
         .lines()
         .map(|s| serde_json::from_str(s).unwrap())
         .collect();
 
     let mut golden_output_lines: Vec<Value> = read_to_string(golden_output_location.clone())
         .await
-        .expect(
-            format!(
+        .unwrap_or_else(|_| {
+            panic!(
                 "golden output file not found at {}, want to compare to {}",
                 golden_output_location, output_location
             )
-            .as_str(),
-        )
+        })
         .lines()
         .map(|s| serde_json::from_str(s).unwrap())
         .collect();

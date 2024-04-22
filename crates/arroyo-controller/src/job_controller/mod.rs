@@ -378,7 +378,7 @@ impl RunningJobModel {
                 // compact the operator's state and notify the workers to load the new files
                 self.job_id.clone(),
                 operator_id.clone(),
-                self.epoch.clone(),
+                self.epoch,
             )
             .await?;
 
@@ -560,8 +560,7 @@ impl JobController {
             model: RunningJobModel {
                 job_id: config.id.clone(),
                 state: JobState::Running,
-                checkpoint_state: commit_state
-                    .map(|state| CheckpointingOrCommittingState::Committing(state)),
+                checkpoint_state: commit_state.map(CheckpointingOrCommittingState::Committing),
                 epoch,
                 min_epoch,
                 last_checkpoint: Instant::now(),

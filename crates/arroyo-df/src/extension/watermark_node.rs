@@ -12,7 +12,7 @@ use prost::Message;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-pub(crate) const WATERMARK_NODE_NAME: &'static str = "WatermarkNode";
+pub(crate) const WATERMARK_NODE_NAME: &str = "WatermarkNode";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WatermarkNode {
     pub input: LogicalPlan,

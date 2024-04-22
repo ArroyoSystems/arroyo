@@ -73,10 +73,7 @@ impl FluvioSourceFunc {
     ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>>>> {
         info!("Creating Fluvio consumer for {:?}", self.endpoint);
 
-        let config: Option<FluvioConfig> = self
-            .endpoint
-            .as_ref()
-            .map(|endpoint| FluvioConfig::new(endpoint));
+        let config: Option<FluvioConfig> = self.endpoint.as_ref().map(FluvioConfig::new);
 
         let client = if let Some(config) = &config {
             Fluvio::connect_with_config(config).await?

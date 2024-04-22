@@ -155,7 +155,7 @@ impl WorkerServer {
     pub fn from_env(shutdown_guard: ShutdownGuard) -> Self {
         let graph = std::env::var(ARROYO_PROGRAM_ENV).expect("ARROYO_PROGRAM not set");
         let graph = general_purpose::STANDARD_NO_PAD
-            .decode(&graph)
+            .decode(graph)
             .expect("ARROYO_PROGRAM not valid base64");
 
         let graph =

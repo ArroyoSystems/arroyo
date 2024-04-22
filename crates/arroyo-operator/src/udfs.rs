@@ -45,7 +45,7 @@ pub struct ArroyoUdaf {
 impl ArroyoUdaf {
     pub fn new(args: Vec<UdafArg>, output_type: Arc<DataType>, udf: Arc<SyncUdfDylib>) -> Self {
         assert!(
-            args.len() > 0,
+            !args.is_empty(),
             "UDAF {} has no arguments, but UDAFs must have at least one",
             udf.name()
         );
@@ -110,7 +110,7 @@ impl Accumulator for ArroyoUdaf {
             .iter()
             .map(|arg| Ok(ScalarValue::List(Arc::new(arg.concatenate_array()?))))
             .collect();
-        Ok(states?)
+        states
     }
 
     fn merge_batch(&mut self, states: &[ArrayRef]) -> Result<()> {

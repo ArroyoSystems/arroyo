@@ -33,9 +33,9 @@ pub fn server_for_hash_array(
 ) -> anyhow::Result<PrimitiveArray<UInt64Type>> {
     let range_size = u64::MAX / (n as u64);
     let range_scalar = UInt64Array::new_scalar(range_size);
-    let mut server_scalar = UInt64Array::new_scalar(n as u64);
+    let server_scalar = UInt64Array::new_scalar(n as u64);
     let division = div(hash, &range_scalar)?;
-    let mod_array = rem(&division, &mut server_scalar)?;
+    let mod_array = rem(&division, &server_scalar)?;
     let result: &PrimitiveArray<UInt64Type> = mod_array.as_any().downcast_ref().unwrap();
     Ok(result.clone())
 }
@@ -149,9 +149,9 @@ impl<T: OperatorConstructor> ErasedConstructor for T {
     }
 }
 
-pub fn get_timestamp_col<'a, 'b>(
+pub fn get_timestamp_col<'a>(
     batch: &'a RecordBatch,
-    ctx: &'b mut ArrowContext,
+    ctx: &mut ArrowContext,
 ) -> &'a PrimitiveArray<TimestampNanosecondType> {
     batch
         .column(ctx.out_schema.as_ref().unwrap().timestamp_index)
@@ -162,6 +162,12 @@ pub fn get_timestamp_col<'a, 'b>(
 
 pub struct RateLimiter {
     last: Instant,
+}
+
+impl Default for RateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RateLimiter {

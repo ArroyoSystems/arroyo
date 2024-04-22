@@ -33,7 +33,7 @@ pub struct SSESourceFunc {
 }
 
 impl SSESourceFunc {
-    pub fn new(table: SseTable, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    pub fn new_operator(table: SseTable, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
         let headers = table
             .headers
             .as_ref()
@@ -48,7 +48,7 @@ impl SSESourceFunc {
             events: table
                 .events
                 .map(|e| e.split(',').map(|e| e.to_string()).collect())
-                .unwrap_or_else(std::vec::Vec::new),
+                .unwrap_or_default(),
             format: config.format.expect("SSE requires a format"),
             framing: config.framing,
             bad_data: config.bad_data,
@@ -170,7 +170,7 @@ impl SSESourceFunc {
 
                                         if events.is_empty() || events.contains(&event.event_type) {
                                             ctx.deserialize_slice(
-                                                &event.data.as_bytes(), SystemTime::now()).await?;
+                                                event.data.as_bytes(), SystemTime::now()).await?;
 
                                             if ctx.should_flush() {
                                                 ctx.flush_buffer().await?;

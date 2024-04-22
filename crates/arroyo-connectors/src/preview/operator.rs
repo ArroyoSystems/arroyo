@@ -53,7 +53,7 @@ impl ArrowOperator for PreviewSink {
                     timestamp: to_micros(
                         timestamp
                             .map(|nanos| from_nanos(nanos as u128))
-                            .unwrap_or_else(|| SystemTime::now()),
+                            .unwrap_or_else(SystemTime::now),
                     ),
                     value,
                     done: false,

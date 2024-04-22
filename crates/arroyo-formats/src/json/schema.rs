@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use arrow_schema::{DataType, Field, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
-use schemars::schema::{Metadata, RootSchema, Schema};
+use schemars::schema::{RootSchema, Schema};
 use std::sync::Arc;
 use tracing::warn;
 use typify::{Type, TypeDetails, TypeSpace, TypeSpaceSettings};
@@ -13,7 +13,7 @@ fn get_type_space(schema: &str) -> anyhow::Result<TypeSpace> {
         serde_json::from_str(schema).map_err(|e| anyhow!("Invalid json schema: {:?}", e))?;
 
     if root_schema.schema.metadata.is_none() {
-        root_schema.schema.metadata = Some(Box::new(Metadata::default()));
+        root_schema.schema.metadata = Some(Box::default());
     }
 
     root_schema.schema.metadata.as_mut().unwrap().title = Some(ROOT_NAME.to_string());
@@ -48,7 +48,7 @@ pub fn to_arrow(name: &str, schema: &str) -> anyhow::Result<arrow_schema::Schema
         })
         .ok_or_else(|| anyhow!("No top-level struct in json schema {}", name))?;
 
-    let (dt, _, _) = to_arrow_datatype(&type_space, name, &s);
+    let (dt, _, _) = to_arrow_datatype(&type_space, &s);
 
     let fields = match dt {
         DataType::Struct(fields) => fields,
@@ -62,7 +62,6 @@ pub fn to_arrow(name: &str, schema: &str) -> anyhow::Result<arrow_schema::Schema
 
 fn to_arrow_datatype(
     type_space: &TypeSpace,
-    source_name: &str,
     t: &Type,
 ) -> (DataType, bool, Option<ArroyoExtensionType>) {
     match t.details() {
@@ -71,11 +70,10 @@ fn to_arrow_datatype(
                 .properties_info()
                 .map(|info| {
                     let field_type = type_space.get_type(&info.type_id).unwrap();
-                    let (t, nullable, extension) =
-                        to_arrow_datatype(type_space, source_name, &field_type);
+                    let (t, nullable, extension) = to_arrow_datatype(type_space, &field_type);
                     Arc::new(ArroyoExtensionType::add_metadata(
                         extension,
-                        Field::new(info.rename.unwrap_or(&info.name), t, nullable),
+                        Field::new(info.rename.unwrap_or(info.name), t, nullable),
                     ))
                 })
                 .collect();
@@ -84,7 +82,7 @@ fn to_arrow_datatype(
         }
         TypeDetails::Option(opt) => {
             let t = type_space.get_type(&opt).unwrap();
-            let (dt, _, extension) = to_arrow_datatype(type_space, source_name, &t);
+            let (dt, _, extension) = to_arrow_datatype(type_space, &t);
             (dt, true, extension)
         }
         TypeDetails::Builtin(t) => {
@@ -109,7 +107,7 @@ fn to_arrow_datatype(
         TypeDetails::String => (DataType::Utf8, false, None),
         TypeDetails::Newtype(t) => {
             let t = type_space.get_type(&t.subtype()).unwrap();
-            to_arrow_datatype(type_space, source_name, &t)
+            to_arrow_datatype(type_space, &t)
         }
         _ => {
             warn!(

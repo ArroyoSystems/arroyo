@@ -217,10 +217,8 @@ impl PollingHttpSourceFunc {
                     _ = timer.tick()  => {
                         match self.request().await {
                             Ok(buf) => {
-                                if self.emit_behavior == EmitBehavior::Changed {
-                                    if Some(&buf) == self.state.last_message.as_ref() {
-                                        continue;
-                                    }
+                                if self.emit_behavior == EmitBehavior::Changed && Some(&buf) == self.state.last_message.as_ref() {
+                                    continue;
                                 }
 
                                 ctx.deserialize_slice(&buf, SystemTime::now()).await?;

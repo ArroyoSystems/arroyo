@@ -119,7 +119,7 @@ pub fn log_event(name: &str, mut props: Value) {
     if telemetry_enabled() {
         let name = name.to_string();
         tokio::task::spawn(async move {
-            let client = CLIENT.get_or_init(|| Client::new());
+            let client = CLIENT.get_or_init(Client::new);
 
             if let Some(props) = props.as_object_mut() {
                 props.insert("distinct_id".to_string(), Value::String(cluster_id));

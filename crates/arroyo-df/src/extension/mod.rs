@@ -62,13 +62,13 @@ pub(crate) struct NodeWithIncomingEdges {
     pub edges: Vec<LogicalEdge>,
 }
 
-fn try_from_t<'a, T: ArroyoExtension + 'static>(
-    node: &'a dyn UserDefinedLogicalNode,
-) -> Result<&'a dyn ArroyoExtension, ()> {
+fn try_from_t<T: ArroyoExtension + 'static>(
+    node: &dyn UserDefinedLogicalNode,
+) -> Result<&dyn ArroyoExtension, ()> {
     node.as_any()
         .downcast_ref::<T>()
         .map(|t| t as &dyn ArroyoExtension)
-        .ok_or_else(|| ())
+        .ok_or(())
 }
 
 impl<'a> TryFrom<&'a dyn UserDefinedLogicalNode> for &'a dyn ArroyoExtension {
@@ -108,7 +108,7 @@ pub(crate) struct TimestampAppendExtension {
 
 impl TimestampAppendExtension {
     fn new(input: LogicalPlan, qualifier: Option<OwnedTableReference>) -> Self {
-        if has_timestamp_field(&input.schema()) {
+        if has_timestamp_field(input.schema()) {
             unreachable!("shouldn't be adding timestamp to a plan that already has it: plan :\n {:?}\n schema: {:?}", input, input.schema());
         }
         let schema = add_timestamp_field(input.schema().clone(), qualifier.clone()).unwrap();
@@ -184,7 +184,7 @@ impl ArroyoExtension for AsyncUDFExtension {
             .arg_exprs
             .iter()
             .map(|e| {
-                let p = planner.create_physical_expr(&e, self.input.schema())?;
+                let p = planner.create_physical_expr(e, self.input.schema())?;
                 Ok(PhysicalExprNode::try_from(p)?.encode_to_vec())
             })
             .collect::<DFResult<Vec<_>>>()
@@ -248,7 +248,7 @@ impl ArroyoExtension for AsyncUDFExtension {
         ArroyoSchema::from_fields(
             self.final_schema
                 .fields()
-                .into_iter()
+                .iter()
                 .map(|f| (**f.field()).clone())
                 .collect(),
         )

@@ -38,7 +38,7 @@ pub struct WebhookConnector {}
 impl WebhookConnector {
     fn construct_test_request(client: &Client, config: &WebhookTable) -> anyhow::Result<Request> {
         let req = client
-            .post(&config.endpoint.sub_env_vars()?)
+            .post(config.endpoint.sub_env_vars()?)
             // TODO: use the schema to construct a correctly-formatted message
             .body(
                 serde_json::to_string(&json! {{
@@ -132,7 +132,7 @@ impl Connector for WebhookConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Sink;
+        ConnectionType::Sink
     }
 
     fn from_config(
@@ -184,7 +184,7 @@ impl Connector for WebhookConnector {
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
 
-        let headers = options.remove("headers").map(|s| VarStr::new(s));
+        let headers = options.remove("headers").map(VarStr::new);
 
         let table = WebhookTable {
             endpoint: VarStr::new(endpoint),

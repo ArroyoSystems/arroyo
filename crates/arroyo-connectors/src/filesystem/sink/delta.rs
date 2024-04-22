@@ -141,8 +141,7 @@ fn create_add_action(file: &FinishedFile, relative_table_path: &Path) -> Result<
         .strip_prefix(&relative_table_path.to_string())
         .context(format!(
             "File {} is not in table {}",
-            file.filename,
-            relative_table_path.to_string()
+            file.filename, relative_table_path
         ))?;
     Ok(Action::Add(Add {
         path: subpath.to_string(),

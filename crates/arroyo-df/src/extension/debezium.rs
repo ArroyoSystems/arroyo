@@ -16,8 +16,8 @@ use crate::builder::{NamedNode, Planner};
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
-pub(crate) const DEBEZIUM_UNROLLING_EXTENSION_NAME: &'static str = "DebeziumUnrollingExtension";
-pub(crate) const TO_DEBEZIUM_EXTENSION_NAME: &'static str = "ToDebeziumExtension";
+pub(crate) const DEBEZIUM_UNROLLING_EXTENSION_NAME: &str = "DebeziumUnrollingExtension";
+pub(crate) const TO_DEBEZIUM_EXTENSION_NAME: &str = "ToDebeziumExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DebeziumUnrollingExtension {

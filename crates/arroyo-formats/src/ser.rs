@@ -214,7 +214,7 @@ mod tests {
     fn test_raw_string() {
         let mut serializer = ArrowSerializer::new(Format::RawString(RawStringFormat {}));
 
-        let data: Vec<_> = vec!["a", "b", "blah", "whatever"]
+        let data: Vec<_> = ["a", "b", "blah", "whatever"]
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -261,7 +261,7 @@ mod tests {
             timestamp_format: Default::default(),
         }));
 
-        let text: Vec<_> = vec!["a", "b", "blah", "whatever"]
+        let text: Vec<_> = ["a", "b", "blah", "whatever"]
             .iter()
             .map(|s| s.to_string())
             .collect();

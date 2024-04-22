@@ -160,9 +160,7 @@ fn get_partitioner_from_file_settings(
     file_settings: FileSettings,
     schema: ArroyoSchemaRef,
 ) -> Option<Arc<dyn PhysicalExpr>> {
-    let Some(partitions) = file_settings.partitioning else {
-        return None;
-    };
+    let partitions = file_settings.partitioning?;
     match (
         partitions.time_partition_pattern,
         partitions.partition_fields.is_empty(),
@@ -181,7 +179,7 @@ fn get_partitioner_from_file_settings(
 
 fn partition_string_for_fields(
     schema: ArroyoSchemaRef,
-    partition_fields: &Vec<String>,
+    partition_fields: &[String],
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let function = field_logical_expression(schema.clone(), partition_fields)?;
     compile_expression(&function, schema)
@@ -197,7 +195,7 @@ fn partition_string_for_time(
 
 fn partition_string_for_fields_and_time(
     schema: ArroyoSchemaRef,
-    partition_fields: &Vec<String>,
+    partition_fields: &[String],
     time_partition_pattern: String,
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let field_function = field_logical_expression(schema.clone(), partition_fields)?;
@@ -225,10 +223,7 @@ fn compile_expression(expr: &Expr, schema: ArroyoSchemaRef) -> Result<Arc<dyn Ph
     Ok(plan)
 }
 
-fn field_logical_expression(
-    schema: ArroyoSchemaRef,
-    partition_fields: &Vec<String>,
-) -> Result<Expr> {
+fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]) -> Result<Expr> {
     let columns_as_string = partition_fields
         .iter()
         .map(|field| {
@@ -662,11 +657,11 @@ impl RollingPolicy {
                 // if the watermark is greater than the representative and has a different string format,
                 // then this partition is closed and should be rolled over.
                 let datetime: DateTime<Utc> = DateTime::from(watermark);
-                let formatted_time = datetime.format(&pattern).to_string();
+                let formatted_time = datetime.format(pattern).to_string();
                 let representative_datetime: DateTime<Utc> =
                     DateTime::from(stats.representative_timestamp);
                 let representative_formatted_time =
-                    representative_datetime.format(&pattern).to_string();
+                    representative_datetime.format(pattern).to_string();
                 formatted_time != representative_formatted_time
             }
         }
@@ -735,14 +730,11 @@ where
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
-        let mut file_naming = file_settings
-            .file_naming
-            .clone()
-            .unwrap_or_else(|| FileNaming {
-                strategy: Some(FilenameStrategy::Serial),
-                prefix: None,
-                suffix: None,
-            });
+        let mut file_naming = file_settings.file_naming.clone().unwrap_or(FileNaming {
+            strategy: Some(FilenameStrategy::Serial),
+            prefix: None,
+            suffix: None,
+        });
         if file_naming.suffix.is_none() {
             file_naming.suffix = Some(R::suffix());
         }
@@ -832,7 +824,7 @@ where
                             }
                         }
                     }
-                    if removed_partitions.len() > 0 {
+                    if !removed_partitions.is_empty() {
                         self.max_file_index += 1;
                     }
                     for (partition, remove_writer) in removed_partitions {
@@ -979,7 +971,7 @@ where
             completed_parts,
             size,
         } = file_to_finish;
-        if completed_parts.len() == 0 {
+        if completed_parts.is_empty() {
             warn!("no parts to finish for file {}", filename);
             return Ok(None);
         }
@@ -1027,7 +1019,7 @@ where
     }
 
     async fn stop(&mut self) -> Result<()> {
-        for (_partition, filename) in &self.active_writers {
+        for filename in self.active_writers.values() {
             let writer = self.writers.get_mut(filename).unwrap();
             let close_future: Option<BoxedTryFuture<MultipartCallbackWithName>> = writer.close()?;
             if let Some(future) = close_future {
@@ -1568,7 +1560,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
         ctx: &mut ArrowContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()> {
-        self.start(Arc::new(ctx.in_schemas.get(0).unwrap().clone()))?;
+        self.start(Arc::new(ctx.in_schemas.first().unwrap().clone()))?;
         let mut max_file_index = 0;
         let mut recovered_files = Vec::new();
         for file_system_data_recovery in data_recovery {
@@ -1632,8 +1624,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
             .send(FileSystemMessages::FilesToFinish(pre_commit))
             .await?;
         // loop over checkpoint receiver until finished received
-        while let Some(checkpoint_message) = self.checkpoint_receiver.as_mut().unwrap().recv().await
-        {
+        if let Some(checkpoint_message) = self.checkpoint_receiver.as_mut().unwrap().recv().await {
             match checkpoint_message {
                 CheckpointData::Finished {
                     max_file_index: _,

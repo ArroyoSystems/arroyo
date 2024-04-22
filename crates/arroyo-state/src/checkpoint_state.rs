@@ -72,7 +72,7 @@ impl OperatorState {
         HashMap<String, TableCheckpointMetadata>,
     )> {
         self.subtasks_checkpointed += 1;
-        self.watermarks.push(c.watermark.map(|w| from_micros(w)));
+        self.watermarks.push(c.watermark.map(from_micros));
         self.start_time = match self.start_time {
             Some(existing_start_time) => Some(existing_start_time.min(from_micros(c.start_time))),
             None => Some(from_micros(c.start_time)),

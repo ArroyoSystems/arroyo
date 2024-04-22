@@ -129,7 +129,7 @@ impl ArrowOperator for WatermarkGenerator {
         self.last_event = SystemTime::now();
 
         let timestamp_column = get_timestamp_col(&record, ctx);
-        let Some(max_timestamp) = kernels::aggregate::max(&timestamp_column) else {
+        let Some(max_timestamp) = kernels::aggregate::max(timestamp_column) else {
             return;
         };
         let max_timestamp = from_nanos(max_timestamp as u128);

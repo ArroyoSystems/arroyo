@@ -218,7 +218,7 @@ impl AvroFormat {
         static RE: OnceLock<Regex> = OnceLock::new();
         let re = RE.get_or_init(|| Regex::new(r"[^a-zA-Z0-9_.]").unwrap());
 
-        re.replace_all(&s, "_").replace('.', "__")
+        re.replace_all(s, "_").replace('.', "__")
     }
 }
 
@@ -323,7 +323,8 @@ impl NewlineDelimitedFraming {
             .map(|t| u64::from_str(&t))
             .transpose()
             .map_err(|_| {
-                format!("invalid value for framing.newline.max_length; must be an unsigned integer")
+                "invalid value for framing.newline.max_length; must be an unsigned integer"
+                    .to_string()
             })?;
 
         Ok(NewlineDelimitedFraming { max_line_length })

@@ -81,6 +81,7 @@ const GCS_URL: &str = r"^[gG][sS]://(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
 enum Backend {
     S3,
+    #[allow(clippy::upper_case_acronyms)]
     GCS,
     Local,
 }
@@ -197,7 +198,7 @@ impl BackendConfig {
             }
         }
 
-        return Err(StorageError::InvalidUrl);
+        Err(StorageError::InvalidUrl)
     }
 
     fn parse_s3(matches: Captures) -> Result<Self, StorageError> {
@@ -267,7 +268,7 @@ impl BackendConfig {
             .expect("path regex must contain a path group")
             .as_str();
 
-        let mut path = if !path.starts_with("/") {
+        let mut path = if !path.starts_with('/') {
             PathBuf::from(format!("/{}", path))
         } else {
             PathBuf::from(path)
@@ -293,6 +294,10 @@ impl BackendConfig {
             BackendConfig::GCS(gcs) => gcs.key.as_ref(),
             BackendConfig::Local(local) => local.key.as_ref(),
         }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, BackendConfig::Local { .. })
     }
 }
 
@@ -339,9 +344,7 @@ impl StorageProvider {
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
 
-        let result = provider.get("").await;
-
-        result
+        provider.get("").await
     }
 
     pub fn get_key(url: &str) -> Result<String, StorageError> {
@@ -374,7 +377,7 @@ impl StorageProvider {
             if AmazonS3ConfigKey::AccessKeyId == s3_config_key {
                 aws_key_manually_set = true;
             }
-            s3_options.insert(s3_config_key.clone(), value.clone());
+            s3_options.insert(s3_config_key, value.clone());
             builder = builder.with_config(s3_config_key, value);
         }
 
@@ -428,7 +431,7 @@ impl StorageProvider {
         let object_store_base_url = format!("s3://{}", config.bucket);
         Ok(Self {
             config: BackendConfig::S3(config),
-            object_store: Arc::new(builder.build().map_err(|e| Into::<StorageError>::into(e))?),
+            object_store: Arc::new(builder.build().map_err(Into::<StorageError>::into)?),
             canonical_url,
             object_store_base_url,
             storage_options: s3_options
@@ -468,8 +471,7 @@ impl StorageProvider {
         })?;
 
         let object_store = Arc::new(
-            LocalFileSystem::new_with_prefix(&config.path)
-                .map_err(|e| Into::<StorageError>::into(e))?,
+            LocalFileSystem::new_with_prefix(&config.path).map_err(Into::<StorageError>::into)?,
         );
 
         let canonical_url = format!("file://{}", config.path);
@@ -522,7 +524,7 @@ impl StorageProvider {
             .object_store
             .get(&self.qualify_path(&path.into()))
             .await
-            .map_err(|e| Into::<StorageError>::into(e))?
+            .map_err(Into::<StorageError>::into)?
             .bytes()
             .await?;
 
@@ -570,7 +572,7 @@ impl StorageProvider {
         let path: Path = path.into().into();
 
         let bytes = retry!(self.object_store.get(&path).await)
-            .map_err(|e| Into::<StorageError>::into(e))?
+            .map_err(Into::<StorageError>::into)?
             .into_stream();
 
         Ok(tokio_util::io::StreamReader::new(bytes))
@@ -604,17 +606,17 @@ impl StorageProvider {
 
     pub async fn delete_if_present<P: Into<String>>(&self, path: P) -> Result<(), StorageError> {
         let path = path.into();
-        return match self.object_store.delete(&path.into()).await {
+        match self.object_store.delete(&path.into()).await {
             Ok(_) => Ok(()),
             Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(e) => Err(e.into()),
-        };
+        }
     }
 
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
         Ok(
             retry!(self.object_store.initiate_multipart_upload(path).await)
-                .map_err(|e| Into::<StorageError>::into(e))?
+                .map_err(Into::<StorageError>::into)?
                 .0,
         )
     }
@@ -626,14 +628,14 @@ impl StorageProvider {
         part_number: usize,
         bytes: Bytes,
     ) -> Result<PartId, StorageError> {
-        Ok(retry!(
+        retry!(
             self.object_store
                 .get_put_part(path, multipart_id)
                 .await?
                 .put_part(bytes.clone(), part_number)
                 .await
         )
-        .map_err(|e| Into::<StorageError>::into(e))?)
+        .map_err(Into::<StorageError>::into)
     }
 
     pub async fn close_multipart(
@@ -642,14 +644,14 @@ impl StorageProvider {
         multipart_id: &MultipartId,
         parts: Vec<PartId>,
     ) -> Result<(), StorageError> {
-        Ok(retry!(
+        retry!(
             self.object_store
                 .get_put_part(path, multipart_id)
                 .await?
                 .complete(parts.clone())
                 .await
         )
-        .map_err(|e| Into::<StorageError>::into(e))?)
+        .map_err(Into::<StorageError>::into)
     }
 
     /// Produces a URL representation of this path that can be read by other systems,

@@ -46,7 +46,7 @@ impl RedisClient {
     pub fn new(config: &RedisConfig) -> anyhow::Result<Self> {
         Ok(match &config.connection {
             RedisConfigConnection::Address(address) => {
-                let info = from_address(&config, &address.0)?;
+                let info = from_address(config, &address.0)?;
 
                 RedisClient::Standard(Client::open(info).map_err(|e| {
                     anyhow!(
@@ -59,7 +59,7 @@ impl RedisClient {
             RedisConfigConnection::Addresses(addresses) => {
                 let infos: anyhow::Result<Vec<ConnectionInfo>> = addresses
                     .iter()
-                    .map(|address| from_address(&config, address))
+                    .map(|address| from_address(config, address))
                     .collect();
 
                 RedisClient::Clustered(
@@ -174,7 +174,7 @@ impl Connector for RedisConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        ConnectionType::Source
     }
 
     fn get_schema(
@@ -242,7 +242,7 @@ impl Connector for RedisConnector {
                     }
                     (None, Some(cluster_addresses)) => RedisConfigConnection::Addresses(
                         cluster_addresses
-                            .split(",")
+                            .split(',')
                             .map(|s| Address(s.to_string()))
                             .collect(),
                     ),
@@ -276,16 +276,11 @@ impl Connector for RedisConnector {
             column: String,
             sql: &str,
         ) -> anyhow::Result<String> {
-            if schema
-                .fields
-                .iter()
-                .find(|f| {
-                    f.field_name == column
-                        && f.field_type.r#type == FieldType::Primitive(PrimitiveType::String)
-                        && !f.nullable
-                })
-                .is_none()
-            {
+            if !schema.fields.iter().any(|f| {
+                f.field_name == column
+                    && f.field_type.r#type == FieldType::Primitive(PrimitiveType::String)
+                    && !f.nullable
+            }) {
                 bail!("invalid value '{}' for {}, must be the name of a non-nullable TEXT column on the table", column, sql);
             };
 
@@ -315,11 +310,7 @@ impl Connector for RedisConnector {
                         .map(|t| t.try_into())
                         .transpose()
                         .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,
-                    operation: match options
-                        .remove("target.operation")
-                        .as_ref()
-                        .map(|s| s.as_str())
-                    {
+                    operation: match options.remove("target.operation").as_deref() {
                         Some("append") | None => ListOperation::Append,
                         Some("prepend") => ListOperation::Prepend,
                         Some(op) => {

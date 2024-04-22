@@ -156,7 +156,7 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                ctx.deserialize_slice(&v, from_millis(timestamp as u64)).await?;
+                                ctx.deserialize_slice(v, from_millis(timestamp as u64)).await?;
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;

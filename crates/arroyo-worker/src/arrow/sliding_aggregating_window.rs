@@ -59,6 +59,8 @@ pub struct SlidingAggregatingWindowFunc<K: Copy> {
     final_projection: Arc<dyn ExecutionPlan>,
     state: SlidingWindowState,
 }
+
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 enum SlidingWindowState {
     // We haven't received any data.
@@ -91,8 +93,8 @@ impl<K: Copy> SlidingAggregatingWindowFunc<K> {
         }
         let mut nanos = to_nanos(timestamp);
         nanos -= nanos % self.slide.as_nanos();
-        let result = from_nanos(nanos);
-        result
+
+        from_nanos(nanos)
     }
 }
 
@@ -276,8 +278,8 @@ impl RecordBatchTier {
         }
         let mut nanos = to_nanos(timestamp);
         nanos -= nanos % self.width.as_nanos();
-        let result = from_nanos(nanos);
-        result
+
+        from_nanos(nanos)
     }
 
     fn batches_for_timestamp(&self, bin_start: SystemTime) -> Result<Vec<RecordBatch>> {
@@ -536,7 +538,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
             .await
             .expect("should be able to load table");
         // bins before the watermark should be put into the TieredRecordBatchHolder, those after in the exec.
-        let watermark_bin = self.bin_start(watermark.unwrap_or_else(|| SystemTime::UNIX_EPOCH));
+        let watermark_bin = self.bin_start(watermark.unwrap_or(SystemTime::UNIX_EPOCH));
         for (timestamp, batches) in table.all_batches_for_watermark(watermark) {
             let bin = self.bin_start(*timestamp);
             if bin < watermark_bin {
@@ -647,9 +649,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         watermark: Watermark,
         ctx: &mut ArrowContext,
     ) -> Option<Watermark> {
-        let Some(last_watermark) = ctx.last_present_watermark() else {
-            return None;
-        };
+        let last_watermark = ctx.last_present_watermark()?;
 
         while self.should_advance(last_watermark) {
             self.advance(ctx).await.unwrap();
@@ -661,11 +661,10 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
     async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
         let watermark = ctx
             .watermark()
-            .map(|watermark: Watermark| match watermark {
+            .and_then(|watermark: Watermark| match watermark {
                 Watermark::EventTime(watermark) => Some(watermark),
                 Watermark::Idle => None,
-            })
-            .flatten();
+            });
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)

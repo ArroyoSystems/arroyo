@@ -67,7 +67,7 @@ impl Connector for DeltaLakeConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        ConnectionType::Source
     }
 
     fn from_config(
@@ -98,11 +98,8 @@ impl Connector for DeltaLakeConnector {
             bail!("commit_style must be DeltaLake");
         }
 
-        let backend_config = BackendConfig::parse_url(&write_path, true)?;
-        let is_local = match &backend_config {
-            BackendConfig::Local { .. } => true,
-            _ => false,
-        };
+        let backend_config = BackendConfig::parse_url(write_path, true)?;
+        let is_local = backend_config.is_local();
         let description = match (&format_settings, is_local) {
             (Some(FormatSettings::Parquet { .. }), true) => "LocalDeltaLake<Parquet>".to_string(),
             (Some(FormatSettings::Parquet { .. }), false) => "DeltaLake<Parquet>".to_string(),
@@ -177,11 +174,8 @@ impl Connector for DeltaLakeConnector {
             bail!("commit_style must be DeltaLake");
         }
 
-        let backend_config = BackendConfig::parse_url(&write_path, true)?;
-        let is_local = match &backend_config {
-            BackendConfig::Local { .. } => true,
-            _ => false,
-        };
+        let backend_config = BackendConfig::parse_url(write_path, true)?;
+        let is_local = backend_config.is_local();
         match (&format_settings, is_local) {
             (Some(FormatSettings::Parquet { .. }), true) => {
                 Ok(OperatorNode::from_operator(Box::new(

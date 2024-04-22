@@ -44,7 +44,7 @@ pub fn run_service(name: String, args: &[&str], env: Vec<(String, String)>) -> R
 async fn wait_for_state(api_conf: &Configuration, pipeline_id: &str, expected_state: &str) {
     let mut last_state = "None".to_string();
     while last_state != expected_state {
-        let jobs = get_pipeline_jobs(&api_conf, &pipeline_id).await.unwrap();
+        let jobs = get_pipeline_jobs(api_conf, pipeline_id).await.unwrap();
         let job = jobs.data.first().unwrap();
 
         let state = job.state.clone();

@@ -324,7 +324,7 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
 
         let profile = get_connection_profile(&self, &*connector).map_err(|e| e.to_string())?;
 
-        let schema = self.schema.map(|schema| serde_json::from_value(schema));
+        let schema = self.schema.map(serde_json::from_value);
         let schema = match schema {
             Some(Ok(schema)) => Some(schema),
             Some(Err(err)) => {
@@ -458,7 +458,6 @@ pub(crate) async fn expand_schema(
         }
         Format::Avro(_) => {
             expand_avro_schema(
-                name,
                 connector,
                 connection_type,
                 schema,
@@ -473,7 +472,6 @@ pub(crate) async fn expand_schema(
 }
 
 async fn expand_avro_schema(
-    name: &str,
     connector: &str,
     connection_type: ConnectionType,
     mut schema: ConnectionSchema,
@@ -489,7 +487,7 @@ async fn expand_avro_schema(
         match connection_type {
             ConnectionType::Source => {
                 let schema_response = schema_response.ok_or_else(|| bad_request(
-                        format!("No schema was found; ensure that the topic exists and has a value schema configured in the schema registry")))?;
+                        "No schema was found; ensure that the topic exists and has a value schema configured in the schema registry".to_string()))?;
 
                 if schema_response.schema_type != ConfluentSchemaType::Avro {
                     return Err(bad_request(format!(
@@ -520,12 +518,12 @@ async fn expand_avro_schema(
 
     if let Some(Format::Avro(format)) = &mut schema.format {
         format.add_reader_schema(
-            apache_avro::Schema::parse_str(&definition)
+            apache_avro::Schema::parse_str(definition)
                 .map_err(|e| bad_request(format!("Avro schema is invalid: {:?}", e)))?,
         );
     }
 
-    let fields: Result<_, String> = avro::schema::to_arrow(&name, &definition)
+    let fields: Result<_, String> = avro::schema::to_arrow(definition)
         .map_err(|e| bad_request(format!("Invalid avro schema: {}", e)))?
         .fields
         .into_iter()
@@ -556,7 +554,7 @@ async fn expand_json_schema(
         match connection_type {
             ConnectionType::Source => {
                 let schema_response = schema_response.ok_or_else(|| bad_request(
-                    format!("No schema was found; ensure that the topic exists and has a value schema configured in the schema registry")))?;
+                    "No schema was found; ensure that the topic exists and has a value schema configured in the schema registry".to_string()))?;
 
                 if schema_response.schema_type != ConfluentSchemaType::Json {
                     return Err(bad_request(format!(
@@ -577,7 +575,7 @@ async fn expand_json_schema(
 
     if let Some(d) = &schema.definition {
         let arrow = match d {
-            SchemaDefinition::JsonSchema(json) => json::schema::to_arrow(&name, &json)
+            SchemaDefinition::JsonSchema(json) => json::schema::to_arrow(name, json)
                 .map_err(|e| bad_request(format!("Invalid json-schema: {}", e)))?,
             SchemaDefinition::RawSchema(_) => raw_schema(),
             _ => return Err(bad_request("Invalid schema type for json format")),
@@ -649,7 +647,6 @@ async fn get_schema(
         bad_request(format!(
             "failed to fetch schemas from schema repository: {}",
             e.chain()
-                .into_iter()
                 .map(|e| e.to_string())
                 .collect::<Vec<_>>()
                 .join(": ")
@@ -676,7 +673,7 @@ pub(crate) async fn test_schema(
 
     match schema_def {
         SchemaDefinition::JsonSchema(schema) => {
-            if let Err(e) = json::schema::to_arrow(&"test", &schema) {
+            if let Err(e) = json::schema::to_arrow("test", &schema) {
                 Err(bad_request(e.to_string()))
             } else {
                 Ok(())

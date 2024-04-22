@@ -209,7 +209,7 @@ impl WebsocketSourceFunc {
                             Some(Ok(msg)) => {
                                 match msg {
                                     tungstenite::Message::Text(t) => {
-                                        self.handle_message(&t.as_bytes(), ctx).await?
+                                        self.handle_message(t.as_bytes(), ctx).await?
                                     },
                                     tungstenite::Message::Binary(bs) => {
                                         self.handle_message(&bs, ctx).await?

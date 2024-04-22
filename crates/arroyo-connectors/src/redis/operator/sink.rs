@@ -35,7 +35,7 @@ impl RedisSinkFunc {
         let mut key = prefix.to_string();
 
         if let Some(key_index) = self.key_index {
-            key.push_str(&batch.column(key_index).as_string::<i32>().value(idx));
+            key.push_str(batch.column(key_index).as_string::<i32>().value(idx));
         };
 
         key
@@ -142,10 +142,8 @@ impl RedisWriter {
                                         }
                                     }
                                     RedisBehavior::Push { append, max } => {
-                                        if max.is_some() {
-                                            if !self.max_push_keys.contains(&key) {
-                                                self.max_push_keys.insert(key.clone());
-                                            }
+                                        if max.is_some() && !self.max_push_keys.contains(&key) {
+                                            self.max_push_keys.insert(key.clone());
                                         }
 
                                         if append {
@@ -184,20 +182,18 @@ impl RedisWriter {
     async fn flush(&mut self) {
         let mut attempts = 0;
 
-        match self.behavior {
-            RedisBehavior::Push {
-                max: Some(max),
-                append,
-            } => {
-                for k in self.max_push_keys.drain().into_iter() {
-                    if append {
-                        self.pipeline.ltrim(k, -(max as isize), -1);
-                    } else {
-                        self.pipeline.ltrim(k, 0, max as isize - 1);
-                    }
+        if let RedisBehavior::Push {
+            max: Some(max),
+            append,
+        } = self.behavior
+        {
+            for k in self.max_push_keys.drain() {
+                if append {
+                    self.pipeline.ltrim(k, -(max as isize), -1);
+                } else {
+                    self.pipeline.ltrim(k, 0, max as isize - 1);
                 }
             }
-            _ => {}
         }
 
         while attempts < 20 {
@@ -252,7 +248,7 @@ impl ArrowOperator for RedisSinkFunc {
             }) => {
                 self.key_index = Some(
                     ctx.in_schemas
-                        .get(0)
+                        .first()
                         .expect("no in-schema for redis sink!")
                         .schema
                         .index_of(key)
@@ -270,7 +266,7 @@ impl ArrowOperator for RedisSinkFunc {
             hash_field_column, ..
         }) = &self.table.connector_type
         {
-            self.hash_index = Some(ctx.in_schemas.get(0).expect("no in-schema for redis sink!")
+            self.hash_index = Some(ctx.in_schemas.first().expect("no in-schema for redis sink!")
                 .schema
                 .index_of(hash_field_column)
                 .unwrap_or_else(|_| panic!("hash field column ({hash_field_column}) does not exist in input schema for redis sink")));

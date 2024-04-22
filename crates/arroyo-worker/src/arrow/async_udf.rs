@@ -192,7 +192,7 @@ impl ArrowOperator for AsyncUdfOperator {
         // and the old partitions are not aligned in the actual dataflow. To fix this we need
         // to retain keys throughout the dataflow.
         gs.get_all()
-            .into_iter()
+            .iter()
             .filter(|(task_index, _)| {
                 **task_index % ctx.task_info.parallelism == ctx.task_info.task_index
             })
@@ -271,7 +271,7 @@ impl ArrowOperator for AsyncUdfOperator {
             let args: Vec<_> = arg_batch
                 .iter()
                 .map(|v| {
-                    arrow::compute::take(&*v, &UInt64Array::from(vec![i as u64]), None)
+                    arrow::compute::take(v, &UInt64Array::from(vec![i as u64]), None)
                         .unwrap()
                         .to_data()
                 })
@@ -300,10 +300,7 @@ impl ArrowOperator for AsyncUdfOperator {
             rows.push(row.row());
         }
 
-        let mut cols = self
-            .input_row_converter
-            .convert_rows(rows.into_iter())
-            .unwrap();
+        let mut cols = self.input_row_converter.convert_rows(rows).unwrap();
         cols.push(make_array(results));
 
         let batch = RecordBatch::try_new(self.input_schema.as_ref().unwrap().clone(), cols)

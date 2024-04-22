@@ -39,7 +39,7 @@ impl SingleFileSourceFunc {
         let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
             ctx.table_manager.get_global_keyed_state("f").await.unwrap();
 
-        self.lines_read = state.get(&self.input_file).map(|v| *v).unwrap_or_default();
+        self.lines_read = state.get(&self.input_file).copied().unwrap_or_default();
 
         let file = File::open(&self.input_file).await.expect(&self.input_file);
         let mut lines = BufReader::new(file).lines();

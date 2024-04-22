@@ -56,8 +56,7 @@ pub async fn main() {
 }
 
 async fn get_docker() -> anyhow::Result<Docker> {
-    Ok(Docker::connect_with_local_defaults()
-        .context("Failed to connect to docker -- is it running?")?)
+    Docker::connect_with_local_defaults().context("Failed to connect to docker -- is it running?")
 }
 
 async fn create_image(docker: &Docker, image: &str) -> Result<String> {
@@ -79,7 +78,7 @@ async fn create_image(docker: &Docker, image: &str) -> Result<String> {
 
     println!("Waiting for image to be available...");
     loop {
-        match docker.inspect_image(&image).await {
+        match docker.inspect_image(image).await {
             Ok(metadata) => {
                 println!();
                 return Ok(metadata.id.unwrap());
@@ -216,7 +215,7 @@ pub async fn start(tag: Option<String>, damon: bool) -> Result<()> {
 
     let docker = get_docker().await?;
 
-    let tag = tag.as_ref().map(|t| t.as_str()).unwrap_or("latest");
+    let tag = tag.as_deref().unwrap_or("latest");
     let image = format!("ghcr.io/arroyosystems/arroyo-single:{}", tag);
 
     let image_id = create_image(&docker, &image).await?;

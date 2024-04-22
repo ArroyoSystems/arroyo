@@ -8,10 +8,10 @@ pub struct Udf {
     pub definition: String,
 }
 
-impl Into<api_proto::Udf> for Udf {
-    fn into(self) -> api_proto::Udf {
+impl From<Udf> for api_proto::Udf {
+    fn from(val: Udf) -> Self {
         api_proto::Udf {
-            definition: self.definition,
+            definition: val.definition,
         }
     }
 }

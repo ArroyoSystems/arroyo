@@ -22,6 +22,12 @@ pub trait SchemaResolver: Send {
 /// dynamically resolve them.
 pub struct FailingSchemaResolver {}
 
+impl Default for FailingSchemaResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FailingSchemaResolver {
     pub fn new() -> Self {
         FailingSchemaResolver {}
@@ -285,9 +291,7 @@ impl ConfluentSchemaRegistryClient {
             })?;
 
         match resp.status() {
-            StatusCode::OK => {
-                return Ok(());
-            }
+            StatusCode::OK => Ok(()),
             StatusCode::NOT_FOUND => {
                 bail!("schema registry returned 404 Not Found; check the endpoint is correct")
             }

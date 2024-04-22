@@ -196,7 +196,7 @@ impl Program {
 
         let mut registry = new_registry();
         for udf in udfs {
-            registry.add_local_udf(&udf);
+            registry.add_local_udf(udf);
         }
         Self::from_logical(name, logical, &assignments, registry)
     }
@@ -249,8 +249,7 @@ impl Program {
                         node.operator_name,
                         node.operator_config.clone(),
                         registry.clone(),
-                    )
-                    .into(),
+                    ),
                     projection: projection.clone(),
                 }));
             }
@@ -484,10 +483,9 @@ impl Engine {
             Some(
                 StateBackend::load_checkpoint_metadata(&self.job_id, epoch)
                     .await
-                    .expect(&format!(
-                        "failed to load checkpoint metadata for epoch {}",
-                        epoch
-                    )),
+                    .unwrap_or_else(|_| {
+                        panic!("failed to load checkpoint metadata for epoch {}", epoch)
+                    }),
             )
         } else {
             None
@@ -684,7 +682,7 @@ impl Engine {
                 if graph.edge_endpoints(edge).unwrap().1 == idx {
                     let weight = graph.edge_weight_mut(edge).unwrap();
                     in_qs_map
-                        .entry((weight.edge.clone(), weight.in_logical_idx))
+                        .entry((weight.edge, weight.in_logical_idx))
                         .or_default()
                         .push(weight.rx.take().unwrap());
                 }
@@ -831,5 +829,5 @@ pub fn construct_operator(
     };
 
     ctor.with_config(config, registry)
-        .expect(&format!("Failed to construct operator {:?}", operator))
+        .unwrap_or_else(|_| panic!("Failed to construct operator {:?}", operator))
 }

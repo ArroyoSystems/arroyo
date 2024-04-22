@@ -83,7 +83,7 @@ impl InstantJoin {
         }
     }
     async fn get_or_insert_exec(&mut self, time: SystemTime) -> Result<&mut InstantComputeHolder> {
-        if !self.execs.contains_key(&time) {
+        if let std::collections::btree_map::Entry::Vacant(e) = self.execs.entry(time) {
             let (left_sender, left_receiver) = unbounded_channel();
             let (right_sender, right_receiver) = unbounded_channel();
             self.left_receiver.write().unwrap().replace(left_receiver);
@@ -100,7 +100,7 @@ impl InstantJoin {
                 left_sender,
                 right_sender,
             };
-            self.execs.insert(time, exec);
+            e.insert(exec);
         }
         Ok(self.execs.get_mut(&time).unwrap())
     }
@@ -154,9 +154,7 @@ impl InstantJoin {
             .collect();
         let sorted = RecordBatch::try_new(batch.schema(), columns).unwrap();
         let sorted_timestamps = take(time_column, &indices, None).unwrap();
-        let ranges = partition(&vec![sorted_timestamps.clone()])
-            .unwrap()
-            .ranges();
+        let ranges = partition(&[sorted_timestamps.clone()]).unwrap().ranges();
         let typed_timestamps = sorted_timestamps
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
@@ -191,7 +189,7 @@ type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 #[async_trait::async_trait]
 impl ArrowOperator for InstantJoin {
     fn name(&self) -> String {
-        format!("InstantJoin")
+        "InstantJoin".to_string()
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
@@ -342,8 +340,8 @@ impl ArrowOperator for InstantJoin {
 
     async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut ArrowContext) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
-        match *data {
-            Some((bin, batch_option)) => match batch_option {
+        if let Some((bin, batch_option)) = *data {
+            match batch_option {
                 None => {
                     debug!("future for {} was finished elsewhere", print_time(bin));
                 }
@@ -358,8 +356,7 @@ impl ArrowOperator for InstantJoin {
                         "FuturesUnordered returned a batch, but we can't find the exec"
                     ),
                 },
-            },
-            None => {}
+            }
         }
     }
 }

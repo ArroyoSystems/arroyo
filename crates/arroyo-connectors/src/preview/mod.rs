@@ -44,7 +44,7 @@ impl Connector for PreviewConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Sink;
+        ConnectionType::Sink
     }
 
     fn test(
@@ -115,8 +115,6 @@ impl Connector for PreviewConnector {
         _: Self::TableT,
         _: OperatorConfig,
     ) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(
-            Box::new(PreviewSink::default()),
-        ))
+        Ok(OperatorNode::from_operator(Box::<PreviewSink>::default()))
     }
 }

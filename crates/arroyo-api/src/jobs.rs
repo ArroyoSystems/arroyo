@@ -95,7 +95,7 @@ pub(crate) async fn create_job<'a>(
             &auth.organization_id,
             &pipeline_name,
             &auth.user_id,
-            &pipeline_id,
+            pipeline_id,
             &(checkpoint_interval.as_micros() as i64),
             &(if request.preview {
                 Some(PREVIEW_TTL.as_micros() as i64)
@@ -128,7 +128,7 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
     use Progress::*;
     use StopType::*;
 
-    let (a, s, p) = match (state.as_ref(), running_desired) {
+    let (a, s, p) = match (state, running_desired) {
         ("Created", true) => ("Stop", Some(Checkpoint), InProgress),
         ("Created", false) => ("Start", Some(None), Stable),
 
@@ -233,22 +233,22 @@ pub async fn get_job_errors(
     }))
 }
 
-impl Into<JobLogMessage> for DbLogMessage {
-    fn into(self) -> JobLogMessage {
-        let level: JobLogLevel = match self.log_level {
+impl From<DbLogMessage> for JobLogMessage {
+    fn from(val: DbLogMessage) -> Self {
+        let level: JobLogLevel = match val.log_level {
             LogLevel::info => JobLogLevel::Info,
             LogLevel::warn => JobLogLevel::Warn,
             LogLevel::error => JobLogLevel::Error,
         };
 
         JobLogMessage {
-            id: self.pub_id,
-            created_at: to_micros(self.created_at),
-            operator_id: self.operator_id,
-            task_index: self.task_index.map(|i| i as u64),
+            id: val.pub_id,
+            created_at: to_micros(val.created_at),
+            operator_id: val.operator_id,
+            task_index: val.task_index.map(|i| i as u64),
             level,
-            message: self.message,
-            details: self.details,
+            message: val.message,
+            details: val.details,
         }
     }
 }
@@ -417,9 +417,9 @@ pub async fn get_checkpoint_details(
                 .for_each(|(subtask_index, subtask_details)| {
                     operator_bytes += subtask_details.bytes.unwrap_or(0);
                     subtasks.push(SubtaskCheckpointGroup {
-                        index: subtask_index.clone(),
+                        index: *subtask_index,
                         bytes: subtask_details.bytes.unwrap_or(0),
-                        event_spans: get_event_spans(&subtask_details),
+                        event_spans: get_event_spans(subtask_details),
                     });
                 });
 
@@ -542,13 +542,13 @@ pub async fn get_jobs(
     }))
 }
 
-impl Into<Checkpoint> for DbCheckpoint {
-    fn into(self) -> Checkpoint {
+impl From<DbCheckpoint> for Checkpoint {
+    fn from(val: DbCheckpoint) -> Self {
         Checkpoint {
-            epoch: self.epoch as u32,
-            backend: self.state_backend,
-            start_time: to_micros(self.start_time),
-            finish_time: self.finish_time.map(to_micros),
+            epoch: val.epoch as u32,
+            backend: val.state_backend,
+            start_time: to_micros(val.start_time),
+            finish_time: val.finish_time.map(to_micros),
         }
     }
 }

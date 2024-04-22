@@ -37,9 +37,7 @@ pub(crate) async fn avro_messages(
     let mut registry = schema_registry.lock().await;
 
     let messages = if format.raw_datums || format.confluent_schema_registry {
-        let schema = if registry.contains_key(&id) {
-            registry.get(&id).unwrap()
-        } else {
+        let schema = if let std::collections::hash_map::Entry::Vacant(e) = registry.entry(id) {
             let new_schema = resolver
                 .resolve_schema(id)
                 .await
@@ -62,19 +60,21 @@ pub(crate) async fn avro_messages(
             })?;
 
             info!("Loaded new schema with id {} from Schema Registry", id);
-            registry.insert(id, new_schema);
+            e.insert(new_schema);
 
+            registry.get(&id).unwrap()
+        } else {
             registry.get(&id).unwrap()
         };
 
-        let mut buf = &msg[..];
+        let mut buf = msg;
         vec![from_avro_datum(
             schema,
             &mut buf,
             format.reader_schema.as_ref().map(|t| t.into()),
         )]
     } else {
-        Reader::new(&msg[..])
+        Reader::new(msg)
             .map_err(|e| SourceError::bad_data(format!("invalid Avro schema in message: {:?}", e)))?
             .collect()
     };
@@ -120,7 +120,7 @@ pub(crate) fn avro_to_json(value: AvroValue) -> JsonValue {
         // this isn't the standard Avro json encoding, which just
         Value::Bytes(b) | Value::Fixed(_, b) => encode_vec(b),
         Value::Union(_, b) => avro_to_json(*b),
-        Value::Array(a) => JsonValue::Array(a.into_iter().map(|v| avro_to_json(v)).collect()),
+        Value::Array(a) => JsonValue::Array(a.into_iter().map(avro_to_json).collect()),
         Value::Map(m) => {
             JsonValue::Object(m.into_iter().map(|(k, v)| (k, avro_to_json(v))).collect())
         }
@@ -233,7 +233,6 @@ mod tests {
             Schema::new(vec![Field::new("value", DataType::Utf8, false)])
         } else {
             to_arrow(
-                "source",
                 &format
                     .reader_schema
                     .as_ref()
@@ -296,7 +295,7 @@ mod tests {
             deserializer_with_schema(format.clone(), writer_schema);
 
         let errors = deserializer
-            .deserialize_slice(&mut builders, &message, SystemTime::now())
+            .deserialize_slice(&mut builders, message, SystemTime::now())
             .await;
         assert_eq!(errors, vec![]);
 
@@ -516,7 +515,7 @@ mod tests {
         }"#;
 
         let mut format = AvroFormat::new(false, true, true);
-        format.add_reader_schema(apache_avro::Schema::parse_str(&schema_str).unwrap());
+        format.add_reader_schema(apache_avro::Schema::parse_str(schema_str).unwrap());
         let vs = deserialize_with_schema(format, Some(schema_str), &data).await;
 
         let expected = json!({ "name": "Alyssa", "favorite_number": 256, "favorite_color": null });

@@ -68,7 +68,7 @@ impl Connector for SSEConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        ConnectionType::Source
     }
 
     fn from_config(
@@ -138,7 +138,7 @@ impl Connector for SSEConnector {
             SseTable {
                 endpoint,
                 events,
-                headers: headers.map(|s| VarStr::new(s)),
+                headers: headers.map(VarStr::new),
             },
             schema,
         )
@@ -150,7 +150,7 @@ impl Connector for SSEConnector {
         table: Self::TableT,
         config: OperatorConfig,
     ) -> anyhow::Result<OperatorNode> {
-        SSESourceFunc::new(table, config)
+        SSESourceFunc::new_operator(table, config)
     }
 }
 

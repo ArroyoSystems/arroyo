@@ -13,7 +13,7 @@ use crate::builder::{NamedNode, SplitPlanOutput};
 use super::{ArroyoExtension, IsRetractExtension, NodeWithIncomingEdges};
 use prost::Message;
 
-pub(crate) const UPDATING_AGGREGATE_EXTENSION_NAME: &'static str = "UpdatingAggregateExtension";
+pub(crate) const UPDATING_AGGREGATE_EXTENSION_NAME: &str = "UpdatingAggregateExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct UpdatingAggregateExtension {
@@ -158,7 +158,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
         };
         let node = LogicalNode {
             operator_id: format!("updating_aggregate_{}", index),
-            description: format!("UpdatingAggregate"),
+            description: "UpdatingAggregate".to_string(),
             operator_name: OperatorName::UpdatingAggregate,
             operator_config: config.encode_to_vec(),
             parallelism: 1,

@@ -25,7 +25,7 @@ use super::{
     NodeWithIncomingEdges,
 };
 
-pub(crate) const SINK_NODE_NAME: &'static str = "SinkExtension";
+pub(crate) const SINK_NODE_NAME: &str = "SinkExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct SinkExtension {

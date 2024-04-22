@@ -59,6 +59,7 @@ fn get_field_schema<'a>(schema: &'a Schema, name: &str, nullable: bool) -> &'a S
     }
 }
 
+#[allow(clippy::redundant_closure_call)]
 fn serialize_column<T: SerializeTarget>(
     schema: &Schema,
     values: &mut T,
@@ -156,7 +157,10 @@ fn serialize_column<T: SerializeTarget>(
             };
 
             let item_values: Vec<Option<Vec<Value>>> = if let Some(nulls) = column.nulls() {
-                nulls.iter().map(|null| null.then(|| vec![])).collect()
+                nulls
+                    .iter()
+                    .map(|null| null.then(std::vec::Vec::new))
+                    .collect()
             } else {
                 (0..column.len()).map(|_| Some(vec![])).collect()
             };
@@ -168,7 +172,7 @@ fn serialize_column<T: SerializeTarget>(
             {
                 if let Some(v) = &mut v {
                     serialize_column(
-                        &*item_schema,
+                        item_schema,
                         v,
                         "",
                         &column.expect("unmasked null in list"),
@@ -182,7 +186,7 @@ fn serialize_column<T: SerializeTarget>(
                         name,
                         Value::Union(
                             v.is_some() as u32,
-                            Box::new(v.map(|v| Value::Array(v)).unwrap_or_else(|| Value::Null)),
+                            Box::new(v.map(Value::Array).unwrap_or_else(|| Value::Null)),
                         ),
                     );
                 } else {
@@ -275,11 +279,7 @@ pub fn serialize(schema: &Schema, batch: &RecordBatch) -> Vec<Value> {
         serialize_column(schema, &mut values, &name, column, field.is_nullable());
     }
 
-    values
-        .into_iter()
-        .filter_map(|f| f)
-        .map(|r| r.into())
-        .collect()
+    values.into_iter().flatten().map(|r| r.into()).collect()
 }
 
 #[cfg(test)]

@@ -136,7 +136,7 @@ impl JoinWithExpiration {
 #[async_trait::async_trait]
 impl ArrowOperator for JoinWithExpiration {
     fn name(&self) -> String {
-        format!("JoinWithExpiration")
+        "JoinWithExpiration".to_string()
     }
 
     async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut ArrowContext) {

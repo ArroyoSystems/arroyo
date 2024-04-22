@@ -20,7 +20,7 @@ use crate::{
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
-pub(crate) const REMOTE_TABLE_NAME: &'static str = "RemoteTableExtension";
+pub(crate) const REMOTE_TABLE_NAME: &str = "RemoteTableExtension";
 
 /* Lightweight extension that allows us to segment the graph and merge nodes with the same name.
   An Extension Planner will be used to isolate computation to individual nodes.
@@ -49,13 +49,13 @@ impl ArroyoExtension for RemoteTableExtension {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         match input_schemas.len() {
-            1 => {}
             0 => bail!("RemoteTableExtension should have exactly one input"),
-            multiple_inputs => {
+            1 => {}
+            _multiple_inputs => {
                 // check they are all the same
                 let first = input_schemas[0].clone();
-                for i in 1..multiple_inputs {
-                    if input_schemas[i] != first {
+                for schema in input_schemas.iter().skip(1) {
+                    if *schema != first {
                         bail!("If a node has multiple inputs, they must all have the same schema");
                     }
                 }

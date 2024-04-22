@@ -60,7 +60,7 @@ impl<'a> Iterator for FramingIterator<'a> {
             Some(framing) => {
                 match &framing.method {
                     FramingMethod::Newline(newline) => {
-                        let end = memchr::memchr('\n' as u8, &self.buf[self.offset..])
+                        let end = memchr::memchr(b'\n', &self.buf[self.offset..])
                             .map(|i| self.offset + i)
                             .unwrap_or(self.buf.len());
 
@@ -147,7 +147,7 @@ impl ArrowDeserializer {
                 )
             }),
             format: Arc::new(format),
-            framing: framing.map(|f| Arc::new(f)),
+            framing: framing.map(Arc::new),
             schema,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
             bad_data,
@@ -159,7 +159,7 @@ impl ArrowDeserializer {
 
     pub async fn deserialize_slice(
         &mut self,
-        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
     ) -> Vec<SourceError> {
@@ -197,7 +197,7 @@ impl ArrowDeserializer {
 
     fn deserialize_single(
         &mut self,
-        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
     ) -> Result<(), SourceError> {
@@ -235,8 +235,8 @@ impl ArrowDeserializer {
 
     pub async fn deserialize_slice_avro<'a>(
         &mut self,
-        builders: &mut Vec<Box<dyn ArrayBuilder>>,
-        mut msg: &'a [u8],
+        builders: &mut [Box<dyn ArrayBuilder>],
+        msg: &'a [u8],
         timestamp: SystemTime,
     ) -> Vec<SourceError> {
         let Format::Avro(format) = &*self.format else {
@@ -247,7 +247,7 @@ impl ArrowDeserializer {
             format,
             &self.schema_registry,
             &self.schema_resolver,
-            &mut msg,
+            msg,
         )
         .await
         {
@@ -303,7 +303,7 @@ impl ArrowDeserializer {
         errors
     }
 
-    fn deserialize_raw_string(&mut self, buffer: &mut Vec<Box<dyn ArrayBuilder>>, msg: &[u8]) {
+    fn deserialize_raw_string(&mut self, buffer: &mut [Box<dyn ArrayBuilder>], msg: &[u8]) {
         let (col, _) = self
             .schema
             .schema
@@ -322,7 +322,7 @@ impl ArrowDeserializer {
 }
 
 pub(crate) fn add_timestamp(
-    builder: &mut Vec<Box<dyn ArrayBuilder>>,
+    builder: &mut [Box<dyn ArrayBuilder>],
     idx: usize,
     timestamp: SystemTime,
 ) {

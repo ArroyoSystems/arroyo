@@ -44,10 +44,10 @@ pub struct MqttConnector {}
 impl MqttTable {
     pub fn qos(&self) -> QoS {
         self.qos
-            .and_then(|qos| match qos {
-                QualityOfService::AtMostOnce => Some(QoS::AtMostOnce),
-                QualityOfService::AtLeastOnce => Some(QoS::AtLeastOnce),
-                QualityOfService::ExactlyOnce => Some(QoS::ExactlyOnce),
+            .map(|qos| match qos {
+                QualityOfService::AtMostOnce => QoS::AtMostOnce,
+                QualityOfService::AtLeastOnce => QoS::AtLeastOnce,
+                QualityOfService::ExactlyOnce => QoS::ExactlyOnce,
             })
             .unwrap_or(QoS::AtMostOnce)
     }
@@ -252,7 +252,7 @@ impl Connector for MqttConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(&self, None, name, connection, table, schema)
+        Self::from_config(self, None, name, connection, table, schema)
     }
 
     fn make_operator(
@@ -314,10 +314,10 @@ async fn test_inner(
             let topic = t.topic;
             let qos = t
                 .qos
-                .and_then(|qos| match qos {
-                    QualityOfService::AtMostOnce => Some(QoS::AtMostOnce),
-                    QualityOfService::AtLeastOnce => Some(QoS::AtLeastOnce),
-                    QualityOfService::ExactlyOnce => Some(QoS::ExactlyOnce),
+                .map(|qos| match qos {
+                    QualityOfService::AtMostOnce => QoS::AtMostOnce,
+                    QualityOfService::AtLeastOnce => QoS::AtLeastOnce,
+                    QualityOfService::ExactlyOnce => QoS::ExactlyOnce,
                 })
                 .unwrap_or(QoS::AtMostOnce);
             if let TableType::Sink { retain, .. } = t.type_ {
@@ -397,10 +397,7 @@ pub(crate) fn create_connection(
     // per client id
     let client_id = format!(
         "{}_{}{}",
-        c.client_prefix
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or_else(|| "arroyo-mqtt"),
+        c.client_prefix.as_deref().unwrap_or("arroyo-mqtt"),
         task_id,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -438,7 +435,7 @@ pub(crate) fn create_connection(
         let tls_config = if let Some((Some(client_cert), Some(client_key))) = c
             .tls
             .as_ref()
-            .and_then(|tls| Some((tls.cert.as_ref(), tls.key.as_ref())))
+            .map(|tls| (tls.cert.as_ref(), tls.key.as_ref()))
         {
             let client_cert = client_cert.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
             let client_key = client_key.sub_env_vars().map_err(|e| anyhow!("{}", e))?;

@@ -294,7 +294,7 @@ impl ArroyoSchema {
                     .filter(|index| {
                         !keys.contains(index)
                             && (with_timestamp || *index != self.timestamp_index)
-                            && !(*index == generation_index)
+                            && *index != generation_index
                     })
                     .collect::<Vec<_>>();
                 Converter::new(self.sort_fields_by_indices(&indices))
@@ -312,14 +312,11 @@ impl ArroyoSchema {
                 }
                 indices
             }
-            Some(keys) => {
-                let indices = (0..field_count)
-                    .filter(|index| {
-                        !keys.contains(index) && (with_timestamp || *index != self.timestamp_index)
-                    })
-                    .collect::<Vec<_>>();
-                indices
-            }
+            Some(keys) => (0..field_count)
+                .filter(|index| {
+                    !keys.contains(index) && (with_timestamp || *index != self.timestamp_index)
+                })
+                .collect::<Vec<_>>(),
         }
     }
 
@@ -344,6 +341,7 @@ impl ArroyoSchema {
         with_timestamp: bool,
     ) -> Result<Vec<Range<usize>>> {
         if self.key_indices.is_none() && !with_timestamp {
+            #[allow(clippy::single_range_in_vec_init)]
             return Ok(vec![0..batch.num_rows()]);
         }
         let mut partition_columns = vec![];
@@ -383,7 +381,7 @@ impl ArroyoSchema {
         let timestamp_index = unkeyed_schema.index_of(TIMESTAMP_FIELD)?;
         Ok(Self {
             schema: Arc::new(unkeyed_schema),
-            timestamp_index: timestamp_index,
+            timestamp_index,
             key_indices: None,
         })
     }

@@ -75,7 +75,7 @@ impl OperatorNode {
     async fn run_behavior(
         &mut self,
         ctx: &mut ArrowContext,
-        in_qs: &mut Vec<BatchReceiver>,
+        in_qs: &mut [BatchReceiver],
         ready: Arc<Barrier>,
     ) -> Option<SignalMessage> {
         match self {
@@ -181,7 +181,7 @@ pub trait SourceOperator: Send + 'static {
 async fn operator_run_behavior(
     this: &mut Box<dyn ArrowOperator + Send>,
     ctx: &mut ArrowContext,
-    in_qs: &mut Vec<BatchReceiver>,
+    in_qs: &mut [BatchReceiver],
     ready: Arc<Barrier>,
 ) -> Option<SignalMessage> {
     this.on_start(ctx).await;
@@ -199,7 +199,7 @@ async fn operator_run_behavior(
     let mut sel = InQReader::new();
     let in_partitions = in_qs.len();
 
-    for (i, q) in in_qs.into_iter().enumerate() {
+    for (i, q) in in_qs.iter_mut().enumerate() {
         let stream = async_stream::stream! {
           while let Some(item) = q.recv().await {
             yield(i,item);
@@ -371,7 +371,7 @@ pub trait ArrowOperator: Send + 'static {
                         .unwrap();
                 }
 
-                if counter.mark(idx, &t) {
+                if counter.mark(idx, t) {
                     debug!(
                         "Checkpointing {}-{}-{}",
                         self.name(),
@@ -454,6 +454,7 @@ pub trait ArrowOperator: Send + 'static {
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext);
 
+    #[allow(clippy::type_complexity)]
     fn future_to_poll(
         &mut self,
     ) -> Option<Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>> {
@@ -647,7 +648,7 @@ impl Registry {
     }
 
     pub fn get_dylib(&self, path: &str) -> Option<Arc<UdfDylib>> {
-        self.dylibs.lock().unwrap().get(path).map(|t| Arc::clone(t))
+        self.dylibs.lock().unwrap().get(path).cloned()
     }
 
     pub fn add_udf(&mut self, udf: Arc<ScalarUDF>) {

@@ -112,7 +112,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
             operator_id: ctx.task_info.operator_id.clone(),
             subtask_index: ctx.task_info.task_index as u32,
             time: SystemTime::now(),
-            event_type: arroyo_rpc::grpc::TaskCheckpointEventType::FinishedCommit.into(),
+            event_type: arroyo_rpc::grpc::TaskCheckpointEventType::FinishedCommit,
         });
         ctx.control_tx
             .send(checkpoint_event)
@@ -209,12 +209,10 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
             .committer
             .checkpoint(
                 &ctx.task_info,
-                ctx.watermark()
-                    .map(|watermark| match watermark {
-                        Watermark::EventTime(watermark) => Some(watermark),
-                        arroyo_types::Watermark::Idle => None,
-                    })
-                    .flatten(),
+                ctx.watermark().and_then(|watermark| match watermark {
+                    Watermark::EventTime(watermark) => Some(watermark),
+                    arroyo_types::Watermark::Idle => None,
+                }),
                 checkpoint_barrier.then_stop,
             )
             .await

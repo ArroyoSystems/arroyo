@@ -70,7 +70,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             .clone()
             .unwrap()
             .file_naming
-            .unwrap_or_else(|| FileNaming {
+            .unwrap_or(FileNaming {
                 strategy: Some(FilenameStrategy::Serial),
                 prefix: None,
                 suffix: None,
@@ -142,8 +142,8 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             let filename = match partition {
                 Some(partition) => {
                     // make sure the partition directory exists in tmp and final
-                    create_dir_all(&format!("{}/{}", self.tmp_dir, partition)).unwrap();
-                    create_dir_all(&format!("{}/{}", self.final_dir, partition)).unwrap();
+                    create_dir_all(format!("{}/{}", self.tmp_dir, partition)).unwrap();
+                    create_dir_all(format!("{}/{}", self.final_dir, partition)).unwrap();
                     format!("{}/{}", partition, filename)
                 }
                 None => filename,
@@ -160,7 +160,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             );
             self.next_file_index += 1;
         }
-        self.writers.get_mut(&partition).unwrap()
+        self.writers.get_mut(partition).unwrap()
     }
 }
 
@@ -302,10 +302,8 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             );
             tokio::fs::rename(tmp_file, destination).await?;
             finished_files.push(FinishedFile {
-                filename: object_store::path::Path::parse(
-                    destination.to_string_lossy().to_string(),
-                )?
-                .to_string(),
+                filename: object_store::path::Path::parse(&destination.to_string_lossy())?
+                    .to_string(),
                 partition: None,
                 size: destination.metadata()?.len() as usize,
             });
