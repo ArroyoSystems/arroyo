@@ -39,6 +39,7 @@ pub struct UpdatingAggregatingFunc {
     partial_schema: ArroyoSchemaRef,
     state_partial_schema: ArroyoSchemaRef,
     state_final_schema: ArroyoSchemaRef,
+    flush_interval: Duration,
     combine_plan: Arc<dyn ExecutionPlan>,
     finish_execution_plan: Arc<dyn ExecutionPlan>,
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
@@ -205,7 +206,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         .collect()
     }
     fn tick_interval(&self) -> Option<Duration> {
-        Some(Duration::from_secs(1))
+        Some(self.flush_interval)
     }
 
     async fn handle_tick(&mut self, _tick: u64, ctx: &mut ArrowContext) {
@@ -342,6 +343,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
                         .ok_or_else(|| anyhow!("requires final schema"))?
                         .try_into()?,
                 ),
+                flush_interval: Duration::from_micros(config.flush_interval_micros),
                 finish_execution_plan,
                 receiver,
                 sender: None,
