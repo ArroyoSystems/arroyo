@@ -41,8 +41,9 @@ petgraph = {version = "0.6", features = ["serde-1"]}
 
 http = "0.2"
 tower-http = {version = "0.4", features = ["trace", "fs", "cors", "validate-request", "auth"]}
-axum = {version = "0.6.12", features = ["headers", "tokio", "macros"]}
+axum = {version = "0.6.20", features = ["headers", "tokio", "macros"]}
 axum-extra = "0.7.4"
+h2 = "0.3.26"
 thiserror = "1.0.40"
 utoipa = "4"
 utoipa-swagger-ui = { version = "4", features = ["axum"] }
