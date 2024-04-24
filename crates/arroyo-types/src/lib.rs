@@ -104,6 +104,7 @@ pub const GRPC_PORT_ENV: &str = "GRPC_PORT";
 pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
 pub const COMPILER_PORT_ENV: &str = "COMPILER_PORT";
 
+pub const UPDATE_AGGREGATE_FLUSH_MS_ENV: &str = "UPDATE_AGGREGATE_FLUSH_MS";
 pub const BATCH_SIZE_ENV: &str = "BATCH_SIZE";
 pub const BATCH_LINGER_MS_ENV: &str = "BATCH_LINGER_MS";
 pub const USE_LOCAL_UDF_LIB_ENV: &str = "USE_LOCAL_UDF_LIB";

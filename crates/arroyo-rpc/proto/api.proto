@@ -129,6 +129,7 @@ message UpdatingAggregateOperator {
   bytes partial_aggregation_plan = 5;
   bytes combine_plan = 6;
   bytes final_aggregation_plan = 7;
+  uint64 flush_interval_micros = 8;
 }
 
 message WasmUdfs {
