@@ -378,6 +378,9 @@ impl KinesisSourceFunc {
                         }
                 },
                 _ = shard_poll_interval.tick() => {
+                    if ctx.should_flush() {
+                        ctx.flush_buffer().await?;
+                    }
                     match self.sync_shards(ctx).await {
                         Err(err) => {
                             warn!("failed to sync shards: {}", err);

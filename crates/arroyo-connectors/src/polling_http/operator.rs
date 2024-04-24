@@ -82,12 +82,6 @@ impl PollingHttpSourceFunc {
         ctx: &mut ArrowContext,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
-        ctx.initialize_deserializer(
-            self.format.clone(),
-            self.framing.clone(),
-            self.bad_data.clone(),
-        );
-
         match msg? {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);

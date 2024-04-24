@@ -15,7 +15,9 @@ use fluvio::metadata::objects::Metadata;
 use fluvio::metadata::topic::TopicSpec;
 use fluvio::{consumer::Record as ConsumerRecord, Fluvio, FluvioConfig, Offset};
 use std::collections::HashMap;
+use std::time::Duration;
 use tokio::select;
+use tokio::time::MissedTickBehavior;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
 
@@ -152,6 +154,9 @@ impl FluvioSourceFunc {
             .await;
         }
 
+        let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
+        flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         let mut offsets = HashMap::new();
         loop {
             select! {
@@ -173,6 +178,11 @@ impl FluvioSourceFunc {
                         None => {
                             panic!("Stream closed");
                         }
+                    }
+                }
+                _ = flush_ticker.tick() => {
+                    if ctx.should_flush() {
+                        ctx.flush_buffer().await?;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
@@ -217,7 +227,6 @@ impl FluvioSourceFunc {
 
                         }
                     }
-
                 }
             }
         }
