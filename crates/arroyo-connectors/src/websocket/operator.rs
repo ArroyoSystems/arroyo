@@ -200,6 +200,9 @@ impl WebsocketSourceFunc {
             }
         }
 
+        let mut flush_ticker = tokio::time::interval(std::time::Duration::from_millis(50));
+        flush_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         // since there's no way to partition across a websocket source, only read on the first task
         if ctx.task_info.task_index == 0 {
             loop {
@@ -240,6 +243,11 @@ impl WebsocketSourceFunc {
                             return Ok(SourceFinishType::Final);
                         }
                     }
+                    }
+                    _ = flush_ticker.tick() => {
+                        if ctx.should_flush() {
+                            ctx.flush_buffer().await?;
+                        }
                     }
                     control_message = ctx.control_rx.recv() => {
                         if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
