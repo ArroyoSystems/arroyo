@@ -102,7 +102,7 @@ spec:
         - name: K8S_WORKER_RESOURCES
           value: {{ .Values.worker.resources | toYaml | quote }}
         - name: K8S_WORKER_SLOTS
-          value: {{ .Values.workerSlots | quote }}
+          value: {{ .Values.worker.slots | quote }}
         {{- if .Values.volumes }}
         - name: K8S_WORKER_VOLUMES
           value: {{ .Values.volumes | toYaml | quote }}
