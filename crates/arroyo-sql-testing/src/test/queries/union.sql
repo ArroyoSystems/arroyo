@@ -8,6 +8,7 @@ CREATE TABLE impulse_source (
       format = 'json',
       type = 'source'
     );
+
     CREATE TABLE second_impulse_source (
       timestamp TIMESTAMP,
       counter bigint unsigned not null,
@@ -18,14 +19,17 @@ CREATE TABLE impulse_source (
       format = 'json',
       type = 'source'
     );
+
     CREATE TABLE union_output (
-      counter bigint
+      counter bigint,
+      source text
     ) WITH (
       connector = 'single_file',
       path = '$output_path',
       format = 'json',
       type = 'sink'
     );
+
     INSERT INTO union_output
-    SELECT counter FROM impulse_source
-    UNION ALL SELECT counter FROM second_impulse_source
+    SELECT counter, 'first' as source FROM impulse_source
+    UNION ALL SELECT counter, 'second' as source FROM second_impulse_source

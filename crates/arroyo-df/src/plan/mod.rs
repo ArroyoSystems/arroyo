@@ -5,14 +5,13 @@ use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion_common::{
     plan_err,
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion},
-    Column, DFField, DFSchema, DataFusionError, Result as DFResult,
+    Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
 };
 
 use aggregate::AggregateRewriter;
 use datafusion_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan};
 use join::JoinRewriter;
 
-use crate::rewriters::AsyncUdfRewriter;
 use crate::{
     extension::{
         aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
@@ -22,6 +21,10 @@ use crate::{
     rewriters::SourceRewriter,
     schemas::{add_timestamp_field, has_timestamp_field},
     ArroyoSchemaProvider, WindowBehavior,
+};
+use crate::{
+    extension::{remote_table::RemoteTableExtension, ArroyoExtension},
+    rewriters::AsyncUdfRewriter,
 };
 
 use self::window_fn::WindowFunctionRewriter;
@@ -322,7 +325,27 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                     node.display()
                 );
             }
-            LogicalPlan::Union(_) => {}
+            LogicalPlan::Union(mut union) => {
+                // Need all the elements of the union to be materialized, so that
+                for input in union.inputs.iter_mut() {
+                    if let LogicalPlan::Extension(Extension { node }) = input.as_ref() {
+                        let arroyo_extension: &dyn ArroyoExtension = node.try_into().unwrap();
+                        if !arroyo_extension.transparent() {
+                            continue;
+                        }
+                    }
+                    let remote_table_extension = Arc::new(RemoteTableExtension {
+                        input: input.as_ref().clone(),
+                        name: OwnedTableReference::bare("union_input"),
+                        schema: union.schema.clone(),
+                        materialize: false,
+                    });
+                    *input = Arc::new(LogicalPlan::Extension(Extension {
+                        node: remote_table_extension,
+                    }));
+                }
+                return Ok(LogicalPlan::Union(union));
+            }
             LogicalPlan::EmptyRelation(_) => {}
             LogicalPlan::Subquery(_) => {}
             LogicalPlan::SubqueryAlias(_) => {}
