@@ -1,7 +1,9 @@
+use super::AcknowledgmentPolicy;
 use super::ConnectorType;
 use super::NatsConfig;
 use super::NatsState;
 use super::NatsTable;
+use super::ReplayPolicy;
 use super::{get_nats_client, SourceType};
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
@@ -42,11 +44,11 @@ impl SourceOperator for NatsSourceFunc {
         format!(
             "nats-source-{}",
             match &self.source_type {
-                SourceType::Subject(s) => {
-                    s
+                SourceType::Jetstream { stream, .. } => {
+                    stream
                 }
-                SourceType::Stream(s) => {
-                    s
+                SourceType::Core { subject, .. } => {
+                    subject
                 }
             }
         )
@@ -198,28 +200,68 @@ impl NatsSourceFunc {
         let consumer_name = format!(
             "{}-{}",
             match &self.source_type {
-                SourceType::Subject(s) => {
-                    s
+                SourceType::Jetstream { stream, .. } => {
+                    stream
                 }
-                SourceType::Stream(s) => {
-                    s
+                SourceType::Core { subject, .. } => {
+                    subject
                 }
             },
             &ctx.task_info.operator_id.replace("operator_", "")
         );
 
-        // TODO: Generate this `consumer_config` via a function that parses
-        // all optional parameters passed in the `client_configs` of the `table.json`
-        // and merges with the default values
-        let consumer_config = consumer::pull::Config {
-            name: Some(consumer_name.clone()),
-            replay_policy: consumer::ReplayPolicy::Instant,
-            inactive_threshold: Duration::from_secs(3600),
-            ack_policy: consumer::AckPolicy::Explicit,
-            ack_wait: Duration::from_secs(120),
-            num_replicas: 1,
-            deliver_policy,
-            ..Default::default()
+        let consumer_config = match &self.source_type {
+            SourceType::Jetstream {
+                ack_policy,
+                replay_policy,
+                ack_wait,
+                description,
+                filter_subjects,
+                rate_limit,
+                sample_frequency,
+                num_replicas,
+                inactive_threshold,
+                max_ack_pending,
+                max_deliver,
+                max_waiting,
+                max_batch,
+                max_bytes,
+                max_expires,
+                ..
+            } => consumer::pull::Config {
+                name: Some(consumer_name.clone()),
+                ack_policy: match ack_policy {
+                    AcknowledgmentPolicy::Explicit => consumer::AckPolicy::Explicit,
+                    AcknowledgmentPolicy::All => consumer::AckPolicy::All,
+                    AcknowledgmentPolicy::None => consumer::AckPolicy::None,
+                },
+                replay_policy: match replay_policy {
+                    ReplayPolicy::Original => consumer::ReplayPolicy::Original,
+                    ReplayPolicy::Instant => consumer::ReplayPolicy::Instant,
+                },
+                ack_wait: Duration::from_secs(ack_wait.clone() as u64),
+                description: description.clone(),
+                filter_subjects: filter_subjects
+                    .clone()
+                    .split(",")
+                    .map(|s| s.to_string())
+                    .collect(),
+                rate_limit: rate_limit.clone() as u64,
+                sample_frequency: sample_frequency.clone() as u8,
+                num_replicas: num_replicas.clone() as usize,
+                inactive_threshold: Duration::from_secs(inactive_threshold.clone() as u64),
+                max_ack_pending: max_ack_pending.clone(),
+                max_deliver: max_deliver.clone(),
+                max_waiting: max_waiting.clone(),
+                max_batch: max_batch.clone(),
+                max_bytes: max_bytes.clone(),
+                max_expires: Duration::from_secs(max_expires.clone() as u64),
+                deliver_policy,
+                ..Default::default()
+            },
+            _ => {
+                panic!("Core source type not supported for NATS consumer")
+            }
         };
 
         match stream.delete_consumer(&consumer_name).await {
@@ -304,12 +346,14 @@ impl NatsSourceFunc {
             .expect("Failed instantiating NATS client");
 
         match self.source_type.clone() {
-            SourceType::Stream(s) => {
+            SourceType::Jetstream { stream, .. } => {
                 let start_sequence = self
                     .get_start_sequence_number(ctx)
                     .await
                     .expect("Failed to get start sequence number");
-                let nats_stream = &self.get_nats_stream(nats_client.clone(), s.clone()).await;
+                let nats_stream = &self
+                    .get_nats_stream(nats_client.clone(), stream.clone())
+                    .await;
                 let mut messages = self
                     .create_nats_consumer(nats_stream, start_sequence, ctx)
                     .await
@@ -367,7 +411,7 @@ impl NatsSourceFunc {
                                     sequence_numbers.insert(
                                         ctx.task_info.operator_id.clone(),
                                         NatsState {
-                                            stream_name: s.clone(),
+                                            stream_name: stream.clone(),
                                             stream_sequence_number: message_info.stream_sequence.clone()
                                         }
                                     );
@@ -387,7 +431,7 @@ impl NatsSourceFunc {
                                 },
                                 None => {
                                     break
-                                    info!("Finished reading message from {}", s.clone());
+                                    info!("Finished reading message from {}", stream.clone());
                                 },
                             }
                         }
@@ -442,9 +486,9 @@ impl NatsSourceFunc {
                 }
                 Ok(SourceFinishType::Graceful)
             }
-            SourceType::Subject(s) => {
+            SourceType::Core { subject, .. } => {
                 let mut messages = nats_client
-                    .subscribe(s.clone())
+                    .subscribe(subject.clone())
                     .await
                     .expect("Failed subscribing to NATS subject");
                 loop {
@@ -461,7 +505,7 @@ impl NatsSourceFunc {
                                 },
                                 None => {
                                     break
-                                    info!("Finished reading message from {}", s.clone());
+                                    info!("Finished reading message from {}", subject.clone());
                                 },
                             }
                         }

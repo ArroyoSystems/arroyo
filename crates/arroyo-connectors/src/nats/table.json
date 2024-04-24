@@ -19,8 +19,107 @@
                                     "title": "NATS Jetstream",
                                     "properties": {
                                         "stream": {
+                                            "title": "Stream Name",
                                             "type": "string",
-                                            "description": "The NATS Jetstream stream to consume from"
+                                            "description": "The stream the consumer should consume from."
+                                        },
+                                        "ackPolicy": {
+                                            "title": "Acknowledgment Policy",
+                                            "type": "string",
+                                            "description": "How messages should be acknowledged.",
+                                            "enum": [
+                                                "Explicit",
+                                                "None",
+                                                "All"
+                                            ],
+                                            "default": "Explicit"
+                                        },
+                                        "replayPolicy": {
+                                            "title": "Replay policy",
+                                            "type": "string",
+                                            "description": "Whether messages are sent as quickly as possible or at the rate of receipt.",
+                                            "enum": [
+                                                "Original",
+                                                "Instant"
+                                            ],
+                                            "default": "Instant"
+                                        },
+                                        "ackWait": {
+                                            "title": "Acknowledgment wait",
+                                            "type": "integer",
+                                            "description": "The duration that the server will wait for an ack for any individual message once it has been delivered to a consumer.",
+                                            "default": 300
+                                        },
+                                        "description": {
+                                            "title": "Consumer description",
+                                            "type": "string",
+                                            "description": "A description of the consumer. This can be particularly useful for ephemeral consumers to indicate their purpose since the durable name cannot be provided."
+                                        },
+                                        "filterSubjects": {
+                                            "title": "Filter subjects",
+                                            "type": "string",
+                                            "description": "A list of subjects that the consumer should filter on. If the list is empty, then no filtering is done.",
+                                            "default": ""
+                                        },
+                                        "sampleFrequency": {
+                                            "title": "Sample frequency",
+                                            "type": "integer",
+                                            "description": "Sets the percentage of acknowledgements that should be sampled for observability, 0-100 This value is a string and for example allows both 30 and 30% as valid values.",
+                                            "default": 0
+                                        },
+                                        "numReplicas": {
+                                            "title": "Consumer number of replicas",
+                                            "type": "integer",
+                                            "description": "Sets the number of replicas for the consumer's state. By default, when the value is set to zero, consumers inherit the number of replicas from the stream.",
+                                            "default": 1
+                                        },
+                                        "inactiveThreshold": {
+                                            "title": "Inactive threshold duration",
+                                            "type": "integer",
+                                            "description": "Duration that instructs the server to cleanup consumers that are inactive for that long. Prior to 2.9, this only applied to ephemeral consumers.",
+                                            "default": 600
+                                        },
+                                        "rateLimit": {
+                                            "title": "Rate limit",
+                                            "type": "integer",
+                                            "description": "The maximum number of messages per second that will be delivered to consumers.",
+                                            "default": -1
+                                        },
+                                        "maxAckPending": {
+                                            "title": "Max messages pending for acknowledgement",
+                                            "type": "integer",
+                                            "description": "Defines the maximum number of messages without an acknowledgement that may be in-flight before pausing sending additional messages to the consumer. Once this limit is reached message delivery will be suspended.",
+                                            "default": -1
+                                        },
+                                        "maxDeliver": {
+                                            "title": "Max delivery attempts",
+                                            "type": "integer",
+                                            "description": "The maximum number of times a specific message delivery will be attempted. Applies to any message that is re-sent due to ack policy (i.e. due to a negative ack, or no ack sent by the client).",
+                                            "default": -1
+                                        },
+                                        "maxWaiting": {
+                                            "title": "Max waiting",
+                                            "type": "integer",
+                                            "description": "The maximum number of messages that can be waiting to be delivered to the consumer.",
+                                            "default": 1000000
+                                        },
+                                        "maxBatch": {
+                                            "title": "Max batch",
+                                            "type": "integer",
+                                            "description": "The maximum number of messages that will be delivered in a single batch.",
+                                            "default": 10000
+                                        },
+                                        "maxBytes": {
+                                            "title": "Max bytes",
+                                            "type": "integer",
+                                            "description": "The maximum number of bytes that will be delivered in a single batch.",
+                                            "default": 104857600
+                                        },
+                                        "maxExpires": {
+                                            "title": "Max expires",
+                                            "type": "integer",
+                                            "description": "The maximum number of messages that can be delivered to the consumer before they are considered expired.",
+                                            "default": 30000
                                         }
                                     },
                                     "required": [
@@ -72,14 +171,6 @@
                     "additionalProperties": false
                 }
             ]
-        },
-        "clientConfigs": {
-            "type": "object",
-            "title": "Client Configs",
-            "description": "Additional NATS configs to pass to the underlying NATS consumer or producer.",
-            "additionalProperties": {
-                "type": "string"
-            }
         }
     },
     "required": [

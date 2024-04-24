@@ -71,8 +71,80 @@ impl NatsConnector {
                     pull_opt("stream", options).ok(),
                     pull_opt("subject", options).ok(),
                 ) {
-                    (Some(stream), None) => Some(SourceType::Stream(stream)),
-                    (None, Some(subject)) => Some(SourceType::Subject(subject)),
+                    (Some(stream), None) => Some(SourceType::Jetstream {
+                        stream,
+                        description: options.remove("consumer.description"),
+                        ack_policy: options
+                            .remove("consumer.ack_policy")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| AcknowledgmentPolicy::Explicit),
+                        replay_policy: options
+                            .remove("consumer.replay_policy")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| ReplayPolicy::Instant),
+                        ack_wait: options
+                            .remove("consumer.ack_wait")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 30),
+                        filter_subjects: options.remove("consumer.filter_subjects").map_or_else(
+                            || Vec::new(),
+                            |s| s.split(',').map(String::from).collect(),
+                        ),
+                        sample_frequency: options
+                            .remove("consumer.sample_frequency")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 0),
+                        num_replicas: options
+                            .remove("consumer.num_replicas")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 1),
+                        inactive_threshold: options
+                            .remove("consumer.inactive_threshold")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 600),
+                        rate_limit: options
+                            .remove("consumer.rate_limit")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| -1),
+                        max_ack_pending: options
+                            .remove("consumer.max_ack_pending")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| -1),
+                        max_deliver: options
+                            .remove("consumer.max_deliver")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| -1),
+                        max_waiting: options
+                            .remove("consumer.max_waiting")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 1000000),
+                        max_batch: options
+                            .remove("consumer.max_batch")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 10000),
+                        max_bytes: options
+                            .remove("consumer.max_bytes")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 104857600),
+                        max_expires: options
+                            .remove("consumer.max_expires")
+                            .unwrap_or_default()
+                            .parse()
+                            .unwrap_or_else(|_| 300000),
+                    }),
+                    (None, Some(subject)) => Some(SourceType::Core { subject }),
                     (Some(_), Some(_)) => bail!("Exactly one of `stream` or `subject` must be set"),
                     (None, None) => bail!("One of `stream` or `subject` must be set"),
                 };
@@ -92,7 +164,6 @@ impl NatsConnector {
         // TODO: Use parameters with `nats.` prefix for the NATS connection configuration
         Ok(NatsTable {
             connector_type: nats_table_type,
-            client_configs: HashMap::new(),
         })
     }
 }
@@ -182,8 +253,8 @@ impl Connector for NatsConnector {
                     .as_ref()
                     .ok_or_else(|| anyhow!("sourceType is required"))?
                 {
-                    SourceType::Subject(s) => s,
-                    SourceType::Stream(s) => s,
+                    SourceType::Jetstream { stream, .. } => stream,
+                    SourceType::Core { subject, .. } => subject,
                 }
             }
             ConnectorType::Sink { sink_type, .. } => {
