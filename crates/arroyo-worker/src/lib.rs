@@ -17,7 +17,7 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_types::{
     default_controller_addr, from_millis, grpc_port, to_micros, CheckpointBarrier, NodeId,
-    WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV,
+    WorkerId, ARROYO_PROGRAM_ENV, ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, RUN_ID_ENV,
 };
 use local_ip_address::local_ip;
 use rand::random;
@@ -25,6 +25,7 @@ use rand::random;
 use base64::engine::general_purpose;
 use base64::Engine as Base64Engine;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::str::FromStr;
@@ -152,14 +153,36 @@ pub struct WorkerServer {
 }
 
 impl WorkerServer {
+    fn get_program() -> String {
+        match (
+            env::var(ARROYO_PROGRAM_FILE_ENV),
+            env::var(ARROYO_PROGRAM_ENV),
+        ) {
+            (Ok(file), Err(_)) => std::fs::read_to_string(&file)
+                .unwrap_or_else(|e| panic!("Could not read program from {}: {:?}", file, e)),
+            (Err(_), Ok(program)) => program,
+            (Err(_), Err(_)) => {
+                panic!(
+                    "One of {} or {} must be set",
+                    ARROYO_PROGRAM_FILE_ENV, ARROYO_PROGRAM_ENV
+                )
+            }
+            _ => {
+                panic!(
+                    "Both {} and {} are set; only one may be used",
+                    ARROYO_PROGRAM_FILE_ENV, ARROYO_PROGRAM_ENV
+                )
+            }
+        }
+    }
+
     pub fn from_env(shutdown_guard: ShutdownGuard) -> Self {
-        let graph = std::env::var(ARROYO_PROGRAM_ENV).expect("ARROYO_PROGRAM not set");
+        let graph = Self::get_program();
         let graph = general_purpose::STANDARD_NO_PAD
             .decode(graph)
-            .expect("ARROYO_PROGRAM not valid base64");
+            .expect("Program is not valid base64");
 
-        let graph =
-            api::ArrowProgram::decode(&graph[..]).expect("ARROYO_PROGRAM is not a valid protobuf");
+        let graph = api::ArrowProgram::decode(&graph[..]).expect("Program is not a valid protobuf");
 
         let logical = LogicalProgram::try_from(graph).expect("Failed to create LogicalProgram");
 

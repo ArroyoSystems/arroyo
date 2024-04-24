@@ -6,20 +6,20 @@ use arroyo_rpc::grpc::{
     WorkerFinishedReq,
 };
 use arroyo_types::{
-    NodeId, WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, SLOTS_PER_NODE,
-    TASK_SLOTS_ENV, WORKER_ID_ENV,
+    to_nanos, NodeId, WorkerId, ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV,
+    SLOTS_PER_NODE, TASK_SLOTS_ENV, WORKER_ID_ENV,
 };
 use base64::{engine::general_purpose, Engine as _};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use prost::Message;
 use std::collections::HashMap;
-use std::env::current_exe;
+use std::env::{current_exe, temp_dir};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex};
 use tonic::{Request, Status};
@@ -117,6 +117,29 @@ impl Scheduler for ProcessScheduler {
         ))
         .unwrap();
 
+        let program = start_pipeline_req.program.clone();
+        let program = general_purpose::STANDARD_NO_PAD
+            .encode(api::ArrowProgram::from(program).encode_to_vec());
+
+        let program_file = temp_dir()
+            .join("arroyo")
+            .join(&start_pipeline_req.job_id)
+            .join(format!("{}.program", to_nanos(SystemTime::now())));
+
+        tokio::fs::create_dir_all(&program_file.parent().unwrap())
+            .await
+            .map_err(|e| {
+                SchedulerError::Other(format!(
+                    "Failed to create tmp dir for program file: {:?}",
+                    e
+                ))
+            })?;
+        tokio::fs::write(&program_file, &program)
+            .await
+            .map_err(|e| {
+                SchedulerError::Other(format!("Failed to write program file to tmp dir: {:?}", e))
+            })?;
+
         for _ in 0..workers {
             let path = base_path.clone();
 
@@ -143,9 +166,7 @@ impl Scheduler for ProcessScheduler {
             let job_id = start_pipeline_req.job_id.clone();
             let workers = self.workers.clone();
             let env_map = start_pipeline_req.env_vars.clone();
-            let program = start_pipeline_req.program.clone();
-            let program = general_purpose::STANDARD_NO_PAD
-                .encode(api::ArrowProgram::from(program).encode_to_vec());
+            let program_file = program_file.to_str().unwrap().to_string();
 
             tokio::spawn(async move {
                 let mut command =
@@ -162,7 +183,7 @@ impl Scheduler for ProcessScheduler {
                     .env(JOB_ID_ENV, &job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
-                    .env(ARROYO_PROGRAM_ENV, program)
+                    .env(ARROYO_PROGRAM_FILE_ENV, program_file)
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();
