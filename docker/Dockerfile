@@ -17,7 +17,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" |  \
       sudo tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && apt-get install -y nodejs && \
-    curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=8.15.1 SHELL=$(which bash) bash -
+    curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=9.0.6 SHELL=$(which bash) bash -
 
 COPY docker/install_deps.sh /install_deps.sh
 RUN sh /install_deps.sh build

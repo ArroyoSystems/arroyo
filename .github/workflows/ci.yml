@@ -11,7 +11,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2.2.4
         with:
-          version: 8.3.0
+          version: 9.0.6
           run_install: |
             - recursive: true
               args: [--frozen-lockfile, --strict-peer-dependencies]
@@ -45,7 +45,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2.2.4
         with:
-          version: 8.3.0
+          version: 9.0.6
           run_install: |
             - recursive: true
               args: [--frozen-lockfile, --strict-peer-dependencies]        
@@ -108,7 +108,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2.2.4
         with:
-          version: 8.3.0
+          version: 9.0.6
           run_install: |
             - recursive: true
               args: [--frozen-lockfile, --strict-peer-dependencies]
