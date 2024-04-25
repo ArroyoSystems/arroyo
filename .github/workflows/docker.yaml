@@ -179,10 +179,9 @@ jobs:
         name: Inspect image
         run: |
           docker buildx imagetools inspect ghcr.io/arroyosystems/${{ matrix.image_name }}:${{ steps.meta.outputs.version }}
-      - name: Push to dev tag.
+      - name: Push to tip tag.
         working-directory: /tmp/digests/${{ matrix.image_name }}
         if: github.ref == 'refs/heads/master'
         run: |
-          # TODO: change to tip after release
-          docker buildx imagetools create --tag ghcr.io/arroyosystems/${{ matrix.image_name }}:0.10-dev \
+          docker buildx imagetools create --tag ghcr.io/arroyosystems/${{ matrix.image_name }}:tip \
             $(printf 'ghcr.io/arroyosystems/${{ matrix.image_name }}@sha256:%s ' *)

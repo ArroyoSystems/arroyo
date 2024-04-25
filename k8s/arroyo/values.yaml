@@ -13,7 +13,7 @@ controller:
   image:
     repository: ghcr.io/arroyosystems/arroyo
     pullPolicy: IfNotPresent
-    tag: "0.10-dev"
+    tag: "tip"
   service:
     grpcPort: 9190
     compilerPort: 9000
@@ -30,7 +30,7 @@ worker:
   image:
     repository: ghcr.io/arroyosystems/arroyo
     pullPolicy: IfNotPresent
-    tag: "0.10-dev"
+    tag: "tip"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster
