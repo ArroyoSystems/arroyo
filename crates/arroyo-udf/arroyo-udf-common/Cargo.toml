@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-udf-common"
-version = "0.10.0-dev"
+version = "0.11.0-dev"
 edition = "2021"
 
 [dependencies]
