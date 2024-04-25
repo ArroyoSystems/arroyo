@@ -57,9 +57,11 @@
                                         },
                                         "filterSubjects": {
                                             "title": "Filter subjects",
-                                            "type": "string",
+                                            "type": "array",
                                             "description": "A list of subjects that the consumer should filter on. If the list is empty, then no filtering is done.",
-                                            "default": ""
+                                            "uniqueItems": true,
+                                            "default": [],
+                                            "items": { "type": "string" }
                                         },
                                         "sampleFrequency": {
                                             "title": "Sample frequency",
@@ -119,7 +121,7 @@
                                             "title": "Max expires",
                                             "type": "integer",
                                             "description": "The maximum number of messages that can be delivered to the consumer before they are considered expired.",
-                                            "default": 30000
+                                            "default": 300000
                                         }
                                     },
                                     "required": [

@@ -71,7 +71,6 @@ impl SourceOperator for NatsSourceFunc {
                     })
                     .await
                     .unwrap();
-                // TODO: Fix panicking `NATS message error: missed idle heartbeat`
                 panic!("{}: {}", err.name, err.details);
             }
         }
@@ -241,11 +240,7 @@ impl NatsSourceFunc {
                 },
                 ack_wait: Duration::from_secs(ack_wait.clone() as u64),
                 description: description.clone(),
-                filter_subjects: filter_subjects
-                    .clone()
-                    .split(",")
-                    .map(|s| s.to_string())
-                    .collect(),
+                filter_subjects: filter_subjects.clone(),
                 rate_limit: rate_limit.clone() as u64,
                 sample_frequency: sample_frequency.clone() as u8,
                 num_replicas: num_replicas.clone() as usize,
