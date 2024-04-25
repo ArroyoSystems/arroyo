@@ -1,19 +1,15 @@
-use axum::body::Body;
-use axum::response::IntoResponse;
+use axum::response::{Html, IntoResponse, Response};
 use axum::{
     routing::{delete, get, patch, post},
     Json, Router,
 };
 use deadpool_postgres::Pool;
 
-use once_cell::sync::Lazy;
+use http::{header, StatusCode, Uri};
+use rust_embed::RustEmbed;
 use std::env;
-use std::path::PathBuf;
-use std::str::FromStr;
-use tower::service_fn;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -37,7 +33,11 @@ use crate::pipelines::{
 use crate::rest_utils::not_found;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
 use crate::ApiDoc;
-use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV, ASSET_DIR_ENV};
+use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV};
+
+#[derive(RustEmbed)]
+#[folder = "../../webui/dist"]
+struct Assets;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -62,30 +62,54 @@ pub async fn api_fallback() -> impl IntoResponse {
     not_found("Route")
 }
 
+async fn not_found_static() -> Response {
+    (StatusCode::NOT_FOUND, "404").into_response()
+}
+
+async fn static_handler(uri: Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+
+    if path.is_empty() || path == "index.html" {
+        return index_html().await;
+    }
+
+    match Assets::get(path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        }
+        None => {
+            if path.contains('.') {
+                return not_found_static().await;
+            }
+
+            index_html().await
+        }
+    }
+}
+
+async fn index_html() -> Response {
+    match Assets::get("index.html") {
+        Some(content) => {
+            let endpoint = env::var(API_ENDPOINT_ENV).unwrap_or_else(|_| String::new());
+
+            let replaced = String::from_utf8(content.data.to_vec())
+                .expect("index.html is invalid UTF-8")
+                .replace("{{API_ENDPOINT}}", &endpoint)
+                .replace("{{CLUSTER_ID}}", &arroyo_server_common::get_cluster_id())
+                .replace(
+                    "{{DISABLE_TELEMETRY}}",
+                    if telemetry_enabled() { "false" } else { "true" },
+                );
+
+            Html(replaced).into_response()
+        }
+        None => not_found_static().await,
+    }
+}
+
 pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
-    let asset_dir = env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "webui/dist".to_string());
-
-    static INDEX_HTML: Lazy<String> = Lazy::new(|| {
-        let asset_dir = env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "webui/dist".to_string());
-
-        let endpoint = env::var(API_ENDPOINT_ENV).unwrap_or_else(|_| String::new());
-
-        std::fs::read_to_string(PathBuf::from_str(&asset_dir).unwrap()
-            .join("index.html"))
-            .expect("Could not find index.html in asset dir (you may need to build the console sources)")
-            .replace("{{API_ENDPOINT}}", &endpoint)
-            .replace("{{CLUSTER_ID}}", &arroyo_server_common::get_cluster_id())
-            .replace("{{DISABLE_TELEMETRY}}", if telemetry_enabled() { "false" } else { "true" })
-    });
-
-    let fallback = service_fn(|_: http::Request<_>| async move {
-        let body = Body::from(INDEX_HTML.as_str());
-        let res = http::Response::new(body);
-        Ok::<_, _>(res)
-    });
-
-    let serve_dir = ServeDir::new(asset_dir).not_found_service(fallback);
-
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()
         .allow_methods(cors::Any)
@@ -146,8 +170,7 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
                 .url("/api/v1/api-docs/openapi.json", ApiDoc::openapi()),
         )
         .nest("/api/v1", api_routes)
-        .route_service("/", fallback)
-        .fallback_service(serve_dir)
+        .fallback(static_handler)
         .with_state(AppState {
             controller_addr: controller_addr.to_string(),
             pool,

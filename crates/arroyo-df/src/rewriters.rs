@@ -30,7 +30,6 @@ use datafusion_expr::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
 
 /// Rewrites a logical plan to move projections out of table scans
 /// and into a separate projection node which may include virtual fields,
@@ -149,20 +148,11 @@ impl<'a> SourceRewriter<'a> {
             )),
         });
 
-        info!(
-            "table source schema: {:?}",
-            table_source_extension.schema().fields()
-        );
-
         let (projection_input, projection) = if table.is_updating() {
             let mut projection_offsets = table_scan.projection.clone();
             if let Some(offsets) = projection_offsets.as_mut() {
                 offsets.push(table.fields.len())
             }
-            info!(
-                "table source schema: {:?}",
-                table_source_extension.schema().fields()
-            );
             (
                 LogicalPlan::Extension(Extension {
                     node: Arc::new(DebeziumUnrollingExtension::try_new(table_source_extension)?),
@@ -187,8 +177,6 @@ impl<'a> SourceRewriter<'a> {
         table: &ConnectorTable,
     ) -> DFResult<LogicalPlan> {
         let input = self.projection(table_scan, table)?;
-
-        info!("table scan plan:\n{:?}", input);
 
         let schema = input.schema().clone();
         let remote = LogicalPlan::Extension(Extension {

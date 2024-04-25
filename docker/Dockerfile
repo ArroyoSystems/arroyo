@@ -55,7 +55,6 @@ COPY docker/install_deps.sh /install_deps.sh
 RUN sh /install_deps.sh run
 
 COPY --from=builder /arroyo-bin ./
-COPY --from=builder /app/webui/dist ./dist
 
 COPY docker/supervisord.conf /supervisord.conf
 COPY docker/entrypoint.sh /entrypoint.sh
@@ -78,7 +77,6 @@ RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl
 
 COPY --from=builder /arroyo-bin ./
-COPY --from=builder /app/webui/dist ./dist
 
 ENV PRODUCTION=true \
     ASSET_DIR="/app/dist" \
@@ -94,7 +92,6 @@ RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl
 
 COPY --from=builder /arroyo-bin ./
-COPY --from=builder /app/webui/dist ./dist
 
 ENV PRODUCTION=true \
     ASSET_DIR="/app/dist"
