@@ -89,6 +89,7 @@ message SessionWindowAggregateOperator {
   ArroyoSchema unkeyed_aggregate_schema = 6;
   bytes partial_aggregation_plan = 7;
   bytes final_aggregation_plan = 8;
+  bool emit_window = 9;
 }
 
 message JoinOperator {

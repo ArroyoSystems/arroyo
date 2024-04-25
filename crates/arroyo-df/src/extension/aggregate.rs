@@ -212,6 +212,7 @@ impl AggregateExtension {
             unkeyed_aggregate_schema: None,
             partial_aggregation_plan: vec![],
             final_aggregation_plan: physical_plan_node.encode_to_vec(),
+            emit_window: true,
         };
 
         Ok(LogicalNode {

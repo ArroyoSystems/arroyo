@@ -297,6 +297,17 @@ impl SessionAggregatingWindowFunc {
         ctx: &mut ArrowContext,
     ) -> Result<RecordBatch> {
         debug!("first result is {:#?}", results[0]);
+        if self.config.window_insert.is_none() {
+            let batches: Vec<_> = results
+                .into_iter()
+                .flat_map(|(_key, results)| results)
+                .map(|result| result.batch)
+                .collect();
+            return Ok(concat_batches(
+                &ctx.out_schema.as_ref().unwrap().schema.clone(),
+                batches.iter(),
+            )?);
+        }
         let (rows, results): (Vec<_>, Vec<_>) = results
             .iter()
             .flat_map(|(owned_row, session_results)| {
@@ -333,17 +344,20 @@ impl SessionAggregatingWindowFunc {
             &results[0].batch.schema(),
             results.iter().map(|result| &result.batch),
         )?;
-        let DataType::Struct(window_fields) = self.config.window_field.data_type() else {
-            bail!("expected window field to be a struct");
-        };
-        let window_struct_array = StructArray::try_new(
-            window_fields.clone(),
-            vec![Arc::new(window_start_array), Arc::new(window_end_array)],
-            None,
-        )?;
+
         let mut columns = key_columns;
-        columns.insert(self.config.window_index, Arc::new(window_struct_array));
-        columns.extend_from_slice(merged_batch.columns());
+        if let Some(window_insert) = &self.config.window_insert {
+            let DataType::Struct(window_fields) = window_insert.window_field.data_type() else {
+                bail!("expected window field to be a struct");
+            };
+            let window_struct_array = StructArray::try_new(
+                window_fields.clone(),
+                vec![Arc::new(window_start_array), Arc::new(window_end_array)],
+                None,
+            )?;
+            columns.insert(window_insert.window_index, Arc::new(window_struct_array));
+            columns.extend_from_slice(merged_batch.columns());
+        }
         columns.push(Arc::new(timestamp_array));
         RecordBatch::try_new(
             ctx.out_schema.as_ref().unwrap().schema.clone(),
@@ -359,8 +373,7 @@ impl SessionAggregatingWindowFunc {
 struct SessionWindowConfig {
     gap: Duration,
     input_schema_ref: ArroyoSchemaRef,
-    window_field: FieldRef,
-    window_index: usize,
+    window_insert: Option<WindowInsert>,
     // TODO: perform partial aggregations and checkpoint those.
     // unkeyed_aggregate_schema_ref: ArroyoSchemaRef,
     // partial_physical_exec: Arc<dyn ExecutionPlan>,
@@ -368,10 +381,16 @@ struct SessionWindowConfig {
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
 }
 
+struct WindowInsert {
+    window_field: FieldRef,
+    window_index: usize,
+}
+
 struct ActiveSession {
     // the data start time for this session
     data_start: SystemTime,
     data_end: SystemTime,
+    need_to_attach_key: bool,
     sender: Option<UnboundedSender<RecordBatch>>,
     // the next batch's execution plan
     result_stream: SendableRecordBatchStream,
@@ -380,6 +399,7 @@ struct ActiveSession {
 impl ActiveSession {
     async fn new(
         aggregation_plan: Arc<dyn ExecutionPlan>,
+        need_to_attach_key: bool,
         initial_timestamp: SystemTime,
         sender: UnboundedSender<RecordBatch>,
     ) -> Result<Self> {
@@ -388,6 +408,7 @@ impl ActiveSession {
         Ok(Self {
             data_start: initial_timestamp,
             data_end: initial_timestamp,
+            need_to_attach_key,
             sender: Some(sender),
             result_stream: result_exec,
         })
@@ -473,14 +494,14 @@ impl ActiveSession {
             .map(|batch| Ok(batch?))
             .collect::<Result<_>>()
             .await?;
-        if result_batches.len() != 1 {
+        if self.need_to_attach_key && result_batches.len() != 1 {
             bail!(
                 "expect active session result to be exactly one batch, not {:?}",
                 result_batches
             );
         }
         let batch = result_batches.into_iter().next().unwrap();
-        if batch.num_rows() != 1 {
+        if self.need_to_attach_key && batch.num_rows() != 1 {
             bail!(
                 "expect active session result to be excactly one row, not {:?}",
                 batch
@@ -569,6 +590,7 @@ impl KeyComputingHolder {
                 self.active_session = Some(
                     ActiveSession::new(
                         self.session_window_config.final_physical_exec.clone(),
+                        self.session_window_config.window_insert.is_some(),
                         *initial_timestamp,
                         sender,
                     )
@@ -725,11 +747,18 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
                     .collect(),
             )?)
         };
+        let window_insert = if config.emit_window {
+            Some(WindowInsert {
+                window_field: window_field.clone(),
+                window_index: config.window_index as usize,
+            })
+        } else {
+            None
+        };
 
         let config = SessionWindowConfig {
             gap: Duration::from_micros(config.gap_micros),
-            window_field,
-            window_index: config.window_index as usize,
+            window_insert,
             input_schema_ref: Arc::new(input_schema),
             final_physical_exec: final_execution_plan,
             receiver,

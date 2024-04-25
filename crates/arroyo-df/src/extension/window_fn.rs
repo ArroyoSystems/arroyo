@@ -1,7 +1,15 @@
 use std::sync::Arc;
 
-use arroyo_datastream::logical::{LogicalEdgeType, LogicalNode, OperatorName};
-use arroyo_rpc::{df::ArroyoSchema, grpc::api::WindowFunctionOperator, TIMESTAMP_FIELD};
+use anyhow::{bail, Result};
+use arroyo_datastream::{
+    logical::{LogicalEdgeType, LogicalNode, OperatorName},
+    WindowType,
+};
+use arroyo_rpc::{
+    df::{ArroyoSchema, ArroyoSchemaRef},
+    grpc::api::{SessionWindowAggregateOperator, WindowFunctionOperator},
+    TIMESTAMP_FIELD,
+};
 use datafusion_common::{Column, DFSchema};
 use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{
@@ -10,7 +18,7 @@ use datafusion_proto::{
 };
 use prost::Message;
 
-use crate::physical::ArroyoPhysicalExtensionCodec;
+use crate::{builder::Planner, physical::ArroyoPhysicalExtensionCodec};
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
@@ -19,15 +27,47 @@ pub(crate) const WINDOW_FUNCTION_EXTENSION_NAME: &str = "WindowFunctionExtension
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct WindowFunctionExtension {
     window_plan: LogicalPlan,
+    window_type: Option<WindowType>,
     key_fields: Vec<usize>,
 }
 
 impl WindowFunctionExtension {
-    pub fn new(window_plan: LogicalPlan, key_fields: Vec<usize>) -> Self {
+    pub fn new(
+        window_plan: LogicalPlan,
+        window_type: Option<WindowType>,
+        key_fields: Vec<usize>,
+    ) -> Self {
         Self {
             window_plan,
+            window_type,
             key_fields,
         }
+    }
+
+    pub fn plan_session_window(
+        &self,
+        planner: &Planner,
+        input_schema: ArroyoSchemaRef,
+    ) -> Result<SessionWindowAggregateOperator> {
+        let Some(WindowType::Session { gap }) = &self.window_type else {
+            bail!("expected session window type");
+        };
+        let final_aggregation_plan = planner.sync_plan(&self.window_plan)?;
+        let codec = ArroyoPhysicalExtensionCodec::default();
+        let window_plan_proto =
+            PhysicalPlanNode::try_from_physical_plan(final_aggregation_plan, &codec)?;
+
+        Ok(SessionWindowAggregateOperator {
+            name: "window_function_over_session".to_string(),
+            gap_micros: gap.as_micros() as u64,
+            window_field_name: "".to_string(),
+            window_index: 0,
+            input_schema: Some(input_schema.as_ref().clone().try_into()?),
+            unkeyed_aggregate_schema: None,
+            partial_aggregation_plan: vec![],
+            final_aggregation_plan: window_plan_proto.encode_to_vec(),
+            emit_window: false,
+        })
     }
 }
 
@@ -66,7 +106,11 @@ impl UserDefinedLogicalNodeCore for WindowFunctionExtension {
         _exprs: &[datafusion::prelude::Expr],
         inputs: &[datafusion_expr::LogicalPlan],
     ) -> Self {
-        Self::new(inputs[0].clone(), self.key_fields.clone())
+        Self::new(
+            inputs[0].clone(),
+            self.window_type.clone(),
+            self.key_fields.clone(),
+        )
     }
 }
 
@@ -85,6 +129,27 @@ impl ArroyoExtension for WindowFunctionExtension {
             return Err(anyhow::anyhow!(
                 "WindowFunctionExtension requires exactly one input"
             ));
+        }
+        if self.window_type.is_some() {
+            if let Some(WindowType::Session { .. }) = &self.window_type {
+                let session_window = self.plan_session_window(planner, input_schemas[0].clone())?;
+                let logical_node = LogicalNode {
+                    operator_id: format!("window_function_{}", index),
+                    description: "window function".to_string(),
+                    operator_name: OperatorName::SessionWindowAggregate,
+                    operator_config: session_window.encode_to_vec(),
+                    parallelism: 1,
+                };
+                let edge = arroyo_datastream::logical::LogicalEdge::project_all(
+                    LogicalEdgeType::Shuffle,
+                    input_schemas[0].as_ref().clone(),
+                );
+                return Ok(NodeWithIncomingEdges {
+                    node: logical_node,
+                    edges: vec![edge],
+                });
+            }
+            bail!("haven't yet planned {:?}", self);
         }
         let input_schema = input_schemas[0].clone();
         let input_df_schema =

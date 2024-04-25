@@ -9,10 +9,11 @@ use datafusion_common::{
 use datafusion_expr::{
     expr::WindowFunction, Expr, Extension, LogicalPlan, Projection, Sort, Window,
 };
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     extension::{key_calculation::KeyCalculationExtension, window_fn::WindowFunctionExtension},
+    find_window,
     plan::extract_column,
 };
 
@@ -33,6 +34,130 @@ fn get_window_and_name(expr: &Expr) -> DFResult<(WindowFunction, String)> {
     }
 }
 
+impl WindowFunctionRewriter {
+    fn mutate_create_windowing(&self, window: Window) -> DFResult<LogicalPlan> {
+        let Window {
+            input, window_expr, ..
+        } = window;
+        // error if there isn't exactly one window expr
+        if window_expr.len() != 1 {
+            return plan_err!("Window functions require exactly one window expression");
+        }
+        // the window_expr can be renamed by optimizers, in which case there will be an alias
+        let (
+            WindowFunction {
+                fun,
+                args,
+                partition_by,
+                order_by,
+                window_frame,
+            },
+            original_name,
+        ) = get_window_and_name(&window_expr[0])?;
+
+        let mut window_field: Vec<_> = partition_by
+            .iter()
+            .enumerate()
+            .filter_map(|(index, expr)| {
+                Some(find_window(expr).transpose()?.map(|window| (window, index)))
+            })
+            .collect::<anyhow::Result<_>>()
+            .expect("should replace");
+        if window_field.len() != 1 {
+            return plan_err!(
+                "Window function requires exactly one window expression in partition_by"
+            );
+        }
+
+        let (window_type, index) = window_field.pop().unwrap();
+        let mut additional_keys = partition_by.clone();
+        // because the operator will have grouped by the timestamp of each row,
+        // don't need to shuffle or partition by the window.
+        additional_keys.remove(index);
+        let key_count = additional_keys.len();
+
+        let new_window_func = WindowFunction {
+            fun,
+            args,
+            partition_by: additional_keys.clone(),
+            order_by,
+            window_frame,
+        };
+
+        let mut key_projection_expressions: Vec<_> = additional_keys
+            .iter()
+            .enumerate()
+            .map(|(index, expression)| expression.clone().alias(format!("_key_{}", index)))
+            .collect();
+
+        key_projection_expressions.extend(
+            input
+                .schema()
+                .fields()
+                .iter()
+                .map(|field| Expr::Column(field.qualified_column())),
+        );
+
+        // this two-step sequence is necessary because we need to
+        // know the types of the partition expressions before constructing the appropriate schema.
+        let auto_schema =
+            Projection::try_new(key_projection_expressions.clone(), input.clone())?.schema;
+        let mut key_fields = auto_schema
+            .fields()
+            .iter()
+            .take(additional_keys.clone().len())
+            .cloned()
+            .collect::<Vec<_>>();
+        key_fields.extend(input.schema().fields().iter().cloned());
+        let key_schema = Arc::new(DFSchema::new_with_metadata(key_fields, HashMap::new())?);
+        let key_projection = LogicalPlan::Projection(Projection::try_new_with_schema(
+            key_projection_expressions,
+            input.clone(),
+            key_schema,
+        )?);
+        let key_plan = LogicalPlan::Extension(Extension {
+            node: Arc::new(KeyCalculationExtension::new(
+                key_projection,
+                (0..key_count).collect(),
+            )),
+        });
+
+        let mut sort_expressions: Vec<_> = additional_keys
+            .iter()
+            .map(|partition| {
+                Expr::Sort(datafusion_expr::expr::Sort {
+                    expr: Box::new(partition.clone()),
+                    asc: true,
+                    nulls_first: false,
+                })
+            })
+            .collect();
+        sort_expressions.extend(new_window_func.order_by.clone());
+
+        // This sort seems to be necessary to not fail at execution time.
+        let shuffle = LogicalPlan::Sort(Sort {
+            expr: sort_expressions,
+            input: Arc::new(key_plan),
+            fetch: None,
+        });
+
+        let window_expr = Expr::WindowFunction(new_window_func).alias_if_changed(original_name)?;
+
+        let rewritten_window_plan =
+            LogicalPlan::Window(Window::try_new(vec![window_expr], Arc::new(shuffle))?);
+
+        info!("Rewritten window plan: {:?}", rewritten_window_plan);
+
+        Ok(LogicalPlan::Extension(Extension {
+            node: Arc::new(WindowFunctionExtension::new(
+                rewritten_window_plan,
+                Some(window_type),
+                (0..key_count).collect(),
+            )),
+        }))
+    }
+}
+
 impl TreeNodeRewriter for WindowFunctionRewriter {
     type N = LogicalPlan;
 
@@ -48,7 +173,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         window.input.visit(&mut window_detecting_visitor)?;
 
         let Some(input_window) = window_detecting_visitor.window else {
-            return plan_err!("Window functions require already windowed input");
+            return self.mutate_create_windowing(window);
         };
         if matches!(input_window, WindowType::Session { .. }) {
             return plan_err!("Window functions do not support session windows");
@@ -182,6 +307,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         Ok(LogicalPlan::Extension(Extension {
             node: Arc::new(WindowFunctionExtension::new(
                 rewritten_window_plan,
+                None,
                 (0..key_count).collect(),
             )),
         }))
