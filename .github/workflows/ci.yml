@@ -87,6 +87,10 @@ jobs:
           sudo service mosquitto start
       - name: Check Formatting
         run: cargo fmt -- --check
+      - name: Build console
+        run: |
+          cd webui
+          pnpm build        
       - name: Build
         run: cargo build --all-features
       - name: Validate API

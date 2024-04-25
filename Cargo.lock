@@ -476,6 +476,7 @@ dependencies = [
  "h2",
  "http 0.2.12",
  "jwt-simple",
+ "mime_guess",
  "once_cell",
  "petgraph",
  "postgres",
@@ -488,6 +489,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "regress 0.6.0",
  "reqwest",
+ "rust-embed 6.8.1",
  "schemars",
  "serde",
  "serde_json",
@@ -1312,10 +1314,10 @@ dependencies = [
  "nkeys",
  "nuid",
  "once_cell",
- "rand",
+ "rand 0.8.5",
  "regex",
  "ring 0.17.8",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
  "rustls-webpki",
@@ -6020,7 +6022,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom",
  "log",
- "rand",
+ "rand 0.8.5",
  "signatory",
 ]
 
@@ -6062,7 +6064,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc895af95856f929163a0aa20c26a78d26bfdc839f51b9d5aa7a5b79e52b7e83"
 dependencies = [
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -7793,12 +7795,37 @@ dependencies = [
 
 [[package]]
 name = "rust-embed"
+version = "6.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a36224c3276f8c4ebc8c20f158eca7ca4359c8db89991c4925132aaaf6702661"
+dependencies = [
+ "axum",
+ "rust-embed-impl 6.8.1",
+ "rust-embed-utils 7.8.1",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed"
 version = "8.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb78f46d0066053d16d4ca7b898e9343bc3530f71c61d5ad84cd404ada068745"
 dependencies = [
- "rust-embed-impl",
- "rust-embed-utils",
+ "rust-embed-impl 8.3.0",
+ "rust-embed-utils 8.3.0",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-impl"
+version = "6.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49b94b81e5b2c284684141a2fb9e2a31be90638caf040bf9afbc5a0416afe1ac"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rust-embed-utils 7.8.1",
+ "syn 2.0.52",
  "walkdir",
 ]
 
@@ -7810,9 +7837,19 @@ checksum = "b91ac2a3c6c0520a3fb3dd89321177c3c692937c4eb21893378219da10c44fc8"
 dependencies = [
  "proc-macro2",
  "quote",
- "rust-embed-utils",
+ "rust-embed-utils 8.3.0",
  "shellexpand",
  "syn 2.0.52",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-utils"
+version = "7.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d38ff6bf570dc3bb7100fce9f7b60c33fa71d80e88da3f2580df4ff2bdded74"
+dependencies = [
+ "sha2 0.10.8",
  "walkdir",
 ]
 
@@ -8435,7 +8472,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1e303f8205714074f6068773f0e29527e0453937fe837c9717d066635b65f31"
 dependencies = [
  "pkcs8 0.10.2",
- "rand_core",
+ "rand_core 0.6.4",
  "signature 2.2.0",
  "zeroize",
 ]
@@ -9744,7 +9781,7 @@ dependencies = [
  "axum",
  "mime_guess",
  "regex",
- "rust-embed",
+ "rust-embed 8.3.0",
  "serde",
  "serde_json",
  "utoipa 4.2.0",

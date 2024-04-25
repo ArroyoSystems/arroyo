@@ -68,7 +68,7 @@ use datafusion_execution::FunctionRegistry;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::Item;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
@@ -520,7 +520,7 @@ pub async fn parse_and_get_arrow_program(
         plan_rewrite.visit(&mut metadata)?;
         used_connections.extend(metadata.connection_ids.iter());
 
-        info!("Logical plan: {}", plan_rewrite.display_graphviz());
+        debug!("Logical plan: {}", plan_rewrite.display_graphviz());
 
         let sink = match sink_name {
             Some(sink_name) => {
