@@ -57,6 +57,10 @@ spec:
         - name: CHECKPOINT_URL
           value: {{ .Values.checkpointUrl }}
         {{- end }}
+        {{ if .Values.artifactUrl }}
+        - name: ARTIFACT_URL
+          value: {{ .Values.artifactUrl }}
+        {{- end }}
 
         {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
         - name: CONTROLLER_ADDR
