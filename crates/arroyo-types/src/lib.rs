@@ -784,6 +784,7 @@ pub fn should_flush(size: usize, time: Instant) -> bool {
     let flush_linger =
         FLUSH_LINGER.get_or_init(|| duration_millis_config(BATCH_LINGER_MS_ENV, DEFAULT_LINGER));
 
+    println!("Should flush? {}", size);
     size > 0 && (size >= *flush_size || time.elapsed() >= *flush_linger)
 }
 
