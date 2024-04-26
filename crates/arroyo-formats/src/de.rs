@@ -181,10 +181,19 @@ impl ArrowDeserializer {
         self.buffered_since = Instant::now();
         self.buffered_count = 0;
         match self.bad_data {
-            BadData::Fail { .. } => decoder
-                .flush()
-                .map_err(|e| SourceError::bad_data(format!("JSON does not match schema: {:?}", e)))
-                .transpose(),
+            BadData::Fail { .. } => Some(
+                decoder
+                    .flush()
+                    .map_err(|e| {
+                        SourceError::bad_data(format!("JSON does not match schema: {:?}", e))
+                    })
+                    .transpose()?
+                    .map(|batch| {
+                        let mut columns = batch.columns().to_vec();
+                        columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
+                        RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
+                    }),
+            ),
             BadData::Drop { .. } => Some(
                 decoder
                     .flush_with_bad_data()
@@ -350,13 +359,13 @@ mod tests {
     use crate::de::{ArrowDeserializer, FramingIterator};
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::cast::AsArray;
-    use arrow_array::types::Int64Type;
+    use arrow_array::types::{Int64Type, TimestampNanosecondType};
     use arrow_schema::{Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{
         BadData, Format, Framing, FramingMethod, JsonFormat, NewlineDelimitedFraming,
     };
-    use arroyo_types::SourceError;
+    use arroyo_types::{to_nanos, SourceError};
     use serde_json::json;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -470,12 +479,14 @@ mod tests {
     async fn test_bad_data_drop() {
         let (mut arrays, mut deserializer) = setup_deserializer(BadData::Drop {});
 
+        let now = SystemTime::now();
+
         assert_eq!(
             deserializer
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
-                    SystemTime::now()
+                    now
                 )
                 .await,
             vec![]
@@ -485,7 +496,7 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
-                    SystemTime::now()
+                    now
                 )
                 .await,
             vec![]
@@ -494,6 +505,12 @@ mod tests {
         let batch = deserializer.flush_buffer().unwrap().unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
+        assert_eq!(
+            batch.columns()[1]
+                .as_primitive::<TimestampNanosecondType>()
+                .value(0),
+            to_nanos(now) as i64
+        );
     }
 
     #[tokio::test]
