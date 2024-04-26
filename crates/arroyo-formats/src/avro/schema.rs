@@ -116,11 +116,18 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
         Schema::Null => (DataType::Null, false, None),
         Schema::Boolean => (DataType::Boolean, false, None),
         Schema::Int | Schema::TimeMillis => (DataType::Int32, false, None),
-        Schema::Long
-        | Schema::TimeMicros
-        | Schema::TimestampMillis
-        | Schema::LocalTimestampMillis
-        | Schema::LocalTimestampMicros => (DataType::Int64, false, None),
+        Schema::Long => (DataType::Int64, false, None),
+        Schema::TimeMicros => (DataType::Time64(TimeUnit::Microsecond), false, None),
+        Schema::TimestampMillis | Schema::LocalTimestampMillis => (
+            DataType::Timestamp(TimeUnit::Millisecond, None),
+            false,
+            None,
+        ),
+        Schema::TimestampMicros | Schema::LocalTimestampMicros => (
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+            false,
+            None,
+        ),
         Schema::Float => (DataType::Float32, false, None),
         Schema::Double => (DataType::Float64, false, None),
         Schema::Bytes | Schema::Fixed(_) | Schema::Decimal(_) => (DataType::Binary, false, None),
