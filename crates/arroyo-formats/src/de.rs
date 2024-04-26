@@ -180,19 +180,40 @@ impl ArrowDeserializer {
         let (decoder, timestamp) = self.json_decoder.as_mut()?;
         self.buffered_since = Instant::now();
         self.buffered_count = 0;
-        Some(
-            decoder
-                .flush_with_bad_data()
-                .map_err(|e| SourceError::bad_data(format!("JSON does not match schema: {:?}", e)))
-                .transpose()?
-                .map(|(batch, mask, _)| {
-                    let mut columns = batch.columns().to_vec();
-                    let timestamp = kernels::filter::filter(&timestamp.finish(), &mask).unwrap();
+        match self.bad_data {
+            BadData::Fail { .. } => Some(
+                decoder
+                    .flush()
+                    .map_err(|e| {
+                        SourceError::bad_data(format!("JSON does not match schema: {:?}", e))
+                    })
+                    .transpose()?
+                    .map(|batch| {
+                        let mut columns = batch.columns().to_vec();
+                        columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
+                        RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
+                    }),
+            ),
+            BadData::Drop { .. } => Some(
+                decoder
+                    .flush_with_bad_data()
+                    .map_err(|e| {
+                        SourceError::bad_data(format!(
+                            "Something went wrong decoding JSON: {:?}",
+                            e
+                        ))
+                    })
+                    .transpose()?
+                    .map(|(batch, mask, _)| {
+                        let mut columns = batch.columns().to_vec();
+                        let timestamp =
+                            kernels::filter::filter(&timestamp.finish(), &mask).unwrap();
 
-                    columns.insert(self.schema.timestamp_index, Arc::new(timestamp));
-                    RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
-                }),
-        )
+                        columns.insert(self.schema.timestamp_index, Arc::new(timestamp));
+                        RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
+                    }),
+            ),
+        }
     }
 
     fn deserialize_single(
@@ -270,7 +291,7 @@ impl ArrowDeserializer {
                         .schema
                         .schema
                         .column_with_name("value")
-                        .expect("no 'value' column for unstructed avro");
+                        .expect("no 'value' column for unstructured avro");
                     let array = builders[idx]
                         .as_any_mut()
                         .downcast_mut::<StringBuilder>()
@@ -335,9 +356,19 @@ pub(crate) fn add_timestamp(
 
 #[cfg(test)]
 mod tests {
-    use crate::de::FramingIterator;
-    use arroyo_rpc::formats::{Framing, FramingMethod, NewlineDelimitedFraming};
+    use crate::de::{ArrowDeserializer, FramingIterator};
+    use arrow_array::builder::{make_builder, ArrayBuilder};
+    use arrow_array::cast::AsArray;
+    use arrow_array::types::{Int64Type, TimestampNanosecondType};
+    use arrow_schema::{Schema, TimeUnit};
+    use arroyo_rpc::df::ArroyoSchema;
+    use arroyo_rpc::formats::{
+        BadData, Format, Framing, FramingMethod, JsonFormat, NewlineDelimitedFraming,
+    };
+    use arroyo_types::{to_nanos, SourceError};
+    use serde_json::json;
     use std::sync::Arc;
+    use std::time::SystemTime;
 
     #[test]
     fn test_line_framing() {
@@ -407,5 +438,108 @@ mod tests {
             ],
             result
         );
+    }
+
+    fn setup_deserializer(bad_data: BadData) -> (Vec<Box<dyn ArrayBuilder>>, ArrowDeserializer) {
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("x", arrow_schema::DataType::Int64, true),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let arrays: Vec<_> = schema
+            .fields
+            .iter()
+            .map(|f| make_builder(f.data_type(), 16))
+            .collect();
+
+        let schema = ArroyoSchema::from_schema_unkeyed(schema).unwrap();
+
+        let deserializer = ArrowDeserializer::new(
+            Format::Json(JsonFormat {
+                confluent_schema_registry: false,
+                schema_id: None,
+                include_schema: false,
+                debezium: false,
+                unstructured: false,
+                timestamp_format: Default::default(),
+            }),
+            schema,
+            None,
+            bad_data,
+        );
+
+        (arrays, deserializer)
+    }
+
+    #[tokio::test]
+    async fn test_bad_data_drop() {
+        let (mut arrays, mut deserializer) = setup_deserializer(BadData::Drop {});
+
+        let now = SystemTime::now();
+
+        assert_eq!(
+            deserializer
+                .deserialize_slice(
+                    &mut arrays[..],
+                    json!({ "x": 5 }).to_string().as_bytes(),
+                    now
+                )
+                .await,
+            vec![]
+        );
+        assert_eq!(
+            deserializer
+                .deserialize_slice(
+                    &mut arrays[..],
+                    json!({ "x": "hello" }).to_string().as_bytes(),
+                    now
+                )
+                .await,
+            vec![]
+        );
+
+        let batch = deserializer.flush_buffer().unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
+        assert_eq!(
+            batch.columns()[1]
+                .as_primitive::<TimestampNanosecondType>()
+                .value(0),
+            to_nanos(now) as i64
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bad_data_fail() {
+        let (mut arrays, mut deserializer) = setup_deserializer(BadData::Fail {});
+
+        assert_eq!(
+            deserializer
+                .deserialize_slice(
+                    &mut arrays[..],
+                    json!({ "x": 5 }).to_string().as_bytes(),
+                    SystemTime::now()
+                )
+                .await,
+            vec![]
+        );
+        assert_eq!(
+            deserializer
+                .deserialize_slice(
+                    &mut arrays[..],
+                    json!({ "x": "hello" }).to_string().as_bytes(),
+                    SystemTime::now()
+                )
+                .await,
+            vec![]
+        );
+
+        let err = deserializer.flush_buffer().unwrap().unwrap_err();
+
+        assert!(matches!(err, SourceError::BadData { .. }));
     }
 }
