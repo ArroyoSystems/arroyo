@@ -423,7 +423,7 @@ impl State for Scheduling {
                             arroyo_rpc::grpc::TableEnum::GlobalKeyValue => {
                                 GlobalKeyedTable::committing_data(config.clone(), table_metadata)
                             }
-                            arroyo_rpc::grpc::TableEnum::ExpiringKeyedTimeTable => todo!(),
+                            arroyo_rpc::grpc::TableEnum::ExpiringKeyedTimeTable => None,
                         } {
                             committing_data
                                 .entry(operator_id.clone())

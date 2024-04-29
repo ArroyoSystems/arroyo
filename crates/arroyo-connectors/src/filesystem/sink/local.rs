@@ -46,10 +46,13 @@ pub struct LocalFileSystemWriter<V: LocalWriter> {
 
 impl<V: LocalWriter> LocalFileSystemWriter<V> {
     pub fn new(
-        final_dir: String,
+        mut final_dir: String,
         table_properties: FileSystemTable,
         config: OperatorConfig,
     ) -> TwoPhaseCommitterOperator<Self> {
+        if final_dir.starts_with("file://") {
+            final_dir = final_dir.trim_start_matches("file://").to_string();
+        }
         // TODO: explore configuration options here
         let tmp_dir = format!("{}/__in_progress", final_dir);
         // make sure final_dir and tmp_dir exists
