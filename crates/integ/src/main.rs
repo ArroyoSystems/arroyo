@@ -1,14 +1,13 @@
 use std::time::{Duration, Instant};
 
-
 use anyhow::Result;
+use arroyo_openapi::types::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType};
+use arroyo_openapi::Client;
 use arroyo_types::DatabaseConfig;
 use rand::RngCore;
 use serde_json::json;
 use tokio_postgres::NoTls;
 use tracing::{info, warn};
-use arroyo_openapi::Client;
-use arroyo_openapi::types::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType};
 
 mod embedded {
     use refinery::embed_migrations;
@@ -40,9 +39,12 @@ pub fn run_service(name: String, args: &[&str], env: Vec<(String, String)>) -> R
 async fn wait_for_state(client: &Client, pipeline_id: &str, expected_state: &str) {
     let mut last_state = "None".to_string();
     while last_state != expected_state {
-        let jobs = client.get_pipeline_jobs()
+        let jobs = client
+            .get_pipeline_jobs()
             .id(pipeline_id)
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
         let job = jobs.data.first().unwrap();
 
         let state = job.state.clone();
@@ -131,13 +133,16 @@ pub async fn main() {
     let source_name = format!("source_{}", run_id);
     info!("Creating source {}", source_name);
 
-    let _ = api_client.create_connection_table()
-        .body(ConnectionTablePost::builder()
-            .config(json!({"event_rate": 10}))
-            .connector("impulse")
-            .name(source_name.clone()))
+    let _ = api_client
+        .create_connection_table()
+        .body(
+            ConnectionTablePost::builder()
+                .config(json!({"event_rate": 10}))
+                .connector("impulse")
+                .name(source_name.clone()),
+        )
         .send()
-    .await;
+        .await;
 
     info!("Created connection table");
 
@@ -145,19 +150,24 @@ pub async fn main() {
     let pipeline_name = format!("pipeline_{}", run_id);
     info!("Creating pipeline {}", pipeline_name);
 
-    let pipeline_id = api_client.post_pipeline()
-        .body(PipelinePost::builder()
-                  .name(pipeline_name)
-                  .parallelism(1)
-                  .query(format!(
-                      "select count(*) from {} group \
+    let pipeline_id = api_client
+        .post_pipeline()
+        .body(
+            PipelinePost::builder()
+                .name(pipeline_name)
+                .parallelism(1)
+                .checkpoint_interval_micros(1_000_000)
+                .query(format!(
+                    "select count(*) from {} group \
                       by hop(interval '2 seconds', interval '10 seconds')",
-                      source_name))
+                    source_name
+                )),
         )
         .send()
         .await
         .unwrap()
-        .id.clone();
+        .id
+        .clone();
 
     info!("Created pipeline {}", pipeline_id);
 
@@ -165,13 +175,19 @@ pub async fn main() {
     info!("Waiting until running");
     wait_for_state(&api_client, &pipeline_id, "Running").await;
 
-    let jobs = api_client.get_pipeline_jobs().id(&pipeline_id).send().await.unwrap();
+    let jobs = api_client
+        .get_pipeline_jobs()
+        .id(&pipeline_id)
+        .send()
+        .await
+        .unwrap();
     let job = jobs.data.first().unwrap();
 
     // wait for a checkpoint
     info!("Waiting for 3 successful checkpoints");
     loop {
-        let checkpoints = api_client.get_job_checkpoints()
+        let checkpoints = api_client
+            .get_job_checkpoints()
             .pipeline_id(&pipeline_id)
             .job_id(&job.id)
             .send()
@@ -189,13 +205,13 @@ pub async fn main() {
 
     // stop job
     info!("Stopping job");
-    api_client.patch_pipeline()
+    api_client
+        .patch_pipeline()
         .id(&pipeline_id)
-        .body(PipelinePatch::builder()
-                  .stop(StopType::Checkpoint))
+        .body(PipelinePatch::builder().stop(StopType::Checkpoint))
         .send()
-    .await
-    .unwrap();
+        .await
+        .unwrap();
 
     info!("Waiting for stop");
     wait_for_state(&api_client, &pipeline_id, "Stopped").await;

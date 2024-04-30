@@ -495,6 +495,8 @@ export interface components {
       stop?: components["schemas"]["StopType"] | null;
     };
     PipelinePost: {
+      /** Format: int64 */
+      checkpointIntervalMicros?: number | null;
       name: string;
       /** Format: int64 */
       parallelism: number;

@@ -2,36 +2,6 @@ syntax = "proto3";
 
 package arroyo_api;
 
-// Job management
-
-
-message CreateSqlJob {
-  string query = 1;
-  uint64 parallelism = 2;
-
-  repeated Udf udfs = 5;
-
-  bool preview = 6;
-}
-
-message CreatePipelineReq {
-  string name = 1;
-  oneof config {
-    bytes program = 2;
-    CreateSqlJob sql = 3;
-  }
-}
-
-message Udf {
-  string definition = 2;
-}
-
-message CreateJobReq {
-  string pipeline_id = 1;
-  uint64 checkpoint_interval_micros = 2;
-  bool preview = 3;
-}
-
 // Program
 
 message PipelineProgramUdf {

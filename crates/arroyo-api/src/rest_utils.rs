@@ -97,13 +97,6 @@ pub(crate) fn internal_server_error(message: impl Into<String>) -> ErrorResp {
     }
 }
 
-pub(crate) fn unauthorized(message: impl Into<String>) -> ErrorResp {
-    ErrorResp {
-        status_code: StatusCode::UNAUTHORIZED,
-        message: message.into(),
-    }
-}
-
 pub(crate) fn not_found(object: &str) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::NOT_FOUND,

@@ -130,7 +130,7 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --: DbPipeline (state?, ttl_micros?)
 
---! create_pipeline(udfs?, textual_repr?)
+--! create_pipeline(textual_repr?)
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version)
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version)
 RETURNING id;

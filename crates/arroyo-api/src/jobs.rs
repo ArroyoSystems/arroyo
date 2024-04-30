@@ -12,7 +12,7 @@ use arroyo_rpc::api_types::{
 };
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
-    CreateJobReq, OperatorCheckpointDetail, TaskCheckpointDetail, TaskCheckpointEventType,
+    OperatorCheckpointDetail, TaskCheckpointDetail, TaskCheckpointEventType,
 };
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
@@ -41,16 +41,17 @@ use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
 
 pub(crate) async fn create_job<'a>(
-    request: CreateJobReq,
     pipeline_name: &str,
-    pipeline_id: &i64,
+    pipeline_id: i64,
+    checkpoint_interval: Duration,
+    preview: bool,
     auth: &AuthData,
     client: &Transaction<'a>,
 ) -> Result<String, ErrorResp> {
-    let checkpoint_interval = if request.preview {
+    let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
     } else {
-        Duration::from_micros(request.checkpoint_interval_micros)
+        checkpoint_interval
     };
 
     if checkpoint_interval < Duration::from_secs(1)
@@ -95,9 +96,9 @@ pub(crate) async fn create_job<'a>(
             &auth.organization_id,
             &pipeline_name,
             &auth.user_id,
-            pipeline_id,
+            &pipeline_id,
             &(checkpoint_interval.as_micros() as i64),
-            &(if request.preview {
+            &(if preview {
                 Some(PREVIEW_TTL.as_micros() as i64)
             } else {
                 None

@@ -25,6 +25,7 @@ pub struct PipelinePost {
     pub udfs: Option<Vec<Udf>>,
     pub preview: Option<bool>,
     pub parallelism: u64,
+    pub checkpoint_interval_micros: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
