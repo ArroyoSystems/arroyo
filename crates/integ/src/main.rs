@@ -1,18 +1,12 @@
+use std::env;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use arroyo_openapi::types::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType};
+use arroyo_openapi::types::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType, Udf};
 use arroyo_openapi::Client;
-use arroyo_types::DatabaseConfig;
 use rand::RngCore;
 use serde_json::json;
-use tokio_postgres::NoTls;
 use tracing::{info, warn};
-
-mod embedded {
-    use refinery::embed_migrations;
-    embed_migrations!("../arroyo-api/migrations");
-}
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -63,8 +57,9 @@ async fn wait_for_state(client: &Client, pipeline_id: &str, expected_state: &str
 
 async fn connect() -> Client {
     let start = Instant::now();
-
-    let client = Client::new("http://localhost:8000/api");
+    
+    let client = Client::new(format!("{}/api", env::var("API_ENDPOINT")
+        .unwrap_or_else(|_| "http://localhost:8000".to_string())));
 
     loop {
         if start.elapsed() > CONNECT_TIMEOUT {
@@ -83,6 +78,29 @@ async fn connect() -> Client {
     }
 }
 
+async fn start_pipeline(client: &Client, run_id: u32, query: &str, udfs: &[&str]) -> anyhow::Result<String> {
+    let pipeline_name = format!("pipeline_{}", run_id);
+    info!("Creating pipeline {}", pipeline_name);
+
+    let pipeline_id = client
+        .post_pipeline()
+        .body(
+            PipelinePost::builder()
+                .name(pipeline_name)
+                .parallelism(1)
+                .checkpoint_interval_micros(1_000_000)
+                .query(query)
+                .udfs(Some(udfs.iter().map(|udf| Udf::builder().definition(*udf).into()).collect())),
+        )
+        .send()
+        .await?
+        .into_inner()
+        .id;
+
+    info!("Created pipeline {}", pipeline_id);
+    Ok(pipeline_id)
+}
+
 #[tokio::main]
 pub async fn main() {
     tracing_subscriber::fmt::init();
@@ -94,28 +112,6 @@ pub async fn main() {
     };
 
     let run_id = rand::thread_rng().next_u32();
-
-    let c = DatabaseConfig::load();
-    let mut config = tokio_postgres::Config::new();
-    config.dbname(&c.name);
-    config.host(&c.host);
-    config.port(c.port);
-    config.user(&c.user);
-    config.password(&c.password);
-
-    let (mut client, connection) = config.connect(NoTls).await.unwrap();
-
-    tokio::spawn(async move {
-        if let Err(error) = connection.await {
-            warn!("Connection error: {}", error);
-        }
-    });
-
-    info!("Running migrations on {}", c.name);
-    embedded::migrations::runner()
-        .run_async(&mut client)
-        .await
-        .unwrap();
 
     let output_dir = std::env::var("OUTPUT_DIR").unwrap_or_else(|_| "/tmp/arroyo".to_string());
 
@@ -147,29 +143,6 @@ pub async fn main() {
     info!("Created connection table");
 
     // create a pipeline
-    let pipeline_name = format!("pipeline_{}", run_id);
-    info!("Creating pipeline {}", pipeline_name);
-
-    let pipeline_id = api_client
-        .post_pipeline()
-        .body(
-            PipelinePost::builder()
-                .name(pipeline_name)
-                .parallelism(1)
-                .checkpoint_interval_micros(1_000_000)
-                .query(format!(
-                    "select count(*) from {} group \
-                      by hop(interval '2 seconds', interval '10 seconds')",
-                    source_name
-                )),
-        )
-        .send()
-        .await
-        .unwrap()
-        .id
-        .clone();
-
-    info!("Created pipeline {}", pipeline_id);
 
     // wait for job to enter running phase
     info!("Waiting until running");
