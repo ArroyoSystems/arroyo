@@ -12,6 +12,7 @@ use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
     BuildUdfReq, BuildUdfResp, GetUdfPathReq, GetUdfPathResp, UdfCrate,
 };
+use arroyo_rpc::var_str::VarStr;
 
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
@@ -102,8 +103,11 @@ impl CompileService {
             crate-type = ["cdylib"]
         };
 
-        let dependencies: Table = toml::from_str(&udf_crate.dependencies)
-            .map_err(|e| anyhow!("Invalid dependency in RPC: {:?}", e))?;
+        let dependencies: Table = VarStr::new(udf_crate.dependencies)
+            .sub_env_vars()
+            .and_then(|deps| {
+                toml::from_str(&deps).map_err(|e| anyhow!("Invalid dependency in RPC: {:?}", e))
+            })?;
 
         cargo_toml.insert("dependencies".to_string(), toml::Value::Table(dependencies));
 
