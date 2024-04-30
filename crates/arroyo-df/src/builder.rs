@@ -25,7 +25,7 @@ use datafusion_expr::{
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::protobuf::{PhysicalExprNode, PhysicalPlanNode};
 use petgraph::graph::{DiGraph, NodeIndex};
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 use tokio::sync::oneshot;
 
 use crate::extension::debezium::{DEBEZIUM_UNROLLING_EXTENSION_NAME, TO_DEBEZIUM_EXTENSION_NAME};
@@ -98,13 +98,22 @@ impl<'a> Planner<'a> {
         let (tx, mut rx) = oneshot::channel();
         thread::scope(|s| {
             let _handle = tokio::runtime::Handle::current();
-            s.spawn(move || {
-                let rt = Runtime::new().unwrap();
-                rt.block_on(async {
-                    let plan = fut.await;
-                    tx.send(plan).unwrap();
-                });
-            });
+            let builder = thread::Builder::new();
+            let builder = if cfg!(debug_assertions) {
+                // Debug modes can end up with stack overflows because DataFusion is stack heavy.
+                builder.stack_size(10_000_000)
+            } else {
+                builder
+            };
+            builder
+                .spawn_scoped(&s, move || {
+                    let rt = Builder::new_current_thread().enable_all().build().unwrap();
+                    rt.block_on(async {
+                        let plan = fut.await;
+                        tx.send(plan).unwrap();
+                    });
+                })
+                .unwrap();
         });
 
         rx.try_recv().unwrap()
