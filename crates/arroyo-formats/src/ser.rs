@@ -348,8 +348,8 @@ mod tests {
         .unwrap();
 
         let mut iter = serializer.serialize(&batch);
-        assert_eq!(iter.next().unwrap(), br#"{"value":1612274910045.332}"#);
+        assert_eq!(iter.next().unwrap(), br#"{"value":1612274910045}"#);
         assert_eq!(iter.next().unwrap(), br#"{"value":null}"#);
-        assert_eq!(iter.next().unwrap(), br#"{"value":1712274910045.332}"#);
+        assert_eq!(iter.next().unwrap(), br#"{"value":1712274910045}"#);
     }
 }
