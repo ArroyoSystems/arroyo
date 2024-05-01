@@ -1,6 +1,6 @@
 use arrow::{
     array::{AsArray, BooleanBuilder, TimestampNanosecondBuilder, UInt32Builder},
-    buffer::NullBuffer,
+    buffer::{BooleanBuffer, NullBuffer},
     compute::{concat, kernels::zip, not, take},
 };
 use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
@@ -975,10 +975,15 @@ impl ExecutionPlan for ToDebeziumExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> DFResult<SendableRecordBatchStream> {
-        let is_retract_index: usize = self.input.schema().index_of(IS_RETRACT_FIELD)?;
+        let is_retract_index = self.input.schema().index_of(IS_RETRACT_FIELD).ok();
         let timestamp_index = self.input.schema().index_of(TIMESTAMP_FIELD)?;
         let struct_projection = (0..self.input.schema().fields().len())
-            .filter(|index| *index != is_retract_index && *index != timestamp_index)
+            .filter(|index| {
+                is_retract_index
+                    .map(|is_retract_index| *index != is_retract_index)
+                    .unwrap_or(true)
+                    && *index != timestamp_index
+            })
             .collect();
         Ok(Box::pin(ToDebeziumStream {
             input: self.input.execute(partition, context)?,
@@ -997,7 +1002,7 @@ impl ExecutionPlan for ToDebeziumExec {
 struct ToDebeziumStream {
     input: SendableRecordBatchStream,
     schema: SchemaRef,
-    is_retract_index: usize,
+    is_retract_index: Option<usize>,
     timestamp_index: usize,
     struct_projection: Vec<usize>,
 }
@@ -1005,11 +1010,30 @@ struct ToDebeziumStream {
 impl ToDebeziumStream {
     fn as_debezium_batch(&mut self, batch: &RecordBatch) -> DFResult<RecordBatch> {
         let value_struct = batch.project(&self.struct_projection)?;
-        let is_retract = batch
-            .column(self.is_retract_index)
-            .as_any()
-            .downcast_ref::<BooleanArray>()
-            .unwrap();
+        let timestamp_column = batch.column(self.timestamp_index).clone();
+        match self.is_retract_index {
+            Some(retract_index) => self.create_debezium(
+                value_struct,
+                timestamp_column,
+                batch
+                    .column(retract_index)
+                    .as_any()
+                    .downcast_ref::<BooleanArray>()
+                    .unwrap(),
+            ),
+            None => {
+                let is_retract_array =
+                    BooleanArray::new(BooleanBuffer::new_unset(batch.num_rows()), None);
+                self.create_debezium(value_struct, timestamp_column, &is_retract_array)
+            }
+        }
+    }
+    fn create_debezium(
+        &mut self,
+        value_struct: RecordBatch,
+        timestamp_column: Arc<dyn Array>,
+        is_retract: &BooleanArray,
+    ) -> DFResult<RecordBatch> {
         let after_nullability = Some(NullBuffer::new(not(is_retract)?.values().clone()));
         let after_array = StructArray::try_new(
             value_struct.schema().fields().clone(),
@@ -1025,7 +1049,6 @@ impl ToDebeziumStream {
         let append_datum = StringArray::new_scalar("c");
         let retract_datum = StringArray::new_scalar("d");
         let op_array = zip::zip(is_retract, &retract_datum, &append_datum)?;
-        let timestamp_column = batch.column(self.timestamp_index).clone();
 
         let columns = vec![
             Arc::new(before_array),
