@@ -439,7 +439,7 @@ impl From<DbPipelineJob> for Job {
     }
 }
 
-/// Get a pipeline graph
+/// Validate a query and return pipeline graph
 #[utoipa::path(
     post,
     path = "/v1/pipelines/validate_query",
@@ -469,17 +469,13 @@ pub async fn validate_query(
     )
     .await
     {
-        Ok(CompiledSql { program, .. }) => {
-            //optimizations::optimize(&mut program.graph);
-
-            QueryValidationResult {
-                graph: Some(program.try_into().map_err(log_and_map)?),
-                errors: None,
-            }
-        }
+        Ok(CompiledSql { program, .. }) => QueryValidationResult {
+            graph: Some(program.try_into().map_err(log_and_map)?),
+            errors: vec![],
+        },
         Err(e) => QueryValidationResult {
             graph: None,
-            errors: Some(vec![e.to_string()]),
+            errors: vec![e.to_string()],
         },
     };
 

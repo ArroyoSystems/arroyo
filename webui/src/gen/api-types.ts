@@ -113,8 +113,8 @@ export interface paths {
   };
   "/v1/pipelines/validate_query": {
     /**
-     * Get a pipeline graph 
-     * @description Get a pipeline graph
+     * Validate a query and return pipeline graph 
+     * @description Validate a query and return pipeline graph
      */
     post: operations["validate_query"];
   };
@@ -510,7 +510,7 @@ export interface components {
     /** @enum {string} */
     PrimitiveType: "int32" | "int64" | "u_int32" | "u_int64" | "f32" | "f64" | "bool" | "string" | "bytes" | "unix_millis" | "unix_micros" | "unix_nanos" | "date_time" | "json";
     QueryValidationResult: {
-      errors?: (string)[] | null;
+      errors: (string)[];
       graph?: components["schemas"]["PipelineGraph"] | null;
     };
     RawStringFormat: Record<string, never>;
@@ -837,8 +837,8 @@ export interface operations {
     };
   };
   /**
-   * Get a pipeline graph 
-   * @description Get a pipeline graph
+   * Validate a query and return pipeline graph 
+   * @description Validate a query and return pipeline graph
    */
   validate_query: {
     requestBody: {

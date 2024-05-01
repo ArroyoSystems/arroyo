@@ -14,7 +14,7 @@ pub struct ValidateQueryPost {
 #[serde(rename_all = "camelCase")]
 pub struct QueryValidationResult {
     pub graph: Option<PipelineGraph>,
-    pub errors: Option<Vec<String>>,
+    pub errors: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
