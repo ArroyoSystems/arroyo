@@ -27,6 +27,7 @@ pub struct KafkaSourceFunc {
     pub topic: String,
     pub bootstrap_servers: String,
     pub group_id: Option<String>,
+    pub group_id_prefix: Option<String>,
     pub offset_mode: super::SourceOffset,
     pub format: Format,
     pub framing: Option<Framing>,
@@ -47,6 +48,27 @@ impl KafkaSourceFunc {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
 
+        let group_id = match (&self.group_id, &self.group_id_prefix) {
+            (Some(group_id), prefix) => {
+                if prefix.is_some() {
+                    warn!("both group_id and group_id_prefix are set for Kafka source; using group_id");
+                }
+                group_id.clone()
+            }
+            (None, Some(prefix)) => {
+                format!(
+                    "{}-arroyo-{}-{}",
+                    prefix, ctx.task_info.job_id, ctx.task_info.operator_id
+                )
+            }
+            (None, None) => {
+                format!(
+                    "arroyo-{}-{}-consumer",
+                    ctx.task_info.job_id, ctx.task_info.operator_id
+                )
+            }
+        };
+
         for (key, value) in &self.client_configs {
             client_config.set(key, value);
         }
@@ -54,15 +76,7 @@ impl KafkaSourceFunc {
             .set("bootstrap.servers", &self.bootstrap_servers)
             .set("enable.partition.eof", "false")
             .set("enable.auto.commit", "false")
-            .set(
-                "group.id",
-                self.group_id.clone().unwrap_or_else(|| {
-                    format!(
-                        "arroyo-{}-{}-consumer",
-                        ctx.task_info.job_id, ctx.task_info.operator_id
-                    )
-                }),
-            )
+            .set("group.id", group_id)
             .create()?;
 
         let state: Vec<_> = ctx

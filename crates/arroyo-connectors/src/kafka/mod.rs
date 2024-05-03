@@ -114,6 +114,7 @@ impl KafkaConnector {
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
                     group_id: options.remove("source.group_id"),
+                    group_id_prefix: options.remove("source.group_id_prefix"),
                 }
             }
             "sink" => {
@@ -333,6 +334,7 @@ impl Connector for KafkaConnector {
                 group_id,
                 offset,
                 read_mode,
+                group_id_prefix,
             } => {
                 let mut client_configs = client_configs(&profile, &table);
                 if let Some(ReadMode::ReadCommitted) = read_mode {
@@ -364,6 +366,7 @@ impl Connector for KafkaConnector {
                     topic: table.topic,
                     bootstrap_servers: profile.bootstrap_servers.to_string(),
                     group_id: group_id.clone(),
+                    group_id_prefix: group_id_prefix.clone(),
                     offset_mode: *offset,
                     format: config.format.expect("Format must be set for Kafka source"),
                     framing: config.framing,
@@ -414,7 +417,22 @@ impl KafkaTester {
             )
             .set("enable.auto.commit", "false")
             .set("auto.offset.reset", "earliest")
-            .set("group.id", "arroyo-kafka-source-tester");
+            .set(
+                "group.id",
+                match &table {
+                    Some(KafkaTable {
+                        type_:
+                            TableType::Source {
+                                group_id_prefix: Some(prefix),
+                                ..
+                            },
+                        ..
+                    }) => {
+                        format!("{}-arroyo-kafka-tester", prefix)
+                    }
+                    _ => "arroyo-kafka-tester".to_string(),
+                },
+            );
 
         // TODO: merge this with client_configs()
         match &self.connection.authentication {
