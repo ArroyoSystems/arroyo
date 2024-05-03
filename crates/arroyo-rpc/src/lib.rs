@@ -156,7 +156,7 @@ pub fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {
         | PrimitiveType::UnixMicros
         | PrimitiveType::UnixNanos
         | PrimitiveType::DateTime => "TIMESTAMP",
-        PrimitiveType::Json => "JSONB",
+        PrimitiveType::Json => "JSON",
     }
 }
 
