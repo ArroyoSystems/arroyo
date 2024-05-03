@@ -49,6 +49,8 @@ prettyplease = "0.2.4"
 unicase = "2.7.0"
 toml = "0.8.8"
 
+xz2 = { version = "0.1.7", features = ["static"] }
+
 [dev-dependencies]
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}
 rstest = { version = "0.18.2" }
