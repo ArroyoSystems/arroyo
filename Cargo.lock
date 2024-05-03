@@ -743,6 +743,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicase",
+ "xz2",
 ]
 
 [[package]]
