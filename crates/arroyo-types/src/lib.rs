@@ -629,7 +629,10 @@ pub struct RawJson {
 }
 
 pub fn raw_schema() -> Schema {
-    Schema::new(vec![Field::new("value", DataType::Utf8, false)])
+    Schema::new(vec![ArroyoExtensionType::add_metadata(
+        Some(ArroyoExtensionType::JSON),
+        Field::new("value", DataType::Utf8, false),
+    )])
 }
 
 pub static MESSAGES_RECV: &str = "arroyo_worker_messages_recv";
