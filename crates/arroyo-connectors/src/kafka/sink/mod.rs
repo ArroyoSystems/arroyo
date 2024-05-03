@@ -242,6 +242,7 @@ impl ArrowOperator for KafkaSinkFunc {
     }
 
     async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+        self.flush(ctx).await;
         if !self.is_committing() {
             return;
         }
