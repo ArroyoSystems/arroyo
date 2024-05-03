@@ -37,7 +37,12 @@
                         "group_id": {
                             "type": "string",
                             "title": "group id",
-                            "description": "Sets the Group ID of the consumer for Kafka source. If not specified, an automatically generated ID will be used. CAUTION: Using one consumer group for multiple pipelines may result in incomplete data"
+                            "description": "Sets the Group ID of the consumer for Kafka source. If not specified, an automatically generated ID will be used. Overrides group_id_prefix if set. CAUTION: Using one consumer group for multiple pipelines may result in incomplete data"
+                        },
+                        "group_id_prefix": {
+                            "type": "string",
+                            "title": "group id prefix",
+                            "description": "Optional prefix for the Group ID for the consumer for the Kafka source."
                         }
                     },
                     "required": [

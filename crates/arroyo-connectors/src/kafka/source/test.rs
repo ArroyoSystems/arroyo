@@ -80,6 +80,7 @@ impl KafkaTopicTester {
             bootstrap_servers: self.server.clone(),
             topic: self.topic.clone(),
             group_id: self.group_id.clone(),
+            group_id_prefix: None,
             offset_mode: SourceOffset::Earliest,
             format: Format::RawString(RawStringFormat {}),
             framing: None,
