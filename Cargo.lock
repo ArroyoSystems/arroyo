@@ -594,7 +594,7 @@ dependencies = [
  "parquet",
  "prost 0.12.3",
  "rand 0.8.5",
- "rdkafka",
+ "rdkafka 0.33.2",
  "rdkafka-sys",
  "redis",
  "regex",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-openapi"
-version = "0.9.0-dev"
+version = "0.11.0-dev"
 dependencies = [
  "arroyo-api",
  "chrono",
@@ -5120,6 +5120,7 @@ dependencies = [
  "anyhow",
  "arroyo-openapi",
  "rand 0.8.5",
+ "rdkafka 0.36.2",
  "serde_json",
  "tokio",
  "tracing",
@@ -7289,6 +7290,24 @@ dependencies = [
  "slab",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "rdkafka"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1beea247b9a7600a81d4cc33f659ce1a77e1988323d7d2809c7ed1c21f4c316d"
+dependencies = [
+ "futures-channel",
+ "futures-util",
+ "libc",
+ "log",
+ "rdkafka-sys",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "slab",
+ "tokio",
 ]
 
 [[package]]

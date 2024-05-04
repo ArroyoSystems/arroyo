@@ -1,7 +1,7 @@
 use crate::avro::de;
 use arrow::compute::kernels;
 use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
-use arrow_array::{RecordBatch};
+use arrow_array::RecordBatch;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
-
 
 pub struct FramingIterator<'a> {
     framing: Option<Arc<Framing>>,

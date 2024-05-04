@@ -276,7 +276,7 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub(crate) async fn create_pipeline<'a>(
+pub(crate) async fn create_pipeline_int<'a>(
     req: &PipelinePost,
     pub_id: &str,
     auth: AuthData,
@@ -492,9 +492,10 @@ pub async fn validate_query(
     request_body = PipelinePost,
     responses(
         (status = 200, description = "Created pipeline and job", body = Pipeline),
+        (status = 400, description = "Bad request", body = ErrorResp),
     ),
 )]
-pub async fn post_pipeline(
+pub async fn create_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
@@ -510,7 +511,7 @@ pub async fn post_pipeline(
         .await
         .map_err(log_and_map)?;
 
-    let (pipeline_id, program) = create_pipeline(
+    let (pipeline_id, program) = create_pipeline_int(
         &pipeline_post,
         &pipeline_pub_id,
         auth_data.clone(),

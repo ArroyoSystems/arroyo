@@ -1,13 +1,19 @@
 use anyhow::bail;
 use std::env;
+use std::fmt::Debug;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use arroyo_openapi::builder::TestSchema;
 use arroyo_openapi::types::{
-    builder, ConnectionTablePost, PipelinePatch, PipelinePost, StopType, Udf, ValidateQueryPost,
+    builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, MetricNames,
+    PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
+    ValidateUdfPost,
 };
 use arroyo_openapi::Client;
 use rand::random;
+use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
+use rdkafka::{ClientConfig, ClientContext};
 use serde_json::json;
 use tracing::info;
 
@@ -59,7 +65,7 @@ async fn start_pipeline(run_id: u32, query: &str, udfs: &[&str]) -> anyhow::Resu
     info!("Creating pipeline {}", pipeline_name);
 
     let pipeline_id = get_client()
-        .post_pipeline()
+        .create_pipeline()
         .body(
             PipelinePost::builder()
                 .name(pipeline_name)
@@ -86,7 +92,7 @@ async fn start_and_monitor(
     query: &str,
     udfs: &[&str],
     checkpoints_to_wait: u32,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<(String, String)> {
     let api_client = get_client();
 
     println!("Starting pipeline");
@@ -117,7 +123,8 @@ async fn start_and_monitor(
             .job_id(&job.id)
             .send()
             .await
-            .unwrap();
+            .unwrap()
+            .into_inner();
 
         if let Some(checkpoint) = checkpoints
             .data
@@ -125,7 +132,20 @@ async fn start_and_monitor(
             .find(|c| c.epoch == checkpoints_to_wait as i64)
         {
             if checkpoint.finish_time.is_some() {
-                return Ok(pipeline_id);
+                // get details
+                let details = api_client
+                    .get_checkpoint_details()
+                    .pipeline_id(&pipeline_id)
+                    .job_id(&job.id)
+                    .epoch(checkpoint.epoch)
+                    .send()
+                    .await
+                    .unwrap()
+                    .into_inner();
+
+                assert!(!details.data.is_empty());
+
+                return Ok((pipeline_id, job.id.clone()));
             }
         }
 
@@ -161,7 +181,7 @@ async fn basic_pipeline() {
     let run_id: u32 = random();
     let source_name = format!("source_{}", run_id);
 
-    let _ = api_client
+    let source_id = api_client
         .create_connection_table()
         .body(
             ConnectionTablePost::builder()
@@ -170,7 +190,10 @@ async fn basic_pipeline() {
                 .name(source_name.clone()),
         )
         .send()
-        .await;
+        .await
+        .expect("failed to create connection table")
+        .into_inner()
+        .id;
 
     // create a pipeline
     let query = format!(
@@ -193,7 +216,36 @@ async fn basic_pipeline() {
     assert_eq!(valid.errors, Vec::<String>::new());
     assert!(valid.graph.is_some());
 
-    let pipeline_id = start_and_monitor(run_id, &query, &[], 3).await.unwrap();
+    let (pipeline_id, job_id) = start_and_monitor(run_id, &query, &[], 10).await.unwrap();
+
+    // get error messages
+    let errors = api_client
+        .get_job_errors()
+        .pipeline_id(&pipeline_id)
+        .job_id(&job_id)
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(errors.data.len(), 0);
+
+    // get metrics
+    let metrics = api_client
+        .get_operator_metric_groups()
+        .pipeline_id(&pipeline_id)
+        .job_id(&job_id)
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(metrics.data.len(), valid.graph.unwrap().nodes.len());
+    for metric in metrics.data {
+        for group in metric.metric_groups {
+            if !metric.operator_id.contains("source") && group.name == MetricNames::MessagesSent {
+                assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
+            }
+        }
+    }
 
     // stop job
     patch_and_wait(
@@ -214,6 +266,7 @@ async fn basic_pipeline() {
     .unwrap();
 
     // rescale job
+    println!("Rescaling pipeline");
     patch_and_wait(
         &pipeline_id,
         PipelinePatch::builder().parallelism(2),
@@ -236,6 +289,7 @@ async fn basic_pipeline() {
     }
 
     // restart job
+    println!("Restarting pipeline");
     api_client
         .restart_pipeline()
         .id(&pipeline_id)
@@ -264,9 +318,222 @@ async fn basic_pipeline() {
         .send()
         .await
         .unwrap();
+
+    // delete source
+    println!("Deleting connection");
+    api_client
+        .delete_connection_table()
+        .id(&source_id)
+        .send()
+        .await
+        .unwrap();
 }
 
-// #[tokio::test]
-// async fn udfs() {
-//     let query = format!(r#"select "#)
-// }
+#[tokio::test]
+async fn udfs() {
+    let udf = r#"
+/*
+[dependencies]
+regex = "1"
+*/
+
+use arroyo_udf_plugin::udf;
+use regex::Regex;
+
+#[udf]
+fn my_double(x: i64) -> i64 {
+    x * 2
+}"#;
+
+    // validate UDF
+    let valid = get_client()
+        .validate_udf()
+        .body(ValidateUdfPost::builder().definition(udf))
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(valid.errors, Vec::<String>::new());
+
+    let query = r#"
+create table impulse with (
+   connector = 'impulse',
+   event_rate = '10'
+);
+
+select my_double(cast(counter as bigint)) from impulse;
+"#;
+
+    let run_id: u32 = random();
+
+    let (pipeline_id, _job_id) = start_and_monitor(run_id, query, &[udf], 3).await.unwrap();
+
+    // stop job
+    patch_and_wait(
+        &pipeline_id,
+        PipelinePatch::builder().stop(StopType::Checkpoint),
+        "Stopped",
+    )
+    .await
+    .unwrap();
+
+    // delete pipeline
+    println!("Deleting pipeline");
+    get_client()
+        .delete_pipeline()
+        .id(&pipeline_id)
+        .send()
+        .await
+        .unwrap();
+}
+
+fn create_kafka_admin(run_id: u32) -> AdminClient<impl ClientContext> {
+    ClientConfig::new()
+        .set("bootstrap.servers", "localhost:9092")
+        .set("enable.auto.commit", "false")
+        .set("group.id", format!("arroyo-integ-{run_id}"))
+        .create()
+        .unwrap()
+}
+
+async fn create_topic(client: &AdminClient<impl ClientContext>, topic: &str) {
+    client
+        .create_topics(
+            [&NewTopic::new(
+                topic,
+                1,
+                rdkafka::admin::TopicReplication::Fixed(1),
+            )],
+            &AdminOptions::new(),
+        )
+        .await
+        .expect("deletion should have worked");
+}
+
+async fn delete_topic(client: &AdminClient<impl ClientContext>, topic: &str) {
+    client
+        .delete_topics(&[topic], &AdminOptions::new())
+        .await
+        .expect("deletion should have worked");
+}
+
+#[tokio::test]
+async fn connection_table() {
+    let api_client = get_client();
+
+    let connectors = api_client
+        .get_connectors()
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(connectors.data.iter().find(|c| c.name == "kafka").is_some());
+
+    let run_id: u32 = random();
+    let table_name = format!("kafka_table_{run_id}");
+    let kafka_admin = create_kafka_admin(run_id);
+
+    let kafka_topic = format!("kafka_test_{run_id}");
+    create_topic(&kafka_admin, &kafka_topic).await;
+
+    let schema = r#"
+{
+    "type": "object",
+    "properties": {
+        "a": {
+            "type": "string"
+        },
+        "b": {
+            "type": "number"
+        },
+        "c": {
+            "type": "array",
+            "item": {
+                "type": "string"
+            }
+        }
+    },
+    "required": ["a"]
+}"#;
+
+    let connection_schema =
+        ConnectionSchema::builder().definition(SchemaDefinition::JsonSchema(schema.to_string()));
+
+    // create a kafka connection
+    let profile_post = ConnectionProfilePost::builder()
+        .name(format!("kafka_source_{}", run_id))
+        .connector("kafka")
+        .config(json!( {
+            "authentication": {},
+            "bootstrapServers": "localhost:9092",
+            "schemaRegistryEnum": {}
+        }));
+
+    let valid = api_client
+        .test_connection_profile()
+        .body(profile_post.clone())
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(valid.done);
+    assert!(!valid.error);
+
+    let profile = api_client
+        .create_connection_profile()
+        .body(profile_post)
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+
+    api_client
+        .get_connection_profile_autocomplete()
+        .id(&profile.id)
+        .send()
+        .await
+        .unwrap()
+        .into_inner()
+        .values
+        .get("topic")
+        .unwrap()
+        .iter()
+        .find(|t| *t == &kafka_topic)
+        .expect("autocomplete did not return kafka topic");
+
+    api_client
+        .test_schema()
+        .body(connection_schema.clone())
+        .send()
+        .await
+        .expect("valid schema");
+
+    let connection_table = ConnectionTablePost::builder()
+        .name(table_name.clone())
+        .connector("kafka")
+        .schema(Some(connection_schema.try_into().unwrap()))
+        .config(json!({
+            "type": {
+                "offset": "latest",
+                "read_mode": "read_uncommitted"
+            },
+            "topic": kafka_topic
+        }))
+        .connection_profile_id(Some(profile.id.clone()));
+
+    let connection_table = api_client
+        .create_connection_table()
+        .body(connection_table)
+        .send()
+        .await
+        .expect("failed to create table")
+        .into_inner();
+
+    // assert_eq!(connection_table.schema.fields,
+    //     vec![
+    //
+    //     ]
+}

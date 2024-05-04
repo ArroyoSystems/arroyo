@@ -10,14 +10,18 @@ use thiserror::Error;
 use tracing::error;
 
 use axum::headers::authorization::{Authorization, Bearer};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 pub type BearerAuth = Option<TypedHeader<Authorization<Bearer>>>;
 
 const DEFAULT_ITEMS_PER_PAGE: u32 = 10;
 
-#[derive(Debug)]
+#[derive(Debug, ToSchema, Serialize, Deserialize)]
 pub struct ErrorResp {
+    #[serde(skip)]
     pub(crate) status_code: StatusCode,
+    #[serde(rename = "error")]
     pub(crate) message: String,
 }
 
@@ -57,10 +61,9 @@ where
 
 impl IntoResponse for ErrorResp {
     fn into_response(self) -> Response {
-        let body = Json(json!({
-            "error": self.message,
-        }));
-        (self.status_code, body).into_response()
+        let status_code = self.status_code;
+        let body = Json(serde_json::to_value(self).unwrap());
+        (status_code, body).into_response()
     }
 }
 
