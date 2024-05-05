@@ -1,15 +1,9 @@
 use anyhow::bail;
 use std::env;
-use std::fmt::Debug;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use arroyo_openapi::builder::TestSchema;
-use arroyo_openapi::types::{
-    builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, MetricNames,
-    PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
-    ValidateUdfPost,
-};
+use arroyo_openapi::types::{builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonFormat, MetricNames, PipelinePatch, PipelinePost, PrimitiveType, SchemaDefinition, SourceField, StopType, Udf, ValidateQueryPost, ValidateUdfPost};
 use arroyo_openapi::Client;
 use rand::random;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -388,11 +382,9 @@ select my_double(cast(counter as bigint)) from impulse;
         .unwrap();
 }
 
-fn create_kafka_admin(run_id: u32) -> AdminClient<impl ClientContext> {
+fn create_kafka_admin() -> AdminClient<impl ClientContext> {
     ClientConfig::new()
         .set("bootstrap.servers", "localhost:9092")
-        .set("enable.auto.commit", "false")
-        .set("group.id", format!("arroyo-integ-{run_id}"))
         .create()
         .unwrap()
 }
@@ -429,11 +421,11 @@ async fn connection_table() {
         .unwrap()
         .into_inner();
 
-    assert!(connectors.data.iter().find(|c| c.name == "kafka").is_some());
+    assert!(connectors.data.iter().find(|c| c.name == "Kafka").is_some());
 
     let run_id: u32 = random();
     let table_name = format!("kafka_table_{run_id}");
-    let kafka_admin = create_kafka_admin(run_id);
+    let kafka_admin = create_kafka_admin();
 
     let kafka_topic = format!("kafka_test_{run_id}");
     create_topic(&kafka_admin, &kafka_topic).await;
@@ -459,7 +451,10 @@ async fn connection_table() {
 }"#;
 
     let connection_schema =
-        ConnectionSchema::builder().definition(SchemaDefinition::JsonSchema(schema.to_string()));
+        ConnectionSchema::builder()
+            .fields(vec![])
+            .format(Format::Json(JsonFormat::builder().try_into().unwrap()))
+            .definition(SchemaDefinition::JsonSchema(schema.to_string()));
 
     // create a kafka connection
     let profile_post = ConnectionProfilePost::builder()
@@ -524,7 +519,7 @@ async fn connection_table() {
         }))
         .connection_profile_id(Some(profile.id.clone()));
 
-    let connection_table = api_client
+    let mut connection_table = api_client
         .create_connection_table()
         .body(connection_table)
         .send()
@@ -532,8 +527,40 @@ async fn connection_table() {
         .expect("failed to create table")
         .into_inner();
 
-    // assert_eq!(connection_table.schema.fields,
-    //     vec![
-    //
-    //     ]
+    connection_table.schema.fields.sort_by_key(|f| f.field_name.clone());
+    
+    assert_eq!(serde_json::to_value(connection_table.schema.fields).unwrap(),
+        json!([
+            {
+                "fieldName": "a",
+                "fieldType": {
+                    "sqlName": "TEXT",                
+                    "type": {
+                        "primitive": "String",
+                    },
+                },
+                "nullable": false
+            },
+            {
+                "fieldName": "b",
+                "fieldType": {
+                   "sqlName": "DOUBLE",
+                    "type": {
+                        "primitive": "F64",
+                    },
+                },
+               "nullable": true,
+            },
+            {
+                "fieldName": "c",
+                "fieldType": {
+                    "sqlName": "JSON",                
+                    "type": {
+                        "primitive": "Json",
+                    },
+                },
+                "nullable": true,
+            }
+            
+        ]));
 }
