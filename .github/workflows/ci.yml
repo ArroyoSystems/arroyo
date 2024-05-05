@@ -99,11 +99,12 @@ jobs:
           cd crates/arroyo-openapi
           lint-openapi --errors-only api-spec.json
       - name: Test
-        run: cargo nextest run --jobs 4 --all-features
+        run: cargo nextest run -E 'kind(lib)' --all-features
       - name: Integ
         run: |
           mkdir /tmp/arroyo-integ
-          RUST_LOG=info DISABLE_TELEMETRY=true OUTPUT_DIR=file:///tmp/arroyo-integ ARTIFACT_URL=file:///tmp/artifacts DEBUG=true target/debug/integ
+          DISABLE_TELEMETRY=true CHECKPOINT_URL=file:///tmp/arroyo-integ ARTIFACT_URL=file:///tmp/artifacts target/debug/arroyo-bin cluster &
+          cargo nextest run -E 'kind(integ)'
   build-console:
     runs-on: ubuntu-latest
     steps:

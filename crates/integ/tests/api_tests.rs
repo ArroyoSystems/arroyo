@@ -3,7 +3,11 @@ use std::env;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use arroyo_openapi::types::{builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonFormat, MetricNames, PipelinePatch, PipelinePost, PrimitiveType, SchemaDefinition, SourceField, StopType, Udf, ValidateQueryPost, ValidateUdfPost};
+use arroyo_openapi::types::{
+    builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonFormat,
+    MetricNames, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
+    ValidateUdfPost,
+};
 use arroyo_openapi::Client;
 use rand::random;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -442,7 +446,7 @@ async fn connection_table() {
         },
         "c": {
             "type": "array",
-            "item": {
+            "items": {
                 "type": "string"
             }
         }
@@ -450,11 +454,10 @@ async fn connection_table() {
     "required": ["a"]
 }"#;
 
-    let connection_schema =
-        ConnectionSchema::builder()
-            .fields(vec![])
-            .format(Format::Json(JsonFormat::builder().try_into().unwrap()))
-            .definition(SchemaDefinition::JsonSchema(schema.to_string()));
+    let connection_schema = ConnectionSchema::builder()
+        .fields(vec![])
+        .format(Format::Json(JsonFormat::builder().try_into().unwrap()))
+        .definition(SchemaDefinition::JsonSchema(schema.to_string()));
 
     // create a kafka connection
     let profile_post = ConnectionProfilePost::builder()
@@ -527,14 +530,18 @@ async fn connection_table() {
         .expect("failed to create table")
         .into_inner();
 
-    connection_table.schema.fields.sort_by_key(|f| f.field_name.clone());
-    
-    assert_eq!(serde_json::to_value(connection_table.schema.fields).unwrap(),
+    connection_table
+        .schema
+        .fields
+        .sort_by_key(|f| f.field_name.clone());
+
+    assert_eq!(
+        serde_json::to_value(connection_table.schema.fields).unwrap(),
         json!([
             {
                 "fieldName": "a",
                 "fieldType": {
-                    "sqlName": "TEXT",                
+                    "sqlName": "TEXT",
                     "type": {
                         "primitive": "String",
                     },
@@ -554,13 +561,60 @@ async fn connection_table() {
             {
                 "fieldName": "c",
                 "fieldType": {
-                    "sqlName": "JSON",                
                     "type": {
-                        "primitive": "Json",
+                        "list": {
+                            "fieldName": "item",
+                            "fieldType": {
+                                "sqlName": "TEXT",
+                                "type": {
+                                    "primitive": "String",
+                                }
+                            },
+                            "nullable": false
+                        },
                     },
                 },
                 "nullable": true,
             }
-            
-        ]));
+        ])
+    );
+
+    let (pipeline_id, _) = start_and_monitor(
+        run_id,
+        &format!("select * from {};", connection_table.name),
+        &[],
+        5,
+    )
+    .await
+    .unwrap();
+
+    // stop job
+    patch_and_wait(
+        &pipeline_id,
+        PipelinePatch::builder().stop(StopType::Immediate),
+        "Stopped",
+    )
+    .await
+    .unwrap();
+
+    // delete pipeline
+    println!("Deleting pipeline");
+    api_client
+        .delete_pipeline()
+        .id(&pipeline_id)
+        .send()
+        .await
+        .unwrap();
+
+    // delete source
+    println!("Deleting connection");
+    api_client
+        .delete_connection_table()
+        .id(&connection_table.id)
+        .send()
+        .await
+        .unwrap();
+
+    // delete topic
+    delete_topic(&kafka_admin, &kafka_topic).await;
 }
