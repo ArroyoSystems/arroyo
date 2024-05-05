@@ -2,6 +2,4 @@ target/
 .idea
 .env
 .vscode/
-crates/arroyo-openapi/api-spec.json
-crates/arroyo-openapi/client
 

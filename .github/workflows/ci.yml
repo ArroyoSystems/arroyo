@@ -96,7 +96,7 @@ jobs:
       - name: Validate API
         run: |
           pnpm install --global ibm-openapi-validator
-          cd crates/arroyo-openapi
+          cd target
           lint-openapi --errors-only api-spec.json
       - name: Test
         run: cargo nextest run -E 'kind(lib)' --all-features
