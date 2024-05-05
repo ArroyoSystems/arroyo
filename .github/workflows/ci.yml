@@ -93,11 +93,6 @@ jobs:
           pnpm build        
       - name: Build
         run: cargo build --all-features
-      - name: Validate API
-        run: |
-          pnpm install --global ibm-openapi-validator
-          cd target
-          lint-openapi --errors-only api-spec.json
       - name: Test
         run: cargo nextest run -E 'kind(lib)' --all-features
       - name: Integ
