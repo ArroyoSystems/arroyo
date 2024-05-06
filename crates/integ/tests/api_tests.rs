@@ -236,28 +236,32 @@ async fn basic_pipeline() {
     assert_eq!(errors.data.len(), 0);
 
     // get metrics
-    loop {
-        let metrics = api_client
-            .get_operator_metric_groups()
-            .pipeline_id(&pipeline_id)
-            .job_id(&job_id)
-            .send()
-            .await
-            .unwrap()
-            .into_inner();
-        if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len() {
-            for metric in metrics.data {
-                for group in metric.metric_groups {
-                    if !metric.operator_id.contains("source")
-                        && group.name == MetricNames::MessagesSent
-                    {
-                        assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
+    // (skip in CI for now, as we don't have prometheus available; re-enable when metrics are moved
+    // off prometheus)
+    if !env::var("CI").map(|ci| ci == "true").unwrap_or(false) {
+        loop {
+            let metrics = api_client
+                .get_operator_metric_groups()
+                .pipeline_id(&pipeline_id)
+                .job_id(&job_id)
+                .send()
+                .await
+                .unwrap()
+                .into_inner();
+            if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len() {
+                for metric in metrics.data {
+                    for group in metric.metric_groups {
+                        if !metric.operator_id.contains("source")
+                            && group.name == MetricNames::MessagesSent
+                        {
+                            assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
+                        }
                     }
                 }
+                break;
             }
-            break;
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     // stop job
