@@ -48,7 +48,7 @@ pub fn to_arrow(name: &str, schema: &str) -> anyhow::Result<arrow_schema::Schema
         })
         .ok_or_else(|| anyhow!("No top-level struct in json schema {}", name))?;
 
-    let (dt, _, _) = to_arrow_datatype(&type_space, &s);
+    let (dt, _, _) = to_arrow_datatype(&type_space, &s, None);
 
     let fields = match dt {
         DataType::Struct(fields) => fields,
@@ -63,6 +63,7 @@ pub fn to_arrow(name: &str, schema: &str) -> anyhow::Result<arrow_schema::Schema
 fn to_arrow_datatype(
     type_space: &TypeSpace,
     t: &Type,
+    required: Option<bool>,
 ) -> (DataType, bool, Option<ArroyoExtensionType>) {
     match t.details() {
         TypeDetails::Struct(s) => {
@@ -70,7 +71,8 @@ fn to_arrow_datatype(
                 .properties_info()
                 .map(|info| {
                     let field_type = type_space.get_type(&info.type_id).unwrap();
-                    let (t, nullable, extension) = to_arrow_datatype(type_space, &field_type);
+                    let (t, nullable, extension) =
+                        to_arrow_datatype(type_space, &field_type, Some(info.required));
                     Arc::new(ArroyoExtensionType::add_metadata(
                         extension,
                         Field::new(info.rename.unwrap_or(info.name), t, nullable),
@@ -82,7 +84,7 @@ fn to_arrow_datatype(
         }
         TypeDetails::Option(opt) => {
             let t = type_space.get_type(&opt).unwrap();
-            let (dt, _, extension) = to_arrow_datatype(type_space, &t);
+            let (dt, _, extension) = to_arrow_datatype(type_space, &t, None);
             (dt, true, extension)
         }
         TypeDetails::Builtin(t) => {
@@ -107,7 +109,19 @@ fn to_arrow_datatype(
         TypeDetails::String => (DataType::Utf8, false, None),
         TypeDetails::Newtype(t) => {
             let t = type_space.get_type(&t.subtype()).unwrap();
-            to_arrow_datatype(type_space, &t)
+            to_arrow_datatype(type_space, &t, None)
+        }
+        TypeDetails::Array(t, _) | TypeDetails::Vec(t) => {
+            let t = type_space.get_type(&t).unwrap();
+            let (t, nullable, extension) = to_arrow_datatype(type_space, &t, None);
+            (
+                DataType::List(Arc::new(ArroyoExtensionType::add_metadata(
+                    extension,
+                    Field::new("item", t, nullable),
+                ))),
+                !required.unwrap_or(true),
+                None,
+            )
         }
         _ => {
             warn!(

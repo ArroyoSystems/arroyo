@@ -15,7 +15,7 @@ use std::env;
 use petgraph::visit::NodeRef;
 use std::time::Duration;
 
-use crate::{compiler_service, connection_profiles, jobs, pipelines, types};
+use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::preview_sink;
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, QueryValidationResult, StopType,
@@ -23,10 +23,7 @@ use arroyo_rpc::api_types::pipelines::{
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
-use arroyo_rpc::grpc::api as api_proto;
-use arroyo_rpc::grpc::api::{
-    create_pipeline_req, ArrowProgram, ConnectorOp, CreateJobReq, CreatePipelineReq, CreateSqlJob,
-};
+use arroyo_rpc::grpc::api::{ArrowProgram, ConnectorOp};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalProgram, OperatorName};
@@ -50,13 +47,12 @@ use crate::queries::api_queries::{DbPipeline, DbPipelineJob, GetPipelinesParams}
 use crate::rest::AppState;
 use crate::rest_utils::{
     authenticate, bad_request, client, log_and_map, not_found, paginate_results, required_field,
-    unauthorized, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
+    validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::{connection_tables, to_micros};
 use crate::{handle_db_error, AuthData};
-use create_pipeline_req::Config::Sql;
 
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -280,84 +276,38 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub(crate) async fn create_pipeline<'a>(
-    req: &CreatePipelineReq,
+pub(crate) async fn create_pipeline_int<'a>(
+    req: &PipelinePost,
     pub_id: &str,
     auth: AuthData,
     tx: &Transaction<'a>,
 ) -> Result<(i64, LogicalProgram), ErrorResp> {
-    let pipeline_type;
-    let mut compiled;
-    let text;
-    let udfs: Option<Vec<Udf>>;
-    let is_preview;
+    let is_preview = req.preview.unwrap_or(false);
 
-    match req.config.clone().ok_or_else(|| required_field("config"))? {
-        create_pipeline_req::Config::Program(bytes) => {
-            if !auth.org_metadata.can_create_programs {
-                return Err(unauthorized(
-                    "Your plan does not allow you to call this API.".to_string(),
-                ));
-            }
-            pipeline_type = PipelineType::rust;
-            compiled = CompiledSql {
-                program: ArrowProgram::decode(&bytes[..])
-                    .map_err(log_and_map)?
-                    .try_into()
-                    .map_err(log_and_map)?,
-                connection_ids: vec![],
-            };
-            text = None;
-            udfs = None;
-            is_preview = false;
-        }
-        Sql(sql) => {
-            if sql.parallelism > auth.org_metadata.max_parallelism as u64 {
-                return Err(bad_request(format!(
-                    "Your plan allows you to run pipelines up to parallelism {};
-                    contact support@arroyo.systems for an increase",
-                    auth.org_metadata.max_parallelism
-                )));
-            }
+    if req.parallelism > auth.org_metadata.max_parallelism as u64 {
+        return Err(bad_request(format!(
+            "Your plan allows you to run pipelines up to parallelism {};
+            contact support@arroyo.systems for an increase",
+            auth.org_metadata.max_parallelism
+        )));
+    }
 
-            let api_udfs = sql.udfs.into_iter().map(|t| t.into()).collect::<Vec<Udf>>();
-
-            pipeline_type = PipelineType::sql;
-            compiled = compile_sql(
-                sql.query.clone(),
-                &api_udfs,
-                sql.parallelism as usize,
-                &auth,
-                false,
-                tx,
-            )
-            .await
-            .map_err(|e| bad_request(e.to_string()))?;
-            text = Some(sql.query);
-            udfs = Some(api_udfs);
-            is_preview = sql.preview;
-        }
-    };
-
-    // TODO: graph optimizations?
-    //optimizations::optimize(&mut compiled.program.graph);
+    let mut compiled = compile_sql(
+        req.query.clone(),
+        req.udfs.as_ref().unwrap_or(&vec![]),
+        req.parallelism as usize,
+        &auth,
+        false,
+        tx,
+    )
+    .await
+    .map_err(|e| bad_request(e.to_string()))?;
 
     if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
             format!("This pipeline is too large to create under your plan, which only allows pipelines up to {} nodes;
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
-
-    // TODO: graph validation?
-    // let errors = compiled.program.validate_graph();
-    // if !errors.is_empty() {
-    //     let errs: Vec<String> = errors.iter().map(|s| format!("  * {}\n", s)).collect();
-    //
-    //     return Err(bad_request(format!(
-    //         "Program validation failed:\n{}",
-    //         errs.join("")
-    //     )));
-    // }
 
     set_parallelism(&mut compiled.program, 1);
 
@@ -389,6 +339,8 @@ pub(crate) async fn create_pipeline<'a>(
         return Err(required_field("name"));
     }
 
+    let udfs = serde_json::to_value(req.udfs.as_ref().unwrap_or(&vec![])).unwrap();
+
     let pipeline_id = api_queries::create_pipeline()
         .bind(
             tx,
@@ -396,9 +348,9 @@ pub(crate) async fn create_pipeline<'a>(
             &auth.organization_id,
             &auth.user_id,
             &req.name,
-            &pipeline_type,
-            &text,
-            &udfs.map(|t| serde_json::to_value(t).unwrap()),
+            &PipelineType::sql,
+            &Some(req.query.clone()),
+            &udfs,
             &program_bytes,
             &2,
         )
@@ -427,7 +379,6 @@ impl TryInto<Pipeline> for DbPipeline {
     type Error = ErrorResp;
 
     fn try_into(self) -> Result<Pipeline, ErrorResp> {
-        let udfs: Vec<api_proto::Udf> = serde_json::from_value(self.udfs).map_err(log_and_map)?;
         let running_desired = self.stop == StopMode::none;
         let state = self.state.unwrap_or_else(|| "Created".to_string());
         let (action_text, action, action_in_progress) = get_action(&state, &running_desired);
@@ -459,7 +410,7 @@ impl TryInto<Pipeline> for DbPipeline {
             id: self.pub_id,
             name: self.name,
             query: self.textual_repr,
-            udfs: udfs.into_iter().map(|v| v.into()).collect(),
+            udfs: serde_json::from_value(self.udfs).map_err(log_and_map)?,
             checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
             stop,
             created_at: to_micros(self.created_at),
@@ -488,7 +439,7 @@ impl From<DbPipelineJob> for Job {
     }
 }
 
-/// Get a pipeline graph
+/// Validate a query and return pipeline graph
 #[utoipa::path(
     post,
     path = "/v1/pipelines/validate_query",
@@ -518,17 +469,13 @@ pub async fn validate_query(
     )
     .await
     {
-        Ok(CompiledSql { program, .. }) => {
-            //optimizations::optimize(&mut program.graph);
-
-            QueryValidationResult {
-                graph: Some(program.try_into().map_err(log_and_map)?),
-                errors: None,
-            }
-        }
+        Ok(CompiledSql { program, .. }) => QueryValidationResult {
+            graph: Some(program.try_into().map_err(log_and_map)?),
+            errors: vec![],
+        },
         Err(e) => QueryValidationResult {
             graph: None,
-            errors: Some(vec![e.to_string()]),
+            errors: vec![e.to_string()],
         },
     };
 
@@ -545,9 +492,10 @@ pub async fn validate_query(
     request_body = PipelinePost,
     responses(
         (status = 200, description = "Created pipeline and job", body = Pipeline),
+        (status = 400, description = "Bad request", body = ErrorResp),
     ),
 )]
-pub async fn post_pipeline(
+pub async fn create_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
@@ -555,50 +503,30 @@ pub async fn post_pipeline(
     let mut client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let preview = pipeline_post.preview.unwrap_or(false);
-
-    let create_pipeline_req = CreatePipelineReq {
-        name: pipeline_post.name.to_string(),
-        config: Some(Sql(CreateSqlJob {
-            query: pipeline_post.query,
-            parallelism: pipeline_post.parallelism,
-            udfs: pipeline_post
-                .udfs
-                .clone()
-                .unwrap_or(vec![])
-                .into_iter()
-                .map(|u| u.into())
-                .collect(),
-            preview,
-        })),
-    };
-
     let pipeline_pub_id = generate_id(IdTypes::Pipeline);
 
     let transaction = client.transaction().await.map_err(log_and_map)?;
-    transaction
-        .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
-        .await
-        .map_err(log_and_map)?;
 
-    let (pipeline_id, program) = pipelines::create_pipeline(
-        &create_pipeline_req,
+    let (pipeline_id, program) = create_pipeline_int(
+        &pipeline_post,
         &pipeline_pub_id,
         auth_data.clone(),
         &transaction,
     )
     .await?;
 
-    let create_job = CreateJobReq {
-        pipeline_id: format!("{}", pipeline_id),
-        checkpoint_interval_micros: DEFAULT_CHECKPOINT_INTERVAL.as_micros() as u64,
-        preview,
-    };
+    let preview = pipeline_post.preview.unwrap_or(false);
+
+    let checkpoint_interval = pipeline_post
+        .checkpoint_interval_micros
+        .map(Duration::from_micros)
+        .unwrap_or(DEFAULT_CHECKPOINT_INTERVAL);
 
     let job_id = jobs::create_job(
-        create_job,
         &pipeline_post.name,
-        &pipeline_id,
+        pipeline_id,
+        checkpoint_interval,
+        preview,
         &auth_data,
         &transaction,
     )

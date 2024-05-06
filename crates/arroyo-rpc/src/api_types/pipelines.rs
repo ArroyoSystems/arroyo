@@ -14,7 +14,7 @@ pub struct ValidateQueryPost {
 #[serde(rename_all = "camelCase")]
 pub struct QueryValidationResult {
     pub graph: Option<PipelineGraph>,
-    pub errors: Option<Vec<String>>,
+    pub errors: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -25,6 +25,7 @@ pub struct PipelinePost {
     pub udfs: Option<Vec<Udf>>,
     pub preview: Option<bool>,
     pub parallelism: u64,
+    pub checkpoint_interval_micros: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

@@ -1,31 +1,28 @@
 use arroyo_api::ApiDoc;
-use std::fs;
-use std::process::Command;
+use progenitor::{GenerationSettings, InterfaceStyle};
+use std::path::PathBuf;
+use std::{env, fs};
 use utoipa::OpenApi;
 
 fn main() {
     // Generate the OpenAPI spec
+    let api_spec = "../../target/api-spec.json";
 
     let doc = ApiDoc::openapi().to_pretty_json().unwrap();
-    fs::write("./api-spec.json", doc).unwrap();
+    fs::write(&api_spec, &doc).unwrap();
 
-    // Generate the API client
+    println!("cargo:rerun-if-changed={}", api_spec);
 
-    let output = Command::new("openapi-generator-cli")
-        .arg("generate")
-        .arg("-g")
-        .arg("rust")
-        .arg("-i")
-        .arg("api-spec.json")
-        .arg("-c")
-        .arg("openapitools.json")
-        .arg("-o")
-        .arg("client")
-        .output()
-        .expect("Failed to run OpenAPI Generator, have you installed openapi-generator-cli?");
+    let spec = serde_json::from_str(&doc).unwrap();
+    let mut settings = GenerationSettings::new();
+    settings.with_interface(InterfaceStyle::Builder);
+    let mut generator = progenitor::Generator::new(&settings);
 
-    if !output.status.success() {
-        let error_message = String::from_utf8_lossy(&output.stderr);
-        panic!("OpenAPI Generator failed with error: {}", error_message);
-    }
+    let tokens = generator.generate_tokens(&spec).unwrap();
+    let ast = syn::parse2(tokens).unwrap();
+    let content = prettyplease::unparse(&ast);
+
+    let generated = PathBuf::from(env::var("OUT_DIR").unwrap()).join("generated");
+    fs::create_dir_all(&generated).unwrap();
+    fs::write(generated.join("api-client.rs"), content).unwrap();
 }

@@ -231,30 +231,9 @@ pub fn try_profile_start(
     }
 }
 
-struct TowerMetrics<S> {
-    inner: S,
-}
-
 lazy_static! {
     static ref REQUEST_COUNTER: IntCounter =
         register_int_counter!("grpc_request_counter", "grpc requests").unwrap();
-}
-
-impl<S, Request> Service<Request> for TowerMetrics<S>
-where
-    S: Service<Request>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request) -> Self::Future {
-        self.inner.call(req)
-    }
 }
 
 #[derive(Debug, Clone, Default)]

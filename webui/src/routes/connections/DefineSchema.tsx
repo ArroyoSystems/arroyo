@@ -220,7 +220,7 @@ const RawStringEditor = ({
             fieldName: 'value',
             fieldType: {
               type: {
-                primitive: 'string',
+                primitive: 'String',
               },
             },
             nullable: false,

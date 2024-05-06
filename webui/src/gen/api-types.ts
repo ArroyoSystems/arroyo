@@ -109,12 +109,12 @@ export interface paths {
      * 
      * The API will create a single job for the pipeline.
      */
-    post: operations["post_pipeline"];
+    post: operations["create_pipeline"];
   };
   "/v1/pipelines/validate_query": {
     /**
-     * Get a pipeline graph 
-     * @description Get a pipeline graph
+     * Validate a query and return pipeline graph 
+     * @description Validate a query and return pipeline graph
      */
     post: operations["validate_query"];
   };
@@ -323,6 +323,9 @@ export interface components {
     ConnectorCollection: {
       data: (components["schemas"]["Connector"])[];
     };
+    ErrorResp: {
+      error: string;
+    };
     FieldType: OneOf<[{
       primitive: components["schemas"]["PrimitiveType"];
     }, {
@@ -495,6 +498,8 @@ export interface components {
       stop?: components["schemas"]["StopType"] | null;
     };
     PipelinePost: {
+      /** Format: int64 */
+      checkpointIntervalMicros?: number | null;
       name: string;
       /** Format: int64 */
       parallelism: number;
@@ -506,9 +511,9 @@ export interface components {
       force?: boolean | null;
     };
     /** @enum {string} */
-    PrimitiveType: "int32" | "int64" | "u_int32" | "u_int64" | "f32" | "f64" | "bool" | "string" | "bytes" | "unix_millis" | "unix_micros" | "unix_nanos" | "date_time" | "json";
+    PrimitiveType: "Int32" | "Int64" | "UInt32" | "UInt64" | "F32" | "F64" | "Bool" | "String" | "Bytes" | "UnixMillis" | "UnixMicros" | "UnixNanos" | "DateTime" | "Json";
     QueryValidationResult: {
-      errors?: (string)[] | null;
+      errors: (string)[];
       graph?: components["schemas"]["PipelineGraph"] | null;
     };
     RawStringFormat: Record<string, never>;
@@ -667,7 +672,11 @@ export interface operations {
     };
     responses: {
       /** @description Autocomplete suggestions for connection profile */
-      200: never;
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConnectionAutocompleteResp"];
+        };
+      };
     };
   };
   /**
@@ -819,7 +828,7 @@ export interface operations {
    * 
    * The API will create a single job for the pipeline.
    */
-  post_pipeline: {
+  create_pipeline: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["PipelinePost"];
@@ -832,11 +841,17 @@ export interface operations {
           "application/json": components["schemas"]["Pipeline"];
         };
       };
+      /** @description Bad request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResp"];
+        };
+      };
     };
   };
   /**
-   * Get a pipeline graph 
-   * @description Get a pipeline graph
+   * Validate a query and return pipeline graph 
+   * @description Validate a query and return pipeline graph
    */
   validate_query: {
     requestBody: {

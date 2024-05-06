@@ -1,36 +1,15 @@
 use crate::avro::de;
 use arrow::compute::kernels;
 use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
-use arrow_array::{RecordBatch, StringArray};
+use arrow_array::RecordBatch;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_types::{should_flush, to_nanos, RawJson, SourceError};
+use arroyo_types::{should_flush, to_nanos, SourceError};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
-
-struct RawJsonIterator {
-    offset: usize,
-    rows: usize,
-    column: StringArray,
-}
-
-impl Iterator for RawJsonIterator {
-    type Item = RawJson;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.offset == self.rows {
-            return None;
-        }
-        let val = self.column.value(self.offset);
-        self.offset += 1;
-        Some(RawJson {
-            value: val.to_string(),
-        })
-    }
-}
 
 pub struct FramingIterator<'a> {
     framing: Option<Arc<Framing>>,

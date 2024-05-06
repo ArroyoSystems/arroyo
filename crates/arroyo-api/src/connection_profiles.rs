@@ -191,7 +191,7 @@ pub(crate) async fn delete_connection_profile(
        ("id" = String, Path, description = "Connection Profile id")
     ),
     responses(
-       (status = 200, description = "Autocomplete suggestions for connection profile"),
+       (status = 200, description = "Autocomplete suggestions for connection profile", body = ConnectionAutocompleteResp),
     ),
 )]
 pub(crate) async fn get_connection_profile_autocomplete(

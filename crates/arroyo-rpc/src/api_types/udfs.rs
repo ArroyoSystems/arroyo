@@ -1,4 +1,3 @@
-use crate::grpc::api as api_proto;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -6,22 +5,6 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct Udf {
     pub definition: String,
-}
-
-impl From<Udf> for api_proto::Udf {
-    fn from(val: Udf) -> Self {
-        api_proto::Udf {
-            definition: val.definition,
-        }
-    }
-}
-
-impl From<api_proto::Udf> for Udf {
-    fn from(value: api_proto::Udf) -> Self {
-        Udf {
-            definition: value.definition,
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

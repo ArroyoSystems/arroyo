@@ -75,7 +75,6 @@ impl TryFrom<String> for ConnectionType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum PrimitiveType {
     Int32,
     Int64,
@@ -101,7 +100,7 @@ pub struct StructType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum FieldType {
     Primitive(PrimitiveType),
     Struct(StructType),

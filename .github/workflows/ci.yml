@@ -93,17 +93,14 @@ jobs:
           pnpm build        
       - name: Build
         run: cargo build --all-features
-      - name: Validate API
-        run: |
-          pnpm install --global ibm-openapi-validator
-          cd crates/arroyo-openapi
-          lint-openapi --errors-only api-spec.json
       - name: Test
-        run: cargo nextest run --jobs 4 --all-features
+        run: cargo nextest run -E 'kind(lib)' --all-features
       - name: Integ
         run: |
+          curl https://github.com/prometheus/prometheus/releases/download/v2.51.2/prometheus-2.51.2.linux-amd64.tar.gz
           mkdir /tmp/arroyo-integ
-          RUST_LOG=info DISABLE_TELEMETRY=true OUTPUT_DIR=file:///tmp/arroyo-integ ARTIFACT_URL=file:///tmp/artifacts DEBUG=true target/debug/integ
+          DISABLE_TELEMETRY=true CHECKPOINT_URL=file:///tmp/arroyo-integ ARTIFACT_URL=file:///tmp/artifacts target/debug/arroyo-bin cluster &
+          cargo nextest run --package integ -E 'kind(test)'
   build-console:
     runs-on: ubuntu-latest
     steps:
