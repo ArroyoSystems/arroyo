@@ -506,10 +506,6 @@ pub async fn create_pipeline(
     let pipeline_pub_id = generate_id(IdTypes::Pipeline);
 
     let transaction = client.transaction().await.map_err(log_and_map)?;
-    transaction
-        .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
-        .await
-        .map_err(log_and_map)?;
 
     let (pipeline_id, program) = create_pipeline_int(
         &pipeline_post,

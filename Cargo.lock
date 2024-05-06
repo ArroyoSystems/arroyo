@@ -5121,6 +5121,7 @@ dependencies = [
  "arroyo-openapi",
  "rand 0.8.5",
  "rdkafka 0.36.2",
+ "reqwest",
  "serde_json",
  "tokio",
  "tracing",
