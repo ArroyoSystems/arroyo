@@ -53,14 +53,10 @@ spec:
 
         env:
         {{- include "arroyo.storageEnvVars" . | nindent 8 }}
-        {{ if .Values.checkpointUrl }}
         - name: CHECKPOINT_URL
-          value: {{ .Values.checkpointUrl }}
-        {{- end }}
-        {{ if .Values.artifactUrl }}
+          value: {{ required "A valid .Values.checkpointUrl entry required!" .Values.checkpointUrl }}
         - name: ARTIFACT_URL
-          value: {{ .Values.artifactUrl }}
-        {{- end }}
+          value: {{ required "A valid .Values.artifactUrl entry required!" .Values.artifactUrl }}
 
         {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
         - name: CONTROLLER_ADDR
