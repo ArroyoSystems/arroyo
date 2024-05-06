@@ -54,10 +54,13 @@ fn get_client() -> Arc<Client> {
                 .timeout(Duration::from_secs(15))
                 .build()
                 .unwrap();
-            Arc::new(Client::new_with_client(&format!(
-                "{}/api",
-                env::var("API_ENDPOINT").unwrap_or_else(|_| "http://localhost:8000".to_string())),
-                client
+            Arc::new(Client::new_with_client(
+                &format!(
+                    "{}/api",
+                    env::var("API_ENDPOINT")
+                        .unwrap_or_else(|_| "http://localhost:8000".to_string())
+                ),
+                client,
             ))
         })
         .clone()
@@ -245,12 +248,14 @@ async fn basic_pipeline() {
         if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len() {
             for metric in metrics.data {
                 for group in metric.metric_groups {
-                    if !metric.operator_id.contains("source") && group.name == MetricNames::MessagesSent {
+                    if !metric.operator_id.contains("source")
+                        && group.name == MetricNames::MessagesSent
+                    {
                         assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
                     }
                 }
             }
-            break
+            break;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
