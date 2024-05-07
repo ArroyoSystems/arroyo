@@ -3,13 +3,14 @@ use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
-use datafusion_common::tree_node::TreeNodeRewriter;
-use datafusion_common::{
+use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
+use datafusion::common::{
     plan_err, Column, DFSchema, DataFusionError, JoinConstraint, JoinType, OwnedTableReference,
     Result as DFResult, ScalarValue,
 };
-use datafusion_expr::expr::{Alias, ScalarFunction};
-use datafusion_expr::{
+use datafusion::logical_expr;
+use datafusion::logical_expr::expr::{Alias, ScalarFunction};
+use datafusion::logical_expr::{
     BinaryExpr, BuiltinScalarFunction, Case, Expr, Extension, Join, LogicalPlan, Projection,
 };
 use std::sync::Arc;
@@ -152,7 +153,7 @@ impl JoinRewriter {
         let max_timestamp = Expr::Case(Case {
             expr: Some(Box::new(Expr::BinaryExpr(BinaryExpr {
                 left: Box::new(left_column.clone()),
-                op: datafusion_expr::Operator::GtEq,
+                op: logical_expr::Operator::GtEq,
                 right: Box::new(right_column.clone()),
             }))),
             when_then_expr: vec![
@@ -185,11 +186,11 @@ impl JoinRewriter {
 }
 
 impl TreeNodeRewriter for JoinRewriter {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         let LogicalPlan::Join(join) = node else {
-            return Ok(node);
+            return Ok(Transformed::no(node));
         };
         let is_instant = Self::check_join_windowing(&join)?;
 
@@ -232,8 +233,8 @@ impl TreeNodeRewriter for JoinRewriter {
             is_instant,
         };
 
-        Ok(LogicalPlan::Extension(Extension {
+        Ok(Transformed::yes(LogicalPlan::Extension(Extension {
             node: Arc::new(join_extension),
-        }))
+        })))
     }
 }

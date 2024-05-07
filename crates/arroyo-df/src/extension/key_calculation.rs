@@ -7,9 +7,9 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::KeyPlanOperator,
 };
-use datafusion_common::{DFSchema, DFSchemaRef};
+use datafusion::common::{DFSchema, DFSchemaRef};
 
-use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 

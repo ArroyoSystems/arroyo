@@ -5,15 +5,15 @@ use arroyo_df::physical::DecodingContext;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::grpc::api;
+use datafusion::common::DataFusionError;
+use datafusion::common::Result as DFResult;
 use datafusion::execution::context::SessionContext;
+use datafusion::execution::runtime_env::RuntimeConfig;
+use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::memory::MemoryStream;
-use datafusion::physical_plan::DisplayAs;
 use datafusion::physical_plan::ExecutionPlan;
-use datafusion_common::DataFusionError;
-use datafusion_common::Result as DFResult;
-use datafusion_execution::runtime_env::RuntimeConfig;
-use datafusion_execution::runtime_env::RuntimeEnv;
-use datafusion_execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::physical_plan::{DisplayAs, PlanProperties};
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::StreamExt;
@@ -74,6 +74,7 @@ impl ArrowOperator for ValueExecutionOperator {
 struct RwLockRecordBatchReader {
     schema: SchemaRef,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
+    plan_properties: PlanProperties,
 }
 
 impl DisplayAs for RwLockRecordBatchReader {
@@ -95,12 +96,8 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         self.schema.clone()
     }
 
-    fn output_partitioning(&self) -> datafusion_physical_expr::Partitioning {
-        datafusion_physical_expr::Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
-        None
+    fn properties(&self) -> &PlanProperties {
+        &self.plan_properties
     }
 
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
@@ -110,7 +107,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
     fn with_new_children(
         self: Arc<Self>,
         _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         Err(DataFusionError::Internal("not supported".into()))
     }
 
@@ -118,7 +115,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         &self,
         _partition: usize,
         _context: Arc<TaskContext>,
-    ) -> datafusion_common::Result<datafusion_execution::SendableRecordBatchStream> {
+    ) -> datafusion::common::Result<datafusion::execution::SendableRecordBatchStream> {
         let result = self.locked_batch.read().unwrap().clone().unwrap();
         Ok(Box::pin(MemoryStream::try_new(
             vec![result],
@@ -127,7 +124,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         )?))
     }
 
-    fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
+    fn statistics(&self) -> DFResult<datafusion::common::Statistics> {
         todo!()
     }
 

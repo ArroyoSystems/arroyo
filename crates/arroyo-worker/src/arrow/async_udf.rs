@@ -13,8 +13,9 @@ use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::AsyncUdfDylib;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use datafusion_physical_expr::PhysicalExpr;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -158,6 +159,7 @@ impl ArrowOperator for AsyncUdfOperator {
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
                     &*self.registry,
                     &input_schema,
+                    &DefaultPhysicalExtensionCodec {},
                 )
                 .unwrap()
             })
@@ -172,6 +174,7 @@ impl ArrowOperator for AsyncUdfOperator {
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
                     &*self.registry,
                     &post_udf_schema,
+                    &DefaultPhysicalExtensionCodec {},
                 )
                 .unwrap()
             })

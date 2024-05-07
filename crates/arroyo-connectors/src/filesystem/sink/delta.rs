@@ -188,19 +188,19 @@ async fn check_existing_files(
 }
 
 async fn commit_to_delta(table: deltalake::DeltaTable, add_actions: Vec<Action>) -> Result<i64> {
-    deltalake::operations::transaction::commit(
-        table.log_store().as_ref(),
-        &add_actions,
-        deltalake::protocol::DeltaOperation::Write {
-            mode: SaveMode::Append,
-            partition_by: None,
-            predicate: None,
-        },
-        Some(table.snapshot()?),
-        None,
-    )
-    .await
-    .map_err(Into::into)
+    Ok(deltalake::operations::transaction::CommitBuilder::default()
+        .with_actions(add_actions)
+        .build(
+            Some(table.snapshot()?),
+            table.log_store(),
+            deltalake::protocol::DeltaOperation::Write {
+                mode: SaveMode::Append,
+                partition_by: None,
+                predicate: None,
+            },
+        )?
+        .await?
+        .version)
 }
 
 fn build_table_path(storage_provider: &StorageProvider, relative_table_path: &Path) -> String {

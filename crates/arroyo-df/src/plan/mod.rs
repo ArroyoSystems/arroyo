@@ -2,14 +2,15 @@ use std::{collections::HashSet, sync::Arc};
 
 use arroyo_datastream::WindowType;
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
-use datafusion_common::{
+use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
+use datafusion::common::{
     plan_err,
-    tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion},
+    tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor},
     Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
 };
 
 use aggregate::AggregateRewriter;
-use datafusion_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan};
+use datafusion::logical_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan};
 use join::JoinRewriter;
 
 use crate::{
@@ -59,9 +60,35 @@ fn extract_column(expr: &Expr) -> Option<&Column> {
 }
 
 impl TreeNodeVisitor for WindowDetectingVisitor {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn post_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
+        let LogicalPlan::Extension(Extension { node }) = node else {
+            return Ok(TreeNodeRecursion::Continue);
+        };
+
+        // handle Join in the pre-join, as each side needs to be checked separately.
+        if node.name() == JOIN_NODE_NAME {
+            let input_windows: HashSet<_> = node
+                .inputs()
+                .iter()
+                .map(|input| Self::get_window(input))
+                .collect::<DFResult<HashSet<_>>>()?;
+            if input_windows.len() > 1 {
+                return Err(DataFusionError::Plan(
+                    "can't handle mixed windowing between left and right".to_string(),
+                ));
+            }
+            self.window = input_windows
+                .into_iter()
+                .next()
+                .expect("join has at least one input");
+            return Ok(TreeNodeRecursion::Jump);
+        }
+        Ok(TreeNodeRecursion::Continue)
+    }
+
+    fn f_up(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         match node {
             LogicalPlan::Projection(projection) => {
                 let window_expressions = projection
@@ -215,33 +242,7 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
             }
             _ => {}
         }
-        Ok(VisitRecursion::Continue)
-    }
-
-    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
-        let LogicalPlan::Extension(Extension { node }) = node else {
-            return Ok(VisitRecursion::Continue);
-        };
-
-        // handle Join in the pre-join, as each side needs to be checked separately.
-        if node.name() == JOIN_NODE_NAME {
-            let input_windows: HashSet<_> = node
-                .inputs()
-                .iter()
-                .map(|input| Self::get_window(input))
-                .collect::<DFResult<HashSet<_>>>()?;
-            if input_windows.len() > 1 {
-                return Err(DataFusionError::Plan(
-                    "can't handle mixed windowing between left and right".to_string(),
-                ));
-            }
-            self.window = input_windows
-                .into_iter()
-                .next()
-                .expect("join has at least one input");
-            return Ok(VisitRecursion::Skip);
-        }
-        Ok(VisitRecursion::Continue)
+        Ok(TreeNodeRecursion::Continue)
     }
 }
 
@@ -252,9 +253,9 @@ pub struct ArroyoRewriter<'a> {
 }
 
 impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
+    fn f_up(&mut self, mut node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         match node {
             LogicalPlan::Projection(ref mut projection) => {
                 if !has_timestamp_field(&projection.schema) {
@@ -295,23 +296,23 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                     projection.expr.push(Expr::Column(field.qualified_column()));
                 }
 
-                return AsyncUdfRewriter::new(self.schema_provider).mutate(node);
+                return AsyncUdfRewriter::new(self.schema_provider).f_up(node);
             }
             LogicalPlan::Aggregate(aggregate) => {
-                return AggregateRewriter {}.mutate(LogicalPlan::Aggregate(aggregate));
+                return AggregateRewriter {}.f_up(LogicalPlan::Aggregate(aggregate));
             }
             LogicalPlan::Join(join) => {
-                return JoinRewriter {}.mutate(LogicalPlan::Join(join));
+                return JoinRewriter {}.f_up(LogicalPlan::Join(join));
             }
             LogicalPlan::TableScan(table_scan) => {
                 return SourceRewriter {
                     schema_provider: self.schema_provider,
                 }
-                .mutate(LogicalPlan::TableScan(table_scan));
+                .f_up(LogicalPlan::TableScan(table_scan));
             }
             LogicalPlan::Filter(_) => {}
             LogicalPlan::Window(_) => {
-                return WindowFunctionRewriter {}.mutate(node);
+                return WindowFunctionRewriter {}.f_up(node);
             }
             LogicalPlan::Sort(_) => {
                 return plan_err!("ORDER BY is not currently supported ({})", node.display());
@@ -344,7 +345,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         node: remote_table_extension,
                     }));
                 }
-                return Ok(LogicalPlan::Union(union));
+                return Ok(Transformed::yes(LogicalPlan::Union(union)));
             }
             LogicalPlan::EmptyRelation(_) => {}
             LogicalPlan::Subquery(_) => {}
@@ -380,6 +381,6 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 return plan_err!("Recursive CTEs are not supported ({})", node.display());
             }
         }
-        Ok(node)
+        Ok(Transformed::no(node))
     }
 }

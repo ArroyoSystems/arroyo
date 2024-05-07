@@ -573,7 +573,6 @@ impl TimeTableCompactor {
             let writer = Some(AsyncArrowWriter::try_new(
                 async_writer,
                 self.schema.state_schema().schema.clone(),
-                10_000_000,
                 None,
             )?);
             e.insert(CompactedFileWriter {
@@ -676,7 +675,6 @@ impl ExpiringTimeKeyTableCheckpointer {
         self.writer = Some(AsyncArrowWriter::try_new(
             async_writer,
             self.parent.schema.state_schema().schema.clone(),
-            10_000_000,
             Some(writer_properties),
         )?);
         Ok(())

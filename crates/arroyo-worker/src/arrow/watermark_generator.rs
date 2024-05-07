@@ -12,8 +12,9 @@ use arroyo_types::{
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use datafusion_physical_expr::PhysicalExpr;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
 use std::collections::HashMap;
@@ -67,7 +68,12 @@ impl OperatorConstructor for WatermarkGeneratorConstructor {
     ) -> anyhow::Result<OperatorNode> {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let expression = PhysicalExprNode::decode(&mut config.expression.as_slice())?;
-        let expression = parse_physical_expr(&expression, registry.as_ref(), &input_schema.schema)?;
+        let expression = parse_physical_expr(
+            &expression,
+            registry.as_ref(),
+            &input_schema.schema,
+            &DefaultPhysicalExtensionCodec {},
+        )?;
 
         Ok(OperatorNode::from_operator(Box::new(
             WatermarkGenerator::expression(

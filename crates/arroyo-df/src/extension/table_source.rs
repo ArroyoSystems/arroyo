@@ -4,9 +4,9 @@ use anyhow::{bail, Result};
 
 use arroyo_datastream::logical::{LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion_common::{DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference};
+use datafusion::common::{DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference};
 
-use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 
 use prost::Message;
 

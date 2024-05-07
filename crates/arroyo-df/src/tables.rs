@@ -14,6 +14,12 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
+use datafusion::common::Column;
+use datafusion::common::{config::ConfigOptions, DFField, DFSchema};
+use datafusion::logical_expr::{
+    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
+    WriteOp,
+};
 use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::Query;
@@ -23,12 +29,6 @@ use datafusion::{
         planner::SqlToRel,
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
-};
-use datafusion_common::Column;
-use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
-use datafusion_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
-    WriteOp,
 };
 
 use crate::extension::remote_table::RemoteTableExtension;

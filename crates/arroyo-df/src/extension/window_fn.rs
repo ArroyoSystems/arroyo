@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use arroyo_datastream::logical::{LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::WindowFunctionOperator, TIMESTAMP_FIELD};
-use datafusion_common::{Column, DFSchema};
-use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
-use datafusion_proto::{
-    physical_plan::AsExecutionPlan,
-    protobuf::{PhysicalExprNode, PhysicalPlanNode},
-};
+use datafusion::common::{Column, DFSchema, DFSchemaRef};
+use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
 use crate::physical::ArroyoPhysicalExtensionCodec;
@@ -36,11 +35,11 @@ impl UserDefinedLogicalNodeCore for WindowFunctionExtension {
         WINDOW_FUNCTION_EXTENSION_NAME
     }
 
-    fn inputs(&self) -> Vec<&datafusion_expr::LogicalPlan> {
+    fn inputs(&self) -> Vec<&LogicalPlan> {
         vec![&self.window_plan]
     }
 
-    fn schema(&self) -> &datafusion_common::DFSchemaRef {
+    fn schema(&self) -> &DFSchemaRef {
         self.window_plan.schema()
     }
 
@@ -61,11 +60,7 @@ impl UserDefinedLogicalNodeCore for WindowFunctionExtension {
         )
     }
 
-    fn from_template(
-        &self,
-        _exprs: &[datafusion::prelude::Expr],
-        inputs: &[datafusion_expr::LogicalPlan],
-    ) -> Self {
+    fn from_template(&self, _exprs: &[datafusion::prelude::Expr], inputs: &[LogicalPlan]) -> Self {
         Self::new(inputs[0].clone(), self.key_fields.clone())
     }
 }
@@ -93,7 +88,8 @@ impl ArroyoExtension for WindowFunctionExtension {
             &Expr::Column(Column::new_unqualified(TIMESTAMP_FIELD.to_string())),
             &input_df_schema,
         )?;
-        let binning_function_proto = PhysicalExprNode::try_from(binning_function)?;
+        let binning_function_proto =
+            serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})?;
         let window_plan = planner.sync_plan(&self.window_plan)?;
         let codec = ArroyoPhysicalExtensionCodec::default();
         let window_plan_proto = PhysicalPlanNode::try_from_physical_plan(window_plan, &codec)?;

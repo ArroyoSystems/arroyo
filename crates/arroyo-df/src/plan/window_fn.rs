@@ -1,12 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use arroyo_datastream::WindowType;
-use datafusion_common::{
+use datafusion::common::tree_node::Transformed;
+use datafusion::common::{
     plan_err,
     tree_node::{TreeNode, TreeNodeRewriter},
-    DFSchema, DataFusionError, Result as DFResult,
+    DFSchema, Result as DFResult,
 };
-use datafusion_expr::{
+use datafusion::logical_expr;
+use datafusion::logical_expr::{
     expr::WindowFunction, Expr, Extension, LogicalPlan, Projection, Sort, Window,
 };
 use tracing::debug;
@@ -34,11 +36,11 @@ fn get_window_and_name(expr: &Expr) -> DFResult<(WindowFunction, String)> {
 }
 
 impl TreeNodeRewriter for WindowFunctionRewriter {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         let LogicalPlan::Window(window) = node else {
-            return Ok(node);
+            return Ok(Transformed::no(node));
         };
         debug!(
             "Rewriting window function: {:?}",
@@ -71,6 +73,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
                 partition_by,
                 order_by,
                 window_frame,
+                null_treatment,
             },
             original_name,
         ) = get_window_and_name(&window_expr[0])?;
@@ -115,6 +118,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
             partition_by: additional_keys.clone(),
             order_by,
             window_frame,
+            null_treatment,
         };
 
         let mut key_projection_expressions: Vec<_> = additional_keys
@@ -158,7 +162,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         let mut sort_expressions: Vec<_> = additional_keys
             .iter()
             .map(|partition| {
-                Expr::Sort(datafusion_expr::expr::Sort {
+                Expr::Sort(logical_expr::expr::Sort {
                     expr: Box::new(partition.clone()),
                     asc: true,
                     nulls_first: false,
@@ -179,11 +183,11 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         let rewritten_window_plan =
             LogicalPlan::Window(Window::try_new(vec![window_expr], Arc::new(shuffle))?);
 
-        Ok(LogicalPlan::Extension(Extension {
+        Ok(Transformed::yes(LogicalPlan::Extension(Extension {
             node: Arc::new(WindowFunctionExtension::new(
                 rewritten_window_plan,
                 (0..key_count).collect(),
             )),
-        }))
+        })))
     }
 }

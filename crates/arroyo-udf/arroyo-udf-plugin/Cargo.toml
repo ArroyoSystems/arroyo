@@ -9,5 +9,5 @@ arroyo-udf-macros = { path = "../arroyo-udf-macros" }
 
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 futures = "0.3"
-arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '50.0.0/parquet_bytes', features = ["ffi"]}
+arrow = { workspace = true, features = ["ffi"]}
 async-ffi = { version = "0.5.0", features = ["macros"] }

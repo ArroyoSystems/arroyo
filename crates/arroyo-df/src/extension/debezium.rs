@@ -6,11 +6,11 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     IS_RETRACT_FIELD, TIMESTAMP_FIELD,
 };
-use datafusion::physical_plan::DisplayAs;
-use datafusion_common::{
-    plan_err, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
+use datafusion::common::{
+    plan_err, DFSchema, DFSchemaRef, OwnedTableReference, Result as DFResult,
 };
-use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::physical_plan::DisplayAs;
 
 use crate::builder::{NamedNode, Planner};
 

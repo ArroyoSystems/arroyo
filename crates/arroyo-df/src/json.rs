@@ -3,8 +3,8 @@ use arrow_array::cast::as_string_array;
 use arrow_array::{Array, ArrayRef, StringArray};
 use arrow_schema::{DataType, Field};
 use datafusion::common::Result;
-use datafusion_common::{DataFusionError, ScalarValue};
-use datafusion_expr::{create_udf, ColumnarValue, ScalarUDF, Volatility};
+use datafusion::common::{DataFusionError, ScalarValue};
+use datafusion::logical_expr::{create_udf, ColumnarValue, ScalarUDF, Volatility};
 use serde_json_path::JsonPath;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -188,7 +188,7 @@ pub fn extract_json_string(args: &[ColumnarValue]) -> Result<ColumnarValue> {
 mod test {
     use arrow_array::builder::{ListBuilder, StringBuilder};
     use arrow_array::StringArray;
-    use datafusion_common::ScalarValue;
+    use datafusion::common::ScalarValue;
     use std::sync::Arc;
 
     #[test]
