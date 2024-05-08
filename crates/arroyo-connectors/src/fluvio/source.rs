@@ -131,8 +131,10 @@ impl FluvioSourceFunc {
 
         let mut streams = StreamMap::new();
         for (p, offset) in parts {
+            #[allow(deprecated)]
             let c = client.partition_consumer(self.topic.clone(), p).await?;
             info!("Starting partition {} at offset {:?}", p, offset);
+            #[allow(deprecated)]
             streams.insert(p, c.stream(offset).await?);
         }
 

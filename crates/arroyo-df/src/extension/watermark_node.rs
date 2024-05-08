@@ -43,7 +43,7 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
     fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(
             f,
-            "WaterMarkNode({}): {}",
+            "WatermarkNode({}): {}",
             self.qualifier,
             self.schema
                 .fields()

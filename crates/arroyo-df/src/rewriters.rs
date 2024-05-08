@@ -631,10 +631,7 @@ impl TreeNodeVisitor for TimeWindowUdfChecker {
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         node.expressions().iter().try_for_each(|expr| {
             let mut checker = TimeWindowExprChecker {};
-            if let Err(e) = expr.visit(&mut checker) {
-                println!("ERROR IN NODE {}", node.display_indent());
-                return Err(e);
-            }
+            expr.visit(&mut checker)?;
             Ok::<(), DataFusionError>(())
         })?;
         Ok(TreeNodeRecursion::Continue)

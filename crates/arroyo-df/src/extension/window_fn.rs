@@ -93,7 +93,6 @@ impl ArroyoExtension for WindowFunctionExtension {
             serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})?;
 
         let window_plan = planner.sync_plan(&self.window_plan)?;
-        println!("window plan {}", self.window_plan.display_indent());
         let codec = ArroyoPhysicalExtensionCodec::default();
         let window_plan_proto = PhysicalPlanNode::try_from_physical_plan(window_plan, &codec)?;
 

@@ -20,16 +20,6 @@ use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
     WriteOp,
 };
-use datafusion::sql::planner::PlannerContext;
-use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::Query;
-use datafusion::{
-    optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
-    sql::{
-        planner::SqlToRel,
-        sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
-    },
-};
 use datafusion::optimizer::common_subexpr_eliminate::CommonSubexprEliminate;
 use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery;
 use datafusion::optimizer::eliminate_cross_join::EliminateCrossJoin;
@@ -40,9 +30,7 @@ use datafusion::optimizer::eliminate_limit::EliminateLimit;
 use datafusion::optimizer::eliminate_nested_union::EliminateNestedUnion;
 use datafusion::optimizer::eliminate_one_union::EliminateOneUnion;
 use datafusion::optimizer::eliminate_outer_join::EliminateOuterJoin;
-use datafusion::optimizer::extract_equijoin_predicate::ExtractEquijoinPredicate;
 use datafusion::optimizer::filter_null_join_keys::FilterNullJoinKeys;
-use datafusion::optimizer::OptimizerRule;
 use datafusion::optimizer::propagate_empty_relation::PropagateEmptyRelation;
 use datafusion::optimizer::push_down_filter::PushDownFilter;
 use datafusion::optimizer::push_down_limit::PushDownLimit;
@@ -51,6 +39,17 @@ use datafusion::optimizer::rewrite_disjunctive_predicate::RewriteDisjunctivePred
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
 use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
+use datafusion::optimizer::OptimizerRule;
+use datafusion::sql::planner::PlannerContext;
+use datafusion::sql::sqlparser;
+use datafusion::sql::sqlparser::ast::Query;
+use datafusion::{
+    optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
+    sql::{
+        planner::SqlToRel,
+        sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
+    },
+};
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -128,7 +127,8 @@ fn produce_optimized_plan(
         Arc::new(EliminateJoin::new()),
         Arc::new(DecorrelatePredicateSubquery::new()),
         Arc::new(ScalarSubqueryToJoin::new()),
-        Arc::new(ExtractEquijoinPredicate::new()),
+        // Breaks window joins
+        // Arc::new(ExtractEquijoinPredicate::new()),
         Arc::new(SimplifyExpressions::new()),
         Arc::new(RewriteDisjunctivePredicate::new()),
         Arc::new(EliminateDuplicatedExpr::new()),
@@ -144,7 +144,6 @@ fn produce_optimized_plan(
         // Filters can't be pushed down past Limits, we should do PushDownFilter after PushDownLimit
         Arc::new(PushDownLimit::new()),
         Arc::new(PushDownFilter::new()),
-
         // This rule creates nested aggregates off of count(distinct value), which we don't support.
         //Arc::new(SingleDistinctToGroupBy::new()),
 
@@ -153,7 +152,6 @@ fn produce_optimized_plan(
         Arc::new(SimplifyExpressions::new()),
         Arc::new(UnwrapCastInComparison::new()),
         Arc::new(CommonSubexprEliminate::new()),
-
         // This rule can drop event time calculation fields if they aren't used elsewhere.
         //Arc::new(OptimizeProjections::new()),
     ];

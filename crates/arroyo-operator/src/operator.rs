@@ -14,8 +14,9 @@ use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::parse::inner_type;
 use arroyo_udf_host::{ContainerOrLocal, LocalUdf, SyncUdfDylib, UdfDylib, UdfInterface};
 use async_trait::async_trait;
-use datafusion::common::{DataFusionError, exec_err, Result as DFResult};
+use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
+use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::{
     create_udaf, AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
 };
@@ -28,7 +29,6 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
@@ -687,7 +687,7 @@ impl FunctionRegistry for Registry {
             .cloned()
             .ok_or_else(|| DataFusionError::Execution(format!("UDWF {name} not found")))
     }
-    
+
     fn register_function_rewrite(
         &mut self,
         _: Arc<dyn FunctionRewrite + Send + Sync>,
@@ -701,9 +701,7 @@ impl FunctionRegistry for Registry {
     }
 
     fn register_udaf(&mut self, udaf: Arc<AggregateUDF>) -> DFResult<Option<Arc<AggregateUDF>>> {
-        Ok(self
-            .udafs
-            .insert(udaf.name().to_string(), udaf))
+        Ok(self.udafs.insert(udaf.name().to_string(), udaf))
     }
 
     fn register_udwf(&mut self, udwf: Arc<WindowUDF>) -> DFResult<Option<Arc<WindowUDF>>> {

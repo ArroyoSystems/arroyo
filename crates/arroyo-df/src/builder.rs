@@ -211,8 +211,8 @@ impl<'a> Planner<'a> {
             Expr::Column(datafusion::common::Column {
                 relation: None,
                 name: "_timestamp".into(),
-            })]
-        );
+            }),
+        ]);
 
         let binning_function = self.create_physical_expr(&date_bin, &input_schema)?;
         serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})

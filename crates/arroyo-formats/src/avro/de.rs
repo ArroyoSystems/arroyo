@@ -309,6 +309,7 @@ mod tests {
             deserializer.flush_buffer().unwrap().unwrap()
         };
 
+        #[allow(deprecated)]
         arrow_json::writer::record_batches_to_json_rows(&[&batch])
             .unwrap()
             .into_iter()

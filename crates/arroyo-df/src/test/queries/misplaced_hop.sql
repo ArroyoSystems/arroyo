@@ -1,4 +1,4 @@
---fail=Error during planning: Time window function hop are not allowed in this context. Are you missing a GROUP BY clause?
+--fail=Error during planning: time window function hop is not allowed in this context. Are you missing a GROUP BY clause?
 CREATE TABLE impulse WITH (
       connector = 'impulse',
       event_rate = '10',

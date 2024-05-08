@@ -70,7 +70,7 @@ use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::Item;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
@@ -550,12 +550,10 @@ pub async fn parse_and_get_arrow_program(
         };
 
         let plan_rewrite = rewrite_plan(plan, &schema_provider)?;
-        
+
         let mut metadata = SourceMetadataVisitor::new(&schema_provider);
         plan_rewrite.visit(&mut metadata)?;
         used_connections.extend(metadata.connection_ids.iter());
-
-        println!("Logical plan: {}", plan_rewrite.display_indent_schema());
 
         let sink = match sink_name {
             Some(sink_name) => {
