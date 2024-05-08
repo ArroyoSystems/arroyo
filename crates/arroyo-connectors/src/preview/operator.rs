@@ -1,4 +1,5 @@
 use arrow::array::{RecordBatch, TimestampNanosecondArray};
+#[allow(deprecated)]
 use arrow::json::writer::record_batches_to_json_rows;
 use std::time::SystemTime;
 

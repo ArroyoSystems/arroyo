@@ -16,9 +16,7 @@ use datafusion::common::{
 use datafusion::execution::config::SessionConfig;
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
-use datafusion::logical_expr::{
-    Expr, Extension, LogicalPlan, ScalarFunctionDefinition, UserDefinedLogicalNode,
-};
+use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
@@ -49,7 +47,7 @@ pub(crate) struct PlanToGraphVisitor<'a> {
     output_schemas: HashMap<NodeIndex, ArroyoSchemaRef>,
     named_nodes: HashMap<NamedNode, NodeIndex>,
     // each node that needs to know its inputs should push an empty vec in pre_visit.
-    // In post_visit each node should cleanup its vec and push its index to the last vec, if present.
+    // In post_visit each node should clean up its vec and push its index to the last vec, if present.
     traversal: Vec<Vec<NodeIndex>>,
     planner: Planner<'a>,
 }
@@ -365,6 +363,12 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
             .map_err(|e| DataFusionError::Plan(format!("error converting extension: {}", e)))?;
         if arroyo_extension.transparent() {
             return Ok(TreeNodeRecursion::Continue);
+        }
+
+        if let Some(name) = arroyo_extension.node_name() {
+            if let Some(_) = self.named_nodes.get(&name) {
+                return Ok(TreeNodeRecursion::Jump);
+            }
         }
 
         let input_nodes = if !node.inputs().is_empty() {

@@ -51,28 +51,27 @@ SELECT window.end, 'views_1_hour', count, path FROM (
     FROM analytic_events
     GROUP BY path, window);
 
--- TODO: re-enable once window functions are supported
---
--- CREATE TABLE top_pages_sink (
---     time TIMESTAMP,
---     page TEXT,
---     count FLOAT,
---     rank FLOAT
--- ) WITH (
---     connector = 'kafka',
---     format = 'debezium_json',
---     'json.include_schema' = 'true',
---     type = 'sink',
---     bootstrap_servers = 'kafka:9092',
---     topic = 'metrics'
--- );
---
--- INSERT INTO top_pages_sink
--- SELECT window.end, path, count, row_num FROM (
---     SELECT *, ROW_NUMBER() OVER (
---         PARTITION BY window
---         ORDER BY count DESC) as row_num
---     FROM (
---         SELECT count(*) as count, path, hop(interval '5 seconds', interval '1 hour') as window
---         FROM analytic_events
---         GROUP BY path, window)) WHERE row_num <= 10;
+
+CREATE TABLE top_pages_sink (
+    time TIMESTAMP,
+    page TEXT,
+    count FLOAT,
+    rank FLOAT
+) WITH (
+    connector = 'kafka',
+    format = 'debezium_json',
+    'json.include_schema' = 'true',
+    type = 'sink',
+    bootstrap_servers = 'kafka:9092',
+    topic = 'metrics'
+);
+
+INSERT INTO top_pages_sink
+SELECT window.end, path, count, row_num FROM (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY window
+        ORDER BY count DESC) as row_num
+    FROM (
+        SELECT count(*) as count, path, hop(interval '5 seconds', interval '1 hour') as window
+        FROM analytic_events
+        GROUP BY path, window)) WHERE row_num <= 10;
