@@ -614,7 +614,7 @@ impl TreeNodeVisitor for TimeWindowExprChecker {
             match func_def.name() {
                 "tumble" | "hop" | "session" => {
                     return plan_err!(
-                        "Time window function {} are not allowed in this context. Are you missing a GROUP BY clause?",
+                        "time window function {} is not allowed in this context. Are you missing a GROUP BY clause?",
                         func_def.name()
                     );
                 }
@@ -631,7 +631,10 @@ impl TreeNodeVisitor for TimeWindowUdfChecker {
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         node.expressions().iter().try_for_each(|expr| {
             let mut checker = TimeWindowExprChecker {};
-            expr.visit(&mut checker)?;
+            if let Err(e) = expr.visit(&mut checker) {
+                println!("ERROR IN NODE {}", node.display_indent());
+                return Err(e);
+            }
             Ok::<(), DataFusionError>(())
         })?;
         Ok(TreeNodeRecursion::Continue)
