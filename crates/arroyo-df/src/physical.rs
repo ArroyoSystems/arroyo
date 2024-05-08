@@ -199,6 +199,9 @@ pub fn new_registry() -> Registry {
     for json_function in get_json_functions().values() {
         registry.add_udf(json_function.clone());
     }
+    
+    datafusion::functions::register_all(&mut registry).unwrap();
+    datafusion::functions_array::register_all(&mut registry).unwrap();    
     registry
 }
 

@@ -93,7 +93,6 @@ pub struct ArroyoSchemaProvider {
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
-
     pub function_rewriters: Vec<Arc<dyn FunctionRewrite + Send + Sync>>,
 }
 
@@ -551,12 +550,12 @@ pub async fn parse_and_get_arrow_program(
         };
 
         let plan_rewrite = rewrite_plan(plan, &schema_provider)?;
-
+        
         let mut metadata = SourceMetadataVisitor::new(&schema_provider);
         plan_rewrite.visit(&mut metadata)?;
         used_connections.extend(metadata.connection_ids.iter());
 
-        debug!("Logical plan: {}", plan_rewrite.display_graphviz());
+        println!("Logical plan: {}", plan_rewrite.display_indent_schema());
 
         let sink = match sink_name {
             Some(sink_name) => {

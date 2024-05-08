@@ -42,6 +42,7 @@ use arroyo_udf_host::LocalUdf;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use petgraph::dot::{Config, Dot};
 use prometheus::labels;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
@@ -182,6 +183,7 @@ impl Program {
         logical: &DiGraph<LogicalNode, LogicalEdge>,
         udfs: &[LocalUdf],
     ) -> Self {
+        println!("{:?}", Dot::with_config(&logical, &[]));        
         let assignments = logical
             .node_weights()
             .flat_map(|weight| {

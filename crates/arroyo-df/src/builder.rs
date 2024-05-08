@@ -16,11 +16,11 @@ use datafusion::common::{
 use datafusion::execution::config::SessionConfig;
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::functions::datetime::date_bin;
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
-use datafusion_functions::expr_fn::date_part;
 use datafusion_proto::protobuf::{PhysicalExprNode, PhysicalPlanNode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::runtime::Builder;
@@ -204,14 +204,14 @@ impl<'a> Planner<'a> {
         width: Duration,
         input_schema: DFSchemaRef,
     ) -> DFResult<PhysicalExprNode> {
-        let date_bin = date_part(
+        let date_bin = date_bin().call(vec![
             Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
                 IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
             ))),
             Expr::Column(datafusion::common::Column {
                 relation: None,
                 name: "_timestamp".into(),
-            }),
+            })]
         );
 
         let binning_function = self.create_physical_expr(&date_bin, &input_schema)?;

@@ -94,13 +94,10 @@ fn produce_optimized_plan(
 
     let mut analyzer = Analyzer::default();
     for rewriter in &schema_provider.function_rewriters {
-        println!("Using rewriter {}", rewriter.name());
         analyzer.add_function_rewrite(rewriter.clone());
     }
     let analyzed_plan =
         analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
-
-    println!("PLAN = {:?}", analyzed_plan.expressions());
 
     let mut optimizer = Optimizer::new();
     optimizer.rules.retain(|rule|

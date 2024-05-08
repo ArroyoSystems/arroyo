@@ -14,7 +14,7 @@ use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::parse::inner_type;
 use arroyo_udf_host::{ContainerOrLocal, LocalUdf, SyncUdfDylib, UdfDylib, UdfInterface};
 use async_trait::async_trait;
-use datafusion::common::{DataFusionError, Result as DFResult};
+use datafusion::common::{DataFusionError, exec_err, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
     create_udaf, AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
@@ -28,6 +28,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn, Instrument};
@@ -500,6 +501,7 @@ pub struct Registry {
     dylibs: Arc<std::sync::Mutex<HashMap<String, Arc<UdfDylib>>>>,
     udfs: HashMap<String, Arc<ScalarUDF>>,
     udafs: HashMap<String, Arc<AggregateUDF>>,
+    udwfs: HashMap<String, Arc<WindowUDF>>,
 }
 
 impl Registry {
@@ -680,9 +682,31 @@ impl FunctionRegistry for Registry {
     }
 
     fn udwf(&self, name: &str) -> DFResult<Arc<WindowUDF>> {
-        Err(DataFusionError::NotImplemented(format!(
-            "udwf {} not implemented",
-            name
-        )))
+        self.udwfs
+            .get(name)
+            .cloned()
+            .ok_or_else(|| DataFusionError::Execution(format!("UDWF {name} not found")))
+    }
+    
+    fn register_function_rewrite(
+        &mut self,
+        _: Arc<dyn FunctionRewrite + Send + Sync>,
+    ) -> DFResult<()> {
+        // no-op
+        Ok(())
+    }
+
+    fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> DFResult<Option<Arc<ScalarUDF>>> {
+        Ok(self.udfs.insert(udf.name().to_string(), udf))
+    }
+
+    fn register_udaf(&mut self, udaf: Arc<AggregateUDF>) -> DFResult<Option<Arc<AggregateUDF>>> {
+        Ok(self
+            .udafs
+            .insert(udaf.name().to_string(), udaf))
+    }
+
+    fn register_udwf(&mut self, udwf: Arc<WindowUDF>) -> DFResult<Option<Arc<WindowUDF>>> {
+        Ok(self.udwfs.insert(udwf.name().to_string(), udwf))
     }
 }
