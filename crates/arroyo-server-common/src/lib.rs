@@ -40,7 +40,7 @@ use tracing_log::LogTracer;
 
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
-pub const VERSION: &str = "0.10.1";
+pub const VERSION: &str = "0.10.2";
 
 #[cfg(not(target_os = "freebsd"))]
 const PYROSCOPE_SERVER_ADDRESS_ENV: &str = "PYROSCOPE_SERVER_ADDRESS";
