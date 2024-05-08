@@ -91,19 +91,25 @@ fn produce_optimized_plan(
     let plan = sql_to_rel
         .sql_statement_to_plan(statement.clone())
         .map_err(|e| anyhow!(e.strip_backtrace()))?;
-
-    let optimizer_config = OptimizerContext::default();
-    let analyzer = Analyzer::default();
-    let mut optimizer = Optimizer::new();
-    optimizer.rules.retain(|rule|
-            // This rule can drop event time calculation fields if they aren't used elsewhere.
-            rule.name() != "optimize_projections"
-            // This rule creates nested aggregates off of count(distinct value), which we don't support.
-            && rule.name() != "single_distinct_aggregation_to_group_by");
+    
+    let mut analyzer = Analyzer::default();
+    for rewriter in &schema_provider.function_rewriters {
+        println!("Using rewriter {}", rewriter.name());
+        analyzer.add_function_rewrite(rewriter.clone());
+    }
     let analyzed_plan =
         analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
-
-    let plan = optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
+    
+    println!("PLAN = {:?}", analyzed_plan.expressions());
+    
+    let mut optimizer = Optimizer::new();
+    optimizer.rules.retain(|rule|
+        // This rule can drop event time calculation fields if they aren't used elsewhere.
+        rule.name() != "optimize_projections"
+            // This rule creates nested aggregates off of count(distinct value), which we don't support.
+            && rule.name() != "single_distinct_aggregation_to_group_by");
+    
+    let plan = optimizer.optimize(&analyzed_plan, &OptimizerContext::default(), |_plan, _rule| {})?;
     Ok(plan)
 }
 

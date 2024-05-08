@@ -68,6 +68,7 @@ use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
+use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use syn::Item;
 use tracing::{debug, info, warn};
 use unicase::UniCase;
@@ -81,7 +82,7 @@ pub struct CompiledSql {
     pub connection_ids: Vec<i64>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ArroyoSchemaProvider {
     pub source_defs: HashMap<String, String>,
     tables: HashMap<UniCase<String>, Table>,
@@ -92,6 +93,8 @@ pub struct ArroyoSchemaProvider {
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
+    
+    pub function_rewriters: Vec<Arc<dyn FunctionRewrite + Send + Sync>>,
 }
 
 impl ArroyoSchemaProvider {
@@ -165,17 +168,16 @@ impl ArroyoSchemaProvider {
 
         functions.extend(get_json_functions());
 
-        Self {
+        let mut registry = Self {
             tables,
             functions,
-            aggregate_functions: HashMap::new(),
-            source_defs: HashMap::new(),
-            connections: HashMap::new(),
-            profiles: HashMap::new(),
-            udf_defs: HashMap::new(),
-            config_options: datafusion::config::ConfigOptions::new(),
-            dylib_udfs: HashMap::new(),
-        }
+            ..Default::default()
+        };
+
+        datafusion_functions::register_all(&mut registry).unwrap();
+        datafusion::functions_array::register_all(&mut registry).unwrap();
+        
+        registry
     }
 
     pub fn add_connector_table(&mut self, connection: Connection) {
@@ -371,6 +373,23 @@ impl FunctionRegistry for ArroyoSchemaProvider {
 
     fn udwf(&self, name: &str) -> datafusion::common::Result<Arc<WindowUDF>> {
         plan_err!("No UDWF with name {name}")
+    }
+
+    fn register_function_rewrite(&mut self, rewrite: Arc<dyn FunctionRewrite + Send + Sync>) -> DFResult<()> {
+        self.function_rewriters.push(rewrite);
+        Ok(())
+    }
+
+    fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> DFResult<Option<Arc<ScalarUDF>>> {
+        Ok(self.functions.insert(udf.name().to_string(), udf))
+    }
+
+    fn register_udaf(&mut self, udaf: Arc<AggregateUDF>) -> DFResult<Option<Arc<AggregateUDF>>> {
+        Ok(self.aggregate_functions.insert(udaf.name().to_string(), udaf))
+    }
+
+    fn register_udwf(&mut self, _udaf: Arc<WindowUDF>) -> DFResult<Option<Arc<WindowUDF>>> {
+        plan_err!("custom window functions not supported")
     }
 }
 
