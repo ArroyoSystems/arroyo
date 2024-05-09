@@ -19,11 +19,11 @@ use arroyo_rpc::{
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, CheckpointBarrier, Watermark};
 use datafusion::execution::context::SessionContext;
-use datafusion_execution::{
+use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
-use datafusion_physical_plan::ExecutionPlan;
+use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use futures::{lock::Mutex, stream::FuturesUnordered, Future};

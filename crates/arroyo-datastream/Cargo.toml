@@ -29,4 +29,4 @@ prost = "0.12"
 regex = "1.9.5"
 serde_json = "1.0.108"
 strum = { version = "0.25.0", features = ["derive"] }
-datafusion-proto = "36.0.0"
+datafusion-proto = { workspace = true }

@@ -1,11 +1,11 @@
 use std::{any::Any, sync::Arc};
 
 use arrow_schema::SchemaRef;
+use datafusion::common::Result as DFResult;
+use datafusion::logical_expr::{Expr, TableType};
 use datafusion::{
     datasource::TableProvider, execution::context::SessionState, physical_plan::ExecutionPlan,
 };
-use datafusion_common::Result as DFResult;
-use datafusion_expr::Expr;
 use serde::{Deserialize, Serialize};
 
 use crate::physical::ArroyoMemExec;
@@ -28,8 +28,8 @@ impl TableProvider for LogicalBatchInput {
     }
 
     #[doc = " Get the type of this table for metadata/catalog purposes."]
-    fn table_type(&self) -> datafusion_expr::TableType {
-        datafusion_expr::TableType::Temporary
+    fn table_type(&self) -> TableType {
+        TableType::Temporary
     }
 
     /// Create an ExecutionPlan that will scan the table.
@@ -47,9 +47,9 @@ impl TableProvider for LogicalBatchInput {
         // The datasource should return *at least* this number of rows if available.
         _limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(ArroyoMemExec {
-            table_name: self.table_name.clone(),
-            schema: self.schema.clone(),
-        }))
+        Ok(Arc::new(ArroyoMemExec::new(
+            self.table_name.clone(),
+            self.schema.clone(),
+        )))
     }
 }

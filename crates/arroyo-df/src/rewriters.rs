@@ -15,15 +15,16 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 
 use crate::extension::AsyncUDFExtension;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
-use datafusion_common::tree_node::{
-    Transformed, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
+use datafusion::common::tree_node::{
+    Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
-use datafusion_common::{
+use datafusion::common::{
     plan_err, Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
     ScalarValue,
 };
-use datafusion_expr::expr::ScalarFunction;
-use datafusion_expr::{
+use datafusion::logical_expr;
+use datafusion::logical_expr::expr::ScalarFunction;
+use datafusion::logical_expr::{
     BinaryExpr, Expr, Extension, LogicalPlan, Projection, ScalarFunctionDefinition, TableScan,
     Unnest,
 };
@@ -64,7 +65,7 @@ impl<'a> SourceRewriter<'a> {
                     relation: None,
                     name: "_timestamp".to_string(),
                 })),
-                op: datafusion_expr::Operator::Minus,
+                op: logical_expr::Operator::Minus,
                 right: Box::new(Expr::Literal(ScalarValue::DurationNanosecond(Some(
                     Duration::from_secs(1).as_nanos() as i64,
                 )))),
@@ -163,19 +164,17 @@ impl<'a> SourceRewriter<'a> {
             (table_source_extension, table_scan.projection.clone())
         };
 
-        Ok(LogicalPlan::Projection(
-            datafusion_expr::Projection::try_new(
-                Self::projection_expressions(table, &qualifier, &projection)?,
-                Arc::new(projection_input),
-            )?,
-        ))
+        Ok(LogicalPlan::Projection(Projection::try_new(
+            Self::projection_expressions(table, &qualifier, &projection)?,
+            Arc::new(projection_input),
+        )?))
     }
 
     fn mutate_connector_table(
         &self,
         table_scan: &TableScan,
         table: &ConnectorTable,
-    ) -> DFResult<LogicalPlan> {
+    ) -> DFResult<Transformed<LogicalPlan>> {
         let input = self.projection(table_scan, table)?;
 
         let schema = input.schema().clone();
@@ -197,16 +196,16 @@ impl<'a> SourceRewriter<'a> {
             DataFusionError::Internal(format!("failed to create watermark expression: {}", err))
         })?;
 
-        Ok(LogicalPlan::Extension(Extension {
+        Ok(Transformed::yes(LogicalPlan::Extension(Extension {
             node: Arc::new(watermark_node),
-        }))
+        })))
     }
 
     fn mutate_table_from_query(
         &self,
         table_scan: &TableScan,
         logical_plan: &LogicalPlan,
-    ) -> DFResult<LogicalPlan> {
+    ) -> DFResult<Transformed<LogicalPlan>> {
         let column_expressions: Vec<_> = if let Some(projection) = &table_scan.projection {
             logical_plan
                 .schema()
@@ -244,16 +243,16 @@ impl<'a> SourceRewriter<'a> {
             Arc::new(logical_plan.clone()),
             table_scan.projected_schema.clone(),
         )?);
-        Ok(projection)
+        Ok(Transformed::yes(projection))
     }
 }
 
 impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         let LogicalPlan::TableScan(mut table_scan) = node else {
-            return Ok(node);
+            return Ok(Transformed::no(node));
         };
 
         let table_name = table_scan.table_name.table();
@@ -318,7 +317,7 @@ impl UnnestRewriter {
                                 ));
                             };
 
-                            return Ok(Transformed::Yes(Expr::Column(Column::new_unqualified(
+                            return Ok(Transformed::yes(Expr::Column(Column::new_unqualified(
                                 UNNESTED_COL,
                             ))));
                         }
@@ -331,17 +330,17 @@ impl UnnestRewriter {
                     }
                 }
             };
-            Ok(Transformed::No(e))
+            Ok(Transformed::no(e))
         })?;
 
-        Ok((expr, c))
+        Ok((expr.data, c))
     }
 }
 
 impl TreeNodeRewriter for UnnestRewriter {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         let LogicalPlan::Projection(projection) = &node else {
             if node.expressions().iter().any(|e| {
                 let e = Self::split_unnest(e.clone());
@@ -351,7 +350,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                     "unnest is only supported in SELECT statements".to_string(),
                 ));
             }
-            return Ok(node);
+            return Ok(Transformed::no(node));
         };
 
         let mut unnest = None;
@@ -445,9 +444,9 @@ impl TreeNodeRewriter for UnnestRewriter {
                 Arc::new(unnest_node),
             )?);
 
-            Ok(output_node)
+            Ok(Transformed::yes(output_node))
         } else {
-            Ok(LogicalPlan::Projection(projection.clone()))
+            Ok(Transformed::no(LogicalPlan::Projection(projection.clone())))
         }
     }
 }
@@ -484,22 +483,22 @@ impl<'a> AsyncUdfRewriter<'a> {
                             "multiple async calls in the same expression, which is not allowed"
                         );
                     }
-                    return Ok(Transformed::Yes(Expr::Column(Column::new_unqualified(
+                    return Ok(Transformed::yes(Expr::Column(Column::new_unqualified(
                         ASYNC_RESULT_FIELD,
                     ))));
                 }
             }
-            Ok(Transformed::No(e))
+            Ok(Transformed::no(e))
         })?;
 
-        Ok((expr, c))
+        Ok((expr.data, c))
     }
 }
 
 impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         let LogicalPlan::Projection(mut projection) = node else {
             for e in node.expressions() {
                 if let (_, Some((udf, _, _))) = Self::split_async(e.clone(), self.provider)? {
@@ -508,7 +507,7 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
                     );
                 }
             }
-            return Ok(node);
+            return Ok(Transformed::no(node));
         };
 
         let mut args = None;
@@ -531,12 +530,12 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
         }
 
         let Some((name, opts, args)) = args else {
-            return Ok(LogicalPlan::Projection(projection));
+            return Ok(Transformed::no(LogicalPlan::Projection(projection)));
         };
 
         let udf = self.provider.dylib_udfs.get(&name).unwrap().clone();
 
-        Ok(LogicalPlan::Extension(Extension {
+        Ok(Transformed::yes(LogicalPlan::Extension(Extension {
             node: Arc::new(AsyncUDFExtension {
                 input: projection.input,
                 name,
@@ -548,7 +547,7 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
                 timeout: opts.timeout,
                 final_schema: projection.schema,
             }),
-        }))
+        })))
     }
 }
 
@@ -593,13 +592,13 @@ impl<'a> SourceMetadataVisitor<'a> {
 }
 
 impl<'a> TreeNodeVisitor for SourceMetadataVisitor<'a> {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         if let Some(id) = self.get_connection_id(node) {
             self.connection_ids.insert(id);
         }
-        Ok(VisitRecursion::Continue)
+        Ok(TreeNodeRecursion::Continue)
     }
 }
 
@@ -608,33 +607,33 @@ struct TimeWindowExprChecker {}
 pub struct TimeWindowUdfChecker {}
 
 impl TreeNodeVisitor for TimeWindowExprChecker {
-    type N = Expr;
+    type Node = Expr;
 
-    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         if let Expr::ScalarFunction(ScalarFunction { func_def, args: _ }) = node {
             match func_def.name() {
                 "tumble" | "hop" | "session" => {
                     return plan_err!(
-                        "Time window function {} are not allowed in this context. Are you missing a GROUP BY clause?",
+                        "time window function {} is not allowed in this context. Are you missing a GROUP BY clause?",
                         func_def.name()
                     );
                 }
                 _ => {}
             }
         }
-        Ok(VisitRecursion::Continue)
+        Ok(TreeNodeRecursion::Continue)
     }
 }
 
 impl TreeNodeVisitor for TimeWindowUdfChecker {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         node.expressions().iter().try_for_each(|expr| {
             let mut checker = TimeWindowExprChecker {};
             expr.visit(&mut checker)?;
             Ok::<(), DataFusionError>(())
         })?;
-        Ok(VisitRecursion::Continue)
+        Ok(TreeNodeRecursion::Continue)
     }
 }

@@ -5,8 +5,8 @@ use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, TIMESTAMP_FIELD};
 use arroyo_types::UPDATE_AGGREGATE_FLUSH_MS_ENV;
-use datafusion_common::{plan_err, DataFusionError, OwnedTableReference};
-use datafusion_expr::{Extension, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference};
+use datafusion::logical_expr::{Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::protobuf::{physical_plan_node::PhysicalPlanType, PhysicalPlanNode};
 
 use crate::builder::{NamedNode, SplitPlanOutput};
@@ -50,11 +50,11 @@ impl UserDefinedLogicalNodeCore for UpdatingAggregateExtension {
         UPDATING_AGGREGATE_EXTENSION_NAME
     }
 
-    fn inputs(&self) -> Vec<&datafusion_expr::LogicalPlan> {
+    fn inputs(&self) -> Vec<&LogicalPlan> {
         vec![&self.aggregate]
     }
 
-    fn schema(&self) -> &datafusion_common::DFSchemaRef {
+    fn schema(&self) -> &DFSchemaRef {
         self.final_calculation.schema()
     }
 
@@ -66,11 +66,7 @@ impl UserDefinedLogicalNodeCore for UpdatingAggregateExtension {
         write!(f, "UpdatingAggregateExtension")
     }
 
-    fn from_template(
-        &self,
-        _exprs: &[datafusion::prelude::Expr],
-        inputs: &[datafusion_expr::LogicalPlan],
-    ) -> Self {
+    fn from_template(&self, _exprs: &[datafusion::prelude::Expr], inputs: &[LogicalPlan]) -> Self {
         Self::new(
             inputs[0].clone(),
             self.key_fields.clone(),

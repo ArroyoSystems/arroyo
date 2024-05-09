@@ -2,7 +2,7 @@ use crate::avro::schema;
 use crate::{avro, json};
 use arrow_array::cast::AsArray;
 use arrow_array::RecordBatch;
-use arrow_json::writer::record_batches_to_json_rows_opts;
+use arrow_json::writer::record_batch_to_vec;
 use arrow_schema::{DataType, Field};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, RawStringFormat, TimestampFormat};
 use arroyo_rpc::TIMESTAMP_FIELD;
@@ -97,8 +97,8 @@ impl ArrowSerializer {
             v
         });
 
-        let rows = record_batches_to_json_rows_opts(
-            &[batch],
+        let rows = record_batch_to_vec(
+            batch,
             true,
             match json.timestamp_format {
                 TimestampFormat::RFC3339 => arrow_json::writer::TimestampFormat::RFC3339,
@@ -110,22 +110,30 @@ impl ArrowSerializer {
         let include_schema = json.include_schema.then(|| self.kafka_schema.clone());
 
         Box::new(rows.into_iter().map(move |row| {
-            let mut buf: Vec<u8> = Vec::with_capacity(128);
-            if let Some(header) = header {
-                buf.extend(&header);
-            }
-
             if let Some(schema) = &include_schema {
+                let parsed: serde_json::Value = serde_json::from_slice(&row).unwrap();
                 let record = json! {{
                     "schema": schema,
-                    "payload": row
+                    "payload": parsed,
                 }};
-                serde_json::to_writer(&mut buf, &record).unwrap();
-            } else {
-                serde_json::to_writer(&mut buf, &row).unwrap();
-            };
 
-            buf
+                let mut buf = if let Some(header) = header {
+                    header.to_vec()
+                } else {
+                    vec![]
+                };
+
+                serde_json::to_writer(&mut buf, &record).unwrap();
+                buf
+            } else {
+                if let Some(header) = header {
+                    let mut buf = header.to_vec();
+                    buf.extend(&row);
+                    buf
+                } else {
+                    row
+                }
+            }
         }))
     }
     fn serialize_raw_string(

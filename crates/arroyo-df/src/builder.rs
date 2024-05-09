@@ -9,20 +9,18 @@ use arroyo_datastream::logical::{LogicalEdge, LogicalGraph, LogicalNode};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 
 use async_trait::async_trait;
-use datafusion::execution::context::SessionState;
-use datafusion::physical_plan::ExecutionPlan;
-use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
-use datafusion_common::tree_node::{TreeNode, TreeNodeVisitor, VisitRecursion};
-use datafusion_common::{
+use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
+use datafusion::common::{
     DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult, ScalarValue,
 };
-use datafusion_execution::config::SessionConfig;
-use datafusion_execution::runtime_env::{RuntimeConfig, RuntimeEnv};
-use datafusion_expr::expr::ScalarFunction;
-use datafusion_expr::{
-    BuiltinScalarFunction, Expr, Extension, LogicalPlan, UserDefinedLogicalNode,
-};
-use datafusion_physical_expr::PhysicalExpr;
+use datafusion::execution::config::SessionConfig;
+use datafusion::execution::context::SessionState;
+use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::functions::datetime::date_bin;
+use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
+use datafusion::physical_expr::PhysicalExpr;
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
 use datafusion_proto::protobuf::{PhysicalExprNode, PhysicalPlanNode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::runtime::Builder;
@@ -37,6 +35,8 @@ use crate::physical::{
 };
 use crate::schemas::add_timestamp_field_arrow;
 use crate::ArroyoSchemaProvider;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode},
@@ -47,7 +47,7 @@ pub(crate) struct PlanToGraphVisitor<'a> {
     output_schemas: HashMap<NodeIndex, ArroyoSchemaRef>,
     named_nodes: HashMap<NamedNode, NodeIndex>,
     // each node that needs to know its inputs should push an empty vec in pre_visit.
-    // In post_visit each node should cleanup its vec and push its index to the last vec, if present.
+    // In post_visit each node should clean up its vec and push its index to the last vec, if present.
     traversal: Vec<Vec<NodeIndex>>,
     planner: Planner<'a>,
 }
@@ -169,10 +169,8 @@ impl<'a> Planner<'a> {
         )?;
 
         let partial_schema = partial_aggregation_exec_plan.schema();
-        let final_input_table_provider = ArroyoMemExec {
-            table_name: "partial".into(),
-            schema: partial_schema.clone(),
-        };
+        let final_input_table_provider =
+            ArroyoMemExec::new("partial".into(), partial_schema.clone());
 
         final_aggregate_proto.input = Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
             Arc::new(final_input_table_provider),
@@ -206,23 +204,18 @@ impl<'a> Planner<'a> {
         width: Duration,
         input_schema: DFSchemaRef,
     ) -> DFResult<PhysicalExprNode> {
-        let date_bin = Expr::ScalarFunction(ScalarFunction {
-            func_def: datafusion_expr::ScalarFunctionDefinition::BuiltIn(
-                BuiltinScalarFunction::DateBin,
-            ),
-            args: vec![
-                Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                    IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
-                ))),
-                Expr::Column(datafusion_common::Column {
-                    relation: None,
-                    name: "_timestamp".into(),
-                }),
-            ],
-        });
+        let date_bin = date_bin().call(vec![
+            Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
+            ))),
+            Expr::Column(datafusion::common::Column {
+                relation: None,
+                name: "_timestamp".into(),
+            }),
+        ]);
 
         let binning_function = self.create_physical_expr(&date_bin, &input_schema)?;
-        PhysicalExprNode::try_from(binning_function)
+        serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})
     }
 }
 
@@ -267,10 +260,10 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
             } else {
                 None
             };
-        Ok(Some(Arc::new(ArroyoMemExec {
-            table_name: name.unwrap_or("memory".to_string()),
-            schema: Arc::new(schema),
-        })))
+        Ok(Some(Arc::new(ArroyoMemExec::new(
+            name.unwrap_or("memory".to_string()),
+            Arc::new(schema),
+        ))))
     }
 }
 
@@ -333,22 +326,22 @@ impl<'a> PlanToGraphVisitor<'a> {
 }
 
 impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         let LogicalPlan::Extension(Extension { node }) = node else {
-            return Ok(VisitRecursion::Continue);
+            return Ok(TreeNodeRecursion::Continue);
         };
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
             .map_err(|e: DataFusionError| e.context("converting extension"))?;
         if arroyo_extension.transparent() {
-            return Ok(VisitRecursion::Continue);
+            return Ok(TreeNodeRecursion::Continue);
         }
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(node_index) = self.named_nodes.get(&name) {
                 self.add_index_to_traversal(*node_index);
-                return Ok(VisitRecursion::Skip);
+                return Ok(TreeNodeRecursion::Jump);
             }
         }
 
@@ -356,20 +349,26 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
             self.traversal.push(vec![]);
         }
 
-        Ok(VisitRecursion::Continue)
+        Ok(TreeNodeRecursion::Continue)
     }
 
     // most of the work sits in post visit so that we can have the inputs of each node
-    fn post_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+    fn f_up(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         let LogicalPlan::Extension(Extension { node }) = node else {
-            return Ok(VisitRecursion::Continue);
+            return Ok(TreeNodeRecursion::Continue);
         };
 
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
             .map_err(|e| DataFusionError::Plan(format!("error converting extension: {}", e)))?;
         if arroyo_extension.transparent() {
-            return Ok(VisitRecursion::Continue);
+            return Ok(TreeNodeRecursion::Continue);
+        }
+
+        if let Some(name) = arroyo_extension.node_name() {
+            if let Some(_) = self.named_nodes.get(&name) {
+                return Ok(TreeNodeRecursion::Jump);
+            }
         }
 
         let input_nodes = if !node.inputs().is_empty() {
@@ -383,7 +382,7 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
         self.build_extension(input_nodes, arroyo_extension)
             .map_err(|e| e.context("building extension"))?;
 
-        Ok(VisitRecursion::Continue)
+        Ok(TreeNodeRecursion::Continue)
     }
 }
 

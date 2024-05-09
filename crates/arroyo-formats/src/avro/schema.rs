@@ -104,6 +104,10 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         DataType::Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
         DataType::Map(_, _) => unimplemented!("maps are not supported"),
         DataType::RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),
+        DataType::BinaryView => unimplemented!("binary view is not supported"),
+        DataType::Utf8View => unimplemented!("utf8 view is not suported"),
+        DataType::ListView(_) => unimplemented!("list view is not supported"),
+        DataType::LargeListView(_) => unimplemented!("large list view is not suported"),
     };
 
     json!({

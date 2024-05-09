@@ -13,7 +13,7 @@ use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::get_hasher;
 use arroyo_types::from_nanos;
 use bincode::config;
-use datafusion_common::{hash_utils::create_hashes, ScalarValue};
+use datafusion::common::{hash_utils::create_hashes, ScalarValue};
 use tracing::warn;
 
 use crate::{parquet::ParquetStats, DataOperation};

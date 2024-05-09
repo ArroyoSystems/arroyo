@@ -409,7 +409,6 @@ mod tests {
         numbers.append_value([Some(4), Some(5)]);
 
         let avro_schema = to_avro("User", &arrow_schema.fields);
-        println!("{}", avro_schema.canonical_form());
 
         let batch = RecordBatch::try_new(
             arrow_schema,

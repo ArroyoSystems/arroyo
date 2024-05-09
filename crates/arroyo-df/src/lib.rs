@@ -22,10 +22,10 @@ use arrow::datatypes::{self, DataType};
 use arrow_schema::Schema;
 use arroyo_datastream::WindowType;
 
+use datafusion::common::{plan_err, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::physical_plan::functions::make_scalar_function;
-use datafusion_common::{plan_err, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
 
 use datafusion::prelude::create_udf;
 
@@ -33,14 +33,14 @@ use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
-use datafusion_common::tree_node::TreeNode;
-use datafusion_expr::expr::ScalarFunction;
-use datafusion_expr::{
+use datafusion::common::tree_node::TreeNode;
+use datafusion::logical_expr::expr::ScalarFunction;
+use datafusion::logical_expr::{
     create_udaf, Expr, Extension, LogicalPlan, ReturnTypeFunction, ScalarFunctionDefinition,
     ScalarUDF, Signature, Volatility, WindowUDF,
 };
 
-use datafusion_expr::{AggregateUDF, TableSource};
+use datafusion::logical_expr::{AggregateUDF, TableSource};
 use logical::LogicalBatchInput;
 
 use schemas::window_arrow_struct;
@@ -51,7 +51,7 @@ use crate::extension::sink::SinkExtension;
 use crate::plan::ArroyoRewriter;
 use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig};
 use arroyo_rpc::api_types::connections::ConnectionProfile;
-use datafusion_common::DataFusionError;
+use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
@@ -64,11 +64,13 @@ use arroyo_datastream::logical::LogicalProgram;
 use arroyo_operator::connector::Connection;
 use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
-use datafusion_execution::FunctionRegistry;
+use datafusion::execution::FunctionRegistry;
+use datafusion::logical_expr;
+use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::Item;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
@@ -80,7 +82,7 @@ pub struct CompiledSql {
     pub connection_ids: Vec<i64>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ArroyoSchemaProvider {
     pub source_defs: HashMap<String, String>,
     tables: HashMap<UniCase<String>, Table>,
@@ -91,11 +93,11 @@ pub struct ArroyoSchemaProvider {
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
+    pub function_rewriters: Vec<Arc<dyn FunctionRewrite + Send + Sync>>,
 }
 
 impl ArroyoSchemaProvider {
     pub fn new() -> Self {
-        let tables = HashMap::new();
         let mut functions = HashMap::new();
 
         let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
@@ -164,17 +166,15 @@ impl ArroyoSchemaProvider {
 
         functions.extend(get_json_functions());
 
-        Self {
-            tables,
+        let mut registry = Self {
             functions,
-            aggregate_functions: HashMap::new(),
-            source_defs: HashMap::new(),
-            connections: HashMap::new(),
-            profiles: HashMap::new(),
-            udf_defs: HashMap::new(),
-            config_options: datafusion::config::ConfigOptions::new(),
-            dylib_udfs: HashMap::new(),
-        }
+            ..Default::default()
+        };
+
+        datafusion_functions::register_all(&mut registry).unwrap();
+        datafusion::functions_array::register_all(&mut registry).unwrap();
+
+        registry
     }
 
     pub fn add_connector_table(&mut self, connection: Connection) {
@@ -304,10 +304,10 @@ impl ContextProvider for ArroyoSchemaProvider {
     fn get_table_source(
         &self,
         name: TableReference,
-    ) -> datafusion_common::Result<Arc<dyn TableSource>> {
-        let table = self.get_table(name.to_string()).ok_or_else(|| {
-            datafusion::error::DataFusionError::Plan(format!("Table {} not found", name))
-        })?;
+    ) -> datafusion::common::Result<Arc<dyn TableSource>> {
+        let table = self
+            .get_table(name.to_string())
+            .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", name)))?;
 
         let fields = table.get_fields();
         let schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
@@ -333,6 +333,18 @@ impl ContextProvider for ArroyoSchemaProvider {
     fn get_window_meta(&self, _name: &str) -> Option<Arc<WindowUDF>> {
         None
     }
+
+    fn udfs_names(&self) -> Vec<String> {
+        self.functions.keys().cloned().collect()
+    }
+
+    fn udafs_names(&self) -> Vec<String> {
+        self.aggregate_functions.keys().cloned().collect()
+    }
+
+    fn udwfs_names(&self) -> Vec<String> {
+        vec![]
+    }
 }
 
 impl FunctionRegistry for ArroyoSchemaProvider {
@@ -340,7 +352,7 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         self.udf_defs.keys().map(|k| k.to_string()).collect()
     }
 
-    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+    fn udf(&self, name: &str) -> datafusion::common::Result<Arc<ScalarUDF>> {
         if let Some(f) = self.functions.get(name) {
             Ok(Arc::clone(f))
         } else {
@@ -348,7 +360,7 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         }
     }
 
-    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+    fn udaf(&self, name: &str) -> datafusion::common::Result<Arc<AggregateUDF>> {
         if let Some(f) = self.aggregate_functions.get(name) {
             Ok(Arc::clone(f))
         } else {
@@ -356,8 +368,30 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         }
     }
 
-    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+    fn udwf(&self, name: &str) -> datafusion::common::Result<Arc<WindowUDF>> {
         plan_err!("No UDWF with name {name}")
+    }
+
+    fn register_function_rewrite(
+        &mut self,
+        rewrite: Arc<dyn FunctionRewrite + Send + Sync>,
+    ) -> DFResult<()> {
+        self.function_rewriters.push(rewrite);
+        Ok(())
+    }
+
+    fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> DFResult<Option<Arc<ScalarUDF>>> {
+        Ok(self.functions.insert(udf.name().to_string(), udf))
+    }
+
+    fn register_udaf(&mut self, udaf: Arc<AggregateUDF>) -> DFResult<Option<Arc<AggregateUDF>>> {
+        Ok(self
+            .aggregate_functions
+            .insert(udaf.name().to_string(), udaf))
+    }
+
+    fn register_udwf(&mut self, _udaf: Arc<WindowUDF>) -> DFResult<Option<Arc<WindowUDF>>> {
+        plan_err!("custom window functions not supported")
     }
 }
 
@@ -451,7 +485,7 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
             }
             _ => Ok(None),
         },
-        Expr::Alias(datafusion_expr::expr::Alias {
+        Expr::Alias(logical_expr::expr::Alias {
             expr,
             name: _,
             relation: _,
@@ -472,10 +506,11 @@ pub fn rewrite_plan(
 ) -> DFResult<LogicalPlan> {
     let rewritten_plan = plan
         .rewrite(&mut UnnestRewriter {})?
+        .data
         .rewrite(&mut ArroyoRewriter { schema_provider })?;
     // check for window functions
-    rewritten_plan.visit(&mut TimeWindowUdfChecker {})?;
-    Ok(rewritten_plan)
+    rewritten_plan.data.visit(&mut TimeWindowUdfChecker {})?;
+    Ok(rewritten_plan.data)
 }
 
 pub async fn parse_and_get_arrow_program(
@@ -519,8 +554,6 @@ pub async fn parse_and_get_arrow_program(
         let mut metadata = SourceMetadataVisitor::new(&schema_provider);
         plan_rewrite.visit(&mut metadata)?;
         used_connections.extend(metadata.connection_ids.iter());
-
-        debug!("Logical plan: {}", plan_rewrite.display_graphviz());
 
         let sink = match sink_name {
             Some(sink_name) => {

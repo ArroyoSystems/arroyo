@@ -7,11 +7,11 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     IS_RETRACT_FIELD,
 };
-use datafusion_common::{
+use datafusion::common::{
     plan_err, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
 };
 
-use datafusion_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 
 use prost::Message;
 

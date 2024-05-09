@@ -14,12 +14,9 @@ arroyo-operator = { path = "../arroyo-operator" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 
-datafusion = "36.0"
-datafusion-expr = "36.0"
-datafusion-common = "36.0"
-datafusion-proto = "36.0"
-datafusion-physical-expr = "36.0"
-datafusion-execution = "36.0"
+datafusion = { workspace = true }
+datafusion-proto = { workspace = true }
+datafusion-functions = { workspace = true }
 
 prost = "0.12"
 arrow-schema = {workspace = true, features = ["serde"] }

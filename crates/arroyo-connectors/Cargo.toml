@@ -17,7 +17,7 @@ arroyo-operator = { path = "../arroyo-operator" }
 arroyo-state = { path = "../arroyo-state" }
 
 arrow = { workspace = true }
-datafusion = "36.0"
+datafusion = { workspace = true }
 async-trait = "0.1"
 bincode = "2.0.0-rc.3"
 chrono = "0.4"
@@ -75,7 +75,7 @@ uuid = { version = "1.7.0", features = ["v4"] }
 # Filesystem
 parquet = { workspace = true, features = ["async"]}
 object_store = { workspace = true }
-deltalake = {version = "0.17", features = ["s3", "datafusion"] }
+deltalake = { workspace = true, features = ["s3", "datafusion"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 
 # MQTT

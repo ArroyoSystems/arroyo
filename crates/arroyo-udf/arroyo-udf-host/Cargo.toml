@@ -8,7 +8,7 @@ description = "safe interface for interacting with dynamically-linked UDFs"
 arroyo-udf-common = { path = "../arroyo-udf-common" }
 dlopen2 = { version = "0.7", features = ["derive"] }
 anyhow = "1.0.82"
-datafusion = "36"
+datafusion = { workspace = true }
 async-ffi = { version = "0.5", features = ["macros"] }
 arrow = { workspace = true, features = ["ffi"]}
 toml = "0.8"

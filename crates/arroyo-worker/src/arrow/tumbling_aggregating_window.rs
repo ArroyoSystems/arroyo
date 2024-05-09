@@ -18,17 +18,18 @@ use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode
 use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
+use datafusion::common::ScalarValue;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use datafusion_common::ScalarValue;
 use futures::{stream::FuturesUnordered, StreamExt};
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
-use datafusion_execution::{
+use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
-use datafusion_physical_expr::PhysicalExpr;
+use datafusion::physical_expr::PhysicalExpr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
     physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
@@ -118,8 +119,12 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
             .ok_or_else(|| anyhow!("requires input schema"))?
             .try_into()?;
         let binning_function = PhysicalExprNode::decode(&mut config.binning_function.as_slice())?;
-        let binning_function =
-            parse_physical_expr(&binning_function, registry.as_ref(), &input_schema.schema)?;
+        let binning_function = parse_physical_expr(
+            &binning_function,
+            registry.as_ref(),
+            &input_schema.schema,
+            &DefaultPhysicalExtensionCodec {},
+        )?;
 
         let receiver = Arc::new(RwLock::new(None));
         let final_batches_passer = Arc::new(RwLock::new(Vec::new()));

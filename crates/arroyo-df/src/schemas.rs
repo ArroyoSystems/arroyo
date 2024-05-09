@@ -1,6 +1,6 @@
 use arrow::datatypes::{DataType, TimeUnit};
 use arrow_schema::{Field, Schema, SchemaRef};
-use datafusion_common::{DFField, DFSchema, DFSchemaRef, OwnedTableReference, Result as DFResult};
+use datafusion::common::{DFField, DFSchema, DFSchemaRef, OwnedTableReference, Result as DFResult};
 use std::{collections::HashMap, sync::Arc};
 
 pub fn window_arrow_struct() -> DataType {

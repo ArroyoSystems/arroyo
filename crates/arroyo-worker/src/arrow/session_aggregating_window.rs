@@ -35,7 +35,7 @@ use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPla
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion_execution::{
+use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };

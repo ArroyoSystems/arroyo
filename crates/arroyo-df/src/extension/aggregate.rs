@@ -15,17 +15,17 @@ use arroyo_rpc::{
     },
     TIMESTAMP_FIELD,
 };
-use datafusion_common::{
+use datafusion::common::{
     Column, DFField, DFSchema, DFSchemaRef, DataFusionError, Result as DFResult, ScalarValue,
 };
-use datafusion_expr::{
+use datafusion::logical_expr;
+use datafusion::logical_expr::{
     expr::ScalarFunction, Aggregate, BinaryExpr, Expr, Extension, LogicalPlan,
     ScalarFunctionDefinition, UserDefinedLogicalNodeCore,
 };
-use datafusion_proto::{
-    physical_plan::AsExecutionPlan,
-    protobuf::{PhysicalExprNode, PhysicalPlanNode},
-};
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
 use crate::physical::window_scalar_function;
@@ -234,7 +234,8 @@ impl AggregateExtension {
             &Expr::Column(Column::new_unqualified("_timestamp".to_string())),
             &input_schema,
         )?;
-        let binning_function_proto = PhysicalExprNode::try_from(binning_function)?;
+        let binning_function_proto =
+            serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})?;
 
         let final_projection = use_final_projection
             .then(|| {
@@ -341,7 +342,7 @@ impl AggregateExtension {
                 // add width interval to _timestamp for bin end
                 Expr::BinaryExpr(BinaryExpr {
                     left: Box::new(Expr::Column(timestamp_column.clone())),
-                    op: datafusion_expr::Operator::Plus,
+                    op: logical_expr::Operator::Plus,
                     right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
                         IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
                     )))),
@@ -356,14 +357,14 @@ impl AggregateExtension {
         aggregate_fields.push(timestamp_field.clone());
         let bin_end_calculation = Expr::BinaryExpr(BinaryExpr {
             left: Box::new(Expr::Column(timestamp_column.clone())),
-            op: datafusion_expr::Operator::Plus,
+            op: logical_expr::Operator::Plus,
             right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
                 IntervalMonthDayNanoType::make_value(0, 0, (width.as_nanos() - 1) as i64),
             )))),
         });
         aggregate_expressions.push(bin_end_calculation);
         Ok(LogicalPlan::Projection(
-            datafusion_expr::Projection::try_new_with_schema(
+            logical_expr::Projection::try_new_with_schema(
                 aggregate_expressions,
                 Arc::new(timestamp_append),
                 Arc::new(DFSchema::new_with_metadata(
@@ -400,7 +401,7 @@ impl AggregateExtension {
                 // calculate the start of the bin
                 Expr::BinaryExpr(BinaryExpr {
                     left: Box::new(Expr::Column(timestamp_column.clone())),
-                    op: datafusion_expr::Operator::Minus,
+                    op: logical_expr::Operator::Minus,
                     right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
                         IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64 - 1),
                     )))),
@@ -408,7 +409,7 @@ impl AggregateExtension {
                 // add 1 nanosecond to the timestamp
                 Expr::BinaryExpr(BinaryExpr {
                     left: Box::new(Expr::Column(timestamp_column.clone())),
-                    op: datafusion_expr::Operator::Plus,
+                    op: logical_expr::Operator::Plus,
                     right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
                         IntervalMonthDayNanoType::make_value(0, 0, 1),
                     )))),
@@ -421,7 +422,7 @@ impl AggregateExtension {
                 .alias_qualified(window_field.qualifier().cloned(), window_field.name()),
         );
         Ok(LogicalPlan::Projection(
-            datafusion_expr::Projection::try_new_with_schema(
+            logical_expr::Projection::try_new_with_schema(
                 aggregate_expressions,
                 Arc::new(aggregate_plan),
                 Arc::new(DFSchema::new_with_metadata(aggregate_fields, HashMap::new()).unwrap()),
@@ -469,7 +470,6 @@ impl UserDefinedLogicalNodeCore for AggregateExtension {
     fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
         assert_eq!(inputs.len(), 1, "input size inconsistent");
 
-        println!("EXPRS: {:?}", _exprs);
         Self::new(
             self.window_behavior.clone(),
             inputs[0].clone(),

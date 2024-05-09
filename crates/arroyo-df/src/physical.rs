@@ -3,7 +3,7 @@ use arrow::{
     buffer::{BooleanBuffer, NullBuffer},
     compute::{concat, kernels::zip, not, take},
 };
-use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
+use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream};
 use std::{
     any::Any,
     mem,
@@ -14,6 +14,9 @@ use std::{
 
 use arrow_array::{array, Array, BooleanArray, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
+use datafusion::common::{
+    plan_err, DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
+};
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
@@ -21,9 +24,6 @@ use datafusion::{
         stream::RecordBatchStreamAdapter,
         DisplayAs, ExecutionPlan, Partitioning,
     },
-};
-use datafusion_common::{
-    plan_err, DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
 };
 
 use crate::json::get_json_functions;
@@ -36,19 +36,20 @@ use arroyo_rpc::{
     grpc::api::{arroyo_exec_node::Node, DebeziumDecodeNode},
     IS_RETRACT_FIELD, TIMESTAMP_FIELD,
 };
-use datafusion::physical_plan::unnest::UnnestExec;
-use datafusion_expr::{
+use datafusion::logical_expr::{
     ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, Signature,
-    TypeSignature,
+    TypeSignature, Volatility,
 };
-use datafusion_physical_expr::expressions::Column;
+use datafusion::physical_expr::expressions::Column;
+use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::unnest::UnnestExec;
+use datafusion::physical_plan::{ExecutionMode, PlanProperties};
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use futures::{
     ready,
     stream::{Stream, StreamExt},
 };
 use prost::Message;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -129,7 +130,7 @@ fn tumble_signature() -> Signature {
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             DataType::Timestamp(TimeUnit::Nanosecond, None),
         ]),
-        datafusion_expr::Volatility::Immutable,
+        Volatility::Immutable,
     )
 }
 
@@ -198,7 +199,18 @@ pub fn new_registry() -> Registry {
     for json_function in get_json_functions().values() {
         registry.add_udf(json_function.clone());
     }
+
+    datafusion::functions::register_all(&mut registry).unwrap();
+    datafusion::functions_array::register_all(&mut registry).unwrap();
     registry
+}
+
+fn make_properties(schema: SchemaRef) -> PlanProperties {
+    PlanProperties::new(
+        EquivalenceProperties::new(schema),
+        Partitioning::UnknownPartitioning(1),
+        ExecutionMode::Unbounded,
+    )
 }
 
 impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
@@ -207,7 +219,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
         buf: &[u8],
         inputs: &[Arc<dyn datafusion::physical_plan::ExecutionPlan>],
         _registry: &dyn datafusion::execution::FunctionRegistry,
-    ) -> datafusion_common::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
+    ) -> datafusion::common::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
         let exec: ArroyoExecNode = Message::decode(buf)
             .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {}", err)))?;
 
@@ -221,41 +233,30 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                 })?;
                 let schema = Arc::new(schema);
                 match &self.context {
-                    DecodingContext::SingleLockedBatch(single_batch) => {
-                        Ok(Arc::new(RwLockRecordBatchReader {
-                            schema,
-                            locked_batch: single_batch.clone(),
-                        }))
+                    DecodingContext::SingleLockedBatch(single_batch) => Ok(Arc::new(
+                        RwLockRecordBatchReader::new(schema, single_batch.clone()),
+                    )),
+                    DecodingContext::UnboundedBatchStream(unbounded_stream) => Ok(Arc::new(
+                        UnboundedRecordBatchReader::new(schema, unbounded_stream.clone()),
+                    )),
+                    DecodingContext::LockedBatchVec(locked_batches) => Ok(Arc::new(
+                        RecordBatchVecReader::new(schema, locked_batches.clone()),
+                    )),
+                    DecodingContext::Planning => {
+                        Ok(Arc::new(ArroyoMemExec::new(mem_exec.table_name, schema)))
                     }
-                    DecodingContext::UnboundedBatchStream(unbounded_stream) => {
-                        Ok(Arc::new(UnboundedRecordBatchReader {
-                            schema,
-                            receiver: unbounded_stream.clone(),
-                        }))
-                    }
-                    DecodingContext::LockedBatchVec(locked_batches) => {
-                        Ok(Arc::new(RecordBatchVecReader {
-                            schema,
-                            receiver: locked_batches.clone(),
-                        }))
-                    }
-                    DecodingContext::Planning => Ok(Arc::new(ArroyoMemExec {
-                        table_name: mem_exec.table_name,
-                        schema,
-                    })),
                     DecodingContext::None => Err(DataFusionError::Internal(
                         "Need an internal context to decode".into(),
                     )),
                     DecodingContext::LockedJoinPair { left, right } => {
                         match mem_exec.table_name.as_str() {
-                            "left" => Ok(Arc::new(RwLockRecordBatchReader {
+                            "left" => {
+                                Ok(Arc::new(RwLockRecordBatchReader::new(schema, left.clone())))
+                            }
+                            "right" => Ok(Arc::new(RwLockRecordBatchReader::new(
                                 schema,
-                                locked_batch: left.clone(),
-                            })),
-                            "right" => Ok(Arc::new(RwLockRecordBatchReader {
-                                schema,
-                                locked_batch: right.clone(),
-                            })),
+                                right.clone(),
+                            ))),
                             _ => Err(DataFusionError::Internal(format!(
                                 "unknown table name {}",
                                 mem_exec.table_name
@@ -264,14 +265,14 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                     }
                     DecodingContext::LockedJoinStream { left, right } => {
                         match mem_exec.table_name.as_str() {
-                            "left" => Ok(Arc::new(UnboundedRecordBatchReader {
+                            "left" => Ok(Arc::new(UnboundedRecordBatchReader::new(
                                 schema,
-                                receiver: left.clone(),
-                            })),
-                            "right" => Ok(Arc::new(UnboundedRecordBatchReader {
+                                left.clone(),
+                            ))),
+                            "right" => Ok(Arc::new(UnboundedRecordBatchReader::new(
                                 schema,
-                                receiver: right.clone(),
-                            })),
+                                right.clone(),
+                            ))),
                             _ => Err(DataFusionError::Internal(format!(
                                 "unknown table name {}",
                                 mem_exec.table_name
@@ -307,9 +308,9 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                 )))
             }
             Node::DebeziumDecode(debezium) => {
-                let schema: Schema = serde_json::from_str(&debezium.schema).map_err(|e| {
-                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
-                })?;
+                let schema = Arc::new(serde_json::from_str::<Schema>(&debezium.schema).map_err(
+                    |e| DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e)),
+                )?);
                 Ok(Arc::new(DebeziumUnrollingExec {
                     input: inputs
                         .first()
@@ -317,13 +318,14 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                             DataFusionError::Internal("no input for debezium node".to_string())
                         })?
                         .clone(),
-                    schema: Arc::new(schema),
+                    schema: schema.clone(),
+                    properties: make_properties(schema),
                 }))
             }
             Node::DebeziumEncode(debezium) => {
-                let schema: Schema = serde_json::from_str(&debezium.schema).map_err(|e| {
-                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
-                })?;
+                let schema = Arc::new(serde_json::from_str::<Schema>(&debezium.schema).map_err(
+                    |e| DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e)),
+                )?);
                 Ok(Arc::new(ToDebeziumExec {
                     input: inputs
                         .first()
@@ -331,7 +333,8 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                             DataFusionError::Internal("no input for debezium node".to_string())
                         })?
                         .clone(),
-                    schema: Arc::new(schema),
+                    schema: schema.clone(),
+                    properties: make_properties(schema),
                 }))
             }
         }
@@ -341,7 +344,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
         &self,
         node: Arc<dyn datafusion::physical_plan::ExecutionPlan>,
         buf: &mut Vec<u8>,
-    ) -> datafusion_common::Result<()> {
+    ) -> datafusion::common::Result<()> {
         let mut proto = None;
 
         let mem_table: Option<&ArroyoMemExec> = node.as_any().downcast_ref();
@@ -398,6 +401,17 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
 struct RwLockRecordBatchReader {
     schema: SchemaRef,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
+    properties: PlanProperties,
+}
+
+impl RwLockRecordBatchReader {
+    fn new(schema: SchemaRef, locked_batch: Arc<RwLock<Option<RecordBatch>>>) -> Self {
+        Self {
+            schema: schema.clone(),
+            locked_batch,
+            properties: make_properties(schema),
+        }
+    }
 }
 
 impl DisplayAs for RwLockRecordBatchReader {
@@ -419,14 +433,6 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         self.schema.clone()
     }
 
-    fn output_partitioning(&self) -> datafusion_physical_expr::Partitioning {
-        datafusion_physical_expr::Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
-        None
-    }
-
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
         vec![]
     }
@@ -434,7 +440,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
     fn with_new_children(
         self: Arc<Self>,
         _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         Err(DataFusionError::Internal("not supported".into()))
     }
 
@@ -442,7 +448,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         &self,
         _partition: usize,
         _context: Arc<TaskContext>,
-    ) -> datafusion_common::Result<datafusion_execution::SendableRecordBatchStream> {
+    ) -> datafusion::common::Result<datafusion::execution::SendableRecordBatchStream> {
         let result = self
             .locked_batch
             .write()
@@ -456,12 +462,16 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         )?))
     }
 
-    fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
+    fn statistics(&self) -> DFResult<datafusion::common::Statistics> {
         Ok(Statistics::new_unknown(&self.schema))
     }
 
     fn reset(&self) -> DFResult<()> {
         Ok(())
+    }
+
+    fn properties(&self) -> &PlanProperties {
+        &self.properties
     }
 }
 
@@ -469,6 +479,20 @@ impl ExecutionPlan for RwLockRecordBatchReader {
 struct UnboundedRecordBatchReader {
     schema: SchemaRef,
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
+    properties: PlanProperties,
+}
+
+impl UnboundedRecordBatchReader {
+    fn new(
+        schema: SchemaRef,
+        receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
+    ) -> Self {
+        Self {
+            schema: schema.clone(),
+            receiver,
+            properties: make_properties(schema),
+        }
+    }
 }
 
 impl DisplayAs for UnboundedRecordBatchReader {
@@ -490,12 +514,8 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         self.schema.clone()
     }
 
-    fn output_partitioning(&self) -> datafusion_physical_expr::Partitioning {
-        datafusion_physical_expr::Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
-        None
+    fn properties(&self) -> &PlanProperties {
+        &self.properties
     }
 
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
@@ -505,7 +525,7 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
     fn with_new_children(
         self: Arc<Self>,
         _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         Err(DataFusionError::Internal("not supported".into()))
     }
 
@@ -513,7 +533,7 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         &self,
         _partition: usize,
         _context: Arc<TaskContext>,
-    ) -> datafusion_common::Result<datafusion_execution::SendableRecordBatchStream> {
+    ) -> datafusion::common::Result<datafusion::execution::SendableRecordBatchStream> {
         Ok(Box::pin(RecordBatchStreamAdapter::new(
             self.schema.clone(),
             UnboundedReceiverStream::new(
@@ -527,8 +547,8 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         )))
     }
 
-    fn statistics(&self) -> datafusion_common::Result<datafusion_common::Statistics> {
-        Ok(datafusion_common::Statistics::new_unknown(&self.schema))
+    fn statistics(&self) -> datafusion::common::Result<datafusion::common::Statistics> {
+        Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
     fn reset(&self) -> DFResult<()> {
@@ -540,6 +560,17 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
 struct RecordBatchVecReader {
     schema: SchemaRef,
     receiver: Arc<RwLock<Vec<RecordBatch>>>,
+    properties: PlanProperties,
+}
+
+impl RecordBatchVecReader {
+    fn new(schema: SchemaRef, receiver: Arc<RwLock<Vec<RecordBatch>>>) -> Self {
+        Self {
+            schema: schema.clone(),
+            receiver,
+            properties: make_properties(schema),
+        }
+    }
 }
 
 impl DisplayAs for RecordBatchVecReader {
@@ -561,12 +592,8 @@ impl ExecutionPlan for RecordBatchVecReader {
         self.schema.clone()
     }
 
-    fn output_partitioning(&self) -> datafusion_physical_expr::Partitioning {
-        datafusion_physical_expr::Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
-        None
+    fn properties(&self) -> &PlanProperties {
+        &self.properties
     }
 
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
@@ -576,7 +603,7 @@ impl ExecutionPlan for RecordBatchVecReader {
     fn with_new_children(
         self: Arc<Self>,
         _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         Err(DataFusionError::Internal("not supported".into()))
     }
 
@@ -584,7 +611,7 @@ impl ExecutionPlan for RecordBatchVecReader {
         &self,
         partition: usize,
         context: Arc<TaskContext>,
-    ) -> datafusion_common::Result<datafusion_execution::SendableRecordBatchStream> {
+    ) -> datafusion::common::Result<datafusion::execution::SendableRecordBatchStream> {
         MemoryExec::try_new(
             &[mem::take(self.receiver.write().unwrap().as_mut())],
             self.schema.clone(),
@@ -593,8 +620,8 @@ impl ExecutionPlan for RecordBatchVecReader {
         .execute(partition, context)
     }
 
-    fn statistics(&self) -> datafusion_common::Result<datafusion_common::Statistics> {
-        Ok(datafusion_common::Statistics::new_unknown(&self.schema))
+    fn statistics(&self) -> datafusion::common::Result<datafusion::common::Statistics> {
+        Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
     fn reset(&self) -> DFResult<()> {
@@ -602,11 +629,13 @@ impl ExecutionPlan for RecordBatchVecReader {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ArroyoMemExec {
     pub table_name: String,
     pub schema: SchemaRef,
+    properties: PlanProperties,
 }
+
 impl DisplayAs for ArroyoMemExec {
     fn fmt_as(
         &self,
@@ -614,6 +643,16 @@ impl DisplayAs for ArroyoMemExec {
         f: &mut std::fmt::Formatter,
     ) -> std::fmt::Result {
         write!(f, "EmptyPartitionStream: schema={}", self.schema)
+    }
+}
+
+impl ArroyoMemExec {
+    pub fn new(table_name: String, schema: SchemaRef) -> Self {
+        Self {
+            schema: schema.clone(),
+            table_name,
+            properties: make_properties(schema),
+        }
     }
 }
 
@@ -626,12 +665,8 @@ impl ExecutionPlan for ArroyoMemExec {
         self.schema.clone()
     }
 
-    fn output_partitioning(&self) -> datafusion::physical_plan::Partitioning {
-        Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion::physical_expr::PhysicalSortExpr]> {
-        None
+    fn properties(&self) -> &PlanProperties {
+        &self.properties
     }
 
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
@@ -653,8 +688,8 @@ impl ExecutionPlan for ArroyoMemExec {
         plan_err!("EmptyPartitionStream cannot be executed, this is only used for physical planning before serialization")
     }
 
-    fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
-        Ok(datafusion_common::Statistics::new_unknown(&self.schema))
+    fn statistics(&self) -> DFResult<datafusion::common::Statistics> {
+        Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
     fn reset(&self) -> DFResult<()> {
@@ -666,6 +701,7 @@ impl ExecutionPlan for ArroyoMemExec {
 pub struct DebeziumUnrollingExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
+    properties: PlanProperties,
 }
 
 impl DebeziumUnrollingExec {
@@ -708,10 +744,11 @@ impl DebeziumUnrollingExec {
             false,
         )));
 
-        let schema = Schema::new(fields);
+        let schema = Arc::new(Schema::new(fields));
         Ok(Self {
             input,
-            schema: Arc::new(schema),
+            schema: schema.clone(),
+            properties: make_properties(schema),
         })
     }
 }
@@ -735,12 +772,8 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         self.schema.clone()
     }
 
-    fn output_partitioning(&self) -> Partitioning {
-        Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
-        None
+    fn properties(&self) -> &PlanProperties {
+        &self.properties
     }
 
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
@@ -759,6 +792,7 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         Ok(Arc::new(DebeziumUnrollingExec {
             input: children[0].clone(),
             schema: self.schema.clone(),
+            properties: self.properties.clone(),
         }))
     }
 
@@ -884,6 +918,7 @@ impl RecordBatchStream for DebeziumUnrollingStream {
 pub struct ToDebeziumExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
+    properties: PlanProperties,
 }
 
 impl ToDebeziumExec {
@@ -916,11 +951,17 @@ impl ToDebeziumExec {
         let op_field = Arc::new(arrow::datatypes::Field::new("op", DataType::Utf8, false));
         let timestamp_field = Arc::new(input_schema.field(timestamp_index).clone());
 
-        let output_schema = Schema::new(vec![before_field, after_field, op_field, timestamp_field]);
+        let output_schema = Arc::new(Schema::new(vec![
+            before_field,
+            after_field,
+            op_field,
+            timestamp_field,
+        ]));
 
         Ok(Self {
             input,
-            schema: Arc::new(output_schema),
+            schema: output_schema.clone(),
+            properties: make_properties(output_schema),
         })
     }
 }
@@ -944,12 +985,8 @@ impl ExecutionPlan for ToDebeziumExec {
         self.schema.clone()
     }
 
-    fn output_partitioning(&self) -> Partitioning {
-        Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
-        None
+    fn properties(&self) -> &PlanProperties {
+        &self.properties
     }
 
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {

@@ -7,9 +7,9 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::ValuePlanOperator,
 };
-use datafusion_common::{DFSchemaRef, OwnedTableReference};
+use datafusion::common::{DFSchemaRef, OwnedTableReference};
 
-use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 

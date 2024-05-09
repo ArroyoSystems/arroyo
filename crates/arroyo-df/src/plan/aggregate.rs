@@ -4,10 +4,13 @@ use crate::extension::updating_aggregate::UpdatingAggregateExtension;
 use crate::plan::WindowDetectingVisitor;
 use crate::{find_window, WindowBehavior};
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
-use datafusion_common::tree_node::{TreeNode, TreeNodeRewriter};
-use datafusion_common::{plan_err, DFField, DFSchema, DataFusionError, Result as DFResult};
-use datafusion_expr::expr::AggregateFunction;
-use datafusion_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
+use datafusion::common::{
+    not_impl_err, plan_err, DFField, DFSchema, DataFusionError, Result as DFResult,
+};
+use datafusion::logical_expr;
+use datafusion::logical_expr::expr::AggregateFunction;
+use datafusion::logical_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
 use std::sync::Arc;
 use tracing::info;
 
@@ -21,7 +24,7 @@ impl AggregateRewriter {
         group_expr: Vec<Expr>,
         mut aggr_expr: Vec<Expr>,
         schema: Arc<DFSchema>,
-    ) -> DFResult<LogicalPlan> {
+    ) -> DFResult<Transformed<LogicalPlan>> {
         if input
             .schema()
             .has_column_with_unqualified_name(IS_RETRACT_FIELD)
@@ -47,7 +50,7 @@ impl AggregateRewriter {
         );
 
         let key_projection =
-            LogicalPlan::Projection(datafusion_expr::Projection::try_new_with_schema(
+            LogicalPlan::Projection(logical_expr::Projection::try_new_with_schema(
                 key_projection_expressions.clone(),
                 input.clone(),
                 key_schema.clone(),
@@ -84,6 +87,7 @@ impl AggregateRewriter {
             false,
             None,
             None,
+            None,
         )));
         let mut output_schema_fields = schema.fields().clone();
         output_schema_fields.push(timestamp_field.clone());
@@ -114,14 +118,14 @@ impl AggregateRewriter {
         let final_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(updating_aggregate_extension),
         });
-        Ok(final_plan)
+        Ok(Transformed::yes(final_plan))
     }
 }
 
 impl TreeNodeRewriter for AggregateRewriter {
-    type N = LogicalPlan;
+    type Node = LogicalPlan;
 
-    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         let LogicalPlan::Aggregate(Aggregate {
             input,
             mut group_expr,
@@ -130,7 +134,7 @@ impl TreeNodeRewriter for AggregateRewriter {
             ..
         }) = node
         else {
-            return Ok(node);
+            return Ok(Transformed::no(node));
         };
         let mut window_group_expr: Vec<_> = group_expr
             .iter()
@@ -144,10 +148,10 @@ impl TreeNodeRewriter for AggregateRewriter {
             .map_err(|err| DataFusionError::Plan(err.to_string()))?;
 
         if window_group_expr.len() > 1 {
-            return Err(datafusion_common::DataFusionError::NotImplemented(format!(
+            return not_impl_err!(
                 "do not support {} window expressions in group by",
                 window_group_expr.len()
-            )));
+            );
         }
 
         let mut key_fields: Vec<DFField> = schema
@@ -241,7 +245,7 @@ impl TreeNodeRewriter for AggregateRewriter {
         );
 
         let key_projection =
-            LogicalPlan::Projection(datafusion_expr::Projection::try_new_with_schema(
+            LogicalPlan::Projection(logical_expr::Projection::try_new_with_schema(
                 key_projection_expressions.clone(),
                 input.clone(),
                 key_schema.clone(),
@@ -285,6 +289,6 @@ impl TreeNodeRewriter for AggregateRewriter {
         });
         // check that the windowing is correct
         WindowDetectingVisitor::get_window(&final_plan)?;
-        Ok(final_plan)
+        Ok(Transformed::yes(final_plan))
     }
 }

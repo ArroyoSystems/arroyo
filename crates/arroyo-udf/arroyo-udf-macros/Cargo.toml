@@ -7,7 +7,7 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-arrow-schema = "50.0.0"
+arrow-schema = { workspace = true }
 arroyo-udf-common = { path = "../arroyo-udf-common" }
 syn = {version = "2", features = ["full"]}
 quote = "1.0"

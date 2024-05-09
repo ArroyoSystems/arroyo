@@ -1,4 +1,5 @@
 use arrow::array::{RecordBatch, TimestampNanosecondArray};
+#[allow(deprecated)]
 use arrow::json::writer::record_batches_to_json_rows;
 use std::time::SystemTime;
 
@@ -38,6 +39,7 @@ impl ArrowOperator for PreviewSink {
             .downcast_ref::<TimestampNanosecondArray>()
             .unwrap();
 
+        #[allow(deprecated)]
         let json_rows = record_batches_to_json_rows(&[&record_batch]).unwrap();
         for (mut map, timestamp) in json_rows.into_iter().zip(timestamp_column.iter()) {
             map.remove("_timestamp");

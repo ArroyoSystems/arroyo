@@ -1,5 +1,6 @@
 use arrow::datatypes::{Field, Fields, SchemaRef};
 use arrow_array::builder::{ArrayBuilder, StringBuilder};
+use arrow_schema::DataType;
 use arroyo_rpc::formats::JsonFormat;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -104,6 +105,10 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         arrow::datatypes::DataType::Decimal256(_, _) => todo!(),
         arrow::datatypes::DataType::Map(_, _) => todo!(),
         arrow::datatypes::DataType::RunEndEncoded(_, _) => todo!(),
+        DataType::BinaryView => todo!(),
+        DataType::Utf8View => todo!(),
+        DataType::ListView(_) => todo!(),
+        DataType::LargeListView(_) => todo!(),
     }
 }
 
@@ -182,6 +187,10 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
         Decimal256(_, _) => todo!(),
         Map(_, _) => todo!(),
         RunEndEncoded(_, _) => todo!(),
+        BinaryView => todo!(),
+        Utf8View => todo!(),
+        ListView(_) => todo!(),
+        LargeListView(_) => todo!(),
     };
 
     json! {{

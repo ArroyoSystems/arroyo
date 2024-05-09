@@ -5,9 +5,10 @@ use anyhow::anyhow;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
-use datafusion_common::{DFSchemaRef, OwnedTableReference};
-use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
-use datafusion_proto::protobuf::PhysicalExprNode;
+use datafusion::common::{DFSchemaRef, OwnedTableReference};
+use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use prost::Message;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -42,7 +43,7 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
     fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(
             f,
-            "WaterMarkNode({}): {}",
+            "WatermarkNode({}): {}",
             self.qualifier,
             self.schema
                 .fields()
@@ -84,7 +85,7 @@ impl ArroyoExtension for WatermarkNode {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> anyhow::Result<NodeWithIncomingEdges> {
         let expression = planner.create_physical_expr(&self.watermark_expression, &self.schema)?;
-        let expression = PhysicalExprNode::try_from(expression)?;
+        let expression = serialize_physical_expr(expression, &DefaultPhysicalExtensionCodec {})?;
         let node = LogicalNode {
             operator_id: format!("watermark_{}", index),
             description: "watermark".to_string(),

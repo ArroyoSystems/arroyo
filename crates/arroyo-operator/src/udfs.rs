@@ -202,6 +202,10 @@ fn scalar_none(datatype: &DataType) -> ScalarValue {
         DataType::Time64(TimeUnit::Millisecond) => {
             unimplemented!("cannot represent time64 millis as scalar")
         }
+        DataType::BinaryView
+        | DataType::Utf8View
+        | DataType::ListView(_)
+        | DataType::LargeListView(_) => unimplemented!("views are not supported"),
     }
 }
 

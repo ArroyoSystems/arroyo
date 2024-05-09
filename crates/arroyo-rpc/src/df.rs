@@ -3,6 +3,7 @@ use crate::{grpc, Converter, TIMESTAMP_FIELD};
 use anyhow::{anyhow, Result};
 use arrow::compute::kernels::numeric::div;
 use arrow::compute::{filter_record_batch, take};
+use arrow::datatypes::{DataType, Field, Schema, SchemaBuilder, TimeUnit};
 use arrow::row::SortField;
 use arrow_array::builder::{make_builder, ArrayBuilder};
 use arrow_array::types::UInt64Type;
@@ -10,7 +11,6 @@ use arrow_array::{Array, PrimitiveArray, RecordBatch, TimestampNanosecondArray, 
 use arrow_ord::cmp::gt_eq;
 use arrow_ord::partition::partition;
 use arrow_ord::sort::{lexsort_to_indices, SortColumn};
-use arrow_schema::{DataType, Field, Schema, SchemaBuilder, TimeUnit};
 use arroyo_types::to_nanos;
 use std::ops::Range;
 use std::sync::Arc;

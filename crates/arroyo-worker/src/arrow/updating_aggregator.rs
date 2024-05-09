@@ -21,12 +21,12 @@ use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPla
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::df::ArroyoSchemaRef;
-use datafusion_common::ScalarValue;
-use datafusion_execution::{
+use datafusion::common::ScalarValue;
+use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
-use datafusion_expr::ColumnarValue;
+use datafusion::logical_expr::ColumnarValue;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::{lock::Mutex, Future};
 use prost::Message;

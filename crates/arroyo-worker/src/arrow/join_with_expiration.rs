@@ -16,8 +16,8 @@ use arroyo_rpc::{
 };
 use arroyo_state::timestamp_table_config;
 use datafusion::execution::context::SessionContext;
-use datafusion_execution::runtime_env::{RuntimeConfig, RuntimeEnv};
-use datafusion_physical_plan::ExecutionPlan;
+use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use prost::Message;

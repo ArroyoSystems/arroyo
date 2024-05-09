@@ -20,7 +20,7 @@ arrow = { workspace = true, features = ["ffi"] }
 ahash = { workspace = true }
 async-trait = "0.1.68"
 bincode = "2.0.0-rc.3"
-datafusion = "36.0"
+datafusion = { workspace = true }
 futures = "0.3"
 prost = "0.12"
 rand = "0.8"

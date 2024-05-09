@@ -11,11 +11,15 @@ use arroyo_datastream::logical::{
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
-use datafusion_common::{
+use datafusion::common::{
     DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
 };
-use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore};
-use datafusion_proto::protobuf::{PhysicalExprNode, ProjectionNode};
+use datafusion::logical_expr::{
+    Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore,
+};
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::protobuf::ProjectionNode;
 use prost::Message;
 use watermark_node::WatermarkNode;
 
@@ -185,7 +189,7 @@ impl ArroyoExtension for AsyncUDFExtension {
             .iter()
             .map(|e| {
                 let p = planner.create_physical_expr(e, self.input.schema())?;
-                Ok(PhysicalExprNode::try_from(p)?.encode_to_vec())
+                Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
             .collect::<DFResult<Vec<_>>>()
             .map_err(|e| anyhow!("failed to build async udf extension: {:?}", e))?;
@@ -203,7 +207,7 @@ impl ArroyoExtension for AsyncUDFExtension {
             .iter()
             .map(|e| {
                 let p = planner.create_physical_expr(e, &post_udf_schema)?;
-                Ok(PhysicalExprNode::try_from(p)?.encode_to_vec())
+                Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
             .collect::<DFResult<Vec<_>>>()
             .map_err(|e| anyhow!("failed to build async udf extension: {:?}", e))?;
