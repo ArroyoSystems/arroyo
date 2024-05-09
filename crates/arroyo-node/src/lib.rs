@@ -1,4 +1,5 @@
 use std::env::{current_exe, temp_dir};
+use std::net::SocketAddr;
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -15,6 +16,7 @@ use arroyo_rpc::grpc::{
     StopWorkerStatus, WorkerFinishedReq,
 };
 use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_server_common::wrap_start;
 use arroyo_types::{
     default_controller_addr, grpc_port, ports, to_millis, to_nanos, NodeId, WorkerId,
     ARROYO_PROGRAM_FILE_ENV, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV,
@@ -273,17 +275,22 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
         worker_finished_tx,
     };
 
-    let bind_addr = format!("0.0.0.0:{}", grpc);
+    let bind_addr: SocketAddr = format!("0.0.0.0:{}", grpc).parse().unwrap();
     info!(
         "Starting node server on {} with {} slots",
         bind_addr, task_slots
     );
+
     guard.spawn_task(
         "grpc",
-        arroyo_server_common::grpc_server()
-            .max_frame_size(Some((1 << 24) - 1)) // 16MB
-            .add_service(NodeGrpcServer::new(server))
-            .serve(bind_addr.parse().unwrap()),
+        wrap_start(
+            "node",
+            bind_addr.clone(),
+            arroyo_server_common::grpc_server()
+                .max_frame_size(Some((1 << 24) - 1)) // 16MB
+                .add_service(NodeGrpcServer::new(server))
+                .serve(bind_addr),
+        ),
     );
 
     let req_addr = format!("{}:{}", local_ip_address::local_ip().unwrap(), grpc);
@@ -331,8 +338,7 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
                             }))
                             .await
                         {
-                            error!("shutting down: controller failed heartbeat with {:?}", e);
-                            return;
+                            bail!("shutting down: controller failed heartbeat with {:?}", e);
                         }
                     }
                 }
@@ -349,6 +355,8 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
                 }
             }
         }
+        #[allow(unreachable_code)]
+        Ok(())
     });
 
     node_id

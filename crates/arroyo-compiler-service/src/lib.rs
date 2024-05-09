@@ -3,6 +3,7 @@ use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::Engine;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::net::SocketAddr;
 use std::process::Stdio;
 use std::str::from_utf8;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -14,6 +15,7 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::var_str::VarStr;
 
+use arroyo_server_common::wrap_start;
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
     bool_config, grpc_port, ports, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV, INSTALL_CLANG_ENV,
@@ -41,16 +43,18 @@ pub async fn start_service() -> anyhow::Result<()> {
     let service = CompileService::new().await?;
     let grpc = grpc_port("compiler", ports::COMPILER_GRPC);
 
-    let addr = format!("0.0.0.0:{}", grpc).parse().unwrap();
+    let addr: SocketAddr = format!("0.0.0.0:{}", grpc).parse().unwrap();
 
     info!("Starting compiler service at {}", addr);
 
-    arroyo_server_common::grpc_server()
-        .add_service(CompilerGrpcServer::new(service))
-        .serve(addr)
-        .await?;
-
-    Ok(())
+    wrap_start(
+        "compiler service",
+        addr.clone(),
+        arroyo_server_common::grpc_server()
+            .add_service(CompilerGrpcServer::new(service))
+            .serve(addr),
+    )
+    .await
 }
 
 pub struct CompileService {

@@ -688,6 +688,7 @@ impl StateMachine {
                             )
                             .await;
                             info!(message = "finished state machine", job_id = id);
+                            Ok(())
                         });
                     }
                     Ok(None) => {

@@ -327,7 +327,7 @@ impl NetworkManager {
         let streams = Arc::clone(&self.in_streams);
         shutdown_guard.into_spawn_task(async move {
             loop {
-                let (stream, _) = listener.accept().await.unwrap();
+                let (stream, _) = listener.accept().await?;
 
                 let mut s = streams.lock().await;
 
@@ -346,6 +346,8 @@ impl NetworkManager {
                     }
                 }
             }
+            #[allow(unreachable_code)]
+            Ok(())
         });
 
         port
