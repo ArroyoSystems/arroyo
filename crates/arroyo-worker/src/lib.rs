@@ -45,6 +45,7 @@ use prost::Message;
 use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
 use arroyo_df::physical::new_registry;
 use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_server_common::wrap_start;
 
 pub mod arrow;
 
@@ -272,11 +273,15 @@ impl WorkerServer {
         let data_address = format!("{}:{}", local_ip, data_port);
         let job_id = self.job_id.clone();
 
-        self.shutdown_guard.child("grpc").into_spawn_task(
-            arroyo_server_common::grpc_server()
-                .add_service(WorkerGrpcServer::new(self))
-                .serve_with_incoming(TcpListenerStream::new(listener)),
-        );
+        self.shutdown_guard
+            .child("grpc")
+            .into_spawn_task(wrap_start(
+                "worker",
+                local_addr,
+                arroyo_server_common::grpc_server()
+                    .add_service(WorkerGrpcServer::new(self))
+                    .serve_with_incoming(TcpListenerStream::new(listener)),
+            ));
 
         // ideally, get a signal when the server is started...
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -309,7 +314,7 @@ impl WorkerServer {
         mut control_rx: Receiver<ControlResp>,
         worker_id: WorkerId,
         job_id: String,
-    ) -> impl Future<Output = ()> {
+    ) -> impl Future<Output = Result<()>> {
         let addr = self.controller_addr.clone();
 
         let cancel_token = self.shutdown_guard.token();
@@ -420,6 +425,7 @@ impl WorkerServer {
                     }
                 }
             }
+            Ok(())
         }
     }
 }

@@ -17,6 +17,7 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_server_common::wrap_start;
 use arroyo_types::{from_micros, grpc_port, ports, NodeId, WorkerId};
 use deadpool_postgres::Pool;
 use lazy_static::lazy_static;
@@ -24,6 +25,7 @@ use prometheus::{register_gauge, Gauge};
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use time::OffsetDateTime;
@@ -490,8 +492,7 @@ impl ControllerServer {
                 let res = queries::controller_queries::all_jobs()
                     .bind(&client)
                     .all()
-                    .await
-                    .unwrap();
+                    .await?;
                 for p in res {
                     let config = JobConfig {
                         id: p.id.clone(),
@@ -549,6 +550,7 @@ impl ControllerServer {
 
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
+            Ok(())
         });
     }
 
@@ -558,7 +560,7 @@ impl ControllerServer {
             .build()
             .unwrap();
 
-        let addr = format!(
+        let addr: SocketAddr = format!(
             "0.0.0.0:{}",
             grpc_port("controller", ports::CONTROLLER_GRPC)
         )
@@ -568,12 +570,14 @@ impl ControllerServer {
         info!("Starting arroyo-controller on {}", addr);
 
         self.start_updater(guard.child("updater"));
-        guard.into_spawn_task(
+        guard.into_spawn_task(wrap_start(
+            "controller",
+            addr,
             arroyo_server_common::grpc_server()
                 .accept_http1(true)
                 .add_service(ControllerGrpcServer::new(self.clone()))
                 .add_service(reflection)
-                .serve(addr),
-        );
+                .serve(addr.clone()),
+        ));
     }
 }

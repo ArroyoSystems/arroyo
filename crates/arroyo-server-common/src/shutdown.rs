@@ -7,7 +7,7 @@ use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub struct ShutdownGuard {
     name: &'static str,
@@ -81,24 +81,27 @@ impl ShutdownGuard {
         )
     }
 
-    pub fn spawn_task<T>(&self, name: &'static str, task: T) -> JoinHandle<Option<T::Output>>
+    pub fn spawn_task<F, T>(&self, name: &'static str, task: T) -> JoinHandle<Option<T::Output>>
     where
-        T: Future + Send + 'static,
-        T::Output: Send + 'static,
+        F: Send + 'static,
+        T: Future<Output = anyhow::Result<F>> + Send + 'static,
     {
         let guard = self.child(name);
         guard.into_spawn_task(task)
     }
 
-    pub fn into_spawn_task<T>(self, task: T) -> JoinHandle<Option<T::Output>>
+    pub fn into_spawn_task<F, T>(self, task: T) -> JoinHandle<Option<T::Output>>
     where
-        T: Future + Send + 'static,
-        T::Output: Send + 'static,
+        F: Send + 'static,
+        T: Future<Output = anyhow::Result<F>> + Send + 'static,
     {
         let token = self.token.clone();
         tokio::spawn(async move {
             let output = select! {
                 output = task => {
+                    if let Err(e) = &output {
+                        error!("{}", e);
+                    }
                     Some(output)
                 }
                 _ = token.cancelled() => {
@@ -110,10 +113,10 @@ impl ShutdownGuard {
         })
     }
 
-    pub fn spawn_temporary<T>(&self, task: T) -> JoinHandle<Option<T::Output>>
+    pub fn spawn_temporary<F, T>(&self, task: T) -> JoinHandle<Option<T::Output>>
     where
-        T: Future + Send + 'static,
-        T::Output: Send + 'static,
+        F: Send + 'static,
+        T: Future<Output = anyhow::Result<F>> + Send + 'static,
     {
         let guard = self.clone_temporary();
         guard.into_spawn_task(task)
@@ -166,10 +169,10 @@ impl Shutdown {
         }
     }
 
-    pub fn spawn_task<T>(&self, name: &'static str, task: T) -> JoinHandle<Option<T::Output>>
+    pub fn spawn_task<F, T>(&self, name: &'static str, task: T) -> JoinHandle<Option<T::Output>>
     where
-        T: Future + Send + 'static,
-        T::Output: Send + 'static,
+        F: Send + 'static,
+        T: Future<Output = anyhow::Result<F>> + Send + 'static,
     {
         self.guard.spawn_task(name, task)
     }

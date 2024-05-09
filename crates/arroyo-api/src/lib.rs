@@ -1,8 +1,10 @@
+use anyhow::anyhow;
 use axum::response::IntoResponse;
 use axum::Json;
 use deadpool_postgres::Pool;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
 use tonic::transport::Channel;
@@ -36,7 +38,7 @@ use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipeline
 use arroyo_rpc::formats::*;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_types::{
-    default_controller_addr, ports, service_port, COMPILER_ADDR_ENV, COMPILER_PORT_ENV,
+    default_controller_addr, grpc_port, ports, service_port, COMPILER_ADDR_ENV,
     CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
 };
 
@@ -137,7 +139,7 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
     let compiler_addr = std::env::var(COMPILER_ADDR_ENV).unwrap_or_else(|_| {
         format!(
             "http://localhost:{}",
-            service_port("compiler", ports::COMPILER_GRPC, COMPILER_PORT_ENV)
+            grpc_port("compiler", ports::COMPILER_GRPC)
         )
     });
 
@@ -150,7 +152,7 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
         })
 }
 
-pub async fn start_server(pool: Pool) {
+pub async fn start_server(pool: Pool) -> anyhow::Result<()> {
     let controller_addr =
         std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| default_controller_addr());
 
@@ -163,7 +165,15 @@ pub async fn start_server(pool: Pool) {
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
-        .expect("HTTP server failed");
+        .map_err(|e| {
+            anyhow!(
+                "Failed to start API server on {}: {}",
+                addr,
+                e.source()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| e.to_string())
+            )
+        })
 }
 
 #[derive(Debug, Serialize, Deserialize)]

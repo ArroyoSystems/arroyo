@@ -2,6 +2,7 @@
 
 pub mod shutdown;
 
+use anyhow::anyhow;
 use arroyo_types::{admin_port, telemetry_enabled, POSTHOG_KEY};
 use axum::body::Bytes;
 use axum::extract::State;
@@ -18,7 +19,10 @@ use pyroscope::{pyroscope::PyroscopeAgentRunning, PyroscopeAgent};
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
 use reqwest::Client;
 use serde_json::{json, Value};
+use std::error::Error;
 use std::fs;
+use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tonic::body::BoxBody;
@@ -180,7 +184,7 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     .unwrap()
 }
 
-pub async fn start_admin_server(service: &str, default_port: u16) {
+pub async fn start_admin_server(service: &str, default_port: u16) -> anyhow::Result<()> {
     let port = admin_port(service, default_port);
 
     info!("Starting {} admin server on 0.0.0.0:{}", service, port);
@@ -200,7 +204,7 @@ pub async fn start_admin_server(service: &str, default_port: u16) {
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
-        .expect("admin server failed");
+        .map_err(|e| anyhow!("Failed to start admin HTTP server: {}", e))
 }
 
 #[cfg(not(target_os = "freebsd"))]
@@ -330,4 +334,21 @@ pub fn grpc_server() -> Server<
         .into_inner();
 
     Server::builder().layer(layer)
+}
+
+pub async fn wrap_start(
+    name: &str,
+    addr: SocketAddr,
+    result: impl Future<Output = Result<(), tonic::transport::Error>>,
+) -> anyhow::Result<()> {
+    result.await.map_err(|e| {
+        anyhow!(
+            "Failed to start {} server on {}: {}",
+            name,
+            addr,
+            e.source()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| e.to_string())
+        )
+    })
 }
