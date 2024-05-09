@@ -793,7 +793,7 @@ where
                             if then_stop {
                                 self.stop().await?;
                             }
-                            self.take_checkpoint( subtask_id).await?;
+                            self.take_checkpoint(subtask_id).await?;
                             let delta_version = self.delta_version();
                             self.checkpoint_sender.send({CheckpointData::Finished {  max_file_index: self.max_file_index,
                             delta_version}}).await?;
@@ -816,7 +816,7 @@ where
                             if self.rolling_policy.should_roll(&stats, self.watermark) {
 
                                 if let Some(future) = writer.close()? {
-                                self.futures.push(future);
+                                    self.futures.push(future);
                                     removed_partitions.push((partition.clone(), false));
                                 } else {
                                     removed_partitions.push((partition.clone(), true));

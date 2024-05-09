@@ -1149,9 +1149,9 @@ dependencies = [
 
 [[package]]
 name = "async-compression"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e9eabd7a98fe442131a17c316bd9349c43695e49e730c3c8e12cfb5f4da2693"
+checksum = "9c90a406b4495d129f00461241616194cb8a032c8d1c53c657f0961d5f8e0498"
 dependencies = [
  "bzip2",
  "flate2",
@@ -3073,7 +3073,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 [[package]]
 name = "datafusion"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3091,11 +3091,11 @@ dependencies = [
  "datafusion-execution",
  "datafusion-expr",
  "datafusion-functions 37.1.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo)",
- "datafusion-functions-array",
+ "datafusion-functions-array 37.1.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo)",
  "datafusion-optimizer",
  "datafusion-physical-expr",
  "datafusion-physical-plan",
- "datafusion-sql",
+ "datafusion-sql 37.1.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo)",
  "flate2",
  "futures",
  "glob",
@@ -3123,7 +3123,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3143,7 +3143,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "tokio",
 ]
@@ -3151,7 +3151,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "arrow",
  "chrono",
@@ -3171,7 +3171,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3212,7 +3212,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "arrow",
  "base64 0.22.1",
@@ -3236,7 +3236,27 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-array"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e501801e84d9c6ef54caaebcda1b18a6196a24176c12fb70e969bc0572e03c55"
+dependencies = [
+ "arrow",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-ord",
+ "arrow-schema",
+ "datafusion-common",
+ "datafusion-execution",
+ "datafusion-expr",
+ "datafusion-functions 37.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "itertools 0.12.1",
+ "log",
+ "paste",
+]
+
+[[package]]
+name = "datafusion-functions-array"
+version = "37.1.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3255,7 +3275,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3272,7 +3292,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3306,7 +3326,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "ahash 0.8.7",
  "arrow",
@@ -3336,7 +3356,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "arrow",
  "chrono",
@@ -3350,7 +3370,23 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "37.1.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ad26df98798b424968d19e2f1f4dc8165d5340f0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49eb54b42227136f6287573f2434b1de249fe1b8e6cd6cc73a634e4a3ec29356"
+dependencies = [
+ "arrow",
+ "arrow-array",
+ "arrow-schema",
+ "datafusion-common",
+ "datafusion-expr",
+ "log",
+ "sqlparser",
+ "strum 0.26.2",
+]
+
+[[package]]
+name = "datafusion-sql"
+version = "37.1.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3464,6 +3500,14 @@ dependencies = [
  "cfg-if",
  "chrono",
  "dashmap",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "datafusion-functions 37.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "datafusion-functions-array 37.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "datafusion-physical-expr",
+ "datafusion-proto",
+ "datafusion-sql 37.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "either",
  "errno",
  "fix-hidden-lifetime-bug",
@@ -3488,6 +3532,7 @@ dependencies = [
  "roaring",
  "serde",
  "serde_json",
+ "sqlparser",
  "thiserror",
  "tokio",
  "tracing",
@@ -6336,7 +6381,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "51.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/parquet_bytes#97ee8cf71d05d4012094d9ee76fca0adfdd739fc"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/parquet_bytes#cac44bf06e000fdf5b5fe954a439ae77b682ab80"
 dependencies = [
  "ahash 0.8.7",
  "arrow-array",
