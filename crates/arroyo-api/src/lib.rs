@@ -5,6 +5,8 @@ use deadpool_postgres::Pool;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use rusqlite::ErrorCode;
+use rusqlite::ffi::sqlite3;
 use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
 use tonic::transport::Channel;
@@ -41,6 +43,7 @@ use arroyo_types::{
     default_controller_addr, grpc_port, ports, service_port, COMPILER_ADDR_ENV,
     CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
 };
+use crate::sql::DatabaseSource;
 
 mod cloud;
 mod connection_profiles;
@@ -52,6 +55,7 @@ mod pipelines;
 pub mod rest;
 mod rest_utils;
 mod udfs;
+mod sql;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -118,6 +122,17 @@ fn handle_db_error(name: &str, err: tokio_postgres::Error) -> ErrorResp {
     log_and_map(err)
 }
 
+fn handle_sqlite_error(name: &str, err: rusqlite::Error) -> ErrorResp {
+    if let Some(sqlite) = err.sqlite_error() {
+        if sqlite.code == ErrorCode::ConstraintViolation {
+            warn!("SQL error: {}", sqlite);
+            return bad_request(format!("A {} with that name already exists", name));
+        }
+    }
+    
+    log_and_map(err)
+}
+
 fn handle_delete(name: &str, users: &str, err: tokio_postgres::Error) -> ErrorResp {
     if let Some(db) = &err.as_db_error() {
         if *db.code() == SqlState::FOREIGN_KEY_VIOLATION {
@@ -152,14 +167,14 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
         })
 }
 
-pub async fn start_server(pool: Pool) -> anyhow::Result<()> {
+pub async fn start_server(pool: Pool, database: DatabaseSource) -> anyhow::Result<()> {
     let controller_addr =
         std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| default_controller_addr());
 
     let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
     let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
 
-    let app = rest::create_rest_app(pool, &controller_addr);
+    let app = rest::create_rest_app(pool, database, &controller_addr);
 
     info!("Starting API server on {:?}", addr);
     axum::Server::bind(&addr)

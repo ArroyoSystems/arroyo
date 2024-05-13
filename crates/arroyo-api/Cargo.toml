@@ -76,6 +76,9 @@ postgres-types = { version = "*", features = ["derive"] }
 tokio-postgres = { version = "*", features = ["with-serde_json-1", "with-time-0_3", "with-uuid-1"] }
 deadpool-postgres = { version = "0.10" }
 
+# sqlite
+rusqlite = { version = "0.31.0", features = ["bundled", "serde_json", "time"] }
+deadpool-sqlite = { version = "0.8.0", features = ["tracing", "serde"]}
 
 futures = "0.3"
 futures-util = "0.3.28"
@@ -90,7 +93,7 @@ rust-embed = { version = "6.8.1", features = ["axum"] }
 mime_guess = "2.0.4"
 
 [build-dependencies]
-cornucopia = { version = "0.9" }
+cornucopia = { version = "0.9", path = "../../../cornucopia/crates/cornucopia"}
 postgres = "0.19.5"
 arroyo-types = { path = "../arroyo-types" }
 utoipa = "3"

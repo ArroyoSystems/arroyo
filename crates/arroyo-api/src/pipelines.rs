@@ -14,6 +14,7 @@ use std::env;
 
 use petgraph::visit::NodeRef;
 use std::time::Duration;
+use futures_util::TryFutureExt;
 
 use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::preview_sink;
@@ -341,7 +342,7 @@ pub(crate) async fn create_pipeline_int<'a>(
 
     let udfs = serde_json::to_value(req.udfs.as_ref().unwrap_or(&vec![])).unwrap();
 
-    let pipeline_id = api_queries::create_pipeline()
+    api_queries::create_pipeline()
         .bind(
             tx,
             &pub_id,
@@ -354,9 +355,16 @@ pub(crate) async fn create_pipeline_int<'a>(
             &program_bytes,
             &2,
         )
-        .one()
         .await
         .map_err(|e| handle_db_error("pipeline", e))?;
+
+    let pipeline_id = api_queries::get_pipeline()
+        .bind(tx, &pub_id, &auth.organization_id)
+        .one()
+        .await
+        .map_err(log_and_map)
+        .unwrap()
+        .id;
 
     if !is_preview {
         for connection in compiled.connection_ids {

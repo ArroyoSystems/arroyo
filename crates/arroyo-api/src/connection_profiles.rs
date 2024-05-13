@@ -114,7 +114,6 @@ pub async fn create_connection_profile(
             &req.connector,
             &req.config,
         )
-        .one()
         .await
         .map_err(|e| handle_db_error("connection_profile", e))?;
 

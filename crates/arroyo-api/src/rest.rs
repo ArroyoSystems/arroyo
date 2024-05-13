@@ -34,6 +34,7 @@ use crate::rest_utils::not_found;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
 use crate::ApiDoc;
 use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV};
+use crate::sql::DatabaseSource;
 
 #[derive(RustEmbed)]
 #[folder = "../../webui/dist"]
@@ -43,6 +44,7 @@ struct Assets;
 pub struct AppState {
     pub(crate) controller_addr: String,
     pub(crate) pool: Pool,
+    pub(crate) database: DatabaseSource,
 }
 
 /// Ping endpoint
@@ -109,7 +111,7 @@ async fn index_html() -> Response {
     }
 }
 
-pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
+pub fn create_rest_app(pool: Pool, database: DatabaseSource, controller_addr: &str) -> Router {
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()
         .allow_methods(cors::Any)
@@ -174,6 +176,8 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
         .with_state(AppState {
             controller_addr: controller_addr.to_string(),
             pool,
+            database,
+            
         })
         .layer(cors)
 }

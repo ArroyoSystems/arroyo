@@ -6,7 +6,6 @@ use axum::response::{IntoResponse, Response};
 use axum::{Json, TypedHeader};
 use deadpool_postgres::{Object, Pool};
 use serde_json::json;
-use thiserror::Error;
 use tracing::error;
 
 use axum::headers::authorization::{Authorization, Bearer};
@@ -25,7 +24,7 @@ pub struct ErrorResp {
     pub(crate) message: String,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error(transparent)]
     JsonExtractorRejection(#[from] JsonRejection),
@@ -39,6 +38,7 @@ impl IntoResponse for ApiError {
             }
         };
 
+        
         ErrorResp {
             status_code: status,
             message,

@@ -7,8 +7,7 @@ WHERE api_key = :api_key;
 ----------- connection profiles ----------------
 --! create_connection_profile
 INSERT INTO connection_profiles (pub_id, organization_id, created_by, name, type, config)
-VALUES (:pub_id, :organization_id, :created_by, :name, :type, :config)
-RETURNING id;
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :config);
 
 --! get_connection_profiles : DbConnectionProfile()
 SELECT
@@ -40,7 +39,7 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --! create_schema
 INSERT INTO schemas (pub_id, organization_id, created_by, name, kafka_schema_registry, type, config)
-VALUES (:pub_id, :organization_id, :created_by, :name, :kafka_schema_registry, :type, :config) RETURNING id;
+VALUES (:pub_id, :organization_id, :created_by, :name, :kafka_schema_registry, :type, :config);
 
 
 ------- connection tables -------------
@@ -132,11 +131,10 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --! create_pipeline(textual_repr?)
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version)
-VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version)
-RETURNING id;
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version);
 
 --! get_pipelines : DbPipeline
-SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -151,7 +149,7 @@ ORDER BY pipelines.created_at DESC
 LIMIT :limit::integer;
 
 --! get_pipeline: DbPipeline
-SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
