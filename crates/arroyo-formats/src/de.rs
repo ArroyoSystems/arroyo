@@ -1,6 +1,9 @@
 use crate::avro::de;
 use arrow::compute::kernels;
-use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
+use arrow_array::builder::{
+    ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
+};
+use arrow_array::types::GenericBinaryType;
 use arrow_array::RecordBatch;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat};
@@ -209,6 +212,10 @@ impl ArrowDeserializer {
                 self.deserialize_raw_string(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
             }
+            Format::RawBytes(_) => {
+                self.deserialize_raw_bytes(buffer, msg);
+                add_timestamp(buffer, self.schema.timestamp_index, timestamp);
+            }
             Format::Json(json) => {
                 let msg = if json.confluent_schema_registry {
                     &msg[5..]
@@ -316,6 +323,19 @@ impl ArrowDeserializer {
             .append_value(String::from_utf8_lossy(msg));
     }
 
+    fn deserialize_raw_bytes(&mut self, buffer: &mut [Box<dyn ArrayBuilder>], msg: &[u8]) {
+        let (col, _) = self
+            .schema
+            .schema
+            .column_with_name("value")
+            .expect("no 'value' column for RawBytes format");
+        buffer[col]
+            .as_any_mut()
+            .downcast_mut::<GenericByteBuilder<GenericBinaryType<i32>>>()
+            .expect("'value' column has incorrect type")
+            .append_value(msg);
+    }
+
     pub fn bad_data(&self) -> &BadData {
         &self.bad_data
     }
@@ -338,11 +358,13 @@ mod tests {
     use crate::de::{ArrowDeserializer, FramingIterator};
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::cast::AsArray;
-    use arrow_array::types::{Int64Type, TimestampNanosecondType};
+    use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
+    use arrow_array::RecordBatch;
     use arrow_schema::{Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{
         BadData, Format, Framing, FramingMethod, JsonFormat, NewlineDelimitedFraming,
+        RawBytesFormat,
     };
     use arroyo_types::{to_nanos, SourceError};
     use serde_json::json;
@@ -520,5 +542,55 @@ mod tests {
         let err = deserializer.flush_buffer().unwrap().unwrap_err();
 
         assert!(matches!(err, SourceError::BadData { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_raw_bytes() {
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("value", arrow_schema::DataType::Binary, false),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let mut arrays: Vec<_> = schema
+            .fields
+            .iter()
+            .map(|f| make_builder(f.data_type(), 16))
+            .collect();
+
+        let arroyo_schema = ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap();
+
+        let mut deserializer = ArrowDeserializer::new(
+            Format::RawBytes(RawBytesFormat {}),
+            arroyo_schema,
+            None,
+            BadData::Fail {},
+        );
+
+        let time = SystemTime::now();
+        let result = deserializer
+            .deserialize_slice(&mut arrays, &vec![0, 1, 2, 3, 4, 5], time)
+            .await;
+        assert!(result.is_empty());
+
+        let arrays: Vec<_> = arrays.into_iter().map(|mut a| a.finish()).collect();
+        let batch = RecordBatch::try_new(schema, arrays).unwrap();
+
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(
+            batch.columns()[0]
+                .as_bytes::<GenericBinaryType<i32>>()
+                .value(0),
+            &[0, 1, 2, 3, 4, 5]
+        );
+        assert_eq!(
+            batch.columns()[1]
+                .as_primitive::<TimestampNanosecondType>()
+                .value(0),
+            to_nanos(time) as i64
+        );
     }
 }

@@ -333,13 +333,14 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "51.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/json#f0d3bd0f5ac37066ad9617fdae1316bf661c20d4"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/json#2c95ca0a0f5d5498fd2b958b846ebd2ed0550b31"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-cast",
  "arrow-data",
  "arrow-schema",
+ "base64 0.22.1",
  "chrono",
  "half",
  "indexmap 2.2.6",

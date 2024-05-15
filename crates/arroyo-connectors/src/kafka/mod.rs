@@ -659,6 +659,9 @@ impl KafkaTester {
                 String::from_utf8(msg).map_err(|e|
                     anyhow!("Failed to parse message as UTF-8: {:?}. Ensure that the format and schema type are correct.", e))?;
             }
+            Format::RawBytes(_) => {
+                // all bytes are valid
+            }
         };
 
         Ok(())

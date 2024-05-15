@@ -248,6 +248,53 @@ const RawStringEditor = ({
   );
 };
 
+const RawBytesEditor = ({
+  state,
+  setState,
+  next,
+}: {
+  state: CreateConnectionState;
+  setState: Dispatch<CreateConnectionState>;
+  next: () => void;
+}) => {
+  const submit = () => {
+    setState({
+      ...state,
+      schema: {
+        ...state.schema,
+        definition: { raw_schema: 'value' },
+        fields: [
+          {
+            fieldName: 'value',
+            fieldType: {
+              type: {
+                primitive: 'Bytes',
+              },
+            },
+            nullable: false,
+          },
+        ],
+        format: { raw_bytes: {} },
+      },
+    });
+    next();
+  };
+
+  return (
+    <Stack spacing={4} maxW="md">
+      <Text>
+        When using the raw bytes format, values are read from the source as raw byte strings.
+      </Text>
+
+      <Text>
+        Raw bytes connection tables have a single <Code>value</Code> column with the value.
+      </Text>
+
+      <Button onClick={submit}>Continue</Button>
+    </Stack>
+  );
+};
+
 export const DefineSchema = ({
   connector,
   state,
@@ -305,6 +352,11 @@ export const DefineSchema = ({
       name: 'Raw String',
       value: 'raw_string',
       el: <RawStringEditor state={state} setState={setState} next={next} />,
+    },
+    {
+      name: 'Raw Bytes',
+      value: 'raw_bytes',
+      el: <RawBytesEditor state={state} setState={setState} next={next} />,
     },
     {
       name: 'Protobuf (coming soon)',

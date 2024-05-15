@@ -22,16 +22,13 @@ members = [
     "crates/arroyo-udf/arroyo-udf-common",
     "crates/arroyo-udf/arroyo-udf-plugin",
     "crates/arroyo-udf/arroyo-udf-host",
+    "crates/arroyo-udf/arroyo-udf-macros",
     "crates/arroyo-worker",
     "crates/copy-artifacts",
-    "crates/integ", "crates/arroyo-udf/arroyo-udf-macros",
+    "crates/integ",
 ]
 
 resolver = "2"
-
-exclude = [
-    "build_dir",
-]
 
 [workspace.dependencies]
 tonic = { version = "0.11" }
