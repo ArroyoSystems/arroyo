@@ -249,10 +249,10 @@ const RawStringEditor = ({
 };
 
 const RawBytesEditor = ({
-                           state,
-                           setState,
-                           next,
-                         }: {
+  state,
+  setState,
+  next,
+}: {
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
@@ -294,7 +294,6 @@ const RawBytesEditor = ({
     </Stack>
   );
 };
-
 
 export const DefineSchema = ({
   connector,
@@ -357,7 +356,7 @@ export const DefineSchema = ({
     {
       name: 'Raw Bytes',
       value: 'raw_bytes',
-      el: <RawBytesEditor state={state} setState={setState} next={next} />
+      el: <RawBytesEditor state={state} setState={setState} next={next} />,
     },
     {
       name: 'Protobuf (coming soon)',
