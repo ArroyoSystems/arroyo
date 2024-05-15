@@ -104,6 +104,10 @@ impl JsonFormat {
 pub struct RawStringFormat {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawBytesFormat {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 pub struct ConfluentSchemaRegistryConfig {
     endpoint: String,
 }
@@ -233,6 +237,7 @@ pub enum Format {
     Avro(AvroFormat),
     Parquet(ParquetFormat),
     RawString(RawStringFormat),
+    RawBytes(RawBytesFormat),
 }
 
 impl Format {
@@ -247,6 +252,7 @@ impl Format {
             "protobuf" => return Err("protobuf is not yet supported".to_string()),
             "avro" => Format::Avro(AvroFormat::from_opts(opts)?),
             "raw_string" => Format::RawString(RawStringFormat {}),
+            "raw_bytes" => Format::RawBytes(RawBytesFormat {}),
             "parquet" => Format::Parquet(ParquetFormat {}),
             f => return Err(format!("Unknown format '{}'", f)),
         }))
@@ -256,6 +262,7 @@ impl Format {
         match self {
             Format::Json(JsonFormat { debezium: true, .. }) => true,
             Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::RawString(_) => false,
+            Format::RawBytes(_) => false,
         }
     }
 }

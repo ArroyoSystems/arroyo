@@ -1,6 +1,5 @@
 use arrow::array::{RecordBatch, TimestampNanosecondArray};
-#[allow(deprecated)]
-use arrow::json::writer::record_batches_to_json_rows;
+use arrow::json::writer::record_batch_to_vec;
 use std::time::SystemTime;
 
 use arroyo_operator::context::ArrowContext;
@@ -32,19 +31,22 @@ impl ArrowOperator for PreviewSink {
         );
     }
 
-    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
-        let timestamp_column = record_batch
-            .column(ctx.in_schemas[0].timestamp_index)
+    async fn process_batch(&mut self, mut batch: RecordBatch, ctx: &mut ArrowContext) {
+        let ts = ctx.in_schemas[0].timestamp_index;
+        let timestamp_column = batch
+            .column(ts)
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
+            .unwrap()
+            .clone();
+
+        batch.remove_column(ts);
+
+        let rows = record_batch_to_vec(&batch, true, arrow::json::writer::TimestampFormat::RFC3339)
             .unwrap();
 
-        #[allow(deprecated)]
-        let json_rows = record_batches_to_json_rows(&[&record_batch]).unwrap();
-        for (mut map, timestamp) in json_rows.into_iter().zip(timestamp_column.iter()) {
-            map.remove("_timestamp");
-            let value = serde_json::to_string(&map).unwrap();
-
+        for (value, timestamp) in rows.into_iter().zip(timestamp_column.iter()) {
+            let s = String::from_utf8(value).unwrap();
             self.client
                 .as_mut()
                 .unwrap()
@@ -57,7 +59,7 @@ impl ArrowOperator for PreviewSink {
                             .map(|nanos| from_nanos(nanos as u128))
                             .unwrap_or_else(SystemTime::now),
                     ),
-                    value,
+                    value: s,
                     done: false,
                 })
                 .await

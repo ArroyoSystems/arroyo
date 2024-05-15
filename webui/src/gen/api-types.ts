@@ -11,203 +11,114 @@ type OneOf<T extends any[]> = T extends [infer Only] ? Only : T extends [infer A
 
 export interface paths {
   "/v1/connection_profiles": {
-    /**
-     * List all connection profiles 
-     * @description List all connection profiles
-     */
+    /** List all connection profiles */
     get: operations["get_connection_profiles"];
-    /**
-     * Create connection profile 
-     * @description Create connection profile
-     */
+    /** Create connection profile */
     post: operations["create_connection_profile"];
   };
   "/v1/connection_profiles/test": {
-    /**
-     * Test connection profile 
-     * @description Test connection profile
-     */
+    /** Test connection profile */
     post: operations["test_connection_profile"];
   };
   "/v1/connection_profiles/{id}": {
-    /**
-     * Delete a Connection Profile 
-     * @description Delete a Connection Profile
-     */
+    /** Delete a Connection Profile */
     delete: operations["delete_connection_profile"];
   };
   "/v1/connection_profiles/{id}/autocomplete": {
-    /**
-     * Get autocomplete suggestions for a connection profile 
-     * @description Get autocomplete suggestions for a connection profile
-     */
+    /** Get autocomplete suggestions for a connection profile */
     get: operations["get_connection_profile_autocomplete"];
   };
   "/v1/connection_tables": {
-    /**
-     * List all connection tables 
-     * @description List all connection tables
-     */
+    /** List all connection tables */
     get: operations["get_connection_tables"];
-    /**
-     * Create a new connection table 
-     * @description Create a new connection table
-     */
+    /** Create a new connection table */
     post: operations["create_connection_table"];
   };
   "/v1/connection_tables/schemas/test": {
-    /**
-     * Test a Connection Schema 
-     * @description Test a Connection Schema
-     */
+    /** Test a Connection Schema */
     post: operations["test_schema"];
   };
   "/v1/connection_tables/test": {
-    /**
-     * Test a Connection Table 
-     * @description Test a Connection Table
-     */
+    /** Test a Connection Table */
     post: operations["test_connection_table"];
   };
   "/v1/connection_tables/{id}": {
-    /**
-     * Delete a Connection Table 
-     * @description Delete a Connection Table
-     */
+    /** Delete a Connection Table */
     delete: operations["delete_connection_table"];
   };
   "/v1/connectors": {
-    /**
-     * List all connectors 
-     * @description List all connectors
-     */
+    /** List all connectors */
     get: operations["get_connectors"];
   };
   "/v1/jobs": {
-    /**
-     * Get all jobs 
-     * @description Get all jobs
-     */
+    /** Get all jobs */
     get: operations["get_jobs"];
   };
   "/v1/ping": {
-    /**
-     * Ping endpoint 
-     * @description Ping endpoint
-     */
+    /** Ping endpoint */
     get: operations["ping"];
   };
   "/v1/pipelines": {
-    /**
-     * List all pipelines 
-     * @description List all pipelines
-     */
+    /** List all pipelines */
     get: operations["get_pipelines"];
     /**
      * Create a new pipeline 
-     * @description Create a new pipeline
-     * 
-     * The API will create a single job for the pipeline.
+     * @description The API will create a single job for the pipeline.
      */
     post: operations["create_pipeline"];
   };
   "/v1/pipelines/validate_query": {
-    /**
-     * Validate a query and return pipeline graph 
-     * @description Validate a query and return pipeline graph
-     */
+    /** Validate a query and return pipeline graph */
     post: operations["validate_query"];
   };
   "/v1/pipelines/{id}": {
-    /**
-     * Get a single pipeline 
-     * @description Get a single pipeline
-     */
+    /** Get a single pipeline */
     get: operations["get_pipeline"];
-    /**
-     * Delete a pipeline 
-     * @description Delete a pipeline
-     */
+    /** Delete a pipeline */
     delete: operations["delete_pipeline"];
-    /**
-     * Update a pipeline 
-     * @description Update a pipeline
-     */
+    /** Update a pipeline */
     patch: operations["patch_pipeline"];
   };
   "/v1/pipelines/{id}/jobs": {
-    /**
-     * List a pipeline's jobs 
-     * @description List a pipeline's jobs
-     */
+    /** List a pipeline's jobs */
     get: operations["get_pipeline_jobs"];
   };
   "/v1/pipelines/{id}/restart": {
-    /**
-     * Restart a pipeline 
-     * @description Restart a pipeline
-     */
+    /** Restart a pipeline */
     post: operations["restart_pipeline"];
   };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints": {
-    /**
-     * List a job's checkpoints 
-     * @description List a job's checkpoints
-     */
+    /** List a job's checkpoints */
     get: operations["get_job_checkpoints"];
   };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints/{epoch}/operator_checkpoint_groups": {
-    /**
-     * Get a checkpoint's details 
-     * @description Get a checkpoint's details
-     */
+    /** Get a checkpoint's details */
     get: operations["get_checkpoint_details"];
   };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors": {
-    /**
-     * List a job's error messages 
-     * @description List a job's error messages
-     */
+    /** List a job's error messages */
     get: operations["get_job_errors"];
   };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/operator_metric_groups": {
-    /**
-     * Get a job's metrics 
-     * @description Get a job's metrics
-     */
+    /** Get a job's metrics */
     get: operations["get_operator_metric_groups"];
   };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output": {
-    /**
-     * Subscribe to a job's output 
-     * @description Subscribe to a job's output
-     */
+    /** Subscribe to a job's output */
     get: operations["get_job_output"];
   };
   "/v1/udfs": {
-    /**
-     * Get Global UDFs 
-     * @description Get Global UDFs
-     */
+    /** Get Global UDFs */
     get: operations["get_udfs"];
-    /**
-     * Create a global UDF 
-     * @description Create a global UDF
-     */
+    /** Create a global UDF */
     post: operations["create_udf"];
   };
   "/v1/udfs/validate": {
-    /**
-     * Validate UDFs 
-     * @description Validate UDFs
-     */
+    /** Validate UDFs */
     post: operations["validate_udf"];
   };
   "/v1/udfs/{id}": {
-    /**
-     * Delete UDF 
-     * @description Delete UDF
-     */
+    /** Delete UDF */
     delete: operations["delete_udf"];
   };
 }
@@ -341,6 +252,8 @@ export interface components {
       parquet: components["schemas"]["ParquetFormat"];
     }, {
       raw_string: components["schemas"]["RawStringFormat"];
+    }, {
+      raw_bytes: components["schemas"]["RawBytesFormat"];
     }]>;
     Framing: {
       method: components["schemas"]["FramingMethod"];
@@ -516,6 +429,7 @@ export interface components {
       errors: (string)[];
       graph?: components["schemas"]["PipelineGraph"] | null;
     };
+    RawBytesFormat: Record<string, never>;
     RawStringFormat: Record<string, never>;
     SchemaDefinition: OneOf<[{
       json_schema: string;
@@ -591,10 +505,7 @@ export type external = Record<string, never>;
 
 export interface operations {
 
-  /**
-   * List all connection profiles 
-   * @description List all connection profiles
-   */
+  /** List all connection profiles */
   get_connection_profiles: {
     responses: {
       /** @description Got connections collection */
@@ -605,10 +516,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Create connection profile 
-   * @description Create connection profile
-   */
+  /** Create connection profile */
   create_connection_profile: {
     requestBody: {
       content: {
@@ -624,10 +532,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Test connection profile 
-   * @description Test connection profile
-   */
+  /** Test connection profile */
   test_connection_profile: {
     requestBody: {
       content: {
@@ -643,10 +548,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Delete a Connection Profile 
-   * @description Delete a Connection Profile
-   */
+  /** Delete a Connection Profile */
   delete_connection_profile: {
     parameters: {
       path: {
@@ -659,10 +561,7 @@ export interface operations {
       200: never;
     };
   };
-  /**
-   * Get autocomplete suggestions for a connection profile 
-   * @description Get autocomplete suggestions for a connection profile
-   */
+  /** Get autocomplete suggestions for a connection profile */
   get_connection_profile_autocomplete: {
     parameters: {
       path: {
@@ -679,10 +578,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * List all connection tables 
-   * @description List all connection tables
-   */
+  /** List all connection tables */
   get_connection_tables: {
     parameters: {
       query?: {
@@ -699,10 +595,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Create a new connection table 
-   * @description Create a new connection table
-   */
+  /** Create a new connection table */
   create_connection_table: {
     requestBody: {
       content: {
@@ -718,10 +611,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Test a Connection Schema 
-   * @description Test a Connection Schema
-   */
+  /** Test a Connection Schema */
   test_schema: {
     requestBody: {
       content: {
@@ -733,10 +623,7 @@ export interface operations {
       200: never;
     };
   };
-  /**
-   * Test a Connection Table 
-   * @description Test a Connection Table
-   */
+  /** Test a Connection Table */
   test_connection_table: {
     requestBody: {
       content: {
@@ -748,10 +635,7 @@ export interface operations {
       200: never;
     };
   };
-  /**
-   * Delete a Connection Table 
-   * @description Delete a Connection Table
-   */
+  /** Delete a Connection Table */
   delete_connection_table: {
     parameters: {
       path: {
@@ -764,10 +648,7 @@ export interface operations {
       200: never;
     };
   };
-  /**
-   * List all connectors 
-   * @description List all connectors
-   */
+  /** List all connectors */
   get_connectors: {
     responses: {
       /** @description Got connectors collection */
@@ -778,10 +659,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get all jobs 
-   * @description Get all jobs
-   */
+  /** Get all jobs */
   get_jobs: {
     responses: {
       /** @description Get all jobs */
@@ -792,20 +670,14 @@ export interface operations {
       };
     };
   };
-  /**
-   * Ping endpoint 
-   * @description Ping endpoint
-   */
+  /** Ping endpoint */
   ping: {
     responses: {
       /** @description Ping endpoint */
       200: never;
     };
   };
-  /**
-   * List all pipelines 
-   * @description List all pipelines
-   */
+  /** List all pipelines */
   get_pipelines: {
     parameters: {
       query?: {
@@ -824,9 +696,7 @@ export interface operations {
   };
   /**
    * Create a new pipeline 
-   * @description Create a new pipeline
-   * 
-   * The API will create a single job for the pipeline.
+   * @description The API will create a single job for the pipeline.
    */
   create_pipeline: {
     requestBody: {
@@ -849,10 +719,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Validate a query and return pipeline graph 
-   * @description Validate a query and return pipeline graph
-   */
+  /** Validate a query and return pipeline graph */
   validate_query: {
     requestBody: {
       content: {
@@ -868,10 +735,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get a single pipeline 
-   * @description Get a single pipeline
-   */
+  /** Get a single pipeline */
   get_pipeline: {
     parameters: {
       path: {
@@ -888,10 +752,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Delete a pipeline 
-   * @description Delete a pipeline
-   */
+  /** Delete a pipeline */
   delete_pipeline: {
     parameters: {
       path: {
@@ -904,10 +765,7 @@ export interface operations {
       200: never;
     };
   };
-  /**
-   * Update a pipeline 
-   * @description Update a pipeline
-   */
+  /** Update a pipeline */
   patch_pipeline: {
     parameters: {
       path: {
@@ -929,10 +787,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * List a pipeline's jobs 
-   * @description List a pipeline's jobs
-   */
+  /** List a pipeline's jobs */
   get_pipeline_jobs: {
     parameters: {
       path: {
@@ -949,10 +804,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Restart a pipeline 
-   * @description Restart a pipeline
-   */
+  /** Restart a pipeline */
   restart_pipeline: {
     parameters: {
       path: {
@@ -974,10 +826,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * List a job's checkpoints 
-   * @description List a job's checkpoints
-   */
+  /** List a job's checkpoints */
   get_job_checkpoints: {
     parameters: {
       path: {
@@ -996,10 +845,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get a checkpoint's details 
-   * @description Get a checkpoint's details
-   */
+  /** Get a checkpoint's details */
   get_checkpoint_details: {
     parameters: {
       path: {
@@ -1020,10 +866,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * List a job's error messages 
-   * @description List a job's error messages
-   */
+  /** List a job's error messages */
   get_job_errors: {
     parameters: {
       query?: {
@@ -1048,10 +891,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get a job's metrics 
-   * @description Get a job's metrics
-   */
+  /** Get a job's metrics */
   get_operator_metric_groups: {
     parameters: {
       path: {
@@ -1070,10 +910,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Subscribe to a job's output 
-   * @description Subscribe to a job's output
-   */
+  /** Subscribe to a job's output */
   get_job_output: {
     parameters: {
       path: {
@@ -1088,10 +925,7 @@ export interface operations {
       200: never;
     };
   };
-  /**
-   * Get Global UDFs 
-   * @description Get Global UDFs
-   */
+  /** Get Global UDFs */
   get_udfs: {
     responses: {
       /** @description List of UDFs */
@@ -1102,10 +936,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Create a global UDF 
-   * @description Create a global UDF
-   */
+  /** Create a global UDF */
   create_udf: {
     requestBody: {
       content: {
@@ -1121,10 +952,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Validate UDFs 
-   * @description Validate UDFs
-   */
+  /** Validate UDFs */
   validate_udf: {
     requestBody: {
       content: {
@@ -1140,10 +968,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Delete UDF 
-   * @description Delete UDF
-   */
+  /** Delete UDF */
   delete_udf: {
     parameters: {
       path: {

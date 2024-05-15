@@ -468,6 +468,7 @@ pub(crate) async fn expand_schema(
         }
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
+        Format::RawBytes(_) => Ok(schema),
     }
 }
 

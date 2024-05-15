@@ -1,10 +1,13 @@
 use crate::avro::schema;
 use crate::{avro, json};
 use arrow_array::cast::AsArray;
+use arrow_array::types::GenericBinaryType;
 use arrow_array::RecordBatch;
 use arrow_json::writer::record_batch_to_vec;
 use arrow_schema::{DataType, Field};
-use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, RawStringFormat, TimestampFormat};
+use arroyo_rpc::formats::{
+    AvroFormat, Format, JsonFormat, RawBytesFormat, RawStringFormat, TimestampFormat,
+};
 use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
 use std::sync::Arc;
@@ -78,6 +81,7 @@ impl ArrowSerializer {
             Format::Avro(avro) => self.serialize_avro(avro, &batch),
             Format::Parquet(_) => todo!("parquet"),
             Format::RawString(RawStringFormat {}) => self.serialize_raw_string(&batch),
+            Format::RawBytes(RawBytesFormat {}) => self.serialize_raw_bytes(&batch),
         }
     }
 
@@ -136,6 +140,7 @@ impl ArrowSerializer {
             }
         }))
     }
+
     fn serialize_raw_string(
         &self,
         batch: &RecordBatch,
@@ -156,6 +161,28 @@ impl ArrowSerializer {
             .as_string::<i32>()
             .iter()
             .map(|v| v.map(|v| v.as_bytes().to_vec()).unwrap_or_default())
+            .collect();
+
+        Box::new(values.into_iter())
+    }
+
+    fn serialize_raw_bytes(&self, batch: &RecordBatch) -> Box<dyn Iterator<Item = Vec<u8>> + Send> {
+        let value_idx = batch.schema().index_of("value").unwrap_or_else(|_| {
+            panic!(
+                "invalid schema for raw_string serializer: {}; a VALUE column is required",
+                batch.schema()
+            )
+        });
+
+        if *batch.schema().field(value_idx).data_type() != DataType::Binary {
+            panic!("invalid schema for raw_string serializer: {}; a must have a column VALUE of type BYTEA", batch.schema());
+        }
+
+        let values: Vec<Vec<u8>> = batch
+            .column(value_idx)
+            .as_bytes::<GenericBinaryType<i32>>()
+            .iter()
+            .map(|v| v.map(|v| v.to_vec()).unwrap_or_default())
             .collect();
 
         Box::new(values.into_iter())
@@ -213,7 +240,7 @@ mod tests {
     use crate::ser::ArrowSerializer;
     use arrow_array::builder::TimestampNanosecondBuilder;
     use arrow_schema::{Schema, TimeUnit};
-    use arroyo_rpc::formats::{Format, RawStringFormat, TimestampFormat};
+    use arroyo_rpc::formats::{Format, RawBytesFormat, RawStringFormat, TimestampFormat};
     use arroyo_types::to_nanos;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
@@ -255,6 +282,44 @@ mod tests {
         assert_eq!(iter.next().unwrap(), b"b");
         assert_eq!(iter.next().unwrap(), b"blah");
         assert_eq!(iter.next().unwrap(), b"whatever");
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_raw_bytes() {
+        let mut serializer = ArrowSerializer::new(Format::RawBytes(RawBytesFormat {}));
+
+        let data = [b"0123".to_vec(), b"hello".to_vec(), vec![0, 1, 2, 4]];
+        let ts: Vec<_> = data
+            .iter()
+            .enumerate()
+            .map(|(i, _)| to_nanos(SystemTime::now() + Duration::from_secs(i as u64)) as i64)
+            .collect();
+
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("value", arrow_schema::DataType::Binary, false),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let batch = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(arrow_array::BinaryArray::from(
+                    data.iter().map(|t| t.as_slice()).collect::<Vec<_>>(),
+                )),
+                Arc::new(arrow_array::TimestampNanosecondArray::from(ts)),
+            ],
+        )
+        .unwrap();
+
+        let mut iter = serializer.serialize(&batch);
+        assert_eq!(iter.next().unwrap(), b"0123");
+        assert_eq!(iter.next().unwrap(), b"hello");
+        assert_eq!(iter.next().unwrap(), vec![0, 1, 2, 4]);
         assert_eq!(iter.next(), None);
     }
 

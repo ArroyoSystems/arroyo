@@ -316,6 +316,7 @@ impl FileSystemSourceFunc {
                     .await
             }
             Format::RawString(_) => todo!(),
+            Format::RawBytes(_) => todo!(),
         }
     }
 
