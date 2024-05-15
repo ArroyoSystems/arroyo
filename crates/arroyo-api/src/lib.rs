@@ -6,7 +6,6 @@ use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use rusqlite::ErrorCode;
-use rusqlite::ffi::sqlite3;
 use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
 use tonic::transport::Channel;
@@ -55,7 +54,7 @@ mod pipelines;
 pub mod rest;
 mod rest_utils;
 mod udfs;
-mod sql;
+pub mod sql;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 

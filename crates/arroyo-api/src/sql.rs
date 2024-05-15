@@ -1,9 +1,11 @@
+use std::sync::Arc;
 use crate::types::public::PipelineType;
 use crate::{AuthData, handle_db_error, handle_sqlite_error};
 use deadpool_postgres::{Object};
-use rusqlite::Connection;
 use serde_json::Value;
-use tokio_postgres::{Transaction as PGTransaction};
+use tokio::sync::{Mutex, MutexGuard};
+use deadpool_postgres::{Transaction as PGTransaction};
+use rusqlite::Params;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbUdf;
 use crate::rest_utils::{ErrorResp, log_and_map};
@@ -11,16 +13,100 @@ use crate::rest_utils::{ErrorResp, log_and_map};
 #[derive(Clone)]
 pub enum DatabaseSource {
     Postgres(deadpool_postgres::Pool),
-    Sqlite(deadpool_sqlite::Pool),
+    Sqlite(Arc<Mutex<rusqlite::Connection>>),
+}
+
+impl DatabaseSource {
+    pub async fn client(&self) -> Result<Database, ErrorResp> {
+        Ok(match self {
+            DatabaseSource::Postgres(p) => {
+                Database::Postgres(p.get().await.map_err(log_and_map)?)
+            }
+            DatabaseSource::Sqlite(p) => {
+                Database::Sqlite(SqliteWrapper::Connection(p.lock().await))
+            }
+        })
+    }
+}
+
+pub enum SqliteWrapper<'a> {
+    Connection(MutexGuard<'a, rusqlite::Connection>),
+    Transaction(rusqlite::Transaction<'a>),
+}
+
+impl <'a> SqliteWrapper<'a> {
+    pub fn execute<P: Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
+        match self {
+            SqliteWrapper::Connection(c) => {
+                c.execute(sql, params)
+            }
+            SqliteWrapper::Transaction(t) => {
+                t.execute(sql, params)
+            }
+        }
+    }
+
+    pub fn prepare(&self, sql: &str) -> rusqlite::Result<rusqlite::Statement<'_>> {
+        match self {
+            SqliteWrapper::Connection(c) => {
+                c.prepare(sql)
+            }
+            SqliteWrapper::Transaction(t) => {
+                t.prepare(sql)
+            }
+        }
+    }
 }
 
 pub enum Database<'a> {
-    Postgres(&'a Object),
-    PostgresTx(&'a PGTransaction<'a>),
-    Sqlite(&'a Connection),
+    Postgres(Object),
+    PostgresTx(PGTransaction<'a>),
+    Sqlite(SqliteWrapper<'a>),
 }
 
 impl <'a> Database<'a> {
+    pub async fn transaction<'b>(&'a mut self) -> Result<Database<'b>, ErrorResp> where 'a: 'b {
+        Ok(match self {
+            Database::Postgres(p) => {
+                Self::PostgresTx(p.transaction().await.map_err(log_and_map)?)
+            }
+            Database::PostgresTx(tx) => {
+                Self::PostgresTx(tx.transaction().await.map_err(log_and_map)?)
+            }
+            Database::Sqlite(p) => {
+                match p {
+                    SqliteWrapper::Connection(c) => {
+                        Self::Sqlite(SqliteWrapper::Transaction(c.transaction().map_err(log_and_map)?))                        
+                    }
+                    SqliteWrapper::Transaction(_) => {
+                        panic!("Cannot duplicate an existing sqlite transaction");                        
+                    }
+                }
+            }
+        })
+    }
+    
+    pub async fn commit(self) -> Result<(), ErrorResp> {
+        match self {
+            Database::Postgres(_) => {
+                // no op
+            }
+            Database::PostgresTx(tx) => {
+                tx.commit().await.map_err(|e| handle_db_error("record", e))?;
+            }
+            Database::Sqlite(s) => {
+                match s {
+                    SqliteWrapper::Connection(_) => {}
+                    SqliteWrapper::Transaction(tx) => {
+                        tx.commit().map_err(|e| handle_sqlite_error("record", e))?;
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
     pub async fn create_pipeline(
         &self,
         pub_id: &str,
@@ -36,7 +122,7 @@ impl <'a> Database<'a> {
             Database::Postgres(p) => {
                 api_queries::create_pipeline()
                     .bind(
-                        *p,
+                        p,
                         &pub_id,
                         &auth.organization_id,
                         &auth.user_id,
@@ -77,7 +163,7 @@ VALUES (:?1, :?2, :?3, :?4, :?5, :?6, :?7, :?8, :?9)",
         Ok(match self {
             Database::Postgres(p) => {
                 api_queries::get_udfs()
-                    .bind(*p, &auth.organization_id)
+                    .bind(p, &auth.organization_id)
                     .all()
                     .await
                     .map_err(log_and_map)?

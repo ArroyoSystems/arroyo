@@ -44,7 +44,7 @@ use tracing::warn;
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
-use crate::queries::api_queries::{DbPipeline, DbPipelineJob, GetPipelinesParams};
+use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs, GetPipelinesParams};
 use crate::rest::AppState;
 use crate::rest_utils::{
     authenticate, bad_request, client, log_and_map, not_found, paginate_results, required_field,
@@ -54,27 +54,22 @@ use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::{connection_tables, to_micros};
 use crate::{handle_db_error, AuthData};
+use crate::sql::Database;
 
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 
-async fn compile_sql<'e, E>(
+async fn compile_sql<'a>(
     query: String,
     local_udfs: &Vec<Udf>,
     parallelism: usize,
     auth_data: &AuthData,
     validate_only: bool,
-    tx: &E,
-) -> anyhow::Result<CompiledSql>
-where
-    E: GenericClient,
-{
+    db: &Database<'a>,
+) -> Result<CompiledSql, ErrorResp> {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
-    let global_udfs = api_queries::get_udfs()
-        .bind(tx, &auth_data.organization_id)
-        .all()
-        .await
-        .map_err(|e| anyhow!("Error global global UDFs: {}", e))?
+    let global_udfs = fetch_get_udfs(db, &auth_data.organization_id)
+        .await?
         .into_iter()
         .map(|u| u.into())
         .collect::<Vec<GlobalUdf>>();
@@ -83,11 +78,11 @@ where
     // but allow  global UDFs to override local ones
 
     if has_duplicate_udf_names(global_udfs.iter().map(|u| &u.definition)) {
-        bail!("Global UDFs have duplicate function names");
+        return Err(bad_request("Global UDFs have duplicate function names"));
     }
 
     if has_duplicate_udf_names(local_udfs.iter().map(|u| &u.definition)) {
-        bail!("Local UDFs have duplicate function names");
+        return Err(bad_request("Local UDFs have duplicate function names"));
     }
 
     for udf in global_udfs {
@@ -98,20 +93,18 @@ where
 
     if !local_udfs.is_empty() {
         let mut compiler_service: CompilerGrpcClient<_> = compiler_service()
-            .await
-            .map_err(|e| anyhow!("{}", e.message))?;
+            .await?;
 
         for udf in local_udfs {
             let parsed = ParsedUdfFile::try_parse(&udf.definition)
-                .map_err(|e| anyhow!("invalid UDF: {e}"))?;
+                .map_err(|e| bad_request(format!("invalid UDF: {e}")))?;
 
             let url = if !validate_only {
                 let res = build_udf(&mut compiler_service, &udf.definition, true)
-                    .await
-                    .map_err(|e| anyhow!("Failed to reach compiler service: {}", e.message))?;
+                    .await?;
 
                 if !res.errors.is_empty() {
-                    bail!("Failed to build UDF: {}", res.errors.join("\n"));
+                    return Err(bad_request(format!("Failed to build UDF: {}", res.errors.join("\n"))));
                 }
 
                 res.url.expect("valid UDF does not have a URL in response")
@@ -121,13 +114,11 @@ where
 
             schema_provider
                 .add_rust_udf(&parsed.definition, &url)
-                .map_err(|e| anyhow!("Invalid UDF {}: {}", parsed.udf.name, e))?;
+                .map_err(|e| bad_request(format!("Invalid UDF {}: {}", parsed.udf.name, e)))?;
         }
     }
 
-    let tables = connection_tables::get_all_connection_tables(auth_data, tx)
-        .await
-        .map_err(|e| anyhow!(e.message))?;
+    let tables = connection_tables::get_all_connection_tables(auth_data, db).await?;
 
     for table in tables {
         let Some(connector) = connector_for_type(&table.connector) else {
@@ -147,13 +138,12 @@ where
                 .unwrap_or(json!({})),
             &table.config,
             Some(&table.schema),
-        )?;
+        ).map_err(log_and_map)?;
 
         schema_provider.add_connector_table(connection);
     }
-    let profiles = connection_profiles::get_all_connection_profiles(auth_data, tx)
-        .await
-        .map_err(|e| anyhow!(e.message))?;
+    let profiles = connection_profiles::get_all_connection_profiles(auth_data, db)
+        .await?;
 
     for profile in profiles {
         schema_provider.add_connection_profile(profile);
@@ -167,10 +157,9 @@ where
         },
     )
     .await
-    .with_context(|| "failed to generate SQL program")
     .map_err(|err| {
         warn!("{:?}", err);
-        anyhow!(format!("{}", err.root_cause()))
+        bad_request(format!("{}", err.root_cause()))
     })
 }
 
@@ -281,7 +270,7 @@ pub(crate) async fn create_pipeline_int<'a>(
     req: &PipelinePost,
     pub_id: &str,
     auth: AuthData,
-    tx: &Transaction<'a>,
+    tx: &Database<'a>,
 ) -> Result<(i64, LogicalProgram), ErrorResp> {
     let is_preview = req.preview.unwrap_or(false);
 
@@ -301,8 +290,7 @@ pub(crate) async fn create_pipeline_int<'a>(
         false,
         tx,
     )
-    .await
-    .map_err(|e| bad_request(e.to_string()))?;
+    .await?;
 
     if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
@@ -342,8 +330,7 @@ pub(crate) async fn create_pipeline_int<'a>(
 
     let udfs = serde_json::to_value(req.udfs.as_ref().unwrap_or(&vec![])).unwrap();
 
-    api_queries::create_pipeline()
-        .bind(
+    api_queries::execute_create_pipeline(
             tx,
             &pub_id,
             &auth.organization_id,
@@ -355,28 +342,24 @@ pub(crate) async fn create_pipeline_int<'a>(
             &program_bytes,
             &2,
         )
-        .await
-        .map_err(|e| handle_db_error("pipeline", e))?;
+        .await?;
 
-    let pipeline_id = api_queries::get_pipeline()
-        .bind(tx, &pub_id, &auth.organization_id)
-        .one()
+    let pipeline_id = api_queries::fetch_get_pipeline(tx, &pub_id, &auth.organization_id)
         .await
-        .map_err(log_and_map)
+        .map_err(log_and_map)?
+        .get(0)
         .unwrap()
         .id;
 
     if !is_preview {
         for connection in compiled.connection_ids {
-            api_queries::add_pipeline_connection_table()
-                .bind(
+            api_queries::execute_add_pipeline_connection_table(
                     tx,
                     &generate_id(IdTypes::ConnectionTablePipeline),
                     &pipeline_id,
                     &connection,
                 )
-                .await
-                .map_err(log_and_map)?;
+                .await?;
         }
     }
 
@@ -462,7 +445,7 @@ pub async fn validate_query(
     bearer_auth: BearerAuth,
     WithRejection(Json(validate_query_post), _): WithRejection<Json<ValidateQueryPost>, ApiError>,
 ) -> Result<Json<QueryValidationResult>, ErrorResp> {
-    let client = client(&state.pool).await?;
+    let db = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
     let udfs = validate_query_post.udfs.unwrap_or(vec![]);
@@ -473,7 +456,7 @@ pub async fn validate_query(
         1,
         &auth_data,
         true,
-        &client,
+        &db,
     )
     .await
     {
@@ -483,7 +466,7 @@ pub async fn validate_query(
         },
         Err(e) => QueryValidationResult {
             graph: None,
-            errors: vec![e.to_string()],
+            errors: vec![e.message],
         },
     };
 
@@ -508,7 +491,7 @@ pub async fn create_pipeline(
     bearer_auth: BearerAuth,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
-    let mut client = client(&state.pool).await?;
+    let mut client = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
     let pipeline_pub_id = generate_id(IdTypes::Pipeline);
@@ -556,7 +539,7 @@ pub async fn create_pipeline(
         }),
     );
 
-    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &state.database.client().await?, &auth_data).await?;
 
     Ok(Json(pipeline))
 }
@@ -870,38 +853,32 @@ pub async fn get_pipeline_jobs(
     }))
 }
 
-pub async fn query_pipeline_by_pub_id(
+pub async fn query_pipeline_by_pub_id<'a>(
     pipeline_pub_id: &String,
-    client: &impl GenericClient,
+    db: &Database<'a>,
     auth_data: &AuthData,
 ) -> Result<Pipeline, ErrorResp> {
-    let pipeline = api_queries::get_pipeline()
-        .bind(client, pipeline_pub_id, &auth_data.organization_id)
-        .opt()
-        .await
-        .map_err(log_and_map)?;
-
-    let res = pipeline.ok_or_else(|| not_found("Pipeline"))?;
-
-    res.try_into()
+    api_queries::fetch_get_pipeline(db, pipeline_pub_id, &auth_data.organization_id)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| not_found("Pipeline"))?
+        .try_into()
 }
 
-pub async fn query_job_by_pub_id(
+pub async fn query_job_by_pub_id<'a>(
     pipeline_pub_id: &String,
     job_pub_id: &String,
-    client: &Object,
+    db: &Database<'a>,
     auth_data: &AuthData,
 ) -> Result<Job, ErrorResp> {
     // make sure pipeline exists
-    query_pipeline_by_pub_id(pipeline_pub_id, client, auth_data).await?;
+    query_pipeline_by_pub_id(pipeline_pub_id, db, auth_data).await?;
 
-    let job = api_queries::get_pipeline_job()
-        .bind(client, &auth_data.organization_id, &job_pub_id)
-        .opt()
-        .await
-        .map_err(log_and_map)?;
-
-    let res: DbPipelineJob = job.ok_or_else(|| not_found("Job"))?;
-
-    Ok(res.into())
+    Ok(api_queries::fetch_get_pipeline_job(db, &auth_data.organization_id, &job_pub_id)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| not_found("Job"))?
+        .into())
 }

@@ -520,8 +520,10 @@ dependencies = [
  "arroyo-worker",
  "clap 4.5.4",
  "deadpool-postgres",
+ "dirs",
  "postgres-types",
  "refinery",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
@@ -7403,9 +7405,9 @@ dependencies = [
 
 [[package]]
 name = "refinery"
-version = "0.8.9"
+version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "431fd1854421586de5e83614052cb0d2d82025647829db6d9499b27385e58a6b"
+checksum = "0904191f0566c3d3e0091d5cc8dec22e663d77def2d247b16e7a438b188bf75d"
 dependencies = [
  "refinery-core",
  "refinery-macros",
@@ -7421,11 +7423,14 @@ dependencies = [
  "cfg-if",
  "log",
  "regex",
+ "rusqlite",
+ "serde",
  "siphasher 1.0.1",
  "thiserror",
  "time",
  "tokio",
  "tokio-postgres",
+ "toml",
  "url",
  "walkdir",
 ]

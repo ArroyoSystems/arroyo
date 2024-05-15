@@ -20,6 +20,7 @@ use crate::rest_utils::{
     authenticate, bad_request, client, log_and_map, not_found, ApiError, BearerAuth, ErrorResp,
 };
 use crate::{handle_db_error, handle_delete, AuthData};
+use crate::sql::Database;
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
@@ -222,15 +223,11 @@ pub(crate) async fn get_connection_profile_autocomplete(
     }))
 }
 
-pub(crate) async fn get_all_connection_profiles<C: GenericClient>(
+pub(crate) async fn get_all_connection_profiles<'a>(
     auth: &AuthData,
-    client: &C,
+    db: &Database<'a>,
 ) -> Result<Vec<ConnectionProfile>, ErrorResp> {
-    let res: Vec<DbConnectionProfile> = api_queries::get_connection_profiles()
-        .bind(client, &auth.organization_id)
-        .all()
-        .await
-        .map_err(log_and_map)?;
+    let res: Vec<DbConnectionProfile> = api_queries::fetch_get_connection_profiles(db, &auth.organization_id).await?;
 
     let data = res
         .into_iter()

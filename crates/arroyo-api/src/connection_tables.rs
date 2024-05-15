@@ -42,6 +42,7 @@ use crate::{
     queries::api_queries::{self, DbConnectionTable},
     to_micros, AuthData,
 };
+use crate::sql::Database;
 
 async fn get_and_validate_connector<E: GenericClient>(
     req: &ConnectionTablePost,
@@ -220,13 +221,11 @@ fn get_connection_profile(
     }
 }
 
-pub(crate) async fn get_all_connection_tables<C: GenericClient>(
+pub(crate) async fn get_all_connection_tables<'a>(
     auth: &AuthData,
-    client: &C,
+    db: &Database<'a>,
 ) -> Result<Vec<ConnectionTable>, ErrorResp> {
-    let tables = api_queries::get_all_connection_tables()
-        .bind(client, &auth.organization_id)
-        .all()
+    let tables = api_queries::fetch_get_all_connection_tables(db, &auth.organization_id)
         .await
         .map_err(log_and_map)?;
 

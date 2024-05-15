@@ -39,6 +39,7 @@ use crate::rest_utils::{
 };
 use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
+use crate::sql::Database;
 
 pub(crate) async fn create_job<'a>(
     pipeline_name: &str,
@@ -46,7 +47,7 @@ pub(crate) async fn create_job<'a>(
     checkpoint_interval: Duration,
     preview: bool,
     auth: &AuthData,
-    client: &Transaction<'a>,
+    db: &Database<'a>,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -62,11 +63,8 @@ pub(crate) async fn create_job<'a>(
         ));
     }
 
-    let running_jobs = api_queries::get_jobs()
-        .bind(client, &auth.organization_id)
-        .all()
-        .await
-        .map_err(log_and_map)?
+    let running_jobs = api_queries::fetch_get_jobs(db, &auth.organization_id)
+        .await?
         .iter()
         .filter(|j| {
             j.stop == public::StopMode::none
@@ -89,9 +87,7 @@ pub(crate) async fn create_job<'a>(
     let job_id = generate_id(IdTypes::JobConfig);
 
     // TODO: handle chance of collision in ids
-    api_queries::create_job()
-        .bind(
-            client,
+    api_queries::execute_create_job(db,
             &job_id,
             &auth.organization_id,
             &pipeline_name,
@@ -104,18 +100,15 @@ pub(crate) async fn create_job<'a>(
                 None
             }),
         )
-        .await
-        .map_err(log_and_map)?;
+        .await?;
 
-    api_queries::create_job_status()
-        .bind(
-            client,
+    api_queries::execute_create_job_status(
+        db,
             &generate_id(IdTypes::JobStatus),
             &job_id,
             &auth.organization_id,
         )
-        .await
-        .map_err(log_and_map)?;
+        .await?;
 
     Ok(job_id)
 }

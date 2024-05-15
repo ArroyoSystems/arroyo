@@ -93,11 +93,15 @@ pub const COMPILER_ADDR_ENV: &str = "COMPILER_ADDR";
 pub const NOMAD_ENDPOINT_ENV: &str = "NOMAD_ENDPOINT";
 pub const NOMAD_DC_ENV: &str = "NOMAD_DC";
 
+pub const DATABASE_ENV: &str = "DATABASE";
+// postgres configs
 pub const DATABASE_NAME_ENV: &str = "DATABASE_NAME";
 pub const DATABASE_HOST_ENV: &str = "DATABASE_HOST";
 pub const DATABASE_PORT_ENV: &str = "DATABASE_PORT";
 pub const DATABASE_USER_ENV: &str = "DATABASE_USER";
 pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
+// sqlite configs
+pub const DATABASE_PATH_ENV: &str = "DATABASE_PATH"; 
 
 pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
 pub const GRPC_PORT_ENV: &str = "GRPC_PORT";

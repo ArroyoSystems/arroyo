@@ -38,7 +38,7 @@ impl IntoResponse for ApiError {
             }
         };
 
-        
+
         ErrorResp {
             status_code: status,
             message,
