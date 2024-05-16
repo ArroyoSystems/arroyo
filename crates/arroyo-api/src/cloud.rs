@@ -1,4 +1,4 @@
-use crate::sql::Database;
+use cornucopia_async::Database;
 use crate::{rest_utils::ErrorResp, AuthData, OrgMetadata};
 use axum::headers::authorization::{Authorization, Bearer};
 use axum::TypedHeader;

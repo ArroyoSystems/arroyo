@@ -19,7 +19,7 @@ use crate::rest_utils::{
     authenticate, bad_request, log_and_map, map_delete_err, not_found, ApiError, BearerAuth,
     ErrorResp,
 };
-use crate::sql::Database;
+use cornucopia_async::Database;
 use crate::AuthData;
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {

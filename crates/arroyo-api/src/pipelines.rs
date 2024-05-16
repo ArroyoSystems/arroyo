@@ -47,7 +47,7 @@ use crate::rest_utils::{
     authenticate, bad_request, log_and_map, not_found, paginate_results, required_field,
     validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
-use crate::sql::Database;
+use cornucopia_async::Database;
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::AuthData;

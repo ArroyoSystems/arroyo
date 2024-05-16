@@ -458,7 +458,7 @@ dependencies = [
  "base64 0.21.7",
  "bincode",
  "chrono",
- "cornucopia 0.9.0",
+ "cornucopia",
  "cornucopia_async",
  "deadpool-postgres",
  "deadpool-sqlite",
@@ -630,7 +630,7 @@ dependencies = [
  "base64 0.21.7",
  "bincode",
  "chrono",
- "cornucopia 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cornucopia",
  "cornucopia_async",
  "deadpool-postgres",
  "futures",
@@ -2590,16 +2590,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chumsky"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eebd66744a15ded14960ab4ccdbfb51ad3b81f51f3f04a80adac98c985396c9"
-dependencies = [
- "hashbrown 0.14.5",
- "stacker",
-]
-
-[[package]]
 name = "clap"
 version = "3.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2696,14 +2686,6 @@ dependencies = [
  "libc",
  "wasix",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "codegen_template"
-version = "0.1.0"
-dependencies = [
- "unicode-xid",
- "unscanny",
 ]
 
 [[package]]
@@ -2835,29 +2817,12 @@ dependencies = [
 [[package]]
 name = "cornucopia"
 version = "0.9.0"
-dependencies = [
- "chumsky 0.9.3",
- "clap 4.5.4",
- "codegen_template 0.1.0",
- "heck 0.4.1",
- "indexmap 2.2.6",
- "miette",
- "postgres",
- "postgres-types",
- "prettyplease 0.2.20",
- "syn 2.0.61",
- "thiserror",
-]
-
-[[package]]
-name = "cornucopia"
-version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d21d8c5cf5940c13b1d82977fc5d4230714ce76d991c5c00b8a1c791c691dcf"
 dependencies = [
- "chumsky 0.8.0",
+ "chumsky",
  "clap 4.5.4",
- "codegen_template 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "codegen_template",
  "heck 0.4.1",
  "indexmap 1.9.3",
  "miette",

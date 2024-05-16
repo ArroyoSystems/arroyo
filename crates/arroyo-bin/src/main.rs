@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use std::{env, fs};
 
-use arroyo_api::sql::DatabaseSource;
+use cornucopia_async::DatabaseSource;
 use arroyo_server_common::shutdown::Shutdown;
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{ports, DatabaseConfig, DATABASE_ENV, DATABASE_PATH_ENV};

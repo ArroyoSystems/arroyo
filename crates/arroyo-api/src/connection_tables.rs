@@ -35,7 +35,7 @@ use crate::rest_utils::{
     not_found, paginate_results, required_field, validate_pagination_params, ApiError, BearerAuth,
     ErrorResp,
 };
-use crate::sql::{Database, DatabaseSource};
+use cornucopia_async::{Database, DatabaseSource};
 use crate::{
     queries::api_queries::{self, DbConnectionTable},
     to_micros, AuthData,

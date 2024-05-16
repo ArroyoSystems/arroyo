@@ -33,7 +33,7 @@ use crate::rest_utils::{
     authenticate, bad_request, log_and_map, not_found, paginate_results,
     validate_pagination_params, BearerAuth, ErrorResp,
 };
-use crate::sql::Database;
+use cornucopia_async::Database;
 use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
 

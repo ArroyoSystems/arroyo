@@ -4,6 +4,7 @@ use axum::Json;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use cornucopia_async::DatabaseSource;
 use time::OffsetDateTime;
 use tonic::transport::Channel;
 use tracing::{error, info};
@@ -31,7 +32,6 @@ use crate::pipelines::{
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{service_unavailable, ErrorResp};
-use crate::sql::DatabaseSource;
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
