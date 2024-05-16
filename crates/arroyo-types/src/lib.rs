@@ -101,7 +101,7 @@ pub const DATABASE_PORT_ENV: &str = "DATABASE_PORT";
 pub const DATABASE_USER_ENV: &str = "DATABASE_USER";
 pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
 // sqlite configs
-pub const DATABASE_PATH_ENV: &str = "DATABASE_PATH"; 
+pub const DATABASE_PATH_ENV: &str = "DATABASE_PATH";
 
 pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
 pub const GRPC_PORT_ENV: &str = "GRPC_PORT";

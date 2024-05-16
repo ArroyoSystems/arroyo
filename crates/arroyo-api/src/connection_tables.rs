@@ -1,12 +1,9 @@
-use crate::queries::api_queries::GetConnectionTablesParams;
 use anyhow::anyhow;
 use axum::extract::{Path, Query, State};
 use axum::response::sse::Event;
 use axum::response::Sse;
 use axum::Json;
 use axum_extra::extract::WithRejection;
-use cornucopia_async::GenericClient;
-use cornucopia_async::Params;
 use futures_util::stream::Stream;
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -34,20 +31,20 @@ use arroyo_types::raw_schema;
 
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map, not_found, paginate_results, required_field,
-    validate_pagination_params, ApiError, BearerAuth, ErrorResp,
+    authenticate, bad_request, internal_server_error, log_and_map, map_delete_err, map_insert_err,
+    not_found, paginate_results, required_field, validate_pagination_params, ApiError, BearerAuth,
+    ErrorResp,
 };
+use crate::sql::{Database, DatabaseSource};
 use crate::{
-    handle_db_error, handle_delete,
     queries::api_queries::{self, DbConnectionTable},
     to_micros, AuthData,
 };
-use crate::sql::Database;
 
-async fn get_and_validate_connector<E: GenericClient>(
+async fn get_and_validate_connector(
     req: &ConnectionTablePost,
     auth: &AuthData,
-    c: &E,
+    db: &DatabaseSource,
 ) -> Result<
     (
         Box<dyn ErasedConnector>,
@@ -57,6 +54,7 @@ async fn get_and_validate_connector<E: GenericClient>(
     ),
     ErrorResp,
 > {
+    let client = db.client().await?;
     let connector = connector_for_type(&req.connector)
         .ok_or_else(|| anyhow!("Unknown connector '{}'", req.connector,))
         .map_err(log_and_map)?;
@@ -64,17 +62,20 @@ async fn get_and_validate_connector<E: GenericClient>(
     let (connection_profile_id, profile_config) = if let Some(connection_profile_id) =
         &req.connection_profile_id
     {
-        let connection_profile = api_queries::get_connection_profile_by_pub_id()
-            .bind(c, &auth.organization_id, &connection_profile_id)
-            .opt()
-            .await
-            .map_err(log_and_map)?
-            .ok_or_else(|| {
-                bad_request(format!(
-                    "No connection profile with id '{}'",
-                    connection_profile_id
-                ))
-            })?;
+        let connection_profile = api_queries::fetch_get_connection_profile_by_pub_id(
+            &client,
+            &auth.organization_id,
+            &connection_profile_id,
+        )
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            bad_request(format!(
+                "No connection profile with id '{}'",
+                connection_profile_id
+            ))
+        })?;
 
         if connection_profile.r#type != req.connector {
             return Err(
@@ -139,13 +140,15 @@ pub(crate) async fn delete_connection_table(
     bearer_auth: BearerAuth,
     Path(pub_id): Path<String>,
 ) -> Result<(), ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    let deleted = api_queries::delete_connection_table()
-        .bind(&client, &auth_data.organization_id, &pub_id)
-        .await
-        .map_err(|e| handle_delete("connection_table", "pipelines", e))?;
+    let deleted = api_queries::execute_delete_connection_table(
+        &state.database.client().await?,
+        &auth_data.organization_id,
+        &pub_id,
+    )
+    .await
+    .map_err(|e| map_delete_err("connection_table", "pipelines", e))?;
 
     if deleted == 0 {
         return Err(not_found("Connection table"));
@@ -170,11 +173,10 @@ pub(crate) async fn test_connection_table(
     bearer_auth: BearerAuth,
     WithRejection(Json(req), _): WithRejection<Json<ConnectionTablePost>, ApiError>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     let (connector, _, profile, schema) =
-        get_and_validate_connector(&req, &auth_data, &client).await?;
+        get_and_validate_connector(&req, &auth_data, &state.database).await?;
 
     let (tx, rx) = channel(8);
 
@@ -221,9 +223,9 @@ fn get_connection_profile(
     }
 }
 
-pub(crate) async fn get_all_connection_tables<'a>(
+pub(crate) async fn get_all_connection_tables(
     auth: &AuthData,
-    db: &Database<'a>,
+    db: &Database<'_>,
 ) -> Result<Vec<ConnectionTable>, ErrorResp> {
     let tables = api_queries::fetch_get_all_connection_tables(db, &auth.organization_id)
         .await
@@ -259,16 +261,16 @@ pub async fn create_connection_table(
     bearer_auth: BearerAuth,
     WithRejection(Json(req), _): WithRejection<Json<ConnectionTablePost>, ApiError>,
 ) -> Result<Json<ConnectionTable>, ErrorResp> {
-    let mut client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
-    let transaction = client.transaction().await.map_err(log_and_map)?;
-    transaction
-        .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
-        .await
-        .map_err(log_and_map)?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
+
+    // let transaction = client.transaction().await.map_err(log_and_map)?;
+    // transaction
+    //     .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
+    //     .await
+    //     .map_err(log_and_map)?;
 
     let (connector, connection_id, profile, schema) =
-        get_and_validate_connector(&req, &auth_data, &transaction).await?;
+        get_and_validate_connector(&req, &auth_data, &state.database).await?;
 
     let table_type = connector.table_type(&profile, &req.config).unwrap();
 
@@ -282,31 +284,33 @@ pub async fn create_connection_table(
 
     let pub_id = generate_id(IdTypes::ConnectionTable);
 
-    api_queries::create_connection_table()
-        .bind(
-            &transaction,
-            &pub_id,
-            &auth_data.organization_id,
-            &auth_data.user_id,
-            &req.name,
-            &table_type.to_string(),
-            &req.connector,
-            &connection_id,
-            &req.config,
-            &schema,
-        )
-        .await
-        .map_err(|err| handle_db_error("connection_table", err))?;
+    let client = state.database.client().await?;
 
-    transaction.commit().await.map_err(log_and_map)?;
+    api_queries::execute_create_connection_table(
+        &client,
+        &pub_id,
+        &auth_data.organization_id,
+        &auth_data.user_id,
+        &req.name,
+        &table_type.to_string(),
+        &req.connector,
+        &connection_id,
+        &req.config,
+        &schema,
+    )
+    .await
+    .map_err(|err| map_insert_err("connection_table", err))?;
 
-    let table = api_queries::get_connection_table()
-        .bind(&client, &auth_data.organization_id, &pub_id)
-        .one()
-        .await
-        .map_err(log_and_map)?
-        .try_into()
-        .map_err(log_and_map)?;
+    // transaction.commit().await.map_err(log_and_map)?;
+
+    let table =
+        api_queries::fetch_get_connection_table(&client, &auth_data.organization_id, &pub_id)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| internal_server_error("Could not create connection table"))?
+            .try_into()
+            .map_err(log_and_map)?;
 
     Ok(Json(table))
 }
@@ -390,24 +394,18 @@ pub(crate) async fn get_connection_tables(
     bearer_auth: BearerAuth,
     query_params: Query<PaginationQueryParams>,
 ) -> Result<Json<ConnectionTableCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     let (starting_after, limit) =
         validate_pagination_params(query_params.starting_after.clone(), query_params.limit)?;
 
-    let tables = api_queries::get_connection_tables()
-        .params(
-            &client,
-            &GetConnectionTablesParams {
-                organization_id: &auth_data.organization_id,
-                starting_after: starting_after.unwrap_or("".to_string()),
-                limit: limit as i32, // is 1 more than the requested limit
-            },
-        )
-        .all()
-        .await
-        .map_err(log_and_map)?;
+    let tables = api_queries::fetch_get_connection_tables(
+        &state.database.client().await?,
+        &auth_data.organization_id,
+        &starting_after.unwrap_or("".to_string()),
+        &(limit as i32), // is 1 more than the requested limit
+    )
+    .await?;
 
     let (tables, has_more) = paginate_results(tables, limit);
 

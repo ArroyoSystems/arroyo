@@ -1,10 +1,10 @@
-use std::{env, fs};
-use std::path::PathBuf;
 use anyhow::{anyhow, bail};
+use std::{env, fs};
 
+use arroyo_api::sql::DatabaseSource;
 use arroyo_server_common::shutdown::Shutdown;
 use arroyo_server_common::{log_event, start_admin_server};
-use arroyo_types::{ports, DatabaseConfig, DATABASE_PATH_ENV, DATABASE_ENV};
+use arroyo_types::{ports, DatabaseConfig, DATABASE_ENV, DATABASE_PATH_ENV};
 use arroyo_worker::WorkerServer;
 use clap::{Parser, Subcommand};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
@@ -13,12 +13,10 @@ use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_postgres::{Client, Connection, NoTls};
 use tracing::{debug, error, info};
 use uuid::Uuid;
-use arroyo_api::sql::DatabaseSource;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -148,44 +146,52 @@ async fn pg_pool() -> Pool {
 fn sqlite_connection() -> rusqlite::Connection {
     let path = env::var(DATABASE_PATH_ENV)
         .map(|s| s.into())
-        .unwrap_or_else(|_| dirs::config_dir()
-            .unwrap_or_else(|| panic!("Must specify {DATABASE_PATH_ENV}"))
-            .join("arroyo/config.sqlite"));
+        .unwrap_or_else(|_| {
+            dirs::config_dir()
+                .unwrap_or_else(|| panic!("Must specify {DATABASE_PATH_ENV}"))
+                .join("arroyo/config.sqlite")
+        });
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .unwrap_or_else(|e| panic!("Could not create database directory {}: {:?}",
-                                       path.to_string_lossy(), e));
+        fs::create_dir_all(parent).unwrap_or_else(|e| {
+            panic!(
+                "Could not create database directory {}: {:?}",
+                path.to_string_lossy(),
+                e
+            )
+        });
     }
-    
+
     let exists = path.exists();
 
     let mut conn = rusqlite::Connection::open(&path)
         .unwrap_or_else(|e| panic!("Could not open sqlite database at path {:?}: {:?}", path, e));
-    
+
     if !exists {
         info!("Creating SQLite database at {:?}", path);
-        if let Err(e) = sqlite_migrations::migrations::runner()
-            .run(&mut conn) {
+        if let Err(e) = sqlite_migrations::migrations::runner().run(&mut conn) {
             let _ = fs::remove_file(&path);
             panic!("Failed to set up database: {}", e);
         }
     }
-    
+
     conn
 }
-
 
 async fn db_source() -> DatabaseSource {
     match env::var(DATABASE_ENV).as_ref().map(|s| s.as_str()).ok() {
         Some("postgres") | None => DatabaseSource::Postgres(pg_pool().await),
-        Some("sqlite") => DatabaseSource::Sqlite(Arc::new(std::sync::Mutex::new(sqlite_connection()))),
+        Some("sqlite") => {
+            DatabaseSource::Sqlite(Arc::new(std::sync::Mutex::new(sqlite_connection())))
+        }
         Some(e) => {
-            panic!("Unsupported setting for {}; supported options are 'postgres' or 'sqlite'", e)
+            panic!(
+                "Unsupported setting for {}; supported options are 'postgres' or 'sqlite'",
+                e
+            )
         }
     }
 }
-
 
 mod migrations {
     use refinery::embed_migrations;
@@ -296,7 +302,7 @@ async fn start_control_plane(service: CPService) {
     );
 
     if service == CPService::Api || service == CPService::All {
-        shutdown.spawn_task("api", arroyo_api::start_server(pool.clone(), db));
+        shutdown.spawn_task("api", arroyo_api::start_server(db));
     }
 
     if service == CPService::Compiler || service == CPService::All {

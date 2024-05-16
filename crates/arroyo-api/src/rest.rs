@@ -3,7 +3,6 @@ use axum::{
     routing::{delete, get, patch, post},
     Json, Router,
 };
-use deadpool_postgres::Pool;
 
 use http::{header, StatusCode, Uri};
 use rust_embed::RustEmbed;
@@ -31,10 +30,10 @@ use crate::pipelines::{
     patch_pipeline, restart_pipeline, validate_query,
 };
 use crate::rest_utils::not_found;
+use crate::sql::DatabaseSource;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
 use crate::ApiDoc;
 use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV};
-use crate::sql::DatabaseSource;
 
 #[derive(RustEmbed)]
 #[folder = "../../webui/dist"]
@@ -43,7 +42,6 @@ struct Assets;
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) controller_addr: String,
-    pub(crate) pool: Pool,
     pub(crate) database: DatabaseSource,
 }
 
@@ -111,7 +109,7 @@ async fn index_html() -> Response {
     }
 }
 
-pub fn create_rest_app(pool: Pool, database: DatabaseSource, controller_addr: &str) -> Router {
+pub fn create_rest_app(database: DatabaseSource, controller_addr: &str) -> Router {
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()
         .allow_methods(cors::Any)
@@ -175,9 +173,7 @@ pub fn create_rest_app(pool: Pool, database: DatabaseSource, controller_addr: &s
         .fallback(static_handler)
         .with_state(AppState {
             controller_addr: controller_addr.to_string(),
-            pool,
             database,
-            
         })
         .layer(cors)
 }

@@ -1,10 +1,10 @@
+use crate::sql::Database;
 use crate::{rest_utils::ErrorResp, AuthData, OrgMetadata};
 use axum::headers::authorization::{Authorization, Bearer};
 use axum::TypedHeader;
-use cornucopia_async::GenericClient;
 
 pub(crate) async fn authenticate(
-    _client: impl GenericClient,
+    _client: &Database<'_>,
     _bearer_auth: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Result<AuthData, ErrorResp> {
     Ok(AuthData {

@@ -1,15 +1,12 @@
 use anyhow::anyhow;
 use axum::response::IntoResponse;
 use axum::Json;
-use deadpool_postgres::Pool;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use rusqlite::ErrorCode;
 use time::OffsetDateTime;
-use tokio_postgres::error::SqlState;
 use tonic::transport::Channel;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use utoipa::OpenApi;
 
 use crate::connection_profiles::{
@@ -33,7 +30,8 @@ use crate::pipelines::{
     __path_patch_pipeline, __path_restart_pipeline, __path_validate_query,
 };
 use crate::rest::__path_ping;
-use crate::rest_utils::{bad_request, log_and_map, service_unavailable, ErrorResp};
+use crate::rest_utils::{service_unavailable, ErrorResp};
+use crate::sql::DatabaseSource;
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
@@ -42,7 +40,6 @@ use arroyo_types::{
     default_controller_addr, grpc_port, ports, service_port, COMPILER_ADDR_ENV,
     CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
 };
-use crate::sql::DatabaseSource;
 
 mod cloud;
 mod connection_profiles;
@@ -53,8 +50,8 @@ mod metrics;
 mod pipelines;
 pub mod rest;
 mod rest_utils;
-mod udfs;
 pub mod sql;
+mod udfs;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -109,42 +106,6 @@ pub struct AuthData {
     pub org_metadata: OrgMetadata,
 }
 
-fn handle_db_error(name: &str, err: tokio_postgres::Error) -> ErrorResp {
-    if let Some(db) = &err.as_db_error() {
-        if *db.code() == SqlState::UNIQUE_VIOLATION {
-            // TODO improve error message
-            warn!("SQL error: {}", db.message());
-            return bad_request(format!("A {} with that name already exists", name));
-        }
-    }
-
-    log_and_map(err)
-}
-
-fn handle_sqlite_error(name: &str, err: rusqlite::Error) -> ErrorResp {
-    if let Some(sqlite) = err.sqlite_error() {
-        if sqlite.code == ErrorCode::ConstraintViolation {
-            warn!("SQL error: {}", sqlite);
-            return bad_request(format!("A {} with that name already exists", name));
-        }
-    }
-    
-    log_and_map(err)
-}
-
-fn handle_delete(name: &str, users: &str, err: tokio_postgres::Error) -> ErrorResp {
-    if let Some(db) = &err.as_db_error() {
-        if *db.code() == SqlState::FOREIGN_KEY_VIOLATION {
-            return bad_request(format!(
-                "Cannot delete {}; it is still being used by {}",
-                name, users
-            ));
-        }
-    }
-
-    log_and_map(err)
-}
-
 pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     (dt.unix_timestamp_nanos() / 1_000) as u64
 }
@@ -166,14 +127,14 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
         })
 }
 
-pub async fn start_server(pool: Pool, database: DatabaseSource) -> anyhow::Result<()> {
+pub async fn start_server(database: DatabaseSource) -> anyhow::Result<()> {
     let controller_addr =
         std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| default_controller_addr());
 
     let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
     let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
 
-    let app = rest::create_rest_app(pool, database, &controller_addr);
+    let app = rest::create_rest_app(database, &controller_addr);
 
     info!("Starting API server on {:?}", addr);
     axum::Server::bind(&addr)
