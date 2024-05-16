@@ -93,10 +93,9 @@ pub async fn get_operator_metric_groups(
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
 ) -> Result<Json<OperatorMetricGroupCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let job = query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    let job = query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &state.database.client().await?, &auth_data).await?;
     let rate = env::var(API_METRICS_RATE_ENV).unwrap_or_else(|_| "15s".to_string());
     let end = (to_millis(SystemTime::now()) / 1000) as i64;
     let start = end - 5 * 60;

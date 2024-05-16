@@ -142,10 +142,9 @@ pub async fn get_connection_profiles(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
 ) -> Result<Json<ConnectionProfileCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let data = get_all_connection_profiles(&auth_data, &client).await?;
+    let data = get_all_connection_profiles(&auth_data, &state.database.client().await?).await?;
 
     Ok(Json(ConnectionProfileCollection { data }))
 }

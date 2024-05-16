@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context};
 use arrow_schema::SchemaRef;
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
-use axum::Json;
+use axum::{debug_handler, Json};
 use axum_extra::extract::WithRejection;
 use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
@@ -344,7 +344,7 @@ pub(crate) async fn create_pipeline_int<'a>(
         )
         .await?;
 
-    let pipeline_id = api_queries::fetch_get_pipeline(tx, &pub_id, &auth.organization_id)
+    let pipeline_id = api_queries::fetch_get_pipeline_id(tx, &pub_id, &auth.organization_id)
         .await
         .map_err(log_and_map)?
         .get(0)
@@ -491,18 +491,18 @@ pub async fn create_pipeline(
     bearer_auth: BearerAuth,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
-    let mut client = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let mut db = state.database.client().await?;
 
     let pipeline_pub_id = generate_id(IdTypes::Pipeline);
 
-    let transaction = client.transaction().await.map_err(log_and_map)?;
+    //let transaction = db.transaction().await?;
 
     let (pipeline_id, program) = create_pipeline_int(
         &pipeline_post,
         &pipeline_pub_id,
         auth_data.clone(),
-        &transaction,
+        &db,
     )
     .await?;
 
@@ -519,12 +519,12 @@ pub async fn create_pipeline(
         checkpoint_interval,
         preview,
         &auth_data,
-        &transaction,
+        &db,
     )
     .await?;
 
-    transaction.commit().await.map_err(log_and_map)?;
-
+    // transaction.commit().await?;
+    
     log_event(
         "job_created",
         json!({
@@ -539,7 +539,7 @@ pub async fn create_pipeline(
         }),
     );
 
-    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &state.database.client().await?, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
 
     Ok(Json(pipeline))
 }
@@ -563,6 +563,7 @@ pub async fn patch_pipeline(
     Path(pipeline_pub_id): Path<String>,
     WithRejection(Json(pipeline_patch), _): WithRejection<Json<PipelinePatch>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
+    let db = state.database.client().await?;
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
@@ -632,7 +633,7 @@ pub async fn patch_pipeline(
         return Err(not_found("Job"));
     }
 
-    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
     Ok(Json(pipeline))
 }
 
@@ -655,6 +656,7 @@ pub async fn restart_pipeline(
     WithRejection(Json(req), _): WithRejection<Json<PipelineRestart>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let client = client(&state.pool).await?;
+    let db = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
     let job_id = api_queries::get_pipeline_jobs()
@@ -686,7 +688,7 @@ pub async fn restart_pipeline(
         return Err(not_found("Pipeline"));
     }
 
-    let pipeline = query_pipeline_by_pub_id(&id, &client, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&id, &db, &auth_data).await?;
     Ok(Json(pipeline))
 }
 
@@ -763,10 +765,9 @@ pub async fn get_pipeline(
     bearer_auth: BearerAuth,
     Path(pipeline_pub_id): Path<String>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
-    let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &state.database.client().await?, &auth_data).await?;
     Ok(Json(pipeline))
 }
 
@@ -832,21 +833,20 @@ pub async fn delete_pipeline(
         (status = 200, description = "Got jobs collection", body = JobCollection),
     ),
 )]
+#[debug_handler]
 pub async fn get_pipeline_jobs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
     Path(pipeline_pub_id): Path<String>,
 ) -> Result<Json<JobCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
+    let db = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
 
-    let jobs: Vec<DbPipelineJob> = api_queries::get_pipeline_jobs()
-        .bind(&client, &auth_data.organization_id, &pipeline_pub_id)
-        .all()
-        .await
-        .map_err(log_and_map)?;
+    let jobs: Vec<DbPipelineJob> = api_queries::fetch_get_pipeline_jobs(
+        &db, &auth_data.organization_id, &pipeline_pub_id)
+        .await?;
 
     Ok(Json(JobCollection {
         data: jobs.into_iter().map(|p| p.into()).collect(),

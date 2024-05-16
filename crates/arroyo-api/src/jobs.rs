@@ -194,25 +194,21 @@ pub async fn get_job_errors(
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
     query_params: Query<PaginationQueryParams>,
 ) -> Result<Json<JobLogMessageCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let db = state.database.client().await?;
 
     let (starting_after, limit) =
         validate_pagination_params(query_params.starting_after.clone(), query_params.limit)?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
 
-    let errors = api_queries::get_operator_errors()
-        .params(
-            &client,
-            &GetOperatorErrorsParams {
-                organization_id: &auth_data.organization_id,
-                job_id: &job_pub_id,
-                starting_after: starting_after.unwrap_or_default(),
-                limit: limit as i32,
-            },
+    let errors = api_queries::fetch_get_operator_errors(
+            &db,
+            &auth_data.organization_id,
+            &job_pub_id,
+            &starting_after.unwrap_or_default(),
+            &(limit as i32),
         )
-        .all()
         .await
         .map_err(log_and_map)?
         .into_iter()
@@ -265,14 +261,13 @@ pub async fn get_job_checkpoints(
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
 ) -> Result<Json<CheckpointCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
+    let db = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
 
-    let checkpoints = api_queries::get_job_checkpoints()
-        .bind(&client, &job_pub_id, &auth_data.organization_id)
-        .all()
+    let checkpoints = api_queries::fetch_get_job_checkpoints(
+        &db, &job_pub_id, &auth_data.organization_id)
         .await
         .map_err(log_and_map)?
         .into_iter()
@@ -340,7 +335,7 @@ fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEven
             finish_time: operator_finished.time,
         });
     }
-
+;
     if let (Some(operator_finished), Some(pre_commit)) = (operator_finished, pre_commit) {
         event_spans.push(CheckpointEventSpan {
             span_type: CheckpointSpanType::Committing,
@@ -372,21 +367,21 @@ pub async fn get_checkpoint_details(
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id, epoch)): Path<(String, String, u32)>,
 ) -> Result<Json<OperatorCheckpointGroupCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
+    let db = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
 
-    let checkpoint_details = api_queries::get_checkpoint_details()
-        .bind(
-            &client,
+    let checkpoint_details = api_queries::fetch_get_checkpoint_details(
+            &db,
             &job_pub_id,
             &auth_data.organization_id,
             &(epoch as i32),
         )
-        .opt()
         .await
         .map_err(log_and_map)?
+        .into_iter()
+        .next()
         .ok_or_else(|| {
             not_found(&format!(
                 "Checkpoint with epoch {} for job '{}'",
@@ -445,12 +440,12 @@ pub async fn get_job_output(
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ErrorResp> {
-    let client = client(&state.pool).await?;
+    let db = state.database.client().await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
     // validate that the job exists, the user has access, and the graph has a GrpcSink
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
-    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
 
     if !pipeline
         .graph

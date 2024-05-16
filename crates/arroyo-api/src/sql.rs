@@ -1,16 +1,15 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use crate::types::public::PipelineType;
 use crate::{AuthData, handle_db_error, handle_sqlite_error};
 use deadpool_postgres::{Object};
 use serde_json::Value;
-use tokio::sync::{Mutex, MutexGuard};
 use deadpool_postgres::{Transaction as PGTransaction};
 use rusqlite::Params;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbUdf;
 use crate::rest_utils::{ErrorResp, log_and_map};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum DatabaseSource {
     Postgres(deadpool_postgres::Pool),
     Sqlite(Arc<Mutex<rusqlite::Connection>>),
@@ -23,37 +22,50 @@ impl DatabaseSource {
                 Database::Postgres(p.get().await.map_err(log_and_map)?)
             }
             DatabaseSource::Sqlite(p) => {
-                Database::Sqlite(SqliteWrapper::Connection(p.lock().await))
+                Database::Sqlite(SqliteWrapper::Connection(p.clone()))
             }
         })
     }
 }
 
-pub enum SqliteWrapper<'a> {
-    Connection(MutexGuard<'a, rusqlite::Connection>),
-    Transaction(rusqlite::Transaction<'a>),
+pub enum SqliteWrapper {
+    Connection(Arc<Mutex<rusqlite::Connection>>),
+    //Transaction(rusqlite::Transaction<'a>),
 }
 
-impl <'a> SqliteWrapper<'a> {
+pub struct WrappedStatement<'a> {
+    statement: rusqlite::Statement<'a>,
+    guard: MutexGuard<'a, rusqlite::Connection>,
+}
+
+impl SqliteWrapper {
     pub fn execute<P: Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
         match self {
             SqliteWrapper::Connection(c) => {
+                let c = c.lock().unwrap();
                 c.execute(sql, params)
             }
-            SqliteWrapper::Transaction(t) => {
-                t.execute(sql, params)
-            }
+            // SqliteWrapper::Transaction(t) => {
+            //     t.execute(sql, params)
+            // }
         }
     }
 
-    pub fn prepare(&self, sql: &str) -> rusqlite::Result<rusqlite::Statement<'_>> {
+    pub fn query_rows<P: Params, T, F: Fn(&rusqlite::Row) -> T>(&self, sql: &str, params: P, map: F) -> rusqlite::Result<Vec<T>> {
         match self {
             SqliteWrapper::Connection(c) => {
-                c.prepare(sql)
+                let c = c.lock().unwrap();
+                let mut statement = c.prepare(sql).unwrap();
+                let results = statement.query(params)?; 
+                Ok(results
+                    .mapped(|r| Ok(map(r)))
+                    .map(|r| r.unwrap())
+                    .collect())
             }
-            SqliteWrapper::Transaction(t) => {
-                t.prepare(sql)
-            }
+            // SqliteWrapper::Transaction(t) => {
+            //     todo!()
+            //     //t.prepare(sql)
+            // }
         }
     }
 }
@@ -61,7 +73,7 @@ impl <'a> SqliteWrapper<'a> {
 pub enum Database<'a> {
     Postgres(Object),
     PostgresTx(PGTransaction<'a>),
-    Sqlite(SqliteWrapper<'a>),
+    Sqlite(SqliteWrapper),
 }
 
 impl <'a> Database<'a> {
@@ -76,11 +88,12 @@ impl <'a> Database<'a> {
             Database::Sqlite(p) => {
                 match p {
                     SqliteWrapper::Connection(c) => {
-                        Self::Sqlite(SqliteWrapper::Transaction(c.transaction().map_err(log_and_map)?))                        
+                        //Self::Sqlite(SqliteWrapper::Transaction(c.transaction().map_err(log_and_map)?))
+                        Self::Sqlite(SqliteWrapper::Connection(Arc::clone(c)))
                     }
-                    SqliteWrapper::Transaction(_) => {
-                        panic!("Cannot duplicate an existing sqlite transaction");                        
-                    }
+                    // SqliteWrapper::Transaction(_) => {
+                    //     panic!("Cannot duplicate an existing sqlite transaction");
+                    // }
                 }
             }
         })
@@ -97,9 +110,9 @@ impl <'a> Database<'a> {
             Database::Sqlite(s) => {
                 match s {
                     SqliteWrapper::Connection(_) => {}
-                    SqliteWrapper::Transaction(tx) => {
-                        tx.commit().map_err(|e| handle_sqlite_error("record", e))?;
-                    }
+                    // SqliteWrapper::Transaction(tx) => {
+                    //     tx.commit().map_err(|e| handle_sqlite_error("record", e))?;
+                    // }
                 }
             }
         }
@@ -174,23 +187,21 @@ VALUES (:?1, :?2, :?3, :?4, :?5, :?6, :?7, :?8, :?9)",
                 todo!()
             }
             Database::Sqlite(c) => {
-                let mut stmt = c.prepare("SELECT pub_id, prefix, name, definition, created_at, updated_at, description, dylib_url
-                FROM udfs WHERE organization_id = :?1;").unwrap();
-                let results = stmt.query([&auth.organization_id]).map_err(log_and_map)?;
-                results.mapped(|r| {
-                        Ok(DbUdf {
-                            pub_id: r.get_unwrap(0),
-                            prefix: r.get_unwrap(1),
-                            name: r.get_unwrap(2),
-                            definition: r.get_unwrap(3),
-                            created_at: r.get_unwrap(4),
-                            updated_at: r.get_unwrap(5),
-                            description: r.get_unwrap(6),
-                            dylib_url: r.get_unwrap(7),
-                        })
-                    })
-                    .map(|t| t.unwrap())
-                    .collect()
+                c.query_rows("SELECT pub_id, prefix, name, definition, created_at, updated_at, description, dylib_url
+                FROM udfs WHERE organization_id = :?1;", 
+                                           [&auth.organization_id],
+                                           |r|
+                                               DbUdf {
+                                                   pub_id: r.get_unwrap(0),
+                                                   prefix: r.get_unwrap(1),
+                                                   name: r.get_unwrap(2),
+                                                   definition: r.get_unwrap(3),
+                                                   created_at: r.get_unwrap(4),
+                                                   updated_at: r.get_unwrap(5),
+                                                   description: r.get_unwrap(6),
+                                                   dylib_url: r.get_unwrap(7),
+                                               }
+                ).map_err(log_and_map)?
             }
         })
     }

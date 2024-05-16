@@ -157,11 +157,14 @@ fn sqlite_connection() -> rusqlite::Connection {
             .unwrap_or_else(|e| panic!("Could not create database directory {}: {:?}",
                                        path.to_string_lossy(), e));
     }
+    
+    let exists = path.exists();
 
     let mut conn = rusqlite::Connection::open(&path)
         .unwrap_or_else(|e| panic!("Could not open sqlite database at path {:?}: {:?}", path, e));
     
-    if !path.exists() {
+    if !exists {
+        info!("Creating SQLite database at {:?}", path);
         if let Err(e) = sqlite_migrations::migrations::runner()
             .run(&mut conn) {
             let _ = fs::remove_file(&path);
@@ -176,7 +179,7 @@ fn sqlite_connection() -> rusqlite::Connection {
 async fn db_source() -> DatabaseSource {
     match env::var(DATABASE_ENV).as_ref().map(|s| s.as_str()).ok() {
         Some("postgres") | None => DatabaseSource::Postgres(pg_pool().await),
-        Some("sqlite") => DatabaseSource::Sqlite(Arc::new(Mutex::new(sqlite_connection()))),
+        Some("sqlite") => DatabaseSource::Sqlite(Arc::new(std::sync::Mutex::new(sqlite_connection()))),
         Some(e) => {
             panic!("Unsupported setting for {}; supported options are 'postgres' or 'sqlite'", e)
         }
