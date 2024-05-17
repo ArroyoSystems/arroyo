@@ -19,7 +19,7 @@ jobs:
         run: |
           cd webui
           pnpm check
-
+          
   build-rust:
     runs-on: ubicloud-standard-16
     env:
@@ -69,7 +69,7 @@ jobs:
       - name: Install dependencies
         run: |
           curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-          sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev
+          sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev netcat
           wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
           unzip protoc*.zip
           sudo mv bin/protoc /usr/local/bin
@@ -90,7 +90,7 @@ jobs:
       - name: Build console
         run: |
           cd webui
-          pnpm build        
+          pnpm build
       - name: Build
         run: cargo build --all-features
       - name: Test
@@ -103,8 +103,8 @@ jobs:
       - name: Integ sqlite
         run: |
           killall arroyo-bin
-          mkdir /tmp/arroyo-integ
           DISABLE_TELEMETRY=true CHECKPOINT_URL=file:///tmp/arroyo-integ ARTIFACT_URL=file:///tmp/artifacts DATABASE=sqlite target/debug/arroyo-bin cluster &
+          while ! nc -z localhost 8000; do sleep 1; done
           cargo nextest run --package integ -E 'kind(test)'
           
   build-console:
