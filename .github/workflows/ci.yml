@@ -104,7 +104,7 @@ jobs:
         run: |
           killall arroyo-bin
           DISABLE_TELEMETRY=true CHECKPOINT_URL=file:///tmp/arroyo-integ ARTIFACT_URL=file:///tmp/artifacts DATABASE=sqlite target/debug/arroyo-bin cluster &
-          while ! nc -z localhost 8000; do sleep 1; done
+          timeout=10; while ! nc -z localhost 8000 && [ $timeout -gt 0 ]; do sleep 1; timeout=$((timeout - 1)); done; [ $timeout -gt 0 ]
           cargo nextest run --package integ -E 'kind(test)'
           
   build-console:

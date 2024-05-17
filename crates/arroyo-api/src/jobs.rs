@@ -35,7 +35,7 @@ use crate::rest_utils::{
 };
 use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
-use cornucopia_async::Database;
+use cornucopia_async::DatabaseSource;
 
 pub(crate) async fn create_job<'a>(
     pipeline_name: &str,
@@ -43,7 +43,7 @@ pub(crate) async fn create_job<'a>(
     checkpoint_interval: Duration,
     preview: bool,
     auth: &AuthData,
-    db: &Database<'a>,
+    db: &DatabaseSource,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -59,7 +59,7 @@ pub(crate) async fn create_job<'a>(
         ));
     }
 
-    let running_jobs = api_queries::fetch_get_jobs(db, &auth.organization_id)
+    let running_jobs = api_queries::fetch_get_jobs(&db.client().await?, &auth.organization_id)
         .await?
         .iter()
         .filter(|j| {
@@ -84,7 +84,7 @@ pub(crate) async fn create_job<'a>(
 
     // TODO: handle chance of collision in ids
     api_queries::execute_create_job(
-        db,
+        &db.client().await?,
         &job_id,
         &auth.organization_id,
         &pipeline_name,
@@ -100,7 +100,7 @@ pub(crate) async fn create_job<'a>(
     .await?;
 
     api_queries::execute_create_job_status(
-        db,
+        &db.client().await?,
         &generate_id(IdTypes::JobStatus),
         &job_id,
         &auth.organization_id,

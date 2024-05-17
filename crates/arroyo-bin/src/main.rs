@@ -173,7 +173,30 @@ fn sqlite_connection() -> rusqlite::Connection {
             let _ = fs::remove_file(&path);
             panic!("Failed to set up database: {}", e);
         }
+
+        let uuid = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO cluster_info (id, name) VALUES (?1, 'default');",
+            [&uuid],
+        )
+        .expect("Unable to write to sqlite database");
     }
+
+    let mut statement = conn.prepare("select id from cluster_info").unwrap();
+
+    let results = statement
+        .query_map([], |r| r.get(0))
+        .expect("Unable to read from sqlite database");
+
+    let uuid: String = results
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("Invalid sqlite database at {:?}; delete to recreate", path))
+        .unwrap();
+
+    arroyo_server_common::set_cluster_id(&uuid);
+
+    drop(statement);
 
     conn
 }

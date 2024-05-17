@@ -51,7 +51,7 @@ use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::AuthData;
 use crate::{connection_tables, to_micros};
-use cornucopia_async::Database;
+use cornucopia_async::{Database, DatabaseSource};
 
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -61,11 +61,11 @@ async fn compile_sql<'a>(
     parallelism: usize,
     auth_data: &AuthData,
     validate_only: bool,
-    db: &Database<'a>,
+    db: &DatabaseSource,
 ) -> Result<CompiledSql, ErrorResp> {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
-    let global_udfs = fetch_get_udfs(db, &auth_data.organization_id)
+    let global_udfs = fetch_get_udfs(&db.client().await?, &auth_data.organization_id)
         .await?
         .into_iter()
         .map(|u| u.into())
@@ -116,7 +116,8 @@ async fn compile_sql<'a>(
         }
     }
 
-    let tables = connection_tables::get_all_connection_tables(auth_data, db).await?;
+    let tables =
+        connection_tables::get_all_connection_tables(auth_data, &db.client().await?).await?;
 
     for table in tables {
         let Some(connector) = connector_for_type(&table.connector) else {
@@ -142,7 +143,8 @@ async fn compile_sql<'a>(
 
         schema_provider.add_connector_table(connection);
     }
-    let profiles = connection_profiles::get_all_connection_profiles(auth_data, db).await?;
+    let profiles =
+        connection_profiles::get_all_connection_profiles(auth_data, &db.client().await?).await?;
 
     for profile in profiles {
         schema_provider.add_connection_profile(profile);
@@ -269,7 +271,7 @@ pub(crate) async fn create_pipeline_int<'a>(
     req: &PipelinePost,
     pub_id: &str,
     auth: AuthData,
-    tx: &Database<'a>,
+    db: &DatabaseSource,
 ) -> Result<(i64, LogicalProgram), ErrorResp> {
     let is_preview = req.preview.unwrap_or(false);
 
@@ -287,7 +289,7 @@ pub(crate) async fn create_pipeline_int<'a>(
         req.parallelism as usize,
         &auth,
         false,
-        tx,
+        db,
     )
     .await?;
 
@@ -330,7 +332,7 @@ pub(crate) async fn create_pipeline_int<'a>(
     let udfs = serde_json::to_value(req.udfs.as_ref().unwrap_or(&vec![])).unwrap();
 
     api_queries::execute_create_pipeline(
-        tx,
+        &db.client().await?,
         &pub_id,
         &auth.organization_id,
         &auth.user_id,
@@ -343,17 +345,18 @@ pub(crate) async fn create_pipeline_int<'a>(
     )
     .await?;
 
-    let pipeline_id = api_queries::fetch_get_pipeline_id(tx, &pub_id, &auth.organization_id)
-        .await
-        .map_err(log_and_map)?
-        .get(0)
-        .unwrap()
-        .id;
+    let pipeline_id =
+        api_queries::fetch_get_pipeline_id(&db.client().await?, &pub_id, &auth.organization_id)
+            .await
+            .map_err(log_and_map)?
+            .get(0)
+            .unwrap()
+            .id;
 
     if !is_preview {
         for connection in compiled.connection_ids {
             api_queries::execute_add_pipeline_connection_table(
-                tx,
+                &db.client().await?,
                 &generate_id(IdTypes::ConnectionTablePipeline),
                 &pipeline_id,
                 &connection,
@@ -444,22 +447,29 @@ pub async fn validate_query(
     bearer_auth: BearerAuth,
     WithRejection(Json(validate_query_post), _): WithRejection<Json<ValidateQueryPost>, ApiError>,
 ) -> Result<Json<QueryValidationResult>, ErrorResp> {
-    let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     let udfs = validate_query_post.udfs.unwrap_or(vec![]);
 
-    let pipeline_graph_validation_result =
-        match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, true, &db).await {
-            Ok(CompiledSql { program, .. }) => QueryValidationResult {
-                graph: Some(program.try_into().map_err(log_and_map)?),
-                errors: vec![],
-            },
-            Err(e) => QueryValidationResult {
-                graph: None,
-                errors: vec![e.message],
-            },
-        };
+    let pipeline_graph_validation_result = match compile_sql(
+        validate_query_post.query,
+        &udfs,
+        1,
+        &auth_data,
+        true,
+        &state.database,
+    )
+    .await
+    {
+        Ok(CompiledSql { program, .. }) => QueryValidationResult {
+            graph: Some(program.try_into().map_err(log_and_map)?),
+            errors: vec![],
+        },
+        Err(e) => QueryValidationResult {
+            graph: None,
+            errors: vec![e.message],
+        },
+    };
 
     Ok(Json(pipeline_graph_validation_result))
 }
@@ -483,14 +493,18 @@ pub async fn create_pipeline(
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
-    let db = state.database.client().await?;
 
     let pipeline_pub_id = generate_id(IdTypes::Pipeline);
 
     //let transaction = db.transaction().await?;
 
-    let (pipeline_id, program) =
-        create_pipeline_int(&pipeline_post, &pipeline_pub_id, auth_data.clone(), &db).await?;
+    let (pipeline_id, program) = create_pipeline_int(
+        &pipeline_post,
+        &pipeline_pub_id,
+        auth_data.clone(),
+        &state.database,
+    )
+    .await?;
 
     let preview = pipeline_post.preview.unwrap_or(false);
 
@@ -505,7 +519,7 @@ pub async fn create_pipeline(
         checkpoint_interval,
         preview,
         &auth_data,
-        &db,
+        &state.database,
     )
     .await?;
 
@@ -525,7 +539,12 @@ pub async fn create_pipeline(
         }),
     );
 
-    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(
+        &pipeline_pub_id,
+        &state.database.client().await?,
+        &auth_data,
+    )
+    .await?;
 
     Ok(Json(pipeline))
 }

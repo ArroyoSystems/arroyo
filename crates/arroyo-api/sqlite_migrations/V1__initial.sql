@@ -28,7 +28,6 @@ CREATE TABLE cluster_info (
     name TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     singleton INTEGER DEFAULT 0 NOT NULL,
-    pub_id TEXT NOT NULL UNIQUE,
     CONSTRAINT cluster_info_singleton_check CHECK (singleton = 0)
 );
 
