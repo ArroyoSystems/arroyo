@@ -19,7 +19,7 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{from_micros, grpc_port, ports, NodeId, WorkerId};
-use deadpool_postgres::Pool;
+use cornucopia_async::DatabaseSource;
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use states::{Created, State, StateMachine};
@@ -96,25 +96,24 @@ pub struct JobStatus {
 }
 
 impl JobStatus {
-    pub async fn update_db(&self, pool: &Pool) -> Result<(), String> {
-        let c = pool.get().await.map_err(|e| format!("{:?}", e))?;
-        let res = queries::controller_queries::update_job_status()
-            .bind(
-                &c,
-                &self.state,
-                &self.start_time,
-                &self.finish_time,
-                &self.tasks,
-                &self.failure_message,
-                &self.restarts,
-                &self.pipeline_path,
-                &self.wasm_path,
-                &self.run_id,
-                &self.restart_nonce,
-                &self.id,
-            )
-            .await
-            .map_err(|e| format!("{:?}", e))?;
+    pub async fn update_db(&self, database: &DatabaseSource) -> Result<(), String> {
+        let c = database.client().await.map_err(|e| format!("{:?}", e))?;
+        let res = queries::controller_queries::execute_update_job_status(
+            &c,
+            &self.state,
+            &self.start_time,
+            &self.finish_time,
+            &self.tasks,
+            &self.failure_message,
+            &self.restarts,
+            &self.pipeline_path,
+            &self.wasm_path,
+            &self.run_id,
+            &self.restart_nonce,
+            &self.id,
+        )
+        .await
+        .map_err(|e| format!("{:?}", e))?;
 
         if res == 0 {
             Err("Job status does not exist".to_string())
@@ -172,7 +171,7 @@ pub struct ControllerServer {
     job_state: Arc<tokio::sync::Mutex<HashMap<String, StateMachine>>>,
     data_txs: Arc<tokio::sync::Mutex<HashMap<String, Vec<Sender<Result<OutputData, Status>>>>>>,
     scheduler: Arc<dyn Scheduler>,
-    db: Pool,
+    db: DatabaseSource,
 }
 
 #[tonic::async_trait]
@@ -407,20 +406,18 @@ impl ControllerGrpc for ControllerServer {
     ) -> Result<Response<WorkerErrorRes>, Status> {
         info!("Got worker error.");
         let req = request.into_inner();
-        let client = self.db.get().await.unwrap();
-        match queries::controller_queries::create_job_log_message()
-            .bind(
-                &client,
-                &generate_id(IdTypes::JobLogMessage),
-                &req.job_id,
-                &req.operator_id,
-                &(req.task_index as i64),
-                &LogLevel::error,
-                &req.message,
-                &req.details,
-            )
-            .one()
-            .await
+        let client = self.db.client().await.unwrap();
+        match queries::controller_queries::execute_create_job_log_message(
+            &client,
+            &generate_id(IdTypes::JobLogMessage),
+            &req.job_id,
+            &req.operator_id,
+            &(req.task_index as i64),
+            &LogLevel::error,
+            &req.message,
+            &req.details,
+        )
+        .await
         {
             Ok(_) => Ok(Response::new(WorkerErrorRes {})),
             Err(err) => Err(Status::from_error(Box::new(err))),
@@ -429,7 +426,7 @@ impl ControllerGrpc for ControllerServer {
 }
 
 impl ControllerServer {
-    pub async fn new(pool: Pool) -> Self {
+    pub async fn new(database: DatabaseSource) -> Self {
         let scheduler: Arc<dyn Scheduler> = match std::env::var("SCHEDULER").ok().as_deref() {
             Some("node") => {
                 info!("Using node scheduler");
@@ -453,7 +450,7 @@ impl ControllerServer {
             scheduler,
             data_txs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             job_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            db: pool,
+            db: database,
         }
     }
 
@@ -488,11 +485,8 @@ impl ControllerServer {
         let our_guard = guard.child("update-thread");
         our_guard.into_spawn_task(async move {
             while !token.is_cancelled() {
-                let client = db.get().await.unwrap();
-                let res = queries::controller_queries::all_jobs()
-                    .bind(&client)
-                    .all()
-                    .await?;
+                let client = db.client().await?;
+                let res = queries::controller_queries::fetch_all_jobs(&client).await?;
                 for p in res {
                     let config = JobConfig {
                         id: p.id.clone(),

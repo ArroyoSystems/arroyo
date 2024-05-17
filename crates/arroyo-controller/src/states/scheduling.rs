@@ -303,36 +303,38 @@ impl State for Scheduling {
         // Compute assignments and send to workers
 
         // TODO: better error handling
-        let c = ctx.pool.get().await.unwrap();
 
         #[derive(Clone, Debug)]
         struct CheckpointInfo {
             epoch: u32,
             min_epoch: u32,
-            id: i64,
+            id: String,
             needs_commits: bool,
         }
 
-        let checkpoint_info = controller_queries::last_successful_checkpoint()
-            .bind(&c, &ctx.config.id)
-            .opt()
-            .await
-            .unwrap()
-            .map(|r| {
-                info!(
-                    message = "restoring checkpoint",
-                    job_id = ctx.config.id,
-                    epoch = r.epoch,
-                    min_epoch = r.min_epoch
-                );
+        let checkpoint_info = controller_queries::fetch_last_successful_checkpoint(
+            &ctx.db.client().await.unwrap(),
+            &ctx.config.id,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .map(|r| {
+            info!(
+                message = "restoring checkpoint",
+                job_id = ctx.config.id,
+                epoch = r.epoch,
+                min_epoch = r.min_epoch
+            );
 
-                CheckpointInfo {
-                    epoch: r.epoch as u32,
-                    min_epoch: r.min_epoch as u32,
-                    id: r.id,
-                    needs_commits: r.needs_commits,
-                }
-            });
+            CheckpointInfo {
+                epoch: r.epoch as u32,
+                min_epoch: r.min_epoch as u32,
+                id: r.pub_id,
+                needs_commits: r.needs_commits,
+            }
+        });
 
         info!("Restoring from {:?}", checkpoint_info);
 
@@ -342,10 +344,13 @@ impl State for Scheduling {
                 .as_ref()
                 .map(|checkpoint_info| checkpoint_info.epoch)
                 .unwrap_or(0);
-            controller_queries::mark_failed()
-                .bind(&c, &ctx.config.id, &(last_epoch as i32 + 1))
-                .await
-                .unwrap();
+            controller_queries::execute_mark_failed(
+                &ctx.db.client().await.unwrap(),
+                &ctx.config.id,
+                &(last_epoch as i32 + 1),
+            )
+            .await
+            .unwrap();
         }
 
         let mut committing_state = None;
@@ -537,7 +542,7 @@ impl State for Scheduling {
         let needs_commit = committing_state.is_some();
 
         let mut controller = JobController::new(
-            ctx.pool.clone(),
+            ctx.db.clone(),
             ctx.config.clone(),
             ctx.program.clone(),
             checkpoint_info.as_ref().map(|info| info.epoch).unwrap_or(0),

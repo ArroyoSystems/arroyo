@@ -35,11 +35,11 @@ use crate::rest_utils::{
     not_found, paginate_results, required_field, validate_pagination_params, ApiError, BearerAuth,
     ErrorResp,
 };
-use cornucopia_async::{Database, DatabaseSource};
 use crate::{
     queries::api_queries::{self, DbConnectionTable},
     to_micros, AuthData,
 };
+use cornucopia_async::{Database, DatabaseSource};
 
 async fn get_and_validate_connector(
     req: &ConnectionTablePost,

@@ -1,7 +1,7 @@
-use cornucopia_async::Database;
 use crate::{rest_utils::ErrorResp, AuthData, OrgMetadata};
 use axum::headers::authorization::{Authorization, Bearer};
 use axum::TypedHeader;
+use cornucopia_async::Database;
 
 pub(crate) async fn authenticate(
     _client: &Database<'_>,

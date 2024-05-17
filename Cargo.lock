@@ -25,15 +25,6 @@ checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
 
 [[package]]
 name = "ahash"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8fd72866655d1904d6b0997d0b07ba561047d070fbe29de039031c641b61217"
-dependencies = [
- "const-random",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c3a9648d43b9cd48db467b3f87fdd6e146bcc88ab0180006cef2179fe11d01"
@@ -242,7 +233,7 @@ name = "arrow-array"
 version = "51.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/parquet_bytes#97ee8cf71d05d4012094d9ee76fca0adfdd739fc"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-buffer",
  "arrow-data",
  "arrow-schema",
@@ -371,7 +362,7 @@ version = "51.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "848ee52bb92eb459b811fb471175ea3afcf620157674c8794f539838920f9228"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
@@ -395,7 +386,7 @@ version = "51.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "849524fa70e0e3c5ab58394c770cb8f514d0122d20de08475f7b472ed8075830"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
@@ -519,6 +510,7 @@ dependencies = [
  "arroyo-types",
  "arroyo-worker",
  "clap 4.5.4",
+ "cornucopia_async",
  "deadpool-postgres",
  "dirs",
  "postgres-types",
@@ -667,7 +659,7 @@ dependencies = [
 name = "arroyo-datastream"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow-schema",
  "arroyo-rpc",
@@ -815,7 +807,7 @@ dependencies = [
 name = "arroyo-operator"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow",
  "arroyo-datastream",
@@ -846,7 +838,7 @@ dependencies = [
 name = "arroyo-rpc"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "apache-avro",
  "arrow",
@@ -939,7 +931,7 @@ dependencies = [
 name = "arroyo-state"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow",
  "arrow-array",
@@ -1060,7 +1052,7 @@ dependencies = [
 name = "arroyo-worker"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow",
  "arrow-array",
@@ -2582,11 +2574,12 @@ dependencies = [
 
 [[package]]
 name = "chumsky"
-version = "0.8.0"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d02796e4586c6c41aeb68eae9bfb4558a522c35f1430c14b40136c3706e09e4"
+checksum = "8eebd66744a15ded14960ab4ccdbfb51ad3b81f51f3f04a80adac98c985396c9"
 dependencies = [
- "ahash 0.3.8",
+ "hashbrown 0.14.5",
+ "stacker",
 ]
 
 [[package]]
@@ -2691,8 +2684,7 @@ dependencies = [
 [[package]]
 name = "codegen_template"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0140c6261e747ed91e0c9d5b2ccd288bfd242a10f7453cfb2c72dc5f9de5b9b8"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#24f7ecff4d546c07967d2b5cdd0ed6c9b59a9ea8"
 dependencies = [
  "unicode-xid",
  "unscanny",
@@ -2817,37 +2809,37 @@ dependencies = [
 [[package]]
 name = "cornucopia"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d21d8c5cf5940c13b1d82977fc5d4230714ce76d991c5c00b8a1c791c691dcf"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#24f7ecff4d546c07967d2b5cdd0ed6c9b59a9ea8"
 dependencies = [
  "chumsky",
  "clap 4.5.4",
  "codegen_template",
  "heck 0.4.1",
- "indexmap 1.9.3",
+ "indexmap 2.2.6",
  "miette",
  "postgres",
  "postgres-types",
+ "prettyplease 0.2.20",
+ "syn 2.0.61",
  "thiserror",
 ]
 
 [[package]]
 name = "cornucopia_async"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38063b8553edf452cccc674f07b3b5e3144a24712e46647bfc357040f25fdc12"
+version = "0.6.0"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#24f7ecff4d546c07967d2b5cdd0ed6c9b59a9ea8"
 dependencies = [
  "async-trait",
  "cornucopia_client_core",
  "deadpool-postgres",
+ "rusqlite",
  "tokio-postgres",
 ]
 
 [[package]]
 name = "cornucopia_client_core"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a087271917ca54f32499539f3f44c8dc112ffea0f39f47d6cde075df8d2f18"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#24f7ecff4d546c07967d2b5cdd0ed6c9b59a9ea8"
 dependencies = [
  "fallible-iterator 0.2.0",
  "postgres-protocol",
@@ -3080,7 +3072,7 @@ name = "datafusion"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-ipc",
@@ -3130,7 +3122,7 @@ name = "datafusion-common"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3178,7 +3170,7 @@ name = "datafusion-expr"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "chrono",
@@ -3299,7 +3291,7 @@ name = "datafusion-physical-expr"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3333,7 +3325,7 @@ name = "datafusion-physical-plan"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3405,14 +3397,13 @@ dependencies = [
 
 [[package]]
 name = "deadpool"
-version = "0.9.5"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421fe0f90f2ab22016f32a9881be5134fdd71c65298917084b0c7477cbc3856e"
+checksum = "fb84100978c1c7b37f09ed3ce3e5f843af02c2a2c431bae5b19230dad2c1b490"
 dependencies = [
  "async-trait",
  "deadpool-runtime",
  "num_cpus",
- "retain_mut",
  "tokio",
 ]
 
@@ -3430,14 +3421,14 @@ dependencies = [
 
 [[package]]
 name = "deadpool-postgres"
-version = "0.10.5"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "836a24a9d49deefe610b8b60c767a7412e9a931d79a89415cd2d2d71630ca8d7"
+checksum = "bda39fa1cfff190d8924d447ad04fd22772c250438ca5ce1dfb3c80621c05aaa"
 dependencies = [
- "deadpool 0.9.5",
- "log",
+ "deadpool 0.10.0",
  "tokio",
  "tokio-postgres",
+ "tracing",
 ]
 
 [[package]]
@@ -4687,7 +4678,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
 ]
 
 [[package]]
@@ -4696,7 +4687,7 @@ version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "allocator-api2",
 ]
 
@@ -5473,7 +5464,7 @@ version = "0.84.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6834a4a1f53a8528d5f346cdd141a77dbda31beb33dab4bf24fa4ecf6c508744"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "async-trait",
  "backoff",
  "derivative",
@@ -6454,7 +6445,7 @@ name = "parquet"
 version = "51.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/parquet_bytes#cac44bf06e000fdf5b5fe954a439ae77b682ab80"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-array",
  "arrow-buffer",
  "arrow-cast",
@@ -7598,12 +7589,6 @@ dependencies = [
  "web-sys",
  "winreg 0.52.0",
 ]
-
-[[package]]
-name = "retain_mut"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
 
 [[package]]
 name = "rfc6979"

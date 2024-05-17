@@ -7,8 +7,8 @@ use axum::{Json, TypedHeader};
 use serde_json::json;
 use tracing::{error, warn};
 
-use cornucopia_async::{DatabaseSource, DbError};
 use axum::headers::authorization::{Authorization, Bearer};
+use cornucopia_async::{DatabaseSource, DbError};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

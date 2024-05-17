@@ -1,12 +1,12 @@
 use anyhow::{anyhow, bail};
 use std::{env, fs};
 
-use cornucopia_async::DatabaseSource;
 use arroyo_server_common::shutdown::Shutdown;
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{ports, DatabaseConfig, DATABASE_ENV, DATABASE_PATH_ENV};
 use arroyo_worker::WorkerServer;
 use clap::{Parser, Subcommand};
+use cornucopia_async::DatabaseSource;
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use serde_json::json;
 use std::process::exit;
@@ -283,7 +283,6 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
 async fn start_control_plane(service: CPService) {
     let _guard = arroyo_server_common::init_logging(service.name());
 
-    let pool = pg_pool().await;
     let db = db_source().await;
 
     log_event(
@@ -302,7 +301,7 @@ async fn start_control_plane(service: CPService) {
     );
 
     if service == CPService::Api || service == CPService::All {
-        shutdown.spawn_task("api", arroyo_api::start_server(db));
+        shutdown.spawn_task("api", arroyo_api::start_server(db.clone()));
     }
 
     if service == CPService::Compiler || service == CPService::All {
@@ -310,7 +309,7 @@ async fn start_control_plane(service: CPService) {
     }
 
     if service == CPService::Controller || service == CPService::All {
-        arroyo_controller::ControllerServer::new(pool)
+        arroyo_controller::ControllerServer::new(db)
             .await
             .start(shutdown.guard("controller"));
     }

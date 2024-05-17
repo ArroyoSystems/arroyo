@@ -6,8 +6,9 @@ fn main() -> Result<(), Error> {
     let queries_path = "queries";
     let destination = format!("{}/controller-sql.rs", std::env::var("OUT_DIR").unwrap());
     let settings = CodegenSettings {
-        is_async: true,
+        gen_async: true,
         derive_ser: false,
+        gen_sync: false,
     };
 
     println!("cargo:rerun-if-changed={queries_path}");

@@ -30,10 +30,10 @@ use crate::pipelines::{
     patch_pipeline, restart_pipeline, validate_query,
 };
 use crate::rest_utils::not_found;
-use cornucopia_async::DatabaseSource;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
 use crate::ApiDoc;
 use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV};
+use cornucopia_async::DatabaseSource;
 
 #[derive(RustEmbed)]
 #[folder = "../../webui/dist"]
