@@ -9,10 +9,12 @@ fn main() -> Result<(), Error> {
         gen_async: true,
         derive_ser: true,
         gen_sync: false,
+        gen_sqlite: true,
     };
 
     println!("cargo:rerun-if-changed={queries_path}");
     println!("cargo:rerun-if-changed=migrations");
+    println!("cargo:rerun-if-changed=sqlite_migrations");
 
     let config = DatabaseConfig::load();
     let mut client = Client::configure()
@@ -24,7 +26,20 @@ fn main() -> Result<(), Error> {
         .connect(NoTls)
         .unwrap_or_else(|_| panic!("Could not connect to postgres: {:?}", config));
 
-    cornucopia::generate_live(&mut client, queries_path, Some(&destination), settings)?;
+    let mut sqlite =
+        rusqlite::Connection::open_in_memory().expect("Couldn't open sqlite memory connection");
+    let migrations = refinery::load_sql_migrations("sqlite_migrations").unwrap();
+    refinery::Runner::new(&migrations)
+        .run(&mut sqlite)
+        .expect("Failed to run migrations");
+
+    cornucopia::generate_live_with_sqlite(
+        &mut client,
+        queries_path,
+        Some(&destination),
+        &sqlite,
+        settings,
+    )?;
 
     Ok(())
 }

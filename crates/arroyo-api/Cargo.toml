@@ -97,3 +97,5 @@ cornucopia = { workspace = true }
 postgres = "0.19.5"
 arroyo-types = { path = "../arroyo-types" }
 utoipa = "3"
+rusqlite = "0.31.0"
+refinery = { version = "0.8.14", features = ["rusqlite"] }
