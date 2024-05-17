@@ -168,7 +168,7 @@ fn sqlite_connection() -> rusqlite::Connection {
         .unwrap_or_else(|e| panic!("Could not open sqlite database at path {:?}: {:?}", path, e));
 
     if !exists {
-        info!("Creating SQLite database at {:?}", path);
+        info!("Creating config database at {}", path.to_string_lossy());
         if let Err(e) = sqlite_migrations::migrations::runner().run(&mut conn) {
             let _ = fs::remove_file(&path);
             panic!("Failed to set up database: {}", e);

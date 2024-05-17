@@ -2687,7 +2687,7 @@ dependencies = [
 [[package]]
 name = "codegen_template"
 version = "0.1.0"
-source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#15014fc55954cbf2015a3cd44f98e0bd284bc1d3"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
  "unicode-xid",
  "unscanny",
@@ -2812,7 +2812,7 @@ dependencies = [
 [[package]]
 name = "cornucopia"
 version = "0.9.0"
-source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#15014fc55954cbf2015a3cd44f98e0bd284bc1d3"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
  "chumsky",
  "clap 4.5.4",
@@ -2831,7 +2831,7 @@ dependencies = [
 [[package]]
 name = "cornucopia_async"
 version = "0.6.0"
-source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#15014fc55954cbf2015a3cd44f98e0bd284bc1d3"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
  "async-trait",
  "cornucopia_client_core",
@@ -2843,7 +2843,7 @@ dependencies = [
 [[package]]
 name = "cornucopia_client_core"
 version = "0.4.0"
-source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#15014fc55954cbf2015a3cd44f98e0bd284bc1d3"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
  "fallible-iterator 0.2.0",
  "postgres-protocol",

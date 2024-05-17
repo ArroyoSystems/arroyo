@@ -108,7 +108,7 @@ CREATE TABLE job_statuses (
     finish_time TIMESTAMP,
     tasks INTEGER,
     failure_message TEXT,
-    restarts INTEGER DEFAULT 0,
+    restarts INTEGER DEFAULT 0 NOT NULL,
     pipeline_path TEXT,
     wasm_path TEXT,
     state TEXT DEFAULT 'Created' NOT NULL,
