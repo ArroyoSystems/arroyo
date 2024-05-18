@@ -729,7 +729,7 @@ impl StateMachine {
         if let Some(tx) = &self.tx {
             tx.send(msg).await.map_err(|_| "State machine is inactive")
         } else {
-            Err("State machine is inactive")
+            Err("State machine not started")
         }
     }
 
