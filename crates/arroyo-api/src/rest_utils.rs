@@ -4,12 +4,11 @@ use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, TypedHeader};
-use deadpool_postgres::{Object, Pool};
 use serde_json::json;
-use thiserror::Error;
-use tracing::error;
+use tracing::{error, warn};
 
 use axum::headers::authorization::{Authorization, Bearer};
+use cornucopia_async::{DatabaseSource, DbError};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -25,10 +24,47 @@ pub struct ErrorResp {
     pub(crate) message: String,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error(transparent)]
     JsonExtractorRejection(#[from] JsonRejection),
+}
+
+pub fn map_insert_err(name: &str, error: DbError) -> ErrorResp {
+    if error == DbError::DuplicateViolation {
+        return bad_request(format!("{} with that name already exists", name));
+    } else {
+        error.into()
+    }
+}
+
+pub fn map_delete_err(name: &str, user: &str, error: DbError) -> ErrorResp {
+    if error == DbError::ForeignKeyViolation {
+        return bad_request(format!(
+            "Cannot delete {}; it is still being used by {}",
+            name, user
+        ));
+    } else {
+        error.into()
+    }
+}
+
+impl From<DbError> for ErrorResp {
+    fn from(value: DbError) -> Self {
+        match value {
+            DbError::DuplicateViolation => bad_request("A record already exists with that name"),
+            DbError::ForeignKeyViolation => {
+                bad_request("Cannot delete; other records depend on this one")
+            }
+            DbError::Other(e) => {
+                warn!("Unhandled database error {}", e);
+                ErrorResp {
+                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e,
+                }
+            }
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -67,16 +103,11 @@ impl IntoResponse for ErrorResp {
     }
 }
 
-pub async fn client(pool: &Pool) -> Result<Object, ErrorResp> {
-    pool.get().await.map_err(log_and_map)
-}
-
 pub(crate) async fn authenticate(
-    pool: &Pool,
+    db: &DatabaseSource,
     bearer_auth: BearerAuth,
 ) -> Result<AuthData, ErrorResp> {
-    let client = client(pool).await?;
-    cloud::authenticate(client, bearer_auth).await
+    cloud::authenticate(&db.client().await?, bearer_auth).await
 }
 
 pub(crate) fn bad_request(message: impl Into<String>) -> ErrorResp {

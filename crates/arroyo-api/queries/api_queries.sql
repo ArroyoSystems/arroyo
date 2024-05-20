@@ -7,8 +7,7 @@ WHERE api_key = :api_key;
 ----------- connection profiles ----------------
 --! create_connection_profile
 INSERT INTO connection_profiles (pub_id, organization_id, created_by, name, type, config)
-VALUES (:pub_id, :organization_id, :created_by, :name, :type, :config)
-RETURNING id;
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :config);
 
 --! get_connection_profiles : DbConnectionProfile()
 SELECT
@@ -40,7 +39,7 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --! create_schema
 INSERT INTO schemas (pub_id, organization_id, created_by, name, kafka_schema_registry, type, config)
-VALUES (:pub_id, :organization_id, :created_by, :name, :kafka_schema_registry, :type, :config) RETURNING id;
+VALUES (:pub_id, :organization_id, :created_by, :name, :kafka_schema_registry, :type, :config);
 
 
 ------- connection tables -------------
@@ -132,11 +131,10 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --! create_pipeline(textual_repr?)
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version)
-VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version)
-RETURNING id;
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version);
 
 --! get_pipelines : DbPipeline
-SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -148,14 +146,19 @@ WHERE pipelines.organization_id = :organization_id
         WHERE pub_id = :starting_after
     ) OR :starting_after = '')
 ORDER BY pipelines.created_at DESC
-LIMIT :limit::integer;
+LIMIT cast(:limit as integer);
 
 --! get_pipeline: DbPipeline
-SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
 WHERE pipelines.pub_id = :pub_id AND pipelines.organization_id = :organization_id;
+
+--! get_pipeline_id
+SELECT id, pub_id
+FROM pipelines
+WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
 --! add_pipeline_connection_table
 INSERT INTO connection_table_pipelines(pub_id, pipeline_id, connection_table_id)
@@ -274,7 +277,7 @@ DELETE FROM pipelines WHERE pipelines.id = (
 --! get_operator_errors : DbLogMessage
 SELECT jlm.pub_id, jlm.job_id, jlm.operator_id, jlm.task_index, jlm.created_at, jlm.log_level, jlm.message, jlm.details
 FROM job_log_messages jlm
-JOIN public.job_configs ON job_configs.id = jlm.job_id
+JOIN job_configs ON job_configs.id = jlm.job_id
 WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id
   AND jlm.log_level = 'error'
   AND (jlm.created_at < (
@@ -282,7 +285,7 @@ WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_i
     WHERE pub_id = :starting_after
 ) OR :starting_after = '')
 ORDER BY jlm.created_at DESC
-LIMIT :limit::integer;
+LIMIT cast(:limit as integer);
 
 ----------- udfs -----------------------
 

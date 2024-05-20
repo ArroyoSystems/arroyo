@@ -25,15 +25,6 @@ checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
 
 [[package]]
 name = "ahash"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8fd72866655d1904d6b0997d0b07ba561047d070fbe29de039031c641b61217"
-dependencies = [
- "const-random",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c3a9648d43b9cd48db467b3f87fdd6e146bcc88ab0180006cef2179fe11d01"
@@ -242,7 +233,7 @@ name = "arrow-array"
 version = "51.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/parquet_bytes#97ee8cf71d05d4012094d9ee76fca0adfdd739fc"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-buffer",
  "arrow-data",
  "arrow-schema",
@@ -371,7 +362,7 @@ version = "51.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "848ee52bb92eb459b811fb471175ea3afcf620157674c8794f539838920f9228"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
@@ -395,7 +386,7 @@ version = "51.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "849524fa70e0e3c5ab58394c770cb8f514d0122d20de08475f7b472ed8075830"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
@@ -461,6 +452,7 @@ dependencies = [
  "cornucopia",
  "cornucopia_async",
  "deadpool-postgres",
+ "deadpool-sqlite",
  "futures",
  "futures-util",
  "h2 0.3.26",
@@ -477,8 +469,10 @@ dependencies = [
  "quote",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "refinery",
  "regress 0.6.0",
  "reqwest 0.11.27",
+ "rusqlite",
  "rust-embed 6.8.1",
  "schemars",
  "serde",
@@ -517,9 +511,12 @@ dependencies = [
  "arroyo-types",
  "arroyo-worker",
  "clap 4.5.4",
+ "cornucopia_async",
  "deadpool-postgres",
+ "dirs",
  "postgres-types",
  "refinery",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
@@ -642,8 +639,10 @@ dependencies = [
  "prost 0.12.4",
  "quote",
  "rand 0.8.5",
+ "refinery",
  "regex",
  "reqwest 0.11.27",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -663,7 +662,7 @@ dependencies = [
 name = "arroyo-datastream"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow-schema",
  "arroyo-rpc",
@@ -811,7 +810,7 @@ dependencies = [
 name = "arroyo-operator"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow",
  "arroyo-datastream",
@@ -842,7 +841,7 @@ dependencies = [
 name = "arroyo-rpc"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "apache-avro",
  "arrow",
@@ -935,7 +934,7 @@ dependencies = [
 name = "arroyo-state"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow",
  "arrow-array",
@@ -1056,7 +1055,7 @@ dependencies = [
 name = "arroyo-worker"
 version = "0.11.0-dev"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "anyhow",
  "arrow",
  "arrow-array",
@@ -2578,11 +2577,12 @@ dependencies = [
 
 [[package]]
 name = "chumsky"
-version = "0.8.0"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d02796e4586c6c41aeb68eae9bfb4558a522c35f1430c14b40136c3706e09e4"
+checksum = "8eebd66744a15ded14960ab4ccdbfb51ad3b81f51f3f04a80adac98c985396c9"
 dependencies = [
- "ahash 0.3.8",
+ "hashbrown 0.14.5",
+ "stacker",
 ]
 
 [[package]]
@@ -2687,8 +2687,7 @@ dependencies = [
 [[package]]
 name = "codegen_template"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0140c6261e747ed91e0c9d5b2ccd288bfd242a10f7453cfb2c72dc5f9de5b9b8"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
  "unicode-xid",
  "unscanny",
@@ -2813,39 +2812,40 @@ dependencies = [
 [[package]]
 name = "cornucopia"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d21d8c5cf5940c13b1d82977fc5d4230714ce76d991c5c00b8a1c791c691dcf"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
  "chumsky",
  "clap 4.5.4",
  "codegen_template",
  "heck 0.4.1",
- "indexmap 1.9.3",
+ "indexmap 2.2.6",
  "miette",
  "postgres",
  "postgres-types",
+ "prettyplease 0.2.20",
+ "rusqlite",
+ "syn 2.0.61",
  "thiserror",
 ]
 
 [[package]]
 name = "cornucopia_async"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38063b8553edf452cccc674f07b3b5e3144a24712e46647bfc357040f25fdc12"
+version = "0.6.0"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
  "async-trait",
  "cornucopia_client_core",
  "deadpool-postgres",
+ "rusqlite",
  "tokio-postgres",
 ]
 
 [[package]]
 name = "cornucopia_client_core"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a087271917ca54f32499539f3f44c8dc112ffea0f39f47d6cde075df8d2f18"
+source = "git+https://github.com/ArroyoSystems/cornucopia?branch=sqlite#f1f037c0653a9a1f103f85548079d004d904893b"
 dependencies = [
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "postgres-protocol",
  "postgres-types",
  "serde",
@@ -3076,7 +3076,7 @@ name = "datafusion"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-ipc",
@@ -3126,7 +3126,7 @@ name = "datafusion-common"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3174,7 +3174,7 @@ name = "datafusion-expr"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "chrono",
@@ -3295,7 +3295,7 @@ name = "datafusion-physical-expr"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3329,7 +3329,7 @@ name = "datafusion-physical-plan"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow",
  "arrow-array",
  "arrow-buffer",
@@ -3401,27 +3401,38 @@ dependencies = [
 
 [[package]]
 name = "deadpool"
-version = "0.9.5"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421fe0f90f2ab22016f32a9881be5134fdd71c65298917084b0c7477cbc3856e"
+checksum = "fb84100978c1c7b37f09ed3ce3e5f843af02c2a2c431bae5b19230dad2c1b490"
 dependencies = [
  "async-trait",
  "deadpool-runtime",
  "num_cpus",
- "retain_mut",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff0fc28638c21092aba483136debc6e177fff3dace8c835d715866923b03323e"
+dependencies = [
+ "deadpool-runtime",
+ "num_cpus",
+ "serde",
  "tokio",
 ]
 
 [[package]]
 name = "deadpool-postgres"
-version = "0.10.5"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "836a24a9d49deefe610b8b60c767a7412e9a931d79a89415cd2d2d71630ca8d7"
+checksum = "bda39fa1cfff190d8924d447ad04fd22772c250438ca5ce1dfb3c80621c05aaa"
 dependencies = [
- "deadpool",
- "log",
+ "deadpool 0.10.0",
  "tokio",
  "tokio-postgres",
+ "tracing",
 ]
 
 [[package]]
@@ -3431,6 +3442,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
 dependencies = [
  "tokio",
+]
+
+[[package]]
+name = "deadpool-sqlite"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a849c6ac43afc930ff3f49904abb49642ae8be629b42586f0f7733424c766217"
+dependencies = [
+ "deadpool 0.11.2",
+ "deadpool-sync",
+ "rusqlite",
+ "serde",
+]
+
+[[package]]
+name = "deadpool-sync"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cc213ac28dbe3eda41e1c1e40fad9a04b3ee3bb12f18dee5930a36aca7fa0e8"
+dependencies = [
+ "deadpool-runtime",
+ "tracing",
 ]
 
 [[package]]
@@ -3939,6 +3972,18 @@ name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
+
+[[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fastrand"
@@ -4637,7 +4682,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
 ]
 
 [[package]]
@@ -4646,8 +4691,17 @@ version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "allocator-api2",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "692eaaf7f7607518dd3cef090f1474b61edc5301d8012f09579920df68b725ee"
+dependencies = [
+ "hashbrown 0.14.5",
 ]
 
 [[package]]
@@ -4866,7 +4920,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -5414,7 +5468,7 @@ version = "0.84.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6834a4a1f53a8528d5f346cdd141a77dbda31beb33dab4bf24fa4ecf6c508744"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "async-trait",
  "backoff",
  "derivative",
@@ -5608,6 +5662,17 @@ checksum = "c0ff37bd590ca25063e35af745c343cb7a0271906fb7b37e4813e8f79f00268d"
 dependencies = [
  "bitflags 2.5.0",
  "libc",
+]
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c10584274047cb335c23d3e61bcef8e323adae7c5c8c760540f73610177fc3f"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -6384,7 +6449,7 @@ name = "parquet"
 version = "51.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=51.0.0/parquet_bytes#cac44bf06e000fdf5b5fe954a439ae77b682ab80"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "arrow-array",
  "arrow-buffer",
  "arrow-cast",
@@ -6669,7 +6734,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7915b33ed60abc46040cbcaa25ffa1c7ec240668e0477c4f3070786f5916d451"
 dependencies = [
  "bytes",
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "futures-util",
  "log",
  "tokio",
@@ -6697,7 +6762,7 @@ dependencies = [
  "base64 0.21.7",
  "byteorder",
  "bytes",
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "hmac 0.12.1",
  "md-5 0.10.6",
  "memchr",
@@ -6713,7 +6778,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d2234cdee9408b523530a9b6d2d6b373d1db34f6a8e51dc03ded1828d7fb67c"
 dependencies = [
  "bytes",
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "postgres-derive",
  "postgres-protocol",
  "serde",
@@ -7300,9 +7365,9 @@ dependencies = [
 
 [[package]]
 name = "refinery"
-version = "0.8.9"
+version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "431fd1854421586de5e83614052cb0d2d82025647829db6d9499b27385e58a6b"
+checksum = "0904191f0566c3d3e0091d5cc8dec22e663d77def2d247b16e7a438b188bf75d"
 dependencies = [
  "refinery-core",
  "refinery-macros",
@@ -7318,11 +7383,14 @@ dependencies = [
  "cfg-if",
  "log",
  "regex",
+ "rusqlite",
+ "serde",
  "siphasher 1.0.1",
  "thiserror",
  "time",
  "tokio",
  "tokio-postgres",
+ "toml",
  "url",
  "walkdir",
 ]
@@ -7525,12 +7593,6 @@ dependencies = [
  "web-sys",
  "winreg 0.52.0",
 ]
-
-[[package]]
-name = "retain_mut"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
 
 [[package]]
 name = "rfc6979"
@@ -7737,6 +7799,22 @@ dependencies = [
  "serde",
  "sha2 0.9.9",
  "tokio",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b838eba278d213a8beaf485bd313fd580ca4505a00d5871caeb1457c55322cae"
+dependencies = [
+ "bitflags 2.5.0",
+ "fallible-iterator 0.3.0",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "serde_json",
+ "smallvec",
+ "time",
 ]
 
 [[package]]
@@ -8993,7 +9071,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "futures-channel",
  "futures-util",
  "log",

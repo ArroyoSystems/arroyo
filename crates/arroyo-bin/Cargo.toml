@@ -24,7 +24,10 @@ tracing = "0.1"
 
 postgres-types = { version = "*", features = ["derive"] }
 tokio-postgres = { version = "*", features = ["with-serde_json-1", "with-time-0_3", "with-uuid-1"] }
-deadpool-postgres = { version = "0.10" }
+deadpool-postgres = { workspace = true }
+cornucopia_async = { workspace = true }
+rusqlite = "0.31.0"
 uuid = { version = "1.7.0", features = ["v4"] }
-refinery = { version = "=0.8.9" , features = ["tokio-postgres"] }
+refinery = { version = "0.8.14" , features = ["tokio-postgres", "rusqlite"] }
 anyhow = { version = "1.0.79", features = [] }
+dirs = "5.0.1"

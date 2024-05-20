@@ -91,7 +91,7 @@ impl State for Running {
                     if ctx.status.restarts > 0 && running_start.elapsed() > HEALTHY_DURATION {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
-                        if let Err(e) = ctx.status.update_db(&ctx.pool).await {
+                        if let Err(e) = ctx.status.update_db(&ctx.db).await {
                             error!(message = "Failed to update status", error = format!("{:?}", e),
                                 job_id = ctx.config.id);
                             ctx.status.restarts = restarts;

@@ -91,7 +91,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
     let checkpoint_id = epoch as i64;
     let mut checkpoint_state = CheckpointState::new(
         ctx.job_id.clone(),
-        checkpoint_id,
+        checkpoint_id.to_string(),
         epoch,
         0,
         ctx.tasks_per_operator.clone(),

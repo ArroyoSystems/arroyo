@@ -52,8 +52,7 @@ WHERE job_id = :job_id AND epoch < :epoch;
 --! create_checkpoint
 INSERT INTO checkpoints
 (pub_id, organization_id, job_id, state_backend, epoch, min_epoch, start_time)
-VALUES (:pub_id, :organization_id, :job_id, :state_backend, :epoch, :min_epoch, :start_time)
-RETURNING id;
+VALUES (:pub_id, :organization_id, :job_id, :state_backend, :epoch, :min_epoch, :start_time);
 
 --! update_checkpoint (finish_time?)
 UPDATE checkpoints
@@ -61,14 +60,14 @@ SET
     operators = :operators,
     finish_time = :finish_time,
     state = :state
-WHERE id = :id;
+WHERE pub_id = :pub_id;
 
 --! commit_checkpoint
 UPDATE checkpoints
 SET
     finish_time = :finish_time,
     state = 'ready'
-WHERE id = :id;
+WHERE pub_id = :pub_id;
 
 --! mark_compacting
 UPDATE checkpoints
@@ -83,7 +82,7 @@ SET
 WHERE job_id = :job_id AND epoch >= :epoch;
 
 --! last_successful_checkpoint
-SELECT id, epoch, min_epoch, state = 'committing' as needs_commits
+SELECT pub_id, epoch, min_epoch, state = 'committing' as needs_commits
 FROM checkpoints
 WHERE job_id = :job_id AND (state = 'ready' or state = 'committing')
 ORDER BY epoch DESC
@@ -91,5 +90,4 @@ LIMIT 1;
 
 --! create_job_log_message
 INSERT INTO job_log_messages (pub_id, job_id, operator_id, task_index, log_level, message, details)
-VALUES (:pub_id, :job_id, :operator_id, :task_index, :log_level, :message, :details)
-RETURNING id;
+VALUES (:pub_id, :job_id, :operator_id, :task_index, :log_level, :message, :details);

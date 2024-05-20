@@ -63,7 +63,8 @@ pub fn init_logging(name: &str) -> Option<WorkerGuard> {
         .with_filter(
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
+                .from_env_lossy()
+                .add_directive("refinery_core=warn".parse().unwrap()),
         );
 
     let subscriber = Registry::default().with(stdout_log);

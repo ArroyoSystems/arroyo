@@ -1,10 +1,8 @@
 use crate::queries::api_queries;
-use crate::queries::api_queries::{
-    CreateUdfParams, DbUdf, DeleteUdfParams, GetUdfByNameParams, GetUdfParams,
-};
+use crate::queries::api_queries::DbUdf;
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, internal_server_error, log_and_map, not_found, ApiError,
+    authenticate, bad_request, internal_server_error, map_insert_err, not_found, ApiError,
     BearerAuth, ErrorResp,
 };
 use crate::{compiler_service, to_micros};
@@ -18,7 +16,6 @@ use arroyo_udf_host::ParsedUdfFile;
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
-use cornucopia_async::Params;
 use tonic::transport::Channel;
 use tracing::error;
 
@@ -59,14 +56,13 @@ pub async fn create_udf(
     bearer_auth: BearerAuth,
     WithRejection(Json(req), _): WithRejection<Json<UdfPost>, ApiError>,
 ) -> Result<Json<GlobalUdf>, ErrorResp> {
-    let mut client = client(&state.pool).await.unwrap();
-    let auth_data = authenticate(&state.pool, bearer_auth).await.unwrap();
+    let auth_data = authenticate(&state.database, bearer_auth).await.unwrap();
 
-    let transaction = client.transaction().await.map_err(log_and_map)?;
-    transaction
-        .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
-        .await
-        .map_err(log_and_map)?;
+    // let transaction = client.transaction().await.map_err(log_and_map)?;
+    // transaction
+    //     .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
+    //     .await
+    //     .map_err(log_and_map)?;
 
     // build udf
     let build_udf_resp = build_udf(&mut compiler_service().await?, &req.definition, true).await?;
@@ -75,61 +71,35 @@ pub async fn create_udf(
         return Err(bad_request("UDF is invalid"));
     }
 
+    let client = state.database.client().await?;
+
     let udf_name = build_udf_resp.name.expect("udf name not set for valid UDF");
     let udf_url = build_udf_resp.url.expect("udf URL not set for valid UDF");
 
     // check for duplicates
-    let duplicate = api_queries::get_udf_by_name()
-        .params(
-            &transaction,
-            &GetUdfByNameParams {
-                organization_id: &auth_data.organization_id,
-                name: &udf_name,
-            },
-        )
-        .opt()
-        .await
-        .map_err(log_and_map)?;
-
-    if duplicate.is_some() {
-        return Err(bad_request(format!(
-            "Global UDF with name {} already exists",
-            &udf_name
-        )));
-    }
-
     let pub_id = generate_id(IdTypes::Udf);
-    api_queries::create_udf()
-        .params(
-            &transaction,
-            &CreateUdfParams {
-                pub_id: &pub_id,
-                created_by: &auth_data.user_id,
-                organization_id: &auth_data.organization_id,
-                prefix: &req.prefix,
-                name: &udf_name,
-                definition: &req.definition,
-                description: &req.description.unwrap_or_default(),
-                dylib_url: udf_url,
-            },
-        )
-        .await
-        .map_err(log_and_map)?;
+    api_queries::execute_create_udf(
+        &client,
+        &pub_id,
+        &auth_data.user_id,
+        &auth_data.organization_id,
+        &req.prefix,
+        &udf_name,
+        &req.definition,
+        &req.description.unwrap_or_default(),
+        &udf_url,
+    )
+    .await
+    .map_err(|e| map_insert_err("udf", e))?;
 
-    let created_udf = api_queries::get_udf()
-        .params(
-            &transaction,
-            &GetUdfParams {
-                organization_id: &auth_data.organization_id,
-                pub_id: &pub_id,
-            },
-        )
-        .one()
-        .await
-        .map_err(log_and_map)?
+    let created_udf = api_queries::fetch_get_udf(&client, &auth_data.organization_id, &pub_id)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| internal_server_error("Failed to fetch created UDF"))?
         .into();
 
-    transaction.commit().await.map_err(log_and_map)?;
+    // transaction.commit().await.map_err(log_and_map)?;
 
     Ok(Json(created_udf))
 }
@@ -147,14 +117,11 @@ pub async fn get_udfs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
 ) -> Result<Json<GlobalUdfCollection>, ErrorResp> {
-    let client = client(&state.pool).await.unwrap();
-    let auth_data = authenticate(&state.pool, bearer_auth).await.unwrap();
+    let auth_data = authenticate(&state.database, bearer_auth).await.unwrap();
 
-    let udfs = api_queries::get_udfs()
-        .bind(&client, &auth_data.organization_id)
-        .all()
-        .await
-        .map_err(log_and_map)?;
+    let udfs =
+        api_queries::fetch_get_udfs(&state.database.client().await?, &auth_data.organization_id)
+            .await?;
 
     Ok(Json(GlobalUdfCollection {
         data: udfs.into_iter().map(|u| u.into()).collect(),
@@ -178,19 +145,14 @@ pub async fn delete_udf(
     bearer_auth: BearerAuth,
     Path(udf_pub_id): Path<String>,
 ) -> Result<(), ErrorResp> {
-    let client = client(&state.pool).await.unwrap();
-    let auth_data = authenticate(&state.pool, bearer_auth).await.unwrap();
+    let auth_data = authenticate(&state.database, bearer_auth).await.unwrap();
 
-    let count = api_queries::delete_udf()
-        .params(
-            &client,
-            &DeleteUdfParams {
-                organization_id: &auth_data.organization_id,
-                pub_id: &udf_pub_id,
-            },
-        )
-        .await
-        .map_err(log_and_map)?;
+    let count = api_queries::execute_delete_udf(
+        &state.database.client().await?,
+        &auth_data.organization_id,
+        &udf_pub_id,
+    )
+    .await?;
 
     if count != 1 {
         return Err(not_found("UDF"));

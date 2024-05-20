@@ -3,14 +3,14 @@ use std::collections::{HashMap, HashSet};
 use arroyo_rpc::grpc::{OperatorCommitData, TableCommitData};
 
 pub struct CommittingState {
-    checkpoint_id: i64,
+    checkpoint_id: String,
     subtasks_to_commit: HashSet<(String, u32)>,
     committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
 }
 
 impl CommittingState {
     pub fn new(
-        checkpoint_id: i64,
+        checkpoint_id: String,
         subtasks_to_commit: HashSet<(String, u32)>,
         committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
     ) -> Self {
@@ -21,8 +21,8 @@ impl CommittingState {
         }
     }
 
-    pub fn checkpoint_id(&self) -> i64 {
-        self.checkpoint_id
+    pub fn checkpoint_id(&self) -> &str {
+        &self.checkpoint_id
     }
 
     pub fn subtask_committed(&mut self, operator_id: String, subtask_index: u32) {

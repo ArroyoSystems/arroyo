@@ -1,6 +1,4 @@
-use crate::queries::api_queries::{
-    DbCheckpoint, DbLogMessage, DbPipelineJob, GetOperatorErrorsParams,
-};
+use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, CheckpointEventSpan, CheckpointSpanType, OperatorCheckpointGroup,
     SubtaskCheckpointGroup,
@@ -19,8 +17,6 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
 use axum::Json;
-use cornucopia_async::Params;
-use deadpool_postgres::Transaction;
 use futures_util::stream::Stream;
 use std::convert::Infallible;
 use std::{collections::HashMap, time::Duration};
@@ -34,11 +30,12 @@ const PREVIEW_TTL: Duration = Duration::from_secs(60);
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map, not_found, paginate_results,
+    authenticate, bad_request, log_and_map, not_found, paginate_results,
     validate_pagination_params, BearerAuth, ErrorResp,
 };
 use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
+use cornucopia_async::DatabaseSource;
 
 pub(crate) async fn create_job<'a>(
     pipeline_name: &str,
@@ -46,7 +43,7 @@ pub(crate) async fn create_job<'a>(
     checkpoint_interval: Duration,
     preview: bool,
     auth: &AuthData,
-    client: &Transaction<'a>,
+    db: &DatabaseSource,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -62,11 +59,8 @@ pub(crate) async fn create_job<'a>(
         ));
     }
 
-    let running_jobs = api_queries::get_jobs()
-        .bind(client, &auth.organization_id)
-        .all()
-        .await
-        .map_err(log_and_map)?
+    let running_jobs = api_queries::fetch_get_jobs(&db.client().await?, &auth.organization_id)
+        .await?
         .iter()
         .filter(|j| {
             j.stop == public::StopMode::none
@@ -89,33 +83,29 @@ pub(crate) async fn create_job<'a>(
     let job_id = generate_id(IdTypes::JobConfig);
 
     // TODO: handle chance of collision in ids
-    api_queries::create_job()
-        .bind(
-            client,
-            &job_id,
-            &auth.organization_id,
-            &pipeline_name,
-            &auth.user_id,
-            &pipeline_id,
-            &(checkpoint_interval.as_micros() as i64),
-            &(if preview {
-                Some(PREVIEW_TTL.as_micros() as i64)
-            } else {
-                None
-            }),
-        )
-        .await
-        .map_err(log_and_map)?;
+    api_queries::execute_create_job(
+        &db.client().await?,
+        &job_id,
+        &auth.organization_id,
+        &pipeline_name,
+        &auth.user_id,
+        &pipeline_id,
+        &(checkpoint_interval.as_micros() as i64),
+        &(if preview {
+            Some(PREVIEW_TTL.as_micros() as i64)
+        } else {
+            None
+        }),
+    )
+    .await?;
 
-    api_queries::create_job_status()
-        .bind(
-            client,
-            &generate_id(IdTypes::JobStatus),
-            &job_id,
-            &auth.organization_id,
-        )
-        .await
-        .map_err(log_and_map)?;
+    api_queries::execute_create_job_status(
+        &db.client().await?,
+        &generate_id(IdTypes::JobStatus),
+        &job_id,
+        &auth.organization_id,
+    )
+    .await?;
 
     Ok(job_id)
 }
@@ -201,30 +191,26 @@ pub async fn get_job_errors(
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
     query_params: Query<PaginationQueryParams>,
 ) -> Result<Json<JobLogMessageCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
+    let db = state.database.client().await?;
 
     let (starting_after, limit) =
         validate_pagination_params(query_params.starting_after.clone(), query_params.limit)?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
 
-    let errors = api_queries::get_operator_errors()
-        .params(
-            &client,
-            &GetOperatorErrorsParams {
-                organization_id: &auth_data.organization_id,
-                job_id: &job_pub_id,
-                starting_after: starting_after.unwrap_or_default(),
-                limit: limit as i32,
-            },
-        )
-        .all()
-        .await
-        .map_err(log_and_map)?
-        .into_iter()
-        .map(|m| m.into())
-        .collect();
+    let errors = api_queries::fetch_get_operator_errors(
+        &db,
+        &auth_data.organization_id,
+        &job_pub_id,
+        &starting_after.unwrap_or_default(),
+        &(limit as i32),
+    )
+    .await
+    .map_err(log_and_map)?
+    .into_iter()
+    .map(|m| m.into())
+    .collect();
 
     let (errors, has_more) = paginate_results(errors, limit);
 
@@ -272,19 +258,18 @@ pub async fn get_job_checkpoints(
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
 ) -> Result<Json<CheckpointCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let db = state.database.client().await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
 
-    let checkpoints = api_queries::get_job_checkpoints()
-        .bind(&client, &job_pub_id, &auth_data.organization_id)
-        .all()
-        .await
-        .map_err(log_and_map)?
-        .into_iter()
-        .map(|m| m.into())
-        .collect();
+    let checkpoints =
+        api_queries::fetch_get_job_checkpoints(&db, &job_pub_id, &auth_data.organization_id)
+            .await
+            .map_err(log_and_map)?
+            .into_iter()
+            .map(|m| m.into())
+            .collect();
 
     Ok(Json(CheckpointCollection { data: checkpoints }))
 }
@@ -346,8 +331,7 @@ fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEven
             start_time: checkpoint_started.time,
             finish_time: operator_finished.time,
         });
-    }
-
+    };
     if let (Some(operator_finished), Some(pre_commit)) = (operator_finished, pre_commit) {
         event_spans.push(CheckpointEventSpan {
             span_type: CheckpointSpanType::Committing,
@@ -379,27 +363,27 @@ pub async fn get_checkpoint_details(
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id, epoch)): Path<(String, String, u32)>,
 ) -> Result<Json<OperatorCheckpointGroupCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let db = state.database.client().await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
 
-    let checkpoint_details = api_queries::get_checkpoint_details()
-        .bind(
-            &client,
-            &job_pub_id,
-            &auth_data.organization_id,
-            &(epoch as i32),
-        )
-        .opt()
-        .await
-        .map_err(log_and_map)?
-        .ok_or_else(|| {
-            not_found(&format!(
-                "Checkpoint with epoch {} for job '{}'",
-                epoch, job_pub_id
-            ))
-        })?;
+    let checkpoint_details = api_queries::fetch_get_checkpoint_details(
+        &db,
+        &job_pub_id,
+        &auth_data.organization_id,
+        &(epoch as i32),
+    )
+    .await
+    .map_err(log_and_map)?
+    .into_iter()
+    .next()
+    .ok_or_else(|| {
+        not_found(&format!(
+            "Checkpoint with epoch {} for job '{}'",
+            epoch, job_pub_id
+        ))
+    })?;
 
     let mut operators: Vec<OperatorCheckpointGroup> = vec![];
 
@@ -452,12 +436,12 @@ pub async fn get_job_output(
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let db = state.database.client().await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     // validate that the job exists, the user has access, and the graph has a GrpcSink
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
-    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
 
     if !pipeline
         .graph
@@ -529,14 +513,13 @@ pub async fn get_jobs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
 ) -> Result<Json<JobCollection>, ErrorResp> {
-    let client = client(&state.pool).await?;
-    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    let jobs: Vec<DbPipelineJob> = api_queries::get_all_jobs()
-        .bind(&client, &auth_data.organization_id)
-        .all()
-        .await
-        .map_err(log_and_map)?;
+    let jobs: Vec<DbPipelineJob> = api_queries::fetch_get_all_jobs(
+        &state.database.client().await?,
+        &auth_data.organization_id,
+    )
+    .await?;
 
     Ok(Json(JobCollection {
         data: jobs.into_iter().map(|p| p.into()).collect(),

@@ -26,7 +26,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct CheckpointState {
     job_id: String,
-    checkpoint_id: i64,
+    checkpoint_id: String,
     epoch: u32,
     min_epoch: u32,
     start_time: SystemTime,
@@ -145,7 +145,7 @@ impl TableState {
 impl CheckpointState {
     pub fn new(
         job_id: String,
-        checkpoint_id: i64,
+        checkpoint_id: String,
         epoch: u32,
         min_epoch: u32,
         tasks_per_operator: HashMap<String, usize>,
@@ -168,8 +168,8 @@ impl CheckpointState {
         }
     }
 
-    pub fn checkpoint_id(&self) -> i64 {
-        self.checkpoint_id
+    pub fn checkpoint_id(&self) -> &str {
+        &self.checkpoint_id
     }
 
     pub fn start_time(&self) -> SystemTime {
@@ -340,7 +340,7 @@ impl CheckpointState {
 
     pub fn committing_state(&self) -> CommittingState {
         CommittingState::new(
-            self.checkpoint_id,
+            self.checkpoint_id.clone(),
             self.subtasks_to_commit.clone(),
             self.commit_data.clone(),
         )

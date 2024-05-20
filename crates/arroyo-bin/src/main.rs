@@ -1,13 +1,16 @@
 use anyhow::{anyhow, bail};
+use std::{env, fs};
 
 use arroyo_server_common::shutdown::Shutdown;
 use arroyo_server_common::{log_event, start_admin_server};
-use arroyo_types::{ports, DatabaseConfig};
+use arroyo_types::{ports, DatabaseConfig, DATABASE_ENV, DATABASE_PATH_ENV};
 use arroyo_worker::WorkerServer;
 use clap::{Parser, Subcommand};
+use cornucopia_async::DatabaseSource;
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use serde_json::json;
 use std::process::exit;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::timeout;
@@ -101,7 +104,7 @@ async fn main() {
     };
 }
 
-async fn db_pool() -> Pool {
+async fn pg_pool() -> Pool {
     let config = DatabaseConfig::load();
     let mut cfg = deadpool_postgres::Config::new();
     cfg.dbname = Some(config.name.clone());
@@ -140,9 +143,87 @@ async fn db_pool() -> Pool {
     pool
 }
 
+fn sqlite_connection() -> rusqlite::Connection {
+    let path = env::var(DATABASE_PATH_ENV)
+        .map(|s| s.into())
+        .unwrap_or_else(|_| {
+            dirs::config_dir()
+                .unwrap_or_else(|| panic!("Must specify {DATABASE_PATH_ENV}"))
+                .join("arroyo/config.sqlite")
+        });
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|e| {
+            panic!(
+                "Could not create database directory {}: {:?}",
+                path.to_string_lossy(),
+                e
+            )
+        });
+    }
+
+    let exists = path.exists();
+
+    let mut conn = rusqlite::Connection::open(&path)
+        .unwrap_or_else(|e| panic!("Could not open sqlite database at path {:?}: {:?}", path, e));
+
+    if !exists {
+        info!("Creating config database at {}", path.to_string_lossy());
+        if let Err(e) = sqlite_migrations::migrations::runner().run(&mut conn) {
+            let _ = fs::remove_file(&path);
+            panic!("Failed to set up database: {}", e);
+        }
+
+        let uuid = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO cluster_info (id, name) VALUES (?1, 'default');",
+            [&uuid],
+        )
+        .expect("Unable to write to sqlite database");
+    }
+
+    let mut statement = conn.prepare("select id from cluster_info").unwrap();
+
+    let results = statement
+        .query_map([], |r| r.get(0))
+        .expect("Unable to read from sqlite database");
+
+    let uuid: String = results
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("Invalid sqlite database at {:?}; delete to recreate", path))
+        .unwrap();
+
+    arroyo_server_common::set_cluster_id(&uuid);
+
+    drop(statement);
+
+    conn
+}
+
+async fn db_source() -> DatabaseSource {
+    match env::var(DATABASE_ENV).as_ref().map(|s| s.as_str()).ok() {
+        Some("postgres") | None => DatabaseSource::Postgres(pg_pool().await),
+        Some("sqlite") => {
+            DatabaseSource::Sqlite(Arc::new(std::sync::Mutex::new(sqlite_connection())))
+        }
+        Some(e) => {
+            panic!(
+                "Unsupported setting for {}; supported options are 'postgres' or 'sqlite'",
+                e
+            )
+        }
+    }
+}
+
 mod migrations {
     use refinery::embed_migrations;
     embed_migrations!("../arroyo-api/migrations");
+}
+
+mod sqlite_migrations {
+    use refinery::embed_migrations;
+    embed_migrations!("../arroyo-api/sqlite_migrations");
 }
 
 async fn connect(
@@ -225,7 +306,7 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
 async fn start_control_plane(service: CPService) {
     let _guard = arroyo_server_common::init_logging(service.name());
 
-    let pool = db_pool().await;
+    let db = db_source().await;
 
     log_event(
         "service_startup",
@@ -243,7 +324,7 @@ async fn start_control_plane(service: CPService) {
     );
 
     if service == CPService::Api || service == CPService::All {
-        shutdown.spawn_task("api", arroyo_api::start_server(pool.clone()));
+        shutdown.spawn_task("api", arroyo_api::start_server(db.clone()));
     }
 
     if service == CPService::Compiler || service == CPService::All {
@@ -251,7 +332,7 @@ async fn start_control_plane(service: CPService) {
     }
 
     if service == CPService::Controller || service == CPService::All {
-        arroyo_controller::ControllerServer::new(pool)
+        arroyo_controller::ControllerServer::new(db)
             .await
             .start(shutdown.guard("controller"));
     }

@@ -48,7 +48,9 @@ datafusion-common = { version = "37.1.0" }
 datafusion-proto = { version = "37.1.0" }
 datafusion-functions = { version = "37.1.0" }
 deltalake = { version = "0.17.3" }
-
+cornucopia = { version = "0.9.0" }
+cornucopia_async = {version = "0.6.0"}
+deadpool-postgres = "0.12"
 [profile.release]
 debug = 1
 
@@ -72,3 +74,5 @@ datafusion-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', br
 datafusion-physical-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '37.1.0_arroyo'}
 datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '37.1.0_arroyo'}
 datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '37.1.0_arroyo'}
+cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
+cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
