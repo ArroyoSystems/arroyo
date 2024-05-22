@@ -13,7 +13,7 @@ use tonic::Status;
 use tracing::{error, info};
 
 pub struct EmbeddedWorker {
-    job_id: String,
+    job_id: Arc<String>,
     run_id: i64,
     shutdown: Shutdown,
     handle: JoinHandle<()>,
@@ -56,7 +56,7 @@ impl Scheduler for EmbeddedScheduler {
             let server = WorkerServer::new(
                 "job",
                 worker_id,
-                req.job_id,
+                (*req.job_id).clone(),
                 req.run_id.to_string(),
                 default_controller_addr(),
                 req.program,
@@ -120,7 +120,7 @@ impl Scheduler for EmbeddedScheduler {
         Ok(state
             .iter()
             .filter(|(_, t)| {
-                t.job_id == job_id && (run_id.is_some() && run_id.unwrap() == t.run_id)
+                *t.job_id == job_id && (run_id.is_some() && run_id.unwrap() == t.run_id)
             })
             .map(|(k, _)| *k)
             .collect())

@@ -194,9 +194,23 @@ pub struct ProgramConfig {
 pub struct LogicalProgram {
     pub graph: LogicalGraph,
     pub program_config: ProgramConfig,
+    pub operator_indices: HashMap<String, u32>,
 }
 
 impl LogicalProgram {
+    pub fn new(graph: LogicalGraph, program_config: ProgramConfig) -> Self {
+        let operator_indices = graph
+            .node_indices()
+            .map(|idx| (graph[idx].operator_id.clone(), idx.index() as u32))
+            .collect();
+
+        Self {
+            graph,
+            program_config,
+            operator_indices,
+        }
+    }
+
     pub fn update_parallelism(&mut self, overrides: &HashMap<String, usize>) {
         for node in self.graph.node_weights_mut() {
             if let Some(p) = overrides.get(&node.operator_id) {
@@ -232,6 +246,10 @@ impl LogicalProgram {
             .map(char::from)
             .map(|c| c.to_ascii_lowercase())
             .collect()
+    }
+
+    pub fn operator_index(&self, name: &str) -> Option<u32> {
+        self.operator_indices.get(name).cloned()
     }
 
     pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
@@ -328,10 +346,7 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
             })
             .into();
 
-        Ok(LogicalProgram {
-            graph,
-            program_config,
-        })
+        Ok(LogicalProgram::new(graph, program_config))
     }
 }
 

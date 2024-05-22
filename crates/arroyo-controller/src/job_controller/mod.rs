@@ -1,3 +1,5 @@
+use std::str::FromStr;
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     env,
@@ -7,8 +9,8 @@ use std::{
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_rpc::grpc::{
-    worker_grpc_client::WorkerGrpcClient, CheckpointReq, CommitReq, JobFinishedReq,
-    LoadCompactedDataReq, StopExecutionReq, StopMode, TaskCheckpointEventType,
+    worker_grpc_client::WorkerGrpcClient, CheckpointReq, CommitReq, JobFinishedReq, LabelPair,
+    LoadCompactedDataReq, MetricsReq, StopExecutionReq, StopMode, TaskCheckpointEventType,
 };
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{to_micros, WorkerId};
@@ -24,6 +26,7 @@ use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
+use crate::job_controller::job_metrics::{get_metric_idx, JobMetrics, METRICS};
 use crate::types::public::CheckpointState as DbCheckpointState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
 use arroyo_state::committing_state::CommittingState;
@@ -31,6 +34,7 @@ use arroyo_state::committing_state::CommittingState;
 use self::checkpointer::CheckpointingOrCommittingState;
 
 mod checkpointer;
+pub mod job_metrics;
 
 const CHECKPOINTS_TO_KEEP: u32 = 4;
 const CHECKPOINT_ROWS_TO_KEEP: u32 = 100;
@@ -77,9 +81,9 @@ pub enum JobState {
 }
 
 pub struct RunningJobModel {
-    job_id: String,
+    job_id: Arc<String>,
     state: JobState,
-    program: LogicalProgram,
+    program: Arc<LogicalProgram>,
     checkpoint_state: Option<CheckpointingOrCommittingState>,
     epoch: u32,
     min_epoch: u32,
@@ -87,6 +91,8 @@ pub struct RunningJobModel {
     workers: HashMap<WorkerId, WorkerStatus>,
     tasks: HashMap<(String, u32), TaskStatus>,
     operator_parallelism: HashMap<String, usize>,
+    metrics: JobMetrics,
+    last_updated_metrics: Instant,
 }
 
 impl std::fmt::Debug for RunningJobModel {
@@ -169,7 +175,7 @@ impl RunningJobModel {
                             message = "Received checkpoint event for wrong epoch",
                             epoch = c.epoch,
                             expected = self.epoch,
-                            job_id = self.job_id,
+                            job_id = *self.job_id,
                         );
                     } else {
                         match checkpoint_state {
@@ -192,7 +198,7 @@ impl RunningJobModel {
                 } else {
                     warn!(
                         message = "Received checkpoint event but not checkpointing",
-                        job_id = self.job_id,
+                        job_id = *self.job_id,
                         event = format!("{:?}", c)
                     )
                 }
@@ -204,7 +210,7 @@ impl RunningJobModel {
                             message = "Received checkpoint finished for wrong epoch",
                             epoch = c.epoch,
                             expected = self.epoch,
-                            self.job_id,
+                            job_id = *self.job_id,
                         );
                     } else {
                         let CheckpointingOrCommittingState::Checkpointing(checkpoint_state) =
@@ -218,7 +224,7 @@ impl RunningJobModel {
                 } else {
                     warn!(
                         message = "Received checkpoint finished but not checkpointing",
-                        job_id = self.job_id
+                        job_id = *self.job_id
                     )
                 }
             }
@@ -234,7 +240,7 @@ impl RunningJobModel {
                 } else {
                     warn!(
                         message = "Received task finished for unknown task",
-                        job_id = self.job_id,
+                        job_id = *self.job_id,
                         operator_id = key.0,
                         subtask_index
                     );
@@ -252,7 +258,7 @@ impl RunningJobModel {
                 } else {
                     warn!(
                         message = "Received task failed message for unknown task",
-                        job_id = self.job_id,
+                        job_id = *self.job_id,
                         operator_id = key.0,
                         subtask_index,
                         reason,
@@ -265,7 +271,7 @@ impl RunningJobModel {
                 } else {
                     warn!(
                         message = "Received heartbeat for unknown worker",
-                        job_id = self.job_id,
+                        job_id = *self.job_id,
                         worker_id = worker_id.0
                     );
                 }
@@ -276,7 +282,7 @@ impl RunningJobModel {
                 } else {
                     warn!(
                         message = "Received finish message for unknown worker",
-                        job_id = self.job_id,
+                        job_id = *self.job_id,
                         worker_id = worker_id.0
                     );
                 }
@@ -291,7 +297,7 @@ impl RunningJobModel {
                 if let Err(e) = w.connect.job_finished(JobFinishedReq {}).await {
                     warn!(
                         message = "Failed to connect to work to send job finish",
-                        job_id = self.job_id,
+                        job_id = *self.job_id,
                         worker_id = w.id.0,
                         error = format!("{:?}", e),
                     )
@@ -313,7 +319,7 @@ impl RunningJobModel {
 
         info!(
             message = "Starting checkpointing",
-            job_id = self.job_id,
+            job_id = *self.job_id,
             epoch = self.epoch,
             then_stop
         );
@@ -339,7 +345,7 @@ impl RunningJobModel {
             &c,
             &checkpoint_id,
             &organization_id,
-            &self.job_id.clone(),
+            &*self.job_id,
             &StateBackend::name().to_string(),
             &(self.epoch as i32),
             &(self.min_epoch as i32),
@@ -425,7 +431,7 @@ impl RunningJobModel {
 
                         info!(
                             message = "Finished checkpointing",
-                            job_id = self.job_id,
+                            job_id = *self.job_id,
                             epoch = self.epoch,
                             duration
                         );
@@ -441,7 +447,7 @@ impl RunningJobModel {
                             Some(CheckpointingOrCommittingState::Committing(committing_state));
                         info!(
                             message = "Committing checkpoint",
-                            job_id = self.job_id,
+                            job_id = *self.job_id,
                             epoch = self.epoch,
                         );
                         for worker in self.workers.values_mut() {
@@ -461,7 +467,7 @@ impl RunningJobModel {
                     self.checkpoint_state = None;
                     info!(
                         message = "Finished committing checkpointing",
-                        job_id = self.job_id,
+                        job_id = *self.job_id,
                         epoch = self.epoch,
                     );
                 }
@@ -483,7 +489,7 @@ impl RunningJobModel {
             if status.heartbeat_timeout() {
                 error!(
                     message = "worker failed to heartbeat",
-                    job_id = self.job_id,
+                    job_id = *self.job_id,
                     worker_id = worker.0
                 );
                 return true;
@@ -494,7 +500,7 @@ impl RunningJobModel {
             if let TaskState::Failed(reason) = &status.state {
                 error!(
                     message = "task failed",
-                    job_id = self.job_id,
+                    job_id = *self.job_id,
                     operator_id,
                     subtask,
                     reason,
@@ -547,11 +553,12 @@ impl JobController {
     pub fn new(
         db: DatabaseSource,
         config: JobConfig,
-        program: LogicalProgram,
+        program: Arc<LogicalProgram>,
         epoch: u32,
         min_epoch: u32,
         worker_connects: HashMap<WorkerId, WorkerGrpcClient<Channel>>,
         commit_state: Option<CommittingState>,
+        metrics: JobMetrics,
     ) -> Self {
         Self {
             db,
@@ -591,6 +598,8 @@ impl JobController {
                     })
                     .collect(),
                 operator_parallelism: program.tasks_per_operator(),
+                metrics,
+                last_updated_metrics: Instant::now(),
                 program,
             },
             config,
@@ -600,6 +609,57 @@ impl JobController {
 
     pub async fn handle_message(&mut self, msg: RunningMessage) -> anyhow::Result<()> {
         self.model.handle_message(msg, &self.db).await
+    }
+
+    async fn update_metrics(&self) {
+        let mut metrics: HashMap<(u32, u32), [u64; METRICS.len()]> = HashMap::new();
+
+        for (_, worker) in &self.model.workers {
+            let Ok(e) = worker.connect.clone().get_metrics(MetricsReq {}).await else {
+                warn!("Failed to collect metrics from worker {:?}", worker.id);
+                return;
+            };
+
+            fn find_label<'a>(labels: &'a [LabelPair], name: &'static str) -> Option<&'a str> {
+                Some(
+                    labels
+                        .iter()
+                        .find(|t| t.name.as_ref().map(|t| t == name).unwrap_or(false))?
+                        .value
+                        .as_ref()?
+                        .as_str(),
+                )
+            }
+
+            e.into_inner()
+                .metrics
+                .into_iter()
+                .filter_map(|f| Some((get_metric_idx(&f.name?)?, f.metric)))
+                .flat_map(|(metric, values)| {
+                    values.into_iter().filter_map(move |m| {
+                        let subtask_idx =
+                            u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
+                        let operator_idx = self
+                            .model
+                            .program
+                            .operator_index(find_label(&m.label, "operator_id")?)?;
+                        Some((
+                            (operator_idx, subtask_idx),
+                            (metric, m.counter?.value? as u64),
+                        ))
+                    })
+                })
+                .for_each(|(subtask_idx, (metric, value))| {
+                    metrics.entry(subtask_idx).or_default()[metric] = value;
+                });
+        }
+
+        for ((operator_idx, subtask_idx), values) in metrics {
+            self.model
+                .metrics
+                .update(operator_idx, subtask_idx, values)
+                .await;
+        }
     }
 
     pub async fn progress(&mut self) -> anyhow::Result<ControllerProgress> {
@@ -622,14 +682,14 @@ impl JobController {
                     info!(
                         message = "setting new min epoch",
                         min_epoch,
-                        job_id = self.config.id
+                        job_id = *self.config.id
                     );
                     self.model.min_epoch = min_epoch;
                 }
                 Ok(Err(e)) => {
                     error!(
                         message = "cleanup failed",
-                        job_id = self.config.id,
+                        job_id = *self.config.id,
                         error = format!("{:?}", e)
                     );
 
@@ -639,7 +699,7 @@ impl JobController {
                 Err(e) => {
                     error!(
                         message = "cleanup panicked",
-                        job_id = self.config.id,
+                        job_id = *self.config.id,
                         error = format!("{:?}", e)
                     );
 
@@ -663,6 +723,12 @@ impl JobController {
         {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
+        }
+
+        // update metrics
+        if self.model.last_updated_metrics.elapsed() > job_metrics::COLLECTION_RATE {
+            self.update_metrics().await;
+            self.model.last_updated_metrics = Instant::now();
         }
 
         Ok(ControllerProgress::Continue)
@@ -738,7 +804,7 @@ impl JobController {
                     if c.stop_mode == SqlStopMode::immediate {
                         info!(
                             message = "stopping job immediately",
-                            job_id = self.config.id
+                            job_id = *self.config.id
                         );
                         self.stop_job(StopMode::Immediate).await?;
                     }
@@ -759,7 +825,12 @@ impl JobController {
         let job_id = self.config.id.clone();
         let db = self.db.clone();
 
-        info!(message = "Starting cleaning", job_id, min_epoch, new_min);
+        info!(
+            message = "Starting cleaning",
+            job_id = *job_id,
+            min_epoch,
+            new_min
+        );
         let start = Instant::now();
         let cur_epoch = self.model.epoch;
 
@@ -768,7 +839,7 @@ impl JobController {
 
             controller_queries::execute_mark_compacting(
                 &db.client().await?,
-                &job_id,
+                &*job_id,
                 &(min_epoch as i32),
                 &(new_min as i32),
             )
@@ -778,7 +849,7 @@ impl JobController {
 
             controller_queries::execute_mark_checkpoints_compacted(
                 &db.client().await?,
-                &job_id,
+                &*job_id,
                 &(new_min as i32),
             )
             .await?;
@@ -786,7 +857,7 @@ impl JobController {
             if let Some(epoch_to_filter_before) = min_epoch.checked_sub(CHECKPOINT_ROWS_TO_KEEP) {
                 controller_queries::execute_drop_old_checkpoint_rows(
                     &db.client().await?,
-                    &job_id,
+                    &*job_id,
                     &(epoch_to_filter_before as i32),
                 )
                 .await?;
@@ -794,7 +865,7 @@ impl JobController {
 
             info!(
                 message = "Finished cleaning",
-                job_id,
+                job_id = *job_id,
                 min_epoch,
                 new_min,
                 duration = start.elapsed().as_secs_f32()

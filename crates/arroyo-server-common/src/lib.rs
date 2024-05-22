@@ -12,11 +12,7 @@ use axum::Router;
 use hyper::Body;
 use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
-use prometheus::{register_int_counter, IntCounter, TextEncoder};
-#[cfg(not(target_os = "freebsd"))]
-use pyroscope::{pyroscope::PyroscopeAgentRunning, PyroscopeAgent};
-#[cfg(not(target_os = "freebsd"))]
-use pyroscope_pprofrs::{pprof_backend, PprofConfig};
+use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, TextEncoder};
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::error::Error;
@@ -33,7 +29,7 @@ use tower_http::classify::{GrpcCode, GrpcErrorsAsFailures, SharedClassifier};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
-use tracing::{debug, info, span, warn, Level};
+use tracing::{debug, info, span, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
@@ -45,9 +41,6 @@ use tracing_log::LogTracer;
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
 pub const VERSION: &str = "0.11.0-dev";
-
-#[cfg(not(target_os = "freebsd"))]
-const PYROSCOPE_SERVER_ADDRESS_ENV: &str = "PYROSCOPE_SERVER_ADDRESS";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
@@ -175,6 +168,17 @@ async fn metrics() -> Result<Bytes, StatusCode> {
     }
 }
 
+async fn metrics_proto() -> Result<Bytes, StatusCode> {
+    let encoder = ProtobufEncoder::new();
+    let registry = prometheus::default_registry();
+    let mut buf = vec![];
+    encoder
+        .encode(&registry.gather(), &mut buf)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(buf.into())
+}
+
 async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     serde_json::to_string_pretty(&json!({
         "service": state.name,
@@ -197,6 +201,7 @@ pub async fn start_admin_server(service: &str, default_port: u16) -> anyhow::Res
         .route("/status", get(status))
         .route("/name", get(root))
         .route("/metrics", get(metrics))
+        .route("/metrics.pb", get(metrics_proto))
         .route("/details", get(details))
         .with_state(state);
 
@@ -206,34 +211,6 @@ pub async fn start_admin_server(service: &str, default_port: u16) -> anyhow::Res
         .serve(app.into_make_service())
         .await
         .map_err(|e| anyhow!("Failed to start admin HTTP server: {}", e))
-}
-
-#[cfg(not(target_os = "freebsd"))]
-pub fn try_profile_start(
-    application_name: impl ToString,
-    tags: Vec<(&str, &str)>,
-) -> Option<PyroscopeAgent<PyroscopeAgentRunning>> {
-    let agent = PyroscopeAgent::builder(
-        std::env::var(PYROSCOPE_SERVER_ADDRESS_ENV).ok()?,
-        application_name.to_string(),
-    )
-    .backend(pprof_backend(PprofConfig::new().sample_rate(100)))
-    .tags(tags)
-    .build();
-    let agent = match agent {
-        Ok(agent) => agent,
-        Err(err) => {
-            warn!("failed to build pyroscope agent with {}", err);
-            return None;
-        }
-    };
-    match agent.start() {
-        Ok(agent) => Some(agent),
-        Err(err) => {
-            warn!("failed to start pyroscope agent with {}", err);
-            None
-        }
-    }
 }
 
 lazy_static! {

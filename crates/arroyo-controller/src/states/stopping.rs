@@ -35,14 +35,14 @@ impl State for Stopping {
 
                 info!(
                     msg = "waiting for workers to terminate",
-                    job_id = ctx.config.id
+                    job_id = *ctx.config.id
                 );
                 match timeout(FINISH_TIMEOUT, job_controller.wait_for_finish(ctx.rx)).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => {
                         error!(
                             msg = "encountered error while waiting for job to stop gracefully; will try force-stopping",
-                            job_id = ctx.config.id,
+                            job_id = *ctx.config.id,
                             error = e.to_string(),
                         );
                         self.stop_mode = StopBehavior::StopWorkers;
@@ -52,7 +52,7 @@ impl State for Stopping {
                         error!(
                             msg =
                                 "timed out while waiting for job to stop; will try force-stopping",
-                            job_id = ctx.config.id
+                            job_id = *ctx.config.id
                         );
                         self.stop_mode = StopBehavior::StopWorkers;
                         return Self::next(self, ctx).await;

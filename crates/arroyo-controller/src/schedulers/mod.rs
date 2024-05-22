@@ -66,7 +66,7 @@ pub trait Scheduler: Send + Sync {
 }
 
 pub struct ProcessWorker {
-    job_id: String,
+    job_id: Arc<String>,
     run_id: i64,
     shutdown_tx: oneshot::Sender<()>,
 }
@@ -92,7 +92,7 @@ pub struct StartPipelineReq {
     pub name: String,
     pub program: LogicalProgram,
     pub wasm_path: String,
-    pub job_id: String,
+    pub job_id: Arc<String>,
     pub hash: String,
     pub run_id: i64,
     pub slots: usize,
@@ -123,7 +123,7 @@ impl Scheduler for ProcessScheduler {
 
         let program_file = temp_dir()
             .join("arroyo")
-            .join(&start_pipeline_req.job_id)
+            .join(&*start_pipeline_req.job_id)
             .join(format!("{}.program", to_nanos(SystemTime::now())));
 
         tokio::fs::create_dir_all(&program_file.parent().unwrap())
@@ -180,7 +180,7 @@ impl Scheduler for ProcessScheduler {
                     .env("RUST_LOG", "info")
                     .env(TASK_SLOTS_ENV, format!("{}", slots_here))
                     .env(WORKER_ID_ENV, format!("{}", worker_id)) // start at 100 to make same length
-                    .env(JOB_ID_ENV, &job_id)
+                    .env(JOB_ID_ENV, &*job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
                     .env(ARROYO_PROGRAM_FILE_ENV, program_file)
@@ -193,7 +193,7 @@ impl Scheduler for ProcessScheduler {
                         info!("Child ({:?}) exited with status {:?}", path, status);
                     }
                     _ = rx => {
-                        info!(message = "Killing child", worker_id = worker_id, job_id = job_id);
+                        info!(message = "Killing child", worker_id = worker_id, job_id = *job_id);
                         child.kill().await.unwrap();
                     }
                 }
@@ -223,7 +223,7 @@ impl Scheduler for ProcessScheduler {
             .await
             .iter()
             .filter(|(_, w)| {
-                w.job_id == job_id && (run_id.is_none() || w.run_id == run_id.unwrap())
+                *w.job_id == job_id && (run_id.is_none() || w.run_id == run_id.unwrap())
             })
             .map(|(k, _)| *k)
             .collect())
@@ -307,7 +307,7 @@ impl NodeStatus {
 
 #[derive(Clone)]
 struct NodeWorker {
-    job_id: String,
+    job_id: Arc<String>,
     node_id: NodeId,
     run_id: i64,
     running: bool,
@@ -383,7 +383,7 @@ impl NodeScheduler {
 
         info!(
             message = "stopping worker",
-            job_id = worker.job_id,
+            job_id = *worker.job_id,
             node_id = worker.node_id.0,
             node_addr = node.addr,
             worker_id = worker_id.0
@@ -478,7 +478,9 @@ impl Scheduler for NodeScheduler {
             .workers
             .iter()
             .filter(|(_, v)| {
-                v.job_id == job_id && v.running && (run_id.is_none() || v.run_id == run_id.unwrap())
+                *v.job_id == job_id
+                    && v.running
+                    && (run_id.is_none() || v.run_id == run_id.unwrap())
             })
             .map(|(w, _)| *w)
             .collect())
@@ -550,7 +552,7 @@ impl Scheduler for NodeScheduler {
 
             let req = StartWorkerReq {
                 name: start_pipeline_req.name.clone(),
-                job_id: start_pipeline_req.job_id.clone(),
+                job_id: (*start_pipeline_req.job_id).clone(),
                 slots: slots_for_this_one as u64,
                 node_id: node.id.0,
                 run_id: start_pipeline_req.run_id as u64,

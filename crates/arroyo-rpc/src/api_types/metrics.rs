@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, Hash, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, ToSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum MetricNames {
+pub enum MetricName {
     BytesRecv,
     BytesSent,
     MessagesRecv,
@@ -28,7 +28,7 @@ pub struct SubtaskMetrics {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricGroup {
-    pub name: MetricNames,
+    pub name: MetricName,
     pub subtasks: Vec<SubtaskMetrics>,
 }
 

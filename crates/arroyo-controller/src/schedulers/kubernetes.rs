@@ -322,6 +322,7 @@ impl Scheduler for KubernetesScheduler {
 #[cfg(test)]
 mod test {
     use arroyo_datastream::logical::LogicalProgram;
+    use std::sync::Arc;
 
     use crate::schedulers::kubernetes::KubernetesScheduler;
     use crate::schedulers::StartPipelineReq;
@@ -332,7 +333,7 @@ mod test {
             name: "test_pipeline".to_string(),
             program: LogicalProgram::default(),
             wasm_path: "file:///wasm".to_string(),
-            job_id: "job123".to_string(),
+            job_id: Arc::new("job123".to_string()),
             hash: "12123123h".to_string(),
             run_id: 1,
             slots: 8,

@@ -122,20 +122,18 @@ pub struct AsyncUdfDylibInterface {
 
 impl AsyncUdfDylibInterface {
     pub fn new(
-        __start: unsafe extern "C-unwind" fn(
+        __start: extern "C-unwind" fn(
             ordered: bool,
             timeout_micros: u64,
             allowed_in_flight: u32,
         ) -> SendableFfiAsyncUdfHandle,
-        __send: unsafe extern "C-unwind" fn(
+        __send: extern "C-unwind" fn(
             handle: SendableFfiAsyncUdfHandle,
             id: u64,
             arrays: FfiArrays,
         ) -> FfiFuture<bool>,
-        __drain_results: unsafe extern "C-unwind" fn(
-            handle: SendableFfiAsyncUdfHandle,
-        ) -> DrainResult,
-        __stop_runtime: unsafe extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle),
+        __drain_results: extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle) -> DrainResult,
+        __stop_runtime: extern "C-unwind" fn(handle: SendableFfiAsyncUdfHandle),
     ) -> Self {
         Self {
             __start,

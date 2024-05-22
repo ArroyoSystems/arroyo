@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use arroyo_openapi::types::{
     builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonFormat,
-    MetricNames, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
+    MetricName, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
     ValidateUdfPost,
 };
 use arroyo_openapi::Client;
@@ -252,7 +252,7 @@ async fn basic_pipeline() {
                 for metric in metrics.data {
                     for group in metric.metric_groups {
                         if !metric.operator_id.contains("source")
-                            && group.name == MetricNames::MessagesSent
+                            && group.name == MetricName::MessagesSent
                         {
                             assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
                         }

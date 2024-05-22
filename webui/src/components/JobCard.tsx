@@ -7,7 +7,7 @@ export interface JobCardProps {
   job: Job;
 }
 
-const jobDurartion = (job: Job) => {
+const jobDuration = (job: Job) => {
   if (job.startTime == null) {
     return 0;
   } else if (job.finishTime == null) {
@@ -40,7 +40,7 @@ const JobCard: React.FC<JobCardProps> = ({ job }) => {
       <CardBody>
         <Flex justifyContent={'space-between'}>
           <Indicator content={job.state} />
-          <Indicator content={formatDuration(jobDurartion(job))} label={'Runtime'} />
+          <Indicator content={formatDuration(jobDuration(job))} label={'Runtime'} />
           <Indicator content={job.tasks ? job.tasks.toString() : 'n/a'} label={'Tasks'} />
         </Flex>
       </CardBody>

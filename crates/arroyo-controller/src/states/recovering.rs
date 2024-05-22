@@ -21,7 +21,7 @@ impl Recovering {
         }
 
         // stop the job
-        info!(message = "stopping job", job_id = ctx.config.id);
+        info!(message = "stopping job", job_id = *ctx.config.id);
         let start = Instant::now();
         match job_controller.stop_job(StopMode::Immediate).await {
             Ok(_) => {
@@ -34,7 +34,7 @@ impl Recovering {
                 {
                     info!(
                         message = "job stopped",
-                        job_id = ctx.config.id,
+                        job_id = *ctx.config.id,
                         duration = start.elapsed().as_secs_f32()
                     );
                 }
@@ -43,7 +43,7 @@ impl Recovering {
                 warn!(
                     message = "failed to stop job",
                     error = format!("{:?}", e),
-                    job_id = ctx.config.id
+                    job_id = *ctx.config.id
                 );
             }
         }
@@ -62,7 +62,7 @@ impl Recovering {
 
             info!(
                 message = "sending SIGKILL to workers",
-                job_id = ctx.config.id
+                job_id = *ctx.config.id
             );
 
             if let Err(e) = ctx
@@ -73,7 +73,7 @@ impl Recovering {
                 warn!(
                     message = "error while stopping workers",
                     error = format!("{:?}", e),
-                    job_id = ctx.config.id
+                    job_id = *ctx.config.id
                 );
             }
 

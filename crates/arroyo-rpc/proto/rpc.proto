@@ -1,6 +1,7 @@
 syntax = "proto3";
 package arroyo_rpc;
 
+
 // Controller
 
 message WorkerResources {
@@ -164,6 +165,15 @@ message WorkerErrorReq {
 message WorkerErrorRes {
 }
 
+message JobMetricsReq {
+  string job_id = 1;
+}
+
+message JobMetricsResp {
+  // JSON-encoded Vec<OperatorMetricGroup>
+  string metrics = 1;
+}
+
 service ControllerGrpc {
   rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
   rpc HeartbeatNode(HeartbeatNodeReq) returns (HeartbeatNodeResp);
@@ -180,6 +190,7 @@ service ControllerGrpc {
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
   rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
+  rpc JobMetrics(JobMetricsReq) returns (JobMetricsResp);
 }
 
 // Checkpoint metadata
@@ -375,6 +386,13 @@ message JobFinishedReq {
 message JobFinishedResp {
 }
 
+message MetricsReq {
+}
+
+message MetricsResp {
+  repeated MetricFamily metrics = 1;
+}
+
 service WorkerGrpc {
   rpc StartExecution(StartExecutionReq) returns (StartExecutionResp);
   rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
@@ -382,6 +400,7 @@ service WorkerGrpc {
   rpc LoadCompactedData(LoadCompactedDataReq) returns (LoadCompactedDataRes);
   rpc StopExecution(StopExecutionReq) returns (StopExecutionResp);
   rpc JobFinished(JobFinishedReq) returns (JobFinishedResp);
+  rpc GetMetrics(MetricsReq) returns (MetricsResp);
 }
 
 // Node
@@ -464,4 +483,70 @@ message GetUdfPathResp {
 service CompilerGrpc {
   rpc BuildUdf(BuildUdfReq) returns (BuildUdfResp);
   rpc GetUdfPath(GetUdfPathReq) returns (GetUdfPathResp);
+}
+
+/// Prometheus
+
+message LabelPair {
+  optional string name  = 1;
+  optional string value = 2;
+}
+
+enum MetricType {
+  COUNTER    = 0;
+  GAUGE      = 1;
+  SUMMARY    = 2;
+  UNTYPED    = 3;
+  HISTOGRAM  = 4;
+}
+
+message Gauge {
+  optional double value = 1;
+}
+
+message Counter {
+  optional double value = 1;
+}
+
+message Quantile {
+  optional double quantile = 1;
+  optional double value    = 2;
+}
+
+message Summary {
+  optional uint64   sample_count = 1;
+  optional double   sample_sum   = 2;
+  repeated Quantile quantile     = 3;
+}
+
+message Untyped {
+  optional double value = 1;
+}
+
+message Histogram {
+  optional uint64 sample_count = 1;
+  optional double sample_sum   = 2;
+  repeated Bucket bucket       = 3; // Ordered in increasing order of upper_bound, +Inf bucket is optional.
+}
+
+message Bucket {
+  optional uint64 cumulative_count = 1; // Cumulative in increasing order.
+  optional double upper_bound = 2;      // Inclusive.
+}
+
+message Metric {
+  repeated LabelPair label        = 1;
+  optional Gauge     gauge        = 2;
+  optional Counter   counter      = 3;
+  optional Summary   summary      = 4;
+  optional Untyped   untyped      = 5;
+  optional Histogram histogram    = 7;
+  optional int64     timestamp_ms = 6;
+}
+
+message MetricFamily {
+  optional string     name   = 1;
+  optional string     help   = 2;
+  optional MetricType type   = 3;
+  repeated Metric     metric = 4;
 }
