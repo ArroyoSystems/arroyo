@@ -442,9 +442,12 @@ impl StorageProvider {
     }
 
     async fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
-        let gcs = GoogleCloudStorageBuilder::from_env()
-            .with_bucket_name(&config.bucket)
-            .build()?;
+        let mut builder = GoogleCloudStorageBuilder::from_env().with_bucket_name(&config.bucket);
+
+        if let Ok(service_account_key) = std::env::var("GOOGLE_SERVICE_ACCOUNT_KEY") {
+            debug!("Constructing GCS builder with service account key");
+            builder = builder.with_service_account_key(&service_account_key);
+        }
 
         let mut canonical_url = format!("https://{}.storage.googleapis.com", config.bucket);
         if let Some(key) = &config.key {
@@ -455,7 +458,7 @@ impl StorageProvider {
 
         Ok(Self {
             config: BackendConfig::GCS(config),
-            object_store: Arc::new(gcs),
+            object_store: Arc::new(builder.build().map_err(Into::<StorageError>::into)?),
             object_store_base_url,
             canonical_url,
             storage_options: HashMap::new(),
