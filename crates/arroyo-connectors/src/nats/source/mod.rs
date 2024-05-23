@@ -285,11 +285,11 @@ impl NatsSourceFunc {
             &consumer_info.created
         );
         info!(
-            "Consumer - last stream sequence of aknowledged messagee: {}",
+            "Consumer - last stream sequence of acknowledged messagee: {}",
             &consumer_info.ack_floor.stream_sequence
         );
         info!(
-            "Consumer - last consumer sequence of aknowledged message: {}",
+            "Consumer - last consumer sequence of acknowledged message: {}",
             &consumer_info.ack_floor.consumer_sequence
         );
         info!(
