@@ -198,6 +198,10 @@ fn sqlite_connection() -> rusqlite::Connection {
 
     drop(statement);
 
+    // enable foreign keys
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .expect("Unable to enable foreign key support in sqlite");
+
     conn
 }
 
