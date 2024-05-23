@@ -62,7 +62,8 @@ impl State for Running {
                                 }));
                             }
 
-                            let job_controller = ctx.job_controller.as_ref().unwrap();
+                            let job_controller = ctx.job_controller.as_mut().unwrap();
+
                             for (op, p) in &c.parallelism_overrides {
                                 if let Some(actual) = job_controller.operator_parallelism(op){
                                     if actual != *p {
@@ -73,6 +74,8 @@ impl State for Running {
                                     }
                                 }
                             }
+
+                            job_controller.update_config(c);
                         }
                         Some(JobMessage::RunningMessage(msg)) => {
                             if let Err(e) = ctx.job_controller.as_mut().unwrap().handle_message(msg).await {
