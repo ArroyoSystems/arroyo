@@ -621,6 +621,19 @@ async fn connection_table() {
         .await
         .unwrap();
 
+    // assert removal of pipeline
+    assert_eq!(
+        api_client
+            .get_pipeline()
+            .id(&pipeline_id)
+            .send()
+            .await
+            .unwrap_err()
+            .status()
+            .unwrap(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+
     // delete source
     println!("Deleting connection");
     api_client

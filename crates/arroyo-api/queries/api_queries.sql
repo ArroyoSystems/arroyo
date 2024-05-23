@@ -35,12 +35,6 @@ ORDER BY COALESCE(connection_profiles.updated_at, connection_profiles.created_at
 DELETE FROM connection_profiles
 WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
------------ schemas --------------------
-
---! create_schema
-INSERT INTO schemas (pub_id, organization_id, created_by, name, kafka_schema_registry, type, config)
-VALUES (:pub_id, :organization_id, :created_by, :name, :kafka_schema_registry, :type, :config);
-
 
 ------- connection tables -------------
 --! create_connection_table(profile_id?, schema?)

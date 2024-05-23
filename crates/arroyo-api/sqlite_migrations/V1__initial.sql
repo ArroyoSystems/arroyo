@@ -49,7 +49,8 @@ CREATE TABLE connection_table_pipelines (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     connection_table_id INTEGER NOT NULL,
     pub_id TEXT NOT NULL UNIQUE,
-    pipeline_id INTEGER
+    pipeline_id INTEGER,
+    FOREIGN KEY (pipeline_id) references pipelines(id) ON DELETE CASCADE
 );
 
 CREATE TABLE connection_tables (
@@ -67,7 +68,8 @@ CREATE TABLE connection_tables (
     config TEXT,
     schema TEXT,
     pub_id TEXT NOT NULL UNIQUE,
-    UNIQUE (organization_id, name)
+    UNIQUE (organization_id, name),
+    FOREIGN KEY (connection_id) references connection_profiles(id) ON DELETE CASCADE
 );
 
 CREATE TABLE job_configs (
@@ -84,7 +86,8 @@ CREATE TABLE job_configs (
     checkpoint_interval_micros INTEGER DEFAULT 10000000 NOT NULL,
     pipeline_id INTEGER,
     restart_nonce INTEGER DEFAULT 0 NOT NULL,
-    restart_mode TEXT DEFAULT 'safe' NOT NULL
+    restart_mode TEXT DEFAULT 'safe' NOT NULL,
+    FOREIGN KEY (pipeline_id) references pipelines(id) ON DELETE CASCADE
 );
 
 CREATE TABLE job_log_messages (
@@ -96,7 +99,8 @@ CREATE TABLE job_log_messages (
     log_level TEXT DEFAULT 'info',
     message TEXT NOT NULL,
     details TEXT,
-    pub_id TEXT NOT NULL UNIQUE
+    pub_id TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (job_id) references job_configs(id) ON DELETE CASCADE
 );
 
 CREATE TABLE job_statuses (
@@ -113,7 +117,8 @@ CREATE TABLE job_statuses (
     wasm_path TEXT,
     state TEXT DEFAULT 'Created' NOT NULL,
     pub_id TEXT NOT NULL UNIQUE,
-    restart_nonce INTEGER DEFAULT 0 NOT NULL
+    restart_nonce INTEGER DEFAULT 0 NOT NULL,
+    FOREIGN KEY (id) references job_configs(id) ON DELETE CASCADE
 );
 
 CREATE TABLE pipelines (
@@ -131,22 +136,6 @@ CREATE TABLE pipelines (
     program BLOB NOT NULL,
     udfs TEXT DEFAULT '[]' NOT NULL,
     proto_version INTEGER DEFAULT 1 NOT NULL
-);
-
-CREATE TABLE schemas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    organization_id TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_by TEXT,
-    updated_at TIMESTAMP,
-    deleted_at TIMESTAMP,
-    name TEXT NOT NULL,
-    kafka_schema_registry INTEGER NOT NULL,
-    type TEXT NOT NULL,
-    config TEXT,
-    pub_id TEXT NOT NULL UNIQUE,
-    UNIQUE (organization_id, name)
 );
 
 CREATE TABLE udfs (
