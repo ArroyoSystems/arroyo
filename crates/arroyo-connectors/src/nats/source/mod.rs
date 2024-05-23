@@ -422,7 +422,15 @@ impl NatsSourceFunc {
                                     }
                                 },
                                 Some(Err(msg)) => {
-                                    return Err(UserError::new("NATS message error", msg.to_string()));
+                                    match msg.kind() {
+                                        consumer::pull::MessagesErrorKind::MissingHeartbeat => {
+                                            // https://github.com/nats-io/nats.rs/discussions/1102#discussioncomment-9298901
+                                            info!("NATS error: {}", msg.to_string());
+                                        },
+                                        _ => {
+                                            return Err(UserError::new("NATS error", msg.to_string()));
+                                        }
+                                    }
                                 },
                                 None => {
                                     break
