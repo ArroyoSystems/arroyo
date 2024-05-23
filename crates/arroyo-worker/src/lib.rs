@@ -1,4 +1,3 @@
-//#![allow(clippy::new_without_default)]
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
@@ -10,10 +9,10 @@ use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
     api, CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
-    JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, RegisterWorkerReq,
-    StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
-    TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq,
-    TaskStartedReq, WorkerErrorReq, WorkerResources,
+    JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily, MetricsReq,
+    MetricsResp, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq,
+    StopExecutionResp, TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq,
+    TaskFinishedReq, TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
 use arroyo_types::{
     default_controller_addr, from_millis, grpc_port, to_micros, CheckpointBarrier, NodeId,
@@ -40,6 +39,7 @@ use tracing::{debug, error, info, warn};
 
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
+use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 
 use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
@@ -51,9 +51,6 @@ pub mod arrow;
 
 pub mod engine;
 mod network_manager;
-
-pub const PROMETHEUS_PUSH_GATEWAY: &str = "localhost:9091";
-pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);
 
 pub static TIMER_TABLE: char = '[';
 
@@ -670,5 +667,34 @@ impl WorkerGrpc for WorkerServer {
         });
 
         Ok(Response::new(JobFinishedResp {}))
+    }
+
+    async fn get_metrics(
+        &self,
+        _req: Request<MetricsReq>,
+    ) -> Result<Response<MetricsResp>, Status> {
+        // we have to round-trip through bytes because rust-prometheus doesn't use prost
+        let encoder = ProtobufEncoder::new();
+        let registry = prometheus::default_registry();
+        let mut buf = vec![];
+        encoder.encode(&registry.gather(), &mut buf).map_err(|e| {
+            Status::failed_precondition(format!("Failed to generate metrics: {:?}", e))
+        })?;
+
+        let mut metrics = vec![];
+
+        let mut input = &buf[..];
+        while !input.is_empty() {
+            metrics.push(
+                MetricFamily::decode_length_delimited(&mut input).map_err(|e| {
+                    Status::failed_precondition(format!(
+                        "Incompatible protobuf format for metrics: {:?}",
+                        e
+                    ))
+                })?,
+            );
+        }
+
+        Ok(Response::new(MetricsResp { metrics }))
     }
 }

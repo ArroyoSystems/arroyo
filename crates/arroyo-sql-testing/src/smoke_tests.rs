@@ -9,6 +9,7 @@ use petgraph::visit::EdgeRef;
 use rstest::rstest;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use std::{env, time::SystemTime};
 use tokio::sync::mpsc::Receiver;
@@ -81,7 +82,7 @@ async fn run_smoketest(path: &Path) {
 }
 
 struct SmokeTestContext<'a> {
-    job_id: String,
+    job_id: Arc<String>,
     engine: &'a RunningEngine,
     control_rx: &'a mut Receiver<ControlResp>,
     tasks_per_operator: HashMap<String, usize>,
@@ -121,7 +122,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
                 let req = TaskCheckpointEventReq {
                     worker_id: 1,
                     time: to_micros(c.time),
-                    job_id: ctx.job_id.clone(),
+                    job_id: (*ctx.job_id).clone(),
                     operator_id: c.operator_id,
                     subtask_index: c.subtask_index,
                     epoch: c.checkpoint_epoch,
@@ -133,7 +134,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
                 let req = TaskCheckpointCompletedReq {
                     worker_id: 1,
                     time: c.subtask_metadata.finish_time,
-                    job_id: ctx.job_id.clone(),
+                    job_id: (*ctx.job_id).clone(),
                     operator_id: c.operator_id,
                     epoch: c.checkpoint_epoch,
                     needs_commit: false,
@@ -151,7 +152,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
 }
 
 async fn compact(
-    job_id: String,
+    job_id: Arc<String>,
     running_engine: &RunningEngine,
     tasks_per_operator: HashMap<String, usize>,
     epoch: u32,
@@ -245,7 +246,7 @@ fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, paralle
     }
 }
 
-async fn run_and_checkpoint(job_id: &str, program: Program, checkpoint_interval: i32) {
+async fn run_and_checkpoint(job_id: Arc<String>, program: Program, checkpoint_interval: i32) {
     let tasks_per_operator = program.tasks_per_operator();
     let engine = Engine::for_local(program, job_id.to_string());
     let (running_engine, mut control_rx) = engine
@@ -257,7 +258,7 @@ async fn run_and_checkpoint(job_id: &str, program: Program, checkpoint_interval:
     env::set_var("MIN_FILES_TO_COMPACT", "2");
 
     let ctx = &mut SmokeTestContext {
-        job_id: job_id.to_string(),
+        job_id: job_id.clone(),
         engine: &running_engine,
         control_rx: &mut control_rx,
         tasks_per_operator: tasks_per_operator.clone(),
@@ -270,13 +271,7 @@ async fn run_and_checkpoint(job_id: &str, program: Program, checkpoint_interval:
     checkpoint(ctx, 2).await;
     advance(&running_engine, checkpoint_interval).await;
 
-    compact(
-        job_id.to_string(),
-        &running_engine,
-        tasks_per_operator.clone(),
-        2,
-    )
-    .await;
+    compact(job_id, &running_engine, tasks_per_operator.clone(), 2).await;
 
     // trigger checkpoint 3, which will include the compacted files
     advance(&running_engine, checkpoint_interval).await;
@@ -331,7 +326,12 @@ async fn run_pipeline_and_assert_outputs(
 
     set_internal_parallelism(&mut graph, 2);
 
-    run_and_checkpoint(job_id, get_program(&graph), checkpoint_interval).await;
+    run_and_checkpoint(
+        Arc::new(job_id.to_string()),
+        get_program(&graph),
+        checkpoint_interval,
+    )
+    .await;
 
     set_internal_parallelism(&mut graph, 3);
 

@@ -6,10 +6,10 @@ use anyhow::Result;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
-    OutputData, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq, RegisterWorkerResp,
-    TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskFailedReq, TaskFailedResp,
-    TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp, WorkerFinishedReq,
-    WorkerFinishedResp,
+    JobMetricsReq, JobMetricsResp, OutputData, RegisterNodeReq, RegisterNodeResp,
+    RegisterWorkerReq, RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
+    TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq,
+    TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
 };
 use arroyo_rpc::grpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
@@ -31,6 +31,7 @@ use std::time::{Duration, Instant, SystemTime};
 use time::OffsetDateTime;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
@@ -42,6 +43,7 @@ mod states;
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
+use crate::job_controller::job_metrics::JobMetrics;
 use crate::schedulers::{NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
 use types::public::{RestartMode, StopMode};
@@ -68,7 +70,7 @@ lazy_static! {
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct JobConfig {
-    id: String,
+    id: Arc<String>,
     organization_id: String,
     pipeline_name: String,
     pipeline_id: i64,
@@ -82,7 +84,7 @@ pub struct JobConfig {
 
 #[derive(Clone, Debug)]
 pub struct JobStatus {
-    id: String,
+    id: Arc<String>,
     run_id: i64,
     state: String,
     start_time: Option<OffsetDateTime>,
@@ -110,7 +112,7 @@ impl JobStatus {
             &self.wasm_path,
             &self.run_id,
             &self.restart_nonce,
-            &self.id,
+            &*self.id,
         )
         .await
         .map_err(|e| format!("{:?}", e))?;
@@ -171,6 +173,7 @@ pub struct ControllerServer {
     job_state: Arc<tokio::sync::Mutex<HashMap<String, StateMachine>>>,
     data_txs: Arc<tokio::sync::Mutex<HashMap<String, Vec<Sender<Result<OutputData, Status>>>>>>,
     scheduler: Arc<dyn Scheduler>,
+    metrics: Arc<RwLock<HashMap<Arc<String>, JobMetrics>>>,
     db: DatabaseSource,
 }
 
@@ -423,6 +426,24 @@ impl ControllerGrpc for ControllerServer {
             Err(err) => Err(Status::from_error(Box::new(err))),
         }
     }
+
+    async fn job_metrics(
+        &self,
+        request: Request<JobMetricsReq>,
+    ) -> Result<Response<JobMetricsResp>, Status> {
+        let job_id = request.into_inner().job_id;
+        let metrics = self
+            .metrics
+            .read()
+            .await
+            .get(&job_id)
+            .ok_or_else(|| Status::not_found("No metrics for job"))?
+            .clone();
+
+        Ok(Response::new(JobMetricsResp {
+            metrics: serde_json::to_string(&metrics.get_groups().await).unwrap(),
+        }))
+    }
 }
 
 impl ControllerServer {
@@ -451,6 +472,7 @@ impl ControllerServer {
             data_txs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             job_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             db: database,
+            metrics: Default::default(),
         }
     }
 
@@ -479,6 +501,7 @@ impl ControllerServer {
         let db = self.db.clone();
         let jobs = Arc::clone(&self.job_state);
         let scheduler = Arc::clone(&self.scheduler);
+        let metrics = Arc::clone(&self.metrics);
 
         let token = guard.token();
 
@@ -488,8 +511,9 @@ impl ControllerServer {
                 let client = db.client().await?;
                 let res = queries::controller_queries::fetch_all_jobs(&client).await?;
                 for p in res {
+                    let id = Arc::new(p.id);
                     let config = JobConfig {
-                        id: p.id.clone(),
+                        id: id.clone(),
                         organization_id: p.org_id,
                         pipeline_name: p.pipeline_name,
                         pipeline_id: p.pipeline_id,
@@ -512,7 +536,7 @@ impl ControllerServer {
                     let mut jobs = jobs.lock().await;
 
                     let status = JobStatus {
-                        id: p.id,
+                        id: id.clone(),
                         run_id: p.run_id.unwrap_or(0),
                         state: p.state.unwrap_or_else(|| Created {}.name().to_string()),
                         start_time: p.start_time,
@@ -525,17 +549,18 @@ impl ControllerServer {
                         restart_nonce: p.status_restart_nonce,
                     };
 
-                    if let Some(sm) = jobs.get_mut(&config.id) {
+                    if let Some(sm) = jobs.get_mut(&*id) {
                         sm.update(config, status, &guard).await;
                     } else {
                         jobs.insert(
-                            config.id.clone(),
+                            (*id).clone(),
                             StateMachine::new(
                                 config,
                                 status,
                                 db.clone(),
                                 scheduler.clone(),
                                 guard.clone_temporary(),
+                                metrics.clone(),
                             )
                             .await,
                         );

@@ -13,6 +13,7 @@ import React from 'react';
 import { TimeSeriesGraph } from './TimeSeriesGraph';
 import Loading from './Loading';
 import { useJobMetrics, usePipeline } from '../lib/data_fetching';
+import { components } from '../gen/api-types';
 
 export interface OperatorDetailProps {
   pipelineId: string;
@@ -58,37 +59,43 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
     backpressureBadge = <Badge colorScheme={'red'}>HIGH</Badge>;
   }
 
-  let msgRecv = 0;
-  let eventsReceivedGraph = <></>;
-  const messagesRecievedGroup = metricGroups.find(m => m.name == 'messages_recv');
-  if (messagesRecievedGroup) {
-    msgRecv = messagesRecievedGroup.subtasks
-      .map(s => s.metrics[s.metrics.length - 1].value)
-      .reduce((a, c) => a + c, 0);
-    const msgRecvData = transformMetricGroup(messagesRecievedGroup);
-    eventsReceivedGraph = (
-      <Box className="chart" marginTop="20px" fontSize={14}>
-        Events RX
-        <TimeSeriesGraph data={msgRecvData} timeWindowMs={5 * 60 * 1000} />
-      </Box>
-    );
+  function createGraph(
+    metricGroups: components['schemas']['MetricGroup'][],
+    groupName: string,
+    graphTitle: string
+  ) {
+    let msgCount = 0;
+    let graph = <></>;
+    const group = metricGroups.find(m => m.name === groupName);
+    if (
+      group &&
+      group.subtasks.length > 0 &&
+      group.subtasks.map(s => s.metrics.length).every(l => l > 0)
+    ) {
+      msgCount = group.subtasks
+        .map(s => s.metrics[s.metrics.length - 1].value)
+        .reduce((a, c) => a + c, 0);
+      const data = transformMetricGroup(group);
+      graph = (
+        <Box className="chart" marginTop="20px" fontSize={14}>
+          {graphTitle}
+          <TimeSeriesGraph data={data} timeWindowMs={5 * 60 * 1000} />
+        </Box>
+      );
+    }
+    return { msgCount, graph };
   }
 
-  let msgSent = 0;
-  let eventsSentGraph = <></>;
-  const messagesSentGroup = metricGroups.find(m => m.name == 'messages_sent');
-  if (messagesSentGroup) {
-    msgSent = messagesSentGroup.subtasks
-      .map(s => s.metrics[s.metrics.length - 1].value)
-      .reduce((a, c) => a + c, 0);
-    const msgSentData = transformMetricGroup(messagesSentGroup);
-    eventsSentGraph = (
-      <Box className="chart" marginTop="20px" fontSize={14}>
-        Events TX
-        <TimeSeriesGraph data={msgSentData} timeWindowMs={5 * 60 * 1000} />
-      </Box>
-    );
-  }
+  const { msgCount: msgRecv, graph: eventsReceivedGraph } = createGraph(
+    metricGroups,
+    'messages_recv',
+    'Events RX'
+  );
+  const { msgCount: msgSent, graph: eventsSentGraph } = createGraph(
+    metricGroups,
+    'messages_sent',
+    'Events TX'
+  );
 
   return (
     <Box className="operatorDetail" marginTop={10} padding="10px" border="1px solid #333">

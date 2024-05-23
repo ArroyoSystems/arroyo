@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
+use std::mem;
 use std::sync::{Arc, RwLock};
-use std::{mem, thread};
 
 use std::time::SystemTime;
 
@@ -10,7 +10,7 @@ use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::arrow::async_udf::AsyncUdfConstructor;
 use crate::arrow::instant_join::InstantJoinConstructor;
@@ -23,7 +23,6 @@ use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
@@ -42,7 +41,6 @@ use arroyo_udf_host::LocalUdf;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
-use prometheus::labels;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
 
@@ -334,6 +332,7 @@ impl Program {
 pub struct Engine {
     program: Program,
     worker_id: WorkerId,
+    #[allow(unused)]
     run_id: String,
     job_id: String,
     network_manager: NetworkManager,
@@ -522,8 +521,6 @@ impl Engine {
         for n in self.program.graph.write().unwrap().edge_weights_mut() {
             n.tx = None;
         }
-
-        self.spawn_metrics_thread();
 
         (
             RunningEngine {
@@ -757,41 +754,6 @@ impl Engine {
                     .await
                     .ok();
             };
-        });
-    }
-
-    fn spawn_metrics_thread(&mut self) {
-        let labels = labels! {
-            "worker_id".to_string() => format!("{}", self.worker_id.0),
-            "job_name".to_string() => self.program.name.clone(),
-            "job_id".to_string() => self.job_id.clone(),
-            "run_id".to_string() => self.run_id.to_string(),
-        };
-        let job_id = self.job_id.clone();
-
-        thread::spawn(move || {
-            #[cfg(not(target_os = "freebsd"))]
-            let _agent = arroyo_server_common::try_profile_start(
-                "node",
-                [("job_id", job_id.as_str())].to_vec(),
-            );
-            // push to metrics gateway
-            loop {
-                let metrics = prometheus::gather();
-                if let Err(e) = prometheus::push_metrics(
-                    "arroyo-worker",
-                    labels.clone(),
-                    PROMETHEUS_PUSH_GATEWAY,
-                    metrics,
-                    None,
-                ) {
-                    debug!(
-                        "Failed to push metrics to {}: {}",
-                        PROMETHEUS_PUSH_GATEWAY, e
-                    );
-                }
-                thread::sleep(METRICS_PUSH_INTERVAL);
-            }
         });
     }
 }

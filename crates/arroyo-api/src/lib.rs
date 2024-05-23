@@ -268,7 +268,7 @@ impl IntoResponse for HttpError {
         Checkpoint,
         CheckpointCollection,
         OutputData,
-        MetricNames,
+        MetricName,
         Metric,
         SubtaskMetrics,
         MetricGroup,

@@ -101,9 +101,15 @@ export function getBackpressureColor(backpressure: number): string {
 }
 
 export function getCurrentMaxMetric(metricGroup: MetricGroup): number {
+  if (
+    metricGroup.subtasks.length === 0 ||
+    metricGroup.subtasks.every(s => s.metrics.length === 0)
+  ) {
+    return 0;
+  }
+
   return metricGroup.subtasks
     .map(s => s.metrics)
-    .filter(m => m.length)
     .map(m =>
       m.reduce((r: Metric, c: Metric) => {
         if (c.time > r.time) {

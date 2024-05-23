@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use arroyo_openapi::types::{
     builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonFormat,
-    MetricNames, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
+    MetricName, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
     ValidateUdfPost,
 };
 use arroyo_openapi::Client;
@@ -235,33 +235,29 @@ async fn basic_pipeline() {
         .into_inner();
     assert_eq!(errors.data.len(), 0);
 
-    // get metrics
-    // (skip in CI for now, as we don't have prometheus available; re-enable when metrics are moved
-    // off prometheus)
-    if !env::var("CI").map(|ci| ci == "true").unwrap_or(false) {
-        loop {
-            let metrics = api_client
-                .get_operator_metric_groups()
-                .pipeline_id(&pipeline_id)
-                .job_id(&job_id)
-                .send()
-                .await
-                .unwrap()
-                .into_inner();
-            if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len() {
-                for metric in metrics.data {
-                    for group in metric.metric_groups {
-                        if !metric.operator_id.contains("source")
-                            && group.name == MetricNames::MessagesSent
-                        {
-                            assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
-                        }
+    loop {
+        let metrics = api_client
+            .get_operator_metric_groups()
+            .pipeline_id(&pipeline_id)
+            .job_id(&job_id)
+            .send()
+            .await
+            .unwrap()
+            .into_inner();
+        if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len() {
+            for metric in metrics.data {
+                for group in metric.metric_groups {
+                    if !metric.operator_id.contains("source")
+                        && group.name == MetricName::MessagesSent
+                        && group.subtasks[0].metrics.len() > 0
+                    {
+                        assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
                     }
                 }
-                break;
             }
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            break;
         }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     // stop job

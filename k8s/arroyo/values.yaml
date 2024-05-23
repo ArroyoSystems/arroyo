@@ -60,30 +60,9 @@ postgresql:
 
 
 prometheus:
-  deploy: true
-  endpoint: ""
   # set to true to enable prometheus annotations on Arroyo cluster resources; if false,
   # you will need to configure prometheus separately to discover Arroyo pods
   setAnnotations: true
-  # the rate interval that should be used for queries; should be at least 4x the scrape
-  # interval configured on prometheus -- setting this (and your scrape interval) to a
-  # lower value will improve metric freshness and resolution
-  queryRate: "15s"
-
-  # Prometheus configuration
-  server:
-    global:
-      scrape_interval: 5s
-      scrape_timeout: 5s
-
-  alertmanager:
-    enabled: false
-  kube-state-metrics:
-    enabled: false
-  prometheus-node-exporter:
-    enabled: false
-  prometheus-pushgateway:
-    enabled: false
 
 s3:
   region: ""

@@ -1,14 +1,20 @@
 use serde::{Deserialize, Serialize};
+use strum_macros::{EnumCount, EnumString};
 use utoipa::ToSchema;
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, Hash, PartialEq, Eq)]
+#[derive(
+    Serialize, Deserialize, Copy, Clone, Debug, ToSchema, Hash, PartialEq, Eq, EnumCount, EnumString,
+)]
 #[serde(rename_all = "snake_case")]
-pub enum MetricNames {
+#[strum(serialize_all = "snake_case")]
+pub enum MetricName {
     BytesRecv,
     BytesSent,
     MessagesRecv,
     MessagesSent,
     Backpressure,
+    TxQueueSize,
+    TxQueueRem,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -28,7 +34,7 @@ pub struct SubtaskMetrics {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricGroup {
-    pub name: MetricNames,
+    pub name: MetricName,
     pub subtasks: Vec<SubtaskMetrics>,
 }
 

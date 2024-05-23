@@ -20,7 +20,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=9.0.6 SHELL=$(which bash) bash -
 
 COPY docker/install_deps.sh /install_deps.sh
-RUN sh /install_deps.sh build
+RUN sh /install_deps.sh
 
 COPY webui/pnpm-lock.yaml webui/pnpm-lock.yaml
 RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm fetch"
@@ -51,14 +51,10 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libssl-dev openssl supervisor libsasl2-dev curl postgresql postgresql-client sudo pkg-config
 
-COPY docker/install_deps.sh /install_deps.sh
-RUN sh /install_deps.sh run
-
 COPY --from=builder /arroyo-bin ./
 
 COPY docker/supervisord.conf /supervisord.conf
 COPY docker/entrypoint.sh /entrypoint.sh
-COPY docker/prometheus.yml /etc/prometheus/prometheus.yml
 
 ENV PRODUCTION=true \
     ASSET_DIR="/app/dist" \

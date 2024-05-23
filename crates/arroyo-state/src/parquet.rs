@@ -170,7 +170,7 @@ impl BackingStore for ParquetBackend {
 impl ParquetBackend {
     /// Called after a checkpoint is committed
     pub async fn compact_operator(
-        job_id: String,
+        job_id: Arc<String>,
         operator_id: String,
         epoch: u32,
     ) -> Result<HashMap<String, TableCheckpointMetadata>> {

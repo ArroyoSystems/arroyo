@@ -600,12 +600,12 @@ pub async fn parse_and_get_arrow_program(
         plan_to_graph_visitor.add_plan(extension)?;
     }
     let graph = plan_to_graph_visitor.into_graph();
-    let program = LogicalProgram {
+    let program = LogicalProgram::new(
         graph,
-        program_config: ProgramConfig {
+        ProgramConfig {
             udf_dylibs: schema_provider.dylib_udfs.clone(),
         },
-    };
+    );
 
     Ok(CompiledSql {
         program,

@@ -93,7 +93,7 @@ impl State for Running {
                         ctx.status.restarts = 0;
                         if let Err(e) = ctx.status.update_db(&ctx.db).await {
                             error!(message = "Failed to update status", error = format!("{:?}", e),
-                                job_id = ctx.config.id);
+                                job_id = *ctx.config.id);
                             ctx.status.restarts = restarts;
                             // we'll try again on the next round
                         }
@@ -110,7 +110,7 @@ impl State for Running {
                             ))
                         },
                         Err(err) => {
-                            error!(message = "error while running", error = format!("{:?}", err), job_id = ctx.config.id);
+                            error!(message = "error while running", error = format!("{:?}", err), job_id = *ctx.config.id);
                             log_event("running_error", json!({
                                 "service": "controller",
                                 "job_id": ctx.config.id,

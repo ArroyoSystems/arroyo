@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use std::{fmt::Debug, sync::Arc};
@@ -93,7 +94,7 @@ async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
         warn!(
             message = "Failed to clean up cluster",
             error = format!("{:?}", e),
-            job_id = ctx.config.id
+            job_id = *ctx.config.id
         );
     }
 }
@@ -345,6 +346,7 @@ macro_rules! stop_if_desired_non_running {
     };
 }
 
+use crate::job_controller::job_metrics::JobMetrics;
 use crate::states::restarting::Restarting;
 pub(crate) use stop_if_desired_non_running;
 pub(crate) use stop_if_desired_running;
@@ -359,6 +361,7 @@ pub struct JobContext<'a> {
     retries_attempted: usize,
     job_controller: Option<JobController>,
     last_transitioned_at: Instant,
+    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 }
 
 impl<'a> JobContext<'a> {
@@ -431,7 +434,7 @@ async fn execute_state<'a>(
         Ok(Transition::Advance(s)) => {
             info!(
                 message = "state transition",
-                job_id = ctx.config.id,
+                job_id = *ctx.config.id,
                 from = state_name,
                 to = s.state.name(),
                 duration_ms = ctx.last_transitioned_at.elapsed().as_millis()
@@ -471,7 +474,7 @@ async fn execute_state<'a>(
         }) => {
             error!(
                 message = "fatal state error",
-                job_id = ctx.config.id,
+                job_id = *ctx.config.id,
                 state = state_name,
                 error_message = message,
                 error = format!("{:?}", source)
@@ -500,7 +503,7 @@ async fn execute_state<'a>(
         }) => {
             error!(
                 message = "retryable state error",
-                job_id = ctx.config.id,
+                job_id = *ctx.config.id,
                 state = state_name,
                 error_message = message,
                 error = format!("{:?}", source),
@@ -544,6 +547,7 @@ pub async fn run_to_completion(
     db: DatabaseSource,
     mut rx: Receiver<JobMessage>,
     scheduler: Arc<dyn Scheduler>,
+    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 ) {
     let mut ctx = JobContext {
         config: config.read().unwrap().clone(),
@@ -555,6 +559,7 @@ pub async fn run_to_completion(
         retries_attempted: 0,
         job_controller: None,
         last_transitioned_at: Instant::now(),
+        metrics,
     };
 
     loop {
@@ -572,7 +577,8 @@ pub async fn run_to_completion(
 
 pub struct StateMachine {
     tx: Option<Sender<JobMessage>>,
-    config: Arc<RwLock<JobConfig>>,
+    pub config: Arc<RwLock<JobConfig>>,
+    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     db: DatabaseSource,
     scheduler: Arc<dyn Scheduler>,
 }
@@ -584,10 +590,12 @@ impl StateMachine {
         db: DatabaseSource,
         scheduler: Arc<dyn Scheduler>,
         shutdown_guard: ShutdownGuard,
+        metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     ) -> Self {
         let mut this = Self {
             tx: None,
             config: Arc::new(RwLock::new(config)),
+            metrics,
             db,
             scheduler,
         };
@@ -670,13 +678,13 @@ impl StateMachine {
                 let config = self.config.clone();
                 let db = self.db.clone();
                 let scheduler = self.scheduler.clone();
-
+                let metrics = self.metrics.clone();
                 let pipeline_id = config.read().unwrap().pipeline_id;
                 match Self::get_program(&db, &status.id, pipeline_id).await {
                     Ok(Some(program)) => {
                         shutdown_guard.into_spawn_task(async move {
                             let id = { config.read().unwrap().id.clone() };
-                            info!(message = "starting state machine", job_id = id);
+                            info!(message = "starting state machine", job_id = *id);
                             run_to_completion(
                                 config,
                                 program,
@@ -685,9 +693,10 @@ impl StateMachine {
                                 db,
                                 rx,
                                 scheduler,
+                                metrics,
                             )
                             .await;
-                            info!(message = "finished state machine", job_id = id);
+                            info!(message = "finished state machine", job_id = *id);
                             Ok(())
                         });
                     }
