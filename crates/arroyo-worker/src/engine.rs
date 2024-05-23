@@ -332,6 +332,7 @@ impl Program {
 pub struct Engine {
     program: Program,
     worker_id: WorkerId,
+    #[allow(unused)]
     run_id: String,
     job_id: String,
     network_manager: NetworkManager,

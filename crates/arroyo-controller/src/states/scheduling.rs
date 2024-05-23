@@ -543,7 +543,7 @@ impl State for Scheduling {
         let needs_commit = committing_state.is_some();
 
         let program = Arc::new(ctx.program.clone());
-        let metrics = JobMetrics::new(ctx.config.id.clone(), program.clone());
+        let metrics = JobMetrics::new(program.clone());
         ctx.metrics
             .write()
             .await

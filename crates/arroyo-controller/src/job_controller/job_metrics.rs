@@ -2,10 +2,10 @@ use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::metrics::{
     Metric, MetricGroup, MetricName, OperatorMetricGroup, SubtaskMetrics,
 };
-use arroyo_types::{from_micros, to_micros};
+use arroyo_types::to_micros;
 use petgraph::prelude::NodeIndex;
-use std::array::from_fn;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -16,21 +16,15 @@ const COLLECTION_TIME: Duration = Duration::from_secs(5 * 60);
 const NUM_BUCKETS: usize = (COLLECTION_TIME.as_secs() / COLLECTION_RATE.as_secs()) as usize;
 const EWMA_ALPHA: f64 = 0.1;
 
-pub const METRICS: [MetricName; 4] = [
+pub const RATE_METRICS: [MetricName; 4] = [
     MetricName::BytesRecv,
     MetricName::BytesSent,
     MetricName::MessagesRecv,
     MetricName::MessagesSent,
 ];
 
-pub fn get_metric_idx(name: &str) -> Option<usize> {
-    match name {
-        "arroyo_worker_bytes_recv" => Some(0),
-        "arroyo_worker_bytes_sent" => Some(1),
-        "arroyo_worker_messages_recv" => Some(2),
-        "arroyo_worker_messages_sent" => Some(3),
-        _ => None,
-    }
+pub fn get_metric_name(name: &str) -> Option<MetricName> {
+    MetricName::from_str(&name["arroyo_worker_".len()..]).ok()
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -42,12 +36,11 @@ pub struct TaskKey {
 #[derive(Clone)]
 pub struct JobMetrics {
     program: Arc<LogicalProgram>,
-    job_id: Arc<String>,
     tasks: Arc<RwLock<HashMap<TaskKey, TaskMetrics>>>,
 }
 
 impl JobMetrics {
-    pub fn new(job_id: Arc<String>, program: Arc<LogicalProgram>) -> Self {
+    pub fn new(program: Arc<LogicalProgram>) -> Self {
         let mut tasks = HashMap::new();
         for op in program.graph.node_indices() {
             for i in 0..program.graph[op].parallelism {
@@ -63,30 +56,49 @@ impl JobMetrics {
 
         Self {
             program,
-            job_id,
             tasks: Arc::new(RwLock::new(tasks)),
         }
     }
 
-    pub async fn update(&self, operator_id: u32, subtask_idx: u32, values: [u64; METRICS.len()]) {
-        let mut lock = self.tasks.write().await;
-        let Some(metrics) = lock.get_mut(&TaskKey {
+    pub async fn update(
+        &self,
+        operator_id: u32,
+        subtask_idx: u32,
+        values: &HashMap<MetricName, u64>,
+    ) {
+        let now = SystemTime::now();
+
+        let key = TaskKey {
             operator_id,
             subtask_idx,
-        }) else {
+        };
+        let mut tasks = self.tasks.write().await;
+        let Some(task) = tasks.get_mut(&key) else {
             warn!(
-                messge = "tried to update metrics for non-existent operator or subtask",
-                job_id = *self.job_id,
-                operator_id = operator_id,
-                subtask_idx = subtask_idx
+                "Task not found for operator_id: {}, subtask_idx: {}",
+                operator_id, subtask_idx
             );
             return;
         };
 
-        let now = SystemTime::now();
-        for (rate, value) in metrics.rates.iter_mut().zip(values) {
-            rate.add(now, value);
+        for (metric, value) in values {
+            if let Some(rate) = task.rates.get_mut(&metric) {
+                rate.add(now, *value);
+            }
         }
+
+        let queue_size = values
+            .get(&MetricName::TxQueueSize)
+            .copied()
+            .unwrap_or_default() as f64;
+        let queue_remaining = values
+            .get(&MetricName::TxQueueRem)
+            .copied()
+            .unwrap_or_default() as f64;
+        // add 1 to each value to account for uninitialized values (which report 0); this can happen when a task
+        // never reads any data
+        let backpressure = 1.0 - (queue_remaining + 1.0) / (queue_size + 1.0);
+        task.update_backpressure(now, backpressure);
     }
 
     pub async fn get_groups(&self) -> Vec<OperatorMetricGroup> {
@@ -96,23 +108,32 @@ impl JobMetrics {
         for (k, v) in self.tasks.read().await.iter() {
             let op = metric_groups.entry(k.operator_id).or_default();
 
-            let mut metric_rates: [Vec<Metric>; METRICS.len()] = Default::default();
-
-            for (rate, output) in v.rates.iter().zip(metric_rates.iter_mut()) {
-                for (t, v) in rate.iter() {
-                    output.push(Metric {
-                        time: to_micros(t),
-                        value: v,
-                    });
-                }
-            }
-
-            for (name, metrics) in METRICS.iter().zip(metric_rates) {
-                op.entry(*name).or_default().push(SubtaskMetrics {
+            for (metric, rate) in &v.rates {
+                op.entry(*metric).or_default().push(SubtaskMetrics {
                     index: k.subtask_idx,
-                    metrics,
+                    metrics: rate
+                        .iter()
+                        .map(|(t, v)| Metric {
+                            time: to_micros(t),
+                            value: v,
+                        })
+                        .collect(),
                 });
             }
+
+            op.entry(MetricName::Backpressure)
+                .or_default()
+                .push(SubtaskMetrics {
+                    index: k.subtask_idx,
+                    metrics: v
+                        .backpressure
+                        .iter()
+                        .map(|(t, v)| Metric {
+                            time: to_micros(t),
+                            value: v,
+                        })
+                        .collect(),
+                });
         }
 
         metric_groups
@@ -138,49 +159,50 @@ impl JobMetrics {
 }
 
 pub struct TaskMetrics {
-    rates: [RateMetric; METRICS.len()],
+    rates: HashMap<MetricName, RateMetric>,
+    backpressure: CircularBuffer<(SystemTime, f64), NUM_BUCKETS>,
 }
 
 impl TaskMetrics {
     pub fn new() -> Self {
         Self {
-            rates: from_fn(|_| RateMetric::new()),
+            rates: RATE_METRICS
+                .iter()
+                .map(|&m| (m, RateMetric::new()))
+                .collect(),
+            backpressure: CircularBuffer::new((UNIX_EPOCH, 0.0)),
         }
+    }
+
+    pub fn update_backpressure(&mut self, time: SystemTime, value: f64) {
+        self.backpressure.push((time, value));
     }
 }
 
 /// Calculates an exponentially-weighted moving average over metrics collected from the job
 pub struct RateMetric {
-    rates: [f64; NUM_BUCKETS],
-    timestamps: [SystemTime; NUM_BUCKETS],
-    cur_idx: usize,
-    prev_value: u64,
+    values: CircularBuffer<(SystemTime, f64), NUM_BUCKETS>,
+    prev_value: Option<(SystemTime, u64)>,
 }
 
 impl RateMetric {
     pub fn new() -> Self {
         Self {
-            rates: [0.0; NUM_BUCKETS],
-            timestamps: [UNIX_EPOCH; NUM_BUCKETS],
-            cur_idx: 0,
-            prev_value: 0,
+            values: CircularBuffer::new((UNIX_EPOCH, 0.0)),
+            prev_value: None,
         }
     }
 
     pub fn add(&mut self, time: SystemTime, value: u64) {
-        let prev_idx = self.cur_idx;
-        self.cur_idx = (prev_idx + 1) % NUM_BUCKETS;
-
         let prev_value = self.prev_value;
-        self.timestamps[self.cur_idx] = time;
-        self.prev_value = value;
+        self.prev_value = Some((time, value));
 
-        if self.timestamps[prev_idx] == UNIX_EPOCH {
+        let Some((prev_time, prev_value)) = prev_value else {
             return;
-        }
+        };
 
         let delta_t = time
-            .duration_since(self.timestamps[prev_idx])
+            .duration_since(prev_time)
             .unwrap_or_default()
             .as_secs_f64();
 
@@ -190,60 +212,70 @@ impl RateMetric {
             //       reset behavior for it
             let diff = value.checked_sub(prev_value).unwrap_or_default();
             let r = diff as f64 / delta_t;
-            self.rates[self.cur_idx] = (1.0 - EWMA_ALPHA) * (self.rates[prev_idx]) + EWMA_ALPHA * r;
+            self.values
+                .push(if let Some((_, last_r)) = self.values.last() {
+                    (time, (1.0 - EWMA_ALPHA) * last_r + EWMA_ALPHA * r)
+                } else {
+                    (time, r)
+                });
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.timestamps[self.cur_idx] == UNIX_EPOCH
+        self.values.is_empty()
     }
 
-    pub fn iter(&self) -> RateMetricsIter {
-        let mut start_idx = (self.cur_idx + 1) % NUM_BUCKETS;
-        if !self.is_empty() {
-            while self.timestamps[start_idx] == UNIX_EPOCH {
-                start_idx = (start_idx + 1) % NUM_BUCKETS;
-            }
-        }
-
-        RateMetricsIter {
-            rate_metrics: self,
-            cur_idx: start_idx,
-            start_idx,
-            started: false,
-        }
+    pub fn iter(&self) -> impl Iterator<Item = (SystemTime, f64)> + '_ {
+        self.values.iter()
     }
 }
 
-pub struct RateMetricsIter<'a> {
-    rate_metrics: &'a RateMetric,
-    cur_idx: usize,
-    start_idx: usize,
-    started: bool,
+pub struct CircularBuffer<T: Copy, const N: usize> {
+    values: [T; N],
+    next_idx: usize,
+    size: u64,
 }
 
-impl<'a> Iterator for RateMetricsIter<'a> {
-    type Item = (SystemTime, f64);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let rate = self.rate_metrics.rates[self.cur_idx];
-        let timestamp = self.rate_metrics.timestamps[self.cur_idx];
-
-        if timestamp == UNIX_EPOCH || self.started && self.cur_idx == self.start_idx {
-            return None;
+impl<T: Copy, const N: usize> CircularBuffer<T, N> {
+    pub fn new(initial: T) -> Self {
+        Self {
+            values: [initial; N],
+            next_idx: 0,
+            size: 0,
         }
+    }
 
-        self.started = true;
-        self.cur_idx = (self.cur_idx + 1) % NUM_BUCKETS;
+    pub fn push(&mut self, value: T) {
+        self.values[self.next_idx] = value;
+        self.next_idx = (self.next_idx + 1) % N;
+        self.size = (self.size + 1).min(N as u64);
+    }
 
-        Some((timestamp, rate))
+    pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
+        self.values
+            .iter()
+            .cycle()
+            .skip(if self.len() < N { 0 } else { self.next_idx })
+            .take(self.size as usize)
+            .copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.size as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
+    pub fn last(&self) -> Option<T> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self.values[(self.next_idx as isize - 1).rem_euclid(N as isize) as usize])
+        }
     }
 }
-//
-// pub struct BackpressureMetric {
-//     buckets: [u64; NUM_BUCKETS],
-//
-// }
 
 #[cfg(test)]
 mod tests {
@@ -264,13 +296,13 @@ mod tests {
         }
 
         let results: Vec<_> = rate_metric.iter().collect();
-        assert_eq!(results.len(), 5);
+        assert_eq!(results.len(), 4);
 
         for (i, (time, v)) in results.iter().enumerate() {
             if i > 0 {
                 assert!(*v > 0.0);
             }
-            assert_eq!(*time, times[i]);
+            assert_eq!(*time, times[i + 1]);
         }
 
         for i in 0..NUM_BUCKETS * 7 {

@@ -19,6 +19,7 @@ use cornucopia_async::DatabaseSource;
 use time::OffsetDateTime;
 
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::parquet::ParquetBackend;
@@ -26,7 +27,7 @@ use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
-use crate::job_controller::job_metrics::{get_metric_idx, JobMetrics, METRICS};
+use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
 use crate::types::public::CheckpointState as DbCheckpointState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
 use arroyo_state::committing_state::CommittingState;
@@ -92,6 +93,7 @@ pub struct RunningJobModel {
     tasks: HashMap<(String, u32), TaskStatus>,
     operator_parallelism: HashMap<String, usize>,
     metrics: JobMetrics,
+    metric_update_task: Option<JoinHandle<()>>,
     last_updated_metrics: Instant,
 }
 
@@ -599,6 +601,7 @@ impl JobController {
                     .collect(),
                 operator_parallelism: program.tasks_per_operator(),
                 metrics,
+                metric_update_task: None,
                 last_updated_metrics: Instant::now(),
                 program,
             },
@@ -611,55 +614,79 @@ impl JobController {
         self.model.handle_message(msg, &self.db).await
     }
 
-    async fn update_metrics(&self) {
-        let mut metrics: HashMap<(u32, u32), [u64; METRICS.len()]> = HashMap::new();
+    async fn update_metrics(&mut self) {
+        if self.model.metric_update_task.is_some()
+            && !self
+                .model
+                .metric_update_task
+                .as_ref()
+                .unwrap()
+                .is_finished()
+        {
+            return;
+        }
 
-        for (_, worker) in &self.model.workers {
-            let Ok(e) = worker.connect.clone().get_metrics(MetricsReq {}).await else {
-                warn!("Failed to collect metrics from worker {:?}", worker.id);
-                return;
-            };
+        let job_metrics = self.model.metrics.clone();
+        let workers: Vec<_> = self
+            .model
+            .workers
+            .iter()
+            .filter(|(_, w)| w.state == WorkerState::Running)
+            .map(|(id, w)| (*id, w.connect.clone()))
+            .collect();
+        let program = self.model.program.clone();
 
-            fn find_label<'a>(labels: &'a [LabelPair], name: &'static str) -> Option<&'a str> {
-                Some(
-                    labels
-                        .iter()
-                        .find(|t| t.name.as_ref().map(|t| t == name).unwrap_or(false))?
-                        .value
-                        .as_ref()?
-                        .as_str(),
-                )
+        self.model.metric_update_task = Some(tokio::spawn(async move {
+            let mut metrics: HashMap<(u32, u32), HashMap<MetricName, u64>> = HashMap::new();
+
+            for (id, mut connect) in workers {
+                let Ok(e) = connect.get_metrics(MetricsReq {}).await else {
+                    warn!("Failed to collect metrics from worker {:?}", id);
+                    return;
+                };
+
+                fn find_label<'a>(labels: &'a [LabelPair], name: &'static str) -> Option<&'a str> {
+                    Some(
+                        labels
+                            .iter()
+                            .find(|t| t.name.as_ref().map(|t| t == name).unwrap_or(false))?
+                            .value
+                            .as_ref()?
+                            .as_str(),
+                    )
+                }
+
+                e.into_inner()
+                    .metrics
+                    .into_iter()
+                    .filter_map(|f| Some((get_metric_name(&f.name?)?, f.metric)))
+                    .flat_map(|(metric, values)| {
+                        let program = program.clone();
+                        values.into_iter().filter_map(move |m| {
+                            let subtask_idx =
+                                u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
+                            let operator_idx =
+                                program.operator_index(find_label(&m.label, "operator_id")?)?;
+                            let value = m
+                                .counter
+                                .map(|c| c.value)
+                                .or_else(|| m.gauge.map(|g| g.value))??
+                                as u64;
+                            Some(((operator_idx, subtask_idx), (metric, value)))
+                        })
+                    })
+                    .for_each(|(subtask_idx, (metric, value))| {
+                        metrics
+                            .entry(subtask_idx)
+                            .or_default()
+                            .insert(metric, value);
+                    });
             }
 
-            e.into_inner()
-                .metrics
-                .into_iter()
-                .filter_map(|f| Some((get_metric_idx(&f.name?)?, f.metric)))
-                .flat_map(|(metric, values)| {
-                    values.into_iter().filter_map(move |m| {
-                        let subtask_idx =
-                            u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
-                        let operator_idx = self
-                            .model
-                            .program
-                            .operator_index(find_label(&m.label, "operator_id")?)?;
-                        Some((
-                            (operator_idx, subtask_idx),
-                            (metric, m.counter?.value? as u64),
-                        ))
-                    })
-                })
-                .for_each(|(subtask_idx, (metric, value))| {
-                    metrics.entry(subtask_idx).or_default()[metric] = value;
-                });
-        }
-
-        for ((operator_idx, subtask_idx), values) in metrics {
-            self.model
-                .metrics
-                .update(operator_idx, subtask_idx, values)
-                .await;
-        }
+            for ((operator_idx, subtask_idx), values) in metrics {
+                job_metrics.update(operator_idx, subtask_idx, &values).await;
+            }
+        }));
     }
 
     pub async fn progress(&mut self) -> anyhow::Result<ControllerProgress> {

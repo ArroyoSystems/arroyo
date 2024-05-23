@@ -29,6 +29,8 @@ apache-avro = "0.16.0"
 regex = "1.9.5"
 base64 = "0.21.5"
 ahash = "0.8.7"
+strum_macros = "0.26.2"
+strum = "0.26.2"
 
 [build-dependencies]
 tonic-build = { workspace = true }
