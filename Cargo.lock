@@ -976,6 +976,7 @@ dependencies = [
  "bytes",
  "futures",
  "object_store",
+ "once_cell",
  "regex",
  "rusoto_core",
  "thiserror",

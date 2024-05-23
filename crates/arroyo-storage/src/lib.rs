@@ -16,8 +16,13 @@ use object_store::multipart::PartId;
 use object_store::path::Path;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
 use object_store::{CredentialProvider, MultipartId};
+use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::RwLock;
+use tracing::{debug, trace};
+
 mod aws;
 
 /// A reference-counted reference to a [StorageProvider].
@@ -311,6 +316,18 @@ pub async fn get_current_credentials() -> Result<Arc<AwsCredential>, StorageErro
     Ok(credentials)
 }
 
+static OBJECT_STORE_CACHE: Lazy<RwLock<HashMap<String, CacheEntry<Arc<dyn ObjectStore>>>>> =
+    Lazy::new(Default::default);
+
+struct CacheEntry<T> {
+    value: T,
+    inserted_at: Instant,
+}
+
+// The bearer token should last for 3600 seconds,
+// but regenerating it every 5 minutes to avoid token expiry
+const GCS_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+
 impl StorageProvider {
     pub async fn for_url(url: &str) -> Result<Self, StorageError> {
         Self::for_url_with_options(url, HashMap::new()).await
@@ -323,7 +340,7 @@ impl StorageProvider {
 
         match config {
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
-            BackendConfig::GCS(config) => Self::construct_gcs(config),
+            BackendConfig::GCS(config) => Self::construct_gcs(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }
     }
@@ -340,7 +357,7 @@ impl StorageProvider {
 
         let provider = match config {
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
-            BackendConfig::GCS(config) => Self::construct_gcs(config),
+            BackendConfig::GCS(config) => Self::construct_gcs(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
 
@@ -441,10 +458,52 @@ impl StorageProvider {
         })
     }
 
-    fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
-        let gcs = GoogleCloudStorageBuilder::from_env()
-            .with_bucket_name(&config.bucket)
-            .build()?;
+    async fn get_or_create_object_store(
+        builder: GoogleCloudStorageBuilder,
+        bucket: &str,
+    ) -> Result<Arc<dyn ObjectStore>, StorageError> {
+        let mut cache = OBJECT_STORE_CACHE.write().await;
+
+        if let Some(entry) = cache.get(bucket) {
+            if entry.inserted_at.elapsed() < GCS_CACHE_TTL {
+                trace!(
+                    "Cache hit - using cached object store for bucket {}",
+                    bucket
+                );
+                return Ok(entry.value.clone());
+            } else {
+                debug!(
+                    "Cache expired - constructing new object store for bucket {}",
+                    bucket
+                );
+            }
+        } else {
+            debug!(
+                "Cache miss - constructing new object store for bucket {}",
+                bucket
+            );
+        }
+
+        let new_store = Arc::new(builder.build().map_err(Into::<StorageError>::into)?);
+
+        cache.insert(
+            bucket.to_string(),
+            CacheEntry {
+                value: new_store.clone(),
+                inserted_at: Instant::now(),
+            },
+        );
+
+        Ok(new_store)
+    }
+
+    async fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
+        let mut builder = GoogleCloudStorageBuilder::from_env().with_bucket_name(&config.bucket);
+
+        if let Ok(service_account_key) = std::env::var("GOOGLE_SERVICE_ACCOUNT_KEY") {
+            debug!("Constructing GCS builder with service account key");
+            builder = builder.with_service_account_key(&service_account_key);
+        }
 
         let mut canonical_url = format!("https://{}.storage.googleapis.com", config.bucket);
         if let Some(key) = &config.key {
@@ -453,9 +512,11 @@ impl StorageProvider {
 
         let object_store_base_url = format!("https://{}.storage.googleapis.com", config.bucket);
 
+        let object_store = Self::get_or_create_object_store(builder, &config.bucket).await?;
+
         Ok(Self {
             config: BackendConfig::GCS(config),
-            object_store: Arc::new(gcs),
+            object_store,
             object_store_base_url,
             canonical_url,
             storage_options: HashMap::new(),
