@@ -323,7 +323,7 @@ impl StorageProvider {
 
         match config {
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
-            BackendConfig::GCS(config) => Self::construct_gcs(config),
+            BackendConfig::GCS(config) => Self::construct_gcs(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }
     }
@@ -340,7 +340,7 @@ impl StorageProvider {
 
         let provider = match config {
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
-            BackendConfig::GCS(config) => Self::construct_gcs(config),
+            BackendConfig::GCS(config) => Self::construct_gcs(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
 
@@ -441,7 +441,7 @@ impl StorageProvider {
         })
     }
 
-    fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
+    async fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
         let gcs = GoogleCloudStorageBuilder::from_env()
             .with_bucket_name(&config.bucket)
             .build()?;
