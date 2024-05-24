@@ -610,6 +610,10 @@ impl JobController {
         }
     }
 
+    pub fn update_config(&mut self, config: JobConfig) {
+        self.config = config;
+    }
+
     pub async fn handle_message(&mut self, msg: RunningMessage) -> anyhow::Result<()> {
         self.model.handle_message(msg, &self.db).await
     }
