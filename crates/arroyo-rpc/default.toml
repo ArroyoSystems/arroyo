@@ -1,0 +1,67 @@
+checkpoint-url = "/tmp/arroyo/checkpoints"
+
+# Services
+
+[api]
+bind-address = "0.0.0.0"
+http-port = 8000
+
+[controller]
+bind-address = "0.0.0.0"
+rpc-port = 9190
+scheduler = "process"
+
+[compiler]
+bind-address = "0.0.0.0"
+rpc-port = 9191
+install-clang = true
+install-rustc = true
+artifact-url = "/tmp/arroyo/artifacts"
+build-dir = "/tmp/arroyo/build-dir"
+
+[worker]
+bind-address = "0.0.0.0"
+rpc-port = 0
+data-port = 0
+task-slots = 16
+queue-size = 8192
+
+[node]
+bind-address = "0.0.0.0"
+rpc-port = 9192
+task-slots = 16
+
+[admin]
+bind-address = "0.0.0.0"
+http-port = 8001
+
+[pipeline]
+source-batch-size = 512
+source-batch-linger = "100ms"
+update-aggregate-flush-interval = "1s"
+
+# Schedulers
+
+[process-scheduler]
+slots-per-process = 16
+
+[kubernetes-scheduler]
+namespace = "default"
+
+[kubernetes-scheduler.worker]
+name-prefix = "arroyo"
+image = "ghcr.io/arroyosystems/arroyo:latest"
+image-pull-policy = "IfNotPresent"
+service-account-name = "default"
+resources = { requests = { cpu = "400m",  memory = "200Mi" } }
+task-slots = 4
+
+[database]
+type = "postgres"
+
+[database.postgres]
+database-name = "arroyo"
+host = "localhost"
+port = 5432
+user = "arroyo"
+password = "arroyo"

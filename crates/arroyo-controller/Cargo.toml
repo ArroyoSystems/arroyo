@@ -41,8 +41,8 @@ serde = "1"
 anyhow = "1.0.70"
 
 # Kubernetes
-kube = { version = "0.84", features = ["runtime", "derive"] }
-k8s-openapi = { version = "0.18.0", features = ["v1_26"] }
+kube = { version = "0.91", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.22.0", features = ["v1_30"] }
 serde_yaml = {version = "0.9"}
 
 # json-schema support

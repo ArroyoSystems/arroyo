@@ -1,9 +1,11 @@
 use anyhow::{anyhow, bail};
-use std::{env, fs};
+use std::fs;
+use std::path::PathBuf;
 
+use arroyo_rpc::config;
+use arroyo_rpc::config::{config, DatabaseType};
 use arroyo_server_common::shutdown::Shutdown;
 use arroyo_server_common::{log_event, start_admin_server};
-use arroyo_types::{ports, DatabaseConfig, DATABASE_ENV, DATABASE_PATH_ENV};
 use arroyo_worker::WorkerServer;
 use clap::{Parser, Subcommand};
 use cornucopia_async::DatabaseSource;
@@ -23,6 +25,10 @@ use uuid::Uuid;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    /// Path to an Arroyo config file, in TOML or YAML format
+    #[arg(short, long)]
+    config: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -76,6 +82,8 @@ impl CPService {
 async fn main() {
     let cli = Cli::parse();
 
+    config::initialize_config(cli.config.as_ref().map(|t| t.as_ref()));
+
     match &cli.command {
         Commands::Api { .. } => {
             start_control_plane(CPService::Api).await;
@@ -105,9 +113,9 @@ async fn main() {
 }
 
 async fn pg_pool() -> Pool {
-    let config = DatabaseConfig::load();
+    let config = &config().database.postgres;
     let mut cfg = deadpool_postgres::Config::new();
-    cfg.dbname = Some(config.name.clone());
+    cfg.dbname = Some(config.database_name.clone());
     cfg.host = Some(config.host.clone());
     cfg.port = Some(config.port);
     cfg.user = Some(config.user.clone());
@@ -118,12 +126,15 @@ async fn pg_pool() -> Pool {
     let pool = cfg
         .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
         .unwrap_or_else(|e| {
-            error!("Unable to connect to database {}: {:?}", config, e);
+            error!("Unable to connect to database {:?}: {:?}", config, e);
             exit(1);
         });
 
     let object_manager = pool.get().await.unwrap_or_else(|e| {
-        error!("Unable to create database connection for {} {}", config, e);
+        error!(
+            "Unable to create database connection for {:?} {}",
+            config, e
+        );
         exit(1);
     });
 
@@ -144,13 +155,7 @@ async fn pg_pool() -> Pool {
 }
 
 fn sqlite_connection() -> rusqlite::Connection {
-    let path = env::var(DATABASE_PATH_ENV)
-        .map(|s| s.into())
-        .unwrap_or_else(|_| {
-            dirs::config_dir()
-                .unwrap_or_else(|| panic!("Must specify {DATABASE_PATH_ENV}"))
-                .join("arroyo/config.sqlite")
-        });
+    let path = config().database.sqlite.path.clone();
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap_or_else(|e| {
@@ -206,16 +211,10 @@ fn sqlite_connection() -> rusqlite::Connection {
 }
 
 async fn db_source() -> DatabaseSource {
-    match env::var(DATABASE_ENV).as_ref().map(|s| s.as_str()).ok() {
-        Some("postgres") | None => DatabaseSource::Postgres(pg_pool().await),
-        Some("sqlite") => {
+    match config().database.r#type {
+        DatabaseType::Postgres => DatabaseSource::Postgres(pg_pool().await),
+        DatabaseType::Sqlite => {
             DatabaseSource::Sqlite(Arc::new(std::sync::Mutex::new(sqlite_connection())))
-        }
-        Some(e) => {
-            panic!(
-                "Unsupported setting for {}; supported options are 'postgres' or 'sqlite'",
-                e
-            )
         }
     }
 }
@@ -236,7 +235,7 @@ async fn connect(
     Client,
     Connection<impl AsyncRead + AsyncWrite + Unpin, impl AsyncRead + AsyncWrite + Unpin>,
 )> {
-    let config = DatabaseConfig::load();
+    let config = &config().database.postgres;
 
     loop {
         match tokio_postgres::config::Config::new()
@@ -244,7 +243,7 @@ async fn connect(
             .port(config.port)
             .user(&config.user)
             .password(&config.password)
-            .dbname(&config.name)
+            .dbname(&config.database_name)
             .connect(NoTls)
             .await
         {
@@ -258,7 +257,7 @@ async fn connect(
                     continue;
                 }
 
-                bail!("Failed to connect to database {}: {}", config, e);
+                bail!("Failed to connect to database {:?}: {}", config, e);
             }
         }
     }
@@ -282,15 +281,18 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
         }
     });
 
-    info!("Running migrations on database {}", DatabaseConfig::load());
+    info!(
+        "Running migrations on database {:?}",
+        config().database.postgres
+    );
 
     let report = migrations::migrations::runner()
         .run_async(&mut client)
         .await
         .map_err(|e| {
             anyhow!(
-                "Failed to run migrations on {}: {:?}",
-                DatabaseConfig::load(),
+                "Failed to run migrations on {:?}: {:?}",
+                config().database.postgres,
                 e
             )
         })?;
@@ -310,22 +312,21 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
 async fn start_control_plane(service: CPService) {
     let _guard = arroyo_server_common::init_logging(service.name());
 
+    let config = config::config();
+
     let db = db_source().await;
 
     log_event(
         "service_startup",
         json!({
             "service": service.name(),
-            "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string())
+            "scheduler": config.controller.scheduler,
         }),
     );
 
     let shutdown = Shutdown::new(service.name());
 
-    shutdown.spawn_task(
-        "admin",
-        start_admin_server(service.name(), ports::API_ADMIN),
-    );
+    shutdown.spawn_task("admin", start_admin_server(service.name()));
 
     if service == CPService::Api || service == CPService::All {
         shutdown.spawn_task("api", arroyo_api::start_server(db.clone()));
@@ -346,7 +347,7 @@ async fn start_control_plane(service: CPService) {
 
 async fn start_worker() {
     let shutdown = Shutdown::new("worker");
-    let server = WorkerServer::from_env(shutdown.guard("worker"));
+    let server = WorkerServer::from_config(shutdown.guard("worker"));
 
     let _guard = arroyo_server_common::init_logging(&format!(
         "worker-{}-{}",
@@ -354,7 +355,7 @@ async fn start_worker() {
         server.job_id()
     ));
 
-    shutdown.spawn_task("admin", start_admin_server("worker", 0));
+    shutdown.spawn_task("admin", start_admin_server("worker"));
     let token = shutdown.token();
     tokio::spawn(async move {
         if let Err(e) = server.start_async().await {
@@ -372,7 +373,7 @@ async fn start_node() {
 
     let _guard = arroyo_server_common::init_logging(&format!("node-{}", id.0,));
 
-    shutdown.spawn_task("admin", start_admin_server("worker", 0));
+    shutdown.spawn_task("admin", start_admin_server("worker"));
 
     let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
 }

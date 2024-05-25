@@ -6,10 +6,10 @@ use anyhow::{bail, Context, Result};
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{CHECKPOINT_URL_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 
+use arroyo_rpc::config::config;
 use prost::Message;
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -25,15 +25,12 @@ pub const GENERATIONS_TO_COMPACT: u32 = 1; // only compact generation 0 files
 async fn get_storage_provider() -> anyhow::Result<StorageProvider> {
     // TODO: this should be encoded in the config so that the controller doesn't need
     // to be synchronized with the workers
-    let storage_url =
-        env::var(CHECKPOINT_URL_ENV).unwrap_or_else(|_| "file:///tmp/arroyo".to_string());
+    let storage_url = &config().checkpoint_url;
 
-    StorageProvider::for_url(&storage_url)
-        .await
-        .context(format!(
-            "failed to construct checkpoint backend for URL {}",
-            storage_url
-        ))
+    StorageProvider::for_url(storage_url).await.context(format!(
+        "failed to construct checkpoint backend for URL {}",
+        storage_url
+    ))
 }
 
 pub struct ParquetBackend;
@@ -326,11 +323,4 @@ impl ParquetStats {
         self.min_routing_key = self.min_routing_key.min(other.min_routing_key);
         self.max_routing_key = self.max_routing_key.max(other.max_routing_key);
     }
-}
-
-pub fn get_storage_env_vars() -> HashMap<String, String> {
-    [S3_REGION_ENV, S3_ENDPOINT_ENV, CHECKPOINT_URL_ENV]
-        .iter()
-        .filter_map(|&var| env::var(var).ok().map(|v| (var.to_string(), v)))
-        .collect()
 }

@@ -3,6 +3,7 @@
 #![allow(clippy::type_complexity)]
 
 use anyhow::Result;
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
@@ -18,7 +19,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{from_micros, grpc_port, ports, NodeId, WorkerId};
+use arroyo_types::{from_micros, NodeId, WorkerId};
 use cornucopia_async::DatabaseSource;
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
@@ -603,12 +604,10 @@ impl ControllerServer {
             .build()
             .unwrap();
 
-        let addr: SocketAddr = format!(
-            "0.0.0.0:{}",
-            grpc_port("controller", ports::CONTROLLER_GRPC)
-        )
-        .parse()
-        .expect("Invalid port");
+        let addr = SocketAddr::new(
+            config().controller.bind_address,
+            config().controller.rpc_port,
+        );
 
         info!("Starting arroyo-controller on {}", addr);
 

@@ -31,6 +31,13 @@ base64 = "0.21.5"
 ahash = "0.8.7"
 strum_macros = "0.26.2"
 strum = "0.26.2"
+figment = { version = "0.10", features = ["toml", "env", "yaml", "json"] }
+k8s-openapi = { version = "0.22.0", features = ["v1_30"] }
+url = { version = "2", features = ["serde"] }
+dirs = "5.0.1"
 
 [build-dependencies]
 tonic-build = { workspace = true }
+
+[dev-dependencies]
+figment = {version = "0.10", features = ["test"]}

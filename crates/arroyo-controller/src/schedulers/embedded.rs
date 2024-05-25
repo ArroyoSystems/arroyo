@@ -1,7 +1,8 @@
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_server_common::shutdown::Shutdown;
-use arroyo_types::{default_controller_addr, WorkerId};
+use arroyo_types::WorkerId;
 use arroyo_worker::WorkerServer;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -58,7 +59,7 @@ impl Scheduler for EmbeddedScheduler {
                 worker_id,
                 (*req.job_id).clone(),
                 req.run_id.to_string(),
-                default_controller_addr(),
+                config().controller_endpoint(),
                 req.program,
                 guard,
             );

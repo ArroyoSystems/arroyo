@@ -1,14 +1,12 @@
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
     api, HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
     WorkerFinishedReq,
 };
-use arroyo_types::{
-    to_nanos, NodeId, WorkerId, ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV,
-    SLOTS_PER_NODE, TASK_SLOTS_ENV, WORKER_ID_ENV,
-};
+use arroyo_types::{to_nanos, NodeId, WorkerId, ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, RUN_ID_ENV};
 use base64::{engine::general_purpose, Engine as _};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
@@ -24,6 +22,7 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex};
 use tonic::{Request, Status};
 use tracing::{info, warn};
+
 pub mod embedded;
 pub mod kubernetes;
 
@@ -86,8 +85,6 @@ impl ProcessScheduler {
     }
 }
 
-const DEFAULT_SLOTS_PER_NODE: u32 = 16;
-
 pub struct StartPipelineReq {
     pub name: String,
     pub program: LogicalProgram,
@@ -105,9 +102,9 @@ impl Scheduler for ProcessScheduler {
         &self,
         start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
-        let slots_per_node = arroyo_types::u32_config(SLOTS_PER_NODE, DEFAULT_SLOTS_PER_NODE);
-
-        let workers = (start_pipeline_req.slots as f32 / slots_per_node as f32).ceil() as usize;
+        let workers = (start_pipeline_req.slots as f32
+            / config().process_scheduler.slots_per_process as f32)
+            .ceil() as usize;
 
         let mut slots_scheduled = 0;
 
@@ -143,8 +140,8 @@ impl Scheduler for ProcessScheduler {
         for _ in 0..workers {
             let path = base_path.clone();
 
-            let slots_here =
-                (start_pipeline_req.slots - slots_scheduled).min(slots_per_node as usize);
+            let slots_here = (start_pipeline_req.slots - slots_scheduled)
+                .min(config().process_scheduler.slots_per_process as usize);
 
             let worker_id = self.worker_counter.fetch_add(1, Ordering::SeqCst);
 
@@ -178,10 +175,10 @@ impl Scheduler for ProcessScheduler {
                 let mut child = command
                     .arg("worker")
                     .env("RUST_LOG", "info")
-                    .env(TASK_SLOTS_ENV, format!("{}", slots_here))
-                    .env(WORKER_ID_ENV, format!("{}", worker_id)) // start at 100 to make same length
+                    .env("ARROYO_ADMIN_HTTP_PORT", "0")
+                    .env("ARROYO_WORKER_TASK_SLOTS", format!("{}", slots_here))
+                    .env("ARROYO_WORKER_ID", format!("{}", worker_id)) // start at 100 to make same length
                     .env(JOB_ID_ENV, &*job_id)
-                    .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
                     .env(ARROYO_PROGRAM_FILE_ENV, program_file)
                     .kill_on_drop(true)

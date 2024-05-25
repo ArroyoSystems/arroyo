@@ -3,7 +3,7 @@
 pub mod shutdown;
 
 use anyhow::anyhow;
-use arroyo_types::{admin_port, telemetry_enabled, POSTHOG_KEY};
+use arroyo_types::POSTHOG_KEY;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -35,6 +35,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
+use arroyo_rpc::config::config;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
 
@@ -114,7 +115,7 @@ pub fn get_cluster_id() -> String {
 pub fn log_event(name: &str, mut props: Value) {
     static CLIENT: OnceCell<Client> = OnceCell::new();
     let cluster_id = get_cluster_id();
-    if telemetry_enabled() {
+    if !config().disable_telemetry {
         let name = name.to_string();
         tokio::task::spawn(async move {
             let client = CLIENT.get_or_init(Client::new);
@@ -179,6 +180,10 @@ async fn metrics_proto() -> Result<Bytes, StatusCode> {
     Ok(buf.into())
 }
 
+async fn config_route() -> Result<String, StatusCode> {
+    Ok(toml::to_string(&*config()).unwrap())
+}
+
 async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     serde_json::to_string_pretty(&json!({
         "service": state.name,
@@ -189,10 +194,11 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     .unwrap()
 }
 
-pub async fn start_admin_server(service: &str, default_port: u16) -> anyhow::Result<()> {
-    let port = admin_port(service, default_port);
+pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
+    let addr = config().admin.bind_address;
+    let port = config().admin.http_port;
 
-    info!("Starting {} admin server on 0.0.0.0:{}", service, port);
+    info!("Starting {} admin server on {}:{}", service, addr, port);
 
     let state = Arc::new(AdminState {
         name: format!("arroyo-{}", service),
@@ -203,9 +209,10 @@ pub async fn start_admin_server(service: &str, default_port: u16) -> anyhow::Res
         .route("/metrics", get(metrics))
         .route("/metrics.pb", get(metrics_proto))
         .route("/details", get(details))
+        .route("/config", get(config_route))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", port).parse().unwrap();
+    let addr = SocketAddr::new(addr, port);
 
     axum::Server::bind(&addr)
         .serve(app.into_make_service())

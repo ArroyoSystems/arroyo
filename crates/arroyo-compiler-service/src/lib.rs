@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::process::Stdio;
 use std::str::from_utf8;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{env, path::PathBuf, str::FromStr, sync::Arc};
+use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
@@ -15,12 +15,9 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::var_str::VarStr;
 
+use arroyo_rpc::config::config;
 use arroyo_server_common::wrap_start;
 use arroyo_storage::StorageProvider;
-use arroyo_types::{
-    bool_config, grpc_port, ports, ARTIFACT_URL_DEFAULT, ARTIFACT_URL_ENV, INSTALL_CLANG_ENV,
-    INSTALL_RUSTC_ENV,
-};
 use dlopen2::utils::PLATFORM_FILE_EXTENSION;
 use serde_json::Value;
 use tokio::time::timeout;
@@ -41,9 +38,9 @@ pub fn from_millis(ts: u64) -> SystemTime {
 
 pub async fn start_service() -> anyhow::Result<()> {
     let service = CompileService::new().await?;
-    let grpc = grpc_port("compiler", ports::COMPILER_GRPC);
+    let config = config();
 
-    let addr: SocketAddr = format!("0.0.0.0:{}", grpc).parse().unwrap();
+    let addr: SocketAddr = SocketAddr::new(config.compiler.bind_address, config.compiler.rpc_port);
 
     info!("Starting compiler service at {}", addr);
 
@@ -77,16 +74,12 @@ async fn binary_present(bin: &str) -> bool {
 
 impl CompileService {
     pub async fn new() -> anyhow::Result<Self> {
-        let build_dir = env::var("BUILD_DIR").unwrap_or("/tmp/arroyo/udf_build".to_string());
-
-        let artifact_url = env::var(ARTIFACT_URL_ENV).unwrap_or(ARTIFACT_URL_DEFAULT.to_string());
-
-        let storage = StorageProvider::for_url(&artifact_url)
+        let storage = StorageProvider::for_url(&config().compiler.artifact_url)
             .await
             .map_err(|e| anyhow!("unable to construct storage provider: {}", e))?;
 
         Ok(CompileService {
-            build_dir: PathBuf::from_str(&build_dir).unwrap(),
+            build_dir: PathBuf::from_str(&config().compiler.build_dir).unwrap(),
             lock: Arc::new(Mutex::new(())),
             storage,
             cargo_path: Arc::new(Mutex::new("cargo".to_string())),
@@ -127,12 +120,11 @@ impl CompileService {
             return Ok(());
         }
 
-        if !bool_config(INSTALL_RUSTC_ENV, false) {
+        if !config().compiler.install_rustc {
             error!(
                 "Rustc is not installed, and compiler server was not configured to automatically \
             install it. To compile UDFs, either manually install rustc or re-run the cluster with\
-            {}=true",
-                INSTALL_RUSTC_ENV
+            `compiler.install-rustc = true`"
             );
             bail!("Rustc is not installed and compiler service is not configured to automatically install it; \
             cannot compile UDFs");
@@ -206,7 +198,7 @@ impl CompileService {
             return Ok(());
         }
 
-        if !bool_config(INSTALL_CLANG_ENV, false) {
+        if !config().compiler.install_clang {
             let error = "UDF compilation requires clang or gcc to be available. Ensure you have a \
             working C compilation environment.";
             error!("{}", error);

@@ -6,7 +6,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
@@ -216,13 +215,11 @@ impl BackendConfig {
 
         let region = last([
             std::env::var("AWS_DEFAULT_REGION").ok(),
-            std::env::var(S3_REGION_ENV).ok(),
             matches.name("region").map(|m| m.as_str().to_string()),
         ]);
 
         let endpoint = last([
             std::env::var("AWS_ENDPOINT").ok(),
-            std::env::var(S3_ENDPOINT_ENV).ok(),
             matches
                 .name("endpoint")
                 .map(|endpoint| -> Result<String, StorageError> {

@@ -5,6 +5,7 @@ use cornucopia_async::DatabaseSource;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::net::SocketAddr;
 use time::OffsetDateTime;
 use tonic::transport::Channel;
 use tracing::{error, info};
@@ -34,12 +35,9 @@ use crate::rest::__path_ping;
 use crate::rest_utils::{service_unavailable, ErrorResp};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
+use arroyo_rpc::config::config;
 use arroyo_rpc::formats::*;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
-use arroyo_types::{
-    default_controller_addr, grpc_port, ports, service_port, COMPILER_ADDR_ENV,
-    CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
-};
 
 mod cloud;
 mod connection_profiles;
@@ -111,15 +109,8 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
 }
 
 pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp> {
-    let compiler_addr = std::env::var(COMPILER_ADDR_ENV).unwrap_or_else(|_| {
-        format!(
-            "http://localhost:{}",
-            grpc_port("compiler", ports::COMPILER_GRPC)
-        )
-    });
-
     // TODO: cache this
-    CompilerGrpcClient::connect(compiler_addr.to_string())
+    CompilerGrpcClient::connect(config().compiler_endpoint().to_string())
         .await
         .map_err(|e| {
             error!("Failed to connect to compiler service: {}", e);
@@ -128,13 +119,10 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
 }
 
 pub async fn start_server(database: DatabaseSource) -> anyhow::Result<()> {
-    let controller_addr =
-        std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| default_controller_addr());
+    let config = config();
+    let addr = SocketAddr::new(config.api.bind_address, config.api.http_port);
 
-    let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
-    let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
-
-    let app = rest::create_rest_app(database, &controller_addr);
+    let app = rest::create_rest_app(database, &config.controller_endpoint());
 
     info!("Starting API server on {:?}", addr);
     axum::Server::bind(&addr)

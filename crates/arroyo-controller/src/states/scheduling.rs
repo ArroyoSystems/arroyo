@@ -12,9 +12,9 @@ use tracing::{error, info, warn};
 
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::config::config;
 use arroyo_state::{
     committing_state::CommittingState,
-    parquet::get_storage_env_vars,
     tables::{global_keyed_map::GlobalKeyedTable, ErasedTable},
     BackingStore, StateBackend,
 };
@@ -178,7 +178,12 @@ impl Scheduling {
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
-                    env_vars: get_storage_env_vars(),
+                    env_vars: [(
+                        "ARROYO_CHECKPOINT_URL".to_string(),
+                        config().checkpoint_url.clone(),
+                    )]
+                    .into_iter()
+                    .collect(),
                 })
                 .await
             {
