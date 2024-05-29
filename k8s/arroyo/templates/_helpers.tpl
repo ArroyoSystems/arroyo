@@ -91,64 +91,10 @@ Create the name of the role to use
 {{- end }}
 {{- end }}
 
-{{/*
-Database environment variables
-*/}}
-{{- define "arroyo.databaseEnvVars" -}}
-{{- if .Values.postgresql.deploy }}
-- name: DATABASE_HOST
-  value: "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.cluster.local"
-- name: DATABASE_PORT
-  value: "{{ default "5432" .Values.postgresql.auth.port }}"
-- name: DATABASE_NAME
-  value: arroyo
-- name: DATABASE_USER
-  value: arroyo
-- name: DATABASE_PASSWORD
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "arroyo.fullname" . }}-postgresql
-      key: password
-{{- else -}}
-- name: DATABASE_HOST
-  value: "{{ .Values.postgresql.externalDatabase.host }}"
-- name: DATABASE_PORT
-  value: "{{ .Values.postgresql.externalDatabase.port }}"
-- name: DATABASE_NAME
-  value: "{{ .Values.postgresql.externalDatabase.name }}"
-- name: DATABASE_USER
-  value: "{{ .Values.postgresql.externalDatabase.user }}"
-- name: DATABASE_PASSWORD
-  value: "{{ .Values.postgresql.externalDatabase.password }}"
-{{- end }}
-{{- end }}
-
-{{/*
-Generic storage env vars
-*/}}
-{{- define "arroyo.storageEnvVars" -}}
-{{- if .Values.s3.region -}}
-- name: S3_REGION
-  value: {{ .Values.s3.region }}
-{{- end -}}
-{{- end -}}
-
 {{- define "tplvalues.render" -}}
     {{- if typeIs "string" .value }}
         {{- tpl .value .context }}
     {{- else }}
         {{- tpl (.value | toYaml) .context }}
     {{- end }}
-{{- end -}}
-
-
-{{/*
-Mount a config map with custom configuration
-*/}}
-{{- define "arroyo.existingConfigMap" -}}
-{{- if .Values.existingConfigMap  -}}
-envFrom:
-- configMapRef:
-    name: {{ .Values.existingConfigMap }}
-{{- end -}}
 {{- end -}}

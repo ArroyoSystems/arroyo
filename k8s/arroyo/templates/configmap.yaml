@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "arroyo.fullname" . }}-config
+data:
+  config.yaml: |-
+    checkpoint-url: "{{ required "A valid .Values.checkpointUrl entry required!" .Values.checkpointUrl }}"
+    controller-endpoint: "http://{{ include "arroyo.fullname" . }}:{{ .Values.controller.service.grpcPort }}"
+    
+    controller:
+      rpc-port: {{ .Values.controller.service.grpcPort }}
+      scheduler: "kubernetes"
+
+    admin:
+      http-port: {{ .Values.controller.service.adminPort }}
+
+    api:
+      http-port: {{ .Values.controller.service.httpPort }}
+    
+    compiler:
+      rpc-port: {{ .Values.controller.service.compilerPort }}
+      artifact-url: {{ required "A valid .Values.artifactUrl entry required!" .Values.artifactUrl }}
+
+    database:
+      type: "postgres"
+      postgres:
+    {{- if .Values.postgresql.deploy }}
+        host = "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.cluster.local"
+        port = {{ default "5432" .Values.postgresql.auth.port }}
+        database-name = "arroyo"
+        user = "arroyo"
+    {{- else -}}
+        host = "{{ .Values.postgresql.externalDatabase.host }}"
+        port = {{ .Values.postgresql.externalDatabase.port }}
+        database-name = "{{ .Values.postgresql.externalDatabase.name }}"
+        user = "{{ .Values.postgresql.externalDatabase.user }}"
+        password = "{{ .Values.postgresql.externalDatabase.password }}"
+    {{- end }}
+
+    kubernetes-scheduler:
+      worker:
+        name-prefix: "{{ include "arroyo.fullname" . }}"
+        task-slots: {{ .Values.worker.slots }}
+        labels: {{- include "arroyo.labels" . | nindent 10 }}
+        annotations:
+          {{- if .Values.prometheus.setAnnotations }}
+          prometheus.io/scrape: "true"
+          prometheus.io/path: /metrics
+          prometheus.io/port: "8001"
+          {{- end }}    
+          {{- with .Values.podAnnotations }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}    
+        image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+        image-pull-policy: "{{ .Values.worker.image.pullPolicy }}"
+        resources: {{ .Values.worker.resources | toYaml | nindent 10 }}
+        service-account-name: {{ .Values.serviceAccount.name | quote }}
+        volumes: {{ .Values.volumes | toYaml | nindent 10 }}
+          - name: arroyo-config
+            configMap:
+              name: {{ include "arroyo.fullname" . }}-config
+          {{ if .Values.existingConfigMap}}
+          - name: arroyo-user-config
+            configMap:
+              name: {{ .Values.existingConfigMap }}
+          {{ end }}
+        volume-mounts: {{ .Values.volumeMounts | toYaml | nindent 10 }}
+          - name: arroyo-config
+            mountPath: /root/.config/arroyo
+          {{- if .Values.existingConfigMap }}
+          - name: arroyo-user-config
+            mountPath: /app
+          {{- end }}

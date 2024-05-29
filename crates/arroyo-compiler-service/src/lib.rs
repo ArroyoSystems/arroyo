@@ -103,6 +103,7 @@ impl CompileService {
         let dependencies: Table = VarStr::new(udf_crate.dependencies)
             .sub_env_vars()
             .and_then(|deps| {
+                
                 toml::from_str(&deps).map_err(|e| anyhow!("Invalid dependency in RPC: {:?}", e))
             })?;
 

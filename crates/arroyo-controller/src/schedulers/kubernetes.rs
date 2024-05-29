@@ -126,13 +126,6 @@ impl KubernetesScheduler {
                                 ],
                                 "env": env,
                                 "volumeMounts": c.worker.volume_mounts,
-                                "envFrom": c.worker.config_map.as_ref().map(|name| {
-                                  json!([
-                                    {"configMapRef": {
-                                         "name": name
-                                    }}
-                                  ])
-                                }).unwrap_or_else(|| json!([]))
                             }
                         ],
                         "serviceAccountName": c.worker.service_account_name,

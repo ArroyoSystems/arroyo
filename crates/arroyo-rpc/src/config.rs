@@ -52,40 +52,48 @@ pub fn config() -> &'static Arc<Config> {
 }
 
 fn load_config(path: Option<&Path>) -> Figment {
-    // Priority (from highest to lowest) is:
+    // Priority (from highest--overriding--to lowest--overridden) is:
     //   1. ARROYO_* environment variables
     //   2. The config file specified in <path>
     //   3. arroyo.toml in the current directory
-    //   4. $(confdir)/arroyo/config.toml
+    //   4. $(confdir)/arroyo/config.{toml,yaml}
     //   5. ../default.toml
     let mut figment = Figment::from(Toml::string(DEFAULT_CONFIG));
-
+    
     if let Some(config_dir) = dirs::config_dir() {
-        figment = figment.merge(Toml::file(config_dir.join("arroyo/config.toml")));
+        figment = figment
+            .admerge(Yaml::file(config_dir.join("arroyo/config.yaml")))
+            .admerge(Toml::file(config_dir.join("arroyo/config.toml")));
     }
 
-    figment = figment.merge(Toml::file("arroyo.toml"));
+    figment =
+        figment.admerge(Yaml::file("arroyo.yaml"))
+            .admerge(Toml::file("arroyo.toml"));
 
     if let Some(path) = path {
         match path.extension().and_then(OsStr::to_str) {
             Some("yaml") => {
-                figment = figment.merge(Yaml::file(path));
+                figment = figment.admerge(Yaml::file(path));
             }
             Some("json") => {
-                figment = figment.merge(Json::file(path));
+                figment = figment.admerge(Json::file(path));
             }
             _ => {
-                figment = figment.merge(Toml::file(path));
+                figment = figment.admerge(Toml::file(path));
             }
         }
     };
 
-    figment.merge(Env::prefixed("ARROYO_").split("_"))
+    figment.admerge(Env::prefixed("ARROYO_")
+        .map(|p| p.as_str()
+            .replace("__", ".")
+            .replace("_", "-").into())
+    )
 }
 
 /// Arroyo configuration
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
     /// API service configuration
     pub api: ApiConfig,
@@ -155,7 +163,7 @@ impl Config {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ApiConfig {
     /// The host the API service should bind to
     pub bind_address: IpAddr,
@@ -165,7 +173,7 @@ pub struct ApiConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ControllerConfig {
     /// The host the controller should bind to
     pub bind_address: IpAddr,
@@ -178,7 +186,7 @@ pub struct ControllerConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CompilerConfig {
     /// Bind address for the compiler
     pub bind_address: IpAddr,
@@ -205,7 +213,7 @@ pub struct CompilerConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WorkerConfig {
     /// Bind address for the worker RPC socket
     pub bind_address: IpAddr,
@@ -220,17 +228,18 @@ pub struct WorkerConfig {
     pub task_slots: u32,
 
     /// ID for this worker
+    #[serde(default)]
     pub id: Option<u64>,
 
     /// Name to identify this worker (e.g., e.g., its hostname or a pod name)
-    pub name: String,
+    pub name: Option<String>,
 
     /// Size of the queues between nodes in the dataflow graph
     pub queue_size: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct NodeConfig {
     /// Bind address for the node service
     pub bind_address: IpAddr,
@@ -243,7 +252,7 @@ pub struct NodeConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AdminConfig {
     /// Bind address for the admin service
     pub bind_address: IpAddr,
@@ -253,7 +262,7 @@ pub struct AdminConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PipelineConfig {
     /// Batch size
     pub source_batch_size: usize,
@@ -266,14 +275,14 @@ pub struct PipelineConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum DatabaseType {
     Postgres,
     Sqlite,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct DatabaseConfig {
     pub r#type: DatabaseType,
     pub postgres: PostgresConfig,
@@ -282,7 +291,7 @@ pub struct DatabaseConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PostgresConfig {
     pub database_name: String,
     pub host: String,
@@ -292,7 +301,7 @@ pub struct PostgresConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SqliteConfig {
     pub path: PathBuf,
 }
@@ -308,7 +317,7 @@ impl Default for SqliteConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Scheduler {
     Embedded,
     Process,
@@ -317,23 +326,24 @@ pub enum Scheduler {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ProcessSchedulerConfig {
     pub slots_per_process: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct KubernetesSchedulerConfig {
     pub namespace: String,
     pub worker: KubernetesWorkerConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct KubernetesWorkerConfig {
     name_prefix: String,
 
+    #[serde(default)]
     name: Option<String>,
 
     pub image: String,
@@ -360,8 +370,6 @@ pub struct KubernetesWorkerConfig {
 
     #[serde(default)]
     pub volume_mounts: Vec<VolumeMount>,
-
-    pub config_map: Option<String>,
 }
 
 impl KubernetesWorkerConfig {
@@ -461,7 +469,7 @@ mod tests {
             assert_eq!(config.database.r#type, DatabaseType::Sqlite);
 
             // try overriding with environment variables
-            jail.set_env("ARROYO_ADMIN_HTTP-PORT", 9111);
+            jail.set_env("ARROYO_ADMIN__HTTP_PORT", 9111);
             let config: Config = load_config(None).extract().unwrap();
             assert_eq!(config.admin.http_port, 9111);
 

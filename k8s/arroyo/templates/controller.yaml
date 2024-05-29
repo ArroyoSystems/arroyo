@@ -30,10 +30,18 @@ spec:
       serviceAccountName: {{ template "arroyo.serviceAccountName" . }}
       volumes:
       {{- if .Values.volumes }}
-      {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 10 }}
+      {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 6 }}
       {{- end }}
-      {{- with .Values.imagePullSecrets }}
+      - name: arroyo-config
+        configMap:
+          name: {{ include "arroyo.fullname" . }}-config
+      {{- if .Values.existingConfigMap }}
+      - name: arroyo-user-config
+        configMap:
+          name: {{ .Values.existingConfigMap }}
+      {{- end }}
       imagePullSecrets:
+      {{- with .Values.imagePullSecrets }}
       {{- toYaml . | nindent 10 }}
       {{- end }}
       initContainers:
@@ -41,8 +49,22 @@ spec:
         image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
         imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
         command: [ "/app/arroyo-bin", "migrate", "--wait", "300" ]
+        volumeMounts:
+          - name: arroyo-config
+            mountPath: /root/.config/arroyo
+          {{- if .Values.existingConfigMap }}
+          - name: arroyo-user-config
+            mountPath: /app
+          {{- end }}
+          
         env:
-        {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
+        {{- if .Values.postgresql.deploy }}
+          - name: ARROYO_DATABASE_POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "arroyo.fullname" . }}-postgresql
+                key: password
+          {{- end }}
       containers:
       - name: arroyo-controller
         securityContext:
@@ -52,71 +74,18 @@ spec:
         command: ["/app/arroyo-bin", "cluster"]
 
         env:
-        {{- include "arroyo.storageEnvVars" . | nindent 8 }}
-        - name: CHECKPOINT_URL
-          value: {{ required "A valid .Values.checkpointUrl entry required!" .Values.checkpointUrl }}
-        - name: ARTIFACT_URL
-          value: {{ required "A valid .Values.artifactUrl entry required!" .Values.artifactUrl }}
+        {{- if .Values.postgresql.deploy }}
+        - name: ARROYO_DATABASE__POSTGRES__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "arroyo.fullname" . }}-postgresql
+              key: password
+          {{- end }}
 
-        {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
-        - name: CONTROLLER_ADDR
-          value: "http://{{ include "arroyo.fullname" . }}:{{ .Values.controller.service.grpcPort }}"
-        - name: GRPC_PORT
-          value: {{ .Values.controller.service.grpcPort | quote }}
-        - name: ADMIN_PORT
-          value: {{ .Values.controller.service.adminPort | quote }}
-        - name: HTTP_PORT
-          value: {{ .Values.controller.service.httpPort | quote }}
-        - name: COMPILER_GRPC_PORT
-          value: {{ .Values.controller.service.compilerPort | quote }}
-        - name: PROM_ENDPOINT
-          value: "{{ include "arroyo.prometheusEndpoint" .}}"
-        - name: API_METRICS_RATE
-          value: "{{ .Values.prometheus.queryRate }}"
-        - name: SCHEDULER
-          value: "kubernetes"
-        - name: K8S_NAMESPACE
+        - name: ARROYO_KUBERNETES__SCHEDULER__WORKER__NAMESPACE
           valueFrom:
             fieldRef:
-              fieldPath: metadata.namespace
-        - name: K8S_WORKER_NAME
-          value: "{{ include "arroyo.fullname" . }}"
-        - name: K8S_WORKER_LABELS
-          value: {{ include "arroyo.labels" . | quote }}
-        - name: K8S_WORKER_ANNOTATIONS
-        {{- if .Values.prometheus.setAnnotations }}
-          {{- $merged := merge (dict "prometheus.io/scrape" "true" "prometheus.io/path" "/metrics" "prometheus.io/port" "6901") .Values.podAnnotations  }}
-          value: {{ toYaml $merged | quote }}
-        {{- else }}
-          value: {{ .Values.podAnnotations | toYaml | quote }}
-        {{- end }}
-        - name: K8S_WORKER_IMAGE
-          value: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
-        - name: K8S_WORKER_IMAGE_PULL_POLICY
-          value: "{{ .Values.worker.image.pullPolicy }}"
-        # TODO: image pull secret
-        {{- if .Values.serviceAccount.name }}
-        - name: K8S_WORKER_SERVICE_ACCOUNT_NAME
-          value: "{{ template "arroyo.serviceAccountName" . }}"
-        {{- end }}
-        - name: K8S_WORKER_RESOURCES
-          value: {{ .Values.worker.resources | toYaml | quote }}
-        - name: K8S_WORKER_SLOTS
-          value: {{ .Values.worker.slots | quote }}
-        {{- if .Values.volumes }}
-        - name: K8S_WORKER_VOLUMES
-          value: {{ .Values.volumes | toYaml | quote }}
-        {{- end }}
-        {{- if .Values.volumeMounts }}
-        - name: K8S_WORKER_VOLUME_MOUNTS
-          value: {{ .Values.volumeMounts | toYaml | quote }}
-        {{- end }}
-        {{- if .Values.existingConfigMap }}
-        - name: K8S_WORKER_CONFIG_MAP
-          value: {{ .Values.existingConfigMap }}
-        {{- end }}
-
-        {{- include "arroyo.existingConfigMap" . | nindent 8 }}
+              fieldPath: metadata.namespace        
 
         ports:
         - containerPort: {{ .Values.controller.service.grpcPort }}
@@ -137,7 +106,13 @@ spec:
           initialDelaySeconds: 5
         volumeMounts:
         {{- if .Values.volumeMounts }}
-        {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 10 }}
+        {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 8 }}
+        {{- end }}
+        - name: arroyo-config
+          mountPath: /root/.config/arroyo
+        {{- if .Values.existingConfigMap }}
+        - name: arroyo-user-config
+          mountPath: /app/arroyo.yaml
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
