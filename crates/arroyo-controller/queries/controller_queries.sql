@@ -1,7 +1,7 @@
 --! all_jobs : Job(ttl_micros?, state?, start_time?, finish_time?, tasks?, failure_message?, run_id?, pipeline_path?, wasm_path?)
 SELECT
-    job_configs.id as id,
-    job_configs.organization_id as org_id,
+    c.id as id,
+    c.organization_id as org_id,
     pipeline_name,
     pipeline_id,
     checkpoint_interval_micros,
@@ -17,11 +17,11 @@ SELECT
     run_id,
     pipeline_path,
     wasm_path,
-    job_configs.restart_nonce as config_restart_nonce,
-    job_statuses.restart_nonce as status_restart_nonce,
+    c.restart_nonce as config_restart_nonce,
+    s.restart_nonce as status_restart_nonce,
     restart_mode
-FROM job_configs
-LEFT JOIN job_statuses ON job_configs.id = job_statuses.id;
+FROM job_configs c
+LEFT JOIN job_statuses s ON c.id = s.id;
 
 --! update_job_status (start_time?, finish_time?, tasks?, failure_message?, pipeline_path?, wasm_path?)
 UPDATE job_statuses
@@ -91,3 +91,12 @@ LIMIT 1;
 --! create_job_log_message
 INSERT INTO job_log_messages (pub_id, job_id, operator_id, task_index, log_level, message, details)
 VALUES (:pub_id, :job_id, :operator_id, :task_index, :log_level, :message, :details);
+
+--! clean_preview_pipelines
+DELETE FROM pipelines WHERE id in (
+  SELECT jc.pipeline_id
+  FROM job_configs jc
+  INNER JOIN job_statuses js ON jc.id = js.id
+  WHERE (js.state = 'Finished' OR js.state = 'Stopped' OR js.state = 'Failed')
+    AND jc.ttl_micros > 0
+    AND jc.created_at < :created_at);
