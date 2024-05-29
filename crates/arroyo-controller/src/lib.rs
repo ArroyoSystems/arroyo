@@ -41,6 +41,8 @@ pub mod job_controller;
 pub mod schedulers;
 mod states;
 
+const TTL_PIPELINE_CLEANUP_TIME: Duration = Duration::from_secs(60 * 60);
+
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::job_controller::job_metrics::JobMetrics;
@@ -122,6 +124,14 @@ impl JobStatus {
         } else {
             Ok(())
         }
+    }
+}
+
+fn job_in_final_state(config: &JobConfig, status: &JobStatus) -> bool {
+    match status.state.as_str() {
+        "Stopped" | "Finished" => config.stop_mode != StopMode::none,
+        "Failed" => config.restart_nonce == status.restart_nonce,
+        _ => false,
     }
 }
 
@@ -505,6 +515,8 @@ impl ControllerServer {
 
         let token = guard.token();
 
+        let mut cleaned_at = Instant::now();
+
         let our_guard = guard.child("update-thread");
         our_guard.into_spawn_task(async move {
             while !token.is_cancelled() {
@@ -551,7 +563,7 @@ impl ControllerServer {
 
                     if let Some(sm) = jobs.get_mut(&*id) {
                         sm.update(config, status, &guard).await;
-                    } else {
+                    } else if !job_in_final_state(&config, &status) {
                         jobs.insert(
                             (*id).clone(),
                             StateMachine::new(
@@ -565,6 +577,18 @@ impl ControllerServer {
                             .await,
                         );
                     }
+                }
+
+                if cleaned_at.elapsed() > Duration::from_secs(5) {
+                    let res = queries::controller_queries::execute_clean_preview_pipelines(
+                        &client,
+                        &(OffsetDateTime::now_utc() - TTL_PIPELINE_CLEANUP_TIME),
+                    )
+                    .await?;
+                    if res > 0 {
+                        info!("Cleaned {res} preview pipelines from database");
+                    }
+                    cleaned_at = Instant::now();
                 }
 
                 tokio::time::sleep(Duration::from_millis(500)).await;
