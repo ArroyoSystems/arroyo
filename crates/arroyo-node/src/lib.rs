@@ -116,9 +116,9 @@ impl NodeServer {
         let mut child = command
             .arg("worker")
             .env("RUST_LOG", "info")
-            .env("ARROYO_WORKER_ID", format!("{}", worker_id.0))
+            .env("ARROYO__WORKER__ID", format!("{}", worker_id.0))
             .env(JOB_ID_ENV, req.job_id.clone())
-            .env("ARROYO_WORKER_TASK_SLOTS", format!("{}", slots))
+            .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots))
             .env(RUN_ID_ENV, format!("{}", req.run_id))
             .env(ARROYO_PROGRAM_FILE_ENV, program_file.to_str().unwrap())
             .kill_on_drop(true)

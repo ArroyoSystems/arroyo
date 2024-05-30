@@ -179,7 +179,7 @@ impl Scheduling {
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
                     env_vars: [(
-                        "ARROYO_CHECKPOINT_URL".to_string(),
+                        "ARROYO__CHECKPOINT_URL".to_string(),
                         config().checkpoint_url.clone(),
                     )]
                     .into_iter()
