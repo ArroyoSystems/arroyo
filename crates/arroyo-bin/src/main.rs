@@ -119,7 +119,7 @@ async fn pg_pool() -> Pool {
     cfg.host = Some(config.host.clone());
     cfg.port = Some(config.port);
     cfg.user = Some(config.user.clone());
-    cfg.password = Some(config.password.clone());
+    cfg.password = Some((*config.password).clone());
     cfg.manager = Some(ManagerConfig {
         recycling_method: RecyclingMethod::Fast,
     });
@@ -242,7 +242,7 @@ async fn connect(
             .host(&config.host)
             .port(config.port)
             .user(&config.user)
-            .password(&config.password)
+            .password(&*config.password)
             .dbname(&config.database_name)
             .connect(NoTls)
             .await

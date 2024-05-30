@@ -4,6 +4,7 @@ use figment::Figment;
 use k8s_openapi::api::core::v1::{EnvVar, ResourceRequirements, Volume, VolumeMount};
 use log::warn;
 use regex::Regex;
+use serde::de::DeserializeOwned;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -367,7 +368,7 @@ pub struct PostgresConfig {
     pub host: String,
     pub port: u16,
     pub user: String,
-    pub password: String,
+    pub password: Sensitive<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -531,6 +532,35 @@ pub enum LogFormat {
     Logfmt,
 }
 
+#[derive(Debug, Clone)]
+pub struct Sensitive<T: Serialize + DeserializeOwned + Debug + Clone>(T);
+
+impl<'de, T: Serialize + DeserializeOwned + Debug + Clone> Deserialize<'de> for Sensitive<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Sensitive(T::deserialize(deserializer)?))
+    }
+}
+
+impl<T: Serialize + DeserializeOwned + Debug + Clone> Serialize for Sensitive<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str("*********")
+    }
+}
+
+impl<T: Serialize + DeserializeOwned + Debug + Clone> Deref for Sensitive<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::{load_config, Config, DatabaseType, Scheduler, SqliteConfig};
@@ -581,6 +611,28 @@ mod tests {
             );
             assert_eq!(config.checkpoint_url, "s3:///checkpoint/path");
             assert_eq!(config.compiler.artifact_url, "s3:///artifact/path");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_sensitive_config() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("ARROYO__DATABASE__POSTGRES__PASSWORD", "sup3r-s3cr3t-p@ss");
+
+            let config: Config = load_config(None).extract().unwrap();
+            assert_eq!(&*config.database.postgres.password, "sup3r-s3cr3t-p@ss");
+
+            let v: serde_json::Value =
+                serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+            assert_eq!(
+                v.pointer("/database/postgres/password")
+                    .unwrap()
+                    .as_str()
+                    .unwrap(),
+                "*********"
+            );
+
             Ok(())
         });
     }
