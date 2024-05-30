@@ -70,6 +70,19 @@ pub fn config() -> Arc<Config> {
     CONFIG.load_full().unwrap()
 }
 
+fn add_legacy(config: Figment, old: &str, new: &str) -> Figment {
+    if let Ok(v) = std::env::var(old) {
+        warn!(
+            "Using deprecated config option '{}' -- will be removed in 0.12; \
+        see the config docs to migrate https://doc.arroyo.dev/config",
+            old
+        );
+        config.merge((new, v))
+    } else {
+        config
+    }
+}
+
 fn load_config(path: Option<&Path>) -> Figment {
     // Priority (from highest--overriding--to lowest--overridden) is:
     //   1. ARROYO__* environment variables
@@ -78,6 +91,18 @@ fn load_config(path: Option<&Path>) -> Figment {
     //   4. $(confdir)/arroyo/config.{toml,yaml}
     //   5. ../default.toml
     let mut figment = Figment::from(Toml::string(DEFAULT_CONFIG));
+
+    // support a few legacy configs with warnings -- to be removed in 0.12.
+    figment = add_legacy(figment, "CHECKPOINT_URL", "checkpoint-url");
+    figment = add_legacy(figment, "ARTIFACT_URL", "compiler.artifact-url");
+    figment = add_legacy(figment, "SCHEDULER", "controller.scheduler");
+    figment = add_legacy(figment, "DATABASE_HOST", "database.postgres.host");
+    figment = add_legacy(figment, "DATABASE_PORT", "database.postgres.port");
+    figment = add_legacy(figment, "DATABASE_USER", "database.postgres.user");
+    figment = add_legacy(figment, "DATABASE_PASSWORD", "database.postgres.password");
+    figment = add_legacy(figment, "DATABASE_NAME", "database.postgres.database-name");
+    figment = add_legacy(figment, "CONTROLLER_ADDR", "controller-endpoint");
+    figment = add_legacy(figment, "COMPILER_ADDR", "compiler-endpoint");
 
     if let Some(config_dir) = dirs::config_dir() {
         figment = figment
@@ -361,7 +386,7 @@ impl Default for SqliteConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Scheduler {
     Embedded,
@@ -508,7 +533,8 @@ pub enum LogFormat {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{load_config, Config, DatabaseType, SqliteConfig};
+    use crate::config::{load_config, Config, DatabaseType, Scheduler, SqliteConfig};
+    use url::Url;
 
     #[test]
     fn test_config() {
@@ -535,6 +561,26 @@ mod tests {
             let config: Config = load_config(None).extract().unwrap();
             assert_eq!(config.admin.http_port, 9111);
 
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_legacy_config() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("SCHEDULER", "kubernetes");
+            jail.set_env("CONTROLLER_ADDR", "http://localhost:9092");
+            jail.set_env("CHECKPOINT_URL", "s3:///checkpoint/path");
+            jail.set_env("ARTIFACT_URL", "s3:///artifact/path");
+
+            let config: Config = load_config(None).extract().unwrap();
+            assert_eq!(config.controller.scheduler, Scheduler::Kubernetes);
+            assert_eq!(
+                config.controller_endpoint,
+                Some(Url::parse("http://localhost:9092").unwrap())
+            );
+            assert_eq!(config.checkpoint_url, "s3:///checkpoint/path");
+            assert_eq!(config.compiler.artifact_url, "s3:///artifact/path");
             Ok(())
         });
     }
