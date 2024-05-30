@@ -235,7 +235,7 @@ impl WorkerServer {
     }
 
     pub async fn start_async(self) -> Result<(), Box<dyn std::error::Error>> {
-        let node_id = NodeId::from_env().unwrap_or(NodeId(0));
+        let node_id = NodeId(config().node.id.unwrap_or(0));
 
         let config = config();
         let listener = TcpListener::bind(SocketAddr::new(

@@ -175,9 +175,9 @@ impl Scheduler for ProcessScheduler {
                 let mut child = command
                     .arg("worker")
                     .env("RUST_LOG", "info")
-                    .env("ARROYO_ADMIN_HTTP_PORT", "0")
-                    .env("ARROYO_WORKER_TASK_SLOTS", format!("{}", slots_here))
-                    .env("ARROYO_WORKER_ID", format!("{}", worker_id)) // start at 100 to make same length
+                    .env("ARROYO__ADMIN__HTTP_PORT", "0")
+                    .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots_here))
+                    .env("ARROYO__WORKER__ID", format!("{}", worker_id)) // start at 100 to make same length
                     .env(JOB_ID_ENV, &*job_id)
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
                     .env(ARROYO_PROGRAM_FILE_ENV, program_file)

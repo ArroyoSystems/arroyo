@@ -1,6 +1,6 @@
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{config, KubernetesSchedulerConfig};
 use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_types::{WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV};
 use async_trait::async_trait;
@@ -21,25 +21,29 @@ const JOB_NAME_LABEL: &str = "job_name";
 
 pub struct KubernetesScheduler {
     client: Option<Client>,
+    config: KubernetesSchedulerConfig,
 }
 
 impl KubernetesScheduler {
-    pub async fn from_env() -> Self {
-        Self::new(Some(Client::try_default().await.unwrap()))
+    pub async fn new() -> Self {
+        Self::with_config(
+            Some(Client::try_default().await.unwrap()),
+            config().kubernetes_scheduler.clone(),
+        )
     }
 
-    pub fn new(client: Option<Client>) -> Self {
-        Self { client }
+    pub fn with_config(client: Option<Client>, config: KubernetesSchedulerConfig) -> Self {
+        Self { client, config }
     }
 
     fn make_replicaset(&self, req: StartPipelineReq) -> ReplicaSet {
-        let c = &config().kubernetes_scheduler;
+        let c = &self.config;
         let replicas = (req.slots as f32 / c.worker.task_slots as f32).ceil() as usize;
 
         let mut labels = c.worker.labels.clone();
         labels.insert(CLUSTER_LABEL.to_string(), c.worker.name());
         labels.insert(JOB_ID_LABEL.to_string(), (*req.job_id).clone());
-        labels.insert(RUN_ID_ENV.to_string(), format!("{}", req.run_id));
+        labels.insert(RUN_ID_LABEL.to_string(), format!("{}", req.run_id));
         labels.insert(JOB_NAME_LABEL.to_string(), req.name.clone());
 
         let mut env = json!([
@@ -235,6 +239,8 @@ impl Scheduler for KubernetesScheduler {
 #[cfg(test)]
 mod test {
     use arroyo_datastream::logical::LogicalProgram;
+    use arroyo_rpc::config::config;
+    use serde_json::json;
     use std::sync::Arc;
 
     use crate::schedulers::kubernetes::KubernetesScheduler;
@@ -253,7 +259,37 @@ mod test {
             env_vars: Default::default(),
         };
 
-        KubernetesScheduler::new(None)
+        let mut config = config().kubernetes_scheduler.clone();
+
+        config.worker.env.push(
+            serde_json::from_value(json!({
+                "name": "MY_TEST_VAR",
+                "value": "my value"
+            }))
+            .unwrap(),
+        );
+
+        config.worker.volume_mounts.push(
+            serde_json::from_value(json!({
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-sx6mp",
+                "readOnly": true
+            }))
+            .unwrap(),
+        );
+
+        config.worker.volumes.push(
+            serde_json::from_value(json!({
+                "hostPath": {
+                    "path": "/tmp/arroyo-test",
+                    "type": "DirectoryOrCreate"
+                },
+                "name": "checkpoints"
+            }))
+            .unwrap(),
+        );
+
+        KubernetesScheduler::with_config(None, config)
             // test that we don't panic when creating the replicaset
             .make_replicaset(req);
     }

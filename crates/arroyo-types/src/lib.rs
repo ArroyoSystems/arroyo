@@ -8,7 +8,6 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -97,14 +96,6 @@ pub struct WorkerId(pub u64);
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub struct NodeId(pub u64);
-
-impl NodeId {
-    pub fn from_env() -> Option<NodeId> {
-        std::env::var("NODE_ID")
-            .map(|s| NodeId(u64::from_str(&s).unwrap()))
-            .ok()
-    }
-}
 
 pub fn to_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64

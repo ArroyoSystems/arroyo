@@ -3,6 +3,7 @@
 #![allow(clippy::type_complexity)]
 
 use anyhow::Result;
+use arroyo_rpc::config;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -459,20 +460,20 @@ impl ControllerGrpc for ControllerServer {
 
 impl ControllerServer {
     pub async fn new(database: DatabaseSource) -> Self {
-        let scheduler: Arc<dyn Scheduler> = match std::env::var("SCHEDULER").ok().as_deref() {
-            Some("node") => {
+        let scheduler: Arc<dyn Scheduler> = match &config().controller.scheduler {
+            config::Scheduler::Node => {
                 info!("Using node scheduler");
                 Arc::new(NodeScheduler::new())
             }
-            Some("kubernetes") | Some("k8s") => {
+            config::Scheduler::Kubernetes => {
                 info!("Using kubernetes scheduler");
-                Arc::new(schedulers::kubernetes::KubernetesScheduler::from_env().await)
+                Arc::new(schedulers::kubernetes::KubernetesScheduler::new().await)
             }
-            Some("embedded") => {
+            config::Scheduler::Embedded => {
                 info!("Using embedded scheduler");
                 Arc::new(schedulers::embedded::EmbeddedScheduler::new())
             }
-            _ => {
+            config::Scheduler::Process => {
                 info!("Using process scheduler");
                 Arc::new(ProcessScheduler::new())
             }

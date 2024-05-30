@@ -25,16 +25,16 @@ data:
       type: "postgres"
       postgres:
     {{- if .Values.postgresql.deploy }}
-        host = "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.cluster.local"
-        port = {{ default "5432" .Values.postgresql.auth.port }}
-        database-name = "arroyo"
-        user = "arroyo"
+        host: "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.cluster.local"
+        port: {{ default "5432" .Values.postgresql.auth.port }}
+        database-name: "arroyo"
+        user: "arroyo"
     {{- else -}}
-        host = "{{ .Values.postgresql.externalDatabase.host }}"
-        port = {{ .Values.postgresql.externalDatabase.port }}
-        database-name = "{{ .Values.postgresql.externalDatabase.name }}"
-        user = "{{ .Values.postgresql.externalDatabase.user }}"
-        password = "{{ .Values.postgresql.externalDatabase.password }}"
+        host: "{{ .Values.postgresql.externalDatabase.host }}"
+        port: {{ .Values.postgresql.externalDatabase.port }}
+        database-name: "{{ .Values.postgresql.externalDatabase.name }}"
+        user: "{{ .Values.postgresql.externalDatabase.user }}"
+        password: "{{ .Values.postgresql.externalDatabase.password }}"
     {{- end }}
 
     kubernetes-scheduler:

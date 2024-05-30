@@ -12,7 +12,6 @@ use futures::StreamExt;
 use arroyo_rpc::config::config;
 use prost::Message;
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -171,9 +170,7 @@ impl ParquetBackend {
         operator_id: String,
         epoch: u32,
     ) -> Result<HashMap<String, TableCheckpointMetadata>> {
-        let min_files_to_compact = env::var("MIN_FILES_TO_COMPACT")
-            .unwrap_or_else(|_| "4".to_string())
-            .parse()?;
+        let min_files_to_compact = config().controller.compaction.checkpoints_to_compact as usize;
 
         let operator_checkpoint_metadata =
             Self::load_operator_metadata(&job_id, &operator_id, epoch)

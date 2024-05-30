@@ -21,6 +21,7 @@ use crate::queries::controller_queries;
 use crate::types::public::StopMode;
 use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus};
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use prost::Message;
 
@@ -447,7 +448,7 @@ async fn execute_state<'a>(
                     "job_id": ctx.config.id,
                     "from": state_name,
                     "to": s.state.name(),
-                    "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string()),
+                    "scheduler": &config().controller.scheduler,
                     "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
                 }),
             );

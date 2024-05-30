@@ -16,7 +16,6 @@ use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, Tex
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::error::Error;
-use std::fs;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,12 +29,12 @@ use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
 use tracing::{debug, info, span, Level};
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::fmt::format::{FmtSpan, Format};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{config, LogFormat};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
 
@@ -45,48 +44,56 @@ pub const VERSION: &str = "0.11.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(name: &str) -> Option<WorkerGuard> {
+pub fn init_logging(_name: &str) -> WorkerGuard {
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {:?}", e);
     }
 
-    let stdout_log = tracing_subscriber::fmt::layer()
-        .with_line_number(false)
-        .with_file(false)
-        .with_span_events(FmtSpan::NONE)
-        .with_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy()
-                .add_directive("refinery_core=warn".parse().unwrap()),
-        );
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy()
+        .add_directive("refinery_core=warn".parse().unwrap());
 
-    let subscriber = Registry::default().with(stdout_log);
+    let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stdout());
 
-    let mut guard = None;
-
-    let json_log = if std::env::var("PROD").is_ok() {
-        let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| "/var/log/arroyo".to_string());
-
-        fs::create_dir_all(&log_dir).unwrap();
-
-        let file_appender = tracing_appender::rolling::daily(&log_dir, name);
-        let (non_blocking, g) = tracing_appender::non_blocking(file_appender);
-        guard = Some(g);
-
-        let json_log = tracing_subscriber::fmt::layer()
-            .event_format(tracing_logfmt::EventsFormatter)
-            .fmt_fields(tracing_logfmt::FieldsFormatter)
-            .with_writer(non_blocking)
-            .with_filter(EnvFilter::from_default_env());
-        Some(json_log)
-    } else {
-        None
-    };
-
-    let subscriber = subscriber.with(json_log);
-
-    tracing::subscriber::set_global_default(subscriber).expect("Unable to set global subscriber");
+    match config().logging.format {
+        LogFormat::Plaintext => {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(
+                    tracing_subscriber::fmt::layer()
+                        .with_line_number(false)
+                        .with_file(false)
+                        .with_span_events(FmtSpan::NONE)
+                        .with_writer(nonblocking)
+                        .with_filter(filter),
+                ),
+            )
+            .expect("Unable to set global log subscriber");
+        }
+        LogFormat::Logfmt => {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(
+                    tracing_subscriber::fmt::layer()
+                        .event_format(tracing_logfmt::EventsFormatter)
+                        .fmt_fields(tracing_logfmt::FieldsFormatter)
+                        .with_writer(nonblocking)
+                        .with_filter(filter),
+                ),
+            )
+            .expect("Unable to set global log subscriber");
+        }
+        LogFormat::Json => {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(
+                    tracing_subscriber::fmt::layer()
+                        .event_format(Format::default().json())
+                        .with_writer(nonblocking)
+                        .with_filter(filter),
+                ),
+            )
+            .expect("Unable to set global log subscriber");
+        }
+    }
 
     std::panic::set_hook(Box::new(|panic| {
         if let Some(location) = panic.location() {

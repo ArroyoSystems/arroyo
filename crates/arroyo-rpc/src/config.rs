@@ -1,6 +1,8 @@
+use arc_swap::ArcSwapOption;
 use figment::providers::{Env, Format, Json, Toml, Yaml};
 use figment::Figment;
 use k8s_openapi::api::core::v1::{EnvVar, ResourceRequirements, Volume, VolumeMount};
+use log::warn;
 use regex::Regex;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
@@ -11,13 +13,13 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::str::FromStr;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
 const DEFAULT_CONFIG: &str = include_str!("../default.toml");
 
-static CONFIG: OnceLock<Arc<Config>> = OnceLock::new();
+static CONFIG: ArcSwapOption<Config> = ArcSwapOption::const_empty();
 
 pub fn initialize_config(path: Option<&Path>) {
     if let Some(path) = path {
@@ -30,45 +32,62 @@ pub fn initialize_config(path: Option<&Path>) {
         }
     }
 
-    CONFIG
-        .set(match load_config(path).extract() {
-            Ok(config) => Arc::new(config),
-            Err(errors) => {
-                eprintln!("Configuration is invalid!");
-                for err in errors {
-                    eprintln!("  • {err}");
-                }
+    let current = CONFIG.load();
+    if current.is_none() {
+        if CONFIG
+            .compare_and_swap(
+                current,
+                match load_config(path).extract() {
+                    Ok(config) => Some(config),
+                    Err(errors) => {
+                        eprintln!("Configuration is invalid!");
+                        for err in errors {
+                            eprintln!("  • {err}");
+                        }
 
-                exit(1);
-            }
-        })
-        .expect("Unable to initialize global config!");
+                        exit(1);
+                    }
+                },
+            )
+            .is_none()
+        {
+            return;
+        }
+    }
+
+    panic!("Unable to initialize configuration; it's already initialized!");
 }
 
-pub fn config() -> &'static Arc<Config> {
-    CONFIG
-        .get()
-        .expect("Configuration was accessed before initialization!")
+pub fn config() -> Arc<Config> {
+    let cur = CONFIG.load();
+    if cur.is_none() {
+        warn!("Config accessed before initialization! This should only happen in tests.");
+        CONFIG.compare_and_swap(cur, Some(load_config(None).extract().unwrap()));
+    } else {
+        drop(cur);
+    }
+
+    CONFIG.load_full().unwrap()
 }
 
 fn load_config(path: Option<&Path>) -> Figment {
     // Priority (from highest--overriding--to lowest--overridden) is:
-    //   1. ARROYO_* environment variables
+    //   1. ARROYO__* environment variables
     //   2. The config file specified in <path>
     //   3. arroyo.toml in the current directory
     //   4. $(confdir)/arroyo/config.{toml,yaml}
     //   5. ../default.toml
     let mut figment = Figment::from(Toml::string(DEFAULT_CONFIG));
-    
+
     if let Some(config_dir) = dirs::config_dir() {
         figment = figment
             .admerge(Yaml::file(config_dir.join("arroyo/config.yaml")))
             .admerge(Toml::file(config_dir.join("arroyo/config.toml")));
     }
 
-    figment =
-        figment.admerge(Yaml::file("arroyo.yaml"))
-            .admerge(Toml::file("arroyo.toml"));
+    figment = figment
+        .admerge(Yaml::file("arroyo.yaml"))
+        .admerge(Toml::file("arroyo.toml"));
 
     if let Some(path) = path {
         match path.extension().and_then(OsStr::to_str) {
@@ -84,10 +103,8 @@ fn load_config(path: Option<&Path>) -> Figment {
         }
     };
 
-    figment.admerge(Env::prefixed("ARROYO_")
-        .map(|p| p.as_str()
-            .replace("__", ".")
-            .replace("_", "-").into())
+    figment.admerge(
+        Env::prefixed("ARROYO__").map(|p| p.as_str().replace("__", ".").replace("_", "-").into()),
     )
 }
 
@@ -125,6 +142,9 @@ pub struct Config {
     // Kubernetes scheduler configuration
     pub kubernetes_scheduler: KubernetesSchedulerConfig,
 
+    // Logging config
+    pub logging: LogConfig,
+
     /// URL of an object store or filesystem for storing checkpoints
     pub checkpoint_url: String,
 
@@ -140,6 +160,10 @@ pub struct Config {
     /// if running the compiler on a separate machine from the other services or on a separate
     /// process with a non-standard port.
     compiler_endpoint: Option<Url>,
+
+    /// Controls whether preview pipelines should have sinks enabled
+    #[serde(default)]
+    pub sinks_in_preview: bool,
 
     /// Telemetry config
     #[serde(default)]
@@ -183,6 +207,18 @@ pub struct ControllerConfig {
 
     /// The scheduler to use
     pub scheduler: Scheduler,
+
+    pub compaction: CompactionConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CompactionConfig {
+    /// Whether to enable compaction for checkpoints
+    pub enabled: bool,
+
+    /// The number of outstanding checkpoints that will trigger compaction
+    pub checkpoints_to_compact: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -241,6 +277,9 @@ pub struct WorkerConfig {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct NodeConfig {
+    /// ID for this node
+    pub id: Option<u64>,
+
     /// Bind address for the node service
     pub bind_address: IpAddr,
 
@@ -249,6 +288,12 @@ pub struct NodeConfig {
 
     /// Number of task slots for this node
     pub task_slots: u32,
+}
+
+impl NodeConfig {
+    pub fn id(&self) -> u64 {
+        todo!()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -331,14 +376,14 @@ pub struct ProcessSchedulerConfig {
     pub slots_per_process: u32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct KubernetesSchedulerConfig {
     pub namespace: String,
     pub worker: KubernetesWorkerConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct KubernetesWorkerConfig {
     name_prefix: String,
@@ -444,6 +489,23 @@ impl<'de> Deserialize<'de> for HumanReadableDuration {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LogConfig {
+    /// Set the log format
+    #[serde(default)]
+    pub format: LogFormat,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum LogFormat {
+    #[default]
+    Plaintext,
+    Json,
+    Logfmt,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::{load_config, Config, DatabaseType, SqliteConfig};
@@ -469,7 +531,7 @@ mod tests {
             assert_eq!(config.database.r#type, DatabaseType::Sqlite);
 
             // try overriding with environment variables
-            jail.set_env("ARROYO_ADMIN__HTTP_PORT", 9111);
+            jail.set_env("ARROYO__ADMIN__HTTP_PORT", 9111);
             let config: Config = load_config(None).extract().unwrap();
             assert_eq!(config.admin.http_port, 9111);
 

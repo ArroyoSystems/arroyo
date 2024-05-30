@@ -8,7 +8,6 @@ use http::StatusCode;
 
 use petgraph::{Direction, EdgeDirection};
 use std::collections::HashMap;
-use std::env;
 
 use petgraph::visit::NodeRef;
 use std::time::Duration;
@@ -51,6 +50,7 @@ use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::AuthData;
 use crate::{connection_tables, to_micros};
+use arroyo_rpc::config::config;
 use cornucopia_async::{Database, DatabaseSource};
 
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
@@ -301,7 +301,7 @@ pub(crate) async fn create_pipeline_int<'a>(
 
     set_parallelism(&mut compiled.program, 1);
 
-    if is_preview && !env::var("PREVIEW_SINKS").is_ok_and(|s| s == "true") {
+    if is_preview && !config().sinks_in_preview {
         for node in compiled.program.graph.node_weights_mut() {
             // replace all sink connectors with websink for preview
             if node.operator_name == OperatorName::ConnectorSink {
