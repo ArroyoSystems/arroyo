@@ -12,6 +12,7 @@ use crate::states::restarting::Restarting;
 use crate::states::{fatal, stop_if_desired_running};
 use crate::JobMessage;
 use crate::{job_controller::ControllerProgress, states::StateError};
+use arroyo_rpc::config::config;
 use arroyo_server_common::log_event;
 use serde_json::json;
 
@@ -138,7 +139,7 @@ impl State for Running {
                         json!({
                             "service": "controller",
                             "job_id": ctx.config.id,
-                            "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string()),
+                            "scheduler": &config().controller.scheduler,
                             "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
                         }),
                     );

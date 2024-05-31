@@ -6,7 +6,6 @@ use axum::{
 
 use http::{header, StatusCode, Uri};
 use rust_embed::RustEmbed;
-use std::env;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
 use utoipa::OpenApi;
@@ -32,7 +31,7 @@ use crate::pipelines::{
 use crate::rest_utils::not_found;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
 use crate::ApiDoc;
-use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV};
+use arroyo_rpc::config::config;
 use cornucopia_async::DatabaseSource;
 
 #[derive(RustEmbed)]
@@ -92,15 +91,24 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 async fn index_html() -> Response {
     match Assets::get("index.html") {
         Some(content) => {
-            let endpoint = env::var(API_ENDPOINT_ENV).unwrap_or_else(|_| String::new());
-
             let replaced = String::from_utf8(content.data.to_vec())
                 .expect("index.html is invalid UTF-8")
-                .replace("{{API_ENDPOINT}}", &endpoint)
+                .replace(
+                    "{{API_ENDPOINT}}",
+                    &config()
+                        .api_endpoint
+                        .as_ref()
+                        .map(|t| t.to_string())
+                        .unwrap_or_default(),
+                )
                 .replace("{{CLUSTER_ID}}", &arroyo_server_common::get_cluster_id())
                 .replace(
                     "{{DISABLE_TELEMETRY}}",
-                    if telemetry_enabled() { "false" } else { "true" },
+                    if config().disable_telemetry {
+                        "true"
+                    } else {
+                        "false"
+                    },
                 );
 
             Html(replaced).into_response()

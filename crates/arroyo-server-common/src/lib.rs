@@ -3,7 +3,7 @@
 pub mod shutdown;
 
 use anyhow::anyhow;
-use arroyo_types::{admin_port, telemetry_enabled, POSTHOG_KEY};
+use arroyo_types::POSTHOG_KEY;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -16,7 +16,6 @@ use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, Tex
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::error::Error;
-use std::fs;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,11 +29,12 @@ use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
 use tracing::{debug, info, span, Level};
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::fmt::format::{FmtSpan, Format};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
+use arroyo_rpc::config::{config, LogFormat};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
 
@@ -44,48 +44,56 @@ pub const VERSION: &str = "0.11.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(name: &str) -> Option<WorkerGuard> {
+pub fn init_logging(_name: &str) -> WorkerGuard {
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {:?}", e);
     }
 
-    let stdout_log = tracing_subscriber::fmt::layer()
-        .with_line_number(false)
-        .with_file(false)
-        .with_span_events(FmtSpan::NONE)
-        .with_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy()
-                .add_directive("refinery_core=warn".parse().unwrap()),
-        );
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy()
+        .add_directive("refinery_core=warn".parse().unwrap());
 
-    let subscriber = Registry::default().with(stdout_log);
+    let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stdout());
 
-    let mut guard = None;
-
-    let json_log = if std::env::var("PROD").is_ok() {
-        let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| "/var/log/arroyo".to_string());
-
-        fs::create_dir_all(&log_dir).unwrap();
-
-        let file_appender = tracing_appender::rolling::daily(&log_dir, name);
-        let (non_blocking, g) = tracing_appender::non_blocking(file_appender);
-        guard = Some(g);
-
-        let json_log = tracing_subscriber::fmt::layer()
-            .event_format(tracing_logfmt::EventsFormatter)
-            .fmt_fields(tracing_logfmt::FieldsFormatter)
-            .with_writer(non_blocking)
-            .with_filter(EnvFilter::from_default_env());
-        Some(json_log)
-    } else {
-        None
-    };
-
-    let subscriber = subscriber.with(json_log);
-
-    tracing::subscriber::set_global_default(subscriber).expect("Unable to set global subscriber");
+    match config().logging.format {
+        LogFormat::Plaintext => {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(
+                    tracing_subscriber::fmt::layer()
+                        .with_line_number(false)
+                        .with_file(false)
+                        .with_span_events(FmtSpan::NONE)
+                        .with_writer(nonblocking)
+                        .with_filter(filter),
+                ),
+            )
+            .expect("Unable to set global log subscriber");
+        }
+        LogFormat::Logfmt => {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(
+                    tracing_subscriber::fmt::layer()
+                        .event_format(tracing_logfmt::EventsFormatter)
+                        .fmt_fields(tracing_logfmt::FieldsFormatter)
+                        .with_writer(nonblocking)
+                        .with_filter(filter),
+                ),
+            )
+            .expect("Unable to set global log subscriber");
+        }
+        LogFormat::Json => {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(
+                    tracing_subscriber::fmt::layer()
+                        .event_format(Format::default().json())
+                        .with_writer(nonblocking)
+                        .with_filter(filter),
+                ),
+            )
+            .expect("Unable to set global log subscriber");
+        }
+    }
 
     std::panic::set_hook(Box::new(|panic| {
         if let Some(location) = panic.location() {
@@ -114,7 +122,7 @@ pub fn get_cluster_id() -> String {
 pub fn log_event(name: &str, mut props: Value) {
     static CLIENT: OnceCell<Client> = OnceCell::new();
     let cluster_id = get_cluster_id();
-    if telemetry_enabled() {
+    if !config().disable_telemetry {
         let name = name.to_string();
         tokio::task::spawn(async move {
             let client = CLIENT.get_or_init(Client::new);
@@ -179,6 +187,10 @@ async fn metrics_proto() -> Result<Bytes, StatusCode> {
     Ok(buf.into())
 }
 
+async fn config_route() -> Result<String, StatusCode> {
+    Ok(toml::to_string(&*config()).unwrap())
+}
+
 async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     serde_json::to_string_pretty(&json!({
         "service": state.name,
@@ -189,10 +201,11 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     .unwrap()
 }
 
-pub async fn start_admin_server(service: &str, default_port: u16) -> anyhow::Result<()> {
-    let port = admin_port(service, default_port);
+pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
+    let addr = config().admin.bind_address;
+    let port = config().admin.http_port;
 
-    info!("Starting {} admin server on 0.0.0.0:{}", service, port);
+    info!("Starting {} admin server on {}:{}", service, addr, port);
 
     let state = Arc::new(AdminState {
         name: format!("arroyo-{}", service),
@@ -203,9 +216,10 @@ pub async fn start_admin_server(service: &str, default_port: u16) -> anyhow::Res
         .route("/metrics", get(metrics))
         .route("/metrics.pb", get(metrics_proto))
         .route("/details", get(details))
+        .route("/config", get(config_route))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", port).parse().unwrap();
+    let addr = SocketAddr::new(addr, port);
 
     axum::Server::bind(&addr)
         .serve(app.into_make_service())

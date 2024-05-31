@@ -1,4 +1,5 @@
 use crate::avro::de;
+use crate::should_flush;
 use arrow::compute::kernels;
 use arrow_array::builder::{
     ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
@@ -8,7 +9,7 @@ use arrow_array::RecordBatch;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_types::{should_flush, to_nanos, SourceError};
+use arroyo_types::{to_nanos, SourceError};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};

@@ -1,25 +1,16 @@
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
+use arroyo_rpc::config::{config, KubernetesSchedulerConfig};
 use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
-use arroyo_types::{
-    string_config, u32_config, WorkerId, ADMIN_PORT_ENV, ARROYO_PROGRAM_ENV, CONTROLLER_ADDR_ENV,
-    GRPC_PORT_ENV, JOB_ID_ENV, K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV,
-    K8S_WORKER_CONFIG_MAP_ENV, K8S_WORKER_IMAGE_ENV, K8S_WORKER_IMAGE_PULL_POLICY_ENV,
-    K8S_WORKER_LABELS_ENV, K8S_WORKER_NAME_ENV, K8S_WORKER_RESOURCES_ENV,
-    K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV, K8S_WORKER_SLOTS_ENV, K8S_WORKER_VOLUMES_ENV,
-    K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
-};
+use arroyo_types::{WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use k8s_openapi::api::apps::v1::ReplicaSet;
-use k8s_openapi::api::core::v1::{Pod, ResourceRequirements, Volume, VolumeMount};
+use k8s_openapi::api::core::v1::Pod;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
 use prost::Message;
-use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
-use std::collections::BTreeMap;
-use std::env;
+use serde_json::json;
 use std::time::Duration;
 use tonic::Status;
 
@@ -30,101 +21,37 @@ const JOB_NAME_LABEL: &str = "job_name";
 
 pub struct KubernetesScheduler {
     client: Option<Client>,
-    namespace: String,
-    name: String,
-    labels: BTreeMap<String, String>,
-    annotations: BTreeMap<String, String>,
-    image: String,
-    image_pull_policy: String,
-    service_account_name: String,
-    resources: ResourceRequirements,
-    slots_per_pod: u32,
-    volumes: Vec<Volume>,
-    volume_mounts: Vec<VolumeMount>,
-    config_map: Option<String>,
-}
-
-fn yaml_config<T: DeserializeOwned>(var: &str, default: T) -> T {
-    env::var(var)
-        .map(|s| {
-            serde_yaml::from_str(&s)
-                .unwrap_or_else(|e| panic!("Invalid configuration for '{}': {:?}", var, e))
-        })
-        .unwrap_or(default)
+    config: KubernetesSchedulerConfig,
 }
 
 impl KubernetesScheduler {
-    pub async fn from_env() -> Self {
-        Self::new(Some(Client::try_default().await.unwrap()))
+    pub async fn new() -> Self {
+        Self::with_config(
+            Some(Client::try_default().await.unwrap()),
+            config().kubernetes_scheduler.clone(),
+        )
     }
 
-    pub fn new(client: Option<Client>) -> Self {
-        Self {
-            client,
-            namespace: string_config(K8S_NAMESPACE_ENV, "default"),
-            name: format!("{}-worker", string_config(K8S_WORKER_NAME_ENV, "arroyo")),
-            image: string_config(K8S_WORKER_IMAGE_ENV, "ghcr.io/arroyosystems/arroyo:latest"),
-            labels: yaml_config(K8S_WORKER_LABELS_ENV, BTreeMap::new()),
-            annotations: yaml_config(K8S_WORKER_ANNOTATIONS_ENV, BTreeMap::new()),
-            image_pull_policy: string_config(K8S_WORKER_IMAGE_PULL_POLICY_ENV, "IfNotPresent"),
-            service_account_name: string_config(K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV, "default"),
-            resources: yaml_config(
-                K8S_WORKER_RESOURCES_ENV,
-                ResourceRequirements {
-                    claims: None,
-                    limits: None,
-                    requests: Some(
-                        [
-                            ("cpu".to_string(), serde_json::from_str("\"400m\"").unwrap()),
-                            (
-                                "memory".to_string(),
-                                serde_json::from_str("\"200Mi\"").unwrap(),
-                            ),
-                        ]
-                        .into(),
-                    ),
-                },
-            ),
-            slots_per_pod: u32_config(K8S_WORKER_SLOTS_ENV, 4),
-            volumes: yaml_config(K8S_WORKER_VOLUMES_ENV, vec![]),
-            volume_mounts: yaml_config(K8S_WORKER_VOLUME_MOUNTS_ENV, vec![]),
-            config_map: env::var(K8S_WORKER_CONFIG_MAP_ENV).ok(),
-        }
+    pub fn with_config(client: Option<Client>, config: KubernetesSchedulerConfig) -> Self {
+        Self { client, config }
     }
 
     fn make_replicaset(&self, req: StartPipelineReq) -> ReplicaSet {
-        let replicas = (req.slots as f32 / self.slots_per_pod as f32).ceil() as usize;
+        let c = &self.config;
+        let replicas = (req.slots as f32 / c.worker.task_slots as f32).ceil() as usize;
 
-        let mut labels = json!({
-            CLUSTER_LABEL: self.name,
-            JOB_ID_LABEL: req.job_id,
-            RUN_ID_LABEL: format!("{}", req.run_id),
-            JOB_NAME_LABEL: req.name,
-        });
-        for (k, v) in &self.labels {
-            labels
-                .as_object_mut()
-                .unwrap()
-                .insert(k.clone(), Value::String(v.clone()));
-        }
-
-        let mut annotations = json!({});
-        for (k, v) in &self.annotations {
-            annotations
-                .as_object_mut()
-                .unwrap()
-                .insert(k.clone(), Value::String(v.clone()));
-        }
+        let mut labels = c.worker.labels.clone();
+        labels.insert(CLUSTER_LABEL.to_string(), c.worker.name());
+        labels.insert(JOB_ID_LABEL.to_string(), (*req.job_id).clone());
+        labels.insert(RUN_ID_LABEL.to_string(), format!("{}", req.run_id));
+        labels.insert(JOB_NAME_LABEL.to_string(), req.name.clone());
 
         let mut env = json!([
             {
                 "name": "PROD", "value": "true",
             },
             {
-                "name": TASK_SLOTS_ENV, "value": format!("{}", self.slots_per_pod),
-            },
-            {
-                "name": NODE_ID_ENV, "value": "1",
+                "name": "ARROYO_WORKER_TASK_SLOTS", "value": format!("{}", c.worker.task_slots),
             },
             {
                 "name": JOB_ID_ENV, "value": req.job_id,
@@ -133,10 +60,10 @@ impl KubernetesScheduler {
                 "name": RUN_ID_ENV, "value": format!("{}", req.run_id),
             },
             {
-                "name": GRPC_PORT_ENV, "value": "6900",
+                "name": "ARROYO_WORKER_RPC_PORT", "value": "6900",
             },
             {
-                "name": ADMIN_PORT_ENV, "value": "6901",
+                "name": "ARROYO_ADMIN_HTTP_PORT", "value": "6901",
             },
             {
                 "name": ARROYO_PROGRAM_ENV,
@@ -147,14 +74,11 @@ impl KubernetesScheduler {
                 "name": "WASM_BIN",
                 "value": req.wasm_path
             },
+            {
+                "name": "ARROYO_CONTROLLER_ENDPOINT",
+                "value": config().controller_endpoint(),
+            }
         ]);
-
-        if let Ok(addr) = std::env::var(CONTROLLER_ADDR_ENV) {
-            env.as_array_mut().unwrap().push(json!({
-                "name": CONTROLLER_ADDR_ENV,
-                "value": addr,
-            }));
-        }
 
         for (key, value) in req.env_vars.into_iter() {
             env.as_array_mut().unwrap().push(json!({
@@ -167,10 +91,10 @@ impl KubernetesScheduler {
             "apiVersion": "apps/v1",
             "kind": "ReplicaSet",
             "metadata": {
-                "name": format!("{}-{}-{}", self.name, req.job_id.to_ascii_lowercase().replace('_', "-"), req.run_id),
-                "namespace": self.namespace,
+                "name": format!("{}-{}-{}", c.worker.name(), req.job_id.to_ascii_lowercase().replace('_', "-"), req.run_id),
+                "namespace": c.namespace,
                 "labels": labels,
-                "annotations": annotations,
+                "annotations": c.worker.annotations,
             },
             "spec": {
                 "replicas": replicas,
@@ -183,17 +107,17 @@ impl KubernetesScheduler {
                 "template": {
                     "metadata": {
                         "labels": labels,
-                        "annotations": annotations,
+                        "annotations": c.worker.annotations,
                     },
                     "spec": {
-                        "volumes": self.volumes,
+                        "volumes": c.worker.volumes,
                         "containers": [
                             {
                                 "name": "worker",
-                                "image": self.image,
+                                "image": c.worker.image,
                                 "command": ["/app/arroyo-bin", "worker"],
-                                "imagePullPolicy": self.image_pull_policy,
-                                "resources": self.resources,
+                                "imagePullPolicy": c.worker.image_pull_policy,
+                                "resources": c.worker.resources,
                                 "ports": [
                                     {
                                         "containerPort": 6900,
@@ -205,17 +129,10 @@ impl KubernetesScheduler {
                                     }
                                 ],
                                 "env": env,
-                                "volumeMounts": self.volume_mounts,
-                                "envFrom": self.config_map.as_ref().map(|name| {
-                                  json!([
-                                    {"configMapRef": {
-                                         "name": name
-                                    }}
-                                  ])
-                                }).unwrap_or_else(|| json!([]))
+                                "volumeMounts": c.worker.volume_mounts,
                             }
                         ],
-                        "serviceAccountName": self.service_account_name,
+                        "serviceAccountName": c.worker.service_account_name,
                     }
                 }
             }
@@ -322,6 +239,8 @@ impl Scheduler for KubernetesScheduler {
 #[cfg(test)]
 mod test {
     use arroyo_datastream::logical::LogicalProgram;
+    use arroyo_rpc::config::config;
+    use serde_json::json;
     use std::sync::Arc;
 
     use crate::schedulers::kubernetes::KubernetesScheduler;
@@ -340,7 +259,37 @@ mod test {
             env_vars: Default::default(),
         };
 
-        KubernetesScheduler::new(None)
+        let mut config = config().kubernetes_scheduler.clone();
+
+        config.worker.env.push(
+            serde_json::from_value(json!({
+                "name": "MY_TEST_VAR",
+                "value": "my value"
+            }))
+            .unwrap(),
+        );
+
+        config.worker.volume_mounts.push(
+            serde_json::from_value(json!({
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-sx6mp",
+                "readOnly": true
+            }))
+            .unwrap(),
+        );
+
+        config.worker.volumes.push(
+            serde_json::from_value(json!({
+                "hostPath": {
+                    "path": "/tmp/arroyo-test",
+                    "type": "DirectoryOrCreate"
+                },
+                "name": "checkpoints"
+            }))
+            .unwrap(),
+        );
+
+        KubernetesScheduler::with_config(None, config)
             // test that we don't panic when creating the replicaset
             .make_replicaset(req);
     }

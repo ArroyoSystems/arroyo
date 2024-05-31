@@ -1,4 +1,3 @@
-use arroyo_types::DatabaseConfig;
 use cornucopia::{CodegenSettings, Error};
 use postgres::{Client, NoTls};
 
@@ -16,15 +15,16 @@ fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=../arroyo-api/migrations");
     println!("cargo:rerun-if-changed=../arroyo-api/sqlite_migrations");
 
-    let config = DatabaseConfig::load();
     let mut client = Client::configure()
-        .dbname(&config.name)
-        .host(&config.host)
-        .port(config.port)
-        .user(&config.user)
-        .password(&config.password)
+        .dbname("arroyo")
+        .host("localhost")
+        .port(5432)
+        .user("arroyo")
+        .password("arroyo")
         .connect(NoTls)
-        .unwrap_or_else(|_| panic!("Could not connect to postgres: {:?}", config));
+        .unwrap_or_else(|_| {
+            panic!("Could not connect to postgres: arroyo:arroyo@localhost:5432/arroyo")
+        });
 
     let mut sqlite =
         rusqlite::Connection::open_in_memory().expect("Couldn't open sqlite memory connection");

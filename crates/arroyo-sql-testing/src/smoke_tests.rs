@@ -255,7 +255,10 @@ async fn run_and_checkpoint(job_id: Arc<String>, program: Program, checkpoint_in
         })
         .await;
     info!("Smoke test checkpointing enabled");
-    env::set_var("MIN_FILES_TO_COMPACT", "2");
+    env::set_var(
+        "ARROYO__CONTROLLER__COMPACTION__CHECKPOINTS_TO_COMPACT",
+        "2",
+    );
 
     let ctx = &mut SmokeTestContext {
         job_id: job_id.clone(),

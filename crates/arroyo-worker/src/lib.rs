@@ -15,8 +15,8 @@ use arroyo_rpc::grpc::{
     TaskFinishedReq, TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
 use arroyo_types::{
-    default_controller_addr, from_millis, grpc_port, to_micros, CheckpointBarrier, NodeId,
-    WorkerId, ARROYO_PROGRAM_ENV, ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, to_micros, CheckpointBarrier, NodeId, WorkerId, ARROYO_PROGRAM_ENV,
+    ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, RUN_ID_ENV,
 };
 use local_ip_address::local_ip;
 use rand::random;
@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
-use std::str::FromStr;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
@@ -44,6 +44,7 @@ use prost::Message;
 
 use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
 use arroyo_df::physical::new_registry;
+use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 
@@ -174,7 +175,7 @@ impl WorkerServer {
         }
     }
 
-    pub fn from_env(shutdown_guard: ShutdownGuard) -> Self {
+    pub fn from_config(shutdown_guard: ShutdownGuard) -> Self {
         let graph = Self::get_program();
         let graph = general_purpose::STANDARD_NO_PAD
             .decode(graph)
@@ -184,22 +185,19 @@ impl WorkerServer {
 
         let logical = LogicalProgram::try_from(graph).expect("Failed to create LogicalProgram");
 
-        let id = WorkerId::from_env().unwrap_or_else(|| WorkerId(random()));
+        let id = WorkerId(config().worker.id.unwrap_or_else(|| random()));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
 
         let run_id =
             std::env::var(RUN_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", RUN_ID_ENV));
 
-        let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
-            .unwrap_or_else(|_| default_controller_addr());
-
         WorkerServer::new(
             "program",
             id,
             job_id,
             run_id,
-            controller_addr,
+            config().controller_endpoint(),
             logical,
             shutdown_guard,
         )
@@ -237,15 +235,14 @@ impl WorkerServer {
     }
 
     pub async fn start_async(self) -> Result<(), Box<dyn std::error::Error>> {
-        let slots = std::env::var(arroyo_types::TASK_SLOTS_ENV)
-            .map(|s| usize::from_str(&s).unwrap())
-            .unwrap_or(8);
+        let node_id = NodeId(config().node.id.unwrap_or(0));
 
-        let node_id = NodeId::from_env();
-
-        let grpc_port = grpc_port("worker", 0);
-
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", grpc_port)).await?;
+        let config = config();
+        let listener = TcpListener::bind(SocketAddr::new(
+            config.worker.bind_address,
+            config.worker.rpc_port,
+        ))
+        .await?;
         let local_addr = listener.local_addr()?;
 
         info!("Started worker-rpc for {} on {}", self.name, local_addr);
@@ -286,14 +283,14 @@ impl WorkerServer {
         client
             .register_worker(Request::new(RegisterWorkerReq {
                 worker_id: id.0,
-                node_id: node_id.map(|n| n.0).unwrap_or(1),
+                node_id: node_id.0,
                 job_id,
                 rpc_address,
                 data_address,
                 resources: Some(WorkerResources {
                     slots: std::thread::available_parallelism().unwrap().get() as u64,
                 }),
-                slots: slots as u64,
+                slots: config.worker.task_slots as u64,
             }))
             .await
             .unwrap();

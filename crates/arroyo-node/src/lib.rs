@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail};
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::{
     controller_grpc_client::ControllerGrpcClient, node_grpc_server::NodeGrpc,
     node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp, HeartbeatNodeReq,
@@ -18,9 +19,7 @@ use arroyo_rpc::grpc::{
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{
-    default_controller_addr, grpc_port, ports, to_millis, to_nanos, NodeId, WorkerId,
-    ARROYO_PROGRAM_FILE_ENV, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV,
-    TASK_SLOTS_ENV, WORKER_ID_ENV,
+    to_millis, to_nanos, NodeId, WorkerId, ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, RUN_ID_ENV,
 };
 use base64::engine::general_purpose;
 use base64::Engine;
@@ -117,10 +116,9 @@ impl NodeServer {
         let mut child = command
             .arg("worker")
             .env("RUST_LOG", "info")
-            .env(WORKER_ID_ENV, format!("{}", worker_id.0))
-            .env(NODE_ID_ENV, format!("{}", node_id.0))
+            .env("ARROYO__WORKER__ID", format!("{}", worker_id.0))
             .env(JOB_ID_ENV, req.job_id.clone())
-            .env(TASK_SLOTS_ENV, format!("{}", slots))
+            .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots))
             .env(RUN_ID_ENV, format!("{}", req.run_id))
             .env(ARROYO_PROGRAM_FILE_ENV, program_file.to_str().unwrap())
             .kill_on_drop(true)
@@ -256,14 +254,7 @@ impl NodeGrpc for NodeServer {
 }
 
 pub async fn start_server(guard: ShutdownGuard) -> NodeId {
-    let controller_addr =
-        std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| default_controller_addr());
-
-    let task_slots = std::env::var("NODE_SLOTS")
-        .map(|s| usize::from_str(&s).unwrap())
-        .unwrap_or(16);
-
-    let grpc = grpc_port("node", ports::NODE_GRPC);
+    let config = config();
 
     let node_id = NodeId(random());
 
@@ -275,10 +266,10 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
         worker_finished_tx,
     };
 
-    let bind_addr: SocketAddr = format!("0.0.0.0:{}", grpc).parse().unwrap();
+    let bind_addr: SocketAddr = SocketAddr::new(config.node.bind_address, config.node.rpc_port);
     info!(
         "Starting node server on {} with {} slots",
-        bind_addr, task_slots
+        bind_addr, config.node.task_slots
     );
 
     guard.spawn_task(
@@ -293,7 +284,11 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
         ),
     );
 
-    let req_addr = format!("{}:{}", local_ip_address::local_ip().unwrap(), grpc);
+    let req_addr = format!(
+        "{}:{}",
+        local_ip_address::local_ip().unwrap(),
+        config.node.rpc_port
+    );
 
     // TODO: replace this with some sort of hook on server startup
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -307,12 +302,12 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
     guard.into_spawn_task(async move {
         let mut attempts = 0;
         loop {
-            match ControllerGrpcClient::connect(controller_addr.clone()).await {
+            match ControllerGrpcClient::connect(config.controller_endpoint()).await {
                 Ok(mut controller) => {
                     controller
                         .register_node(Request::new(RegisterNodeReq {
                             node_id: node_id.0,
-                            task_slots: task_slots as u64,
+                            task_slots: config.node.task_slots as u64,
                             addr: req_addr.clone(),
                         }))
                         .await
@@ -346,7 +341,7 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
                     if attempts % 50 == 0 {
                         info!(
                             "failed to connect to controller on {}..., {:?}",
-                            controller_addr, e
+                            config.controller_endpoint(), e
                         );
                     }
 

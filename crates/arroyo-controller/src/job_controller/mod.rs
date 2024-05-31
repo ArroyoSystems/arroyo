@@ -2,7 +2,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{
     collections::HashMap,
-    env,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -20,6 +19,7 @@ use time::OffsetDateTime;
 
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::metrics::MetricName;
+use arroyo_rpc::config::config;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::parquet::ParquetBackend;
@@ -369,12 +369,7 @@ impl RunningJobModel {
     }
 
     async fn compact_state(&mut self) -> anyhow::Result<()> {
-        let compaction_enabled = match env::var("COMPACTION_ENABLED") {
-            Ok(val) => val.to_lowercase() == "true",
-            Err(_) => false,
-        };
-
-        if !compaction_enabled {
+        if !config().controller.compaction.enabled {
             info!("Compaction is disabled, skipping compaction");
             return Ok(());
         }

@@ -31,12 +31,11 @@ use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver, Batch
 use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;
 use arroyo_operator::ErasedConstructor;
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::{api, CheckpointMetadata, TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{
-    range_for_server, u32_config, Key, TaskInfo, WorkerId, DEFAULT_QUEUE_SIZE, QUEUE_SIZE_ENV,
-};
+use arroyo_types::{range_for_server, Key, TaskInfo, WorkerId};
 use arroyo_udf_host::LocalUdf;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -253,7 +252,7 @@ impl Program {
             }
         }
 
-        let queue_size = u32_config(QUEUE_SIZE_ENV, DEFAULT_QUEUE_SIZE);
+        let queue_size = config().worker.queue_size;
 
         for idx in logical.edge_indices() {
             let edge = logical.edge_weight(idx).unwrap();

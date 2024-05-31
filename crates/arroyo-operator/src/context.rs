@@ -3,6 +3,7 @@ use arrow::array::{make_builder, Array, ArrayBuilder, PrimitiveArray, RecordBatc
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::{SchemaRef, UInt64Type};
 use arroyo_formats::de::ArrowDeserializer;
+use arroyo_formats::should_flush;
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -12,8 +13,7 @@ use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
-    from_micros, should_flush, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo, UserError,
-    Watermark,
+    from_micros, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo, UserError, Watermark,
 };
 use datafusion::common::hash_utils;
 use rand::Rng;

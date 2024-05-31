@@ -24,6 +24,7 @@ use tonic::{
     service::Interceptor,
 };
 
+pub mod config;
 pub mod df;
 
 pub mod grpc {

@@ -4,9 +4,10 @@ use std::time::SystemTime;
 
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::SinkDataReq;
-use arroyo_types::{default_controller_addr, from_nanos, to_micros, SignalMessage};
+use arroyo_types::{from_nanos, to_micros, SignalMessage};
 use tonic::transport::Channel;
 
 #[derive(Default)]
@@ -21,11 +22,8 @@ impl ArrowOperator for PreviewSink {
     }
 
     async fn on_start(&mut self, _: &mut ArrowContext) {
-        let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
-            .unwrap_or_else(|_| default_controller_addr());
-
         self.client = Some(
-            ControllerGrpcClient::connect(controller_addr)
+            ControllerGrpcClient::connect(config().controller_endpoint())
                 .await
                 .unwrap(),
         );

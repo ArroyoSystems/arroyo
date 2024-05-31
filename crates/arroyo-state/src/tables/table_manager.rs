@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use std::{collections::HashMap, env, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_rpc::CompactionResult;
@@ -12,12 +12,13 @@ use arroyo_rpc::{
     CheckpointCompleted, ControlResp,
 };
 use arroyo_storage::{StorageProvider, StorageProviderRef};
-use arroyo_types::{to_micros, CheckpointBarrier, Data, Key, TaskInfoRef, CHECKPOINT_URL_ENV};
+use arroyo_types::{to_micros, CheckpointBarrier, Data, Key, TaskInfoRef};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
 };
 
+use arroyo_rpc::config::config;
 use tracing::{debug, error, info, warn};
 
 use crate::{tables::global_keyed_map::GlobalKeyedTable, StateMessage};
@@ -227,15 +228,13 @@ impl BackendWriter {
 async fn get_storage_provider() -> anyhow::Result<StorageProviderRef> {
     // TODO: this should be encoded in the config so that the controller doesn't need
     // to be synchronized with the workers
-    let storage_url =
-        env::var(CHECKPOINT_URL_ENV).unwrap_or_else(|_| "file:///tmp/arroyo".to_string());
 
     Ok(Arc::new(
-        StorageProvider::for_url(&storage_url)
+        StorageProvider::for_url(&config().checkpoint_url)
             .await
             .context(format!(
                 "failed to construct checkpoint backend for URL {}",
-                storage_url
+                config().checkpoint_url
             ))?,
     ))
 }

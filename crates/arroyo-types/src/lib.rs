@@ -1,4 +1,3 @@
-use crate::ports::CONTROLLER_GRPC;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use bincode::{Decode, Encode};
@@ -6,13 +5,11 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::env;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
-use std::str::FromStr;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
@@ -76,126 +73,15 @@ impl Serialize for Window {
     }
 }
 
-pub const DEFAULT_LINGER: Duration = Duration::from_millis(100);
-pub const DEFAULT_BATCH_SIZE: usize = 512;
-pub const QUEUE_SIZE_ENV: &str = "QUEUE_SIZE";
-pub const DEFAULT_QUEUE_SIZE: u32 = 8 * 1024;
-pub const TASK_SLOTS_ENV: &str = "TASK_SLOTS";
-pub const CONTROLLER_ADDR_ENV: &str = "CONTROLLER_ADDR";
-pub const API_ADDR_ENV: &str = "API_ADDR";
-pub const NODE_ID_ENV: &str = "NODE_ID_ENV";
-pub const WORKER_ID_ENV: &str = "WORKER_ID_ENV";
-pub const JOB_ID_ENV: &str = "JOB_ID_ENV";
-pub const RUN_ID_ENV: &str = "RUN_ID_ENV";
 pub const ARROYO_PROGRAM_ENV: &str = "ARROYO_PROGRAM";
 pub const ARROYO_PROGRAM_FILE_ENV: &str = "ARROYO_PROGRAM_FILE";
-pub const COMPILER_ADDR_ENV: &str = "COMPILER_ADDR";
-pub const NOMAD_ENDPOINT_ENV: &str = "NOMAD_ENDPOINT";
-pub const NOMAD_DC_ENV: &str = "NOMAD_DC";
 
-pub const DATABASE_ENV: &str = "DATABASE";
-// postgres configs
-pub const DATABASE_NAME_ENV: &str = "DATABASE_NAME";
-pub const DATABASE_HOST_ENV: &str = "DATABASE_HOST";
-pub const DATABASE_PORT_ENV: &str = "DATABASE_PORT";
-pub const DATABASE_USER_ENV: &str = "DATABASE_USER";
-pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
-// sqlite configs
-pub const DATABASE_PATH_ENV: &str = "DATABASE_PATH";
-
-pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
-pub const GRPC_PORT_ENV: &str = "GRPC_PORT";
-pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
-pub const COMPILER_PORT_ENV: &str = "COMPILER_PORT";
-
-pub const UPDATE_AGGREGATE_FLUSH_MS_ENV: &str = "UPDATE_AGGREGATE_FLUSH_MS";
-pub const BATCH_SIZE_ENV: &str = "BATCH_SIZE";
-pub const BATCH_LINGER_MS_ENV: &str = "BATCH_LINGER_MS";
-pub const USE_LOCAL_UDF_LIB_ENV: &str = "USE_LOCAL_UDF_LIB";
-
-pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
-// Endpoint that the frontend should query for the API
-pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
-// The rate parameter (e.g., "15s") used by the API when querying prometheus metrics -- this should
-// be at least 4x the configured scrape interval for your prometheus config
-pub const API_METRICS_RATE_ENV: &str = "API_METRICS_RATE";
-
-// storage configuration
-pub const S3_ENDPOINT_ENV: &str = "S3_ENDPOINT";
-pub const S3_REGION_ENV: &str = "S3_REGION";
-pub const CHECKPOINT_URL_ENV: &str = "CHECKPOINT_URL";
-
-// compiler service
-pub const ARTIFACT_URL_ENV: &str = "ARTIFACT_URL";
-pub const ARTIFACT_URL_DEFAULT: &str = "/tmp/arroyo/artifacts";
-pub const COMPILER_FEATURES_ENV: &str = "COMPILER_FEATURES";
-pub const INSTALL_CLANG_ENV: &str = "INSTALL_CLANG";
-pub const INSTALL_RUSTC_ENV: &str = "INSTALL_RUSTC";
-
-// process scheduler
-pub const SLOTS_PER_NODE: &str = "SLOTS_PER_NODE";
-
-// kubernetes scheduler configuration
-pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
-pub const K8S_WORKER_NAME_ENV: &str = "K8S_WORKER_NAME";
-pub const K8S_WORKER_IMAGE_ENV: &str = "K8S_WORKER_IMAGE";
-pub const K8S_WORKER_IMAGE_PULL_POLICY_ENV: &str = "K8S_WORKER_IMAGE_PULL_POLICY";
-pub const K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV: &str = "K8S_WORKER_SERVICE_ACCOUNT_NAME";
-pub const K8S_WORKER_LABELS_ENV: &str = "K8S_WORKER_LABELS";
-pub const K8S_WORKER_ANNOTATIONS_ENV: &str = "K8S_WORKER_ANNOTATIONS";
-pub const K8S_WORKER_RESOURCES_ENV: &str = "K8S_WORKER_RESOURCES";
-pub const K8S_WORKER_SLOTS_ENV: &str = "K8S_WORKER_SLOTS";
-pub const K8S_WORKER_VOLUMES_ENV: &str = "K8S_WORKER_VOLUMES";
-pub const K8S_WORKER_VOLUME_MOUNTS_ENV: &str = "K8S_WORKER_VOLUME_MOUNTS";
-pub const K8S_WORKER_CONFIG_MAP_ENV: &str = "K8S_WORKER_CONFIG_MAP";
-
-// node
-pub const NODE_SLOTS_ENV: &str = "NODE_SLOTS";
+// worker configuration
+pub const JOB_ID_ENV: &str = "JOB_ID";
+pub const RUN_ID_ENV: &str = "RUN_ID";
 
 // telemetry configuration
-pub const DISABLE_TELEMETRY_ENV: &str = "DISABLE_TELEMETRY";
 pub const POSTHOG_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";
-pub fn telemetry_enabled() -> bool {
-    match env::var(DISABLE_TELEMETRY_ENV) {
-        Ok(val) => val != "true",
-        Err(_) => true,
-    }
-}
-
-pub fn bool_config(var: &str, default: bool) -> bool {
-    if let Ok(v) = env::var(var) {
-        match v.to_lowercase().as_str() {
-            "true" | "yes" | "1" => {
-                return true;
-            }
-            "false" | "no" | "0" => {
-                return false;
-            }
-            _ => {}
-        }
-    };
-    default
-}
-
-pub fn string_config(var: &str, default: &str) -> String {
-    env::var(var).unwrap_or_else(|_| default.to_string())
-}
-
-pub fn u32_config(var: &str, default: u32) -> u32 {
-    env::var(var)
-        .map(|s| u32::from_str(&s).unwrap_or(default))
-        .unwrap_or(default)
-}
-
-pub fn duration_millis_config(var: &str, default: Duration) -> Duration {
-    env::var(var)
-        .map(|s| {
-            u64::from_str(&s)
-                .map(Duration::from_millis)
-                .unwrap_or(default)
-        })
-        .unwrap_or(default)
-}
 
 // These seeds were randomly generated; changing them will break existing state
 pub const HASH_SEEDS: [u64; 4] = [
@@ -205,96 +91,11 @@ pub const HASH_SEEDS: [u64; 4] = [
     17942305062735447798,
 ];
 
-#[derive(Debug, Clone)]
-pub struct DatabaseConfig {
-    pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub user: String,
-    pub password: String,
-}
-
-impl Display for DatabaseConfig {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}@{}:{}/{}", self.user, self.host, self.port, self.name)
-    }
-}
-
-impl DatabaseConfig {
-    pub fn load() -> Self {
-        DatabaseConfig {
-            name: env::var(DATABASE_NAME_ENV).unwrap_or_else(|_| "arroyo".to_string()),
-            host: env::var(DATABASE_HOST_ENV).unwrap_or_else(|_| "localhost".to_string()),
-            port: u16::from_str(
-                &env::var(DATABASE_PORT_ENV).unwrap_or_else(|_| "5432".to_string()),
-            )
-            .unwrap_or(5432),
-            user: env::var(DATABASE_USER_ENV).unwrap_or_else(|_| "arroyo".to_string()),
-            password: env::var(DATABASE_PASSWORD_ENV).unwrap_or_else(|_| "arroyo".to_string()),
-        }
-    }
-}
-
-// default ports for development; overridden in production to
-pub mod ports {
-    pub const CONTROLLER_GRPC: u16 = 9190;
-    pub const CONTROLLER_ADMIN: u16 = 9191;
-
-    pub const NODE_GRPC: u16 = 9290;
-    pub const NODE_ADMIN: u16 = 9291;
-
-    pub const API_HTTP: u16 = 8000;
-    pub const API_ADMIN: u16 = 8001;
-
-    pub const COMPILER_GRPC: u16 = 9000;
-    pub const COMPILER_ADMIN: u16 = 9001;
-}
-
-pub fn grpc_port(service: &str, default: u16) -> u16 {
-    service_port(service, default, GRPC_PORT_ENV)
-}
-
-pub fn admin_port(service: &str, default: u16) -> u16 {
-    service_port(service, default, ADMIN_PORT_ENV)
-}
-
-pub fn service_port(service: &str, default: u16, env_var: &str) -> u16 {
-    env::var(format!("{}_{}", service.to_uppercase(), env_var))
-        .ok()
-        .or(env::var(env_var).ok())
-        .map(|s| u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", env_var)))
-        .unwrap_or(default)
-}
-
-pub fn default_controller_addr() -> String {
-    format!(
-        "http://localhost:{}",
-        grpc_port("controller", CONTROLLER_GRPC)
-    )
-}
-
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub struct WorkerId(pub u64);
 
-impl WorkerId {
-    pub fn from_env() -> Option<WorkerId> {
-        std::env::var(WORKER_ID_ENV)
-            .map(|s| u64::from_str(&s).unwrap())
-            .ok()
-            .map(WorkerId)
-    }
-}
-
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub struct NodeId(pub u64);
-
-impl NodeId {
-    pub fn from_env() -> Option<NodeId> {
-        std::env::var(NODE_ID_ENV)
-            .map(|s| NodeId(u64::from_str(&s).unwrap()))
-            .ok()
-    }
-}
 
 pub fn to_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -780,18 +581,6 @@ pub fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
         start + range_size - 1
     };
     start..=end
-}
-
-pub fn should_flush(size: usize, time: Instant) -> bool {
-    static FLUSH_SIZE: OnceLock<usize> = OnceLock::new();
-    let flush_size =
-        FLUSH_SIZE.get_or_init(|| u32_config(BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE as u32) as usize);
-
-    static FLUSH_LINGER: OnceLock<Duration> = OnceLock::new();
-    let flush_linger =
-        FLUSH_LINGER.get_or_init(|| duration_millis_config(BATCH_LINGER_MS_ENV, DEFAULT_LINGER));
-
-    size > 0 && (size >= *flush_size || time.elapsed() >= *flush_linger)
 }
 
 #[cfg(test)]

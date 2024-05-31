@@ -8,10 +8,10 @@ use crate::rest_utils::{
 use crate::{compiler_service, to_micros};
 use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfPost, UdfValidationResult, ValidateUdfPost};
 use arroyo_rpc::api_types::GlobalUdfCollection;
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::{BuildUdfReq, UdfCrate};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_types::{bool_config, USE_LOCAL_UDF_LIB_ENV};
 use arroyo_udf_host::ParsedUdfFile;
 use axum::extract::{Path, State};
 use axum::Json;
@@ -189,7 +189,7 @@ pub async fn build_udf(
     };
 
     let mut dependencies = file.dependencies;
-    let plugin_dep = if bool_config(USE_LOCAL_UDF_LIB_ENV, false) {
+    let plugin_dep = if config().compiler.use_local_udf_crate {
         toml::Value::Table(
             [(
                 "path".to_string(),

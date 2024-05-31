@@ -1,17 +1,17 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, TIMESTAMP_FIELD};
-use arroyo_types::UPDATE_AGGREGATE_FLUSH_MS_ENV;
-use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference};
+use datafusion::common::{DFSchemaRef, OwnedTableReference};
 use datafusion::logical_expr::{Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::protobuf::{physical_plan_node::PhysicalPlanType, PhysicalPlanNode};
 
 use crate::builder::{NamedNode, SplitPlanOutput};
 
 use super::{ArroyoExtension, IsRetractExtension, NodeWithIncomingEdges};
+use arroyo_rpc::config::config;
 use prost::Message;
 
 pub(crate) const UPDATING_AGGREGATE_EXTENSION_NAME: &str = "UpdatingAggregateExtension";
@@ -144,21 +144,6 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             physical_plan_type: Some(PhysicalPlanType::Aggregate(Box::new(combine_aggregate))),
         };
 
-        let flush_interval = std::env::var(UPDATE_AGGREGATE_FLUSH_MS_ENV)
-            .ok()
-            .map(|s| {
-                let Ok(millis): Result<u64, _> = s.parse() else {
-                    return plan_err!(
-                        "Failed to parse {} to a number for {}",
-                        s,
-                        UPDATE_AGGREGATE_FLUSH_MS_ENV
-                    );
-                };
-                Ok(Duration::from_millis(millis))
-            })
-            .transpose()?
-            .unwrap_or_else(|| Duration::from_secs(1));
-
         let config = UpdatingAggregateOperator {
             name: "UpdatingAggregate".to_string(),
             partial_schema: Some(partial_schema.try_into()?),
@@ -167,7 +152,10 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             combine_plan: combine_plan.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),
-            flush_interval_micros: flush_interval.as_micros() as u64,
+            flush_interval_micros: config()
+                .pipeline
+                .update_aggregate_flush_interval
+                .as_micros() as u64,
         };
         let node = LogicalNode {
             operator_id: format!("updating_aggregate_{}", index),

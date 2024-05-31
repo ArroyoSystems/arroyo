@@ -2,12 +2,13 @@ use crate::nexmark::{auction_fields, bid_fields, person_fields, NexmarkTable};
 use arrow::array::{
     Int64Builder, RecordBatch, StringBuilder, StructBuilder, TimestampNanosecondBuilder,
 };
+use arroyo_formats::should_flush;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::grpc::{StopMode, TableConfig};
 use arroyo_rpc::ControlMessage;
-use arroyo_types::{should_flush, to_millis, to_nanos};
+use arroyo_types::{to_millis, to_nanos};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use rand::{
