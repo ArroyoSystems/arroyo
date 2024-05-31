@@ -4,52 +4,41 @@ use arrow_array::{Array, ArrayRef, StringArray};
 use arrow_schema::{DataType, Field};
 use datafusion::common::Result;
 use datafusion::common::{DataFusionError, ScalarValue};
-use datafusion::logical_expr::{create_udf, ColumnarValue, ScalarUDF, Volatility};
+use datafusion::execution::FunctionRegistry;
+use datafusion::logical_expr::{create_udf, ColumnarValue, Volatility};
 use serde_json_path::JsonPath;
-use std::collections::HashMap;
 use std::sync::Arc;
 
-pub fn get_json_functions() -> HashMap<String, Arc<ScalarUDF>> {
-    let mut udfs = HashMap::new();
+pub fn register_json_functions(registry: &mut impl FunctionRegistry) -> Result<()> {
+    registry.register_udf(Arc::new(create_udf(
+        "get_first_json_object",
+        vec![DataType::Utf8, DataType::Utf8],
+        Arc::new(DataType::Utf8),
+        Volatility::Immutable,
+        Arc::new(get_first_json_object),
+    )))?;
 
-    udfs.insert(
-        "get_first_json_object".to_string(),
-        Arc::new(create_udf(
-            "get_first_json_object",
-            vec![DataType::Utf8, DataType::Utf8],
-            Arc::new(DataType::Utf8),
-            Volatility::Immutable,
-            Arc::new(get_first_json_object),
-        )),
-    );
+    registry.register_udf(Arc::new(create_udf(
+        "extract_json",
+        vec![DataType::Utf8, DataType::Utf8],
+        Arc::new(DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::Utf8,
+            true,
+        )))),
+        Volatility::Immutable,
+        Arc::new(extract_json),
+    )))?;
 
-    udfs.insert(
-        "extract_json".to_string(),
-        Arc::new(create_udf(
-            "extract_json",
-            vec![DataType::Utf8, DataType::Utf8],
-            Arc::new(DataType::List(Arc::new(Field::new(
-                "item",
-                DataType::Utf8,
-                true,
-            )))),
-            Volatility::Immutable,
-            Arc::new(extract_json),
-        )),
-    );
+    registry.register_udf(Arc::new(create_udf(
+        "extract_json_string",
+        vec![DataType::Utf8, DataType::Utf8],
+        Arc::new(DataType::Utf8),
+        Volatility::Immutable,
+        Arc::new(extract_json_string),
+    )))?;
 
-    udfs.insert(
-        "extract_json_string".to_string(),
-        Arc::new(create_udf(
-            "extract_json_string",
-            vec![DataType::Utf8, DataType::Utf8],
-            Arc::new(DataType::Utf8),
-            Volatility::Immutable,
-            Arc::new(extract_json_string),
-        )),
-    );
-
-    udfs
+    Ok(())
 }
 
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {

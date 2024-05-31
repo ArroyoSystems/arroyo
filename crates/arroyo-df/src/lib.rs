@@ -55,7 +55,7 @@ use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::json::get_json_functions;
+use crate::json::register_json_functions;
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 use crate::types::interval_month_day_nanos_to_duration;
 
@@ -164,15 +164,12 @@ impl ArroyoSchemaProvider {
             }),
         );
 
-        functions.extend(get_json_functions());
-
         let mut registry = Self {
             functions,
             ..Default::default()
         };
 
-        datafusion_functions::register_all(&mut registry).unwrap();
-        datafusion::functions_array::register_all(&mut registry).unwrap();
+        register_all_udfs(&mut registry).expect("Failed to register system UDFs");
 
         registry
     }
@@ -298,6 +295,14 @@ fn create_table(table_name: String, schema: Arc<Schema>) -> Arc<dyn TableSource>
     let wrapped = Arc::new(table_provider);
     let provider = DefaultTableSource::new(wrapped);
     Arc::new(provider)
+}
+
+pub(crate) fn register_all_udfs(registry: &mut impl FunctionRegistry) -> DFResult<()> {
+    datafusion_functions::register_all(registry)?;
+    datafusion::functions_array::register_all(registry)?;
+    datafusion_functions_json::register_all(registry)?;
+    register_json_functions(registry)?;
+    Ok(())
 }
 
 impl ContextProvider for ArroyoSchemaProvider {

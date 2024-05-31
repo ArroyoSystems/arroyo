@@ -17,6 +17,7 @@ arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 datafusion = { workspace = true }
 datafusion-proto = { workspace = true }
 datafusion-functions = { workspace = true }
+datafusion-functions-json = { workspace = true} 
 
 prost = "0.12"
 arrow-schema = {workspace = true, features = ["serde"] }

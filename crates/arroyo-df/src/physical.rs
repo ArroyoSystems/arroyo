@@ -26,7 +26,7 @@ use datafusion::{
     },
 };
 
-use crate::json::get_json_functions;
+use crate::register_all_udfs;
 use crate::rewriters::UNNESTED_COL;
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
@@ -196,12 +196,9 @@ pub enum DecodingContext {
 pub fn new_registry() -> Registry {
     let mut registry = Registry::default();
     registry.add_udf(Arc::new(window_scalar_function()));
-    for json_function in get_json_functions().values() {
-        registry.add_udf(json_function.clone());
-    }
 
-    datafusion::functions::register_all(&mut registry).unwrap();
-    datafusion::functions_array::register_all(&mut registry).unwrap();
+    register_all_udfs(&mut registry).unwrap();
+
     registry
 }
 

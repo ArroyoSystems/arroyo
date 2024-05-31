@@ -709,6 +709,7 @@ dependencies = [
  "bincode",
  "datafusion",
  "datafusion-functions 37.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "datafusion-functions-json",
  "datafusion-proto",
  "futures",
  "glob",
@@ -3275,6 +3276,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "datafusion-functions-json"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dde1c675e61dae8bd426f64e1e53daa6c3effa0d32613ce99554ce150c257b9b"
+dependencies = [
+ "arrow",
+ "arrow-schema",
+ "datafusion-common",
+ "datafusion-execution",
+ "datafusion-expr",
+ "jiter",
+ "log",
+ "paste",
+]
+
+[[package]]
 name = "datafusion-optimizer"
 version = "37.1.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=37.1.0_arroyo#ca898b0f7154fc05856a1243bb9a80f99e4b1202"
@@ -5242,6 +5259,19 @@ name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
+
+[[package]]
+name = "jiter"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1a93990c326029488e17160709844d607638c0e881034ea7e0e5615991e89b5"
+dependencies = [
+ "ahash",
+ "lexical-parse-float",
+ "num-bigint",
+ "num-traits",
+ "smallvec",
+]
 
 [[package]]
 name = "jobserver"
