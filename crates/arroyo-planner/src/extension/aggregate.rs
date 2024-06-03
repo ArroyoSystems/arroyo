@@ -1,6 +1,5 @@
 use std::{collections::HashMap, fmt::Formatter, sync::Arc, time::Duration};
 
-use anyhow::{bail, Result};
 use arrow::datatypes::IntervalMonthDayNanoType;
 
 use arroyo_datastream::{
@@ -15,9 +14,8 @@ use arroyo_rpc::{
     },
     TIMESTAMP_FIELD,
 };
-use datafusion::common::{
-    Column, DFField, DFSchema, DFSchemaRef, DataFusionError, Result as DFResult, ScalarValue,
-};
+use datafusion::common::{plan_err, Column, DFField, DFSchema, DFSchemaRef, Result, ScalarValue};
+use datafusion::error::DataFusionError;
 use datafusion::logical_expr;
 use datafusion::logical_expr::{
     expr::ScalarFunction, Aggregate, BinaryExpr, Expr, Extension, LogicalPlan,
@@ -95,7 +93,7 @@ impl AggregateExtension {
                     Arc::new(input_schema.as_ref().into()),
                     self.key_fields.clone(),
                 )?
-                .try_into()?,
+                .into(),
             ),
             partial_schema: Some(partial_schema.try_into().unwrap()),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
@@ -144,9 +142,9 @@ impl AggregateExtension {
                     Arc::new(input_schema.as_ref().into()),
                     self.key_fields.clone(),
                 )?
-                .try_into()?,
+                .into(),
             ),
-            partial_schema: Some(partial_schema.try_into()?),
+            partial_schema: Some(partial_schema.into()),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),
             final_projection: final_physical_plan_node.encode_to_vec(),
@@ -174,11 +172,11 @@ impl AggregateExtension {
             is_nested: false,
         } = &self.window_behavior
         else {
-            bail!("expected sliding window")
+            return plan_err!("expected sliding window");
         };
         let output_schema = self.aggregate.schema().clone();
         let LogicalPlan::Aggregate(agg) = self.aggregate.clone() else {
-            bail!("expected aggregate")
+            return plan_err!("expected aggregate");
         };
         let key_count = self.key_fields.len();
         let unkeyed_aggregate_schema = Arc::new(DFSchema::new_with_metadata(
@@ -208,7 +206,7 @@ impl AggregateExtension {
             gap_micros: gap.as_micros() as u64,
             window_field_name: window_field.name().to_string(),
             window_index: *window_index as u64,
-            input_schema: Some(input_schema.try_into()?),
+            input_schema: Some(input_schema.into()),
             unkeyed_aggregate_schema: None,
             partial_aggregation_plan: vec![],
             final_aggregation_plan: physical_plan_node.encode_to_vec(),
@@ -244,7 +242,7 @@ impl AggregateExtension {
                     final_physical_plan,
                     &ArroyoPhysicalExtensionCodec::default(),
                 )?;
-                Ok::<Vec<u8>, anyhow::Error>(final_physical_plan_node.encode_to_vec())
+                Ok::<Vec<u8>, DataFusionError>(final_physical_plan_node.encode_to_vec())
             })
             .transpose()?;
 
@@ -263,9 +261,9 @@ impl AggregateExtension {
                     Arc::new(input_schema.as_ref().into()),
                     self.key_fields.clone(),
                 )?
-                .try_into()?,
+                .into(),
             ),
-            partial_schema: Some(partial_schema.try_into()?),
+            partial_schema: Some(partial_schema.into()),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),
             final_projection,
@@ -284,7 +282,7 @@ impl AggregateExtension {
     pub fn final_projection(
         aggregate_plan: &LogicalPlan,
         window_behavior: WindowBehavior,
-    ) -> DFResult<LogicalPlan> {
+    ) -> Result<LogicalPlan> {
         let timestamp_field = aggregate_plan.inputs()[0]
             .schema()
             .field_with_unqualified_name(TIMESTAMP_FIELD)?
@@ -380,7 +378,7 @@ impl AggregateExtension {
         window_field: DFField,
         window_index: usize,
         width: Duration,
-    ) -> DFResult<LogicalPlan> {
+    ) -> Result<LogicalPlan> {
         let timestamp_field = aggregate_plan
             .schema()
             .field_with_unqualified_name(TIMESTAMP_FIELD)
@@ -490,7 +488,7 @@ impl ArroyoExtension for AggregateExtension {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         if input_schemas.len() != 1 {
-            bail!("AggregateExtension should have exactly one input");
+            return plan_err!("AggregateExtension should have exactly one input");
         }
         let input_schema = input_schemas[0].clone();
         let input_df_schema =
@@ -517,7 +515,9 @@ impl ArroyoExtension for AggregateExtension {
                             *slide,
                         )?,
                         WindowType::Instant => {
-                            bail!("instant window not supported in aggregate extension")
+                            return plan_err!(
+                                "instant window not supported in aggregate extension"
+                            );
                         }
                         WindowType::Session { gap: _ } => {
                             self.session_window_config(planner, index, input_df_schema)?
@@ -527,7 +527,7 @@ impl ArroyoExtension for AggregateExtension {
             }
             WindowBehavior::InData => self
                 .instant_window_config(planner, index, input_df_schema, false)
-                .map_err(|err| DataFusionError::Plan(format!("instant window error: {}", err)))?,
+                .map_err(|e| e.context("instant window"))?,
         };
         let edge = LogicalEdge::project_all(LogicalEdgeType::Shuffle, (*input_schema).clone());
         Ok(NodeWithIncomingEdges {

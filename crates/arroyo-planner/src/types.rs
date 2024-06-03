@@ -3,9 +3,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use anyhow::bail;
-use anyhow::Result;
 use arrow::datatypes::{DataType, Field, IntervalMonthDayNanoType};
+use datafusion::common::{plan_err, Result};
 
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
 use datafusion::sql::sqlparser::ast::{
@@ -44,7 +43,7 @@ pub(crate) fn convert_data_type(
             ))
         }
         SQLDataType::Array(ArrayElemTypeDef::None) => {
-            bail!("Arrays with unspecified type is not supported")
+            return plan_err!("Arrays with unspecified type is not supported");
         }
         other => convert_simple_data_type(other),
     }
@@ -86,11 +85,13 @@ fn convert_simple_data_type(
             3 => Ok(DataType::Timestamp(TimeUnit::Millisecond, None)),
             6 => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
             9 => Ok(DataType::Timestamp(TimeUnit::Nanosecond, None)),
-            _ => bail!(
-                "unsupported precision {} -- supported precisions are 0 (seconds), \
+            _ => {
+                return plan_err!(
+                    "unsupported precision {} -- supported precisions are 0 (seconds), \
             3 (milliseconds), 6 (microseconds), and 9 (nanoseconds)",
-                precision
-            ),
+                    precision
+                )
+            }
         },
         SQLDataType::Date => Ok(DataType::Date32),
         SQLDataType::Time(None, tz_info) => {
@@ -100,7 +101,7 @@ fn convert_simple_data_type(
                 Ok(DataType::Time64(TimeUnit::Nanosecond))
             } else {
                 // We don't support TIMETZ and TIME WITH TIME ZONE for now
-                bail!("Unsupported SQL type {sql_type:?}")
+                return plan_err!("Unsupported SQL type {sql_type:?}");
             }
         }
         SQLDataType::Numeric(exact_number_info) | SQLDataType::Decimal(exact_number_info) => {
@@ -118,7 +119,7 @@ fn convert_simple_data_type(
         // Explicitly list all other types so that if sqlparser
         // adds/changes the `SQLDataType` the compiler will tell us on upgrade
         // and avoid bugs like https://github.com/apache/arrow-datafusion/issues/3059
-        _ => bail!("Unsupported SQL type {sql_type:?}"),
+        _ => return plan_err!("Unsupported SQL type {sql_type:?}"),
     };
 
     Ok((dt?, None))
@@ -131,17 +132,15 @@ pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> R
     let (precision, scale) = match (precision, scale) {
         (Some(p), Some(s)) => (p as u8, s as i8),
         (Some(p), None) => (p as u8, 0),
-        (None, Some(_)) => {
-            bail!("Cannot specify only scale for decimal data type".to_string())
-        }
+        (None, Some(_)) => return plan_err!("Cannot specify only scale for decimal data type"),
         (None, None) => (DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE),
     };
 
     // Arrow decimal is i128 meaning 38 maximum decimal digits
     if precision == 0 || precision > DECIMAL128_MAX_PRECISION || scale.unsigned_abs() > precision {
-        bail!(
+        return plan_err!(
             "Decimal(precision = {precision}, scale = {scale}) should satisfy `0 < precision <= 38`, and `scale <= precision`."
-        )
+        );
     } else {
         Ok(DataType::Decimal128(precision, scale))
     }

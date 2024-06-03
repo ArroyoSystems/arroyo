@@ -12,6 +12,7 @@ use arrow_ord::cmp::gt_eq;
 use arrow_ord::partition::partition;
 use arrow_ord::sort::{lexsort_to_indices, SortColumn};
 use arroyo_types::to_nanos;
+use datafusion_common::DataFusionError;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -49,30 +50,29 @@ impl TryFrom<grpc::ArroyoSchema> for ArroyoSchema {
     }
 }
 
-impl TryFrom<ArroyoSchema> for grpc::ArroyoSchema {
-    type Error = anyhow::Error;
-
-    fn try_from(schema: ArroyoSchema) -> anyhow::Result<Self> {
-        let arrow_schema = serde_json::to_string(schema.schema.as_ref())?;
+impl From<ArroyoSchema> for grpc::ArroyoSchema {
+    fn from(schema: ArroyoSchema) -> Self {
+        let arrow_schema = serde_json::to_string(schema.schema.as_ref()).unwrap();
         let timestamp_index = schema.timestamp_index as u32;
         let has_keys = schema.key_indices.is_some();
         let key_indices = match schema.key_indices {
             Some(indices) => indices.iter().map(|index| (*index) as u32).collect(),
             None => vec![],
         };
-        Ok(Self {
+        Self {
             arrow_schema,
             timestamp_index,
             key_indices,
             has_keys,
-        })
+        }
     }
 }
 
 impl TryFrom<api::ArroyoSchema> for ArroyoSchema {
-    type Error = anyhow::Error;
-    fn try_from(schema_proto: api::ArroyoSchema) -> anyhow::Result<Self> {
-        let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)?;
+    type Error = DataFusionError;
+    fn try_from(schema_proto: api::ArroyoSchema) -> Result<Self, DataFusionError> {
+        let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)
+            .map_err(|e| DataFusionError::Plan(format!("Invalid arrow schema: {}", e)))?;
         let timestamp_index = schema_proto.timestamp_index as usize;
         let key_indices = if schema_proto.has_keys {
             Some(
@@ -93,23 +93,21 @@ impl TryFrom<api::ArroyoSchema> for ArroyoSchema {
     }
 }
 
-impl TryFrom<ArroyoSchema> for api::ArroyoSchema {
-    type Error = anyhow::Error;
-
-    fn try_from(schema: ArroyoSchema) -> anyhow::Result<Self> {
-        let arrow_schema = serde_json::to_string(schema.schema.as_ref())?;
+impl From<ArroyoSchema> for api::ArroyoSchema {
+    fn from(schema: ArroyoSchema) -> Self {
+        let arrow_schema = serde_json::to_string(schema.schema.as_ref()).unwrap();
         let timestamp_index = schema.timestamp_index as u32;
         let has_keys = schema.key_indices.is_some();
         let key_indices = match schema.key_indices {
             Some(indices) => indices.iter().map(|index| (*index) as u32).collect(),
             None => vec![],
         };
-        Ok(Self {
+        Self {
             arrow_schema,
             timestamp_index,
             key_indices,
             has_keys,
-        })
+        }
     }
 }
 
@@ -152,15 +150,14 @@ impl ArroyoSchema {
         Self::from_schema_keys(Arc::new(Schema::new(fields)), vec![]).unwrap()
     }
 
-    pub fn from_schema_unkeyed(schema: Arc<Schema>) -> anyhow::Result<Self> {
+    pub fn from_schema_unkeyed(schema: Arc<Schema>) -> datafusion_common::Result<Self> {
         let timestamp_index = schema
             .column_with_name(TIMESTAMP_FIELD)
             .ok_or_else(|| {
-                anyhow!(
+                DataFusionError::Plan(format!(
                     "no {} field in schema, schema is {:?}",
-                    TIMESTAMP_FIELD,
-                    schema
-                )
+                    TIMESTAMP_FIELD, schema
+                ))
             })?
             .0;
 
@@ -171,15 +168,17 @@ impl ArroyoSchema {
         })
     }
 
-    pub fn from_schema_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> anyhow::Result<Self> {
+    pub fn from_schema_keys(
+        schema: Arc<Schema>,
+        key_indices: Vec<usize>,
+    ) -> datafusion_common::Result<Self> {
         let timestamp_index = schema
             .column_with_name(TIMESTAMP_FIELD)
             .ok_or_else(|| {
-                anyhow!(
+                DataFusionError::Plan(format!(
                     "no {} field in schema, schema is {:?}",
-                    TIMESTAMP_FIELD,
-                    schema
-                )
+                    TIMESTAMP_FIELD, schema
+                ))
             })?
             .0;
 

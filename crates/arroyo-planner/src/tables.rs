@@ -2,7 +2,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
-use anyhow::{anyhow, bail, Context, Result};
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 
@@ -14,8 +13,8 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
-use datafusion::common::Column;
-use datafusion::common::{config::ConfigOptions, DFField, DFSchema};
+use datafusion::common::{config::ConfigOptions, DFField, DFSchema, Result};
+use datafusion::common::{plan_err, Column, DataFusionError};
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
     WriteOp,
@@ -108,9 +107,7 @@ fn produce_optimized_plan(
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
     let sql_to_rel = SqlToRel::new(schema_provider);
-    let plan = sql_to_rel
-        .sql_statement_to_plan(statement.clone())
-        .map_err(|e| anyhow!(e.strip_backtrace()))?;
+    let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
     let mut analyzer = Analyzer::default();
     for rewriter in &schema_provider.function_rewriters {
@@ -217,18 +214,20 @@ impl ConnectorTable {
                 .collect();
         }
         let connector = connector_for_type(connector)
-            .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
+            .ok_or_else(|| DataFusionError::Plan(format!("Unknown connector '{}'", connector)))?;
 
-        let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
+        let format = Format::from_opts(options)
+            .map_err(|e| DataFusionError::Plan(format!("invalid format: '{e}'")))?;
 
-        let framing = Framing::from_opts(options).map_err(|e| anyhow!("invalid framing: '{e}'"))?;
+        let framing = Framing::from_opts(options)
+            .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
 
         let mut input_to_schema_fields = fields.clone();
 
         if let Some(Format::Json(JsonFormat { debezium: true, .. })) = &format {
             // check that there are no virtual fields in fields
             if fields.iter().any(|f| f.is_virtual()) {
-                bail!("can't use virtual fields with debezium format")
+                return plan_err!("can't use virtual fields with debezium format");
             }
             let df_struct_type =
                 DataType::Struct(fields.iter().map(|f| f.field().clone()).collect());
@@ -246,16 +245,16 @@ impl ConnectorTable {
             .map(|f| {
                 let struct_field = f.field();
                 struct_field.clone().try_into().map_err(|_| {
-                    anyhow!(
+                    DataFusionError::Plan(format!(
                         "field '{}' has a type '{:?}' that cannot be used in a connection table",
                         struct_field.name(),
                         struct_field.data_type()
-                    )
+                    ))
                 })
             })
             .collect::<Result<_>>()?;
-        let bad_data =
-            BadData::from_opts(options).map_err(|e| anyhow!("Invalid bad_data: '{e}'"))?;
+        let bad_data = BadData::from_opts(options)
+            .map_err(|e| DataFusionError::Plan(format!("Invalid bad_data: '{e}'")))?;
 
         let schema = ConnectionSchema::try_new(
             format,
@@ -265,10 +264,12 @@ impl ConnectorTable {
             schema_fields,
             None,
             Some(fields.is_empty()),
-        )?;
+        )
+        .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
 
-        let connection =
-            connector.from_options(name, options, Some(&schema), connection_profile)?;
+        let connection = connector
+            .from_options(name, options, Some(&schema), connection_profile)
+            .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let mut table: ConnectorTable = connection.into();
         if !fields.is_empty() {
@@ -282,14 +283,14 @@ impl ConnectorTable {
             .remove("idle_micros")
             .map(|t| i64::from_str(&t))
             .transpose()
-            .map_err(|_| anyhow!("idle_micros must be set to a number"))?
+            .map_err(|_| DataFusionError::Plan("idle_micros must be set to a number".to_string()))?
             .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
             .filter(|t| *t <= 0)
             .map(|t| Duration::from_micros(t as u64));
 
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
-            bail!(
+            return plan_err!(
                 "unknown options provided in WITH clause: {}",
                 keys.join(", ")
             );
@@ -312,23 +313,11 @@ impl ConnectorTable {
     fn timestamp_override(&self) -> Result<Option<Expr>> {
         if let Some(field_name) = &self.event_time_field {
             if self.is_update() {
-                bail!("can't use event_time_field with update mode.")
+                return plan_err!("can't use event_time_field with update mode.");
             }
 
             // check that a column exists and it is a timestamp
-            let field = self
-                .fields
-                .iter()
-                .find(|f| {
-                    f.field().name() == field_name
-                        && matches!(f.field().data_type(), DataType::Timestamp(..))
-                })
-                .ok_or_else(|| {
-                    anyhow!(
-                        "event_time_field {} not found or not a timestamp",
-                        field_name
-                    )
-                })?;
+            let field = self.get_time_field(field_name)?;
 
             Ok(Some(Expr::Column(Column::from_name(field.field().name()))))
         } else {
@@ -336,22 +325,24 @@ impl ConnectorTable {
         }
     }
 
+    fn get_time_field(&self, field_name: &String) -> Result<&FieldSpec, DataFusionError> {
+        let field = self
+            .fields
+            .iter()
+            .find(|f| {
+                f.field().name() == field_name
+                    && matches!(f.field().data_type(), DataType::Timestamp(..))
+            })
+            .ok_or_else(|| {
+                DataFusionError::Plan(format!("field {} not found or not a timestamp", field_name))
+            })?;
+        Ok(field)
+    }
+
     fn watermark_column(&self) -> Result<Option<Expr>> {
         if let Some(field_name) = &self.watermark_field {
             // check that a column exists and it is a timestamp
-            let field = self
-                .fields
-                .iter()
-                .find(|f| {
-                    f.field().name() == field_name
-                        && matches!(f.field().data_type(), DataType::Timestamp(..))
-                })
-                .ok_or_else(|| {
-                    anyhow!(
-                        "watermark_field {} not found or not a timestamp",
-                        field_name
-                    )
-                })?;
+            let field = self.get_time_field(field_name)?;
 
             Ok(Some(Expr::Column(Column::from_name(field.field().name()))))
         } else {
@@ -389,12 +380,12 @@ impl ConnectorTable {
         match self.connection_type {
             ConnectionType::Source => {}
             ConnectionType::Sink => {
-                bail!("cannot read from sink")
+                return plan_err!("cannot read from sink");
             }
         };
 
         if self.is_update() && self.has_virtual_fields() {
-            bail!("can't read from a source with virtual fields and update mode.")
+            return plan_err!("can't read from a source with virtual fields and update mode.");
         }
 
         let timestamp_override = self.timestamp_override()?;
@@ -462,7 +453,7 @@ fn value_to_inner_string(value: &Value) -> Result<String> {
         Value::SingleQuotedString(inner_string)
         | Value::UnQuotedString(inner_string)
         | Value::DoubleQuotedString(inner_string) => Ok(inner_string.clone()),
-        _ => bail!("Expected a string value, found {:?}", value),
+        _ => plan_err!("Expected a string value, found {:?}", value),
     }
 }
 
@@ -565,7 +556,7 @@ impl Table {
             let mut with_map = HashMap::new();
             for option in with_options {
                 let sqlparser::ast::Expr::Value(value) = &option.value else {
-                    bail!("Expected a value, found {:?}", option.value)
+                    return plan_err!("Expected a value, found {:?}", option.value);
                 };
                 with_map.insert(option.name.value.to_string(), value_to_inner_string(value)?);
             }
@@ -576,14 +567,14 @@ impl Table {
             match connector.as_deref() {
                 Some("memory") | None => {
                     if fields.iter().any(|f| f.is_virtual()) {
-                        bail!("Virtual fields are not supported in memory tables; instead write a query");
+                        return plan_err!("Virtual fields are not supported in memory tables; instead write a query");
                     }
 
                     if !with_map.is_empty() {
                         if connector.is_some() {
-                            bail!("Memory tables do not allow with options");
+                            return plan_err!("Memory tables do not allow with options");
                         } else {
-                            bail!("Memory tables do not allow with options; to create a connection table set the 'connector' option");
+                            return plan_err!("Memory tables do not allow with options; to create a connection table set the 'connector' option");
                         }
                     }
 
@@ -603,10 +594,10 @@ impl Table {
                                 .profiles
                                 .get(&connection_profile_name)
                                 .ok_or_else(|| {
-                                    anyhow!(
+                                    DataFusionError::Plan(format!(
                                         "connection profile '{}' not found",
                                         connection_profile_name
-                                    )
+                                    ))
                                 })?,
                         ),
                         None => None,
@@ -619,7 +610,7 @@ impl Table {
                             &mut with_map,
                             connection_profile,
                         )
-                        .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
+                        .map_err(|e| e.context(format!("Failed to create table {}", name)))?,
                     )))
                 }
             }
@@ -680,7 +671,7 @@ impl Table {
                     .all(|(a, b)| a.name() == b.name() && a.data_type() == b.data_type());
 
             if !matches {
-                bail!("all inserts into a table must share the same schema");
+                return plan_err!("all inserts into a table must share the same schema");
             }
         }
 
@@ -723,9 +714,7 @@ impl Table {
     pub fn connector_op(&self) -> Result<ConnectorOp> {
         match self {
             Table::ConnectorTable(c) => Ok(c.connector_op()),
-            Table::MemoryTable { .. } => {
-                bail!("can't write to a memory table")
-            }
+            Table::MemoryTable { .. } => return plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
             Table::PreviewSink { logical_plan: _ } => Ok(preview_sink()),
         }
@@ -748,11 +737,11 @@ fn infer_sink_schema(
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
 ) -> Result<()> {
-    let plan = produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)
-        .context("failed to produce optimized plan")?;
+    let plan =
+        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)?;
     let table = schema_provider
         .get_table_mut(&table_name)
-        .ok_or_else(|| anyhow!("table {} not found", table_name))?;
+        .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;
 
     table.set_inferred_fields(plan.schema().fields().to_vec())?;
 

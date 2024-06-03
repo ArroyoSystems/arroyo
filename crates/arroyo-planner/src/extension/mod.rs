@@ -3,7 +3,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
 use arrow_schema::{DataType, TimeUnit};
 use arroyo_datastream::logical::{
     DylibUdfConfig, LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName,
@@ -12,7 +11,7 @@ use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::{
-    DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
+    DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result,
 };
 use datafusion::logical_expr::{
     Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore,
@@ -78,7 +77,7 @@ fn try_from_t<T: ArroyoExtension + 'static>(
 impl<'a> TryFrom<&'a dyn UserDefinedLogicalNode> for &'a dyn ArroyoExtension {
     type Error = DataFusionError;
 
-    fn try_from(node: &'a dyn UserDefinedLogicalNode) -> DFResult<Self, Self::Error> {
+    fn try_from(node: &'a dyn UserDefinedLogicalNode) -> Result<Self, Self::Error> {
         try_from_t::<TableSourceExtension>(node)
             .or_else(|_| try_from_t::<WatermarkNode>(node))
             .or_else(|_| try_from_t::<SinkExtension>(node))
@@ -98,7 +97,7 @@ impl<'a> TryFrom<&'a dyn UserDefinedLogicalNode> for &'a dyn ArroyoExtension {
 impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtension {
     type Error = DataFusionError;
 
-    fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> DFResult<Self, Self::Error> {
+    fn try_from(node: &'a Arc<dyn UserDefinedLogicalNode>) -> Result<Self, Self::Error> {
         TryFrom::try_from(node.as_ref())
     }
 }
@@ -191,8 +190,7 @@ impl ArroyoExtension for AsyncUDFExtension {
                 let p = planner.create_physical_expr(e, self.input.schema())?;
                 Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
-            .collect::<DFResult<Vec<_>>>()
-            .map_err(|e| anyhow!("failed to build async udf extension: {:?}", e))?;
+            .collect::<Result<Vec<_>>>()?;
 
         let mut final_fields = self.input.schema().fields().clone();
         final_fields.push(DFField::new_unqualified(
@@ -209,8 +207,7 @@ impl ArroyoExtension for AsyncUDFExtension {
                 let p = planner.create_physical_expr(e, &post_udf_schema)?;
                 Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
-            .collect::<DFResult<Vec<_>>>()
-            .map_err(|e| anyhow!("failed to build async udf extension: {:?}", e))?;
+            .collect::<Result<Vec<_>>>()?;
 
         ProjectionNode {
             input: None,

@@ -7,7 +7,7 @@ members = [
     "crates/arroyo-connectors",
     "crates/arroyo-controller",
     "crates/arroyo-datastream",
-    "crates/arroyo-df",
+    "crates/arroyo-planner",
     "crates/arroyo-formats",
     "crates/arroyo-metrics",
     "crates/arroyo-node",

@@ -5,9 +5,7 @@ use crate::plan::WindowDetectingVisitor;
 use crate::{find_window, WindowBehavior};
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
-use datafusion::common::{
-    not_impl_err, plan_err, DFField, DFSchema, DataFusionError, Result as DFResult,
-};
+use datafusion::common::{not_impl_err, plan_err, DFField, DFSchema, DataFusionError, Result};
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::AggregateFunction;
 use datafusion::logical_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
@@ -24,7 +22,7 @@ impl AggregateRewriter {
         group_expr: Vec<Expr>,
         mut aggr_expr: Vec<Expr>,
         schema: Arc<DFSchema>,
-    ) -> DFResult<Transformed<LogicalPlan>> {
+    ) -> Result<Transformed<LogicalPlan>> {
         if input
             .schema()
             .has_column_with_unqualified_name(IS_RETRACT_FIELD)
@@ -125,7 +123,7 @@ impl AggregateRewriter {
 impl TreeNodeRewriter for AggregateRewriter {
     type Node = LogicalPlan;
 
-    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
         let LogicalPlan::Aggregate(Aggregate {
             input,
             mut group_expr,
@@ -144,8 +142,7 @@ impl TreeNodeRewriter for AggregateRewriter {
                     .map(|option| option.map(|inner| (i, inner)))
                     .transpose()
             })
-            .collect::<anyhow::Result<Vec<_>>>()
-            .map_err(|err| DataFusionError::Plan(err.to_string()))?;
+            .collect::<Result<Vec<_>>>()?;
 
         if window_group_expr.len() > 1 {
             return not_impl_err!(

@@ -160,7 +160,7 @@ async fn compile_sql<'a>(
     .await
     .map_err(|err| {
         warn!("{:?}", err);
-        bad_request(format!("{}", err.root_cause()))
+        bad_request(err.to_string())
     })
 }
 
