@@ -1,11 +1,10 @@
 use crate::builder::{NamedNode, Planner};
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::physical::ArroyoPhysicalExtensionCodec;
-use anyhow::bail;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::JoinOperator;
-use datafusion::common::DFSchemaRef;
+use datafusion::common::{plan_err, DFSchemaRef, Result};
 use datafusion::logical_expr::expr::Expr;
 use datafusion::logical_expr::{LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::generated::datafusion::PhysicalPlanNode;
@@ -31,9 +30,9 @@ impl ArroyoExtension for JoinExtension {
         planner: &Planner,
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
-    ) -> anyhow::Result<NodeWithIncomingEdges> {
+    ) -> Result<NodeWithIncomingEdges> {
         if input_schemas.len() != 2 {
-            bail!("join should have exactly two inputs");
+            return plan_err!("join should have exactly two inputs");
         }
         let left_schema = input_schemas[0].clone();
         let right_schema = input_schemas[1].clone();
@@ -50,9 +49,9 @@ impl ArroyoExtension for JoinExtension {
         };
         let config = JoinOperator {
             name: format!("join_{}", index),
-            left_schema: Some(left_schema.as_ref().clone().try_into()?),
-            right_schema: Some(right_schema.as_ref().clone().try_into()?),
-            output_schema: Some(self.output_schema().try_into()?),
+            left_schema: Some(left_schema.as_ref().clone().into()),
+            right_schema: Some(right_schema.as_ref().clone().into()),
+            output_schema: Some(self.output_schema().into()),
             join_plan: physical_plan_node.encode_to_vec(),
         };
         let logical_node = LogicalNode {

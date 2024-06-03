@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, TIMESTAMP_FIELD};
-use datafusion::common::{DFSchemaRef, OwnedTableReference};
+use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference, Result};
 use datafusion::logical_expr::{Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::protobuf::{physical_plan_node::PhysicalPlanType, PhysicalPlanNode};
 
@@ -87,7 +86,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
         input_schemas: Vec<arroyo_rpc::df::ArroyoSchemaRef>,
     ) -> Result<super::NodeWithIncomingEdges> {
         if input_schemas.len() != 1 {
-            bail!(
+            return plan_err!(
                 "UpdatingAggregateExtension requires exactly one input schema, found {}",
                 input_schemas.len()
             );
@@ -136,7 +135,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
         let Some(PhysicalPlanType::Aggregate(aggregate)) = finish_plan.physical_plan_type.as_ref()
         else {
-            bail!("expect finish plan to be an aggregate");
+            return plan_err!("expect finish plan to be an aggregate");
         };
         let mut combine_aggregate = aggregate.as_ref().clone();
         combine_aggregate.set_mode(datafusion_proto::protobuf::AggregateMode::CombinePartial);
@@ -146,9 +145,9 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
         let config = UpdatingAggregateOperator {
             name: "UpdatingAggregate".to_string(),
-            partial_schema: Some(partial_schema.try_into()?),
-            state_partial_schema: Some(state_partial_schema.try_into()?),
-            state_final_schema: Some(state_final_schema.try_into()?),
+            partial_schema: Some(partial_schema.into()),
+            state_partial_schema: Some(state_partial_schema.into()),
+            state_final_schema: Some(state_final_schema.into()),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             combine_plan: combine_plan.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),

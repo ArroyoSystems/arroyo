@@ -1,11 +1,11 @@
 use crate::builder::{NamedNode, Planner};
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::schemas::add_timestamp_field;
-use anyhow::anyhow;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
-use datafusion::common::{DFSchemaRef, OwnedTableReference};
+use datafusion::common::{DFSchemaRef, OwnedTableReference, Result};
+use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
@@ -83,7 +83,7 @@ impl ArroyoExtension for WatermarkNode {
         planner: &Planner,
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
-    ) -> anyhow::Result<NodeWithIncomingEdges> {
+    ) -> Result<NodeWithIncomingEdges> {
         let expression = planner.create_physical_expr(&self.watermark_expression, &self.schema)?;
         let expression = serialize_physical_expr(expression, &DefaultPhysicalExtensionCodec {})?;
         let node = LogicalNode {
@@ -116,11 +116,11 @@ impl WatermarkNode {
         input: LogicalPlan,
         qualifier: OwnedTableReference,
         watermark_expression: Expr,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let schema = add_timestamp_field(input.schema().clone(), Some(qualifier.clone()))?;
         let timestamp_index = schema
             .index_of_column_by_name(None, "_timestamp")?
-            .ok_or_else(|| anyhow!("missing _timestamp column"))?;
+            .ok_or_else(|| DataFusionError::Plan("missing _timestamp column".to_string()))?;
         Ok(Self {
             input,
             qualifier,

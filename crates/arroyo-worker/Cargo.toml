@@ -16,7 +16,7 @@ arroyo-storage = { path = "../arroyo-storage" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-datastream = { path = "../arroyo-datastream" }
-arroyo-df = { path = "../arroyo-df" }
+arroyo-df = { path = "../arroyo-planner" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }

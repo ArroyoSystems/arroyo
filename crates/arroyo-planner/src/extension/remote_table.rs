@@ -1,13 +1,11 @@
 use std::{fmt::Formatter, sync::Arc};
 
-use anyhow::{bail, Result};
-
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::ValuePlanOperator,
 };
-use datafusion::common::{DFSchemaRef, OwnedTableReference};
+use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference, Result};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
@@ -49,14 +47,16 @@ impl ArroyoExtension for RemoteTableExtension {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         match input_schemas.len() {
-            0 => bail!("RemoteTableExtension should have exactly one input"),
+            0 => return plan_err!("RemoteTableExtension should have exactly one input"),
             1 => {}
             _multiple_inputs => {
                 // check they are all the same
                 let first = input_schemas[0].clone();
                 for schema in input_schemas.iter().skip(1) {
                     if *schema != first {
-                        bail!("If a node has multiple inputs, they must all have the same schema");
+                        return plan_err!(
+                            "If a node has multiple inputs, they must all have the same schema"
+                        );
                     }
                 }
             }

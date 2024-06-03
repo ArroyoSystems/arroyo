@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use arroyo_datastream::logical::{LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::WindowFunctionOperator, TIMESTAMP_FIELD};
-use datafusion::common::{Column, DFSchema, DFSchemaRef};
+use datafusion::common::{plan_err, Column, DFSchema, DFSchemaRef, Result};
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
@@ -75,11 +75,9 @@ impl ArroyoExtension for WindowFunctionExtension {
         planner: &crate::builder::Planner,
         index: usize,
         input_schemas: Vec<arroyo_rpc::df::ArroyoSchemaRef>,
-    ) -> anyhow::Result<super::NodeWithIncomingEdges> {
+    ) -> Result<super::NodeWithIncomingEdges> {
         if input_schemas.len() != 1 {
-            return Err(anyhow::anyhow!(
-                "WindowFunctionExtension requires exactly one input"
-            ));
+            return plan_err!("WindowFunctionExtension requires exactly one input");
         }
         let input_schema = input_schemas[0].clone();
         let input_df_schema =
@@ -98,7 +96,7 @@ impl ArroyoExtension for WindowFunctionExtension {
 
         let config = WindowFunctionOperator {
             name: "WindowFunction".to_string(),
-            input_schema: Some(input_schema.as_ref().clone().try_into()?),
+            input_schema: Some(input_schema.as_ref().clone().into()),
             binning_function: binning_function_proto.encode_to_vec(),
             window_function_plan: window_plan_proto.encode_to_vec(),
         };

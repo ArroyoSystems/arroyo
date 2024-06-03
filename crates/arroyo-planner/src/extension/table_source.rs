@@ -1,10 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{bail, Result};
-
 use arroyo_datastream::logical::{LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion::common::{DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference};
+use datafusion::common::{plan_err, DFField, DFSchema, DFSchemaRef, OwnedTableReference, Result};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 
@@ -106,11 +104,9 @@ impl ArroyoExtension for TableSourceExtension {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         if !input_schemas.is_empty() {
-            bail!("TableSourceExtension should not have inputs");
+            return plan_err!("TableSourceExtension should not have inputs");
         }
-        let sql_source = self.table.as_sql_source().map_err(|e| {
-            DataFusionError::Plan(format!("Error turning table into a SQL source: {}", e))
-        })?;
+        let sql_source = self.table.as_sql_source()?;
         let node = LogicalNode {
             operator_id: format!("source_{}_{}", self.name, index),
             description: sql_source.source.config.description.clone(),

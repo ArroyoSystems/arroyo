@@ -47,8 +47,11 @@ async fn validate_query(path: &Path) {
     if fail {
         let err = result.unwrap_err();
         if let Some(error_message) = error_message {
+            let err_s = err.to_string();
+            let err: Vec<_> = err_s.split_whitespace().collect();
+            let err = err.join(" ");
             assert!(
-                err.to_string().contains(error_message),
+                err.contains(error_message),
                 "expected error message '{}' not found; instead got '{}'",
                 error_message,
                 err

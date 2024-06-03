@@ -11,7 +11,7 @@ use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use async_trait::async_trait;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{
-    DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult, ScalarValue,
+    plan_err, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result, ScalarValue,
 };
 use datafusion::execution::config::SessionConfig;
 use datafusion::execution::context::SessionState;
@@ -93,7 +93,7 @@ impl<'a> Planner<'a> {
         }
     }
 
-    pub(crate) fn sync_plan(&self, plan: &LogicalPlan) -> DFResult<Arc<dyn ExecutionPlan>> {
+    pub(crate) fn sync_plan(&self, plan: &LogicalPlan) -> Result<Arc<dyn ExecutionPlan>> {
         let fut = self.planner.create_physical_plan(plan, &self.session_state);
         let (tx, mut rx) = oneshot::channel();
         thread::scope(|s| {
@@ -122,7 +122,7 @@ impl<'a> Planner<'a> {
         &self,
         expr: &Expr,
         input_dfschema: &DFSchema,
-    ) -> DFResult<Arc<dyn PhysicalExpr>> {
+    ) -> Result<Arc<dyn PhysicalExpr>> {
         self.planner
             .create_physical_expr(expr, input_dfschema, &self.session_state)
     }
@@ -134,7 +134,7 @@ impl<'a> Planner<'a> {
         key_indices: Vec<usize>,
         aggregate: &LogicalPlan,
         add_timestamp_field: bool,
-    ) -> DFResult<SplitPlanOutput> {
+    ) -> Result<SplitPlanOutput> {
         let physical_plan = self.sync_plan(aggregate)?;
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::Planning,
@@ -144,16 +144,14 @@ impl<'a> Planner<'a> {
         let PhysicalPlanType::Aggregate(mut final_aggregate_proto) = physical_plan_node
             .physical_plan_type
             .take()
-            .ok_or_else(|| DataFusionError::Plan("missing physical plan type".to_string()))?
+            .ok_or_else(|| {
+                return DataFusionError::Plan("missing physical plan type".to_string());
+            })?
         else {
-            return Err(DataFusionError::Plan(
-                "unexpected physical plan type".to_string(),
-            ));
+            return plan_err!("unexpected physical plan type");
         };
         let AggregateMode::Final = final_aggregate_proto.mode() else {
-            return Err(DataFusionError::Plan(
-                "unexpected physical plan type".to_string(),
-            ));
+            return plan_err!("unexpected physical plan type");
         };
         // pull out the partial aggregation, so we can checkpoint it.
         let partial_aggregation_plan = *final_aggregate_proto
@@ -203,7 +201,7 @@ impl<'a> Planner<'a> {
         &self,
         width: Duration,
         input_schema: DFSchemaRef,
-    ) -> DFResult<PhysicalExprNode> {
+    ) -> Result<PhysicalExprNode> {
         let date_bin = date_bin().call(vec![
             Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
                 IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
@@ -237,7 +235,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
         _logical_inputs: &[&LogicalPlan],
         physical_inputs: &[Arc<dyn ExecutionPlan>],
         _session_state: &SessionState,
-    ) -> DFResult<Option<Arc<dyn ExecutionPlan>>> {
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
         let schema = node.schema().as_ref().into();
         if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into() {
             if arroyo_extension.transparent() {
@@ -274,7 +272,7 @@ impl<'a> PlanToGraphVisitor<'a> {
         }
     }
 
-    pub(crate) fn add_plan(&mut self, plan: LogicalPlan) -> DFResult<()> {
+    pub(crate) fn add_plan(&mut self, plan: LogicalPlan) -> Result<()> {
         self.traversal.clear();
         plan.visit(self)?;
         Ok(())
@@ -288,14 +286,14 @@ impl<'a> PlanToGraphVisitor<'a> {
         &mut self,
         input_nodes: Vec<NodeIndex>,
         extension: &dyn ArroyoExtension,
-    ) -> DFResult<()> {
+    ) -> Result<()> {
         if let Some(node_name) = extension.node_name() {
             if self.named_nodes.contains_key(&node_name) {
                 // we should've short circuited
-                return Err(DataFusionError::Plan(format!(
+                return plan_err!(
                     "extension {:?} has already been planned, shouldn't try again.",
                     node_name
-                )));
+                );
             }
         }
         let input_schemas = input_nodes
@@ -307,10 +305,10 @@ impl<'a> PlanToGraphVisitor<'a> {
                     .ok_or_else(|| DataFusionError::Plan("missing input node".to_string()))?
                     .clone())
             })
-            .collect::<DFResult<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?;
         let NodeWithIncomingEdges { node, edges } = extension
             .plan_node(&self.planner, self.graph.node_count(), input_schemas)
-            .map_err(|e| DataFusionError::Plan(format!("error planning extension: {}", e)))?;
+            .map_err(|e| e.context("planning extension"))?;
         let node_index = self.graph.add_node(node);
         self.add_index_to_traversal(node_index);
         for (source, edge) in input_nodes.into_iter().zip(edges.into_iter()) {
@@ -328,7 +326,7 @@ impl<'a> PlanToGraphVisitor<'a> {
 impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
     type Node = LogicalPlan;
 
-    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
+    fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return Ok(TreeNodeRecursion::Continue);
         };
@@ -353,14 +351,15 @@ impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
     }
 
     // most of the work sits in post visit so that we can have the inputs of each node
-    fn f_up(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
+    fn f_up(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return Ok(TreeNodeRecursion::Continue);
         };
 
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
-            .map_err(|e| DataFusionError::Plan(format!("error converting extension: {}", e)))?;
+            .map_err(|e: DataFusionError| e.context("planning extension"))?;
+
         if arroyo_extension.transparent() {
             return Ok(TreeNodeRecursion::Continue);
         }

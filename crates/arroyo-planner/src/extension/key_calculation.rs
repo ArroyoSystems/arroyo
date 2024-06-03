@@ -1,13 +1,11 @@
 use std::{fmt::Formatter, sync::Arc};
 
-use anyhow::{bail, Result};
-
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::KeyPlanOperator,
 };
-use datafusion::common::{DFSchema, DFSchemaRef};
+use datafusion::common::{plan_err, DFSchema, DFSchemaRef, Result};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
@@ -82,7 +80,7 @@ impl ArroyoExtension for KeyCalculationExtension {
     ) -> Result<NodeWithIncomingEdges> {
         // check there's only one input
         if input_schemas.len() != 1 {
-            bail!("KeyCalculationExtension should have exactly one input");
+            return plan_err!("KeyCalculationExtension should have exactly one input");
         }
         let input_schema = input_schemas[0].clone();
         let physical_plan = planner.sync_plan(&self.input)?;

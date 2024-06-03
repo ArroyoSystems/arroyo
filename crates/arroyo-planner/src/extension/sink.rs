@@ -1,15 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
-
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     IS_RETRACT_FIELD,
 };
-use datafusion::common::{
-    plan_err, DFSchemaRef, DataFusionError, OwnedTableReference, Result as DFResult,
-};
+use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference, Result};
 
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 
@@ -41,7 +37,7 @@ impl SinkExtension {
         table: Table,
         mut schema: DFSchemaRef,
         mut input: Arc<LogicalPlan>,
-    ) -> DFResult<Self> {
+    ) -> Result<Self> {
         let input_is_updating = input
             .schema()
             .has_column_with_unqualified_name(IS_RETRACT_FIELD);
@@ -165,14 +161,15 @@ impl ArroyoExtension for SinkExtension {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         if input_schemas.len() != 1 {
-            bail!("sink should have exactly one input");
+            return plan_err!("sink should have exactly one input");
         }
         // should have exactly one input
         let input_schema = input_schemas[0].clone();
 
-        let operator_config = (self.table.connector_op().map_err(|e| {
-            DataFusionError::Plan(format!("failed to calculate connector op error: {}", e))
-        })?)
+        let operator_config = (self
+            .table
+            .connector_op()
+            .map_err(|e| e.context("connector op"))?)
         .encode_to_vec();
         let node = LogicalNode {
             operator_id: format!("sink_{}_{}", self.name, index),

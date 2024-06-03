@@ -15,7 +15,7 @@ use std::{
 use arrow_array::{array, Array, BooleanArray, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::common::{
-    plan_err, DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
+    not_impl_err, plan_err, DataFusionError, Result, ScalarValue, Statistics, UnnestOptions,
 };
 use datafusion::{
     execution::TaskContext,
@@ -54,25 +54,22 @@ use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-pub fn window_function(columns: &[ColumnarValue]) -> DFResult<ColumnarValue> {
+pub fn window_function(columns: &[ColumnarValue]) -> Result<ColumnarValue> {
     if columns.len() != 2 {
-        return DFResult::Err(DataFusionError::Internal(format!(
-            "window function expected 2 argument, got {}",
-            columns.len()
-        )));
+        return plan_err!("window function expected 2 argument, got {}", columns.len());
     }
     // check both columns are of the correct type
     if columns[0].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
-        return DFResult::Err(DataFusionError::Internal(format!(
+        return plan_err!(
             "window function expected first argument to be a timestamp, got {:?}",
             columns[0].data_type()
-        )));
+        );
     }
     if columns[1].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
-        return DFResult::Err(DataFusionError::Internal(format!(
+        return plan_err!(
             "window function expected second argument to be a timestamp, got {:?}",
             columns[1].data_type()
-        )));
+        );
     }
     let fields = vec![
         Arc::new(arrow::datatypes::Field::new(
@@ -462,11 +459,11 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         )?))
     }
 
-    fn statistics(&self) -> DFResult<datafusion::common::Statistics> {
+    fn statistics(&self) -> Result<datafusion::common::Statistics> {
         Ok(Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> DFResult<()> {
+    fn reset(&self) -> Result<()> {
         Ok(())
     }
 
@@ -547,11 +544,11 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         )))
     }
 
-    fn statistics(&self) -> datafusion::common::Result<datafusion::common::Statistics> {
+    fn statistics(&self) -> Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> DFResult<()> {
+    fn reset(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -624,7 +621,7 @@ impl ExecutionPlan for RecordBatchVecReader {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> DFResult<()> {
+    fn reset(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -676,23 +673,23 @@ impl ExecutionPlan for ArroyoMemExec {
     fn with_new_children(
         self: Arc<Self>,
         _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Err(DataFusionError::Internal("unimplemented".into()))
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        not_impl_err!("with_new_children is not implemented for mem_exec; should not be called")
     }
 
     fn execute(
         &self,
         _partition: usize,
         _context: Arc<datafusion::execution::TaskContext>,
-    ) -> DFResult<datafusion::physical_plan::SendableRecordBatchStream> {
+    ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
         plan_err!("EmptyPartitionStream cannot be executed, this is only used for physical planning before serialization")
     }
 
-    fn statistics(&self) -> DFResult<datafusion::common::Statistics> {
+    fn statistics(&self) -> Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> DFResult<()> {
+    fn reset(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -705,7 +702,7 @@ pub struct DebeziumUnrollingExec {
 }
 
 impl DebeziumUnrollingExec {
-    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> DFResult<Self> {
+    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
         let input_schema = input.schema();
         // confirm that the input schema has before, after and op columns, and before and after match
         let before_index = input_schema.index_of("before")?;
@@ -783,7 +780,7 @@ impl ExecutionPlan for DebeziumUnrollingExec {
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> DFResult<Arc<dyn ExecutionPlan>> {
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         if children.len() != 1 {
             return Err(DataFusionError::Internal(
                 "DebeziumUnrollingExec wrong number of children".to_string(),
@@ -800,14 +797,14 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         &self,
         partition: usize,
         context: Arc<TaskContext>,
-    ) -> DFResult<SendableRecordBatchStream> {
+    ) -> Result<SendableRecordBatchStream> {
         Ok(Box::pin(DebeziumUnrollingStream::try_new(
             self.input.execute(partition, context)?,
             self.schema.clone(),
         )?))
     }
 
-    fn reset(&self) -> DFResult<()> {
+    fn reset(&self) -> Result<()> {
         self.input.reset()
     }
 }
@@ -822,7 +819,7 @@ struct DebeziumUnrollingStream {
 }
 
 impl DebeziumUnrollingStream {
-    fn try_new(input: SendableRecordBatchStream, schema: SchemaRef) -> DFResult<Self> {
+    fn try_new(input: SendableRecordBatchStream, schema: SchemaRef) -> Result<Self> {
         let input_schema = input.schema();
         let before_index = input_schema.index_of("before")?;
         let after_index = input_schema.index_of("after")?;
@@ -838,7 +835,7 @@ impl DebeziumUnrollingStream {
             timestamp_index,
         })
     }
-    fn unroll_batch(&self, batch: &RecordBatch) -> DFResult<RecordBatch> {
+    fn unroll_batch(&self, batch: &RecordBatch) -> Result<RecordBatch> {
         let before = batch.column(self.before_index).as_ref();
         let after = batch.column(self.after_index).as_ref();
         let op = batch
@@ -899,7 +896,7 @@ impl DebeziumUnrollingStream {
 }
 
 impl Stream for DebeziumUnrollingStream {
-    type Item = DFResult<RecordBatch>;
+    type Item = Result<RecordBatch>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let result =
@@ -922,7 +919,7 @@ pub struct ToDebeziumExec {
 }
 
 impl ToDebeziumExec {
-    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> DFResult<Self> {
+    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
         let input_schema = input.schema();
         let timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
         let struct_fields: Vec<_> = input_schema
@@ -996,7 +993,7 @@ impl ExecutionPlan for ToDebeziumExec {
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> DFResult<Arc<dyn ExecutionPlan>> {
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         if children.len() != 1 {
             return Err(DataFusionError::Internal(
                 "DebeziumUnrollingExec wrong number of children".to_string(),
@@ -1011,7 +1008,7 @@ impl ExecutionPlan for ToDebeziumExec {
         &self,
         partition: usize,
         context: Arc<TaskContext>,
-    ) -> DFResult<SendableRecordBatchStream> {
+    ) -> Result<SendableRecordBatchStream> {
         let is_retract_index = self.input.schema().index_of(IS_RETRACT_FIELD).ok();
         let timestamp_index = self.input.schema().index_of(TIMESTAMP_FIELD)?;
         let struct_projection = (0..self.input.schema().fields().len())
@@ -1031,7 +1028,7 @@ impl ExecutionPlan for ToDebeziumExec {
         }))
     }
 
-    fn reset(&self) -> DFResult<()> {
+    fn reset(&self) -> Result<()> {
         self.input.reset()
     }
 }
@@ -1045,7 +1042,7 @@ struct ToDebeziumStream {
 }
 
 impl ToDebeziumStream {
-    fn as_debezium_batch(&mut self, batch: &RecordBatch) -> DFResult<RecordBatch> {
+    fn as_debezium_batch(&mut self, batch: &RecordBatch) -> Result<RecordBatch> {
         let value_struct = batch.project(&self.struct_projection)?;
         let timestamp_column = batch.column(self.timestamp_index).clone();
         match self.is_retract_index {
@@ -1070,7 +1067,7 @@ impl ToDebeziumStream {
         value_struct: RecordBatch,
         timestamp_column: Arc<dyn Array>,
         is_retract: &BooleanArray,
-    ) -> DFResult<RecordBatch> {
+    ) -> Result<RecordBatch> {
         let after_nullability = Some(NullBuffer::new(not(is_retract)?.values().clone()));
         let after_array = StructArray::try_new(
             value_struct.schema().fields().clone(),
@@ -1099,7 +1096,7 @@ impl ToDebeziumStream {
 }
 
 impl Stream for ToDebeziumStream {
-    type Item = DFResult<RecordBatch>;
+    type Item = Result<RecordBatch>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let result =

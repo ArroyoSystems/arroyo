@@ -6,7 +6,7 @@ use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{
     plan_err,
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor},
-    Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
+    Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result,
 };
 
 use aggregate::AggregateRewriter;
@@ -41,7 +41,7 @@ struct WindowDetectingVisitor {
 }
 
 impl WindowDetectingVisitor {
-    fn get_window(logical_plan: &LogicalPlan) -> DFResult<Option<WindowType>> {
+    fn get_window(logical_plan: &LogicalPlan) -> Result<Option<WindowType>> {
         let mut visitor = WindowDetectingVisitor {
             window: None,
             fields: HashSet::new(),
@@ -62,7 +62,7 @@ fn extract_column(expr: &Expr) -> Option<&Column> {
 impl TreeNodeVisitor for WindowDetectingVisitor {
     type Node = LogicalPlan;
 
-    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
+    fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return Ok(TreeNodeRecursion::Continue);
         };
@@ -73,7 +73,7 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                 .inputs()
                 .iter()
                 .map(|input| Self::get_window(input))
-                .collect::<DFResult<HashSet<_>>>()?;
+                .collect::<Result<HashSet<_>>>()?;
             if input_windows.len() > 1 {
                 return Err(DataFusionError::Plan(
                     "can't handle mixed windowing between left and right".to_string(),
@@ -88,7 +88,7 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
         Ok(TreeNodeRecursion::Continue)
     }
 
-    fn f_up(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
+    fn f_up(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
         match node {
             LogicalPlan::Projection(projection) => {
                 let window_expressions = projection
@@ -113,10 +113,9 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                         }
                         find_window(expr)
                             .map(|option| option.map(|inner| (index, inner)))
-                            .map_err(|err| DataFusionError::Plan(err.to_string()))
                             .transpose()
                     })
-                    .collect::<DFResult<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>>>()?;
                 self.fields.clear();
                 for (index, window) in window_expressions {
                     // if there's already a window they should match
@@ -153,7 +152,7 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                             )
                             .clone())
                     })
-                    .collect::<DFResult<HashSet<_>>>()?;
+                    .collect::<Result<HashSet<_>>>()?;
             }
             LogicalPlan::Aggregate(Aggregate {
                 input,
@@ -182,10 +181,9 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                         }
                         find_window(expr)
                             .map(|option| option.map(|inner| (index, inner)))
-                            .map_err(|err| DataFusionError::Plan(err.to_string()))
                             .transpose()
                     })
-                    .collect::<DFResult<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>>>()?;
                 self.fields.clear();
                 for (index, window) in window_expressions {
                     // if there's already a window they should match
@@ -255,7 +253,7 @@ pub struct ArroyoRewriter<'a> {
 impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
     type Node = LogicalPlan;
 
-    fn f_up(&mut self, mut node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+    fn f_up(&mut self, mut node: Self::Node) -> Result<Transformed<Self::Node>> {
         match node {
             LogicalPlan::Projection(ref mut projection) => {
                 if !has_timestamp_field(&projection.schema) {

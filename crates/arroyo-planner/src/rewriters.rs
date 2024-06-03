@@ -346,9 +346,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                 let e = Self::split_unnest(e.clone());
                 e.is_err() || e.unwrap().1.is_some()
             }) {
-                return Err(DataFusionError::Plan(
-                    "unnest is only supported in SELECT statements".to_string(),
-                ));
+                return plan_err!("unnest is only supported in SELECT statements");
             }
             return Ok(Transformed::no(node));
         };
@@ -364,7 +362,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                 let typ = if let Some(e) = opt {
                     if let Some(prev) = unnest.replace((e, i)) {
                         if &prev != unnest.as_ref().unwrap() {
-                            return Err(DataFusionError::Plan("Projection contains multiple unnests, which is not currently supported".to_string()));
+                            return plan_err!("Projection contains multiple unnests, which is not currently supported");
                         }
                     }
                     true
@@ -403,10 +401,10 @@ impl TreeNodeRewriter for UnnestRewriter {
                 .map(|(i, f)| {
                     if i == unnest_idx {
                         let DataType::List(inner) = f.data_type() else {
-                            return Err(DataFusionError::Plan(format!(
+                            return plan_err!(
                                 "Argument '{}' to unnest is not a List",
                                 f.qualified_name()
-                            )));
+                            );
                         };
 
                         Ok(DFField::new_unqualified(

@@ -5,8 +5,8 @@ use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{
-    plan_err, Column, DFSchema, DataFusionError, JoinConstraint, JoinType, OwnedTableReference,
-    Result as DFResult, ScalarValue,
+    not_impl_err, plan_err, Column, DFSchema, DataFusionError, JoinConstraint, JoinType,
+    OwnedTableReference, Result, ScalarValue,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::{Alias, ScalarFunction};
@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub(crate) struct JoinRewriter {}
 
 impl JoinRewriter {
-    fn check_join_windowing(join: &Join) -> DFResult<bool> {
+    fn check_join_windowing(join: &Join) -> Result<bool> {
         let left_window = WindowDetectingVisitor::get_window(&join.left)?;
         let right_window = WindowDetectingVisitor::get_window(&join.right)?;
         match (left_window, right_window) {
@@ -57,7 +57,7 @@ impl JoinRewriter {
         }
     }
 
-    fn check_updating(left: &LogicalPlan, right: &LogicalPlan) -> DFResult<()> {
+    fn check_updating(left: &LogicalPlan, right: &LogicalPlan) -> Result<()> {
         if left
             .schema()
             .has_column_with_unqualified_name(IS_RETRACT_FIELD)
@@ -78,7 +78,7 @@ impl JoinRewriter {
         input: Arc<LogicalPlan>,
         join_expressions: Vec<Expr>,
         name: &'static str,
-    ) -> DFResult<LogicalPlan> {
+    ) -> Result<LogicalPlan> {
         let key_count = join_expressions.len();
         let mut join_expressions: Vec<_> = join_expressions
             .into_iter()
@@ -109,7 +109,7 @@ impl JoinRewriter {
         }))
     }
 
-    fn post_join_timestamp_projection(&mut self, input: LogicalPlan) -> DFResult<LogicalPlan> {
+    fn post_join_timestamp_projection(&mut self, input: LogicalPlan) -> Result<LogicalPlan> {
         let schema = input.schema().clone();
         let mut schema_with_timestamp = schema.fields().clone();
         let timestamp_fields = schema_with_timestamp
@@ -118,9 +118,7 @@ impl JoinRewriter {
             .cloned()
             .collect::<Vec<_>>();
         if timestamp_fields.len() != 2 {
-            return Err(DataFusionError::NotImplemented(
-                "join must have two timestamp fields".to_string(),
-            ));
+            return not_impl_err!("join must have two timestamp fields");
         }
         schema_with_timestamp.retain(|field| field.name() != "_timestamp");
         let mut projection_expr = schema_with_timestamp
@@ -188,7 +186,7 @@ impl JoinRewriter {
 impl TreeNodeRewriter for JoinRewriter {
     type Node = LogicalPlan;
 
-    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
         let LogicalPlan::Join(join) = node else {
             return Ok(Transformed::no(node));
         };
@@ -205,9 +203,7 @@ impl TreeNodeRewriter for JoinRewriter {
             null_equals_null: false,
         } = join
         else {
-            return Err(DataFusionError::NotImplemented(
-                "can't handle join constraint other than ON".into(),
-            ));
+            return not_impl_err!("can't handle join constraint other than ON");
         };
         Self::check_updating(&left, &right)?;
 

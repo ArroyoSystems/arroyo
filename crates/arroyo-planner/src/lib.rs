@@ -16,13 +16,13 @@ pub mod udafs;
 #[cfg(test)]
 mod test;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::bail;
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType};
 use arrow_schema::Schema;
 use arroyo_datastream::WindowType;
 
-use datafusion::common::{plan_err, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
+use datafusion::common::{plan_err, DFField, OwnedTableReference, Result, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::physical_plan::functions::make_scalar_function;
@@ -62,6 +62,8 @@ use crate::types::interval_month_day_nanos_to_duration;
 use crate::udafs::EmptyUdaf;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_operator::connector::Connection;
+use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
 use datafusion::execution::FunctionRegistry;
@@ -201,7 +203,7 @@ impl ArroyoSchemaProvider {
         self.tables.get_mut(&UniCase::new(table_name.into()))
     }
 
-    pub fn add_rust_udf(&mut self, body: &str, url: &str) -> Result<String> {
+    pub fn add_rust_udf(&mut self, body: &str, url: &str) -> anyhow::Result<String> {
         let parsed = ParsedUdfFile::try_parse(body)?;
 
         if parsed.udf.vec_arguments > 0 && parsed.udf.vec_arguments != parsed.udf.args.len() {
@@ -352,7 +354,7 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         self.udf_defs.keys().map(|k| k.to_string()).collect()
     }
 
-    fn udf(&self, name: &str) -> datafusion::common::Result<Arc<ScalarUDF>> {
+    fn udf(&self, name: &str) -> Result<Arc<ScalarUDF>> {
         if let Some(f) = self.functions.get(name) {
             Ok(Arc::clone(f))
         } else {
@@ -360,7 +362,7 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         }
     }
 
-    fn udaf(&self, name: &str) -> datafusion::common::Result<Arc<AggregateUDF>> {
+    fn udaf(&self, name: &str) -> Result<Arc<AggregateUDF>> {
         if let Some(f) = self.aggregate_functions.get(name) {
             Ok(Arc::clone(f))
         } else {
@@ -368,29 +370,29 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         }
     }
 
-    fn udwf(&self, name: &str) -> datafusion::common::Result<Arc<WindowUDF>> {
+    fn udwf(&self, name: &str) -> Result<Arc<WindowUDF>> {
         plan_err!("No UDWF with name {name}")
     }
 
     fn register_function_rewrite(
         &mut self,
         rewrite: Arc<dyn FunctionRewrite + Send + Sync>,
-    ) -> DFResult<()> {
+    ) -> Result<()> {
         self.function_rewriters.push(rewrite);
         Ok(())
     }
 
-    fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> DFResult<Option<Arc<ScalarUDF>>> {
+    fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> Result<Option<Arc<ScalarUDF>>> {
         Ok(self.functions.insert(udf.name().to_string(), udf))
     }
 
-    fn register_udaf(&mut self, udaf: Arc<AggregateUDF>) -> DFResult<Option<Arc<AggregateUDF>>> {
+    fn register_udaf(&mut self, udaf: Arc<AggregateUDF>) -> Result<Option<Arc<AggregateUDF>>> {
         Ok(self
             .aggregate_functions
             .insert(udaf.name().to_string(), udaf))
     }
 
-    fn register_udwf(&mut self, _udaf: Arc<WindowUDF>) -> DFResult<Option<Arc<WindowUDF>>> {
+    fn register_udwf(&mut self, _udaf: Arc<WindowUDF>) -> Result<Option<Arc<WindowUDF>>> {
         plan_err!("custom window functions not supported")
     }
 }
@@ -416,7 +418,7 @@ pub async fn parse_and_get_program(
     let query = query.to_string();
 
     if query.trim().is_empty() {
-        bail!("Query is empty");
+        return plan_err!("Query is empty");
     }
 
     parse_and_get_arrow_program(query, schema_provider, config).await
@@ -441,7 +443,7 @@ fn get_duration(expression: &Expr) -> Result<Duration> {
         Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(val))) => {
             Ok(interval_month_day_nanos_to_duration(*val))
         }
-        _ => bail!(
+        _ => plan_err!(
             "unsupported Duration expression, expect duration literal, not {}",
             expression
         ),
@@ -461,7 +463,7 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
                 let slide = get_duration(&args[0])?;
                 let width = get_duration(&args[1])?;
                 if width.as_nanos() % slide.as_nanos() != 0 {
-                    bail!(
+                    return plan_err!(
                         "hop() width {:?} currently must be a multiple of slide {:?}",
                         width,
                         slide
@@ -503,7 +505,7 @@ fn inspect_plan(logical_plan: LogicalPlan) -> LogicalPlan {
 pub fn rewrite_plan(
     plan: LogicalPlan,
     schema_provider: &ArroyoSchemaProvider,
-) -> DFResult<LogicalPlan> {
+) -> Result<LogicalPlan> {
     let rewritten_plan = plan
         .rewrite(&mut UnnestRewriter {})?
         .data
@@ -533,7 +535,7 @@ pub async fn parse_and_get_arrow_program(
     }
 
     if inserts.is_empty() {
-        bail!("The provided SQL does not contain a query");
+        return plan_err!("The provided SQL does not contain a query");
     }
 
     let mut used_connections = HashSet::new();
@@ -557,9 +559,9 @@ pub async fn parse_and_get_arrow_program(
 
         let sink = match sink_name {
             Some(sink_name) => {
-                let table = schema_provider
-                    .get_table_mut(&sink_name)
-                    .ok_or_else(|| anyhow!("Connection {} not found", sink_name))?;
+                let table = schema_provider.get_table_mut(&sink_name).ok_or_else(|| {
+                    DataFusionError::Plan(format!("Connection {} not found", sink_name))
+                })?;
                 match table {
                     Table::ConnectorTable(_) => SinkExtension::new(
                         OwnedTableReference::bare(sink_name),
@@ -569,16 +571,16 @@ pub async fn parse_and_get_arrow_program(
                     ),
                     Table::MemoryTable { logical_plan, .. } => {
                         if logical_plan.is_some() {
-                            bail!("Can only insert into a memory table once");
+                            return plan_err!("Can only insert into a memory table once");
                         }
                         logical_plan.replace(plan_rewrite);
                         continue;
                     }
                     Table::TableFromQuery { .. } => {
-                        bail!("Shouldn't be inserting more data into a table made with CREATE TABLE AS");
+                        plan_err!("Shouldn't be inserting more data into a table made with CREATE TABLE AS")
                     }
                     Table::PreviewSink { .. } => {
-                        bail!("queries shouldn't be able insert into preview sink.")
+                        plan_err!("queries shouldn't be able insert into preview sink.")
                     }
                 }
             }
@@ -676,4 +678,22 @@ pub fn has_duplicate_udf_names<'a>(definitions: impl Iterator<Item = &'a String>
         }
     }
     false
+}
+
+pub fn schema_with_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> Result<ArroyoSchema> {
+    let timestamp_index = schema
+        .column_with_name(TIMESTAMP_FIELD)
+        .ok_or_else(|| {
+            DataFusionError::Plan(format!(
+                "no {} field in schema, schema is {:?}",
+                TIMESTAMP_FIELD, schema
+            ))
+        })?
+        .0;
+
+    Ok(ArroyoSchema {
+        schema,
+        timestamp_index,
+        key_indices: Some(key_indices),
+    })
 }

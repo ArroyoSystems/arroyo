@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
 use arrow_schema::{DataType, Schema};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     IS_RETRACT_FIELD, TIMESTAMP_FIELD,
 };
 use datafusion::common::{
-    plan_err, DFSchema, DFSchemaRef, OwnedTableReference, Result as DFResult,
+    internal_err, plan_err, DFSchema, DFSchemaRef, OwnedTableReference, Result,
 };
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion::physical_plan::DisplayAs;
@@ -29,7 +28,7 @@ impl DebeziumUnrollingExtension {
     pub(crate) fn as_debezium_schema(
         input_schema: &DFSchemaRef,
         qualifier: Option<OwnedTableReference>,
-    ) -> DFResult<DFSchemaRef> {
+    ) -> Result<DFSchemaRef> {
         let timestamp_field = if input_schema.has_column_with_unqualified_name(TIMESTAMP_FIELD) {
             Some(
                 input_schema
@@ -70,7 +69,7 @@ impl DebeziumUnrollingExtension {
         Ok(Arc::new(schema))
     }
 
-    pub fn try_new(input: LogicalPlan) -> DFResult<Self> {
+    pub fn try_new(input: LogicalPlan) -> Result<Self> {
         let input_schema = input.schema();
         // confirm that the input schema has before, after and op columns, and before and after match
         let Some(before_index) = input_schema.index_of_column_by_name(None, "before")? else {
@@ -180,7 +179,7 @@ impl ArroyoExtension for DebeziumUnrollingExtension {
         _index: usize,
         _input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
-        bail!("DebeziumUnrollingExtension should not be planned")
+        plan_err!("DebeziumUnrollingExtension should not be planned")
     }
 
     fn output_schema(&self) -> ArroyoSchema {
@@ -199,7 +198,7 @@ pub(crate) struct ToDebeziumExtension {
 }
 
 impl ToDebeziumExtension {
-    pub(crate) fn try_new(input: LogicalPlan) -> DFResult<Self> {
+    pub(crate) fn try_new(input: LogicalPlan) -> Result<Self> {
         let input_schema = input.schema();
         let schema = DebeziumUnrollingExtension::as_debezium_schema(input_schema, None)
             .expect("should be able to create ToDebeziumExtenison");
@@ -257,7 +256,7 @@ impl ArroyoExtension for ToDebeziumExtension {
         _index: usize,
         _input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
-        bail!("ToDebeziumExtension should not be planned")
+        internal_err!("ToDebeziumExtension should not be planned")
     }
 
     fn output_schema(&self) -> ArroyoSchema {

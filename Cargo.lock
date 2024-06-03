@@ -854,6 +854,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.7",
  "bincode",
+ "datafusion-common",
  "dirs",
  "figment",
  "k8s-openapi",
