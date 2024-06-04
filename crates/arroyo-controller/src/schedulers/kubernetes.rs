@@ -5,7 +5,6 @@ use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq
 use arroyo_types::{WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
-use k8s_openapi::api::apps::v1::ReplicaSet;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
@@ -13,6 +12,7 @@ use prost::Message;
 use serde_json::json;
 use std::time::Duration;
 use tonic::Status;
+use tracing::info;
 
 const CLUSTER_LABEL: &str = "cluster";
 const JOB_ID_LABEL: &str = "job_id";
@@ -50,7 +50,7 @@ impl KubernetesScheduler {
                 "name": "PROD", "value": "true",
             },
             {
-                "name": "ARROYO_WORKER_TASK_SLOTS", "value": format!("{}", c.worker.task_slots),
+                "name": "ARROYO__WORKER__TASK_SLOTS", "value": format!("{}", c.worker.task_slots),
             },
             {
                 "name": JOB_ID_ENV, "value": req.job_id,
@@ -59,10 +59,10 @@ impl KubernetesScheduler {
                 "name": RUN_ID_ENV, "value": format!("{}", req.run_id),
             },
             {
-                "name": "ARROYO_WORKER_RPC_PORT", "value": "6900",
+                "name": "ARROYO__WORKER__RPC_PORT", "value": "6900",
             },
             {
-                "name": "ARROYO_ADMIN_HTTP_PORT", "value": "6901",
+                "name": "ARROYO__ADMIN__HTTP_PORT", "value": "6901",
             },
             {
                 "name": ARROYO_PROGRAM_ENV,
@@ -71,10 +71,6 @@ impl KubernetesScheduler {
             {
                 "name": "WASM_BIN",
                 "value": req.wasm_path
-            },
-            {
-                "name": "ARROYO_CONTROLLER_ENDPOINT",
-                "value": config().controller_endpoint(),
             }
         ]);
 
@@ -111,6 +107,7 @@ impl KubernetesScheduler {
                         "command": ["/app/arroyo-bin", "worker"],
                         "imagePullPolicy": c.worker.image_pull_policy,
                         "resources": c.worker.resources,
+                        "restartPolicy": "Never",
                         "ports": [
                             {
                                 "containerPort": 6900,
@@ -139,12 +136,24 @@ impl Scheduler for KubernetesScheduler {
         let replicas = (req.slots as f32 / config().kubernetes_scheduler.worker.task_slots as f32)
             .ceil() as usize;
 
+        info!(
+            job_id = *req.job_id,
+            message = "starting workers on k8s",
+            replicas,
+            task_slots = req.slots
+        );
+
         let program = general_purpose::STANDARD_NO_PAD
             .encode(api::ArrowProgram::from(req.program.clone()).encode_to_vec());
 
         let pods = (0..replicas).map(|i| self.make_pod(&req, &program, i));
 
         for pod in pods {
+            info!(
+                job_id = *req.job_id,
+                message = "starting worker",
+                pod = pod.metadata.name
+            );
             api.create(&Default::default(), &pod)
                 .await
                 .map_err(|e| SchedulerError::Other(e.to_string()))?;

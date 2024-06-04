@@ -1,3 +1,4 @@
+
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -21,9 +22,7 @@ use arroyo_state::{
 
 use crate::job_controller::job_metrics::JobMetrics;
 use crate::{
-    job_controller::JobController,
-    queries::controller_queries,
-    states::{compiling::Compiling, stop_if_desired_non_running},
+    job_controller::JobController, queries::controller_queries, states::stop_if_desired_non_running,
 };
 use crate::{schedulers::SchedulerError, JobMessage};
 use crate::{
@@ -155,17 +154,12 @@ async fn handle_worker_connect<'a>(
     Ok(())
 }
 
-enum Either<A, B> {
-    Left(A),
-    Right(B),
-}
-
 impl Scheduling {
     async fn start_workers<'a>(
         self: Box<Self>,
         ctx: &mut JobContext<'a>,
         slots_needed: usize,
-    ) -> Result<Either<Transition, Box<Self>>, StateError> {
+    ) -> Result<Box<Self>, StateError> {
         let start = Instant::now();
         loop {
             match ctx
@@ -202,22 +196,6 @@ impl Scheduling {
                         ));
                     }
                 }
-                Err(SchedulerError::CompilationNeeded) => {
-                    warn!(
-                        message = "pipeline binary not found",
-                        job_id = *ctx.config.id,
-                        path = ctx.status.pipeline_path
-                    );
-
-                    ctx.status.pipeline_path = None;
-                    ctx.status.wasm_path = None;
-
-                    // TODO: this introduces the possibility of an infinite loop, if compiling succeeds but for some
-                    //   reason we are not able to read the pipeline binary that it produces (e.g., we may have perms
-                    //   to write to S3, but not read). Addressing that will take a more sophisticated error handling
-                    //   system that is able to track errors across multiple states.
-                    return Ok(Either::Left(Transition::next(*self, Compiling {})));
-                }
                 Err(SchedulerError::Other(s)) => {
                     return Err(ctx.retryable(
                         self,
@@ -231,7 +209,7 @@ impl Scheduling {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        Ok(Either::Right(self))
+        Ok(self)
     }
 }
 
@@ -242,6 +220,10 @@ impl State for Scheduling {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        // if we've started in scheduling but the job isn't supposed to be running, don't try
+        // to schedule
+        stop_if_desired_non_running!(self, &ctx.config);
+
         // clear out any existing workers for this job
         if let Err(e) = ctx.scheduler.stop_workers(&ctx.config.id, None, true).await {
             warn!(
@@ -255,12 +237,7 @@ impl State for Scheduling {
             .update_parallelism(&ctx.config.parallelism_overrides);
 
         let slots_needed: usize = slots_for_job(&*ctx.program);
-        self = match self.start_workers(ctx, slots_needed).await? {
-            Either::Left(t) => {
-                return Ok(t);
-            }
-            Either::Right(s) => s,
-        };
+        self = self.start_workers(ctx, slots_needed).await?;
 
         // wait for them to connect and make outbound RPC connections
         let mut workers = HashMap::new();

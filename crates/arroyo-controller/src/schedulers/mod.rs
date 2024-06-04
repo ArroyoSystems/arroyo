@@ -343,7 +343,6 @@ pub struct NodeScheduler {
 pub enum SchedulerError {
     NotEnoughSlots { slots_needed: usize },
     Other(String),
-    CompilationNeeded,
 }
 
 impl NodeScheduler {
