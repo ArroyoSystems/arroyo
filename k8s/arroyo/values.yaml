@@ -24,8 +24,8 @@ worker:
   resources:
     limits: {}
     requests:
-      memory: 200Mi
-      cpu: 400m
+      memory: 4Gi
+      cpu: 4000m
   slots: 4
   image:
     repository: ghcr.io/arroyosystems/arroyo
