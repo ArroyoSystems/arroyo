@@ -123,7 +123,7 @@ export function getCurrentMaxMetric(metricGroup: MetricGroup): number {
     .map(m => m.value)
     .reduce((max, curr) => Math.max(max, curr), 0);
 
-    return max;
+  return max;
 }
 
 export function transformMetricGroup(metric_group: MetricGroup) {
