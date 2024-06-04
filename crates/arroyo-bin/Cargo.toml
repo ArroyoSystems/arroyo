@@ -5,7 +5,6 @@ edition = "2021"
 
 [features]
 kafka-sasl = ["arroyo-connectors/kafka-sasl", "arroyo-worker/kafka-sal"]
-always-embed-assets = ["arroyo-api/always-embed-assets"]
 
 [dependencies]
 arroyo-types = { path ="../arroyo-types" }
