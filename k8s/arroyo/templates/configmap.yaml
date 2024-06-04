@@ -38,6 +38,9 @@ data:
     {{- end }}
 
     kubernetes-scheduler:
+      controller:
+        apiVersion: "v1"
+        kind: "Pod"
       worker:
         name-prefix: "{{ include "arroyo.fullname" . }}"
         task-slots: {{ .Values.worker.slots }}
