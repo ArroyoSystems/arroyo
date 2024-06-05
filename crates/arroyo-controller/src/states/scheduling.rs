@@ -6,7 +6,7 @@ use std::{
 
 use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
 use arroyo_types::WorkerId;
-use tokio::{sync::Mutex, task::JoinHandle};
+use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
@@ -31,7 +31,8 @@ use crate::{
 
 use super::{running::Running, JobContext, State, Transition};
 
-const STARTUP_TIME: Duration = Duration::from_secs(10 * 60);
+const WORKER_STARTUP_TIME: Duration = Duration::from_secs(10 * 60);
+const TASK_STARTUP_TIME: Duration = Duration::from_secs(2 * 60);
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {
@@ -188,7 +189,7 @@ impl Scheduling {
                         slots_for_job = slots_needed,
                         slots_needed = s
                     );
-                    if start.elapsed() > STARTUP_TIME {
+                    if start.elapsed() > WORKER_STARTUP_TIME {
                         return Err(fatal(
                             "Not enough slots to schedule job",
                             anyhow!("scheduler error -- needed {} slots", slots_needed),
@@ -245,8 +246,8 @@ impl State for Scheduling {
 
         let start = Instant::now();
         loop {
-            let timeout = STARTUP_TIME
-                .min(ctx.config.ttl.unwrap_or(STARTUP_TIME))
+            let timeout = WORKER_STARTUP_TIME
+                .min(ctx.config.ttl.unwrap_or(WORKER_STARTUP_TIME))
                 .checked_sub(start.elapsed())
                 .unwrap_or(Duration::ZERO);
 
@@ -266,8 +267,8 @@ impl State for Scheduling {
                 }
                 _ = tokio::time::sleep(timeout) => {
                     return Err(ctx.retryable(self,
-                        "timed out while waiting for job to start",
-                        anyhow!("timed out after {:?} while waiting for worker startup", STARTUP_TIME), 3));
+                        "timed out while waiting for workers to start",
+                        anyhow!("timed out after {:?} while waiting for worker startup", WORKER_STARTUP_TIME), 3));
                 }
             }
 
@@ -317,8 +318,6 @@ impl State for Scheduling {
                 needs_commits: r.needs_commits,
             }
         });
-
-        info!("Restoring from {:?}", checkpoint_info);
 
         {
             // mark in-progress checkpoints as failed
@@ -497,24 +496,39 @@ impl State for Scheduling {
         }
 
         // wait until all tasks are running
-        let mut started = HashSet::new();
-        while started.len() < ctx.program.task_count() {
-            match ctx.rx.recv().await {
-                Some(JobMessage::TaskStarted {
-                    operator_id,
-                    operator_subtask,
-                    ..
-                }) => {
-                    started.insert((operator_id, operator_subtask));
+        let start = Instant::now();
+        let mut started_tasks = HashSet::new();
+        while started_tasks.len() < ctx.program.task_count() {
+            let timeout = TASK_STARTUP_TIME
+                .min(ctx.config.ttl.unwrap_or(TASK_STARTUP_TIME))
+                .checked_sub(start.elapsed())
+                .unwrap_or(Duration::ZERO);
+
+            select! {
+                v = ctx.rx.recv() => {
+                    match v {
+                        Some(JobMessage::TaskStarted {
+                            operator_id,
+                            operator_subtask,
+                            ..
+                        }) => {
+                            started_tasks.insert((operator_id, operator_subtask));
+                        }
+                        Some(JobMessage::ConfigUpdate(c)) => {
+                            stop_if_desired_non_running!(self, &c);
+                        }
+                        Some(msg) => {
+                            ctx.handle(msg)?;
+                        }
+                        None => {
+                            panic!("Job queue shutdown");
+                        }
+                    }
                 }
-                Some(JobMessage::ConfigUpdate(c)) => {
-                    stop_if_desired_non_running!(self, &c);
-                }
-                Some(msg) => {
-                    ctx.handle(msg)?;
-                }
-                None => {
-                    panic!("Job queue shutdown");
+                _ = tokio::time::sleep(timeout) => {
+                    return Err(ctx.retryable(self,
+                        "timed out while waiting for tasks to start",
+                        anyhow!("timed out after {:?} while waiting for worker startup", TASK_STARTUP_TIME), 3));
                 }
             }
         }
