@@ -98,6 +98,22 @@ pub enum TaskCounters {
     DeserializationErrors,
 }
 
+impl TaskCounters {
+    pub fn variants() -> [TaskCounters; 7] {
+        use TaskCounters::*;
+
+        [
+            MessagesReceived,
+            MessagesSent,
+            BatchesReceived,
+            BatchesSent,
+            BytesReceived,
+            BytesSent,
+            DeserializationErrors,
+        ]
+    }
+}
+
 #[allow(clippy::type_complexity)]
 impl TaskCounters {
     fn metric(&self) -> &'static IntCounterVec {
@@ -149,6 +165,7 @@ pub fn register_queue_gauge<T>(
     help: &'static str,
     task_info: &TaskInfo,
     out_qs: &[Vec<T>],
+    initial: i64,
 ) -> QueueGauges {
     out_qs
         .iter()
@@ -157,7 +174,7 @@ pub fn register_queue_gauge<T>(
             qs.iter()
                 .enumerate()
                 .map(|(j, _)| {
-                    gauge_for_task(
+                    let mut g = gauge_for_task(
                         task_info,
                         name,
                         help,
@@ -165,7 +182,13 @@ pub fn register_queue_gauge<T>(
                             "next_node".to_string() => format!("{}", i),
                             "next_node_idx".to_string() => format!("{}", j)
                         },
-                    )
+                    );
+
+                    if let Some(g) = &mut g {
+                        g.set(initial);
+                    }
+
+                    g
                 })
                 .collect()
         })

@@ -150,7 +150,13 @@ impl JobMetrics {
                     operator_id,
                     metric_groups: metrics
                         .into_iter()
-                        .map(|(name, subtasks)| MetricGroup { name, subtasks })
+                        .map(|(name, subtasks)| MetricGroup {
+                            name,
+                            subtasks: subtasks
+                                .into_iter()
+                                .filter(|t| t.metrics.len() > 0)
+                                .collect(),
+                        })
                         .collect(),
                 }
             })
