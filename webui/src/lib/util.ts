@@ -108,8 +108,9 @@ export function getCurrentMaxMetric(metricGroup: MetricGroup): number {
     return 0;
   }
 
-  return metricGroup.subtasks
+  let max = metricGroup.subtasks
     .map(s => s.metrics)
+    .filter(m => m.length > 0)
     .map(m =>
       m.reduce((r: Metric, c: Metric) => {
         if (c.time > r.time) {
@@ -120,7 +121,9 @@ export function getCurrentMaxMetric(metricGroup: MetricGroup): number {
       }, m[0])
     )
     .map(m => m.value)
-    .reduce((max, curr) => Math.max(max, curr));
+    .reduce((max, curr) => Math.max(max, curr), 0);
+
+  return max;
 }
 
 export function transformMetricGroup(metric_group: MetricGroup) {

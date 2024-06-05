@@ -5,7 +5,6 @@ use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq
 use arroyo_types::{WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
-use k8s_openapi::api::apps::v1::ReplicaSet;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
@@ -13,6 +12,7 @@ use prost::Message;
 use serde_json::json;
 use std::time::Duration;
 use tonic::Status;
+use tracing::info;
 
 const CLUSTER_LABEL: &str = "cluster";
 const JOB_ID_LABEL: &str = "job_id";
@@ -36,9 +36,8 @@ impl KubernetesScheduler {
         Self { client, config }
     }
 
-    fn make_replicaset(&self, req: StartPipelineReq) -> ReplicaSet {
+    fn make_pod(&self, req: &StartPipelineReq, program: &str, number: usize) -> Pod {
         let c = &self.config;
-        let replicas = (req.slots as f32 / c.worker.task_slots as f32).ceil() as usize;
 
         let mut labels = c.worker.labels.clone();
         labels.insert(CLUSTER_LABEL.to_string(), c.worker.name());
@@ -51,7 +50,7 @@ impl KubernetesScheduler {
                 "name": "PROD", "value": "true",
             },
             {
-                "name": "ARROYO_WORKER_TASK_SLOTS", "value": format!("{}", c.worker.task_slots),
+                "name": "ARROYO__WORKER__TASK_SLOTS", "value": format!("{}", c.worker.task_slots),
             },
             {
                 "name": JOB_ID_ENV, "value": req.job_id,
@@ -60,81 +59,70 @@ impl KubernetesScheduler {
                 "name": RUN_ID_ENV, "value": format!("{}", req.run_id),
             },
             {
-                "name": "ARROYO_WORKER_RPC_PORT", "value": "6900",
+                "name": "ARROYO__WORKER__RPC_PORT", "value": "6900",
             },
             {
-                "name": "ARROYO_ADMIN_HTTP_PORT", "value": "6901",
+                "name": "ARROYO__ADMIN__HTTP_PORT", "value": "6901",
             },
             {
                 "name": ARROYO_PROGRAM_ENV,
-                "value": general_purpose::STANDARD_NO_PAD
-                    .encode(api::ArrowProgram::from(req.program).encode_to_vec()),
+                "value": program,
             },
             {
                 "name": "WASM_BIN",
                 "value": req.wasm_path
-            },
-            {
-                "name": "ARROYO_CONTROLLER_ENDPOINT",
-                "value": config().controller_endpoint(),
             }
         ]);
 
-        for (key, value) in req.env_vars.into_iter() {
+        for (key, value) in req.env_vars.iter() {
             env.as_array_mut().unwrap().push(json!({
                 "name": key,
                 "value": value,
             }));
         }
 
+        let owner: Vec<_> = config()
+            .kubernetes_scheduler
+            .controller
+            .iter()
+            .cloned()
+            .collect();
+
         serde_json::from_value(json!({
-            "apiVersion": "apps/v1",
-            "kind": "ReplicaSet",
+            "apiVersion": "v1",
+            "kind": "Pod",
             "metadata": {
-                "name": format!("{}-{}-{}", c.worker.name(), req.job_id.to_ascii_lowercase().replace('_', "-"), req.run_id),
+                "name": format!("{}-{}-{}-{}", c.worker.name(), req.job_id.to_ascii_lowercase().replace('_', "-"), req.run_id, number),
                 "namespace": c.namespace,
                 "labels": labels,
                 "annotations": c.worker.annotations,
+                "ownerReferences": owner,
             },
             "spec": {
-                "replicas": replicas,
-                "selector": {
-                    "matchLabels": {
-                        JOB_ID_LABEL: req.job_id,
-                        RUN_ID_LABEL: format!("{}", req.run_id),
-                    }
-                },
-                "template": {
-                    "metadata": {
-                        "labels": labels,
-                        "annotations": c.worker.annotations,
-                    },
-                    "spec": {
-                        "volumes": c.worker.volumes,
-                        "containers": [
+                "volumes": c.worker.volumes,
+                "containers": [
+                    {
+                        "name": "worker",
+                        "image": c.worker.image,
+                        "command": ["/app/arroyo-bin", "worker"],
+                        "imagePullPolicy": c.worker.image_pull_policy,
+                        "resources": c.worker.resources,
+                        "restartPolicy": "Never",
+                        "ports": [
                             {
-                                "name": "worker",
-                                "image": c.worker.image,
-                                "command": ["/app/arroyo-bin", "worker"],
-                                "imagePullPolicy": c.worker.image_pull_policy,
-                                "resources": c.worker.resources,
-                                "ports": [
-                                    {
-                                        "containerPort": 6900,
-                                        "name": "grpc",
-                                    },
-                                    {
-                                        "containerPort": 6901,
-                                        "name": "admin",
-                                    }
-                                ],
-                                "env": env,
-                                "volumeMounts": c.worker.volume_mounts,
+                                "containerPort": 6900,
+                                "name": "grpc",
+                            },
+                            {
+                                "containerPort": 6901,
+                                "name": "admin",
                             }
                         ],
-                        "serviceAccountName": c.worker.service_account_name,
+                        "env": env,
+                        "volumeMounts": c.worker.volume_mounts,
                     }
-                }
+                ],
+                "serviceAccountName": c.worker.service_account_name,
             }
         })).unwrap()
     }
@@ -143,13 +131,33 @@ impl KubernetesScheduler {
 #[async_trait]
 impl Scheduler for KubernetesScheduler {
     async fn start_workers(&self, req: StartPipelineReq) -> Result<(), SchedulerError> {
-        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
+        let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
-        let rs = self.make_replicaset(req);
+        let replicas = (req.slots as f32 / config().kubernetes_scheduler.worker.task_slots as f32)
+            .ceil() as usize;
 
-        api.create(&Default::default(), &rs)
-            .await
-            .map_err(|e| SchedulerError::Other(e.to_string()))?;
+        info!(
+            job_id = *req.job_id,
+            message = "starting workers on k8s",
+            replicas,
+            task_slots = req.slots
+        );
+
+        let program = general_purpose::STANDARD_NO_PAD
+            .encode(api::ArrowProgram::from(req.program.clone()).encode_to_vec());
+
+        let pods = (0..replicas).map(|i| self.make_pod(&req, &program, i));
+
+        for pod in pods {
+            info!(
+                job_id = *req.job_id,
+                message = "starting worker",
+                pod = pod.metadata.name
+            );
+            api.create(&Default::default(), &pod)
+                .await
+                .map_err(|e| SchedulerError::Other(e.to_string()))?;
+        }
 
         Ok(())
     }
@@ -173,7 +181,7 @@ impl Scheduler for KubernetesScheduler {
         run_id: Option<i64>,
         force: bool,
     ) -> anyhow::Result<()> {
-        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
+        let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
         let mut labels = format!("{}={}", JOB_ID_LABEL, job_id);
         if let Some(run_id) = run_id {
@@ -291,6 +299,6 @@ mod test {
 
         KubernetesScheduler::with_config(None, config)
             // test that we don't panic when creating the replicaset
-            .make_replicaset(req);
+            .make_pod(&req, "program", 3);
     }
 }

@@ -6,7 +6,7 @@ use std::{
 
 use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
 use arroyo_types::WorkerId;
-use tokio::{sync::Mutex, task::JoinHandle};
+use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
@@ -21,9 +21,7 @@ use arroyo_state::{
 
 use crate::job_controller::job_metrics::JobMetrics;
 use crate::{
-    job_controller::JobController,
-    queries::controller_queries,
-    states::{compiling::Compiling, stop_if_desired_non_running},
+    job_controller::JobController, queries::controller_queries, states::stop_if_desired_non_running,
 };
 use crate::{schedulers::SchedulerError, JobMessage};
 use crate::{
@@ -33,7 +31,8 @@ use crate::{
 
 use super::{running::Running, JobContext, State, Transition};
 
-const STARTUP_TIME: Duration = Duration::from_secs(10 * 60);
+const WORKER_STARTUP_TIME: Duration = Duration::from_secs(10 * 60);
+const TASK_STARTUP_TIME: Duration = Duration::from_secs(2 * 60);
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {
@@ -155,17 +154,12 @@ async fn handle_worker_connect<'a>(
     Ok(())
 }
 
-enum Either<A, B> {
-    Left(A),
-    Right(B),
-}
-
 impl Scheduling {
     async fn start_workers<'a>(
         self: Box<Self>,
         ctx: &mut JobContext<'a>,
         slots_needed: usize,
-    ) -> Result<Either<Transition, Box<Self>>, StateError> {
+    ) -> Result<Box<Self>, StateError> {
         let start = Instant::now();
         loop {
             match ctx
@@ -195,28 +189,12 @@ impl Scheduling {
                         slots_for_job = slots_needed,
                         slots_needed = s
                     );
-                    if start.elapsed() > STARTUP_TIME {
+                    if start.elapsed() > WORKER_STARTUP_TIME {
                         return Err(fatal(
                             "Not enough slots to schedule job",
                             anyhow!("scheduler error -- needed {} slots", slots_needed),
                         ));
                     }
-                }
-                Err(SchedulerError::CompilationNeeded) => {
-                    warn!(
-                        message = "pipeline binary not found",
-                        job_id = *ctx.config.id,
-                        path = ctx.status.pipeline_path
-                    );
-
-                    ctx.status.pipeline_path = None;
-                    ctx.status.wasm_path = None;
-
-                    // TODO: this introduces the possibility of an infinite loop, if compiling succeeds but for some
-                    //   reason we are not able to read the pipeline binary that it produces (e.g., we may have perms
-                    //   to write to S3, but not read). Addressing that will take a more sophisticated error handling
-                    //   system that is able to track errors across multiple states.
-                    return Ok(Either::Left(Transition::next(*self, Compiling {})));
                 }
                 Err(SchedulerError::Other(s)) => {
                     return Err(ctx.retryable(
@@ -231,7 +209,7 @@ impl Scheduling {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        Ok(Either::Right(self))
+        Ok(self)
     }
 }
 
@@ -242,6 +220,10 @@ impl State for Scheduling {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        // if we've started in scheduling but the job isn't supposed to be running, don't try
+        // to schedule
+        stop_if_desired_non_running!(self, &ctx.config);
+
         // clear out any existing workers for this job
         if let Err(e) = ctx.scheduler.stop_workers(&ctx.config.id, None, true).await {
             warn!(
@@ -255,12 +237,7 @@ impl State for Scheduling {
             .update_parallelism(&ctx.config.parallelism_overrides);
 
         let slots_needed: usize = slots_for_job(&*ctx.program);
-        self = match self.start_workers(ctx, slots_needed).await? {
-            Either::Left(t) => {
-                return Ok(t);
-            }
-            Either::Right(s) => s,
-        };
+        self = self.start_workers(ctx, slots_needed).await?;
 
         // wait for them to connect and make outbound RPC connections
         let mut workers = HashMap::new();
@@ -269,8 +246,8 @@ impl State for Scheduling {
 
         let start = Instant::now();
         loop {
-            let timeout = STARTUP_TIME
-                .min(ctx.config.ttl.unwrap_or(STARTUP_TIME))
+            let timeout = WORKER_STARTUP_TIME
+                .min(ctx.config.ttl.unwrap_or(WORKER_STARTUP_TIME))
                 .checked_sub(start.elapsed())
                 .unwrap_or(Duration::ZERO);
 
@@ -290,8 +267,8 @@ impl State for Scheduling {
                 }
                 _ = tokio::time::sleep(timeout) => {
                     return Err(ctx.retryable(self,
-                        "timed out while waiting for job to start",
-                        anyhow!("timed out after {:?} while waiting for worker startup", STARTUP_TIME), 3));
+                        "timed out while waiting for workers to start",
+                        anyhow!("timed out after {:?} while waiting for worker startup", WORKER_STARTUP_TIME), 3));
                 }
             }
 
@@ -341,8 +318,6 @@ impl State for Scheduling {
                 needs_commits: r.needs_commits,
             }
         });
-
-        info!("Restoring from {:?}", checkpoint_info);
 
         {
             // mark in-progress checkpoints as failed
@@ -521,24 +496,39 @@ impl State for Scheduling {
         }
 
         // wait until all tasks are running
-        let mut started = HashSet::new();
-        while started.len() < ctx.program.task_count() {
-            match ctx.rx.recv().await {
-                Some(JobMessage::TaskStarted {
-                    operator_id,
-                    operator_subtask,
-                    ..
-                }) => {
-                    started.insert((operator_id, operator_subtask));
+        let start = Instant::now();
+        let mut started_tasks = HashSet::new();
+        while started_tasks.len() < ctx.program.task_count() {
+            let timeout = TASK_STARTUP_TIME
+                .min(ctx.config.ttl.unwrap_or(TASK_STARTUP_TIME))
+                .checked_sub(start.elapsed())
+                .unwrap_or(Duration::ZERO);
+
+            select! {
+                v = ctx.rx.recv() => {
+                    match v {
+                        Some(JobMessage::TaskStarted {
+                            operator_id,
+                            operator_subtask,
+                            ..
+                        }) => {
+                            started_tasks.insert((operator_id, operator_subtask));
+                        }
+                        Some(JobMessage::ConfigUpdate(c)) => {
+                            stop_if_desired_non_running!(self, &c);
+                        }
+                        Some(msg) => {
+                            ctx.handle(msg)?;
+                        }
+                        None => {
+                            panic!("Job queue shutdown");
+                        }
+                    }
                 }
-                Some(JobMessage::ConfigUpdate(c)) => {
-                    stop_if_desired_non_running!(self, &c);
-                }
-                Some(msg) => {
-                    ctx.handle(msg)?;
-                }
-                None => {
-                    panic!("Job queue shutdown");
+                _ = tokio::time::sleep(timeout) => {
+                    return Err(ctx.retryable(self,
+                        "timed out while waiting for tasks to start",
+                        anyhow!("timed out after {:?} while waiting for worker startup", TASK_STARTUP_TIME), 3));
                 }
             }
         }

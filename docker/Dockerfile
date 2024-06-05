@@ -44,7 +44,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p crates/arroyo-api/migrations && \
     CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --profile ${PROFILE} --bin arroyo-bin --all-features && \
-    mv target/release/arroyo-bin /arroyo-bin
+    mv target/*/arroyo-bin /arroyo-bin
 
 FROM debian:bookworm-slim AS arroyo-single
 WORKDIR /app

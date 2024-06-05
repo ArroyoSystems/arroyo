@@ -7,6 +7,9 @@ data:
     checkpoint-url: "{{ required "A valid .Values.checkpointUrl entry required!" .Values.checkpointUrl }}"
     controller-endpoint: "http://{{ include "arroyo.fullname" . }}:{{ .Values.controller.service.grpcPort }}"
     
+    logging:
+      format: "json"
+    
     controller:
       rpc-port: {{ .Values.controller.service.grpcPort }}
       scheduler: "kubernetes"
@@ -38,6 +41,9 @@ data:
     {{- end }}
 
     kubernetes-scheduler:
+      controller:
+        apiVersion: "v1"
+        kind: "Pod"
       worker:
         name-prefix: "{{ include "arroyo.fullname" . }}"
         task-slots: {{ .Values.worker.slots }}
@@ -55,7 +61,10 @@ data:
         image-pull-policy: "{{ .Values.worker.image.pullPolicy }}"
         resources: {{ .Values.worker.resources | toYaml | nindent 10 }}
         service-account-name: {{ .Values.serviceAccount.name | quote }}
-        volumes: {{ .Values.volumes | toYaml | nindent 10 }}
+        volumes:
+          {{- if .Values.volumes }}
+          {{ .Values.volumes | toYaml | nindent 10 }}
+          {{- end }}
           - name: arroyo-config
             configMap:
               name: {{ include "arroyo.fullname" . }}-config
@@ -64,7 +73,10 @@ data:
             configMap:
               name: {{ .Values.existingConfigMap }}
           {{ end }}
-        volume-mounts: {{ .Values.volumeMounts | toYaml | nindent 10 }}
+        volume-mounts:
+          {{- if .Values.volumeMounts }}
+          {{ .Values.volumeMounts | toYaml | nindent 10 }}
+          {{- end }}
           - name: arroyo-config
             mountPath: /root/.config/arroyo
           {{- if .Values.existingConfigMap }}

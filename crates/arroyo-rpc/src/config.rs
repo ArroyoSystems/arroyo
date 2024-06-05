@@ -2,6 +2,7 @@ use arc_swap::ArcSwapOption;
 use figment::providers::{Env, Format, Json, Toml, Yaml};
 use figment::Figment;
 use k8s_openapi::api::core::v1::{EnvVar, ResourceRequirements, Volume, VolumeMount};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use log::warn;
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -406,6 +407,7 @@ pub struct ProcessSchedulerConfig {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct KubernetesSchedulerConfig {
     pub namespace: String,
+    pub controller: Option<OwnerReference>,
     pub worker: KubernetesWorkerConfig,
 }
 

@@ -27,9 +27,9 @@ const PaginatedContent: React.FC<PaginatedContentProps> = ({
 }) => {
   const [pageNum, setPageNum] = useState<number>(1);
   const currentPage = pages?.length ? pages[pageNum - 1] : undefined;
-  setMaxPages(Math.max(pageNum, totalPages));
 
   useEffect(() => {
+    setMaxPages(Math.max(pageNum, totalPages));
     if (currentPage) {
       setCurrentData(currentPage.data);
     }
