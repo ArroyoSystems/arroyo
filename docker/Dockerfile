@@ -70,7 +70,7 @@ FROM debian:bookworm-slim as arroyo
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get -y install libsasl2-2 ca-certificates curl pkg-config
+    apt-get -y install libsasl2-2 ca-certificates curl pkg-config libssl-dev
 
 COPY --from=builder /arroyo-bin ./
 
@@ -85,7 +85,7 @@ ENTRYPOINT [ "/app/arroyo-bin" ]
 FROM rust:slim-bookworm AS arroyo-full
 WORKDIR /app
 RUN apt-get update && \
-    apt-get -y install libsasl2-2 ca-certificates curl pkg-config
+    apt-get -y install libsasl2-2 ca-certificates curl pkg-config libssl-dev
 
 COPY --from=builder /arroyo-bin ./
 
