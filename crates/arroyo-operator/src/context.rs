@@ -5,6 +5,7 @@ use arrow::datatypes::{SchemaRef, UInt64Type};
 use arroyo_formats::de::ArrowDeserializer;
 use arroyo_formats::should_flush;
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
+use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
@@ -457,6 +458,7 @@ impl ArrowContext {
             "Size of a tx queue",
             &task_info,
             &out_qs,
+            config().worker.queue_size as i64,
         );
 
         let tx_queue_rem_gauges = register_queue_gauge(
@@ -464,6 +466,7 @@ impl ArrowContext {
             "Remaining space in a tx queue",
             &task_info,
             &out_qs,
+            config().worker.queue_size as i64,
         );
 
         let tx_queue_bytes_gauges = register_queue_gauge(
@@ -471,9 +474,16 @@ impl ArrowContext {
             "Number of bytes queued in a tx queue",
             &task_info,
             &out_qs,
+            0,
         );
 
         let task_info = Arc::new(task_info);
+
+        // initialize counters so that tasks that never produce data still report 0
+        for m in TaskCounters::variants() {
+            // just initialize it
+            m.for_task(&task_info, |_| {});
+        }
 
         let table_manager =
             TableManager::new(task_info.clone(), tables, control_tx.clone(), metadata)
@@ -509,35 +519,6 @@ impl ArrowContext {
             buffered_error: None,
             table_manager,
         }
-    }
-
-    pub fn new_for_test() -> (Self, Receiver<QueueItem>) {
-        todo!()
-
-        // let (_, control_rx) = channel(128);
-        // let (command_tx, _) = channel(128);
-        // let (data_tx, data_rx) = channel(128);
-        //
-        // let task_info = TaskInfo {
-        //     job_id: "instance-1".to_string(),
-        //     operator_name: "test-operator".to_string(),
-        //     operator_id: "test-operator-1".to_string(),
-        //     task_index: 0,
-        //     parallelism: 1,
-        //     key_range: 0..=0,
-        // };
-
-        // let ctx = futures::executor::block_on(ArrowContext::new(
-        //     task_info,
-        //     None,
-        //     control_rx,
-        //     command_tx,
-        //     1,
-        //     vec![vec![data_tx]],
-        //     vec![],
-        // ));
-        //
-        // (ctx, data_rx)
     }
 
     pub fn watermark(&self) -> Option<Watermark> {
@@ -826,6 +807,7 @@ mod tests {
             "Size of a tx queue",
             &task_info,
             &out_qs,
+            0,
         );
 
         let tx_queue_rem_gauges = register_queue_gauge(
@@ -833,6 +815,7 @@ mod tests {
             "Remaining space in a tx queue",
             &task_info,
             &out_qs,
+            0,
         );
 
         let tx_queue_bytes_gauges = register_queue_gauge(
@@ -840,6 +823,7 @@ mod tests {
             "Number of bytes queued in a tx queue",
             &task_info,
             &out_qs,
+            0,
         );
 
         let mut collector = ArrowCollector {

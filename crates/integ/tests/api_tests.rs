@@ -245,17 +245,25 @@ async fn basic_pipeline() {
             .unwrap()
             .into_inner();
         if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len() {
-            for metric in metrics.data {
-                for group in metric.metric_groups {
-                    if !metric.operator_id.contains("source")
-                        && group.name == MetricName::MessagesSent
-                        && group.subtasks[0].metrics.len() > 0
-                    {
-                        assert!(group.subtasks[0].metrics.iter().last().unwrap().value > 0.0);
-                    }
-                }
+            if metrics
+                .data
+                .iter()
+                .filter(|op| !op.operator_id.contains("sink"))
+                .map(|op| {
+                    op.metric_groups
+                        .iter()
+                        .find(|t| t.name == MetricName::MessagesSent)
+                })
+                .all(|m| {
+                    m.map(|m| {
+                        m.subtasks[0].metrics.len() > 0
+                            && m.subtasks[0].metrics.iter().last().unwrap().value > 0.0
+                    })
+                    .unwrap_or(false)
+                })
+            {
+                break;
             }
-            break;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
