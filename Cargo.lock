@@ -861,6 +861,7 @@ dependencies = [
  "log",
  "nanoid",
  "prost",
+ "rand 0.8.5",
  "regex",
  "reqwest",
  "serde",
@@ -980,12 +981,14 @@ dependencies = [
 name = "arroyo-storage"
 version = "0.11.0-dev"
 dependencies = [
+ "arroyo-rpc",
  "arroyo-types",
  "async-trait",
  "bytes",
  "futures",
  "object_store",
  "once_cell",
+ "rand 0.8.5",
  "regex",
  "rusoto_core",
  "thiserror",

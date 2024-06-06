@@ -10,6 +10,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fmt::{Debug, Formatter};
+use std::fs;
 use std::net::IpAddr;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -23,7 +24,8 @@ const DEFAULT_CONFIG: &str = include_str!("../default.toml");
 
 static CONFIG: ArcSwapOption<Config> = ArcSwapOption::const_empty();
 
-pub fn initialize_config(path: Option<&Path>) {
+pub fn initialize_config(path: Option<&Path>, dir: Option<&Path>) {
+    let mut paths = vec![];
     if let Some(path) = path {
         if !path.exists() {
             eprintln!(
@@ -32,6 +34,22 @@ pub fn initialize_config(path: Option<&Path>) {
             );
             exit(1);
         }
+        paths.push(path.to_path_buf());
+    }
+
+    // find config files in directory
+    if let Some(dir) = dir {
+        if let Ok(rd) = fs::read_dir(dir) {
+            paths.extend(rd.filter_map(|f| Some(f.ok()?.path())).filter(|p| {
+                p.extension()
+                    .map(|ext| {
+                        &*ext.to_string_lossy() == "yaml" || &*ext.to_string_lossy() == "toml"
+                    })
+                    .unwrap_or(false)
+            }));
+        } else {
+            warn!("Invalid configuration directory '{}", dir.to_string_lossy());
+        }
     }
 
     let current = CONFIG.load();
@@ -39,7 +57,7 @@ pub fn initialize_config(path: Option<&Path>) {
         if CONFIG
             .compare_and_swap(
                 current,
-                match load_config(path).extract() {
+                match load_config(&paths).extract() {
                     Ok(config) => Some(config),
                     Err(errors) => {
                         eprintln!("Configuration is invalid!");
@@ -64,7 +82,7 @@ pub fn config() -> Arc<Config> {
     let cur = CONFIG.load();
     if cur.is_none() {
         warn!("Config accessed before initialization! This should only happen in tests.");
-        CONFIG.compare_and_swap(cur, Some(load_config(None).extract().unwrap()));
+        CONFIG.compare_and_swap(cur, Some(load_config(&vec![]).extract().unwrap()));
     } else {
         drop(cur);
     }
@@ -85,13 +103,14 @@ fn add_legacy(config: Figment, old: &str, new: &str) -> Figment {
     }
 }
 
-fn load_config(path: Option<&Path>) -> Figment {
+fn load_config(paths: &[PathBuf]) -> Figment {
     // Priority (from highest--overriding--to lowest--overridden) is:
     //   1. ARROYO__* environment variables
     //   2. The config file specified in <path>
-    //   3. arroyo.toml in the current directory
-    //   4. $(confdir)/arroyo/config.{toml,yaml}
-    //   5. ../default.toml
+    //   3. Any *.toml or *.yaml files specified in <dir>
+    //   4. arroyo.toml in the current directory
+    //   5. $(user conf dir)/arroyo/config.{toml,yaml}
+    //   6. ../default.toml
     let mut figment = Figment::from(Toml::string(DEFAULT_CONFIG));
 
     // support a few legacy configs with warnings -- to be removed in 0.12.
@@ -116,7 +135,7 @@ fn load_config(path: Option<&Path>) -> Figment {
         .admerge(Yaml::file("arroyo.yaml"))
         .admerge(Toml::file("arroyo.toml"));
 
-    if let Some(path) = path {
+    for path in paths {
         match path.extension().and_then(OsStr::to_str) {
             Some("yaml") => {
                 figment = figment.admerge(Yaml::file(path));
@@ -128,7 +147,7 @@ fn load_config(path: Option<&Path>) -> Figment {
                 figment = figment.admerge(Toml::file(path));
             }
         }
-    };
+    }
 
     figment.admerge(
         Env::prefixed("ARROYO__").map(|p| p.as_str().replace("__", ".").replace("_", "-").into()),
@@ -405,9 +424,21 @@ pub struct ProcessSchedulerConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ResourceMode {
+    /// In per-slot mode, tasks are packed onto workers up to the `task-slots` config, and for each
+    /// slot the amount of resources specified in `resources` is provided
+    PerSlot,
+    /// In per-pod mode, every pod has exactly `task-slots` slots, and exactly the resources in
+    /// `resources`, even if it is scheduled for fewer slots. This mirrors the behavior before 0.11.
+    PerPod,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct KubernetesSchedulerConfig {
     pub namespace: String,
     pub controller: Option<OwnerReference>,
+    pub resource_mode: ResourceMode,
     pub worker: KubernetesWorkerConfig,
 }
 
@@ -443,6 +474,8 @@ pub struct KubernetesWorkerConfig {
 
     #[serde(default)]
     pub volume_mounts: Vec<VolumeMount>,
+
+    pub command: String,
 }
 
 impl KubernetesWorkerConfig {
@@ -572,7 +605,7 @@ mod tests {
     fn test_config() {
         figment::Jail::expect_with(|jail| {
             // test default loading
-            let _config: Config = load_config(None).extract().unwrap();
+            let _config: Config = load_config(&vec![]).extract().unwrap();
 
             // try overriding database by config file
             jail.create_file(
@@ -584,13 +617,13 @@ mod tests {
             )
             .unwrap();
 
-            let config: Config = load_config(None).extract().unwrap();
+            let config: Config = load_config(&vec![]).extract().unwrap();
             assert_eq!(config.database.sqlite.path, SqliteConfig::default().path);
             assert_eq!(config.database.r#type, DatabaseType::Sqlite);
 
             // try overriding with environment variables
             jail.set_env("ARROYO__ADMIN__HTTP_PORT", 9111);
-            let config: Config = load_config(None).extract().unwrap();
+            let config: Config = load_config(&vec![]).extract().unwrap();
             assert_eq!(config.admin.http_port, 9111);
 
             Ok(())
@@ -605,7 +638,7 @@ mod tests {
             jail.set_env("CHECKPOINT_URL", "s3:///checkpoint/path");
             jail.set_env("ARTIFACT_URL", "s3:///artifact/path");
 
-            let config: Config = load_config(None).extract().unwrap();
+            let config: Config = load_config(&vec![]).extract().unwrap();
             assert_eq!(config.controller.scheduler, Scheduler::Kubernetes);
             assert_eq!(
                 config.controller_endpoint,
@@ -622,7 +655,7 @@ mod tests {
         figment::Jail::expect_with(|jail| {
             jail.set_env("ARROYO__DATABASE__POSTGRES__PASSWORD", "sup3r-s3cr3t-p@ss");
 
-            let config: Config = load_config(None).extract().unwrap();
+            let config: Config = load_config(&vec![]).extract().unwrap();
             assert_eq!(&*config.database.postgres.password, "sup3r-s3cr3t-p@ss");
 
             let v: serde_json::Value =

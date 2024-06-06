@@ -1,18 +1,22 @@
+mod quantities;
+
+use crate::schedulers::kubernetes::quantities::QuantityParser;
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
-use arroyo_rpc::config::{config, KubernetesSchedulerConfig};
+use arroyo_rpc::config::{config, KubernetesSchedulerConfig, ResourceMode};
 use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_types::{WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
 use prost::Message;
 use serde_json::json;
 use std::time::Duration;
 use tonic::Status;
-use tracing::info;
+use tracing::{info, warn};
 
 const CLUSTER_LABEL: &str = "cluster";
 const JOB_ID_LABEL: &str = "job_id";
@@ -36,8 +40,45 @@ impl KubernetesScheduler {
         Self { client, config }
     }
 
-    fn make_pod(&self, req: &StartPipelineReq, program: &str, number: usize) -> Pod {
+    fn make_pod(&self, req: &StartPipelineReq, program: &str, number: usize, slots: usize) -> Pod {
         let c = &self.config;
+
+        let resources = match c.resource_mode {
+            ResourceMode::PerSlot => {
+                let mut r = c.worker.resources.clone();
+
+                for (name, rs) in [("limits", &mut r.limits), ("requests", &mut r.requests)] {
+                    if let Some(l) = rs {
+                        if let Some(cpu) = l.get_mut("cpu") {
+                            let v = cpu.parse_cpu().unwrap_or_else(|e| {
+                                if number == 0 {
+                                    warn!("Invalid value '{}' for \
+                                kubernetes_scheduler.worker.resources.{}.cpu: {}; defaulting to 900m", cpu.0, name, e);
+                                }
+                                Quantity("900m".to_string()).parse_cpu().unwrap()
+                            });
+
+                            *cpu = Quantity((v * slots as i64).to_canonical());
+                        }
+
+                        if let Some(mem) = l.get_mut("memory") {
+                            let v = mem.parse_memory().unwrap_or_else(|e| {
+                                if number == 0 {
+                                    warn!("Invalid value '{}' for \
+                                kubernetes_scheduler.worker.resources.{}.memory: {}; defaulting to 500Mi", mem.0, name, e);
+                                }
+                                Quantity("500Mi".to_string()).parse_memory().unwrap()
+                            });
+
+                            *mem = Quantity((v * slots as i64).to_canonical());
+                        }
+                    }
+                }
+
+                r
+            }
+            ResourceMode::PerPod => c.worker.resources.clone(),
+        };
 
         let mut labels = c.worker.labels.clone();
         labels.insert(CLUSTER_LABEL.to_string(), c.worker.name());
@@ -50,7 +91,7 @@ impl KubernetesScheduler {
                 "name": "PROD", "value": "true",
             },
             {
-                "name": "ARROYO__WORKER__TASK_SLOTS", "value": format!("{}", c.worker.task_slots),
+                "name": "ARROYO__WORKER__TASK_SLOTS", "value": format!("{}", slots),
             },
             {
                 "name": JOB_ID_ENV, "value": req.job_id,
@@ -88,6 +129,12 @@ impl KubernetesScheduler {
             .cloned()
             .collect();
 
+        let command: Vec<_> = c
+            .worker
+            .command
+            .split(|w: char| w.is_whitespace())
+            .collect();
+
         serde_json::from_value(json!({
             "apiVersion": "v1",
             "kind": "Pod",
@@ -100,14 +147,14 @@ impl KubernetesScheduler {
             },
             "spec": {
                 "volumes": c.worker.volumes,
+                "restartPolicy": "Never",
                 "containers": [
                     {
                         "name": "worker",
                         "image": c.worker.image,
-                        "command": ["/app/arroyo-bin", "worker"],
+                        "command": command,
                         "imagePullPolicy": c.worker.image_pull_policy,
-                        "resources": c.worker.resources,
-                        "restartPolicy": "Never",
+                        "resources": resources,
                         "ports": [
                             {
                                 "containerPort": 6900,
@@ -146,7 +193,21 @@ impl Scheduler for KubernetesScheduler {
         let program = general_purpose::STANDARD_NO_PAD
             .encode(api::ArrowProgram::from(req.program.clone()).encode_to_vec());
 
-        let pods = (0..replicas).map(|i| self.make_pod(&req, &program, i));
+        let max_slots_per_pod = config().kubernetes_scheduler.worker.task_slots as usize;
+        let mut slots_scheduled = 0;
+        let mut pods = vec![];
+        for i in 0..replicas {
+            let slots_here = (req.slots - slots_scheduled).min(max_slots_per_pod);
+            pods.push(self.make_pod(&req, &program, i, slots_here));
+            slots_scheduled += slots_here;
+        }
+
+        info!(
+            job_id = *req.job_id,
+            message = "starting workers on k8s",
+            replicas = pods.len(),
+            task_slots = req.slots
+        );
 
         for pod in pods {
             info!(
@@ -299,6 +360,6 @@ mod test {
 
         KubernetesScheduler::with_config(None, config)
             // test that we don't panic when creating the replicaset
-            .make_pod(&req, "program", 3);
+            .make_pod(&req, "program", 3, 4);
     }
 }

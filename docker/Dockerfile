@@ -70,7 +70,8 @@ FROM debian:bookworm-slim as arroyo
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get -y install libsasl2-2 ca-certificates curl pkg-config
+    apt-get -y install libsasl2-2 ca-certificates curl pkg-config && \
+    mkdir /config
 
 COPY --from=builder /arroyo-bin ./
 

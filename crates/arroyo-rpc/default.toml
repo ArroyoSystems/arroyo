@@ -52,14 +52,16 @@ slots-per-process = 16
 
 [kubernetes-scheduler]
 namespace = "default"
+resource-mode = "per-slot"
 
 [kubernetes-scheduler.worker]
 name-prefix = "arroyo"
 image = "ghcr.io/arroyosystems/arroyo:latest"
 image-pull-policy = "IfNotPresent"
 service-account-name = "default"
-resources = { requests = { cpu = "400m",  memory = "200Mi" } }
-task-slots = 4
+resources = { requests = { cpu = "900m",  memory = "500Mi" } }
+task-slots = 16
+command = "/app/arroyo-bin worker"
 
 [database]
 type = "postgres"

@@ -37,6 +37,7 @@ url = { version = "2", features = ["serde"] }
 dirs = "5.0.1"
 arc-swap = "1.7.1"
 datafusion-common = { workspace = true }
+rand = "0.8.5"
 
 [build-dependencies]
 tonic-build = { workspace = true }
