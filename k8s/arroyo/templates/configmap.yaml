@@ -81,5 +81,6 @@ data:
             mountPath: /root/.config/arroyo
           {{- if .Values.existingConfigMap }}
           - name: arroyo-user-config
-            mountPath: /app
+            mountPath: /config
           {{- end }}
+        command: "/app/arroyo-bin --config-dir /config worker"

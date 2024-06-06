@@ -29,6 +29,10 @@ struct Cli {
     /// Path to an Arroyo config file, in TOML or YAML format
     #[arg(short, long)]
     config: Option<PathBuf>,
+
+    /// Directory in which to look for configuration files
+    #[arg(long)]
+    config_dir: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -82,7 +86,10 @@ impl CPService {
 async fn main() {
     let cli = Cli::parse();
 
-    config::initialize_config(cli.config.as_ref().map(|t| t.as_ref()));
+    config::initialize_config(
+        cli.config.as_ref().map(|t| t.as_ref()),
+        cli.config_dir.as_ref().map(|t| t.as_ref()),
+    );
 
     match &cli.command {
         Commands::Api { .. } => {
@@ -342,12 +349,13 @@ async fn start_control_plane(service: CPService) {
             .start(shutdown.guard("controller"));
     }
 
-    let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
+    Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
 }
 
 async fn start_worker() {
     let shutdown = Shutdown::new("worker");
-    let server = WorkerServer::from_config(shutdown.guard("worker"));
+    let server =
+        WorkerServer::from_config(shutdown.guard("worker")).expect("Could not start worker");
 
     let _guard = arroyo_server_common::init_logging(&format!(
         "worker-{}-{}",
@@ -364,7 +372,7 @@ async fn start_worker() {
         }
     });
 
-    let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
+    Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
 }
 
 async fn start_node() {
@@ -375,5 +383,5 @@ async fn start_node() {
 
     shutdown.spawn_task("admin", start_admin_server("worker"));
 
-    let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
+    Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
 }
