@@ -9,12 +9,14 @@ default = []
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
+arroyo-rpc = { path = "../arroyo-rpc" }
 bytes = "1.4.0"
 tracing = "0.1"
 # used only for getting local AWS credentials; can be removed once we have a
 # better way to do this
 rusoto_core = "0.48.0"
 
+rand = "0.8"
 object_store = {workspace = true, features = ["aws", "gcp"]}
 regex = "1.9.5"
 thiserror = "1"

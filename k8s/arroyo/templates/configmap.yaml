@@ -32,7 +32,7 @@ data:
         port: {{ default "5432" .Values.postgresql.auth.port }}
         database-name: "arroyo"
         user: "arroyo"
-    {{- else -}}
+    {{- else }}
         host: "{{ .Values.postgresql.externalDatabase.host }}"
         port: {{ .Values.postgresql.externalDatabase.port }}
         database-name: "{{ .Values.postgresql.externalDatabase.name }}"
@@ -81,5 +81,6 @@ data:
             mountPath: /root/.config/arroyo
           {{- if .Values.existingConfigMap }}
           - name: arroyo-user-config
-            mountPath: /app
+            mountPath: /config
           {{- end }}
+        command: "/app/arroyo-bin --config-dir /config worker"

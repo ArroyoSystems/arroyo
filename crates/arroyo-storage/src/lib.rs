@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use arroyo_rpc::retry;
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
@@ -20,7 +21,7 @@ use regex::{Captures, Regex};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 mod aws;
 
@@ -127,29 +128,16 @@ fn matchers() -> &'static HashMap<Backend, Vec<Regex>> {
     })
 }
 
-macro_rules! retry {
-    ($e:expr) => {{
-        use std::thread::sleep;
-        use std::time::Duration;
-        use tracing::error;
-        let mut retries = 0;
-        let max_retries: u32 = 10;
-        let backoff_factor: u64 = 2;
-        loop {
-            match $e {
-                Ok(value) => break Ok(value),
-                Err(e) if retries < max_retries => {
-                    retries += 1;
-                    error!("Error: {}. Retrying...", e);
-                    // exponential backoff, capped at 10 seconds.
-                    let backoff_time =
-                        Duration::from_millis(10_000.min(100 * backoff_factor.pow(retries)));
-                    sleep(backoff_time);
-                }
-                Err(e) => break Err(e),
-            }
-        }
-    }};
+macro_rules! storage_retry {
+    ($e: expr) => {
+        retry!(
+            $e,
+            10,
+            Duration::from_millis(100),
+            Duration::from_secs(10),
+            |e| error!("Error: {}. Retrying...", e)
+        )
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -629,7 +617,7 @@ impl StorageProvider {
     ) -> Result<impl tokio::io::AsyncRead, StorageError> {
         let path: Path = path.into().into();
 
-        let bytes = retry!(self.object_store.get(&path).await)
+        let bytes = storage_retry!(self.object_store.get(&path).await)
             .map_err(Into::<StorageError>::into)?
             .into_stream();
 
@@ -643,7 +631,7 @@ impl StorageProvider {
     ) -> Result<String, StorageError> {
         let path = path.into().into();
         let bytes: Bytes = bytes.into();
-        retry!(
+        storage_retry!(
             self.object_store
                 .put(&self.qualify_path(&path), bytes.clone())
                 .await
@@ -673,7 +661,7 @@ impl StorageProvider {
 
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
         Ok(
-            retry!(self.object_store.initiate_multipart_upload(path).await)
+            storage_retry!(self.object_store.initiate_multipart_upload(path).await)
                 .map_err(Into::<StorageError>::into)?
                 .0,
         )
@@ -686,7 +674,7 @@ impl StorageProvider {
         part_number: usize,
         bytes: Bytes,
     ) -> Result<PartId, StorageError> {
-        retry!(
+        storage_retry!(
             self.object_store
                 .get_put_part(path, multipart_id)
                 .await?
@@ -702,7 +690,7 @@ impl StorageProvider {
         multipart_id: &MultipartId,
         parts: Vec<PartId>,
     ) -> Result<(), StorageError> {
-        retry!(
+        storage_retry!(
             self.object_store
                 .get_put_part(path, multipart_id)
                 .await?

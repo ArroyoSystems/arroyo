@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::process::exit;
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
@@ -8,6 +9,8 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+
+static ERROR_CODE: AtomicI32 = AtomicI32::new(0);
 
 pub struct ShutdownGuard {
     name: &'static str,
@@ -101,6 +104,7 @@ impl ShutdownGuard {
                 output = task => {
                     if let Err(e) = &output {
                         error!("{}", e);
+                        ERROR_CODE.store(1, Ordering::Relaxed);
                     }
                     Some(output)
                 }
@@ -133,6 +137,7 @@ pub struct Shutdown {
 pub enum ShutdownError {
     Signal,
     Timeout,
+    Err(i32),
 }
 
 impl Shutdown {
@@ -189,6 +194,15 @@ impl Shutdown {
         self.guard.is_cancelled()
     }
 
+    pub fn handle_shutdown(result: Result<(), ShutdownError>) {
+        match result {
+            Ok(_) => exit(0),
+            Err(ShutdownError::Err(code)) => exit(code),
+            Err(ShutdownError::Signal) => exit(128),
+            Err(ShutdownError::Timeout) => exit(129),
+        }
+    }
+
     pub async fn wait_for_shutdown(mut self, timeout: Duration) -> Result<(), ShutdownError> {
         select! {
             _ = self.signal_rx.recv() => {
@@ -198,7 +212,7 @@ impl Shutdown {
             }
             _ = self.guard.token.cancelled() => {
                 // Or some part of the system shut down
-                warn!("{} shutting down", self.name);
+                info!("{} shutting down", self.name);
             }
         }
 
@@ -207,7 +221,12 @@ impl Shutdown {
             _ = self.rx.recv() => {
                 // everything has shutdown
                 info!("{} shutdown complete", self.name);
-                Ok(())
+                let code = ERROR_CODE.load(Ordering::Relaxed);
+                if code == 0 {
+                    Ok(())
+                } else {
+                    Err(ShutdownError::Err(code))
+                }
             }
             _ = self.signal_rx.recv() => {
                 // we got another signal, shutdown immediately

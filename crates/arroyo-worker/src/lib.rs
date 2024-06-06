@@ -3,7 +3,7 @@
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
@@ -37,7 +37,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
-use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
+use arroyo_rpc::{retry, CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
@@ -152,31 +152,33 @@ pub struct WorkerServer {
 }
 
 impl WorkerServer {
-    fn get_program() -> String {
+    fn get_program() -> Result<String> {
         match (
             env::var(ARROYO_PROGRAM_FILE_ENV),
             env::var(ARROYO_PROGRAM_ENV),
         ) {
             (Ok(file), Err(_)) => std::fs::read_to_string(&file)
-                .unwrap_or_else(|e| panic!("Could not read program from {}: {:?}", file, e)),
-            (Err(_), Ok(program)) => program,
+                .map_err(|e| anyhow!("Could not read program from {}: {:?}", file, e)),
+            (Err(_), Ok(program)) => Ok(program),
             (Err(_), Err(_)) => {
-                panic!(
+                bail!(
                     "One of {} or {} must be set",
-                    ARROYO_PROGRAM_FILE_ENV, ARROYO_PROGRAM_ENV
+                    ARROYO_PROGRAM_FILE_ENV,
+                    ARROYO_PROGRAM_ENV
                 )
             }
             _ => {
-                panic!(
+                bail!(
                     "Both {} and {} are set; only one may be used",
-                    ARROYO_PROGRAM_FILE_ENV, ARROYO_PROGRAM_ENV
+                    ARROYO_PROGRAM_FILE_ENV,
+                    ARROYO_PROGRAM_ENV
                 )
             }
         }
     }
 
-    pub fn from_config(shutdown_guard: ShutdownGuard) -> Self {
-        let graph = Self::get_program();
+    pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
+        let graph = Self::get_program()?;
         let graph = general_purpose::STANDARD_NO_PAD
             .decode(graph)
             .expect("Program is not valid base64");
@@ -192,7 +194,7 @@ impl WorkerServer {
         let run_id =
             std::env::var(RUN_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", RUN_ID_ENV));
 
-        WorkerServer::new(
+        Ok(WorkerServer::new(
             "program",
             id,
             job_id,
@@ -200,7 +202,7 @@ impl WorkerServer {
             config().controller_endpoint(),
             logical,
             shutdown_guard,
-        )
+        ))
     }
 
     pub fn new(
@@ -234,7 +236,7 @@ impl WorkerServer {
         &self.job_id
     }
 
-    pub async fn start_async(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start_async(self) -> Result<()> {
         let node_id = NodeId(config().node.id.unwrap_or(0));
 
         let config = config();
@@ -246,7 +248,13 @@ impl WorkerServer {
         let local_addr = listener.local_addr()?;
 
         info!("Started worker-rpc for {} on {}", self.name, local_addr);
-        let mut client = ControllerGrpcClient::connect(self.controller_addr.clone()).await?;
+        let mut client = retry!(
+            ControllerGrpcClient::connect(self.controller_addr.clone()).await,
+            20,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+            |e| warn!("Failed to connect to controller: {e}, retrying...")
+        )?;
 
         let mut network = NetworkManager::new(0);
         let data_port = network
@@ -299,7 +307,7 @@ impl WorkerServer {
     }
 
     #[tokio::main]
-    pub async fn start(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(self) -> Result<()> {
         self.start_async().await
     }
 
