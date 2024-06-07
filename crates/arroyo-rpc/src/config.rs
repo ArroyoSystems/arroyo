@@ -90,7 +90,7 @@ pub fn config() -> Arc<Config> {
     CONFIG.load_full().unwrap()
 }
 
-fn add_legacy(config: Figment, old: &str, new: &str) -> Figment {
+fn add_legacy_str(config: Figment, old: &str, new: &str) -> Figment {
     if let Ok(v) = std::env::var(old) {
         warn!(
             "Using deprecated config option '{}' -- will be removed in 0.12; \
@@ -101,6 +101,26 @@ fn add_legacy(config: Figment, old: &str, new: &str) -> Figment {
     } else {
         config
     }
+}
+
+fn add_legacy_int(config: Figment, old: &str, new: &str) -> Figment {
+    if let Ok(v) = std::env::var(old) {
+        warn!(
+            "Using deprecated config option '{}' -- will be removed in 0.12; \
+        see the config docs to migrate https://doc.arroyo.dev/config",
+            old
+        );
+        match v.parse::<u16>() {
+            Ok(v) => {
+                return config.merge((new, v));
+            }
+            Err(_) => {
+                warn!("Invalid config for {} -- expected a number", old);
+            }
+        }
+    }
+
+    config
 }
 
 fn load_config(paths: &[PathBuf]) -> Figment {
@@ -114,16 +134,16 @@ fn load_config(paths: &[PathBuf]) -> Figment {
     let mut figment = Figment::from(Toml::string(DEFAULT_CONFIG));
 
     // support a few legacy configs with warnings -- to be removed in 0.12.
-    figment = add_legacy(figment, "CHECKPOINT_URL", "checkpoint-url");
-    figment = add_legacy(figment, "ARTIFACT_URL", "compiler.artifact-url");
-    figment = add_legacy(figment, "SCHEDULER", "controller.scheduler");
-    figment = add_legacy(figment, "DATABASE_HOST", "database.postgres.host");
-    figment = add_legacy(figment, "DATABASE_PORT", "database.postgres.port");
-    figment = add_legacy(figment, "DATABASE_USER", "database.postgres.user");
-    figment = add_legacy(figment, "DATABASE_PASSWORD", "database.postgres.password");
-    figment = add_legacy(figment, "DATABASE_NAME", "database.postgres.database-name");
-    figment = add_legacy(figment, "CONTROLLER_ADDR", "controller-endpoint");
-    figment = add_legacy(figment, "COMPILER_ADDR", "compiler-endpoint");
+    figment = add_legacy_str(figment, "CHECKPOINT_URL", "checkpoint-url");
+    figment = add_legacy_str(figment, "ARTIFACT_URL", "compiler.artifact-url");
+    figment = add_legacy_str(figment, "SCHEDULER", "controller.scheduler");
+    figment = add_legacy_str(figment, "DATABASE_HOST", "database.postgres.host");
+    figment = add_legacy_int(figment, "DATABASE_PORT", "database.postgres.port");
+    figment = add_legacy_str(figment, "DATABASE_USER", "database.postgres.user");
+    figment = add_legacy_str(figment, "DATABASE_PASSWORD", "database.postgres.password");
+    figment = add_legacy_str(figment, "DATABASE_NAME", "database.postgres.database-name");
+    figment = add_legacy_str(figment, "CONTROLLER_ADDR", "controller-endpoint");
+    figment = add_legacy_str(figment, "COMPILER_ADDR", "compiler-endpoint");
 
     if let Some(config_dir) = dirs::config_dir() {
         figment = figment
@@ -637,6 +657,7 @@ mod tests {
             jail.set_env("CONTROLLER_ADDR", "http://localhost:9092");
             jail.set_env("CHECKPOINT_URL", "s3:///checkpoint/path");
             jail.set_env("ARTIFACT_URL", "s3:///artifact/path");
+            jail.set_env("DATABASE_PORT", "5000");
 
             let config: Config = load_config(&vec![]).extract().unwrap();
             assert_eq!(config.controller.scheduler, Scheduler::Kubernetes);
@@ -646,6 +667,7 @@ mod tests {
             );
             assert_eq!(config.checkpoint_url, "s3:///checkpoint/path");
             assert_eq!(config.compiler.artifact_url, "s3:///artifact/path");
+            assert_eq!(config.database.postgres.port, 5000);
             Ok(())
         });
     }
