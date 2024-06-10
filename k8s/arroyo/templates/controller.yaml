@@ -79,6 +79,8 @@ spec:
           value: "{{ .Values.prometheus.queryRate }}"
         - name: SCHEDULER
           value: "kubernetes"
+        - name: ARROYO_K8S_PROGRAM_FILES
+          value: "true"
         - name: K8S_NAMESPACE
           valueFrom:
             fieldRef:
