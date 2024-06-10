@@ -56,7 +56,6 @@ postgresql:
 
   serviceAccount:
     create: true
-    name: arroyo-postgresql
 
 
 prometheus:
