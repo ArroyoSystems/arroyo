@@ -31,9 +31,6 @@ use crate::{
 
 use super::{running::Running, JobContext, State, Transition};
 
-const WORKER_STARTUP_TIME: Duration = Duration::from_secs(10 * 60);
-const TASK_STARTUP_TIME: Duration = Duration::from_secs(2 * 60);
-
 #[derive(Debug, Clone)]
 struct WorkerStatus {
     id: WorkerId,
@@ -189,7 +186,7 @@ impl Scheduling {
                         slots_for_job = slots_needed,
                         slots_needed = s
                     );
-                    if start.elapsed() > WORKER_STARTUP_TIME {
+                    if start.elapsed() > *config().pipeline.worker_startup_time {
                         return Err(fatal(
                             "Not enough slots to schedule job",
                             anyhow!("scheduler error -- needed {} slots", slots_needed),
@@ -244,10 +241,13 @@ impl State for Scheduling {
         let worker_connects = Arc::new(Mutex::new(HashMap::new()));
         let mut handles = vec![];
 
+        let config = &config().pipeline;
+
         let start = Instant::now();
         loop {
-            let timeout = WORKER_STARTUP_TIME
-                .min(ctx.config.ttl.unwrap_or(WORKER_STARTUP_TIME))
+            let timeout = config
+                .worker_startup_time
+                .min(ctx.config.ttl.unwrap_or(*config.worker_startup_time))
                 .checked_sub(start.elapsed())
                 .unwrap_or(Duration::ZERO);
 
@@ -268,7 +268,7 @@ impl State for Scheduling {
                 _ = tokio::time::sleep(timeout) => {
                     return Err(ctx.retryable(self,
                         "timed out while waiting for workers to start",
-                        anyhow!("timed out after {:?} while waiting for worker startup", WORKER_STARTUP_TIME), 3));
+                        anyhow!("timed out after {:?} while waiting for worker startup", *config.worker_startup_time), 3));
                 }
             }
 
@@ -499,8 +499,9 @@ impl State for Scheduling {
         let start = Instant::now();
         let mut started_tasks = HashSet::new();
         while started_tasks.len() < ctx.program.task_count() {
-            let timeout = TASK_STARTUP_TIME
-                .min(ctx.config.ttl.unwrap_or(TASK_STARTUP_TIME))
+            let timeout = config
+                .task_startup_time
+                .min(ctx.config.ttl.unwrap_or(*config.task_startup_time))
                 .checked_sub(start.elapsed())
                 .unwrap_or(Duration::ZERO);
 
@@ -528,7 +529,7 @@ impl State for Scheduling {
                 _ = tokio::time::sleep(timeout) => {
                     return Err(ctx.retryable(self,
                         "timed out while waiting for tasks to start",
-                        anyhow!("timed out after {:?} while waiting for worker startup", TASK_STARTUP_TIME), 3));
+                        anyhow!("timed out after {:?} while waiting for worker startup", *config.task_startup_time), 3));
                 }
             }
         }

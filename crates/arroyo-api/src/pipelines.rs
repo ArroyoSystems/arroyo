@@ -53,8 +53,6 @@ use crate::{connection_tables, to_micros};
 use arroyo_rpc::config::config;
 use cornucopia_async::{Database, DatabaseSource};
 
-const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
-
 async fn compile_sql<'a>(
     query: String,
     local_udfs: &Vec<Udf>,
@@ -511,7 +509,7 @@ pub async fn create_pipeline(
     let checkpoint_interval = pipeline_post
         .checkpoint_interval_micros
         .map(Duration::from_micros)
-        .unwrap_or(DEFAULT_CHECKPOINT_INTERVAL);
+        .unwrap_or(*config().default_checkpoint_interval);
 
     let job_id = jobs::create_job(
         &pipeline_post.name,

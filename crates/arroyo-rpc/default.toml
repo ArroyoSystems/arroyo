@@ -1,4 +1,19 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
+default-checkpoint-interval = "10s"
+
+[pipeline]
+source-batch-size = 512
+source-batch-linger = "100ms"
+update-aggregate-flush-interval = "1s"
+allowed-restarts = 20
+worker-heartbeat-timeout = "30s"
+healthy-duration = "2m"
+worker-startup-time = "10m"
+task-startup-time = "2m"
+
+[pipeline.compaction]
+enabled = false
+checkpoints-to-compact = 4
 
 # Services
 
@@ -10,11 +25,6 @@ http-port = 8000
 bind-address = "0.0.0.0"
 rpc-port = 9190
 scheduler = "process"
-
-[controller.compaction]
-enabled = false
-checkpoints-to-compact = 4
-
 
 [compiler]
 bind-address = "0.0.0.0"
@@ -40,10 +50,6 @@ task-slots = 16
 bind-address = "0.0.0.0"
 http-port = 8001
 
-[pipeline]
-source-batch-size = 512
-source-batch-linger = "100ms"
-update-aggregate-flush-interval = "1s"
 
 # Schedulers
 
@@ -62,6 +68,8 @@ service-account-name = "default"
 resources = { requests = { cpu = "900m",  memory = "500Mi" } }
 task-slots = 16
 command = "/app/arroyo-bin worker"
+
+# other
 
 [database]
 type = "postgres"

@@ -214,6 +214,9 @@ pub struct Config {
     /// URL of an object store or filesystem for storing checkpoints
     pub checkpoint_url: String,
 
+    /// Default interval for checkpointing
+    pub default_checkpoint_interval: HumanReadableDuration,
+
     /// The endpoint of the controller, used by other services to connect to it. This must be set
     /// if running the controller on a separate machine from the other services or on a separate
     /// process with a non-standard port.
@@ -273,8 +276,6 @@ pub struct ControllerConfig {
 
     /// The scheduler to use
     pub scheduler: Scheduler,
-
-    pub compaction: CompactionConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -381,8 +382,25 @@ pub struct PipelineConfig {
     /// Batch linger time (how long to wait before flushing)
     pub source_batch_linger: HumanReadableDuration,
 
-    // How often to flush aggregates
+    /// How often to flush aggregates
     pub update_aggregate_flush_interval: HumanReadableDuration,
+
+    /// How many restarts to allow before moving to failed (-1 for infinite)
+    pub allowed_restarts: i32,
+
+    /// After this amount of time, we consider the job to be healthy and reset the restarts counter
+    pub healthy_duration: HumanReadableDuration,
+
+    /// Number of seconds to wait for a worker heartbeat before considering it dead
+    pub worker_heartbeat_timeout: HumanReadableDuration,
+
+    /// Amount of time to wait for workers to start up before considering them failed
+    pub worker_startup_time: HumanReadableDuration,
+
+    /// Amount of time to wait for tasks to startup before considering it failed
+    pub task_startup_time: HumanReadableDuration,
+
+    pub compaction: CompactionConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]

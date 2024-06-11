@@ -40,7 +40,6 @@ pub mod job_metrics;
 const CHECKPOINTS_TO_KEEP: u32 = 4;
 const CHECKPOINT_ROWS_TO_KEEP: u32 = 100;
 const COMPACT_EVERY: u32 = 2;
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkerState {
@@ -58,7 +57,7 @@ pub struct WorkerStatus {
 
 impl WorkerStatus {
     fn heartbeat_timeout(&self) -> bool {
-        self.last_heartbeat.elapsed() > HEARTBEAT_TIMEOUT
+        self.last_heartbeat.elapsed() > *config().pipeline.worker_heartbeat_timeout
     }
 }
 
@@ -369,7 +368,7 @@ impl RunningJobModel {
     }
 
     async fn compact_state(&mut self) -> anyhow::Result<()> {
-        if !config().controller.compaction.enabled {
+        if !config().pipeline.compaction.enabled {
             info!("Compaction is disabled, skipping compaction");
             return Ok(());
         }
