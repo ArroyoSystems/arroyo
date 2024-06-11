@@ -59,7 +59,7 @@ data:
           {{- end }}    
         image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
         image-pull-policy: "{{ .Values.worker.image.pullPolicy }}"
-        imagePullSecrets:
+        image-pull-secrets:
         {{- with .Values.imagePullSecrets }}
         {{- toYaml . | nindent 10 }}
         {{- end }} 

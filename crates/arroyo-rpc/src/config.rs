@@ -517,6 +517,8 @@ pub struct KubernetesWorkerConfig {
     pub image: String,
 
     pub image_pull_policy: String,
+    
+    pub image_pull_secrets: String,
 
     pub service_account_name: String,
 
