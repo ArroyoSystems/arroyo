@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-storage"
-version = "0.10.2"
+version = "0.10.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
