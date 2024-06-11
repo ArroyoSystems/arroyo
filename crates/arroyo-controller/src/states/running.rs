@@ -18,12 +18,6 @@ use serde_json::json;
 
 use super::{JobContext, State, Transition};
 
-// after this amount of time, we consider the job to be healthy and reset the restarts counter
-const HEALTHY_DURATION: Duration = Duration::from_secs(2 * 60);
-
-// how many times we allow the job to restart before moving it to failed
-const RESTARTS_ALLOWED: usize = 10;
-
 #[derive(Debug)]
 pub struct Running {}
 
@@ -35,6 +29,8 @@ impl State for Running {
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         stop_if_desired_running!(self, ctx.config);
+
+        let pipeline_config = &config().clone().pipeline;
 
         let running_start = Instant::now();
 
@@ -92,7 +88,7 @@ impl State for Running {
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                    if ctx.status.restarts > 0 && running_start.elapsed() > HEALTHY_DURATION {
+                    if ctx.status.restarts > 0 && running_start.elapsed() > *pipeline_config.healthy_duration {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
                         if let Err(e) = ctx.status.update_db(&ctx.db).await {
@@ -120,7 +116,7 @@ impl State for Running {
                                 "job_id": ctx.config.id,
                                 "error": format!("{:?}", err),
                             }));
-                            if ctx.status.restarts >= RESTARTS_ALLOWED as i32 {
+                            if pipeline_config.allowed_restarts != -1 && ctx.status.restarts >= pipeline_config.allowed_restarts {
                                 return Err(fatal(
                                     "Job has restarted too many times",
                                     err
