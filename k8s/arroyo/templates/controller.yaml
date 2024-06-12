@@ -48,7 +48,7 @@ spec:
       - name: migrate-database
         image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
         imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
-        command: [ "/app/arroyo-bin", "--config-dir", "/config", "migrate", "--wait", "300" ]
+        command: [ "/app/arroyo", "--config-dir", "/config", "migrate", "--wait", "300" ]
         volumeMounts:
           - name: arroyo-config
             mountPath: /root/.config/arroyo
@@ -71,7 +71,7 @@ spec:
         {{- toYaml .Values.securityContext | nindent 12 }}
         image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
         imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
-        command: ["/app/arroyo-bin", "--config-dir", "/config", "cluster"]
+        command: ["/app/arroyo", "--config-dir", "/config", "cluster"]
 
         env:
         {{- if .Values.postgresql.deploy }}

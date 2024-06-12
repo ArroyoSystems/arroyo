@@ -1,315 +1,387 @@
-use anyhow::{bail, Context, Result};
-use bollard::container::{CreateContainerOptions, LogOutput, LogsOptions, StartContainerOptions};
-use bollard::image::CreateImageOptions;
-use bollard::models::{ContainerStateStatusEnum, HostConfig, PortBinding};
-use bollard::{container, Docker};
-use clap::{Parser, Subcommand};
-use std::collections::HashMap;
-use std::io;
-use std::io::Write;
-use std::process::exit;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::signal::unix::{signal, SignalKind};
-use tokio_stream::StreamExt;
+use anyhow::{anyhow, bail};
+use std::fs;
+use std::path::PathBuf;
 
-const CONTAINER_NAME: &str = "arroyo-cli-single";
+use arroyo_rpc::config;
+use arroyo_rpc::config::{config, DatabaseType};
+use arroyo_server_common::shutdown::Shutdown;
+use arroyo_server_common::{log_event, start_admin_server};
+use arroyo_worker::WorkerServer;
+use clap::{Parser, Subcommand};
+use cornucopia_async::DatabaseSource;
+use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
+use serde_json::json;
+use std::process::exit;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::timeout;
+use tokio_postgres::{Client, Connection, NoTls};
+use tracing::{debug, error, info};
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    /// Path to an Arroyo config file, in TOML or YAML format
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+
+    /// Directory in which to look for configuration files
+    #[arg(long)]
+    config_dir: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Starts an Arroyo cluster in Docker
-    Start {
-        /// Set the tag to run (defaults to `latest`, the most recent release version)
-        #[arg(short, long)]
-        tag: Option<String>,
+    /// Starts an Arroyo API server
+    Api {},
 
-        /// If set, will run in the background
-        #[arg(short, long)]
-        daemon: bool,
+    /// Starts an Arroyo Controller
+    Controller {},
+
+    /// Starts a complete Arroyo cluster
+    Cluster {},
+
+    /// Starts an Arroyo worker
+    Worker {},
+
+    /// Starts an Arroyo compiler
+    Compiler {},
+
+    /// Starts an Arroyo node server
+    Node {},
+
+    /// Runs database migrations on the configure Postgres database
+    Migrate {
+        /// If set, waits for the specified number of seconds until Postgres is ready before running migrations
+        #[arg(long)]
+        wait: Option<u32>,
     },
+}
 
-    /// Stops a running Arroyo cluster
-    Stop {},
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+enum CPService {
+    Api,
+    Compiler,
+    Controller,
+    All,
+}
+
+impl CPService {
+    pub fn name(&self) -> &'static str {
+        match self {
+            CPService::Api => "api",
+            CPService::Compiler => "compiler",
+            CPService::Controller => "controller",
+            CPService::All => "cluster",
+        }
+    }
 }
 
 #[tokio::main]
-pub async fn main() {
+async fn main() {
     let cli = Cli::parse();
 
-    let result = match &cli.command {
-        Commands::Start { tag, daemon } => start(tag.clone(), *daemon).await,
-        Commands::Stop {} => stop().await,
-    };
-
-    if let Err(e) = result {
-        eprintln!("\n-------------------------------\n{:?}", e);
-        exit(1);
-    } else {
-        exit(0);
-    }
-}
-
-async fn get_docker() -> anyhow::Result<Docker> {
-    Docker::connect_with_local_defaults().context("Failed to connect to docker -- is it running?")
-}
-
-async fn create_image(docker: &Docker, image: &str) -> Result<String> {
-    docker
-        .create_image(
-            Some(CreateImageOptions {
-                from_image: image,
-                ..Default::default()
-            }),
-            None,
-            None,
-        )
-        .next()
-        .await
-        .unwrap()
-        .context("Failed to pull image")?;
-
-    // wait for the image to be available
-
-    println!("Waiting for image to be available...");
-    loop {
-        match docker.inspect_image(image).await {
-            Ok(metadata) => {
-                println!();
-                return Ok(metadata.id.unwrap());
-            }
-            Err(bollard::errors::Error::DockerResponseServerError {
-                status_code: 404, ..
-            }) => {
-                // wait
-            }
-            Err(e) => {
-                bail!("Failed while fetching image metadata from docker: {:?}", e);
-            }
-        }
-
-        print!(".");
-        io::stdout().flush().unwrap();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-async fn create_container(docker: &Docker, image: &str) -> Result<bool> {
-    let mut ports = HashMap::new();
-    ports.insert("8000/tcp", HashMap::new());
-
-    let mut port_map = HashMap::new();
-    port_map.insert(
-        "8000/tcp".to_string(),
-        Some(vec![PortBinding {
-            host_ip: Some("0.0.0.0".to_string()),
-            host_port: Some("8000".to_string()),
-        }]),
+    config::initialize_config(
+        cli.config.as_ref().map(|t| t.as_ref()),
+        cli.config_dir.as_ref().map(|t| t.as_ref()),
     );
 
-    let config = container::Config {
-        image: Some(image),
-        exposed_ports: Some(ports),
-        host_config: Some(HostConfig {
-            port_bindings: Some(port_map),
-            ..Default::default()
-        }),
-        ..Default::default()
+    match &cli.command {
+        Commands::Api { .. } => {
+            start_control_plane(CPService::Api).await;
+        }
+        Commands::Compiler { .. } => {
+            start_control_plane(CPService::Compiler).await;
+        }
+        Commands::Controller { .. } => {
+            start_control_plane(CPService::Controller).await;
+        }
+        Commands::Cluster { .. } => {
+            start_control_plane(CPService::All).await;
+        }
+        Commands::Worker { .. } => {
+            start_worker().await;
+        }
+        Commands::Migrate { wait } => {
+            if let Err(e) = migrate(*wait).await {
+                error!("{}", e);
+                exit(1);
+            }
+        }
+        Commands::Node { .. } => {
+            start_node().await;
+        }
     };
+}
 
-    match docker
-        .create_container(
-            Some(CreateContainerOptions {
-                name: CONTAINER_NAME,
-                platform: None,
-            }),
-            config,
-        )
+async fn pg_pool() -> Pool {
+    let config = &config().database.postgres;
+    let mut cfg = deadpool_postgres::Config::new();
+    cfg.dbname = Some(config.database_name.clone());
+    cfg.host = Some(config.host.clone());
+    cfg.port = Some(config.port);
+    cfg.user = Some(config.user.clone());
+    cfg.password = Some((*config.password).clone());
+    cfg.manager = Some(ManagerConfig {
+        recycling_method: RecyclingMethod::Fast,
+    });
+    let pool = cfg
+        .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
+        .unwrap_or_else(|e| {
+            error!("Unable to connect to database {:?}: {:?}", config, e);
+            exit(1);
+        });
+
+    let object_manager = pool.get().await.unwrap_or_else(|e| {
+        error!(
+            "Unable to create database connection for {:?} {}",
+            config, e
+        );
+        exit(1);
+    });
+
+    match object_manager
+        .query_one("select id from cluster_info", &[])
         .await
     {
-        Ok(_) => {}
-        Err(bollard::errors::Error::DockerResponseServerError {
-            status_code: 409, ..
-        }) => {
-            // if the container already exists, check if it's running
-            if docker
-                .inspect_container(CONTAINER_NAME, None)
-                .await
-                .context("Failed to inspect container")?
-                .state
-                .unwrap()
-                .status
-                .unwrap()
-                == ContainerStateStatusEnum::RUNNING
-            {
-                println!("Container already running");
-                return Ok(false);
-            }
+        Ok(row) => {
+            let uuid: Uuid = row.get(0);
+            arroyo_server_common::set_cluster_id(&uuid.to_string());
         }
         Err(e) => {
-            bail!("Failed to create container: {:?}", e);
+            panic!("Failed to get cluster info {:?}", e);
         }
-    }
-
-    Ok(true)
-}
-
-async fn read_logs(docker: &Docker, start_time: SystemTime, tail: bool) -> Result<()> {
-    println!("Reading logs");
-    let opts: LogsOptions<String> = LogsOptions {
-        follow: tail,
-        stdout: true,
-        stderr: true,
-        since: start_time.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64,
-        ..Default::default()
     };
 
-    let mut tail = docker.logs(CONTAINER_NAME, Some(opts.clone()));
-
-    while let Some(log) = tail.next().await {
-        match log.context("Failed while tailing logs")? {
-            LogOutput::StdErr { message } => {
-                eprint!("> {}", String::from_utf8_lossy(&message));
-            }
-            LogOutput::StdOut { message } => {
-                print!("> {}", String::from_utf8_lossy(&message));
-            }
-            LogOutput::StdIn { .. } => {}
-            LogOutput::Console { .. } => {}
-        }
-    }
-
-    Ok(())
+    pool
 }
 
-pub struct ContainerStatus {
-    state: ContainerStateStatusEnum,
-    api_available: bool,
-}
+fn sqlite_connection() -> rusqlite::Connection {
+    let path = config().database.sqlite.path.clone();
 
-async fn get_status(docker: &Docker) -> anyhow::Result<ContainerStatus> {
-    let state = docker
-        .inspect_container(CONTAINER_NAME, None)
-        .await
-        .context("Failed talking to the docker daemon while inspecting")?
-        .state
-        .unwrap()
-        .status
-        .unwrap();
-
-    let api_available = reqwest::get("http://localhost:8000").await.is_ok();
-
-    Ok(ContainerStatus {
-        state,
-        api_available,
-    })
-}
-
-pub async fn start(tag: Option<String>, damon: bool) -> Result<()> {
-    let start_time = SystemTime::now();
-
-    let docker = get_docker().await?;
-
-    let tag = tag.as_deref().unwrap_or("latest");
-    let image = format!("ghcr.io/arroyosystems/arroyo-single:{}", tag);
-
-    let image_id = create_image(&docker, &image).await?;
-    println!("Pulled image {}", image_id);
-
-    if !create_container(&docker, &image_id).await? {
-        return Ok(());
-    }
-
-    docker
-        .start_container(CONTAINER_NAME, None::<StartContainerOptions<String>>)
-        .await?;
-
-    println!("Started container. Waiting for API to come up...");
-
-    // wait for port
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    loop {
-        let status = get_status(&docker).await?;
-        match status.state {
-            ContainerStateStatusEnum::CREATED | ContainerStateStatusEnum::RUNNING => {}
-            _ => {
-                eprintln!("\nDocker container failed... see logs for details:");
-                read_logs(&docker, start_time, false).await?;
-                bail!("shutting down...");
-            }
-        }
-
-        if status.api_available {
-            break;
-        }
-
-        print!(".");
-        io::stdout().flush().unwrap();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    println!();
-
-    match open::that("http://localhost:8000") {
-        Ok(_) => println!("Opened webui in browser"),
-        Err(_) => println!("Failed to open browser... navigate to http://localhost:8000 for webui"),
-    }
-
-    if damon {
-        return Ok(());
-    }
-
-    println!("Tailing logs...\n----------------------");
-
-    let mut sigint = signal(SignalKind::interrupt()).unwrap();
-    {
-        let docker = docker.clone();
-        tokio::spawn(async move {
-            match sigint.recv().await {
-                None => {}
-                Some(_) => {
-                    print!("Stopping container...");
-                    match docker.stop_container(CONTAINER_NAME, None).await {
-                        Ok(_) => {
-                            println!("Container stopped");
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to stop container: {:?}", e);
-                        }
-                    }
-                    exit(0);
-                }
-            }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|e| {
+            panic!(
+                "Could not create database directory {}: {:?}",
+                path.to_string_lossy(),
+                e
+            )
         });
     }
 
-    read_logs(&docker, start_time, true).await?;
+    let exists = path.exists();
 
-    println!("Container exited");
+    let mut conn = rusqlite::Connection::open(&path)
+        .unwrap_or_else(|e| panic!("Could not open sqlite database at path {:?}: {:?}", path, e));
+
+    if !exists {
+        info!("Creating config database at {}", path.to_string_lossy());
+        if let Err(e) = sqlite_migrations::migrations::runner().run(&mut conn) {
+            let _ = fs::remove_file(&path);
+            panic!("Failed to set up database: {}", e);
+        }
+
+        let uuid = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO cluster_info (id, name) VALUES (?1, 'default');",
+            [&uuid],
+        )
+        .expect("Unable to write to sqlite database");
+    }
+
+    let mut statement = conn.prepare("select id from cluster_info").unwrap();
+
+    let results = statement
+        .query_map([], |r| r.get(0))
+        .expect("Unable to read from sqlite database");
+
+    let uuid: String = results
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("Invalid sqlite database at {:?}; delete to recreate", path))
+        .unwrap();
+
+    arroyo_server_common::set_cluster_id(&uuid);
+
+    drop(statement);
+
+    // enable foreign keys
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .expect("Unable to enable foreign key support in sqlite");
+
+    conn
+}
+
+async fn db_source() -> DatabaseSource {
+    match config().database.r#type {
+        DatabaseType::Postgres => DatabaseSource::Postgres(pg_pool().await),
+        DatabaseType::Sqlite => {
+            DatabaseSource::Sqlite(Arc::new(std::sync::Mutex::new(sqlite_connection())))
+        }
+    }
+}
+
+mod migrations {
+    use refinery::embed_migrations;
+    embed_migrations!("../arroyo-api/migrations");
+}
+
+mod sqlite_migrations {
+    use refinery::embed_migrations;
+    embed_migrations!("../arroyo-api/sqlite_migrations");
+}
+
+async fn connect(
+    retry: bool,
+) -> anyhow::Result<(
+    Client,
+    Connection<impl AsyncRead + AsyncWrite + Unpin, impl AsyncRead + AsyncWrite + Unpin>,
+)> {
+    let config = &config().database.postgres;
+
+    loop {
+        match tokio_postgres::config::Config::new()
+            .host(&config.host)
+            .port(config.port)
+            .user(&config.user)
+            .password(&*config.password)
+            .dbname(&config.database_name)
+            .connect(NoTls)
+            .await
+        {
+            Ok(r) => {
+                return Ok(r);
+            }
+            Err(e) => {
+                if !e.to_string().contains("authentication") && retry {
+                    debug!("Received error from database while waiting: {}", e);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+
+                bail!("Failed to connect to database {:?}: {}", config, e);
+            }
+        }
+    }
+}
+
+async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
+    let _guard = arroyo_server_common::init_logging("migrate");
+
+    let (mut client, connection) = if let Some(wait) = wait {
+        info!("Waiting for database to be ready to run migrations");
+        timeout(Duration::from_secs(wait as u64), connect(true))
+            .await
+            .map_err(|e| anyhow!("Timed out waiting for database to connect after {}", e))??
+    } else {
+        connect(false).await?
+    };
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
+    info!(
+        "Running migrations on database {:?}",
+        config().database.postgres
+    );
+
+    let report = migrations::migrations::runner()
+        .run_async(&mut client)
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "Failed to run migrations on {:?}: {:?}",
+                config().database.postgres,
+                e
+            )
+        })?;
+
+    for migration in report.applied_migrations() {
+        info!("Applying V{} {}", migration.version(), migration.name());
+    }
+
+    info!(
+        "Successfully applied {} migration(s)",
+        report.applied_migrations().len()
+    );
 
     Ok(())
 }
 
-async fn stop() -> anyhow::Result<()> {
-    let docker = get_docker().await?;
+async fn start_control_plane(service: CPService) {
+    let _guard = arroyo_server_common::init_logging(service.name());
 
-    match docker.stop_container(CONTAINER_NAME, None).await {
-        Ok(_) => {
-            println!("Container stopped");
-        }
-        Err(bollard::errors::Error::DockerResponseServerError {
-            status_code: 404, ..
-        }) => {
-            println!("Container does not exist")
-        }
-        Err(e) => {
-            bail!("Encountered an error while stopping: {:?}", e);
-        }
+    let config = config::config();
+
+    let db = db_source().await;
+
+    log_event(
+        "service_startup",
+        json!({
+            "service": service.name(),
+            "scheduler": config.controller.scheduler,
+        }),
+    );
+
+    let shutdown = Shutdown::new(service.name());
+
+    shutdown.spawn_task("admin", start_admin_server(service.name()));
+
+    if service == CPService::Api || service == CPService::All {
+        shutdown.spawn_task("api", arroyo_api::start_server(db.clone()));
     }
 
-    Ok(())
+    if service == CPService::Compiler || service == CPService::All {
+        shutdown.spawn_task("compiler", arroyo_compiler_service::start_service());
+    }
+
+    if service == CPService::Controller || service == CPService::All {
+        arroyo_controller::ControllerServer::new(db)
+            .await
+            .start(shutdown.guard("controller"));
+    }
+
+    Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
+}
+
+async fn start_worker() {
+    let shutdown = Shutdown::new("worker");
+    let server =
+        WorkerServer::from_config(shutdown.guard("worker")).expect("Could not start worker");
+
+    let _guard = arroyo_server_common::init_logging(&format!(
+        "worker-{}-{}",
+        server.id().0,
+        server.job_id()
+    ));
+
+    shutdown.spawn_task("admin", start_admin_server("worker"));
+    let token = shutdown.token();
+    tokio::spawn(async move {
+        if let Err(e) = server.start_async().await {
+            error!("Failed to start worker server: {:?}", e);
+            token.cancel();
+        }
+    });
+
+    Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
+}
+
+async fn start_node() {
+    let shutdown = Shutdown::new("node");
+    let id = arroyo_node::start_server(shutdown.guard("node")).await;
+
+    let _guard = arroyo_server_common::init_logging(&format!("node-{}", id.0,));
+
+    shutdown.spawn_task("admin", start_admin_server("worker"));
+
+    Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
 }

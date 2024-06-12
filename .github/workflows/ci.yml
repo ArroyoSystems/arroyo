@@ -94,12 +94,12 @@ jobs:
       - name: Integ postgres
         run: |
           mkdir /tmp/arroyo-integ
-          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts target/debug/arroyo-bin cluster &
+          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts target/debug/arroyo cluster &
           cargo nextest run --package integ -E 'kind(test)'
       - name: Integ sqlite
         run: |
-          killall arroyo-bin
-          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts ARROYO__DATABASE__TYPE=sqlite target/debug/arroyo-bin cluster &
+          killall arroyo
+          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts ARROYO__DATABASE__TYPE=sqlite target/debug/arroyo cluster &
           timeout=10; while ! nc -z localhost 8000 && [ $timeout -gt 0 ]; do sleep 1; timeout=$((timeout - 1)); done; [ $timeout -gt 0 ]
           cargo nextest run --package integ -E 'kind(test)'
           

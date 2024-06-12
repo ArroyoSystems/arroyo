@@ -61,7 +61,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           cache-from: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
           cache-to: type=registry,ref=ghcr.io/arroyosystems/arroyo-builder:buildcache-${{ matrix.arch }}
-          target: arroyo-single
+          # note that this is now the same as arroyo
+          target: arroyo
           outputs: type=image,name=ghcr.io/arroyosystems/arroyo-single,push-by-digest=true,name-canonical=true,push=true,store=true
 
       # arroyo
