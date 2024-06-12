@@ -67,12 +67,12 @@ image-pull-policy = "IfNotPresent"
 service-account-name = "default"
 resources = { requests = { cpu = "900m",  memory = "500Mi" } }
 task-slots = 16
-command = "/app/arroyo-bin worker"
+command = "/app/arroyo worker"
 
 # other
 
 [database]
-type = "postgres"
+type = "sqlite"
 
 [database.postgres]
 database-name = "arroyo"

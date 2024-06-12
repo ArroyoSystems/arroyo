@@ -83,4 +83,4 @@ data:
           - name: arroyo-user-config
             mountPath: /config
           {{- end }}
-        command: "/app/arroyo-bin --config-dir /config worker"
+        command: "/app/arroyo --config-dir /config worker"

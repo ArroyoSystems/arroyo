@@ -43,28 +43,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p crates/arroyo-api/migrations && \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --profile ${PROFILE} --bin arroyo-bin --all-features && \
-    mv target/*/arroyo-bin /arroyo-bin
+    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --profile ${PROFILE} --bin arroyo --all-features && \
+    mv target/*/arroyo /arroyo
 
-FROM debian:bookworm-slim AS arroyo-single
-WORKDIR /app
-RUN apt-get update && \
-    apt-get -y install libssl-dev openssl supervisor libsasl2-dev curl postgresql postgresql-client sudo pkg-config
-
-COPY --from=builder /arroyo-bin ./
-
-COPY docker/supervisord.conf /supervisord.conf
-COPY docker/entrypoint.sh /entrypoint.sh
-
-ENV PRODUCTION=true \
-    ASSET_DIR="/app/dist" \
-    INSTALL_RUSTC=true \
-    INSTALL_CLANG=true
-
-RUN chmod +x /entrypoint.sh
-
-EXPOSE 8000
-ENTRYPOINT [ "/entrypoint.sh" ]
 
 FROM debian:bookworm-slim as arroyo
 WORKDIR /app
@@ -73,7 +54,7 @@ RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl pkg-config && \
     mkdir /config
 
-COPY --from=builder /arroyo-bin ./
+COPY --from=builder /arroyo ./
 
 ENV PRODUCTION=true \
     ASSET_DIR="/app/dist" \
@@ -81,17 +62,17 @@ ENV PRODUCTION=true \
     INSTALL_CLANG=true
 
 EXPOSE 8000
-ENTRYPOINT [ "/app/arroyo-bin" ]
+ENTRYPOINT [ "/app/arroyo" ]
 
 FROM rust:slim-bookworm AS arroyo-full
 WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl pkg-config
 
-COPY --from=builder /arroyo-bin ./
+COPY --from=builder /arroyo ./
 
 ENV PRODUCTION=true \
     ASSET_DIR="/app/dist"
 
 EXPOSE 8000
-ENTRYPOINT [ "/app/arroyo-bin" ]
+ENTRYPOINT [ "/app/arroyo" ]
