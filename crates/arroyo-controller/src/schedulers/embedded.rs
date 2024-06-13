@@ -1,7 +1,7 @@
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
-use arroyo_server_common::shutdown::Shutdown;
+use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
 use arroyo_types::WorkerId;
 use arroyo_worker::WorkerServer;
 use async_trait::async_trait;
@@ -47,7 +47,7 @@ impl Scheduler for EmbeddedScheduler {
     async fn start_workers(&self, req: StartPipelineReq) -> Result<(), SchedulerError> {
         self.clear_finished().await;
 
-        let shutdown = Shutdown::new("embedded-worker");
+        let shutdown = Shutdown::new("embedded-worker", SignalBehavior::None);
         let guard = shutdown.guard("embedded-worker");
 
         let job_id = req.job_id.clone();

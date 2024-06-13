@@ -1,4 +1,5 @@
 use axum::async_trait;
+use futures::future::OptionFuture;
 use std::future::Future;
 use std::io;
 use std::process::exit;
@@ -132,7 +133,7 @@ pub struct Shutdown {
     name: &'static str,
     guard: ShutdownGuard,
     rx: broadcast::Receiver<()>,
-    signal_rx: mpsc::Receiver<()>,
+    signal_rx: Option<mpsc::Receiver<()>>,
     handler: Option<Box<dyn ShutdownHandler + Send>>,
 }
 
@@ -147,31 +148,47 @@ pub trait ShutdownHandler {
     async fn shutdown(&self);
 }
 
+pub enum SignalBehavior {
+    Handle,
+    Ignore,
+    None,
+}
+
 impl Shutdown {
-    pub fn new(name: &'static str) -> Self {
+    pub fn new(name: &'static str, signal_behavior: SignalBehavior) -> Self {
         let (tx, rx) = broadcast::channel(1);
 
         let token = CancellationToken::new();
 
-        let (signal_tx, signal_rx) = mpsc::channel(4);
-        tokio::spawn(async move {
-            loop {
-                let ctrl_c = tokio::signal::ctrl_c();
-                let signal = async {
-                    let mut os_signal =
-                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-                    os_signal.recv().await;
-                    io::Result::Ok(())
-                };
+        let signal_rx = if !matches!(signal_behavior, SignalBehavior::None) {
+            let (signal_tx, signal_rx) = mpsc::channel(4);
+            tokio::spawn(async move {
+                loop {
+                    let ctrl_c = tokio::signal::ctrl_c();
+                    let signal = async {
+                        let mut os_signal = tokio::signal::unix::signal(
+                            tokio::signal::unix::SignalKind::terminate(),
+                        )?;
+                        os_signal.recv().await;
+                        io::Result::Ok(())
+                    };
 
-                select! {
-                    _ = ctrl_c => {}
-                    _ = signal => {}
+                    select! {
+                        _ = ctrl_c => {}
+                        _ = signal => {}
+                    }
+
+                    if matches!(signal_behavior, SignalBehavior::Ignore) {
+                        debug!("Ignoring signal");
+                    } else {
+                        let _ = signal_tx.send(()).await;
+                    }
                 }
-
-                let _ = signal_tx.send(()).await;
-            }
-        });
+            });
+            Some(signal_rx)
+        } else {
+            None
+        };
 
         Self {
             name,
@@ -217,12 +234,13 @@ impl Shutdown {
 
     pub async fn wait_for_shutdown(mut self, timeout: Duration) -> Result<(), ShutdownError> {
         select! {
-            _ = self.signal_rx.recv() => {
+            Some(_) = OptionFuture::from(self.signal_rx.as_mut().map(|s| s.recv())) => {
                 // wait for a signal to start the cancellation process
                 info!("Received signal, shutting down {}", self.name);
 
                 // call the handler if there is one
                 if let Some(handler) = self.handler {
+                    info!("Running shutdown handler");
                     handler.shutdown().await;
                 }
 
@@ -246,7 +264,7 @@ impl Shutdown {
                     Err(ShutdownError::Err(code))
                 }
             }
-            _ = self.signal_rx.recv() => {
+            Some(_) = OptionFuture::from(self.signal_rx.as_mut().map(|s| s.recv())) => {
                 // we got another signal, shutdown immediately
                 info!("Received signal, shutting down {} immediately", self.name);
                 Err(ShutdownError::Signal)
