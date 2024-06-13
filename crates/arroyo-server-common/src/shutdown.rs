@@ -1,3 +1,4 @@
+use axum::async_trait;
 use std::future::Future;
 use std::io;
 use std::process::exit;
@@ -132,12 +133,18 @@ pub struct Shutdown {
     guard: ShutdownGuard,
     rx: broadcast::Receiver<()>,
     signal_rx: mpsc::Receiver<()>,
+    handler: Option<Box<dyn ShutdownHandler + Send>>,
 }
 
 pub enum ShutdownError {
     Signal,
     Timeout,
     Err(i32),
+}
+
+#[async_trait]
+pub trait ShutdownHandler {
+    async fn shutdown(&self);
 }
 
 impl Shutdown {
@@ -171,7 +178,12 @@ impl Shutdown {
             guard: ShutdownGuard::new("root", tx, token, Arc::new(AtomicUsize::new(0)), false),
             rx,
             signal_rx,
+            handler: None,
         }
+    }
+
+    pub fn set_handler(&mut self, handler: Box<dyn ShutdownHandler + Send>) {
+        self.handler = Some(handler);
     }
 
     pub fn spawn_task<F, T>(&self, name: &'static str, task: T) -> JoinHandle<Option<T::Output>>
@@ -208,6 +220,12 @@ impl Shutdown {
             _ = self.signal_rx.recv() => {
                 // wait for a signal to start the cancellation process
                 info!("Received signal, shutting down {}", self.name);
+
+                // call the handler if there is one
+                if let Some(handler) = self.handler {
+                    handler.shutdown().await;
+                }
+
                 self.guard.token.cancel();
             }
             _ = self.guard.token.cancelled() => {

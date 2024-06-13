@@ -78,6 +78,17 @@ pub fn initialize_config(path: Option<&Path>, dir: Option<&Path>) {
     panic!("Unable to initialize configuration; it's already initialized!");
 }
 
+pub fn update<F: Fn(&mut Config)>(f: F) {
+    CONFIG.rcu(|c| {
+        let mut new = (**c
+            .as_ref()
+            .expect("tried to update config; but not yet loaded!"))
+        .clone();
+        f(&mut new);
+        Some(Arc::new(new))
+    });
+}
+
 pub fn config() -> Arc<Config> {
     let cur = CONFIG.load();
     if cur.is_none() {
@@ -175,7 +186,7 @@ fn load_config(paths: &[PathBuf]) -> Figment {
 }
 
 /// Arroyo configuration
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
     /// API service configuration
@@ -255,7 +266,7 @@ impl Config {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ApiConfig {
     /// The host the API service should bind to
@@ -265,7 +276,7 @@ pub struct ApiConfig {
     pub http_port: u16,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ControllerConfig {
     /// The host the controller should bind to
@@ -278,7 +289,7 @@ pub struct ControllerConfig {
     pub scheduler: Scheduler,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CompactionConfig {
     /// Whether to enable compaction for checkpoints
@@ -288,7 +299,7 @@ pub struct CompactionConfig {
     pub checkpoints_to_compact: u32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CompilerConfig {
     /// Bind address for the compiler
@@ -315,7 +326,7 @@ pub struct CompilerConfig {
     pub use_local_udf_crate: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WorkerConfig {
     /// Bind address for the worker RPC socket
@@ -341,7 +352,7 @@ pub struct WorkerConfig {
     pub queue_size: u32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct NodeConfig {
     /// ID for this node
@@ -363,7 +374,7 @@ impl NodeConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AdminConfig {
     /// Bind address for the admin service
@@ -373,7 +384,7 @@ pub struct AdminConfig {
     pub http_port: u16,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PipelineConfig {
     /// Batch size
@@ -403,14 +414,14 @@ pub struct PipelineConfig {
     pub compaction: CompactionConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum DatabaseType {
     Postgres,
     Sqlite,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct DatabaseConfig {
     pub r#type: DatabaseType,
@@ -419,7 +430,7 @@ pub struct DatabaseConfig {
     pub sqlite: SqliteConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PostgresConfig {
     pub database_name: String,
@@ -429,7 +440,7 @@ pub struct PostgresConfig {
     pub password: Sensitive<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SqliteConfig {
     pub path: PathBuf,
@@ -445,7 +456,7 @@ impl Default for SqliteConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Scheduler {
     Embedded,
@@ -454,7 +465,7 @@ pub enum Scheduler {
     Kubernetes,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ProcessSchedulerConfig {
     pub slots_per_process: u32,
@@ -525,6 +536,7 @@ impl KubernetesWorkerConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct HumanReadableDuration {
     duration: Duration,
     original: String,
@@ -588,7 +600,7 @@ impl<'de> Deserialize<'de> for HumanReadableDuration {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct LogConfig {
     /// Set the log format
@@ -596,7 +608,7 @@ pub struct LogConfig {
     pub format: LogFormat,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum LogFormat {
     #[default]

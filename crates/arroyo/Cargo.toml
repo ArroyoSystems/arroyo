@@ -16,6 +16,7 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-compiler-service = { path = "../arroyo-compiler-service" }
 arroyo-node = { path = "../arroyo-node" }
 arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-openapi = { path ="../arroyo-openapi" }
 
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
@@ -30,5 +31,9 @@ cornucopia_async = { workspace = true }
 rusqlite = "0.31.0"
 uuid = { version = "1.7.0", features = ["v4"] }
 refinery = { version = "0.8.14" , features = ["tokio-postgres", "rusqlite"] }
-anyhow = { version = "1.0.79", features = [] }
+anyhow = { version = "1.0.79"}
 dirs = "5.0.1"
+rand = "0.8.5"
+reqwest = "0.11"
+clio = { version = "0.3.5", features = ["clap", "clap-parse"] }
+async-trait = "0.1.80"
