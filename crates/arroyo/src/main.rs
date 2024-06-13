@@ -1,16 +1,16 @@
 mod run;
 
 use anyhow::{anyhow, bail};
-use std::fs;
 use std::path::PathBuf;
+use std::{env, fs};
 
 use arroyo_rpc::config;
 use arroyo_rpc::config::{config, DatabaseType};
-use arroyo_server_common::shutdown::Shutdown;
+use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_worker::WorkerServer;
 use clap::{Args, Parser, Subcommand};
-use clio::{ClioPath, Input};
+use clio::Input;
 use cornucopia_async::DatabaseSource;
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use serde_json::json;
@@ -359,7 +359,7 @@ async fn start_control_plane(service: CPService) {
         }),
     );
 
-    let shutdown = Shutdown::new(service.name());
+    let shutdown = Shutdown::new(service.name(), SignalBehavior::Handle);
 
     shutdown.spawn_task("admin", start_admin_server(service.name()));
 
@@ -383,7 +383,14 @@ async fn start_control_plane(service: CPService) {
 }
 
 async fn start_worker() {
-    let shutdown = Shutdown::new("worker");
+    let shutdown = Shutdown::new(
+        "worker",
+        if env::var("UNDER_PROCESS_SCHEDULER").is_ok() {
+            SignalBehavior::Ignore
+        } else {
+            SignalBehavior::Handle
+        },
+    );
     let server =
         WorkerServer::from_config(shutdown.guard("worker")).expect("Could not start worker");
 
@@ -406,7 +413,7 @@ async fn start_worker() {
 }
 
 async fn start_node() {
-    let shutdown = Shutdown::new("node");
+    let shutdown = Shutdown::new("node", SignalBehavior::Handle);
     let id = arroyo_node::start_server(shutdown.guard("node")).await;
 
     let _guard = arroyo_server_common::init_logging(&format!("node-{}", id.0,));

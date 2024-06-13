@@ -11,8 +11,6 @@ fn main() {
     let doc = ApiDoc::openapi().to_pretty_json().unwrap();
     fs::write(&api_spec, &doc).unwrap();
 
-    println!("cargo:rerun-if-changed={}", api_spec);
-
     let spec = serde_json::from_str(&doc).unwrap();
     let mut settings = GenerationSettings::new();
     settings.with_interface(InterfaceStyle::Builder);

@@ -178,6 +178,11 @@ impl Scheduler for ProcessScheduler {
                     .env("ARROYO__ADMIN__HTTP_PORT", "0")
                     .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots_here))
                     .env("ARROYO__WORKER__ID", format!("{}", worker_id)) // start at 100 to make same length
+                    .env(
+                        "ARROYO__CONTROLLER_ENDPOINT",
+                        config().controller_endpoint(),
+                    )
+                    .env("UNDER_PROCESS_SCHEDULER", "true")
                     .env(JOB_ID_ENV, &*job_id)
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
                     .env(ARROYO_PROGRAM_FILE_ENV, program_file)

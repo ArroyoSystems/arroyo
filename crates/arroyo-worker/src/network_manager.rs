@@ -497,7 +497,7 @@ mod test {
     use std::{pin::Pin, time::Duration};
 
     use arroyo_operator::context::batch_bounded;
-    use arroyo_server_common::shutdown::Shutdown;
+    use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
     use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
     use tokio::time::timeout;
 
@@ -561,7 +561,7 @@ mod test {
 
         senders.add(quad, schema.clone(), server_tx);
 
-        let shutdown = Shutdown::new("test");
+        let shutdown = Shutdown::new("test", SignalBehavior::None);
         let mut nm = NetworkManager::new(0);
         let port = nm.open_listener(shutdown.guard("test")).await;
 
