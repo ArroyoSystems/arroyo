@@ -331,7 +331,7 @@ pub fn grpc_server() -> Server<
 pub async fn wrap_start(
     name: &str,
     addr: SocketAddr,
-    result: impl Future<Output = Result<(), tonic::transport::Error>>,
+    result: impl Future<Output = Result<(), impl Error>>,
 ) -> anyhow::Result<()> {
     result.await.map_err(|e| {
         anyhow!(
