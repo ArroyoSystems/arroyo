@@ -384,6 +384,14 @@ pub struct AdminConfig {
     pub http_port: u16,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DefaultSink {
+    #[default]
+    Preview,
+    Stdout,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PipelineConfig {
@@ -410,6 +418,10 @@ pub struct PipelineConfig {
 
     /// Amount of time to wait for tasks to startup before considering it failed
     pub task_startup_time: HumanReadableDuration,
+
+    /// Default sink, for when none is specified
+    #[serde(default)]
+    pub default_sink: DefaultSink,
 
     pub compaction: CompactionConfig,
 }

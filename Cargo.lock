@@ -877,6 +877,7 @@ dependencies = [
  "arroyo-types",
  "axum",
  "bytes",
+ "dirs",
  "futures",
  "hyper 0.14.28",
  "lazy_static",
@@ -895,6 +896,7 @@ dependencies = [
  "tracing-log",
  "tracing-logfmt",
  "tracing-subscriber",
+ "uuid",
  "vergen",
 ]
 

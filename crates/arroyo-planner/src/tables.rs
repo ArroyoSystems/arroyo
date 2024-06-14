@@ -5,7 +5,7 @@ use std::{collections::HashMap, time::Duration};
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 
-use arroyo_datastream::preview_sink;
+use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
@@ -716,7 +716,7 @@ impl Table {
             Table::ConnectorTable(c) => Ok(c.connector_op()),
             Table::MemoryTable { .. } => return plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
-            Table::PreviewSink { logical_plan: _ } => Ok(preview_sink()),
+            Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
         }
     }
 }

@@ -31,6 +31,8 @@ tokio-util = "0.7.10"
 anyhow = "1.0.82"
 bytes = "1.6.0"
 toml = "0.8.13"
+dirs = "5.0.1"
+uuid = { version = "1.8.0", features = ["v4"] }
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

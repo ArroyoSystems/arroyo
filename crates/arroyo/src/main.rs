@@ -44,13 +44,13 @@ struct RunArgs {
     #[arg(short, long)]
     name: Option<String>,
 
-    /// If set, the system will daemonize and run in the background
-    #[arg(short, long)]
-    daemon: bool,
-
     /// Path to a database file to save to or restore from
     #[arg(long)]
     database: Option<PathBuf>,
+
+    /// Number of parallel subtasks to run
+    #[arg(short, long, default_value = "1")]
+    parallelism: u32,
 
     /// The query to run
     #[clap(value_parser, default_value = "-")]
@@ -74,13 +74,13 @@ enum Commands {
     /// Starts an Arroyo worker
     Worker {},
 
-    /// Starts an Arroyo compiler
+    /// Starts an Arroyo compiler server
     Compiler {},
 
     /// Starts an Arroyo node server
     Node {},
 
-    /// Runs database migrations on the configure Postgres database
+    /// Runs database migrations on the configured Postgres database
     Migrate {
         /// If set, waits for the specified number of seconds until Postgres is ready before running migrations
         #[arg(long)]

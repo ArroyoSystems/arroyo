@@ -13,7 +13,7 @@ use petgraph::visit::NodeRef;
 use std::time::Duration;
 
 use crate::{compiler_service, connection_profiles, jobs, types};
-use arroyo_datastream::preview_sink;
+use arroyo_datastream::default_sink;
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, QueryValidationResult, StopType,
     ValidateQueryPost,
@@ -297,13 +297,13 @@ pub(crate) async fn create_pipeline_int<'a>(
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
 
-    set_parallelism(&mut compiled.program, 1);
+    set_parallelism(&mut compiled.program, req.parallelism as usize);
 
     if is_preview && !config().sinks_in_preview {
         for node in compiled.program.graph.node_weights_mut() {
             // replace all sink connectors with websink for preview
             if node.operator_name == OperatorName::ConnectorSink {
-                node.operator_config = preview_sink().encode_to_vec();
+                node.operator_config = default_sink().encode_to_vec();
             }
         }
     }

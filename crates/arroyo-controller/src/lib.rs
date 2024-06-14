@@ -35,7 +35,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
@@ -625,7 +625,7 @@ impl ControllerServer {
                 .accept_http1(true)
                 .add_service(ControllerGrpcServer::new(self.clone()))
                 .add_service(reflection)
-                .serve(local_addr),
+                .serve_with_incoming(TcpListenerStream::new(listener)),
         ));
 
         Ok(local_addr.port())
