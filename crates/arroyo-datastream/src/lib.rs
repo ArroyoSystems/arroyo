@@ -3,9 +3,11 @@
 
 pub mod logical;
 
+use arroyo_rpc::config::{config, DefaultSink};
 use arroyo_rpc::grpc::api;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 use syn::parse_quote;
@@ -214,11 +216,31 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-pub fn preview_sink() -> api::ConnectorOp {
-    api::ConnectorOp {
-        connector: "preview".to_string(),
-        config: "{\"connection\": {}, \"table\": {}, \"connection_schema\": {\"fields\":[]}}"
+pub fn default_sink() -> api::ConnectorOp {
+    match config().pipeline.default_sink {
+        DefaultSink::Preview => api::ConnectorOp {
+            connector: "preview".to_string(),
+            config: json!({
+                "connection": {},
+                "table": {},
+                "connection_schema": {
+                    "fields": [],
+                }
+            })
             .to_string(),
-        description: "PreviewSink".to_string(),
+            description: "PreviewSink".to_string(),
+        },
+        DefaultSink::Stdout => api::ConnectorOp {
+            connector: "stdout".to_string(),
+            config: json!({
+                "connection": {},
+                "table": {},
+                "connection_schema": {
+                    "fields": [],
+                }
+            })
+            .to_string(),
+            description: "StdoutSink".to_string(),
+        },
     }
 }

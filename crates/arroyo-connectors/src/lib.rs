@@ -7,6 +7,7 @@ use crate::polling_http::PollingHTTPConnector;
 use crate::preview::PreviewConnector;
 use crate::redis::RedisConnector;
 use crate::single_file::SingleFileConnector;
+use crate::stdout::StdoutConnector;
 use crate::webhook::WebhookConnector;
 use anyhow::{anyhow, bail, Context};
 use arroyo_operator::connector::ErasedConnector;
@@ -48,6 +49,7 @@ pub mod preview;
 pub mod redis;
 pub mod single_file;
 pub mod sse;
+pub mod stdout;
 pub mod webhook;
 pub mod websocket;
 
@@ -69,6 +71,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(RedisConnector {}),
         Box::new(SingleFileConnector {}),
         Box::new(SSEConnector {}),
+        Box::new(StdoutConnector {}),
         Box::new(WebhookConnector {}),
         Box::new(WebsocketConnector {}),
     ];

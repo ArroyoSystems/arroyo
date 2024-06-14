@@ -107,6 +107,7 @@ impl ShutdownGuard {
                     if let Err(e) = &output {
                         error!("{}", e);
                         ERROR_CODE.store(1, Ordering::Relaxed);
+                        token.cancel();
                     }
                     Some(output)
                 }
@@ -209,6 +210,14 @@ impl Shutdown {
         T: Future<Output = anyhow::Result<F>> + Send + 'static,
     {
         self.guard.spawn_task(name, task)
+    }
+
+    pub fn spawn_temporary<F, T>(&self, task: T) -> JoinHandle<Option<T::Output>>
+    where
+        F: Send + 'static,
+        T: Future<Output = anyhow::Result<F>> + Send + 'static,
+    {
+        self.guard.spawn_temporary(task)
     }
 
     pub fn guard(&self, name: &'static str) -> ShutdownGuard {

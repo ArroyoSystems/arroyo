@@ -1,9 +1,9 @@
 use crate::{db_source, RunArgs};
 use anyhow::bail;
-use arroyo_openapi::types::{PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
+use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_openapi::Client;
 use arroyo_rpc::config;
-use arroyo_rpc::config::{DatabaseType, Scheduler};
+use arroyo_rpc::config::{DatabaseType, DefaultSink, Scheduler};
 use arroyo_server_common::log_event;
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
 use async_trait::async_trait;
@@ -98,10 +98,36 @@ impl ShutdownHandler for PipelineShutdownHandler {
     }
 }
 
+async fn get_pipelines(client: &Client) -> anyhow::Result<Vec<Pipeline>> {
+    let mut starting_after = "".to_string();
+    let mut result = vec![];
+    loop {
+        let pipelines = client
+            .get_pipelines()
+            .starting_after(&starting_after)
+            .send()
+            .await?
+            .into_inner();
+
+        if let Some(next) = pipelines.data.last().map(|p| p.id.to_string()) {
+            starting_after = next;
+        }
+
+        result.extend(pipelines.data.into_iter());
+
+        if !pipelines.has_more {
+            break;
+        }
+    }
+
+    Ok(result)
+}
+
 async fn run_pipeline(
     client: Arc<Client>,
     name: Option<String>,
     query: String,
+    parallelism: u32,
     http_port: u16,
     shutdown_handler: PipelineShutdownHandler,
 ) -> anyhow::Result<()> {
@@ -113,8 +139,7 @@ async fn run_pipeline(
         .validate_query()
         .body(ValidateQueryPost::builder().query(&query))
         .send()
-        .await
-        .expect("Something went wrong while running pipeline")
+        .await?
         .into_inner();
 
     if !errors.errors.is_empty() {
@@ -125,31 +150,46 @@ async fn run_pipeline(
         exit(1);
     }
 
-    let id = client
-        .create_pipeline()
-        .body(
-            PipelinePost::builder()
-                .name(name.unwrap_or_else(|| "query".to_string()))
-                .parallelism(1)
-                .query(&query),
-        )
-        .send()
-        .await
-        .unwrap()
-        .into_inner()
-        .id;
+    // see if our current pipeline is in the existing pipelines
+    let id = match get_pipelines(&client)
+        .await?
+        .into_iter()
+        .find(|p| p.query == query)
+    {
+        Some(p) => {
+            info!("Pipeline already exists in database as {}", p.id);
+            client
+                .patch_pipeline()
+                .id(&p.id)
+                .body(PipelinePatch::builder().stop(StopType::None))
+                .send()
+                .await?;
+            p.id
+        }
+        None => {
+            // or create it
+            client
+                .create_pipeline()
+                .body(
+                    PipelinePost::builder()
+                        .name(name.unwrap_or_else(|| "query".to_string()))
+                        .parallelism(parallelism)
+                        .query(&query),
+                )
+                .send()
+                .await?
+                .into_inner()
+                .id
+        }
+    };
 
     {
         *shutdown_handler.pipeline_id.lock().unwrap() = Some(id.clone());
     }
 
-    wait_for_state(&client, &id, &["Running"]).await.unwrap();
+    wait_for_state(&client, &id, &["Running"]).await?;
 
     info!("Pipeline running... dashboard at http://localhost:{http_port}/pipelines/{id}");
-
-    wait_for_state(&client, &id, &["Stopped", "Failed"])
-        .await
-        .unwrap();
 
     Ok(())
 }
@@ -165,8 +205,6 @@ pub async fn run(args: RunArgs) {
         PathBuf::from_str(&format!("/tmp/arroyo/{}.arroyo", random::<u32>())).unwrap()
     });
 
-    info!("Using database {}", db_path.to_string_lossy());
-
     config::update(|c| {
         c.database.r#type = DatabaseType::Sqlite;
         c.database.sqlite.path = db_path.clone();
@@ -174,6 +212,8 @@ pub async fn run(args: RunArgs) {
         c.api.http_port = 0;
         c.controller.rpc_port = 0;
         c.controller.scheduler = Scheduler::Process;
+
+        c.pipeline.default_sink = DefaultSink::Stdout;
     });
 
     let db = db_source().await;
@@ -205,8 +245,16 @@ pub async fn run(args: RunArgs) {
 
     shutdown.set_handler(Box::new(shutdown_handler.clone()));
 
-    shutdown.spawn_task("pipeline", async move {
-        run_pipeline(client, args.name, query, http_port, shutdown_handler).await
+    shutdown.spawn_temporary(async move {
+        run_pipeline(
+            client,
+            args.name,
+            query,
+            args.parallelism,
+            http_port,
+            shutdown_handler,
+        )
+        .await
     });
 
     Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(60)).await);
