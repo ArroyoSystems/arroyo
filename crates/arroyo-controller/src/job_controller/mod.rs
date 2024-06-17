@@ -14,6 +14,7 @@ use arroyo_rpc::grpc::{
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{to_micros, WorkerId};
 use cornucopia_async::DatabaseSource;
+use rand::{thread_rng, Rng};
 
 use time::OffsetDateTime;
 
@@ -564,7 +565,12 @@ impl JobController {
                 checkpoint_state: commit_state.map(CheckpointingOrCommittingState::Committing),
                 epoch,
                 min_epoch,
-                last_checkpoint: Instant::now(),
+                // delay the initial checkpoint by a random amount so that on controller restart,
+                // checkpoint times are staggered across jobs
+                last_checkpoint: Instant::now()
+                    + Duration::from_millis(
+                        thread_rng().gen_range(0..config.checkpoint_interval.as_millis() as u64),
+                    ),
                 workers: worker_connects
                     .into_iter()
                     .map(|(id, connect)| {
