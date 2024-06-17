@@ -22,6 +22,8 @@ use arroyo_rpc::formats::{Format, JsonFormat};
 
 pub struct StdoutConnector {}
 
+const ICON: &str = include_str!("./stdout.svg");
+
 impl Connector for StdoutConnector {
     type ProfileT = EmptyConfig;
     type TableT = EmptyConfig;
@@ -33,14 +35,14 @@ impl Connector for StdoutConnector {
         arroyo_rpc::api_types::connections::Connector {
             id: "stdout".to_string(),
             name: "StdOut".to_string(),
-            icon: "".to_string(),
+            icon: ICON.to_string(),
             description: "Write outputs to stdout".to_string(),
             enabled: true,
             source: false,
             sink: true,
             testing: false,
             hidden: false,
-            custom_schemas: false,
+            custom_schemas: true,
             connection_config: None,
             table_config: "{}".to_string(),
         }
