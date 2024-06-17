@@ -241,6 +241,10 @@ pub struct Config {
     /// process with a non-standard port.
     compiler_endpoint: Option<Url>,
 
+    /// Supplies the default query for `arroyo run`; otherwise the query is read from the command
+    /// line or from stdin
+    pub query: Option<String>,
+
     /// Controls whether preview pipelines should have sinks enabled
     #[serde(default)]
     pub sinks_in_preview: bool,
@@ -274,6 +278,9 @@ pub struct ApiConfig {
 
     /// The HTTP port for the API service
     pub http_port: u16,
+
+    /// The HTTP port for the API service in run mode; defaults to a random port
+    pub run_http_port: Option<u16>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

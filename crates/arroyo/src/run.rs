@@ -3,7 +3,7 @@ use anyhow::bail;
 use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_openapi::Client;
 use arroyo_rpc::config;
-use arroyo_rpc::config::{DatabaseType, DefaultSink, Scheduler};
+use arroyo_rpc::config::{config, DatabaseType, DefaultSink, Scheduler};
 use arroyo_server_common::log_event;
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
 use async_trait::async_trait;
@@ -197,7 +197,10 @@ async fn run_pipeline(
 pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging("pipeline");
 
-    let query = std::io::read_to_string(args.query).unwrap();
+    let query = match config().query.clone() {
+        Some(query) => query,
+        None => std::io::read_to_string(args.query).unwrap(),
+    };
 
     let mut shutdown = Shutdown::new("pipeline", SignalBehavior::Handle);
 
@@ -209,7 +212,11 @@ pub async fn run(args: RunArgs) {
         c.database.r#type = DatabaseType::Sqlite;
         c.database.sqlite.path = db_path.clone();
 
-        c.api.http_port = 0;
+        if let Some(port) = c.api.run_http_port {
+            c.api.http_port = port;
+        } else {
+            c.api.http_port = 0;
+        }
         c.controller.rpc_port = 0;
         c.controller.scheduler = Scheduler::Process;
 
