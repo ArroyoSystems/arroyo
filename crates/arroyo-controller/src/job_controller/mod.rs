@@ -198,7 +198,7 @@ impl RunningJobModel {
                         };
                     }
                 } else {
-                    warn!(
+                    debug!(
                         message = "Received checkpoint event but not checkpointing",
                         job_id = *self.job_id,
                         event = format!("{:?}", c)

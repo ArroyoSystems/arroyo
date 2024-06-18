@@ -249,19 +249,25 @@ impl Shutdown {
 
                 // call the handler if there is one
                 if let Some(handler) = self.handler {
-                    info!("Running shutdown handler");
-                    handler.shutdown().await;
+                    tokio::spawn(async move {
+                        info!("Running shutdown handler");
+                        handler.shutdown().await;
+                        info!("Finished shutdown handler");
+                        self.guard.token.cancel();
+                        drop(self.guard);
+                    });
+                } else {
+                    self.guard.token.cancel();
+                    drop(self.guard)
                 }
-
-                self.guard.token.cancel();
             }
             _ = self.guard.token.cancelled() => {
                 // Or some part of the system shut down
                 info!("{} shutting down", self.name);
+                drop(self.guard)
             }
         }
 
-        drop(self.guard);
         select! {
             _ = self.rx.recv() => {
                 // everything has shutdown

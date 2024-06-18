@@ -2,37 +2,47 @@ use crate::{db_source, RunArgs};
 use anyhow::bail;
 use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_openapi::Client;
-use arroyo_rpc::config;
 use arroyo_rpc::config::{config, DatabaseType, DefaultSink, Scheduler};
+use arroyo_rpc::{config, retry};
 use arroyo_server_common::log_event;
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
 use async_trait::async_trait;
 use rand::random;
 use serde_json::json;
+use std::env;
+use std::env::set_var;
 use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::timeout;
+use tracing::level_filters::LevelFilter;
 use tracing::{error, info, warn};
+use tracing_subscriber::EnvFilter;
+
+async fn get_state(client: &Client, pipeline_id: &str) -> String {
+    let jobs = retry!(
+        client.get_pipeline_jobs().id(pipeline_id).send().await,
+        10,
+        Duration::from_millis(100),
+        Duration::from_secs(2),
+        |e| { warn!("Failed to get job state from API: {}", e) }
+    )
+    .unwrap()
+    .into_inner();
+
+    jobs.data.into_iter().next().unwrap().state
+}
 
 async fn wait_for_state(
     client: &Client,
     pipeline_id: &str,
     expected_states: &[&str],
 ) -> anyhow::Result<()> {
-    let mut last_state = "None".to_string();
+    let mut last_state: String = get_state(client, pipeline_id).await;
     while !expected_states.contains(&last_state.as_str()) {
-        let jobs = client
-            .get_pipeline_jobs()
-            .id(pipeline_id)
-            .send()
-            .await
-            .unwrap();
-        let job = jobs.data.first().unwrap();
-
-        let state = job.state.clone();
+        let state = get_state(client, pipeline_id).await;
         if last_state != state {
             info!("Job transitioned to {}", state);
             last_state = state;
@@ -195,7 +205,20 @@ async fn run_pipeline(
 }
 
 pub async fn run(args: RunArgs) {
-    let _guard = arroyo_server_common::init_logging("pipeline");
+    let _guard = arroyo_server_common::init_logging_with_filter(
+        "pipeline",
+        if !env::var("RUST_LOG").is_ok() {
+            set_var("RUST_LOG", "WARN");
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::WARN.into())
+                .from_env_lossy()
+                .add_directive("arroyo::run=info".parse().unwrap())
+        } else {
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy()
+        },
+    );
 
     let query = match config().query.clone() {
         Some(query) => query,

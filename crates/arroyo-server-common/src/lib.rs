@@ -47,15 +47,21 @@ pub const VERSION: &str = "0.11.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(_name: &str) -> WorkerGuard {
+pub fn init_logging(name: &str) -> WorkerGuard {
+    init_logging_with_filter(
+        name,
+        EnvFilter::builder()
+            .with_default_directive(LevelFilter::INFO.into())
+            .from_env_lossy(),
+    )
+}
+
+pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {:?}", e);
     }
 
-    let filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy()
-        .add_directive("refinery_core=warn".parse().unwrap());
+    let filter = filter.add_directive("refinery_core=warn".parse().unwrap());
 
     let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stderr());
 
