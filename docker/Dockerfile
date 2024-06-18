@@ -56,10 +56,9 @@ RUN apt-get update && \
 
 COPY --from=builder /arroyo ./
 
-ENV PRODUCTION=true \
-    ASSET_DIR="/app/dist" \
-    INSTALL_RUSTC=true \
-    INSTALL_CLANG=true
+ENV INSTALL_RUSTC=true \
+    INSTALL_CLANG=true \
+    ARROYO__API__RUN_HTTP_PORT=8000
 
 EXPOSE 8000
 ENTRYPOINT [ "/app/arroyo" ]
@@ -69,10 +68,9 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl pkg-config
 
-COPY --from=builder /arroyo ./
+ENV ARROYO__API__RUN_HTTP_PORT=8000
 
-ENV PRODUCTION=true \
-    ASSET_DIR="/app/dist"
+COPY --from=builder /arroyo ./
 
 EXPOSE 8000
 ENTRYPOINT [ "/app/arroyo" ]

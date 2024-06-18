@@ -1,11 +1,9 @@
-use anyhow::anyhow;
 use axum::response::IntoResponse;
 use axum::Json;
 use cornucopia_async::DatabaseSource;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener};
 use time::OffsetDateTime;
 use tonic::transport::Channel;
 use tracing::{error, info};
@@ -38,6 +36,8 @@ use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipeline
 use arroyo_rpc::config::config;
 use arroyo_rpc::formats::*;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
+use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_server_common::wrap_start;
 
 mod cloud;
 mod connection_profiles;
@@ -118,25 +118,22 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
         })
 }
 
-pub async fn start_server(database: DatabaseSource) -> anyhow::Result<()> {
+pub fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::Result<u16> {
     let config = config();
     let addr = SocketAddr::new(config.api.bind_address, config.api.http_port);
+    let listener = TcpListener::bind(addr)?;
+    let local_addr = listener.local_addr()?;
 
     let app = rest::create_rest_app(database, &config.controller_endpoint());
 
-    info!("Starting API server on {:?}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .map_err(|e| {
-            anyhow!(
-                "Failed to start API server on {}: {}",
-                addr,
-                e.source()
-                    .map(|e| e.to_string())
-                    .unwrap_or_else(|| e.to_string())
-            )
-        })
+    info!("Starting API server on {:?}", local_addr);
+    guard.into_spawn_task(wrap_start(
+        "api",
+        local_addr,
+        axum::Server::from_tcp(listener)?.serve(app.into_make_service()),
+    ));
+
+    Ok(local_addr.port())
 }
 
 #[derive(Debug, Serialize, Deserialize)]

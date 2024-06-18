@@ -19,7 +19,7 @@ use cornucopia_async::DatabaseSource;
 use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::StopMode;
-use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus};
+use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus, RunningMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
@@ -367,7 +367,12 @@ pub struct JobContext<'a> {
 
 impl<'a> JobContext<'a> {
     pub fn handle(&mut self, msg: JobMessage) -> Result<(), StateError> {
-        warn!("unhandled job message {:?}", msg);
+        if !matches!(
+            msg,
+            JobMessage::RunningMessage(RunningMessage::WorkerHeartbeat { .. })
+        ) {
+            warn!("unhandled job message {:?}", msg);
+        }
         Ok(())
     }
 

@@ -31,10 +31,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use time::OffsetDateTime;
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
@@ -599,7 +600,7 @@ impl ControllerServer {
         });
     }
 
-    pub fn start(self, guard: ShutdownGuard) {
+    pub async fn start(self, guard: ShutdownGuard) -> anyhow::Result<u16> {
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(arroyo_rpc::grpc::API_FILE_DESCRIPTOR_SET)
             .build()
@@ -610,17 +611,23 @@ impl ControllerServer {
             config().controller.rpc_port,
         );
 
-        info!("Starting arroyo-controller on {}", addr);
+        let listener = TcpListener::bind(addr).await?;
+
+        let local_addr = listener.local_addr()?;
+
+        info!("Starting arroyo-controller on {}", local_addr);
 
         self.start_updater(guard.child("updater"));
         guard.into_spawn_task(wrap_start(
             "controller",
-            addr,
+            local_addr,
             arroyo_server_common::grpc_server()
                 .accept_http1(true)
                 .add_service(ControllerGrpcServer::new(self.clone()))
                 .add_service(reflection)
-                .serve(addr.clone()),
+                .serve_with_incoming(TcpListenerStream::new(listener)),
         ));
+
+        Ok(local_addr.port())
     }
 }

@@ -16,8 +16,10 @@ use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, Tex
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::error::Error;
+use std::fs;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tonic::body::BoxBody;
@@ -37,6 +39,7 @@ use tracing_subscriber::Registry;
 use arroyo_rpc::config::{config, LogFormat};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
+use uuid::Uuid;
 
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
@@ -44,17 +47,23 @@ pub const VERSION: &str = "0.11.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(_name: &str) -> WorkerGuard {
+pub fn init_logging(name: &str) -> WorkerGuard {
+    init_logging_with_filter(
+        name,
+        EnvFilter::builder()
+            .with_default_directive(LevelFilter::INFO.into())
+            .from_env_lossy(),
+    )
+}
+
+pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {:?}", e);
     }
 
-    let filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy()
-        .add_directive("refinery_core=warn".parse().unwrap());
+    let filter = filter.add_directive("refinery_core=warn".parse().unwrap());
 
-    let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stdout());
+    let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stderr());
 
     match config().logging.format {
         LogFormat::Plaintext => {
@@ -111,8 +120,28 @@ pub fn init_logging(_name: &str) -> WorkerGuard {
     guard
 }
 
+fn existing_cluster_id(path: Option<&PathBuf>) -> Option<String> {
+    let path = path?;
+    if path.exists() {
+        let s = fs::read_to_string(path).ok()?.trim().to_string();
+        Uuid::parse_str(&s).ok()?;
+        Some(s)
+    } else {
+        None
+    }
+}
+
 pub fn set_cluster_id(cluster_id: &str) {
-    CLUSTER_ID.set(cluster_id.to_string()).unwrap();
+    let path = dirs::config_dir().map(|p| p.join("arroyo").join("cluster-info"));
+
+    if let Some(id) = existing_cluster_id(path.as_ref()) {
+        CLUSTER_ID.set(id).unwrap();
+    } else {
+        CLUSTER_ID.set(cluster_id.to_string()).unwrap();
+        if let Some(path) = path {
+            let _ = fs::write(&path, cluster_id);
+        }
+    }
 }
 
 pub fn get_cluster_id() -> String {
@@ -331,7 +360,7 @@ pub fn grpc_server() -> Server<
 pub async fn wrap_start(
     name: &str,
     addr: SocketAddr,
-    result: impl Future<Output = Result<(), tonic::transport::Error>>,
+    result: impl Future<Output = Result<(), impl Error>>,
 ) -> anyhow::Result<()> {
     result.await.map_err(|e| {
         anyhow!(

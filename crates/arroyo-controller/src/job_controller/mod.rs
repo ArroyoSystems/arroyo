@@ -26,7 +26,7 @@ use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::parquet::ParquetBackend;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
 use crate::types::public::CheckpointState as DbCheckpointState;
@@ -198,7 +198,7 @@ impl RunningJobModel {
                         };
                     }
                 } else {
-                    warn!(
+                    debug!(
                         message = "Received checkpoint event but not checkpointing",
                         job_id = *self.job_id,
                         event = format!("{:?}", c)
@@ -370,11 +370,15 @@ impl RunningJobModel {
 
     async fn compact_state(&mut self) -> anyhow::Result<()> {
         if !config().pipeline.compaction.enabled {
-            info!("Compaction is disabled, skipping compaction");
+            debug!("Compaction is disabled, skipping compaction");
             return Ok(());
         }
 
-        info!("Compacting state");
+        info!(
+            message = "Compacting state",
+            job_id = *self.job_id,
+            epoch = self.epoch,
+        );
 
         let mut worker_clients: Vec<WorkerGrpcClient<Channel>> =
             self.workers.values().map(|w| w.connect.clone()).collect();
@@ -401,6 +405,12 @@ impl RunningJobModel {
                     .await?;
             }
         }
+
+        info!(
+            message = "Finished compaction",
+            job_id = *self.job_id,
+            epoch = self.epoch,
+        );
         Ok(())
     }
 
@@ -419,7 +429,6 @@ impl RunningJobModel {
                         .as_secs_f32();
                     // shortcut if committing is unnecessary
                     if committing_state.done() {
-                        info!("no committing");
                         Self::update_checkpoint_in_db(&checkpointing, db, DbCheckpointState::ready)
                             .await?;
                         self.last_checkpoint = Instant::now();

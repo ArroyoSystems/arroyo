@@ -1,13 +1,16 @@
+mod run;
+
 use anyhow::{anyhow, bail};
-use std::fs;
 use std::path::PathBuf;
+use std::{env, fs};
 
 use arroyo_rpc::config;
 use arroyo_rpc::config::{config, DatabaseType};
-use arroyo_server_common::shutdown::Shutdown;
+use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_worker::WorkerServer;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+use clio::Input;
 use cornucopia_async::DatabaseSource;
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use serde_json::json;
@@ -35,8 +38,30 @@ struct Cli {
     config_dir: Option<PathBuf>,
 }
 
+#[derive(Args)]
+struct RunArgs {
+    /// Name for this pipeline
+    #[arg(short, long)]
+    name: Option<String>,
+
+    /// Path to a database file to save to or restore from
+    #[arg(long)]
+    database: Option<PathBuf>,
+
+    /// Number of parallel subtasks to run
+    #[arg(short, long, default_value = "1")]
+    parallelism: u32,
+
+    /// The query to run
+    #[clap(value_parser, default_value = "-")]
+    query: Input,
+}
+
 #[derive(Subcommand)]
 enum Commands {
+    /// Run a query as a local pipeline cluster
+    Run(RunArgs),
+
     /// Starts an Arroyo API server
     Api {},
 
@@ -49,13 +74,13 @@ enum Commands {
     /// Starts an Arroyo worker
     Worker {},
 
-    /// Starts an Arroyo compiler
+    /// Starts an Arroyo compiler server
     Compiler {},
 
     /// Starts an Arroyo node server
     Node {},
 
-    /// Runs database migrations on the configure Postgres database
+    /// Runs database migrations on the configured Postgres database
     Migrate {
         /// If set, waits for the specified number of seconds until Postgres is ready before running migrations
         #[arg(long)]
@@ -91,7 +116,7 @@ async fn main() {
         cli.config_dir.as_ref().map(|t| t.as_ref()),
     );
 
-    match &cli.command {
+    match cli.command {
         Commands::Api { .. } => {
             start_control_plane(CPService::Api).await;
         }
@@ -108,13 +133,16 @@ async fn main() {
             start_worker().await;
         }
         Commands::Migrate { wait } => {
-            if let Err(e) = migrate(*wait).await {
+            if let Err(e) = migrate(wait).await {
                 error!("{}", e);
                 exit(1);
             }
         }
         Commands::Node { .. } => {
             start_node().await;
+        }
+        Commands::Run(args) => {
+            run::run(args).await;
         }
     };
 }
@@ -331,12 +359,12 @@ async fn start_control_plane(service: CPService) {
         }),
     );
 
-    let shutdown = Shutdown::new(service.name());
+    let shutdown = Shutdown::new(service.name(), SignalBehavior::Handle);
 
     shutdown.spawn_task("admin", start_admin_server(service.name()));
 
     if service == CPService::Api || service == CPService::All {
-        shutdown.spawn_task("api", arroyo_api::start_server(db.clone()));
+        arroyo_api::start_server(db.clone(), shutdown.guard("api")).unwrap();
     }
 
     if service == CPService::Compiler || service == CPService::All {
@@ -346,14 +374,23 @@ async fn start_control_plane(service: CPService) {
     if service == CPService::Controller || service == CPService::All {
         arroyo_controller::ControllerServer::new(db)
             .await
-            .start(shutdown.guard("controller"));
+            .start(shutdown.guard("controller"))
+            .await
+            .expect("Could not start controller");
     }
 
     Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
 }
 
 async fn start_worker() {
-    let shutdown = Shutdown::new("worker");
+    let shutdown = Shutdown::new(
+        "worker",
+        if env::var("UNDER_PROCESS_SCHEDULER").is_ok() {
+            SignalBehavior::Ignore
+        } else {
+            SignalBehavior::Handle
+        },
+    );
     let server =
         WorkerServer::from_config(shutdown.guard("worker")).expect("Could not start worker");
 
@@ -376,7 +413,7 @@ async fn start_worker() {
 }
 
 async fn start_node() {
-    let shutdown = Shutdown::new("node");
+    let shutdown = Shutdown::new("node", SignalBehavior::Handle);
     let id = arroyo_node::start_server(shutdown.guard("node")).await;
 
     let _guard = arroyo_server_common::init_logging(&format!("node-{}", id.0,));
