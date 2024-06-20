@@ -1,56 +1,49 @@
 import { Th, Td, Tr, Table, Thead, Tbody } from '@chakra-ui/react';
 import { ReactElement } from 'react';
 import { OutputData } from '../../lib/data_fetching';
+import { AgGridReact } from 'ag-grid-react';
+import 'ag-grid-community/styles/ag-grid.css';
+import '@fontsource/ibm-plex-mono';
+import '../../styles/data-grid-style.css';
 
 export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data: OutputData }> }) {
   let headers: Array<ReactElement> = [];
-  const data = outputs
-    .map(row => {
-      const output = row.data;
-      let parsed = JSON.parse(output.value);
 
-      let cols: Array<ReactElement> = [];
 
-      if (headers.length == 0) {
-        Object.keys(parsed).forEach(k => {
-          headers.push(<Th key={k}>{k}</Th>);
-        });
-      }
+  const rows = outputs.map(line => {
+    let parsed = JSON.parse(line.data.value);
+    let object: any = {
+      id: line.id,
+      timestamp: new Date(Number(line.data.timestamp) / 1000).toISOString(),
+    };
+    Object.keys(parsed).forEach((k) => {
+      object[k.replace(".", "__")] = JSON.stringify(parsed[k])
+    });
 
-      Object.values(parsed).forEach((v, i) => {
-        cols.push(<Td key={i}>{JSON.stringify(v, null, 2)}</Td>);
-      });
+    return object;
+  }).reverse();
 
-      return (
-        <Tr key={row.id}>
-          <Th bgColor={'transparent'} color={'green.400'} key={'row'}>
-            {row.id + 1}
-          </Th>
-          <Th bgColor={'transparent'} color={'green.400'} key={'date'}>
-            {new Date(Number(output.timestamp) / 1000).toISOString()}
-          </Th>
-          {cols}
-        </Tr>
-      );
-    })
-    .reverse();
+
+  const cols = [
+    { headerName: '', field: 'id', width: 40, resizable: false, cellStyle: { color: 'var(--chakra-colors-purple-500)' } },
+    { field: 'timestamp', width: 210, cellStyle: { color: 'var(--chakra-colors-green-500)' } },
+    ...Object.keys(JSON.parse(outputs[0].data.value)).map(k => {
+      return {
+        headerName: k,
+        field: k.replaceAll('.', '__')
+      };
+    }),
+  ];
 
   return (
-    <Table
-      maxWidth="500px"
-      size="sm"
-      bgColor="transparent"
-      variant={'simple'}
-      fontFamily={'roboto-mono,monaco,monospace'}
+    <div
+      style={{ height: "100%" }} // the grid will fill the size of the parent container
     >
-      <Thead>
-        <Tr>
-          <Th>Row</Th>
-          <Th>Time</Th>
-          {headers}
-        </Tr>
-      </Thead>
-      <Tbody>{data}</Tbody>
-    </Table>
+      <AgGridReact
+        autoSizeStrategy={{ type: 'fitCellContents'}}
+        skipHeaderOnAutoSize={true}
+       className='ag-theme-custom' rowData={rows} columnDefs={cols} />
+    </div>
   );
+
 }
