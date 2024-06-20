@@ -1,6 +1,7 @@
 import React, { useContext } from 'react';
 import {
   Box,
+  Button,
   Flex,
   HStack,
   Icon,
@@ -28,13 +29,32 @@ import { PiFileSqlDuotone } from 'react-icons/pi';
 import { LocalUdfsContext } from '../../udf_state';
 import UdfEditor from '../udfs/UdfEditor';
 import UdfEditTab from '../udfs/UdfEditTab';
+import { FiCheckCircle, FiDatabase, FiPlay } from 'react-icons/fi';
+import { IoRocketOutline } from 'react-icons/io5';
+import { DiDatabase } from 'react-icons/di';
+import { CiDatabase } from 'react-icons/ci';
 
 export interface PipelineEditorTabsProps {
   queryInput: string;
+  previewing: boolean | undefined;
+  startingPreview: boolean;
+  preview: () => void;
+  stopPreview: () => void;
+  run: () => void;
+  pipelineIsValid: (tab: number) => void;
   updateQuery: (s: string) => void;
 }
 
-const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({ queryInput, updateQuery }) => {
+const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
+  queryInput,
+  previewing,
+  startingPreview,
+  preview,
+  stopPreview,
+  run,
+  pipelineIsValid,
+  updateQuery,
+}) => {
   const { openedUdfs, isGlobal, editorTab, handleEditorTabChange } = useContext(LocalUdfsContext);
   const {
     isOpen: exampleQueriesIsOpen,
@@ -65,6 +85,12 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({ queryInput, upd
         <IconButton
           icon={<HiOutlineBookOpen />}
           aria-label="Example queries"
+          title="Example queries"
+          size={'xs'}
+          mr={4}
+          borderColor={'gray.500'}
+          borderWidth={'1px'}
+          px={2}
           onClick={() => {
             openExampleQueries();
             setTourStep(TourSteps.ExampleQuery);
@@ -82,8 +108,8 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({ queryInput, upd
 
   const tabs = (
     <Flex flexWrap={'wrap'}>
-      <Tab gap={1}>
-        <Icon as={PiFileSqlDuotone} boxSize={5} />
+      <Tab gap={1} height={10}>
+        <Icon as={PiFileSqlDuotone} boxSize={4} />
         Query
       </Tab>
       {openedUdfs.map(udf => {
@@ -126,18 +152,121 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({ queryInput, upd
     </TabPanels>
   );
 
+  let startPreviewButton = <></>;
+  let stopPreviewButton = <></>;
+
+  if (previewing) {
+    stopPreviewButton = (
+      <Button
+        onClick={stopPreview}
+        size="xs"
+        colorScheme="blue"
+        title="Stop a preview pipeline"
+        borderRadius={2}
+      >
+        Stop
+      </Button>
+    );
+  } else {
+    startPreviewButton = (
+      <Button
+        onClick={preview}
+        size="xs"
+        title="Run a preview pipeline"
+        borderRadius={2}
+        isLoading={startingPreview}
+        backgroundColor={'gray.700'}
+        borderColor={'gray.500'}
+        borderWidth={'1px'}
+      >
+        <HStack spacing={2}>
+          <Icon as={FiPlay}></Icon>
+          <Text>Preview</Text>
+        </HStack>
+      </Button>
+    );
+  }
+
+  const checkButton = (
+    <Button
+      size="xs"
+      color={'white'}
+      backgroundColor={'gray.700'}
+      onClick={() => pipelineIsValid(0)}
+      title="Check that the SQL is valid"
+      borderRadius={2}
+      borderColor={'gray.500'}
+      borderWidth={'1px'}
+    >
+      <HStack spacing={2}>
+        <Icon as={FiCheckCircle}></Icon>
+        <Text>Check</Text>
+      </HStack>
+    </Button>
+  );
+
+  const startPipelineButton = (
+    <Button
+      size="xs"
+      backgroundColor={'gray.700'}
+      onClick={run}
+      borderRadius={2}
+      color="green.200"
+      borderColor={'gray.500'}
+      borderWidth={'1px'}
+    >
+      <HStack>
+        <Icon as={IoRocketOutline} />
+        <Text>Launch</Text>
+      </HStack>
+    </Button>
+  );
+
+  const buttonGroup = (
+    <HStack spacing={4}>
+      {checkButton}
+      <Popover
+        isOpen={tourStep == TourSteps.Preview}
+        placement={'top'}
+        closeOnBlur={false}
+        variant={'tour'}
+      >
+        <PopoverTrigger>{startPreviewButton}</PopoverTrigger>
+        <PopoverContent>
+          <PopoverArrow />
+          <PopoverCloseButton onClick={disableTour} />
+          <PopoverHeader>Nice!</PopoverHeader>
+          <PopoverBody>
+            Finally, run a preview pipeline to see the results of your query.
+          </PopoverBody>
+        </PopoverContent>
+      </Popover>
+      {stopPreviewButton}
+      {startPipelineButton}
+    </HStack>
+  );
+
   return (
     <Flex direction={'column'} backgroundColor="#1e1e1e" height="100%">
       <Tabs
+        size={'sm'}
         display={'flex'}
         flexDirection={'column'}
         flex={1}
         index={editorTab}
         onChange={handleEditorTabChange}
       >
-        <TabList display={'grid'} gridTemplateColumns={'minmax(0, 1fr) min-content'} width={'100%'}>
+        <TabList
+          display={'grid'}
+          gridTemplateColumns={'minmax(0, 1fr) min-content'}
+          width={'100%'}
+          h={10}
+        >
           {tabs}
-          <HStack p={4}>{exampleQueriesButton}</HStack>
+          <HStack>
+            {buttonGroup}
+            {exampleQueriesButton}
+          </HStack>
         </TabList>
         {tabPanels}
       </Tabs>

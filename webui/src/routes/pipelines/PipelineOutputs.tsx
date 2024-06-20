@@ -23,11 +23,11 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data
 
       return (
         <Tr key={row.id}>
-          <Th key={'row'}>{row.id + 1}</Th>
-          <Th key={'date'}>
-            {new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeStyle: 'long' }).format(
-              new Date(Number(output.timestamp) / 1000)
-            )}
+          <Th bgColor={'transparent'} color={'green.400'} key={'row'}>
+            {row.id + 1}
+          </Th>
+          <Th bgColor={'transparent'} color={'green.400'} key={'date'}>
+            {new Date(Number(output.timestamp) / 1000).toISOString()}
           </Th>
           {cols}
         </Tr>
@@ -36,7 +36,13 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data
     .reverse();
 
   return (
-    <Table maxWidth="500px">
+    <Table
+      maxWidth="500px"
+      size="sm"
+      bgColor="transparent"
+      variant={'simple'}
+      fontFamily={'roboto-mono,monaco,monospace'}
+    >
       <Thead>
         <Tr>
           <Th>Row</Th>

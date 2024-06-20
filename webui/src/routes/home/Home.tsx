@@ -23,6 +23,7 @@ import Loading from '../../components/Loading';
 import React, { useContext, useEffect } from 'react';
 import WelcomeModal from '../../components/WelcomeModal';
 import { TourContext, TourSteps } from '../../tour';
+import { useNavbar } from '../../App';
 
 interface Props {
   label: string;
@@ -56,6 +57,12 @@ export const Stat = (props: Props) => {
 export function Home() {
   const { jobs, jobsLoading } = useJobs();
   const navigate = useNavigate();
+
+  const { setMenuItems } = useNavbar();
+
+  useEffect(() => {
+    setMenuItems([]);
+  }, []);
 
   const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
 

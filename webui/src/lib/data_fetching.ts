@@ -443,6 +443,7 @@ const pipelinesFetcher = () => {
     const { data, error } = await get('/v1/pipelines', {
       params: {
         query: {
+          limit: 100,
           starting_after: params.startingAfter,
         },
       },
@@ -457,7 +458,7 @@ export const usePipelines = () => {
     pipelinesKey,
     pipelinesFetcher(),
     {
-      refreshInterval: 2000,
+      refreshInterval: 5000,
     }
   );
 

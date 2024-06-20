@@ -36,7 +36,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ tabIndex, handleTabChange
         </TabList>
         <TabPanels flex={1}>
           <TabPanel height={'100%'} display={'flex'} px={5}>
-            <CatalogTab />
+
           </TabPanel>
           <TabPanel height={'100%'} px={5}>
             <UdfsResourceTab />

@@ -5,6 +5,7 @@ import {
   Badge,
   Box,
   Button,
+  Collapse,
   Flex,
   HStack,
   Icon,
@@ -15,7 +16,9 @@ import {
   PopoverContent,
   PopoverHeader,
   PopoverTrigger,
+  Spacer,
   Spinner,
+  Stack,
   Tab,
   TabList,
   TabPanel,
@@ -24,7 +27,7 @@ import {
   Text,
   useDisclosure,
 } from '@chakra-ui/react';
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PipelineGraphViewer } from './PipelineGraph';
 import { SqlOptions } from '../../lib/types';
@@ -47,7 +50,7 @@ import StartPipelineModal from '../../components/StartPipelineModal';
 import { formatError } from '../../lib/util';
 import { WarningIcon } from '@chakra-ui/icons';
 import PaginatedContent from '../../components/PaginatedContent';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { ImperativePanelGroupHandle, ImperativePanelHandle, Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { MdDragHandle } from 'react-icons/md';
 import { PipelineOutputs } from './PipelineOutputs';
 import { TourContext, TourSteps } from '../../tour';
@@ -59,7 +62,14 @@ import PipelineEditorTabs from './PipelineEditorTabs';
 import ResourcePanel from './ResourcePanel';
 import { LocalUdf, LocalUdfsContext } from '../../udf_state';
 import UdfLabel from '../udfs/UdfLabel';
-import { PiFileSqlDuotone } from 'react-icons/pi';
+import { PiFileSqlDuotone, PiFunction, PiGraph } from 'react-icons/pi';
+import { BiTable } from 'react-icons/bi';
+import { IoWarningOutline } from 'react-icons/io5';
+import { motion } from 'framer-motion';
+import { useNavbar } from '../../App';
+import { FiDatabase } from 'react-icons/fi';
+import CatalogTab from './CatalogTab';
+import UdfsResourceTab from '../udfs/UdfsResourceTab';
 
 function useQuery() {
   const { search } = useLocation();
@@ -105,6 +115,27 @@ export function CreatePipeline() {
   const [startingPreview, setStartingPreview] = useState<boolean>(false);
 
   const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
+
+  const [sidebarElement, setSidebarElement] = useState<"tables" | "udfs" | null>('tables');
+
+  const { setMenuItems } = useNavbar();
+
+  useEffect(() => {
+    setMenuItems([
+      {
+        label: 'Tables',
+        icon: FiDatabase,
+        onClick: () => setSidebarElement(sidebarElement == 'tables' ? null : 'tables'),
+        selected: sidebarElement == 'tables',
+      },
+      {
+        label: 'UDFs',
+        icon: PiFunction,
+        onClick: () => setSidebarElement(sidebarElement == 'udfs' ? null : 'udfs'),
+        selected: sidebarElement == 'udfs',
+      },
+    ]);
+  }, [sidebarElement]);
 
   useEffect(() => {
     if (tourActive) {
@@ -192,6 +223,20 @@ export function CreatePipeline() {
       setOutputSource(useJobOutput(sseHandler, pipelineId, job.id));
     }
   }, [job?.id]);
+
+  const panelRef = useRef<ImperativePanelHandle | null>(null);
+
+  useEffect(() => {
+    if (panelRef?.current != undefined) {
+      if (sidebarElement == null && panelRef?.current?.getSize() > 0) {
+        panelRef?.current?.collapse();
+      } else if (sidebarElement != null && panelRef?.current?.getSize() == 0) {
+        panelRef?.current?.expand();
+      }
+    }
+  }, [sidebarElement]);
+
+
 
   // Top-level loading state
   if (copyFromLoading || connectionTablesLoading || !localUdfs) {
@@ -353,79 +398,6 @@ export function CreatePipeline() {
     />
   );
 
-  const previewing = job?.runningDesired && job?.state != 'Failed' && !job?.finishTime;
-
-  let startPreviewButton = <></>;
-  let stopPreviewButton = <></>;
-
-  if (previewing) {
-    stopPreviewButton = (
-      <Button
-        onClick={stopPreview}
-        size="md"
-        colorScheme="blue"
-        title="Stop a preview pipeline"
-        borderRadius={2}
-      >
-        Stop Preview
-      </Button>
-    );
-  } else {
-    startPreviewButton = (
-      <Button
-        onClick={preview}
-        size="md"
-        colorScheme="blue"
-        title="Run a preview pipeline"
-        borderRadius={2}
-        isLoading={startingPreview}
-      >
-        Start Preview
-      </Button>
-    );
-  }
-
-  const checkButton = (
-    <Button
-      size="md"
-      colorScheme="blue"
-      onClick={() => pipelineIsValid(0)}
-      title="Check that the SQL is valid"
-      borderRadius={2}
-    >
-      Check
-    </Button>
-  );
-
-  const startPipelineButton = (
-    <Button size="md" colorScheme="green" onClick={run} borderRadius={2}>
-      Start Pipeline
-    </Button>
-  );
-
-  const buttonGroup = (
-    <HStack spacing={4} p={4}>
-      {checkButton}
-      <Popover
-        isOpen={tourStep == TourSteps.Preview}
-        placement={'top'}
-        closeOnBlur={false}
-        variant={'tour'}
-      >
-        <PopoverTrigger>{startPreviewButton}</PopoverTrigger>
-        <PopoverContent>
-          <PopoverArrow />
-          <PopoverCloseButton onClick={disableTour} />
-          <PopoverHeader>Nice!</PopoverHeader>
-          <PopoverBody>
-            Finally, run a preview pipeline to see the results of your query.
-          </PopoverBody>
-        </PopoverContent>
-      </Popover>
-      {stopPreviewButton}
-      {startPipelineButton}
-    </HStack>
-  );
 
   let previewPipelineTab = (
     <TabPanel height="100%" position="relative">
@@ -457,6 +429,7 @@ export function CreatePipeline() {
   }
 
   let previewResultsTabContent = <Text>Preview your SQL to see outputs.</Text>;
+  const previewing = job?.runningDesired && job?.state != 'Failed' && !job?.finishTime;
 
   if (outputs.length) {
     setTourStep(TourSteps.TourCompleted);
@@ -492,8 +465,8 @@ export function CreatePipeline() {
   );
 
   const validationErrorAlert = (
-    <Alert status="error">
-      <AlertIcon />
+    <Alert status="error" height={8}>
+      <AlertIcon boxSize={4} />
       <AlertDescription>
         <Text>Validation error</Text>
       </AlertDescription>
@@ -544,8 +517,7 @@ export function CreatePipeline() {
     }
 
     errorsTab = (
-      <TabPanel overflowX="auto" height="100%" position="relative">
-        {validationErrorAlert}
+      <TabPanel overflowX="auto" p={0} pl={2} height="100%" position="relative">
         {queryErrors}
         {udfErrors}
       </TabPanel>
@@ -576,7 +548,7 @@ export function CreatePipeline() {
   } else {
     errorsTab = (
       <TabPanel overflowX="auto" height="100%" position="relative">
-        <Text>Job errors will appear here.</Text>
+        <Text color={"gray.500"}>No job errors</Text>
       </TabPanel>
     );
   }
@@ -601,8 +573,6 @@ export function CreatePipeline() {
     </TabPanels>
   );
 
-  const editorTabs = <PipelineEditorTabs queryInput={queryInput} updateQuery={updateQuery} />;
-
   let errorMessage;
   if (queryValidationError) {
     errorMessage = formatError(queryValidationError);
@@ -617,7 +587,6 @@ export function CreatePipeline() {
   let errorComponent = <></>;
   if (errorMessage) {
     errorComponent = (
-      <div>
         <Alert status="error">
           <AlertIcon />
           <AlertDescription>
@@ -626,55 +595,67 @@ export function CreatePipeline() {
             </Text>
           </AlertDescription>
         </Alert>
-      </div>
     );
   }
 
   let previewCompletedComponent = <></>;
   if (job?.finishTime && !job?.failureMessage) {
     previewCompletedComponent = (
-      <div>
-        <Alert status="success">
-          <AlertIcon />
-          <AlertDescription>
-            <Text>Preview completed</Text>
-          </AlertDescription>
-        </Alert>
-      </div>
+      <Alert status="success" h={8}>
+        <AlertIcon boxSize={4} />
+        <AlertDescription>
+          <Text>Preview completed</Text>
+        </AlertDescription>
+      </Alert>
     );
-  }
-
-  let errorsTabIcon = <></>;
-  if (hasValidationErrors || hasOperatorErrors) {
-    errorsTabIcon = <Icon as={WarningIcon} color={'red.400'} ml={2} />;
   }
 
   const tabs = (
     <Tabs
       display={'flex'}
-      flexDirection={'column'}
+      flexDirection={'row'}
       index={tabIndex}
       onChange={i => setTabIndex(i)}
       flex={1}
       overflow={'auto'}
+      orientation="vertical"
+      variant={'unstyled'}
+      size={'md'}
+      colorScheme="green"
     >
       <TabList>
-        <Flex width={'100%'} justifyContent={'space-between'}>
-          <Flex>
-            <Tab>Pipeline</Tab>
-            <Tab>
-              <HStack>
-                <Text>Results</Text>
-                {previewing ? <Spinner size="xs" speed="0.9s" /> : null}
-              </HStack>
-            </Tab>
-            <Tab>
-              <Text>Errors</Text>
-              {errorsTabIcon}
-            </Tab>
-          </Flex>
-          {buttonGroup}
-        </Flex>
+        <Stack w={10} mx={2} spacing={4} h={'100%'} py={4}>
+          <Tab
+            title="Pipeline graph"
+            borderRadius={'md'}
+            _selected={{ bg: 'gray.600' }}
+            _hover={{ bg: 'gray.500 ' }}
+          >
+            <Icon as={PiGraph} boxSize={5} />
+          </Tab>
+          <Tab
+            title="Results"
+            borderRadius={'md'}
+            _selected={{ bg: 'gray.600' }}
+            _hover={{ bg: 'gray.500 ' }}
+          >
+            <HStack>
+              {previewing ? <Spinner size="xs" speed="0.9s" /> : <Icon boxSize={5} as={BiTable} />}
+            </HStack>
+          </Tab>
+          <Tab
+            title="Errors"
+            borderRadius={'md'}
+            _selected={{ bg: 'gray.600' }}
+            _hover={{ bg: 'gray.500 ' }}
+          >
+            <Icon
+              as={IoWarningOutline}
+              boxSize={5}
+              color={hasValidationErrors || hasOperatorErrors ? 'red.400' : undefined}
+            />
+          </Tab>
+        </Stack>
       </TabList>
       {previewTabsContent}
     </Tabs>
@@ -682,30 +663,49 @@ export function CreatePipeline() {
 
   const panelResizer = (
     <PanelResizeHandle>
-      <Flex justifyContent="center">
-        <MdDragHandle color={'grey'} />
-      </Flex>
+      <Box bg={"#111"} h={"2px"} w="100%" />
     </PanelResizeHandle>
   );
 
   return (
     <Flex height={'100vh'}>
-      <Flex>
-        <ResourcePanel tabIndex={resourcePanelTab} handleTabChange={setResourcePanelTab} />
-      </Flex>
-      <Flex direction={'column'} flex={1} minWidth={0}>
-        <PanelGroup autoSaveId={'create-pipeline-panels'} direction="vertical">
-          <Panel minSize={20}>{editorTabs}</Panel>
-          {panelResizer}
-          <Panel minSize={20}>
-            <Flex direction={'column'} height={'100%'}>
-              {errorComponent}
-              {previewCompletedComponent}
-              {tabs}
-            </Flex>
-          </Panel>
-        </PanelGroup>
-      </Flex>
+      <PanelGroup direction="horizontal">
+        <Panel minSize={0} defaultSize={15} collapsible={true} ref={panelRef}>
+          <Flex h={'100vh'} p={4} bgColor={"#1A1A1A"}>
+            { sidebarElement == 'tables' ? <CatalogTab /> :
+              sidebarElement == 'udfs' ? <UdfsResourceTab /> : null }
+          </Flex>
+        </Panel>
+        { sidebarElement != null && <PanelResizeHandle>
+            <Box bg={'#111'} w={"2px"} h="100%" />
+        </PanelResizeHandle> }
+        <Panel minSize={60}>
+          <Flex direction={'column'} bg={'#151515'} h={'100vh'}>
+            <PanelGroup autoSaveId={'create-pipeline-panels'} direction="vertical">
+              <Panel minSize={20}>
+                <PipelineEditorTabs
+                  queryInput={queryInput}
+                  previewing={previewing}
+                  startingPreview={startingPreview}
+                  preview={preview}
+                  stopPreview={stopPreview}
+                  run={run}
+                  pipelineIsValid={pipelineIsValid}
+                  updateQuery={updateQuery}
+                />
+              </Panel>
+              {panelResizer}
+              <Panel minSize={20}>
+                <Flex direction={'column'} height={'100%'}>
+                  {errorComponent}
+                  {tabs}
+                  {hasValidationErrors ? validationErrorAlert : previewCompletedComponent}
+                </Flex>
+              </Panel>
+            </PanelGroup>
+          </Flex>
+        </Panel>
+      </PanelGroup>
       <CreatePipelineTourModal />
       <TourCompleteModal />
       {startPipelineModal}

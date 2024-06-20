@@ -25,7 +25,7 @@ import {
   Text,
   useDisclosure,
 } from '@chakra-ui/react';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import 'reactflow/dist/style.css';
 import 'metrics-graphics/dist/mg.css';
 import PipelineConfigModal from './PipelineConfigModal';
@@ -52,6 +52,7 @@ import { PipelineOutputs } from './PipelineOutputs';
 import PaginatedContent from '../../components/PaginatedContent';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+import { useNavbar } from '../../App';
 
 export function PipelineDetails() {
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
@@ -75,6 +76,13 @@ export function PipelineDetails() {
   const { operatorMetricGroups } = useJobMetrics(id, job?.id);
 
   const hasErrors = operatorErrorsPages?.length && operatorErrorsPages[0]?.data.length > 0;
+
+  const { setMenuItems } = useNavbar();
+
+  useEffect(() => {
+    setMenuItems([]);
+  }, []);
+
 
   if (pipelineError || jobsError) {
     return (
