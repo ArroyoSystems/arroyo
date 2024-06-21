@@ -6,9 +6,12 @@ import {
   AccordionPanel,
   Box,
   Flex,
+  HStack,
+  Icon,
   Text,
 } from '@chakra-ui/react';
 import { ConnectionTable, SourceField } from '../../lib/data_fetching';
+import { BiTable } from 'react-icons/bi';
 
 function CatalogField({ field, nesting }: { field: SourceField; nesting: number }) {
   if (field.fieldType!.type.primitive) {
@@ -17,7 +20,7 @@ function CatalogField({ field, nesting }: { field: SourceField; nesting: number 
         <Box flex="1" textAlign="left">
           {field.fieldName}
         </Box>
-        <Box flex="1" textAlign="right">
+        <Box flex="1" textAlign="right" color={'pink.300'}>
           {field.fieldType.sqlName}
         </Box>
       </Flex>
@@ -49,11 +52,20 @@ export function Catalog({ tables }: { tables: Array<ConnectionTable> }) {
           <AccordionItem key={table.name} fontSize="xs" pb={4} borderWidth={0}>
             <Box>
               <AccordionButton padding={0}>
-                <Box fontWeight="bold" as="span" flex="1" textAlign="left">
-                  <Text fontSize="xs" pb={2}>
+                <HStack
+                  fontWeight="bold"
+                  as="span"
+                  flex="1"
+                  textAlign="left"
+                  fontFamily={'monospace'}
+                  alignItems={'middle'}
+                  color={'gray.300'}
+                >
+                  <Icon as={BiTable} boxSize={'4'} color={'blue.400'} />
+                  <Text fontSize="12px" pb={2}>
                     {table.name}
                   </Text>
-                </Box>
+                </HStack>
                 <AccordionIcon />
               </AccordionButton>
             </Box>

@@ -26,8 +26,9 @@ use crate::jobs::{
 use crate::metrics::__path_get_operator_metric_groups;
 use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::{
-    __path_create_pipeline, __path_delete_pipeline, __path_get_pipeline, __path_get_pipeline_jobs,
-    __path_patch_pipeline, __path_restart_pipeline, __path_validate_query,
+    __path_create_pipeline, __path_create_preview_pipeline, __path_delete_pipeline,
+    __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline, __path_restart_pipeline,
+    __path_validate_query,
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{service_unavailable, ErrorResp};
@@ -207,6 +208,7 @@ impl IntoResponse for HttpError {
         validate_query,
         validate_udf,
         create_pipeline,
+        create_preview_pipeline,
         patch_pipeline,
         restart_pipeline,
         get_pipeline,
@@ -237,6 +239,7 @@ impl IntoResponse for HttpError {
     components(schemas(
         ErrorResp,
         PipelinePost,
+        PreviewPost,
         PipelinePatch,
         PipelineRestart,
         Pipeline,

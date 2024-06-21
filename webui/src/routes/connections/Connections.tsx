@@ -27,13 +27,14 @@ import {
   ModalBody,
   ModalFooter,
 } from '@chakra-ui/react';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FiInfo, FiXCircle } from 'react-icons/fi';
 import { ConnectionTable, del, Format, useConnectionTables } from '../../lib/data_fetching';
 import { useNavigate } from 'react-router-dom';
 import { formatError } from '../../lib/util';
 import { formatDate } from '../../lib/util';
 import PaginatedContent from '../../components/PaginatedContent';
+import { useNavbar } from '../../App';
 
 interface ColumnDef {
   name: string;
@@ -92,8 +93,14 @@ export function Connections() {
     mutateConnectionTables,
     connectionTablesTotalPages,
     setConnectionTablesMaxPages,
-  } = useConnectionTables(10);
+  } = useConnectionTables(100);
   const [connectionTables, setConnectionTables] = useState<ConnectionTable[]>([]);
+
+  const { setMenuItems } = useNavbar();
+
+  useEffect(() => {
+    setMenuItems([]);
+  }, []);
 
   const deleteTable = async (connection: ConnectionTable) => {
     const { error } = await del('/v1/connection_tables/{id}', {

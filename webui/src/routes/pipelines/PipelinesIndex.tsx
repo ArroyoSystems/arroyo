@@ -2,10 +2,17 @@ import './pipelines.css';
 
 import { Button, Container, Heading, HStack, Stack } from '@chakra-ui/react';
 import { useLinkClickHandler } from 'react-router-dom';
-import React from 'react';
+import React, { useEffect } from 'react';
 import PipelinesTable from '../../components/PipelinesTable';
+import { useNavbar } from '../../App';
 
 export function PipelinesIndex() {
+  const { setMenuItems } = useNavbar();
+
+  useEffect(() => {
+    setMenuItems([]);
+  }, []);
+
   return (
     <Container py="8" flex="1">
       <Stack spacing={{ base: '8', lg: '6' }}>

@@ -67,6 +67,10 @@ export interface paths {
      */
     post: operations["create_pipeline"];
   };
+  "/v1/pipelines/preview": {
+    /** Create a new preview pipeline */
+    post: operations["create_preview_pipeline"];
+  };
   "/v1/pipelines/validate_query": {
     /** Validate a query and return pipeline graph */
     post: operations["validate_query"];
@@ -328,11 +332,11 @@ export interface components {
       value: number;
     };
     MetricGroup: {
-      name: components["schemas"]["MetricNames"];
+      name: components["schemas"]["MetricName"];
       subtasks: (components["schemas"]["SubtaskMetrics"])[];
     };
     /** @enum {string} */
-    MetricNames: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure";
+    MetricName: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure" | "tx_queue_size" | "tx_queue_rem";
     NewlineDelimitedFraming: {
       /** Format: int64 */
       maxLineLength?: number | null;
@@ -354,10 +358,13 @@ export interface components {
       data: (components["schemas"]["OperatorMetricGroup"])[];
     };
     OutputData: {
+      batch: string;
       operatorId: string;
       /** Format: int64 */
-      timestamp: number;
-      value: string;
+      startId: number;
+      /** Format: int32 */
+      subtaskIdx: number;
+      timestamps: (number)[];
     };
     PaginationQueryParams: {
       /** Format: int32 */
@@ -416,12 +423,16 @@ export interface components {
       name: string;
       /** Format: int64 */
       parallelism: number;
-      preview?: boolean | null;
       query: string;
       udfs?: (components["schemas"]["Udf"])[] | null;
     };
     PipelineRestart: {
       force?: boolean | null;
+    };
+    PreviewPost: {
+      enableSinks?: boolean;
+      query: string;
+      udfs?: (components["schemas"]["Udf"])[] | null;
     };
     /** @enum {string} */
     PrimitiveType: "Int32" | "Int64" | "UInt32" | "UInt64" | "F32" | "F64" | "Bool" | "String" | "Bytes" | "UnixMillis" | "UnixMicros" | "UnixNanos" | "DateTime" | "Json";
@@ -702,6 +713,28 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["PipelinePost"];
+      };
+    };
+    responses: {
+      /** @description Created pipeline and job */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Pipeline"];
+        };
+      };
+      /** @description Bad request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResp"];
+        };
+      };
+    };
+  };
+  /** Create a new preview pipeline */
+  create_preview_pipeline: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PreviewPost"];
       };
     };
     responses: {

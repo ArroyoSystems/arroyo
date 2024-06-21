@@ -24,6 +24,7 @@ import { ConfigureConnection } from './ConfigureConnection';
 import { DefineSchema } from './DefineSchema';
 import { ConnectionTester } from './ConnectionTester';
 import { ConfigureProfile } from './ConfigureProfile';
+import { useNavbar } from '../../App';
 
 export type CreateConnectionState = {
   name: string | undefined;
@@ -138,6 +139,12 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
 export const CreateConnection = () => {
   let { connectorId } = useParams();
   let { connectors, connectorsLoading } = useConnectors();
+
+  const { setMenuItems } = useNavbar();
+
+  useEffect(() => {
+    setMenuItems([]);
+  }, []);
 
   let navigate = useNavigate();
 

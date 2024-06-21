@@ -35,6 +35,9 @@ importers:
       '@emotion/styled':
         specifier: ^11.11.0
         version: 11.11.0(@emotion/react@11.11.1(@types/react@18.2.12)(react@18.2.0))(@types/react@18.2.12)(react@18.2.0)
+      '@fontsource/ibm-plex-mono':
+        specifier: ^5.0.13
+        version: 5.0.13
       '@fontsource/inter':
         specifier: ^4.5.15
         version: 4.5.15
@@ -68,6 +71,12 @@ importers:
       '@types/react-syntax-highlighter':
         specifier: ^15.5.7
         version: 15.5.7
+      ag-grid-community:
+        specifier: ^31.3.2
+        version: 31.3.2
+      ag-grid-react:
+        specifier: ^31.3.2
+        version: 31.3.2(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
       ajv:
         specifier: ^8.12.0
         version: 8.12.0
@@ -1257,6 +1266,9 @@ packages:
   '@floating-ui/utils@0.1.6':
     resolution: {integrity: sha512-OfX7E2oUDYxtBvsuS4e/jSn4Q9Qb6DzgeYtsAdkPZ47znpoNsMgZw0+tVijiv3uGNR6dgNlty6r9rzIzHjtd/A==}
 
+  '@fontsource/ibm-plex-mono@5.0.13':
+    resolution: {integrity: sha512-gtlMmvk//2AgDEZDFsoL5z9mgW3ZZg/9SC7pIfDwNKp5DtZpApgqd1Fua3HhPwYRIHrT76IQ1tMTzQKLEGtJGQ==}
+
   '@fontsource/inter@4.5.15':
     resolution: {integrity: sha512-FzleM9AxZQK2nqsTDtBiY0PMEVWvnKnuu2i09+p6DHvrHsuucoV2j0tmw+kAT3L4hvsLdAIDv6MdGehsPIdT+Q==}
 
@@ -1647,6 +1659,15 @@ packages:
     resolution: {integrity: sha512-xjIYgE8HBrkpd/sJqOGNspf8uHG+NOHGOw6a/Urj8taM2EXfdNAH2oFcPeIFfsv3+kz/mJrS5VuMqbNLjCa2vw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  ag-grid-community@31.3.2:
+    resolution: {integrity: sha512-GxqFRD0OcjaVRE1gwLgoP0oERNPH8Lk8wKJ1txulsxysEQ5dZWHhiIoXXSiHjvOCVMkK/F5qzY6HNrn6VeDMTQ==}
+
+  ag-grid-react@31.3.2:
+    resolution: {integrity: sha512-SFHN05bsXp901rIT00Fa6iQLCtyavoJiKaXEDUtAU5LMu+GTkjs/FPQBQ8754omgdDFr4NsS3Ri6QbqBne3rug==}
+    peerDependencies:
+      react: ^16.3.0 || ^17.0.0 || ^18.0.0
+      react-dom: ^16.3.0 || ^17.0.0 || ^18.0.0
 
   ajv-formats@2.1.1:
     resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
@@ -4714,6 +4735,8 @@ snapshots:
 
   '@floating-ui/utils@0.1.6': {}
 
+  '@fontsource/ibm-plex-mono@5.0.13': {}
+
   '@fontsource/inter@4.5.15': {}
 
   '@humanwhocodes/config-array@0.11.10':
@@ -5194,6 +5217,15 @@ snapshots:
       acorn: 8.8.2
 
   acorn@8.8.2: {}
+
+  ag-grid-community@31.3.2: {}
+
+  ag-grid-react@31.3.2(react-dom@18.2.0(react@18.2.0))(react@18.2.0):
+    dependencies:
+      ag-grid-community: 31.3.2
+      prop-types: 15.8.1
+      react: 18.2.0
+      react-dom: 18.2.0(react@18.2.0)
 
   ajv-formats@2.1.1(ajv@8.12.0):
     optionalDependencies:

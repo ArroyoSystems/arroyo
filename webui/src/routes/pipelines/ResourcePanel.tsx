@@ -1,6 +1,5 @@
 import React from 'react';
 import { Flex, HStack, Stack, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react';
-import CatalogTab from './CatalogTab';
 import UdfsResourceTab from '../udfs/UdfsResourceTab';
 
 export interface ResourcePanelProps {
@@ -35,9 +34,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ tabIndex, handleTabChange
           </Flex>
         </TabList>
         <TabPanels flex={1}>
-          <TabPanel height={'100%'} display={'flex'} px={5}>
-            <CatalogTab />
-          </TabPanel>
+          <TabPanel height={'100%'} display={'flex'} px={5}></TabPanel>
           <TabPanel height={'100%'} px={5}>
             <UdfsResourceTab />
           </TabPanel>

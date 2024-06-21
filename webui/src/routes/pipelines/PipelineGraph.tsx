@@ -80,7 +80,7 @@ export function PipelineGraphViewer({
       x: 0,
       y: 0,
       width: 200,
-      height: 100,
+      height: 50,
     };
   });
 
@@ -109,7 +109,7 @@ export function PipelineGraphViewer({
   });
 
   return (
-    <Box className="pipelineGraph">
+    <Box className="pipelineGraph" h="100%">
       <ReactFlow
         proOptions={{ hideAttribution: true }}
         nodes={nodes}

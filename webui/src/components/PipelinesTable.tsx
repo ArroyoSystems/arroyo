@@ -109,7 +109,9 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
       <Tr>
         <Th>Name / ID</Th>
         <Th>Created at</Th>
-        <Th>Job</Th>
+        <Th>State</Th>
+        <Th>Runtime</Th>
+        <Th>Tasks</Th>
         <Th></Th>
       </Tr>
     </Thead>

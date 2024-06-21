@@ -1,15 +1,15 @@
 import React from 'react';
-import { Alert, AlertDescription, AlertIcon, Box, Spacer, Stack, Text } from '@chakra-ui/react';
+import { Alert, AlertDescription, AlertIcon, Box, Stack, Text } from '@chakra-ui/react';
 import { Link } from 'react-router-dom';
 import { ConnectionTable, useConnectionTables } from '../../lib/data_fetching';
 import { Catalog } from './Catalog';
 
 const CatalogTab: React.FC = () => {
-  const { connectionTablePages, connectionTablesLoading } = useConnectionTables(50);
+  const { connectionTablePages, connectionTablesLoading } = useConnectionTables(200, false);
 
   let connectionTables: ConnectionTable[] = [];
   let catalogTruncated = false;
-  if (connectionTablePages?.length) {
+  if (connectionTablePages?.length && connectionTablePages[0]) {
     connectionTables = connectionTablePages[0].data;
     catalogTruncated = connectionTablePages[0].hasMore;
   }
@@ -24,10 +24,7 @@ const CatalogTab: React.FC = () => {
     catalogTruncatedWarning = (
       <Alert flexShrink={0} status="warning">
         <AlertIcon />
-        <AlertDescription>
-          The catalogue is too large to be shown in its entirety. Please see the Connections tab for
-          the complete listing.
-        </AlertDescription>
+        <AlertDescription>The catalogue is too large to be shown in its entirety.</AlertDescription>
       </Alert>
     );
   }
@@ -35,7 +32,7 @@ const CatalogTab: React.FC = () => {
   const catalogType = (name: string, tables: Array<ConnectionTable>) => {
     return (
       <Stack>
-        <Text fontSize={'md'} pt={2} pb={4} fontWeight={'bold'}>
+        <Text fontSize={'sm'} pt={2} pb={4} fontWeight={'bold'}>
           {name.toUpperCase()}S
         </Text>
         <Stack spacing={4}>
@@ -56,19 +53,10 @@ const CatalogTab: React.FC = () => {
   };
 
   return (
-    <Stack>
+    <Stack w="100%">
       {catalogTruncatedWarning}
       {catalogType('Source', sources)}
       {catalogType('Sink', sinks)}
-
-      <Spacer />
-      <Box p={4} borderTop={'1px solid'} borderColor={'gray.500'}>
-        Write SQL to create a streaming pipeline. See the{' '}
-        <Link to={'http://doc.arroyo.dev/sql'} target="_blank">
-          SQL docs
-        </Link>{' '}
-        for details on Arroyo SQL.
-      </Box>
     </Stack>
   );
 };

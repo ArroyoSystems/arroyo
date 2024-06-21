@@ -40,7 +40,7 @@ const UdfEditTab: React.FC<UdfEditTabProps> = ({ udf }) => {
   const cancelDeleteRef = useRef<HTMLButtonElement>(null);
 
   const tab = (
-    <Tab px={2} key={udf.id}>
+    <Tab height={10} px={2} key={udf.id}>
       <UdfLabel udf={udf} />
       <CloseButton as={'div'} w={5} fontSize={8} onClick={() => closeUdf(udf)} />
     </Tab>
@@ -119,9 +119,9 @@ const UdfEditTab: React.FC<UdfEditTabProps> = ({ udf }) => {
 
   return (
     <>
-      <Popover trigger={'hover'} variant={'default'} closeDelay={0} gutter={-8}>
+      <Popover trigger={'hover'} variant={'default'} closeDelay={100} gutter={-8}>
         <PopoverTrigger>{tab}</PopoverTrigger>
-        <PopoverContent width={'min-content'}>
+        <PopoverContent width={'min-content'} mt={2}>
           <PopoverArrow />
           <PopoverHeader>
             <Text align={'center'} fontStyle={'italic'} fontSize={'sm'}>

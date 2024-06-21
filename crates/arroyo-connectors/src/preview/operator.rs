@@ -1,18 +1,21 @@
 use arrow::array::{RecordBatch, TimestampNanosecondArray};
-use arrow::json::writer::record_batch_to_vec;
-use std::time::SystemTime;
+use arrow::json::writer::JsonArray;
+use arrow::json::{Writer, WriterBuilder};
+use std::collections::HashMap;
 
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::SinkDataReq;
-use arroyo_types::{from_nanos, to_micros, SignalMessage};
+use arroyo_rpc::grpc::{SinkDataReq, TableConfig};
+use arroyo_state::global_table_config;
+use arroyo_types::{from_nanos, to_micros, CheckpointBarrier, SignalMessage};
 use tonic::transport::Channel;
 
 #[derive(Default)]
 pub struct PreviewSink {
     client: Option<ControllerGrpcClient<Channel>>,
+    row: usize,
 }
 
 #[async_trait::async_trait]
@@ -21,7 +24,18 @@ impl ArrowOperator for PreviewSink {
         "Preview".to_string()
     }
 
-    async fn on_start(&mut self, _: &mut ArrowContext) {
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        global_table_config(
+            "s",
+            "Number of rows of output produced by this preview sink",
+        )
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        let table = ctx.table_manager.get_global_keyed_state("s").await.unwrap();
+
+        self.row = *table.get(&ctx.task_info.task_index).unwrap_or(&0);
+
         self.client = Some(
             ControllerGrpcClient::connect(config().controller_endpoint())
                 .await
@@ -31,39 +45,56 @@ impl ArrowOperator for PreviewSink {
 
     async fn process_batch(&mut self, mut batch: RecordBatch, ctx: &mut ArrowContext) {
         let ts = ctx.in_schemas[0].timestamp_index;
-        let timestamp_column = batch
+        let timestamps: Vec<_> = batch
             .column(ts)
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
             .unwrap()
-            .clone();
+            .iter()
+            .map(|t| to_micros(from_nanos(t.unwrap_or(0).max(0) as u128)))
+            .collect();
 
         batch.remove_column(ts);
 
-        let rows = record_batch_to_vec(&batch, true, arrow::json::writer::TimestampFormat::RFC3339)
+        let mut buf = Vec::with_capacity(batch.get_array_memory_size());
+
+        let mut writer: Writer<_, JsonArray> = WriterBuilder::new()
+            .with_explicit_nulls(true)
+            .with_timestamp_format(arrow::json::writer::TimestampFormat::RFC3339)
+            .build(&mut buf);
+
+        writer.write(&batch).unwrap();
+
+        writer.finish().unwrap();
+
+        self.client
+            .as_mut()
+            .unwrap()
+            .send_sink_data(SinkDataReq {
+                job_id: ctx.task_info.job_id.clone(),
+                operator_id: ctx.task_info.operator_id.clone(),
+                subtask_index: ctx.task_info.task_index as u32,
+                timestamps,
+                batch: String::from_utf8(buf).unwrap_or_else(|_| String::new()),
+                start_id: self.row as u64,
+                done: false,
+            })
+            .await
             .unwrap();
 
-        for (value, timestamp) in rows.into_iter().zip(timestamp_column.iter()) {
-            let s = String::from_utf8(value).unwrap();
-            self.client
-                .as_mut()
-                .unwrap()
-                .send_sink_data(SinkDataReq {
-                    job_id: ctx.task_info.job_id.clone(),
-                    operator_id: ctx.task_info.operator_id.clone(),
-                    subtask_index: ctx.task_info.task_index as u32,
-                    timestamp: to_micros(
-                        timestamp
-                            .map(|nanos| from_nanos(nanos as u128))
-                            .unwrap_or_else(SystemTime::now),
-                    ),
-                    value: s,
-                    done: false,
-                })
-                .await
-                .unwrap();
-        }
+        self.row += batch.num_rows();
     }
+
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
+        let table = ctx
+            .table_manager
+            .get_global_keyed_state::<usize, usize>("s")
+            .await
+            .unwrap();
+
+        table.insert(ctx.task_info.task_index, self.row).await;
+    }
+
     async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
         self.client
             .as_mut()
@@ -72,8 +103,9 @@ impl ArrowOperator for PreviewSink {
                 job_id: ctx.task_info.job_id.clone(),
                 operator_id: ctx.task_info.operator_id.clone(),
                 subtask_index: ctx.task_info.task_index as u32,
-                timestamp: to_micros(SystemTime::now()),
-                value: "".to_string(),
+                timestamps: vec![],
+                batch: "[]".to_string(),
+                start_id: self.row as u64,
                 done: true,
             })
             .await

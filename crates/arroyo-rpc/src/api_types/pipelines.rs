@@ -23,9 +23,17 @@ pub struct PipelinePost {
     pub name: String,
     pub query: String,
     pub udfs: Option<Vec<Udf>>,
-    pub preview: Option<bool>,
     pub parallelism: u64,
     pub checkpoint_interval_micros: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewPost {
+    pub query: String,
+    pub udfs: Option<Vec<Udf>>,
+    #[serde(default)]
+    pub enable_sinks: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -133,16 +141,20 @@ pub struct JobLogMessage {
 #[serde(rename_all = "camelCase")]
 pub struct OutputData {
     pub operator_id: String,
-    pub timestamp: u64,
-    pub value: String,
+    pub subtask_idx: u32,
+    pub timestamps: Vec<u64>,
+    pub start_id: u64,
+    pub batch: String,
 }
 
 impl From<grpc_proto::OutputData> for OutputData {
     fn from(value: grpc_proto::OutputData) -> Self {
         OutputData {
             operator_id: value.operator_id,
-            timestamp: value.timestamp,
-            value: value.value,
+            subtask_idx: value.subtask_idx,
+            timestamps: value.timestamps,
+            start_id: value.start_id,
+            batch: value.batch,
         }
     }
 }

@@ -18,10 +18,18 @@ import {
 } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
 import { useConnectors } from '../../lib/data_fetching';
+import { useNavbar } from '../../App';
+import { useEffect } from 'react';
 
 export function ChooseConnector() {
   const navigate = useNavigate();
   const { connectors } = useConnectors();
+
+  const { setMenuItems } = useNavbar();
+
+  useEffect(() => {
+    setMenuItems([]);
+  }, []);
 
   const connectorCards = connectors?.map(c => {
     return (

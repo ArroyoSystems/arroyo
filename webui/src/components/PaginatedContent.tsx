@@ -29,11 +29,12 @@ const PaginatedContent: React.FC<PaginatedContentProps> = ({
   const currentPage = pages?.length ? pages[pageNum - 1] : undefined;
 
   useEffect(() => {
+    const currentPage = pages?.length ? pages[pageNum - 1] : undefined;
     setMaxPages(Math.max(pageNum, totalPages));
     if (currentPage) {
       setCurrentData(currentPage.data);
     }
-  }, [currentPage]);
+  }, [pages, currentPage]);
 
   if (!pages || !pages.length || pages.length != totalPages || loading || !currentPage) {
     return <Loading />;

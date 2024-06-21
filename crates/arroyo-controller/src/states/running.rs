@@ -115,7 +115,14 @@ impl State for Running {
                                 "service": "controller",
                                 "job_id": ctx.config.id,
                                 "error": format!("{:?}", err),
+                                "is_preview": ctx.config.ttl.is_some(),
                             }));
+
+                            // only allow one restart for preview pipelines
+                            if ctx.config.ttl.is_some() {
+                                return Err(fatal("Job encountered a fatal error; see worker logs for details", err));
+                            }
+
                             if pipeline_config.allowed_restarts != -1 && ctx.status.restarts >= pipeline_config.allowed_restarts {
                                 return Err(fatal(
                                     "Job has restarted too many times",

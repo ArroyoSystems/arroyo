@@ -372,8 +372,10 @@ impl ControllerGrpc for ControllerServer {
         if let Some(v) = data_txs.get_mut(&req.job_id) {
             let output = OutputData {
                 operator_id: req.operator_id,
-                timestamp: req.timestamp,
-                value: req.value,
+                subtask_idx: req.subtask_index,
+                timestamps: req.timestamps,
+                batch: req.batch,
+                start_id: req.start_id,
                 done: req.done,
             };
 

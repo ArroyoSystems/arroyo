@@ -13,7 +13,10 @@ const config: ThemeConfig = {
 };
 
 const theme = extendTheme(proTheme, {
-  colors: { ...proTheme.colors, brand: proTheme.colors.blue },
+  colors: {
+    ...proTheme.colors,
+    brand: proTheme.colors.blue,
+  },
   config: config,
   components: { Modal: modalTheme, Popover: popoverTheme, Tabs: tabsTheme },
 });

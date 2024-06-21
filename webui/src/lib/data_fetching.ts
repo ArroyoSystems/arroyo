@@ -217,12 +217,11 @@ const connectionTablesFetcher = () => {
   };
 };
 
-export const useConnectionTables = (limit: number) => {
+export const useConnectionTables = (limit: number, refresh?: boolean) => {
+  const options = refresh ? { refreshInterval: 5000 } : {};
   const { data, isLoading, mutate, size, setSize } = useSWRInfinite<
     schemas['ConnectionTableCollection']
-  >(connectionTablesKey(limit), connectionTablesFetcher(), {
-    refreshInterval: 5000,
-  });
+  >(connectionTablesKey(limit), connectionTablesFetcher(), options);
 
   return {
     connectionTablePages: data,
@@ -443,6 +442,7 @@ const pipelinesFetcher = () => {
     const { data, error } = await get('/v1/pipelines', {
       params: {
         query: {
+          limit: 100,
           starting_after: params.startingAfter,
         },
       },
@@ -457,7 +457,7 @@ export const usePipelines = () => {
     pipelinesKey,
     pipelinesFetcher(),
     {
-      refreshInterval: 2000,
+      refreshInterval: 5000,
     }
   );
 
@@ -550,8 +550,12 @@ const pipelineJobsFetcher = () => {
   };
 };
 
-export const usePipelineJobs = (pipelineId?: string, refresh: boolean = false) => {
-  const options = refresh ? { refreshInterval: 2000 } : {};
+export const usePipelineJobs = (
+  pipelineId?: string,
+  refresh: boolean = false,
+  refreshInterval?: number
+) => {
+  const options = refresh ? { refreshInterval: refreshInterval || 2000 } : {};
   const { data, error } = useSWR<schemas['JobCollection']>(
     pipelineJobsKey(pipelineId),
     pipelineJobsFetcher(),
@@ -599,23 +603,6 @@ export const useOperatorErrors = (pipelineId?: string, jobId?: string) => {
     operatorErrorsTotalPages: size,
     setOperatorErrorsMaxPages: setSize,
   };
-};
-
-export const useJobOutput = (
-  handler: (event: MessageEvent) => void,
-  pipelineId?: string,
-  jobId?: string
-) => {
-  if (!pipelineId || !jobId) {
-    return;
-  }
-  const url = `${BASE_URL}/v1/pipelines/${pipelineId}/jobs/${jobId}/output`;
-  const eventSource = new EventSource(url);
-  eventSource.onerror = () => {
-    eventSource.close();
-  };
-  eventSource.addEventListener('message', handler);
-  return eventSource;
 };
 
 export const useConnectionTableTest = async (
