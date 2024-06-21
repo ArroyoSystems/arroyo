@@ -81,8 +81,8 @@ pub async fn create_udf(
     api_queries::execute_create_udf(
         &client,
         &pub_id,
-        &auth_data.user_id,
         &auth_data.organization_id,
+        &auth_data.user_id,
         &req.prefix,
         &udf_name,
         &req.definition,

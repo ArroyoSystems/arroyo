@@ -26,8 +26,6 @@ import {
   JobLogMessage,
   PipelineLocalUdf,
   post,
-  useConnectionTables,
-  useJobMetrics,
   useOperatorErrors,
   usePipeline,
   usePipelineJobs,
@@ -81,13 +79,11 @@ export function CreatePipeline() {
   const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
   const [queryInput, setQueryInput] = useState<string>('');
   const [queryInputToCheck, setQueryInputToCheck] = useState<string | undefined>(undefined);
-  const { operatorMetricGroups } = useJobMetrics(pipelineId, job?.id);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
   const navigate = useNavigate();
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);
-  const { connectionTablesLoading } = useConnectionTables(50);
   const queryParams = useQuery();
   const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
     queryParams.get('from') ?? undefined
@@ -213,7 +209,7 @@ export function CreatePipeline() {
   }, [sidebarElement]);
 
   // Top-level loading state
-  if (copyFromLoading || connectionTablesLoading || !localUdfs) {
+  if (copyFromLoading || !localUdfs) {
     return <Loading />;
   }
 
@@ -386,11 +382,7 @@ export function CreatePipeline() {
           }}
           overflow="auto"
         >
-          <PipelineGraphViewer
-            graph={queryValidation.graph}
-            operatorMetricGroups={operatorMetricGroups}
-            setActiveOperator={() => {}}
-          />
+          <PipelineGraphViewer graph={queryValidation.graph} setActiveOperator={() => {}} />
         </Box>
       </TabPanel>
     );

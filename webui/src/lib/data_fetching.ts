@@ -217,12 +217,11 @@ const connectionTablesFetcher = () => {
   };
 };
 
-export const useConnectionTables = (limit: number) => {
+export const useConnectionTables = (limit: number, refresh?: boolean) => {
+  const options = refresh ? { refreshInterval: 5000 } : {};
   const { data, isLoading, mutate, size, setSize } = useSWRInfinite<
     schemas['ConnectionTableCollection']
-  >(connectionTablesKey(limit), connectionTablesFetcher(), {
-    refreshInterval: 5000,
-  });
+  >(connectionTablesKey(limit), connectionTablesFetcher(), options);
 
   return {
     connectionTablePages: data,

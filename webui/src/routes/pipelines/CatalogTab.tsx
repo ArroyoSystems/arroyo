@@ -5,7 +5,7 @@ import { ConnectionTable, useConnectionTables } from '../../lib/data_fetching';
 import { Catalog } from './Catalog';
 
 const CatalogTab: React.FC = () => {
-  const { connectionTablePages, connectionTablesLoading } = useConnectionTables(200);
+  const { connectionTablePages, connectionTablesLoading } = useConnectionTables(200, false);
 
   let connectionTables: ConnectionTable[] = [];
   let catalogTruncated = false;
