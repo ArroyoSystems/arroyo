@@ -127,6 +127,10 @@ impl ConfluentSchemaRegistryClient {
         api_key: Option<VarStr>,
         api_secret: Option<VarStr>,
     ) -> anyhow::Result<Self> {
+        if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+            bail!("schema registry endpoint must start with a protocol (like `https://`)")
+        }
+
         let mut client = Client::builder().timeout(Duration::from_secs(5));
 
         if let Some(api_key) = api_key {
@@ -326,11 +330,17 @@ impl ConfluentSchemaRegistry {
         })
     }
 
-    fn subject_endpoint(&self) -> Url {
+    fn subject_endpoint(&self) -> anyhow::Result<Url> {
         self.client
             .endpoint
             .join(&format!("subjects/{}/versions/", self.subject))
-            .unwrap()
+            .map_err(|e| {
+                anyhow!(
+                    "'{}' is not a valid schema registry endpoint: {}",
+                    self.client.endpoint,
+                    e
+                )
+            })
     }
 
     pub async fn write_schema(
@@ -339,7 +349,7 @@ impl ConfluentSchemaRegistry {
         schema_type: ConfluentSchemaType,
     ) -> anyhow::Result<i32> {
         self.client
-            .write_schema(self.subject_endpoint(), schema, schema_type)
+            .write_schema(self.subject_endpoint()?, schema, schema_type)
             .await
             .context(format!("subject '{}'", self.subject))
     }
@@ -368,7 +378,7 @@ impl ConfluentSchemaRegistry {
             .map(|v| format!("{}", v))
             .unwrap_or_else(|| "latest".to_string());
 
-        let url = self.subject_endpoint().join(&version).unwrap();
+        let url = self.subject_endpoint()?.join(&version).unwrap();
 
         self.client.get_schema_for_url(url).await.context(format!(
             "failed to fetch schema for subject '{}' with version {}",

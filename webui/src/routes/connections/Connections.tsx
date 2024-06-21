@@ -102,7 +102,6 @@ export function Connections() {
     setMenuItems([]);
   }, []);
 
-
   const deleteTable = async (connection: ConnectionTable) => {
     const { error } = await del('/v1/connection_tables/{id}', {
       params: { path: { id: connection.id } },

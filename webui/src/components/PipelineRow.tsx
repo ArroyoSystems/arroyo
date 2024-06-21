@@ -1,10 +1,9 @@
 import React from 'react';
 import { Job, Pipeline, usePipelineJobs } from '../lib/data_fetching';
-import { Card, CardBody, Flex, IconButton, Link, Td, Tr, Text } from '@chakra-ui/react';
+import { Flex, IconButton, Link, Td, Tr, Text } from '@chakra-ui/react';
 import { formatDate, relativeTime } from '../lib/util';
 import { FiCopy, FiXCircle } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
-
 
 export interface IndicatorProps {
   content: string | undefined;
@@ -30,7 +29,6 @@ const Indicator: React.FC<IndicatorProps> = ({ content, label, color }) => {
     </Flex>
   );
 };
-
 
 export interface JobCardProps {
   job: Job;
@@ -58,7 +56,6 @@ function stateColor(state: string): string {
   return 'gray.400';
 }
 
-
 function formatDuration(micros: number): string {
   let millis = micros / 1000;
   let secs = Math.floor(millis / 1000);
@@ -76,14 +73,11 @@ function formatDuration(micros: number): string {
   }
 }
 
-
-
 export interface PipelineRowProps {
   pipeline: Pipeline;
   setPipelineIdToBeDeleted: (pipelineId: string) => void;
   onOpen: () => void;
 }
-
 
 const PipelineRow: React.FC<PipelineRowProps> = ({
   pipeline,
@@ -102,7 +96,10 @@ const PipelineRow: React.FC<PipelineRowProps> = ({
   return (
     <Tr key={pipeline.id}>
       <Td key={'name'} minWidth={230} maxWidth={'400px'}>
-        <Link href={`/pipelines/${pipeline.id}`}>
+        <Link
+          href={`/pipelines/${pipeline.id}`}
+          onClick={() => navigate(`/pipelines/${pipeline.id}`)}
+        >
           <Indicator content={pipeline.name} label={pipeline.id} />
         </Link>
       </Td>

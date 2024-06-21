@@ -4,19 +4,10 @@ import {
   AlertIcon,
   Badge,
   Box,
-  Button,
-  Collapse,
+  Code,
   Flex,
   HStack,
   Icon,
-  Popover,
-  PopoverArrow,
-  PopoverBody,
-  PopoverCloseButton,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTrigger,
-  Spacer,
   Spinner,
   Stack,
   Tab,
@@ -33,12 +24,10 @@ import { PipelineGraphViewer } from './PipelineGraph';
 import { SqlOptions } from '../../lib/types';
 import {
   JobLogMessage,
-  OutputData,
   PipelineLocalUdf,
   post,
   useConnectionTables,
   useJobMetrics,
-  useJobOutput,
   useOperatorErrors,
   usePipeline,
   usePipelineJobs,
@@ -48,10 +37,13 @@ import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
 import StartPipelineModal from '../../components/StartPipelineModal';
 import { formatError } from '../../lib/util';
-import { WarningIcon } from '@chakra-ui/icons';
 import PaginatedContent from '../../components/PaginatedContent';
-import { ImperativePanelGroupHandle, ImperativePanelHandle, Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { MdDragHandle } from 'react-icons/md';
+import {
+  ImperativePanelHandle,
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+} from 'react-resizable-panels';
 import { PipelineOutputs } from './PipelineOutputs';
 import { TourContext, TourSteps } from '../../tour';
 import CreatePipelineTourModal from '../../components/CreatePipelineTourModal';
@@ -59,13 +51,11 @@ import TourCompleteModal from '../../components/TourCompleteModal';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import PipelineEditorTabs from './PipelineEditorTabs';
-import ResourcePanel from './ResourcePanel';
 import { LocalUdf, LocalUdfsContext } from '../../udf_state';
 import UdfLabel from '../udfs/UdfLabel';
 import { PiFileSqlDuotone, PiFunction, PiGraph } from 'react-icons/pi';
 import { BiTable } from 'react-icons/bi';
 import { IoWarningOutline } from 'react-icons/io5';
-import { motion } from 'framer-motion';
 import { useNavbar } from '../../App';
 import { FiDatabase } from 'react-icons/fi';
 import CatalogTab from './CatalogTab';
@@ -77,10 +67,14 @@ function useQuery() {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
+export interface PreviewOptions {
+  enableSinks: boolean;
+}
+
 export function CreatePipeline() {
   const [pipelineId, setPipelineId] = useState<string | undefined>(undefined);
   const { updatePipeline } = usePipeline(pipelineId);
-  const { jobs } = usePipelineJobs(pipelineId, true);
+  const { jobs } = usePipelineJobs(pipelineId, true, 500);
   const job = jobs?.length ? jobs[0] : undefined;
   const { operatorErrorsPages, operatorErrorsTotalPages, setOperatorErrorsMaxPages } =
     useOperatorErrors(pipelineId, job?.id);
@@ -93,8 +87,6 @@ export function CreatePipeline() {
   const navigate = useNavigate();
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);
-  const [outputSource, setOutputSource] = useState<EventSource | undefined>(undefined);
-  const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
   const { connectionTablesLoading } = useConnectionTables(50);
   const queryParams = useQuery();
   const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
@@ -107,8 +99,8 @@ export function CreatePipeline() {
     queryInputToCheck,
     localUdfsToCheck
   );
+  const [previewError, setPreviewError] = useState<string | undefined>(undefined);
   const hasUdfValidationErrors = localUdfs.some(u => u.errors?.length);
-  const hasValidationErrors = queryValidation?.errors?.length || hasUdfValidationErrors;
   const [resourcePanelTab, setResourcePanelTab] = useState(0);
   const [udfValidationApiError, setUdfValidationApiError] = useState<any | undefined>(undefined);
   const [validationInProgress, setValidationInProgress] = useState<boolean>(false);
@@ -116,9 +108,12 @@ export function CreatePipeline() {
 
   const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
 
-  const [sidebarElement, setSidebarElement] = useState<"tables" | "udfs" | null>('tables');
+  const [sidebarElement, setSidebarElement] = useState<'tables' | 'udfs' | null>('tables');
+  const [previewOptions, setPreviewOptions] = useState<PreviewOptions>({ enableSinks: false });
 
   const { setMenuItems } = useNavbar();
+
+  const hasValidationErrors = queryValidation?.errors?.length || hasUdfValidationErrors;
 
   useEffect(() => {
     setMenuItems([
@@ -168,15 +163,15 @@ export function CreatePipeline() {
           // merge with local udfs
           let merged = localUdfs;
           for (const udf of udfs) {
-            const { data: udfValiation } = await post('/v1/udfs/validate', {
+            const { data: udfValidation } = await post('/v1/udfs/validate', {
               body: {
                 definition: udf.definition,
               },
             });
 
-            if (udfValiation) {
-              udf.name = udfValiation.udfName ?? udf.name;
-              udf.errors = udfValiation.errors ?? [];
+            if (udfValidation) {
+              udf.name = udfValidation.udfName ?? udf.name;
+              udf.errors = udfValidation.errors ?? [];
             }
 
             if (!merged.some(u => u.name == udf.name)) {
@@ -205,25 +200,6 @@ export function CreatePipeline() {
     return `udf_${id}`;
   };
 
-  const sseHandler = (event: MessageEvent) => {
-    const parsed = JSON.parse(event.data) as OutputData;
-    const o = { id: Number(event.lastEventId), data: parsed };
-    outputs.push(o);
-    if (outputs.length > 20) {
-      outputs.shift();
-    }
-    setOutputs(outputs.slice());
-  };
-
-  useEffect(() => {
-    if (pipelineId && job) {
-      if (outputSource) {
-        outputSource.close();
-      }
-      setOutputSource(useJobOutput(sseHandler, pipelineId, job.id));
-    }
-  }, [job?.id]);
-
   const panelRef = useRef<ImperativePanelHandle | null>(null);
 
   useEffect(() => {
@@ -235,8 +211,6 @@ export function CreatePipeline() {
       }
     }
   }, [sidebarElement]);
-
-
 
   // Top-level loading state
   if (copyFromLoading || connectionTablesLoading || !localUdfs) {
@@ -295,7 +269,6 @@ export function CreatePipeline() {
     setPipelineId(undefined);
     setQueryInputToCheck(queryInput);
     setLocalUdfsToCheck(localUdfs);
-    setOutputs([]);
     setUdfValidationApiError(undefined);
     await stopPreview();
 
@@ -317,6 +290,7 @@ export function CreatePipeline() {
     setTourStep(undefined);
     setQueryInputToCheck('');
     setStartingPreview(true);
+    setPreviewError(undefined);
 
     if (!(await pipelineIsValid(1))) {
       setStartingPreview(false);
@@ -327,20 +301,19 @@ export function CreatePipeline() {
       definition: u.definition,
     }));
 
-    const { data: newPipeline, error } = await post('/v1/pipelines', {
+    const { data: newPipeline, error } = await post('/v1/pipelines/preview', {
       body: {
-        name: `preview-${new Date().getTime()}`,
-        parallelism: 1,
-        preview: true,
         query: queryInput,
         udfs,
+        enableSinks: previewOptions.enableSinks,
       },
     });
 
     setStartingPreview(false);
 
     if (error) {
-      console.log('Create pipeline failed');
+      console.error('Create pipeline failed', error);
+      setPreviewError(`Failed to start preview: ${formatError(error)}`);
     } else {
       // Setting the pipeline id will trigger fetching the job and subscribing to the output
       setPipelineId(newPipeline?.id);
@@ -349,10 +322,6 @@ export function CreatePipeline() {
 
   const stopPreview = async () => {
     await updatePipeline({ stop: 'immediate' });
-
-    if (outputSource) {
-      outputSource.close();
-    }
   };
 
   const run = async () => {
@@ -398,7 +367,6 @@ export function CreatePipeline() {
     />
   );
 
-
   let previewPipelineTab = (
     <TabPanel height="100%" position="relative">
       <Text>Check your SQL to see the pipeline graph.</Text>
@@ -431,7 +399,7 @@ export function CreatePipeline() {
   let previewResultsTabContent = <Text>Preview your SQL to see outputs.</Text>;
   const previewing = job?.runningDesired && job?.state != 'Failed' && !job?.finishTime;
 
-  if (outputs.length) {
+  if (pipelineId != null && jobs != null && jobs[0] != null) {
     setTourStep(TourSteps.TourCompleted);
     previewResultsTabContent = (
       <Box
@@ -444,7 +412,7 @@ export function CreatePipeline() {
         }}
         overflow="auto"
       >
-        <PipelineOutputs outputs={outputs} />
+        <PipelineOutputs pipelineId={pipelineId} job={jobs[0]} onDemand={false} />
       </Box>
     );
   } else {
@@ -548,7 +516,7 @@ export function CreatePipeline() {
   } else {
     errorsTab = (
       <TabPanel overflowX="auto" height="100%" position="relative">
-        <Text color={"gray.500"}>No job errors</Text>
+        <Text color={'gray.500'}>No job errors</Text>
       </TabPanel>
     );
   }
@@ -580,6 +548,12 @@ export function CreatePipeline() {
     errorMessage = formatError(udfValidationApiError);
   } else if (job?.state == 'Failed') {
     errorMessage = job.failureMessage ?? 'Job failed.';
+  } else if (previewError) {
+    errorMessage = (
+      <Code backgroundColor={'transparent'}>
+        <pre>{previewError}</pre>
+      </Code>
+    );
   } else {
     errorMessage = '';
   }
@@ -587,14 +561,14 @@ export function CreatePipeline() {
   let errorComponent = <></>;
   if (errorMessage) {
     errorComponent = (
-        <Alert status="error">
-          <AlertIcon />
-          <AlertDescription>
-            <Text noOfLines={2} textOverflow={'ellipsis'} wordBreak={'break-all'}>
-              {errorMessage}
-            </Text>
-          </AlertDescription>
-        </Alert>
+      <Alert status="error">
+        <AlertIcon />
+        <AlertDescription>
+          <Text noOfLines={2} textOverflow={'ellipsis'} wordBreak={'break-all'}>
+            {errorMessage}
+          </Text>
+        </AlertDescription>
+      </Alert>
     );
   }
 
@@ -663,7 +637,7 @@ export function CreatePipeline() {
 
   const panelResizer = (
     <PanelResizeHandle>
-      <Box bg={"#111"} h={"2px"} w="100%" />
+      <Box bg={'#111'} h={'2px'} w="100%" />
     </PanelResizeHandle>
   );
 
@@ -671,14 +645,19 @@ export function CreatePipeline() {
     <Flex height={'100vh'}>
       <PanelGroup direction="horizontal">
         <Panel minSize={0} defaultSize={15} collapsible={true} ref={panelRef}>
-          <Flex h={'100vh'} p={4} bgColor={"#1A1A1A"}>
-            { sidebarElement == 'tables' ? <CatalogTab /> :
-              sidebarElement == 'udfs' ? <UdfsResourceTab /> : null }
+          <Flex h={'100vh'} overflowY={'auto'} p={4} bgColor={'#1A1A1A'}>
+            {sidebarElement == 'tables' ? (
+              <CatalogTab />
+            ) : sidebarElement == 'udfs' ? (
+              <UdfsResourceTab />
+            ) : null}
           </Flex>
         </Panel>
-        { sidebarElement != null && <PanelResizeHandle>
-            <Box bg={'#111'} w={"2px"} h="100%" />
-        </PanelResizeHandle> }
+        {sidebarElement != null && (
+          <PanelResizeHandle>
+            <Box bg={'#111'} w={'2px'} h="100%" />
+          </PanelResizeHandle>
+        )}
         <Panel minSize={60}>
           <Flex direction={'column'} bg={'#151515'} h={'100vh'}>
             <PanelGroup autoSaveId={'create-pipeline-panels'} direction="vertical">
@@ -692,6 +671,9 @@ export function CreatePipeline() {
                   run={run}
                   pipelineIsValid={pipelineIsValid}
                   updateQuery={updateQuery}
+                  previewOptions={previewOptions}
+                  setPreviewOptions={setPreviewOptions}
+                  job={job}
                 />
               </Panel>
               {panelResizer}

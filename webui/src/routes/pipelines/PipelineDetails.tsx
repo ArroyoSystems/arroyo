@@ -30,10 +30,8 @@ import 'reactflow/dist/style.css';
 import 'metrics-graphics/dist/mg.css';
 import PipelineConfigModal from './PipelineConfigModal';
 import {
-  OutputData,
   StopType,
   useJobCheckpoints,
-  useJobOutput,
   useJobMetrics,
   useOperatorErrors,
   usePipeline,
@@ -56,8 +54,6 @@ import { useNavbar } from '../../App';
 
 export function PipelineDetails() {
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
-  const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
-  const [subscribed, setSubscribed] = useState<boolean>(false);
   const {
     isOpen: configModalOpen,
     onOpen: onConfigModalOpen,
@@ -83,7 +79,6 @@ export function PipelineDetails() {
     setMenuItems([]);
   }, []);
 
-
   if (pipelineError || jobsError) {
     return (
       <PipelineNotFound
@@ -96,24 +91,6 @@ export function PipelineDetails() {
   if (!pipeline || !job || !operatorErrorsPages) {
     return <Loading />;
   }
-
-  const sseHandler = (event: MessageEvent) => {
-    const parsed = JSON.parse(event.data) as OutputData;
-    outputs.push({ id: Number(event.lastEventId), data: parsed });
-    if (outputs.length > 20) {
-      outputs.shift();
-    }
-    setOutputs(outputs.slice());
-  };
-
-  const subscribe = async () => {
-    if (subscribed) {
-      return;
-    }
-
-    setSubscribed(true);
-    useJobOutput(sseHandler, pipeline.id, job?.id);
-  };
 
   async function updateJobState(stop: StopType) {
     console.log(`Setting pipeline stop_mode=${stop}`);
@@ -180,17 +157,11 @@ export function PipelineDetails() {
   );
 
   const outputsTab = (
-    <TabPanel w={'100%'}>
-      {outputs.length == 0 ? (
-        pipeline.graph.nodes.find(n => n.operator.includes('preview')) != null ? (
-          <Button isLoading={subscribed} onClick={subscribe} width={150} size="sm">
-            Read output
-          </Button>
-        ) : (
-          <Text>Pipeline does not have a web sink</Text>
-        )
+    <TabPanel w={'100%'} h={'100%'}>
+      {pipeline.graph.nodes.find(n => n.operator.includes('preview')) == null ? (
+        <Text>Pipeline does not have a web sink</Text>
       ) : (
-        <PipelineOutputs outputs={outputs} />
+        <PipelineOutputs pipelineId={pipeline.id} job={job} onDemand={true} />
       )}
     </TabPanel>
   );

@@ -146,7 +146,6 @@ export const CreateConnection = () => {
     setMenuItems([]);
   }, []);
 
-
   let navigate = useNavigate();
 
   let connector = connectors?.find(c => c.id === connectorId);

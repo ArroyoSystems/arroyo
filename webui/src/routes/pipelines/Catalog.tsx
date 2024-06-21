@@ -11,7 +11,6 @@ import {
   Text,
 } from '@chakra-ui/react';
 import { ConnectionTable, SourceField } from '../../lib/data_fetching';
-import { FiTablet } from 'react-icons/fi';
 import { BiTable } from 'react-icons/bi';
 
 function CatalogField({ field, nesting }: { field: SourceField; nesting: number }) {
@@ -21,11 +20,7 @@ function CatalogField({ field, nesting }: { field: SourceField; nesting: number 
         <Box flex="1" textAlign="left">
           {field.fieldName}
         </Box>
-        <Box
-          flex="1"
-          textAlign="right"
-          color={'purple.400'}
-        >
+        <Box flex="1" textAlign="right" color={'pink.300'}>
           {field.fieldType.sqlName}
         </Box>
       </Flex>
@@ -64,9 +59,9 @@ export function Catalog({ tables }: { tables: Array<ConnectionTable> }) {
                   textAlign="left"
                   fontFamily={'monospace'}
                   alignItems={'middle'}
-                  color={"gray.300"}
+                  color={'gray.300'}
                 >
-                  <Icon as={BiTable} boxSize={'4'} color={"blue.400"} />
+                  <Icon as={BiTable} boxSize={'4'} color={'blue.400'} />
                   <Text fontSize="12px" pb={2}>
                     {table.name}
                   </Text>

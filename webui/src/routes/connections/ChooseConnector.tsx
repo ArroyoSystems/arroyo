@@ -31,7 +31,6 @@ export function ChooseConnector() {
     setMenuItems([]);
   }, []);
 
-
   const connectorCards = connectors?.map(c => {
     return (
       <Card key={c.name} size={'md'} maxW={400}>

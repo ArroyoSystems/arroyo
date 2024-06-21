@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, AlertDescription, AlertIcon, Box, Spacer, Stack, Text } from '@chakra-ui/react';
+import { Alert, AlertDescription, AlertIcon, Box, Stack, Text } from '@chakra-ui/react';
 import { Link } from 'react-router-dom';
 import { ConnectionTable, useConnectionTables } from '../../lib/data_fetching';
 import { Catalog } from './Catalog';
@@ -9,7 +9,7 @@ const CatalogTab: React.FC = () => {
 
   let connectionTables: ConnectionTable[] = [];
   let catalogTruncated = false;
-  if (connectionTablePages?.length) {
+  if (connectionTablePages?.length && connectionTablePages[0]) {
     connectionTables = connectionTablePages[0].data;
     catalogTruncated = connectionTablePages[0].hasMore;
   }
@@ -24,9 +24,7 @@ const CatalogTab: React.FC = () => {
     catalogTruncatedWarning = (
       <Alert flexShrink={0} status="warning">
         <AlertIcon />
-        <AlertDescription>
-          The catalogue is too large to be shown in its entirety.
-        </AlertDescription>
+        <AlertDescription>The catalogue is too large to be shown in its entirety.</AlertDescription>
       </Alert>
     );
   }

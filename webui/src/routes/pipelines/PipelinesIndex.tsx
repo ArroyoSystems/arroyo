@@ -7,11 +7,11 @@ import PipelinesTable from '../../components/PipelinesTable';
 import { useNavbar } from '../../App';
 
 export function PipelinesIndex() {
-    const { setMenuItems } = useNavbar();
+  const { setMenuItems } = useNavbar();
 
-    useEffect(() => {
-      setMenuItems([]);
-    }, []);
+  useEffect(() => {
+    setMenuItems([]);
+  }, []);
 
   return (
     <Container py="8" flex="1">

@@ -245,10 +245,6 @@ pub struct Config {
     /// line or from stdin
     pub query: Option<String>,
 
-    /// Controls whether preview pipelines should have sinks enabled
-    #[serde(default)]
-    pub sinks_in_preview: bool,
-
     /// Telemetry config
     #[serde(default)]
     pub disable_telemetry: bool,

@@ -20,11 +20,10 @@ import { CloudSidebar, UserProfile } from './lib/CloudComponents';
 import { usePing } from './lib/data_fetching';
 import ApiUnavailable from './routes/not_found/ApiUnavailable';
 import Loading from './components/Loading';
-import React, { ReactElement, ReactNode, createContext, useContext, useState } from 'react';
+import React, { ReactNode, createContext, useContext, useState } from 'react';
 import { getTourContextValue, TourContext } from './tour';
 import { getLocalUdfsContextValue, LocalUdfsContext } from './udf_state';
-import { BiCaretLeftCircle, BiLeftArrowCircle } from 'react-icons/bi';
-import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons';
+import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons';
 import { motion } from 'framer-motion';
 import useLocalStorage from 'use-local-storage';
 
@@ -61,13 +60,19 @@ export const NavButton = (props: NavButtonProps) => {
     >
       <HStack spacing="3">
         <Icon as={icon} boxSize="4" color="subtle" />
-        {!collapsed && <Text fontSize="sm">{label}</Text> }
+        {!collapsed && <Text fontSize="sm">{label}</Text>}
       </HStack>
     </Button>
   );
 };
 
-const Sidebar = ({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (c: boolean) => void }) => {
+const Sidebar = ({
+  collapsed,
+  setCollapsed,
+}: {
+  collapsed: boolean;
+  setCollapsed: (c: boolean) => void;
+}) => {
   const { menuItems } = useNavbar();
 
   return (
@@ -115,6 +120,7 @@ const Sidebar = ({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
               <Stack>
                 {menuItems.map(item => (
                   <NavButton
+                    key={item.label}
                     label={item.label}
                     onClick={item.onClick}
                     icon={item.icon}
@@ -145,11 +151,11 @@ const Sidebar = ({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
 };
 
 export type SubnavType = {
-    icon: As;
-    label: string;
-    onClick: () => void;
-    selected: boolean;
-}
+  icon: As;
+  label: string;
+  onClick: () => void;
+  selected: boolean;
+};
 
 interface NavbarContextType {
   menuItems: SubnavType[];
@@ -173,7 +179,6 @@ export const useNavbar = () => {
   }
   return context;
 };
-
 
 function App() {
   const { ping, pingLoading, pingError } = usePing();

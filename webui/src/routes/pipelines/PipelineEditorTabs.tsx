@@ -1,8 +1,11 @@
-import React, { useContext } from 'react';
+import React, { Dispatch, useContext } from 'react';
 import {
   Box,
   Button,
+  Checkbox,
   Flex,
+  FormControl,
+  FormHelperText,
   HStack,
   Icon,
   IconButton,
@@ -13,6 +16,7 @@ import {
   PopoverContent,
   PopoverHeader,
   PopoverTrigger,
+  Stack,
   Tab,
   TabList,
   TabPanel,
@@ -29,10 +33,10 @@ import { PiFileSqlDuotone } from 'react-icons/pi';
 import { LocalUdfsContext } from '../../udf_state';
 import UdfEditor from '../udfs/UdfEditor';
 import UdfEditTab from '../udfs/UdfEditTab';
-import { FiCheckCircle, FiDatabase, FiPlay } from 'react-icons/fi';
+import { FiCheckCircle, FiPlay } from 'react-icons/fi';
 import { IoRocketOutline } from 'react-icons/io5';
-import { DiDatabase } from 'react-icons/di';
-import { CiDatabase } from 'react-icons/ci';
+import { PreviewOptions } from './CreatePipeline';
+import { Job } from '../../lib/data_fetching';
 
 export interface PipelineEditorTabsProps {
   queryInput: string;
@@ -43,6 +47,9 @@ export interface PipelineEditorTabsProps {
   run: () => void;
   pipelineIsValid: (tab: number) => void;
   updateQuery: (s: string) => void;
+  previewOptions: PreviewOptions;
+  setPreviewOptions: Dispatch<PreviewOptions>;
+  job?: Job;
 }
 
 const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
@@ -54,6 +61,9 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
   run,
   pipelineIsValid,
   updateQuery,
+  previewOptions,
+  setPreviewOptions,
+  job,
 }) => {
   const { openedUdfs, isGlobal, editorTab, handleEditorTabChange } = useContext(LocalUdfsContext);
   const {
@@ -107,7 +117,7 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
   );
 
   const tabs = (
-    <Flex flexWrap={'wrap'}>
+    <Flex flexWrap={'nowrap'} overflowX={'auto'} style={{ scrollbarWidth: 'none' }}>
       <Tab gap={1} height={10}>
         <Icon as={PiFileSqlDuotone} boxSize={4} />
         Query
@@ -163,6 +173,7 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
         colorScheme="blue"
         title="Stop a preview pipeline"
         borderRadius={2}
+        disabled={job?.state != 'Running'}
       >
         Stop
       </Button>
@@ -184,6 +195,53 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
           <Text>Preview</Text>
         </HStack>
       </Button>
+    );
+  }
+
+  if (tourStep == TourSteps.Preview) {
+    startPreviewButton = (
+      <Popover isOpen={true} placement={'top'} closeOnBlur={false} variant={'tour'}>
+        <PopoverTrigger>{startPreviewButton}</PopoverTrigger>
+        <PopoverContent>
+          <PopoverArrow />
+          <PopoverCloseButton onClick={disableTour} />
+          <PopoverHeader>Nice!</PopoverHeader>
+          <PopoverBody>
+            Finally, run a preview pipeline to see the results of your query.
+          </PopoverBody>
+        </PopoverContent>
+      </Popover>
+    );
+  } else if (!previewing) {
+    startPreviewButton = (
+      <Popover trigger="hover">
+        <PopoverTrigger>{startPreviewButton}</PopoverTrigger>
+        <PopoverContent mt={2}>
+          <PopoverArrow />
+          <PopoverHeader>
+            <Text fontWeight={'bold'} p={2} my={0} fontSize={'sm'}>
+              Preview options
+            </Text>
+          </PopoverHeader>
+          <PopoverBody p={4}>
+            <Stack>
+              <FormControl>
+                <Checkbox
+                  checked={previewOptions.enableSinks}
+                  onChange={e =>
+                    setPreviewOptions({ ...previewOptions, enableSinks: e.target.checked })
+                  }
+                >
+                  Enable sinks
+                </Checkbox>
+                <FormHelperText fontSize={'xs'}>
+                  By default, sinks are disabled in preview mode
+                </FormHelperText>
+              </FormControl>
+            </Stack>
+          </PopoverBody>
+        </PopoverContent>
+      </Popover>
     );
   }
 
@@ -222,30 +280,6 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
     </Button>
   );
 
-  const buttonGroup = (
-    <HStack spacing={4}>
-      {checkButton}
-      <Popover
-        isOpen={tourStep == TourSteps.Preview}
-        placement={'top'}
-        closeOnBlur={false}
-        variant={'tour'}
-      >
-        <PopoverTrigger>{startPreviewButton}</PopoverTrigger>
-        <PopoverContent>
-          <PopoverArrow />
-          <PopoverCloseButton onClick={disableTour} />
-          <PopoverHeader>Nice!</PopoverHeader>
-          <PopoverBody>
-            Finally, run a preview pipeline to see the results of your query.
-          </PopoverBody>
-        </PopoverContent>
-      </Popover>
-      {stopPreviewButton}
-      {startPipelineButton}
-    </HStack>
-  );
-
   return (
     <Flex direction={'column'} backgroundColor="#1e1e1e" height="100%">
       <Tabs
@@ -256,18 +290,30 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
         index={editorTab}
         onChange={handleEditorTabChange}
       >
-        <TabList
-          display={'grid'}
-          gridTemplateColumns={'minmax(0, 1fr) min-content'}
-          width={'100%'}
-          h={10}
-        >
-          {tabs}
-          <HStack>
-            {buttonGroup}
+        <HStack spacing={0}>
+          <TabList
+            display={'grid'}
+            gridTemplateColumns={'minmax(0, 1fr) min-content'}
+            width={'100%'}
+            h={10}
+          >
+            {tabs}
+          </TabList>
+          <HStack
+            backgroundColor={'gray.700'}
+            border={'1px solid #111'}
+            boxShadow={'-5px 5px 15px #00000044'}
+            h="100%"
+            pl={4}
+            spacing={2}
+          >
+            {checkButton}
+            {startPreviewButton}
+            {stopPreviewButton}
+            {startPipelineButton}
             {exampleQueriesButton}
           </HStack>
-        </TabList>
+        </HStack>
         {tabPanels}
       </Tabs>
       {exampleQueries}
