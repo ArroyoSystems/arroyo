@@ -1,18 +1,21 @@
 use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
+use arrow_schema::DataType;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
-use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
 use datafusion::common::{
-    not_impl_err, plan_err, Column, DFSchema, DataFusionError, JoinConstraint, JoinType,
-    OwnedTableReference, Result, ScalarValue,
+    not_impl_err, plan_err, Column, DFSchema, DFSchemaRef, DataFusionError, JoinConstraint,
+    JoinType, OwnedTableReference, Result, ScalarValue,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::{Alias, ScalarFunction};
 use datafusion::logical_expr::{
-    BinaryExpr, BuiltinScalarFunction, Case, Expr, Extension, Join, LogicalPlan, Projection,
+    BinaryExpr, BuiltinScalarFunction, Case, Expr, ExprSchemable, Extension, Join, LogicalPlan,
+    Operator, Projection,
 };
+use datafusion::prelude::{get_field, lit};
 use std::sync::Arc;
 
 pub(crate) struct JoinRewriter {}
@@ -183,6 +186,59 @@ impl JoinRewriter {
     }
 }
 
+struct StructEqRewriter {
+    schema: DFSchemaRef,
+}
+
+impl TreeNodeRewriter for StructEqRewriter {
+    type Node = Expr;
+
+    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
+        if let Expr::BinaryExpr(BinaryExpr {
+            op: Operator::Eq,
+            left,
+            right,
+        }) = &node
+        {
+            let (left_t, _) = left.data_type_and_nullable(&self.schema)?;
+            let (right_t, _) = right.data_type_and_nullable(&self.schema)?;
+
+            if let DataType::Struct(fields) = &left_t {
+                if fields.iter().find(|e| e.data_type().is_nested()).is_some() {
+                    return plan_err!("Joins on struct fields are only supported for structs with a single layer of nesting (in {})",
+                        node.canonical_name());
+                }
+
+                if left_t != right_t {
+                    return plan_err!(
+                        "Joins on structs must have the same types on both sides of '=' (in {})",
+                        node.canonical_name()
+                    );
+                }
+
+                let mut exprs = fields.iter().map(|f| {
+                    get_field((**left).clone(), lit(f.name().clone()))
+                        .eq(get_field((**right).clone(), lit(f.name().clone())))
+                });
+
+                let Some(mut expr) = exprs.next() else {
+                    return plan_err!(
+                        "Struct types used in join comparison must have at least one field"
+                    );
+                };
+
+                for next in exprs {
+                    expr = expr.and(next);
+                }
+
+                return Ok(Transformed::yes(expr));
+            }
+        }
+
+        Ok(Transformed::no(node))
+    }
+}
+
 impl TreeNodeRewriter for JoinRewriter {
     type Node = LogicalPlan;
 
@@ -209,6 +265,16 @@ impl TreeNodeRewriter for JoinRewriter {
 
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
+
+        let filter = filter
+            .map(|expr| {
+                expr.rewrite(&mut StructEqRewriter {
+                    schema: schema.clone(),
+                })
+                .map(|e| e.data)
+            })
+            .transpose()?;
+
         let left_input = self.create_join_key_plan(left.clone(), left_expressions, "left")?;
         let right_input = self.create_join_key_plan(right.clone(), right_expressions, "right")?;
         let rewritten_join = LogicalPlan::Join(Join {
