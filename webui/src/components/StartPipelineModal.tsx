@@ -14,7 +14,13 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
+  NumberInputField,
+  NumberInput,
   Stack,
+  NumberInputStepper,
+  NumberIncrementStepper,
+  NumberDecrementStepper,
+  Box,
 } from '@chakra-ui/react';
 import React from 'react';
 import { SqlOptions } from '../lib/types';
@@ -61,6 +67,23 @@ const StartPipelineModal: React.FC<StartPipelineModalProps> = ({
                 onChange={v => setOptions({ ...options, name: v.target.value })}
               />
               <FormHelperText>Give this pipeline a name to help you identify it</FormHelperText>
+            </FormControl>
+
+            <FormControl>
+              <FormLabel>Parallelism</FormLabel>
+              <Box >
+                <NumberInput step={1} min={1} max={1024} bg={"gray.800"}
+                             value={options.parallelism || 1}
+                             onChange={v => setOptions({ ...options, parallelism: Number(v) })}>
+                  <NumberInputField />
+                  <NumberInputStepper>
+                    <NumberIncrementStepper />
+                    <NumberDecrementStepper />
+                  </NumberInputStepper>
+                </NumberInput>
+
+              </Box>
+              <FormHelperText>How many parallel subtasks should be used for this pipeline</FormHelperText>
             </FormControl>
           </Stack>
         </ModalBody>

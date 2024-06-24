@@ -387,7 +387,7 @@ impl ControllerGrpc for ControllerServer {
                         remove.insert(i);
                     }
                     Err(TrySendError::Full(_)) => {
-                        warn!("queue full");
+                        debug!("queue full");
                     }
                 }
             }
