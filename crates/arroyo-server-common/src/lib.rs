@@ -354,7 +354,8 @@ pub fn grpc_server() -> Server<
         .layer(GrpcErrorLogMiddlewareLayer)
         .into_inner();
 
-    Server::builder().layer(layer)
+    Server::builder()
+        .layer(layer)
 }
 
 pub async fn wrap_start(
