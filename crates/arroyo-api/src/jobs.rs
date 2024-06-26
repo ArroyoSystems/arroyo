@@ -482,6 +482,7 @@ pub async fn get_job_output(
             };
 
             let output_data: OutputData = v.into();
+
             let e = Ok(Event::default()
                 .json_data(output_data)
                 .unwrap()

@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::net::{SocketAddr, TcpListener};
 use time::OffsetDateTime;
 use tonic::transport::Channel;
-use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::NotForContentType;
+use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
 use tracing::{error, info};
 use utoipa::OpenApi;
 
@@ -126,8 +127,14 @@ pub fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::R
     let listener = TcpListener::bind(addr)?;
     let local_addr = listener.local_addr()?;
 
-    let app = rest::create_rest_app(database, &config.controller_endpoint())
-        .layer(CompressionLayer::new().gzip(true));
+    let app = rest::create_rest_app(database, &config.controller_endpoint()).layer(
+        CompressionLayer::new().zstd(true).compress_when(
+            DefaultPredicate::new()
+                // compression doesn't work for server-sent events
+                // (https://github.com/tokio-rs/axum/discussions/2034)
+                .and(NotForContentType::new("text/event-stream")),
+        ),
+    );
 
     info!("Starting API server on {:?}", local_addr);
     guard.into_spawn_task(wrap_start(

@@ -36,8 +36,8 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
-use tonic::{Request, Response, Status};
 use tonic::codec::CompressionEncoding;
+use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
 //pub mod compiler;
@@ -456,11 +456,7 @@ impl ControllerGrpc for ControllerServer {
             .ok_or_else(|| Status::not_found("No metrics for job"))?
             .clone();
 
-        // the metric output can be very large as json and can exceed the max grpc message size, so 
-        // we'll compress it
         // TODO: send this over in a more efficient format like protobuf
-        // let mut buf = vec![];
-        // zstd::stream::copy_encode()
         Ok(Response::new(JobMetricsResp {
             metrics: serde_json::to_string(&metrics.get_groups().await).unwrap(),
         }))
@@ -631,9 +627,11 @@ impl ControllerServer {
             local_addr,
             arroyo_server_common::grpc_server()
                 .accept_http1(true)
-                .add_service(ControllerGrpcServer::new(self.clone())
-                    .send_compressed(CompressionEncoding::Zstd)
-                    .accept_compressed(CompressionEncoding::Zstd))
+                .add_service(
+                    ControllerGrpcServer::new(self.clone())
+                        .send_compressed(CompressionEncoding::Zstd)
+                        .accept_compressed(CompressionEncoding::Zstd),
+                )
                 .add_service(reflection)
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         ));

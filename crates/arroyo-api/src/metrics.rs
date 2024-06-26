@@ -8,9 +8,9 @@ use arroyo_rpc::api_types::metrics::OperatorMetricGroup;
 use arroyo_rpc::api_types::OperatorMetricGroupCollection;
 use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::rpc::JobMetricsReq;
-use tonic::Code;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::Channel;
+use tonic::Code;
 
 /// Get a job's metrics
 #[utoipa::path(
@@ -42,8 +42,9 @@ pub async fn get_operator_metric_groups(
 
     let channel = Channel::builder(state.controller_addr.parse().unwrap())
         .connect()
-        .await.map_err(log_and_map)?;
-    
+        .await
+        .map_err(log_and_map)?;
+
     let mut controller = ControllerGrpcClient::new(channel)
         .accept_compressed(CompressionEncoding::Zstd)
         .send_compressed(CompressionEncoding::Zstd);
