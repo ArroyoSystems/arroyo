@@ -7,7 +7,7 @@ use arrow::array::RecordBatch;
 use arrow::datatypes::DataType;
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_metrics::TaskCounters;
-use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
+use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};

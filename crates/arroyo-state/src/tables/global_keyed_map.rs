@@ -2,7 +2,7 @@ use crate::{CheckpointMessage, StateMessage, TableData};
 use anyhow::{anyhow, bail, Result};
 use arrow_array::{BinaryArray, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::{
     GlobalKeyedTableSubtaskCheckpointMetadata, GlobalKeyedTableTaskCheckpointMetadata,
     OperatorMetadata, TableEnum,
 };
@@ -21,6 +21,7 @@ use tracing::info;
 
 use std::iter::Zip;
 
+use arroyo_rpc::grpc::rpc::GlobalKeyedTableConfig;
 use std::time::SystemTime;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -100,7 +101,7 @@ impl GlobalKeyedTable {
 impl Table for GlobalKeyedTable {
     type Checkpointer = GlobalKeyedCheckpointer;
 
-    type ConfigMessage = arroyo_rpc::grpc::GlobalKeyedTableConfig;
+    type ConfigMessage = GlobalKeyedTableConfig;
 
     type TableSubtaskCheckpointMetadata = GlobalKeyedTableSubtaskCheckpointMetadata;
 

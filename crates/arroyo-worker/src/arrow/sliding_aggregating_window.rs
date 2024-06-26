@@ -13,7 +13,7 @@ use arroyo_operator::{
     context::ArrowContext,
     operator::{ArrowOperator, OperatorConstructor, OperatorNode},
 };
-use arroyo_rpc::grpc::{api, TableConfig};
+use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::common::ScalarValue;

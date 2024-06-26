@@ -147,8 +147,8 @@ pub struct OutputData {
     pub batch: String,
 }
 
-impl From<grpc_proto::OutputData> for OutputData {
-    fn from(value: grpc_proto::OutputData) -> Self {
+impl From<grpc_proto::rpc::OutputData> for OutputData {
+    fn from(value: grpc_proto::rpc::OutputData) -> Self {
         OutputData {
             operator_id: value.operator_id,
             subtask_idx: value.subtask_idx,

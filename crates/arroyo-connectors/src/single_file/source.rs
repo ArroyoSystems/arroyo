@@ -5,7 +5,7 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
     formats::{BadData, Format, Framing},
-    grpc::{StopMode, TableConfig},
+    grpc::rpc::{StopMode, TableConfig},
     ControlMessage,
 };
 use async_trait::async_trait;

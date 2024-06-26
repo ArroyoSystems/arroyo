@@ -10,13 +10,13 @@ use std::{fs, time::SystemTime};
 
 use crate::api_types::connections::PrimitiveType;
 use crate::formats::{BadData, Format, Framing};
-use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
+use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::Result;
 use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::DataType;
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
-use grpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
+use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tonic::{
@@ -28,12 +28,14 @@ pub mod config;
 pub mod df;
 
 pub mod grpc {
-    #![allow(clippy::derive_partial_eq_without_eq)]
-    tonic::include_proto!("arroyo_rpc");
+    pub mod rpc {
+        #![allow(clippy::derive_partial_eq_without_eq)]
+        tonic::include_proto!("arroyo_rpc");
+    }
 
     pub mod api {
         #![allow(clippy::derive_partial_eq_without_eq)]
-        tonic::include_proto!("arroyo_api");
+        tonic::include_proto!("api");
     }
 
     pub const API_FILE_DESCRIPTOR_SET: &[u8] =

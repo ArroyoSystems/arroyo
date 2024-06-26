@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use arrow::array::RecordBatch;
 
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_types::{CheckpointBarrier, SignalMessage};
 
 use async_trait::async_trait;

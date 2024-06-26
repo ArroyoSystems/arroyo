@@ -1,6 +1,6 @@
 use anyhow::Result;
 use arrow_array::RecordBatch;
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
     OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
 };

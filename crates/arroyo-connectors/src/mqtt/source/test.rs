@@ -215,7 +215,7 @@ async fn test_mqtt() {
     reader
         .to_control_tx
         .send(ControlMessage::Stop {
-            mode: arroyo_rpc::grpc::StopMode::Graceful,
+            mode: arroyo_rpc::grpc::rpc::StopMode::Graceful,
         })
         .await
         .unwrap();

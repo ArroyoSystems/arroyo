@@ -4,7 +4,7 @@ use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::{context::ArrowContext, operator::ArrowOperator};
 use arroyo_rpc::{
-    grpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
+    grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
     CheckpointEvent, ControlMessage,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
@@ -112,7 +112,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
             operator_id: ctx.task_info.operator_id.clone(),
             subtask_index: ctx.task_info.task_index as u32,
             time: SystemTime::now(),
-            event_type: arroyo_rpc::grpc::TaskCheckpointEventType::FinishedCommit,
+            event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
         });
         ctx.control_tx
             .send(checkpoint_event)

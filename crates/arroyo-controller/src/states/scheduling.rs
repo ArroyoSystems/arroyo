@@ -4,7 +4,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
+use arroyo_rpc::grpc::rpc::{
+    worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment,
+};
 use arroyo_types::WorkerId;
 use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
@@ -13,6 +15,7 @@ use tracing::{error, info, warn};
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
+use arroyo_rpc::grpc::api;
 use arroyo_state::{
     committing_state::CommittingState,
     tables::{global_keyed_map::GlobalKeyedTable, ErasedTable},
@@ -400,16 +403,16 @@ impl State for Scheduling {
                                     )
                                 })?;
                         if let Some(commit_data) = match config.table_type() {
-                            arroyo_rpc::grpc::TableEnum::MissingTableType => {
+                            arroyo_rpc::grpc::rpc::TableEnum::MissingTableType => {
                                 return Err(fatal(
                                     "Missing table type",
                                     anyhow!("table type not found"),
                                 ));
                             }
-                            arroyo_rpc::grpc::TableEnum::GlobalKeyValue => {
+                            arroyo_rpc::grpc::rpc::TableEnum::GlobalKeyValue => {
                                 GlobalKeyedTable::committing_data(config.clone(), table_metadata)
                             }
-                            arroyo_rpc::grpc::TableEnum::ExpiringKeyedTimeTable => None,
+                            arroyo_rpc::grpc::rpc::TableEnum::ExpiringKeyedTimeTable => None,
                         } {
                             committing_data
                                 .entry(operator_id.clone())
@@ -441,6 +444,7 @@ impl State for Scheduling {
 
         let assignments = compute_assignments(workers.values().collect(), &*ctx.program);
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();
+        let program = api::ArrowProgram::from(ctx.program.clone());
         let tasks: Vec<_> = worker_connects
             .into_iter()
             .map(|(id, mut c)| {
@@ -448,6 +452,7 @@ impl State for Scheduling {
 
                 let job_id = ctx.config.id.clone();
                 let restore_epoch = checkpoint_info.as_ref().map(|info| info.epoch);
+                let program = program.clone();
                 tokio::spawn(async move {
                     info!(
                         message = "starting execution on worker",
@@ -458,6 +463,7 @@ impl State for Scheduling {
                         match c
                             .start_execution(Request::new(StartExecutionReq {
                                 restore_epoch,
+                                program: Some(program.clone()),
                                 tasks: assignments.clone(),
                             }))
                             .await

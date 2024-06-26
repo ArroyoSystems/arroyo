@@ -30,8 +30,8 @@ use crate::filesystem::{CompressionFormat, TableType};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::TableConfig;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
+use arroyo_rpc::grpc::rpc::TableConfig;
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{to_nanos, UserError};
 

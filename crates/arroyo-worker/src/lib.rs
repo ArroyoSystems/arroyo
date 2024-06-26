@@ -3,28 +3,24 @@
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::{anyhow, bail, Result};
+use anyhow::Result;
 
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
-use arroyo_rpc::grpc::{
-    api, CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
+use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
+use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
     JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily, MetricsReq,
     MetricsResp, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq,
     StopExecutionResp, TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq,
     TaskFinishedReq, TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
 use arroyo_types::{
-    from_millis, to_micros, CheckpointBarrier, NodeId, WorkerId, ARROYO_PROGRAM_ENV,
-    ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
 };
 use local_ip_address::local_ip;
 use rand::random;
 
-use base64::engine::general_purpose;
-use base64::Engine as Base64Engine;
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::net::SocketAddr;
@@ -42,7 +38,7 @@ pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 
-use arroyo_datastream::logical::{LogicalGraph, LogicalProgram, ProgramConfig};
+use arroyo_datastream::logical::LogicalProgram;
 use arroyo_df::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
@@ -144,49 +140,13 @@ pub struct WorkerServer {
     run_id: String,
     name: &'static str,
     controller_addr: String,
-    logical_graph: LogicalGraph,
-    program_config: ProgramConfig,
     state: Arc<Mutex<Option<EngineState>>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
     shutdown_guard: ShutdownGuard,
 }
 
 impl WorkerServer {
-    fn get_program() -> Result<String> {
-        match (
-            env::var(ARROYO_PROGRAM_FILE_ENV),
-            env::var(ARROYO_PROGRAM_ENV),
-        ) {
-            (Ok(file), Err(_)) => std::fs::read_to_string(&file)
-                .map_err(|e| anyhow!("Could not read program from {}: {:?}", file, e)),
-            (Err(_), Ok(program)) => Ok(program),
-            (Err(_), Err(_)) => {
-                bail!(
-                    "One of {} or {} must be set",
-                    ARROYO_PROGRAM_FILE_ENV,
-                    ARROYO_PROGRAM_ENV
-                )
-            }
-            _ => {
-                bail!(
-                    "Both {} and {} are set; only one may be used",
-                    ARROYO_PROGRAM_FILE_ENV,
-                    ARROYO_PROGRAM_ENV
-                )
-            }
-        }
-    }
-
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
-        let graph = Self::get_program()?;
-        let graph = general_purpose::STANDARD_NO_PAD
-            .decode(graph)
-            .expect("Program is not valid base64");
-
-        let graph = api::ArrowProgram::decode(&graph[..]).expect("Program is not a valid protobuf");
-
-        let logical = LogicalProgram::try_from(graph).expect("Failed to create LogicalProgram");
-
         let id = WorkerId(config().worker.id.unwrap_or_else(|| random()));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
@@ -200,7 +160,6 @@ impl WorkerServer {
             job_id,
             run_id,
             config().controller_endpoint(),
-            logical,
             shutdown_guard,
         ))
     }
@@ -211,7 +170,6 @@ impl WorkerServer {
         job_id: String,
         run_id: String,
         controller_addr: String,
-        logical: LogicalProgram,
         shutdown_guard: ShutdownGuard,
     ) -> Self {
         Self {
@@ -220,8 +178,6 @@ impl WorkerServer {
             job_id,
             run_id,
             controller_addr,
-            logical_graph: logical.graph,
-            program_config: logical.program_config,
             state: Arc::new(Mutex::new(None)),
             network: Arc::new(Mutex::new(None)),
             shutdown_guard,
@@ -451,7 +407,10 @@ impl WorkerGrpc for WorkerServer {
         let req = request.into_inner();
         let mut registry = new_registry();
 
-        for (udf_name, dylib_config) in &self.program_config.udf_dylibs {
+        let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
+            .expect("Failed to create LogicalProgram");
+
+        for (udf_name, dylib_config) in &logical.program_config.udf_dylibs {
             info!("Loading UDF {}", udf_name);
             registry
                 .load_dylib(udf_name, dylib_config)
@@ -469,12 +428,8 @@ impl WorkerGrpc for WorkerServer {
         let (engine, control_rx) = {
             let network = { self.network.lock().unwrap().take().unwrap() };
 
-            let program = Program::from_logical(
-                self.name.to_string(),
-                &self.logical_graph,
-                &req.tasks,
-                registry,
-            );
+            let program =
+                Program::from_logical(self.name.to_string(), &logical.graph, &req.tasks, registry);
 
             let engine = Engine::new(
                 program,

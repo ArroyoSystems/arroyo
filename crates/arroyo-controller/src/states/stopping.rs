@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::states::StateError;
-use arroyo_rpc::grpc::StopMode;
+use arroyo_rpc::grpc::rpc::StopMode;
 use tokio::time::timeout;
 use tracing::{error, info};
 

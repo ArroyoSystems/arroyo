@@ -4,15 +4,13 @@ use crate::schedulers::kubernetes::quantities::QuantityParser;
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
 use arroyo_rpc::config::{config, KubernetesSchedulerConfig, ResourceMode};
-use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
-use arroyo_types::{WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV};
+use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
+use arroyo_types::{WorkerId, JOB_ID_ENV, RUN_ID_ENV};
 use async_trait::async_trait;
-use base64::{engine::general_purpose, Engine as _};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
-use prost::Message;
 use serde_json::json;
 use std::time::Duration;
 use tonic::Status;
@@ -40,7 +38,7 @@ impl KubernetesScheduler {
         Self { client, config }
     }
 
-    fn make_pod(&self, req: &StartPipelineReq, program: &str, number: usize, slots: usize) -> Pod {
+    fn make_pod(&self, req: &StartPipelineReq, number: usize, slots: usize) -> Pod {
         let c = &self.config;
 
         let resources = match c.resource_mode {
@@ -104,10 +102,6 @@ impl KubernetesScheduler {
             },
             {
                 "name": "ARROYO__ADMIN__HTTP_PORT", "value": "6901",
-            },
-            {
-                "name": ARROYO_PROGRAM_ENV,
-                "value": program,
             },
             {
                 "name": "WASM_BIN",
@@ -190,15 +184,12 @@ impl Scheduler for KubernetesScheduler {
             task_slots = req.slots
         );
 
-        let program = general_purpose::STANDARD_NO_PAD
-            .encode(api::ArrowProgram::from(req.program.clone()).encode_to_vec());
-
         let max_slots_per_pod = config().kubernetes_scheduler.worker.task_slots as usize;
         let mut slots_scheduled = 0;
         let mut pods = vec![];
         for i in 0..replicas {
             let slots_here = (req.slots - slots_scheduled).min(max_slots_per_pod);
-            pods.push(self.make_pod(&req, &program, i, slots_here));
+            pods.push(self.make_pod(&req, i, slots_here));
             slots_scheduled += slots_here;
         }
 
@@ -360,6 +351,6 @@ mod test {
 
         KubernetesScheduler::with_config(None, config)
             // test that we don't panic when creating the replicaset
-            .make_pod(&req, "program", 3, 4);
+            .make_pod(&req, 3, 4);
     }
 }

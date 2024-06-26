@@ -10,7 +10,7 @@ use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, CheckpointBarrier, Watermark};

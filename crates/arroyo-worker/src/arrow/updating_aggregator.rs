@@ -13,7 +13,7 @@ use arroyo_operator::{
     context::ArrowContext,
     operator::{ArrowOperator, OperatorConstructor, OperatorNode},
 };
-use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, TableConfig};
+use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};

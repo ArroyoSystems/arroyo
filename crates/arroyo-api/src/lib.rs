@@ -36,7 +36,7 @@ use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::config::config;
 use arroyo_rpc::formats::*;
-use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
+use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 

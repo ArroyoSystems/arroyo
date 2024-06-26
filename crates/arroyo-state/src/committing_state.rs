@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use arroyo_rpc::grpc::{OperatorCommitData, TableCommitData};
+use arroyo_rpc::grpc::rpc::{OperatorCommitData, TableCommitData};
 
 pub struct CommittingState {
     checkpoint_id: String,

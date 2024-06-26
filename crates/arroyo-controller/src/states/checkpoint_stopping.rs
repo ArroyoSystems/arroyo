@@ -72,7 +72,9 @@ impl State for CheckpointStopping {
                             return Ok(Transition::next(
                                 *self,
                                 Stopping {
-                                    stop_mode: StopBehavior::StopJob(grpc::StopMode::Immediate),
+                                    stop_mode: StopBehavior::StopJob(
+                                        grpc::rpc::StopMode::Immediate,
+                                    ),
                                 },
                             ));
                         }

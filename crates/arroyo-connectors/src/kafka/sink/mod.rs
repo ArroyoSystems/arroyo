@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use arroyo_rpc::grpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
+use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
@@ -245,7 +245,7 @@ impl ArrowOperator for KafkaSinkFunc {
             operator_id: ctx.task_info.operator_id.clone(),
             subtask_index: ctx.task_info.task_index as u32,
             time: SystemTime::now(),
-            event_type: arroyo_rpc::grpc::TaskCheckpointEventType::FinishedCommit,
+            event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
         });
         ctx.control_tx
             .send(checkpoint_event)

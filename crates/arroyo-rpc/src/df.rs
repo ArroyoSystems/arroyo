@@ -26,9 +26,9 @@ pub struct ArroyoSchema {
     pub key_indices: Option<Vec<usize>>,
 }
 
-impl TryFrom<grpc::ArroyoSchema> for ArroyoSchema {
+impl TryFrom<grpc::rpc::ArroyoSchema> for ArroyoSchema {
     type Error = anyhow::Error;
-    fn try_from(schema_proto: grpc::ArroyoSchema) -> anyhow::Result<Self> {
+    fn try_from(schema_proto: grpc::rpc::ArroyoSchema) -> anyhow::Result<Self> {
         let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)?;
         let timestamp_index = schema_proto.timestamp_index as usize;
         let key_indices = if schema_proto.has_keys {
@@ -50,7 +50,7 @@ impl TryFrom<grpc::ArroyoSchema> for ArroyoSchema {
     }
 }
 
-impl From<ArroyoSchema> for grpc::ArroyoSchema {
+impl From<ArroyoSchema> for grpc::rpc::ArroyoSchema {
     fn from(schema: ArroyoSchema) -> Self {
         let arrow_schema = serde_json::to_string(schema.schema.as_ref()).unwrap();
         let timestamp_index = schema.timestamp_index as u32;

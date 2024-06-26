@@ -5,15 +5,15 @@
 use anyhow::Result;
 use arroyo_rpc::config;
 use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
+use arroyo_rpc::grpc::rpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
     JobMetricsReq, JobMetricsResp, OutputData, RegisterNodeReq, RegisterNodeResp,
     RegisterWorkerReq, RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
     TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq,
     TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
 };
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
     WorkerErrorRes,
 };

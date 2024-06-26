@@ -1,6 +1,6 @@
 use crate::{CheckpointMessage, DataOperation, TableData};
 use anyhow::{bail, Result};
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::{
     OperatorMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
     TableSubtaskCheckpointMetadata,
 };

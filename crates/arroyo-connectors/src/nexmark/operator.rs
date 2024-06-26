@@ -6,7 +6,7 @@ use arroyo_formats::should_flush;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::grpc::{StopMode, TableConfig};
+use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::ControlMessage;
 use arroyo_types::{to_millis, to_nanos};
 use async_trait::async_trait;

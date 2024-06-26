@@ -8,9 +8,12 @@ use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::grpc::{
     self,
     api::{self, OperatorCheckpointDetail},
-    CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata, SubtaskCheckpointMetadata,
-    TableCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata,
-    TaskCheckpointCompletedReq, TaskCheckpointEventReq,
+    rpc,
+    rpc::{
+        CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata,
+        SubtaskCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
+        TableSubtaskCheckpointMetadata, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
+    },
 };
 use arroyo_types::{from_micros, to_micros};
 use tracing::{debug, warn};
@@ -180,7 +183,7 @@ impl CheckpointState {
     pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) -> anyhow::Result<()> {
         debug!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_index = c.subtask_index, operator_id = ?c.operator_id);
 
-        if grpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
+        if grpc::rpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
             bail!(
                 "shouldn't receive finished commit {:?} while checkpointing",
                 c
@@ -210,19 +213,19 @@ impl CheckpointState {
             .push(api::TaskCheckpointEvent {
                 time: c.time,
                 event_type: match c.event_type() {
-                    grpc::TaskCheckpointEventType::StartedAlignment => {
+                    rpc::TaskCheckpointEventType::StartedAlignment => {
                         api::TaskCheckpointEventType::AlignmentStarted
                     }
-                    grpc::TaskCheckpointEventType::StartedCheckpointing => {
+                    rpc::TaskCheckpointEventType::StartedCheckpointing => {
                         api::TaskCheckpointEventType::CheckpointStarted
                     }
-                    grpc::TaskCheckpointEventType::FinishedOperatorSetup => {
+                    rpc::TaskCheckpointEventType::FinishedOperatorSetup => {
                         api::TaskCheckpointEventType::CheckpointOperatorFinished
                     }
-                    grpc::TaskCheckpointEventType::FinishedSync => {
+                    rpc::TaskCheckpointEventType::FinishedSync => {
                         api::TaskCheckpointEventType::CheckpointSyncFinished
                     }
-                    grpc::TaskCheckpointEventType::FinishedCommit => {
+                    rpc::TaskCheckpointEventType::FinishedCommit => {
                         api::TaskCheckpointEventType::CheckpointPreCommit
                     }
                 } as i32,
