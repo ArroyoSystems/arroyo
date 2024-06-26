@@ -230,24 +230,6 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
         })
         .collect();
 
-    let to_owned: Vec<_> = parsed
-        .args
-        .iter()
-        .enumerate()
-        .map(|(i, arg_type)| {
-            let id = format_ident!("arg_{}", i);
-            if matches!(arg_type.data_type, DataType::Utf8 | DataType::Binary) {
-                if arg_type.nullable {
-                    Some(quote!(let #id = #id.map(|t| t.to_owned())))
-                } else {
-                    Some(quote!(let #id = #id.to_owned()))
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
-
     let mut arg_destructure = quote!(arg_0);
     let mut arg_zip = quote!(arg_0.iter());
     for i in 1..args.len() {
@@ -270,7 +252,6 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
         quote! {
             for #arg_destructure in #arg_zip {
                 #(#unwrapping;)*
-                #(#to_owned;)*
                 #call
             }
         }
@@ -317,12 +298,11 @@ fn async_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream
     let call_args: Vec<_> = args
         .iter()
         .zip(parsed.args)
-        .map(|(arg, dt)| match dt.data_type {
-            DataType::Utf8 | DataType::Binary => {
-                quote!(#arg.value(0))
-            }
-            _ => {
-                quote!(#arg.value(0))
+        .map(|(arg, t)| {
+            if t.nullable {
+                quote!(if arroyo_udf_plugin::arrow::array::Array::is_null(&#arg, 0) { None } else { Some(#arg.value(0))})
+            } else {
+                quote!(#arg.value(0))                
             }
         })
         .collect();

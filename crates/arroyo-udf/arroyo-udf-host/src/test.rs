@@ -11,7 +11,7 @@ mod test_udf_1 {
     use arroyo_udf_macros::local_udf;
 
     #[local_udf]
-    fn my_udf(x: i32, y: String, z: Vec<u8>) -> Option<String> {
+    fn my_udf(x: i32, y: &str, z: &[u8]) -> Option<String> {
         if x < 5 {
             None
         } else {
@@ -26,8 +26,8 @@ mod test_udf_optional_binary {
     use arroyo_udf_macros::local_udf;
 
     #[local_udf]
-    fn my_udf(v: Option<Vec<u8>>) -> Vec<u8> {
-        v.unwrap_or_else(|| vec![0])
+    fn my_udf(v: Option<&[u8]>) -> Vec<u8> {
+        v.map(|x| x.to_owned()).unwrap_or_else(|| vec![0])
     }
 }
 
@@ -37,8 +37,8 @@ mod test_udf_optional_binary_return {
     use arroyo_udf_macros::local_udf;
 
     #[local_udf]
-    fn my_udf(v: Option<Vec<u8>>) -> Option<Vec<u8>> {
-        v
+    fn my_udf(v: Option<&[u8]>) -> Option<Vec<u8>> {
+        v.map(|v| v.to_owned())
     }
 }
 
@@ -71,12 +71,26 @@ fn test_udf() {
 
 #[test]
 fn test_optional_arg() {
-    let udf = test_udf_optional_binary::__local().config;
+    let udf = test_udf_optional_binary_return::__local().config;
     let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
     let mut data = BinaryBuilder::new();
     data.append_option(Some(vec![1, 2, 3]));
     data.append_option(None::<Vec<u8>>);
     data.append_option(Some(vec![4, 5]));
+
+    let result = sync_udf
+        .invoke(&[ColumnarValue::Array(Arc::new(data.finish()))])
+        .unwrap();
+
+    let ColumnarValue::Array(a) = result else {
+        panic!("not an array");
+    };
+
+    let result = a.as_any().downcast_ref::<BinaryArray>().unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result.value(0), &[1, 2, 3]);
+    assert!(result.is_null(1));
+    assert_eq!(result.value(2), &[4, 5]);
 }
 
 mod test_udaf {
@@ -100,21 +114,24 @@ fn test_udaf() {
     assert_eq!(result, ScalarValue::UInt64(Some(3)));
 }
 
+#[allow(unused)]
 mod test_async_optional_binary {
-    use arroyo_udf_macros::udf;
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
 
-    #[udf(unordered)]
-    async fn my_udf(x: Option<Vec<u8>>) -> Vec<u8> {
-        x.unwrap()
+    #[local_udf(unordered)]
+    async fn my_udf(_x: Option<i64>) -> Vec<u8> {
+        b"yeah".to_vec()
     }
 }
 
 mod test_async_udf {
-    use arroyo_udf_macros::udf;
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
     use std::time::Duration;
 
-    #[udf(ordered, timeout = "5s", allowed_in_flight = 100)]
-    async fn my_udf(a: u64, b: String, c: Vec<u8>) -> u32 {
+    #[local_udf(ordered, timeout = "5s", allowed_in_flight = 100)]
+    async fn my_udf(a: u64, b: &str, c: &[u8]) -> u32 {
         tokio::time::sleep(Duration::from_millis(10)).await;
         a as u32 + b.len() as u32 + c.len() as u32
     }

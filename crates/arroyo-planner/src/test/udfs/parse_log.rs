@@ -9,7 +9,7 @@ use serde_json::json;
 use std::time::{UNIX_EPOCH, Duration};
 
 #[udf]
-pub fn parse_log(input: String) -> Option<String> {
+pub fn parse_log(input: &str) -> Option<String> {
     let LogEntry::CommonLog(entry) =
         parse(LogType::CommonLog, &input).ok()? else {
         return None
