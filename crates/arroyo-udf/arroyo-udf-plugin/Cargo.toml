@@ -1,7 +1,16 @@
 [package]
 name = "arroyo-udf-plugin"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
+authors = ["Arroyo Systems <support@arroyo.systems>"]
+license = "MIT OR Apache-2.0"
+readme = "../../../README.md"
+repository = "https://github.com/ArroyoSystems/arroyo"
+homepage = "https://arroyo.dev"
+categories = ["database-implementations", "web-programming"]
+keywords = ["streaming", "data", "sql", "event-processing"]
+
+description = "Plugin interface for Arroyo UDFs"
 
 [dependencies]
 arroyo-udf-common = { path = "../arroyo-udf-common" }

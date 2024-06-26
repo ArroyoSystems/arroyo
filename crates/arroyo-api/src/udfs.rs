@@ -19,7 +19,7 @@ use axum_extra::extract::WithRejection;
 use tonic::transport::Channel;
 use tracing::error;
 
-const PLUGIN_VERSION: &str = "0.1.0";
+const PLUGIN_VERSION: &str = "0.1.1";
 
 const LOCAL_UDF_LIB_CRATE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
