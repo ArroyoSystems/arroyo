@@ -37,62 +37,129 @@ impl NullableType {
     }
 }
 
-fn rust_to_arrow(typ: &Type) -> Option<NullableType> {
+pub fn is_vec_u8(typ: &Type) -> bool {
+    let Some(inner) = ParsedUdf::vec_inner_type(typ) else {
+        return false;
+    };
+
+    matches!(
+        rust_to_arrow(&inner, true),
+        Ok(NullableType {
+            data_type: DataType::UInt8,
+            nullable: false
+        })
+    )
+}
+
+pub(crate) fn rust_to_arrow(typ: &Type, expect_owned: bool) -> anyhow::Result<NullableType> {
     match typ {
         Type::Path(pat) => {
             let last = pat.path.segments.last().unwrap();
             if last.ident == "Option" {
                 let AngleBracketed(args) = &last.arguments else {
-                    return None;
+                    bail!("invalid Rust type; Option must have arguments");
                 };
 
-                let GenericArgument::Type(inner) = args.args.first()? else {
-                    return None;
+                let Some(GenericArgument::Type(inner)) = args.args.first() else {
+                    bail!("invalid Rust type; Option must have an inner type parameter")
                 };
 
-                Some(rust_to_arrow(inner)?.with_nullability(true))
+                Ok(rust_to_arrow(inner, expect_owned)?.with_nullability(true))
             } else {
-                Some(NullableType::not_null(rust_primitive_to_arrow(typ)?))
+                let mut dt = rust_primitive_to_arrow(typ);
+
+                if dt.is_none() {
+                    dt = Some(
+                        match (
+                            render_path(typ)
+                                .ok_or_else(|| anyhow!("unsupported Rust type1"))?
+                                .as_str(),
+                            expect_owned,
+                        ) {
+                            ("String", true) => DataType::Utf8,
+                            ("String", false) => {
+                                bail!("expected reference type &str instead of String")
+                            }
+                            ("Vec<u8>", true) => DataType::Binary,
+                            ("Vec<u8>", false) => {
+                                bail!("expected reference type &[u8] instead of Vec<u8>")
+                            }
+                            (t, _) => bail!("unsupported Rust type {}", t),
+                        },
+                    );
+                }
+
+                Ok(NullableType::not_null(
+                    dt.ok_or_else(|| anyhow!("unsupported Rust type2"))?,
+                ))
             }
         }
-        _ => None,
+        Type::Reference(r) => {
+            let t = render_path(&r.elem).ok_or_else(|| anyhow!("unsupported Rust type3"))?;
+
+            let dt = match (t.as_str(), rust_primitive_to_arrow(&r.elem), expect_owned) {
+                ("String", _, false) => bail!("expected &str, not &String"),
+                ("String", _, true) => {
+                    bail!("expected owned String, not &String (hint: remove the &)")
+                }
+                ("Vec<u8>", _, false) => bail!("expected &[u8], not &Vec<u8>"),
+                ("Vec<u8>", _, true) => {
+                    bail!("expected owned Vec<u8>, not &Vec<u8> (hint: remove the &)")
+                }
+                ("str", _, false) => DataType::Utf8,
+                ("str", _, true) => bail!("expected owned String, not &str"),
+                ("[u8]", _, false) => DataType::Binary,
+                ("[u8]", _, true) => bail!("expected owned Vec<u8>, not &[u8]"),
+                (t, Some(_), _) => bail!(
+                    "unexpected &{}; primitives should be passed by value (hint: remove the &)",
+                    t
+                ),
+                _ => {
+                    bail!("unsupported Rust data type")
+                }
+            };
+
+            Ok(NullableType::not_null(dt))
+        }
+        _ => bail!("unsupported Rust data type"),
     }
 }
 
-fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
+fn render_path(typ: &Type) -> Option<String> {
     match typ {
         Type::Path(pat) => {
             let path: Vec<String> = pat
                 .path
                 .segments
                 .iter()
-                .map(|s| s.ident.to_string())
+                .map(|s| s.to_token_stream().to_string().replace(' ', ""))
                 .collect();
 
-            match path.join("::").as_str() {
-                "bool" => Some(DataType::Boolean),
-                "i8" => Some(DataType::Int8),
-                "i16" => Some(DataType::Int16),
-                "i32" => Some(DataType::Int32),
-                "i64" => Some(DataType::Int64),
-                "u8" => Some(DataType::UInt8),
-                "u16" => Some(DataType::UInt16),
-                "u32" => Some(DataType::UInt32),
-                "u64" => Some(DataType::UInt64),
-                "f16" => Some(DataType::Float16),
-                "f32" => Some(DataType::Float32),
-                "f64" => Some(DataType::Float64),
-                "String" => Some(DataType::Utf8),
-                "Vec<u8>" => Some(DataType::Binary),
-                "SystemTime" | "std::time::SystemTime" => {
-                    Some(DataType::Timestamp(TimeUnit::Microsecond, None))
-                }
-                "Duration" | "std::time::Duration" => {
-                    Some(DataType::Duration(TimeUnit::Microsecond))
-                }
-                _ => None,
-            }
+            Some(path.join("::"))
         }
+        Type::Slice(t) => Some(format!("[{}]", render_path(&t.elem)?)),
+        _ => None,
+    }
+}
+
+fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
+    match render_path(typ)?.as_str() {
+        "bool" => Some(DataType::Boolean),
+        "i8" => Some(DataType::Int8),
+        "i16" => Some(DataType::Int16),
+        "i32" => Some(DataType::Int32),
+        "i64" => Some(DataType::Int64),
+        "u8" => Some(DataType::UInt8),
+        "u16" => Some(DataType::UInt16),
+        "u32" => Some(DataType::UInt32),
+        "u64" => Some(DataType::UInt64),
+        "f16" => Some(DataType::Float16),
+        "f32" => Some(DataType::Float32),
+        "f64" => Some(DataType::Float64),
+        "SystemTime" | "std::time::SystemTime" => {
+            Some(DataType::Timestamp(TimeUnit::Microsecond, None))
+        }
+        "Duration" | "std::time::Duration" => Some(DataType::Duration(TimeUnit::Microsecond)),
         _ => None,
     }
 }
@@ -197,13 +264,12 @@ impl ParsedUdf {
                     )
                 }
                 FnArg::Typed(t) => {
-                    if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
+                    let vec_type = Self::vec_inner_type(&t.ty);
+                    if vec_type.is_some() {
                         vec_arguments += 1;
-                        let vec_type = rust_to_arrow(&vec_type).ok_or_else(|| {
+                        let vec_type = rust_to_arrow(vec_type.as_ref().unwrap(), false).map_err(|e| {
                             anyhow!(
-                                "Could not convert function {} inner vector arg {} into an Arrow data type",
-                                name,
-                                i
+                                "Could not convert function {name} inner vector arg {i} into an Arrow data type: {e}",
                             )
                         })?;
 
@@ -211,11 +277,9 @@ impl ParsedUdf {
                             Field::new("item", vec_type.data_type, vec_type.nullable),
                         ))));
                     } else {
-                        args.push(rust_to_arrow(&t.ty).ok_or_else(|| {
+                        args.push(rust_to_arrow(&t.ty, false).map_err(|e| {
                             anyhow!(
-                                "Could not convert function {} arg {} into a SQL data type",
-                                name,
-                                i
+                                "Could not convert function {name} arg {i} into a SQL data type: {e}",
                             )
                         })?);
                     }
@@ -225,11 +289,8 @@ impl ParsedUdf {
 
         let ret = match &function.sig.output {
             ReturnType::Default => bail!("Function {} return type must be specified", name),
-            ReturnType::Type(_, t) => rust_to_arrow(t).ok_or_else(|| {
-                anyhow!(
-                    "Could not convert function {} return type into a SQL data type",
-                    name
-                )
+            ReturnType::Type(_, t) => rust_to_arrow(t, true).map_err(|e| {
+                anyhow!("Could not convert function {name} return type into a SQL data type: {e}",)
             })?,
         };
 
@@ -295,8 +356,10 @@ pub fn inner_type(dt: &DataType) -> Option<DataType> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::parse_duration;
+    use crate::parse::{parse_duration, rust_to_arrow, NullableType};
+    use arrow::datatypes::DataType;
     use std::time::Duration;
+    use syn::parse_quote;
 
     #[test]
     fn test_duration() {
@@ -313,5 +376,78 @@ mod tests {
         assert!(parse_duration("-10ms").is_err());
         assert!(parse_duration("10.0s").is_err());
         assert!(parse_duration("5s what").is_err());
+    }
+
+    #[test]
+    fn test_rust_to_arrow() {
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(i32), false).unwrap(),
+            NullableType::not_null(DataType::Int32)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(Option<i32>), false).unwrap(),
+            NullableType::null(DataType::Int32)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(Vec<u8>), true).unwrap(),
+            NullableType::not_null(DataType::Binary)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(&[u8]), false).unwrap(),
+            NullableType::not_null(DataType::Binary)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(Vec<u8>), true).unwrap(),
+            NullableType::not_null(DataType::Binary)
+        );
+
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(u64), false).unwrap(),
+            NullableType::not_null(DataType::UInt64)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(f32), false).unwrap(),
+            NullableType::not_null(DataType::Float32)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(bool), false).unwrap(),
+            NullableType::not_null(DataType::Boolean)
+        );
+
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(Option<f64>), false).unwrap(),
+            NullableType::null(DataType::Float64)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(Option<bool>), false).unwrap(),
+            NullableType::null(DataType::Boolean)
+        );
+
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(String), true).unwrap(),
+            NullableType::not_null(DataType::Utf8)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(&str), false).unwrap(),
+            NullableType::not_null(DataType::Utf8)
+        );
+
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(Option<String>), true).unwrap(),
+            NullableType::null(DataType::Utf8)
+        );
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(Option<&str>), false).unwrap(),
+            NullableType::null(DataType::Utf8)
+        );
+
+        assert_eq!(
+            rust_to_arrow(&parse_quote!(HashMap<String, i32>), false).ok(),
+            None
+        );
+        assert_eq!(rust_to_arrow(&parse_quote!(CustomStruct), false).ok(), None);
+
+        assert_eq!(rust_to_arrow(&parse_quote!(Vec<u8>), false).ok(), None);
+        assert_eq!(rust_to_arrow(&parse_quote!(&[u8]), true).ok(), None);
     }
 }

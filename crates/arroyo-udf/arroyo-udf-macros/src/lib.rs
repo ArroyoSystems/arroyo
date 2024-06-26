@@ -1,5 +1,5 @@
 use arrow_schema::DataType;
-use arroyo_udf_common::parse::ParsedUdf;
+use arroyo_udf_common::parse::{is_vec_u8, ParsedUdf};
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
@@ -20,6 +20,7 @@ fn data_type_to_arrow_type_token(data_type: &DataType) -> TokenStream {
         DataType::UInt64 => quote!(UInt64Type),
         DataType::Float32 => quote!(Float32Type),
         DataType::Float64 => quote!(Float64Type),
+        DataType::Binary => quote!(GenericBinaryType<i32>),
         DataType::List(f) => data_type_to_arrow_type_token(f.data_type()),
         _ => panic!("Unsupported data type: {:?}", data_type),
     }
@@ -35,7 +36,7 @@ impl Parse for ParsedFunction {
             if let Some(vec) = function.sig.inputs.iter().find_map(|t| match t {
                 FnArg::Receiver(_) => None,
                 FnArg::Typed(t) => {
-                    if ParsedUdf::vec_inner_type(&t.ty).is_some() {
+                    if ParsedUdf::vec_inner_type(&t.ty).is_some() && !is_vec_u8(&t.ty) {
                         Some(t.ty.span())
                     } else {
                         None
@@ -149,6 +150,9 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
                 DataType::Utf8 => {
                     quote!(let #id = arroyo_udf_plugin::arrow::array::StringArray::from(args.next().unwrap());)
                 }
+                DataType::Binary => {
+                    quote!(let #id = arroyo_udf_plugin::arrow::array::BinaryArray::from(args.next().unwrap());)
+                }
                 DataType::List(field) => {
                     let filter = if !field.is_nullable() {
                         quote!(.filter_map(|x| x))
@@ -175,11 +179,18 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
     let (parsed, item) = (parsed.0, parsed.1);
     let udf_name = format_ident!("{}", parsed.name);
 
-    let results_builder = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
-        quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::StringBuilder::with_capacity(batch_size, batch_size * 8);)
-    } else {
-        let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
-        quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::PrimitiveBuilder::<arroyo_udf_plugin::arrow::datatypes::#return_type>::with_capacity(batch_size);)
+    let results_builder = match parsed.ret_type.data_type {
+        DataType::Utf8 => {
+            quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::StringBuilder::with_capacity(batch_size, batch_size * 8);)
+        }
+        DataType::Binary => {
+            quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::GenericByteBuilder::<arroyo_udf_plugin::arrow::array::types::GenericBinaryType<i32>>
+                ::with_capacity(batch_size, batch_size * 8);)
+        }
+        _ => {
+            let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
+            quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::PrimitiveBuilder::<arroyo_udf_plugin::arrow::datatypes::#return_type>::with_capacity(batch_size);)
+        }
     };
 
     let (defs, args) = arg_vars(&parsed);
@@ -196,10 +207,14 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
         .map(|(i, arg_type)| {
             let id = format_ident!("arg_{}", i);
 
-            let append_none = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
-                quote!(results_builder.append_option(None::<String>);)
-            } else {
-                quote!(results_builder.append_option(None);)
+            let append_none = match parsed.ret_type.data_type {
+                DataType::Utf8 => {
+                    quote!(results_builder.append_option(None::<String>);)
+                }
+                DataType::Binary => {
+                    quote!(results_builder.append_option(None::<Vec<u8>>);)
+                }
+                _ => quote!(results_builder.append_option(None);),
             };
 
             if arg_type.nullable {
@@ -215,24 +230,12 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
         })
         .collect();
 
-    let to_string: Vec<_> = parsed
-        .args
-        .iter()
-        .enumerate()
-        .map(|(i, arg_type)| {
-            let id = format_ident!("arg_{}", i);
-            if matches!(arg_type.data_type, DataType::Utf8) {
-                Some(quote!(let #id = #id.to_string()))
-            } else {
-                None
-            }
-        })
-        .collect();
-
+    let mut arg_destructure = quote!(arg_0);
     let mut arg_zip = quote!(arg_0.iter());
     for i in 1..args.len() {
         let next_arg = format_ident!("arg_{}", i);
         arg_zip = quote!(#arg_zip.zip(#next_arg.iter()));
+        arg_destructure = quote!((#arg_destructure, #next_arg))
     }
 
     let call = if parsed.ret_type.nullable {
@@ -247,9 +250,8 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
         }
     } else {
         quote! {
-            for (#(#args),*) in #arg_zip {
+            for #arg_destructure in #arg_zip {
                 #(#unwrapping;)*
-                #(#to_string;)*
                 #call
             }
         }
@@ -296,15 +298,11 @@ fn async_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream
     let call_args: Vec<_> = args
         .iter()
         .zip(parsed.args)
-        .map(|(arg, dt)| match dt.data_type {
-            DataType::Utf8 => {
-                quote!(#arg.value(0).to_string())
-            }
-            DataType::Binary => {
-                quote!(#arg.value(0).clone())
-            }
-            _ => {
-                quote!(#arg.value(0))
+        .map(|(arg, t)| {
+            if t.nullable {
+                quote!(if arroyo_udf_plugin::arrow::array::Array::is_null(&#arg, 0) { None } else { Some(#arg.value(0))})
+            } else {
+                quote!(#arg.value(0))                
             }
         })
         .collect();
@@ -343,11 +341,15 @@ fn async_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream
         }
     };
 
-    let results_builder = if matches!(parsed.ret_type.data_type, DataType::Utf8) {
-        quote!(arroyo_udf_plugin::arrow::array::StringBuilder::new())
-    } else {
-        let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
-        quote!(arroyo_udf_plugin::arrow::array::PrimitiveBuilder::<arroyo_udf_plugin::arrow::datatypes::#return_type>::new())
+    let results_builder = match parsed.ret_type.data_type {
+        DataType::Utf8 => quote!(arroyo_udf_plugin::arrow::array::StringBuilder::new()),
+        DataType::Binary => quote!(arroyo_udf_plugin::arrow::array::GenericByteBuilder::<
+            arroyo_udf_plugin::arrow::array::types::GenericBinaryType<i32>,
+        >::new()),
+        _ => {
+            let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
+            quote!(arroyo_udf_plugin::arrow::array::PrimitiveBuilder::<arroyo_udf_plugin::arrow::datatypes::#return_type>::new())
+        }
     };
 
     let start = quote! {

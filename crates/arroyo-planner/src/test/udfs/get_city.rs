@@ -8,7 +8,7 @@ use arroyo_udf_plugin::udf;
 use reqwest::Client;
 
 #[udf(allowed_in_flight=100000, timeout="180s")]
-pub async fn get_city(ip: String) -> Option<String> {
+pub async fn get_city(ip: &str) -> Option<String> {
     use std::sync::OnceLock;
     static CLIENT: OnceLock<Client> = OnceLock::new();
     let client = CLIENT.get_or_init(|| {
