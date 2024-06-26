@@ -360,7 +360,7 @@ mod tests {
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
-    use arrow_array::RecordBatch;
+    use arrow_array::{BinaryArray, RecordBatch};
     use arrow_schema::{Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{

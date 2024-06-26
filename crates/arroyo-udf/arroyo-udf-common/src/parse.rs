@@ -37,6 +37,20 @@ impl NullableType {
     }
 }
 
+pub fn is_vec_u8(typ: &Type) -> bool {
+    let Some(inner) = ParsedUdf::vec_inner_type(typ) else {
+        return false;
+    };
+
+    matches!(
+        rust_to_arrow(&inner),
+        Some(NullableType {
+            data_type: DataType::UInt8,
+            nullable: false
+        })
+    )
+}
+
 fn rust_to_arrow(typ: &Type) -> Option<NullableType> {
     match typ {
         Type::Path(pat) => {
@@ -66,7 +80,7 @@ fn rust_primitive_to_arrow(typ: &Type) -> Option<DataType> {
                 .path
                 .segments
                 .iter()
-                .map(|s| s.ident.to_string())
+                .map(|s| s.to_token_stream().to_string().replace(' ', ""))
                 .collect();
 
             match path.join("::").as_str() {
@@ -197,9 +211,10 @@ impl ParsedUdf {
                     )
                 }
                 FnArg::Typed(t) => {
-                    if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
+                    let vec_type = Self::vec_inner_type(&t.ty);
+                    if vec_type.is_some() && !is_vec_u8(&t.ty) {
                         vec_arguments += 1;
-                        let vec_type = rust_to_arrow(&vec_type).ok_or_else(|| {
+                        let vec_type = rust_to_arrow(vec_type.as_ref().unwrap()).ok_or_else(|| {
                             anyhow!(
                                 "Could not convert function {} inner vector arg {} into an Arrow data type",
                                 name,

@@ -1,5 +1,7 @@
 use crate::{AsyncUdfDylib, AsyncUdfDylibInterface, SyncUdfDylib};
-use arrow::array::{Array, ArrayRef, Int32Array, StringArray, UInt64Array};
+use arrow::array::{
+    Array, ArrayRef, BinaryArray, BinaryBuilder, Int32Array, StringArray, UInt64Array,
+};
 use arrow::datatypes::DataType;
 use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl};
 use std::sync::Arc;
@@ -9,12 +11,34 @@ mod test_udf_1 {
     use arroyo_udf_macros::local_udf;
 
     #[local_udf]
-    fn my_udf(x: i32, y: String) -> Option<String> {
+    fn my_udf(x: i32, y: String, z: Vec<u8>) -> Option<String> {
         if x < 5 {
             None
         } else {
-            Some(format!("{x}-{y}"))
+            Some(format!("{}-{}-{:?}", x, y, z))
         }
+    }
+}
+
+#[allow(unused)]
+mod test_udf_optional_binary {
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
+
+    #[local_udf]
+    fn my_udf(v: Option<Vec<u8>>) -> Vec<u8> {
+        v.unwrap_or_else(|| vec![0])
+    }
+}
+
+#[allow(unused)]
+mod test_udf_optional_binary_return {
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
+
+    #[local_udf]
+    fn my_udf(v: Option<Vec<u8>>) -> Option<Vec<u8>> {
+        v
     }
 }
 
@@ -26,6 +50,11 @@ fn test_udf() {
         .invoke(&[
             ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
             ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
+            ColumnarValue::Array(Arc::new(BinaryArray::from(vec![
+                b"x".as_ref(),
+                b"y".as_ref(),
+                b"z".as_ref(),
+            ]))),
         ])
         .unwrap();
 
@@ -36,8 +65,18 @@ fn test_udf() {
     let result = a.as_any().downcast_ref::<StringArray>().unwrap();
     assert_eq!(result.len(), 3);
     assert!(result.is_null(0));
-    assert_eq!(result.value(1), "10-b");
-    assert_eq!(result.value(2), "20-c");
+    assert_eq!(result.value(1), "10-b-[121]");
+    assert_eq!(result.value(2), "20-c-[122]");
+}
+
+#[test]
+fn test_optional_arg() {
+    let udf = test_udf_optional_binary::__local().config;
+    let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
+    let mut data = BinaryBuilder::new();
+    data.append_option(Some(vec![1, 2, 3]));
+    data.append_option(None::<Vec<u8>>);
+    data.append_option(Some(vec![4, 5]));
 }
 
 mod test_udaf {
@@ -61,14 +100,23 @@ fn test_udaf() {
     assert_eq!(result, ScalarValue::UInt64(Some(3)));
 }
 
+mod test_async_optional_binary {
+    use arroyo_udf_macros::udf;
+
+    #[udf(unordered)]
+    async fn my_udf(x: Option<Vec<u8>>) -> Vec<u8> {
+        x.unwrap()
+    }
+}
+
 mod test_async_udf {
     use arroyo_udf_macros::udf;
     use std::time::Duration;
 
     #[udf(ordered, timeout = "5s", allowed_in_flight = 100)]
-    async fn my_udf(a: u64, b: String) -> u32 {
+    async fn my_udf(a: u64, b: String, c: Vec<u8>) -> u32 {
         tokio::time::sleep(Duration::from_millis(10)).await;
-        a as u32 + b.len() as u32
+        a as u32 + b.len() as u32 + c.len() as u32
     }
 }
 
@@ -91,7 +139,8 @@ async fn test_async() {
 
     let arg1 = PrimitiveArray::<UInt64Type>::from(vec![2]);
     let arg2 = StringArray::from(vec!["hello"]);
-    udf.send(5, vec![arg1.to_data(), arg2.to_data()])
+    let arg3 = BinaryArray::from(vec![b"blah".as_ref()]);
+    udf.send(5, vec![arg1.to_data(), arg2.to_data(), arg3.to_data()])
         .await
         .unwrap();
 
@@ -101,7 +150,7 @@ async fn test_async() {
             Some((ids, values)) => {
                 let values = PrimitiveArray::<UInt32Type>::from(values);
                 assert_eq!(values.len(), 1);
-                assert_eq!(values.value(0), 7);
+                assert_eq!(values.value(0), 11);
                 assert_eq!(ids.len(), 1);
                 assert_eq!(ids.value(0), 5);
                 return;
