@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc, time::SystemTime};
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_rpc::CompactionResult;
 use arroyo_rpc::{
-    grpc::{
+    grpc::rpc::{
         OperatorCheckpointMetadata, SubtaskCheckpointMetadata, TableConfig, TableEnum,
         TableSubtaskCheckpointMetadata,
     },

@@ -3,7 +3,7 @@ use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{OperatorNode, SourceOperator};
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{StopMode, TableConfig};
+use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::{string_to_map, ArrowMessage, SignalMessage, UserError, Watermark};

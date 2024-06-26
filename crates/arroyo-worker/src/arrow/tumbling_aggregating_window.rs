@@ -15,7 +15,7 @@ use arrow_schema::SchemaRef;
 use arroyo_df::schemas::add_timestamp_field_arrow;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
-use arroyo_rpc::grpc::{api, TableConfig};
+use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::common::ScalarValue;

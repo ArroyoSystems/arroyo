@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
-use arroyo_rpc::grpc::StopMode;
+use arroyo_rpc::grpc::rpc::StopMode;
 use tokio::time::timeout;
 use tracing::{info, warn};
 

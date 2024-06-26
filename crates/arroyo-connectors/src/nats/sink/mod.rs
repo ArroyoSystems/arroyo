@@ -5,7 +5,7 @@ use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
-use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlMessage;
 use arroyo_rpc::ControlResp;
 use arroyo_types::*;

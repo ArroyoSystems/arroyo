@@ -12,7 +12,7 @@ use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
     OperatorCheckpointDetail, TaskCheckpointDetail, TaskCheckpointEventType,
 };
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
+use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
@@ -459,7 +459,7 @@ pub async fn get_job_output(
         .unwrap();
 
     let mut stream = controller
-        .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
+        .subscribe_to_output(Request::new(grpc::rpc::GrpcOutputSubscription {
             job_id: job_pub_id.clone(),
         }))
         .await

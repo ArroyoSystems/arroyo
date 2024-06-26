@@ -6,8 +6,8 @@ use crate::rest::AppState;
 use crate::rest_utils::{authenticate, log_and_map, BearerAuth, ErrorResp};
 use arroyo_rpc::api_types::metrics::OperatorMetricGroup;
 use arroyo_rpc::api_types::OperatorMetricGroupCollection;
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::JobMetricsReq;
+use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
+use arroyo_rpc::grpc::rpc::JobMetricsReq;
 use tonic::Code;
 
 /// Get a job's metrics

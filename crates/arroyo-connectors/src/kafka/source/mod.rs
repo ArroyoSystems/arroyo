@@ -1,7 +1,7 @@
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp};
 
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;

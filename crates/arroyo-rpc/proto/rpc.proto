@@ -1,6 +1,8 @@
 syntax = "proto3";
 package arroyo_rpc;
 
+import "api.proto";
+
 
 // Controller
 
@@ -324,6 +326,7 @@ message TaskAssignment {
 }
 
 message StartExecutionReq {
+  api.ArrowProgram program = 1;
   optional uint32 restore_epoch = 2;
   repeated TaskAssignment tasks = 3;
 }
@@ -415,7 +418,6 @@ message StartWorkerReq {
   uint64 node_id = 7;
   uint64 run_id = 8;
   map<string, string> env_vars = 10;
-  bytes program = 11;
 }
 
 message StartWorkerResp {

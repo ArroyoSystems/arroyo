@@ -15,7 +15,7 @@ use crate::webhook::MAX_INFLIGHT;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
-use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlResp;
 use arroyo_state::global_table_config;
 

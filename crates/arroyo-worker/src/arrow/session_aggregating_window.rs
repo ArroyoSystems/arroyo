@@ -23,7 +23,7 @@ use arroyo_operator::{
     operator::{ArrowOperator, OperatorConstructor, OperatorNode},
 };
 use arroyo_rpc::{
-    grpc::{api, TableConfig},
+    grpc::{api, rpc::TableConfig},
     Converter,
 };
 use arroyo_state::{

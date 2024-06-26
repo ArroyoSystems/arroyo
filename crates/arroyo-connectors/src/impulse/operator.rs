@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use arrow::array::builder::{TimestampNanosecondBuilder, UInt64Builder};
 use arrow::array::RecordBatch;
-use arroyo_rpc::grpc::{StopMode, TableConfig};
+use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::ControlMessage;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};

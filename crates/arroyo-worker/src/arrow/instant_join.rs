@@ -14,7 +14,7 @@ use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
-    grpc::{api, TableConfig},
+    grpc::{api, rpc::TableConfig},
 };
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, CheckpointBarrier, Watermark};

@@ -7,7 +7,7 @@ use std::{
 
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::{
     worker_grpc_client::WorkerGrpcClient, CheckpointReq, CommitReq, JobFinishedReq, LabelPair,
     LoadCompactedDataReq, MetricsReq, StopExecutionReq, StopMode, TaskCheckpointEventType,
 };

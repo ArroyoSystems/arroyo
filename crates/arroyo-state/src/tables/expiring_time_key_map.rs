@@ -16,7 +16,7 @@ use arrow_array::{
 use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arroyo_rpc::{
     df::server_for_hash_array,
-    grpc::{
+    grpc::rpc::{
         ExpiringKeyedTimeSubtaskCheckpointMetadata, ExpiringKeyedTimeTableCheckpointMetadata,
         ExpiringKeyedTimeTableConfig, OperatorMetadata, ParquetTimeFile, TableEnum,
     },
@@ -350,7 +350,7 @@ impl Table for ExpiringTimeKeyTable {
         }))
     }
 
-    fn table_type() -> arroyo_rpc::grpc::TableEnum {
+    fn table_type() -> arroyo_rpc::grpc::rpc::TableEnum {
         TableEnum::ExpiringKeyedTimeTable
     }
 
@@ -756,7 +756,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
         }
     }
 
-    fn table_type() -> arroyo_rpc::grpc::TableEnum {
+    fn table_type() -> arroyo_rpc::grpc::rpc::TableEnum {
         TableEnum::ExpiringKeyedTimeTable
     }
 

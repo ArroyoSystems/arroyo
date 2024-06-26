@@ -32,7 +32,10 @@ use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;
 use arroyo_operator::ErasedConstructor;
 use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::{api, CheckpointMetadata, TaskAssignment};
+use arroyo_rpc::grpc::{
+    api,
+    rpc::{CheckpointMetadata, TaskAssignment},
+};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{range_for_server, Key, TaskInfo, WorkerId};

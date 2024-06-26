@@ -278,7 +278,7 @@ macro_rules! stop_if_desired_running {
         use crate::states::stopping::StopBehavior;
         use crate::states::stopping::Stopping;
         use crate::types::public::StopMode;
-        use arroyo_rpc::grpc;
+        use arroyo_rpc::grpc::rpc;
         match $config.stop_mode {
             StopMode::checkpoint => {
                 return Ok(Transition::next(*$self, CheckpointStopping {}));
@@ -287,7 +287,7 @@ macro_rules! stop_if_desired_running {
                 return Ok(Transition::next(
                     *$self,
                     Stopping {
-                        stop_mode: StopBehavior::StopJob(grpc::StopMode::Graceful),
+                        stop_mode: StopBehavior::StopJob(rpc::StopMode::Graceful),
                     },
                 ));
             }
@@ -295,7 +295,7 @@ macro_rules! stop_if_desired_running {
                 return Ok(Transition::next(
                     *$self,
                     Stopping {
-                        stop_mode: StopBehavior::StopJob(grpc::StopMode::Immediate),
+                        stop_mode: StopBehavior::StopJob(rpc::StopMode::Immediate),
                     },
                 ));
             }
@@ -328,7 +328,7 @@ macro_rules! stop_if_desired_non_running {
                 return Ok(Transition::next(
                     *$self,
                     Stopping {
-                        stop_mode: StopBehavior::StopJob(grpc::StopMode::Immediate),
+                        stop_mode: StopBehavior::StopJob(grpc::rpc::StopMode::Immediate),
                     },
                 ));
             }

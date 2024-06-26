@@ -17,7 +17,7 @@ use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
-use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
+use arroyo_rpc::grpc::rpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{
@@ -320,7 +320,7 @@ async fn test_kafka() {
     reader
         .to_control_tx
         .send(ControlMessage::Stop {
-            mode: arroyo_rpc::grpc::StopMode::Graceful,
+            mode: arroyo_rpc::grpc::rpc::StopMode::Graceful,
         })
         .await
         .unwrap();

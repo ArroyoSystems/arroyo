@@ -1,4 +1,4 @@
-use std::env::{current_exe, temp_dir};
+use std::env::current_exe;
 use std::net::SocketAddr;
 use std::{
     collections::HashMap,
@@ -8,9 +8,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::{
     controller_grpc_client::ControllerGrpcClient, node_grpc_server::NodeGrpc,
     node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp, HeartbeatNodeReq,
     RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq, StopWorkerResp,
@@ -18,11 +18,7 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{
-    to_millis, to_nanos, NodeId, WorkerId, ARROYO_PROGRAM_FILE_ENV, JOB_ID_ENV, RUN_ID_ENV,
-};
-use base64::engine::general_purpose;
-use base64::Engine;
+use arroyo_types::{to_millis, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use rand::random;
@@ -91,19 +87,6 @@ impl NodeServer {
         let worker_id = WorkerId(random());
         let node_id = self.id;
         let finished_tx = self.worker_finished_tx.clone();
-        let program = general_purpose::STANDARD_NO_PAD.encode(&req.program);
-
-        let program_file = temp_dir()
-            .join("arroyo")
-            .join(&req.job_id)
-            .join(format!("{}.program", to_nanos(SystemTime::now())));
-
-        tokio::fs::create_dir_all(&program_file.parent().unwrap())
-            .await
-            .map_err(|e| anyhow!("Failed to create tmp dir for program file: {:?}", e))?;
-        tokio::fs::write(&program_file, &program)
-            .await
-            .map_err(|e| anyhow!("Failed to write program file to tmp dir: {:?}", e))?;
 
         let mut workers = self.workers.lock().unwrap();
 
@@ -120,7 +103,6 @@ impl NodeServer {
             .env(JOB_ID_ENV, req.job_id.clone())
             .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots))
             .env(RUN_ID_ENV, format!("{}", req.run_id))
-            .env(ARROYO_PROGRAM_FILE_ENV, program_file.to_str().unwrap())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| Status::internal(format!("Failed to start worker: {:?}", e)))?;
@@ -242,7 +224,7 @@ impl NodeGrpc for NodeServer {
 
         let statuses: Vec<_> = workers
             .values()
-            .map(|w| arroyo_rpc::grpc::WorkerStatus {
+            .map(|w| arroyo_rpc::grpc::rpc::WorkerStatus {
                 name: w.name.clone(),
                 slots: w.slots as u64,
                 running: w.running,

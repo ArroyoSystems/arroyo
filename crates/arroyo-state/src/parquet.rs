@@ -3,13 +3,15 @@ use crate::tables::global_keyed_map::GlobalKeyedTable;
 use crate::tables::{CompactionConfig, ErasedTable};
 use crate::BackingStore;
 use anyhow::{bail, Context, Result};
-use arroyo_rpc::grpc;
-use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
+};
 use arroyo_storage::StorageProvider;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 
 use arroyo_rpc::config::config;
+use arroyo_rpc::grpc::rpc;
 use prost::Message;
 use std::collections::{HashMap, HashSet};
 use std::ops::RangeInclusive;
@@ -193,8 +195,8 @@ impl ParquetBackend {
                 .unwrap()
                 .clone();
             if let Some(compacted_metadata) = match table_metadata.table_type() {
-                grpc::TableEnum::MissingTableType => bail!("should have table type"),
-                grpc::TableEnum::GlobalKeyValue => {
+                rpc::TableEnum::MissingTableType => bail!("should have table type"),
+                rpc::TableEnum::GlobalKeyValue => {
                     GlobalKeyedTable::compact_data(
                         table_config,
                         &compaction_config,
@@ -203,7 +205,7 @@ impl ParquetBackend {
                     )
                     .await?
                 }
-                grpc::TableEnum::ExpiringKeyedTimeTable => {
+                rpc::TableEnum::ExpiringKeyedTimeTable => {
                     ExpiringTimeKeyTable::compact_data(
                         table_config,
                         &compaction_config,
@@ -240,11 +242,11 @@ impl ParquetBackend {
                     .clone();
 
                 match table_config.table_type() {
-                    grpc::TableEnum::MissingTableType => todo!("should handle error"),
-                    grpc::TableEnum::GlobalKeyValue => {
+                    rpc::TableEnum::MissingTableType => todo!("should handle error"),
+                    rpc::TableEnum::GlobalKeyValue => {
                         GlobalKeyedTable::files_to_keep(table_config, metadata.clone()).unwrap()
                     }
-                    grpc::TableEnum::ExpiringKeyedTimeTable => {
+                    rpc::TableEnum::ExpiringKeyedTimeTable => {
                         ExpiringTimeKeyTable::files_to_keep(table_config, metadata.clone()).unwrap()
                     }
                 }
@@ -275,11 +277,11 @@ impl ParquetBackend {
                         .clone();
 
                     match table_config.table_type() {
-                        grpc::TableEnum::MissingTableType => todo!("should handle error"),
-                        grpc::TableEnum::GlobalKeyValue => {
+                        rpc::TableEnum::MissingTableType => todo!("should handle error"),
+                        rpc::TableEnum::GlobalKeyValue => {
                             GlobalKeyedTable::files_to_keep(table_config, metadata.clone()).unwrap()
                         }
-                        grpc::TableEnum::ExpiringKeyedTimeTable => {
+                        rpc::TableEnum::ExpiringKeyedTimeTable => {
                             ExpiringTimeKeyTable::files_to_keep(table_config, metadata.clone())
                                 .unwrap()
                         }

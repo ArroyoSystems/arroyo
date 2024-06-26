@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp};
 use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rumqttc::v5::mqttbytes::QoS;
@@ -17,7 +17,7 @@ use crate::mqtt::{create_connection, MqttConfig};
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::grpc::rpc::TableConfig;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 

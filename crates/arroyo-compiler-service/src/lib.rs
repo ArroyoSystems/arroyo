@@ -9,7 +9,7 @@ use std::str::from_utf8;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
-use arroyo_rpc::grpc::{
+use arroyo_rpc::grpc::rpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
     BuildUdfReq, BuildUdfResp, GetUdfPathReq, GetUdfPathResp, UdfCrate,
 };

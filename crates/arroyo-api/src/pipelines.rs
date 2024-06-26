@@ -27,7 +27,7 @@ use arroyo_datastream::logical::{LogicalNode, LogicalProgram, OperatorName};
 use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
+use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 use arroyo_rpc::{error_chain, OperatorConfig};

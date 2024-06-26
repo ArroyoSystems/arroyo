@@ -73,9 +73,6 @@ impl Serialize for Window {
     }
 }
 
-pub const ARROYO_PROGRAM_ENV: &str = "ARROYO_PROGRAM";
-pub const ARROYO_PROGRAM_FILE_ENV: &str = "ARROYO_PROGRAM_FILE";
-
 // worker configuration
 pub const JOB_ID_ENV: &str = "JOB_ID";
 pub const RUN_ID_ENV: &str = "RUN_ID";
