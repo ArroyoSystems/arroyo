@@ -424,6 +424,7 @@ dependencies = [
  "arroyo-openapi",
  "arroyo-rpc",
  "arroyo-server-common",
+ "arroyo-storage",
  "arroyo-types",
  "arroyo-worker",
  "async-trait",

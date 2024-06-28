@@ -5,7 +5,7 @@ pub mod schema_resolver;
 pub mod var_str;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{fs, time::SystemTime};
 
 use crate::api_types::connections::PrimitiveType;
@@ -19,6 +19,7 @@ use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     service::Interceptor,
@@ -40,6 +41,20 @@ pub mod grpc {
 
     pub const API_FILE_DESCRIPTOR_SET: &[u8] =
         tonic::include_file_descriptor_set!("api_descriptor");
+}
+
+static DB_BACKUP_NOTIFIER: OnceLock<Sender<bool>> = OnceLock::new();
+
+pub fn init_db_notifier() -> Receiver<bool> {
+    let (tx, rx) = channel(1);
+    DB_BACKUP_NOTIFIER
+        .set(tx)
+        .expect("DB notifier was initialized multiple times!");
+    rx
+}
+
+pub fn notify_db() -> Option<()> {
+    DB_BACKUP_NOTIFIER.get()?.try_send(true).ok()
 }
 
 #[derive(Debug)]
