@@ -241,9 +241,9 @@ pub struct Config {
     /// process with a non-standard port.
     compiler_endpoint: Option<Url>,
 
-    /// Supplies the default query for `arroyo run`; otherwise the query is read from the command
-    /// line or from stdin
-    pub query: Option<String>,
+    /// Run options
+    #[serde(default)]
+    pub run: RunConfig,
 
     /// Telemetry config
     #[serde(default)]
@@ -630,6 +630,17 @@ pub enum LogFormat {
     Plaintext,
     Json,
     Logfmt,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RunConfig {
+    /// Supplies the default query for `arroyo run`; otherwise the query is read from the command
+    /// line or from stdin
+    pub query: Option<String>,
+
+    /// Sets the state directory, where state will be read from and written to
+    pub state_dir: Option<String>,
 }
 
 #[derive(Debug, Clone)]

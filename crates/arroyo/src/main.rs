@@ -44,13 +44,17 @@ struct RunArgs {
     #[arg(short, long)]
     name: Option<String>,
 
-    /// Path to a database file to save to or restore from
-    #[arg(long)]
-    database: Option<PathBuf>,
+    /// Directory or URL where checkpoints and metadata will be written and restored from
+    #[arg(short = 's', long)]
+    state_dir: Option<String>,
 
     /// Number of parallel subtasks to run
     #[arg(short, long, default_value = "1")]
     parallelism: u32,
+
+    /// Force the pipeline to start even if the state file does not match the query
+    #[clap(short, long)]
+    force: bool,
 
     /// The query to run
     #[clap(value_parser, default_value = "-")]
@@ -237,6 +241,10 @@ fn sqlite_connection() -> rusqlite::Connection {
     arroyo_server_common::set_cluster_id(&uuid);
 
     drop(statement);
+
+    // enable WAL mode
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .expect("Unable to enable WAL mode in sqlite");
 
     // enable foreign keys
     conn.pragma_update(None, "foreign_keys", "ON")

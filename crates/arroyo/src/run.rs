@@ -1,22 +1,27 @@
 use crate::{db_source, RunArgs};
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_openapi::Client;
 use arroyo_rpc::config::{config, DatabaseType, DefaultSink, Scheduler};
-use arroyo_rpc::{config, retry};
+use arroyo_rpc::{config, init_db_notifier, notify_db, retry};
 use arroyo_server_common::log_event;
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
+use arroyo_storage::StorageProvider;
+use arroyo_types::to_millis;
 use async_trait::async_trait;
 use rand::random;
+use rusqlite::{Connection, DatabaseName, OpenFlags};
 use serde_json::json;
 use std::env;
-use std::env::set_var;
+use std::env::{set_var, temp_dir};
 use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::time::timeout;
+use std::time::{Duration, Instant, SystemTime};
+use tokio::select;
+use tokio::task::spawn_blocking;
+use tokio::time::{interval, timeout, MissedTickBehavior};
 use tracing::level_filters::LevelFilter;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -105,6 +110,9 @@ impl ShutdownHandler for PipelineShutdownHandler {
                 "Pipeline did not complete checkpoint within timeout; shutting down immediately"
             );
         }
+
+        // start a final backup
+        notify_db();
     }
 }
 
@@ -140,6 +148,7 @@ async fn run_pipeline(
     parallelism: u32,
     http_port: u16,
     shutdown_handler: PipelineShutdownHandler,
+    force: bool,
 ) -> anyhow::Result<()> {
     // wait until server is available
     wait_for_connect(&client).await.unwrap();
@@ -177,7 +186,21 @@ async fn run_pipeline(
             p.id
         }
         None => {
-            // or create it
+            // or create it, unless there are other pipelines, which would indicate that this is
+            // a DB for another query
+            if client.get_pipelines().send().await?.data.len() > 0 {
+                let msg =
+                    "The specified state is for a different pipeline; this likely means either \
+                    the state directory is incorrect or the query is incorrect.";
+                if force {
+                    warn!("{}", msg);
+                    warn!("--force was supplied, so continuing anyways");
+                } else {
+                    error!("{}", msg);
+                    bail!("Exiting... if you would like to continue pass --force");
+                }
+            }
+
             client
                 .create_pipeline()
                 .body(
@@ -204,6 +227,116 @@ async fn run_pipeline(
     Ok(())
 }
 
+struct MaybeLocalDb {
+    provider: StorageProvider,
+    local_path: PathBuf,
+    connection: Option<Arc<Mutex<Connection>>>,
+}
+
+const REMOTE_STATE_KEY: &str = "state.sqlite";
+
+impl MaybeLocalDb {
+    pub async fn from_dir(s: &str) -> Self {
+        let provider = StorageProvider::for_url(s)
+            .await
+            .unwrap_or_else(|e| panic!("Provided state dir '{}' is not valid: {}", s, e));
+
+        let local_path = if !provider.config().is_local() {
+            let local_path = temp_dir().join(format!("arroyo-local-{}.sqlite", random::<u32>()));
+            let db = provider
+                .get_if_present(REMOTE_STATE_KEY)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to fetch database from configured state directory '{}': {}",
+                        s, e
+                    );
+                });
+
+            if let Some(db) = db {
+                tokio::fs::write(&local_path, db).await.unwrap_or_else(|e| {
+                    panic!(
+                        "Unable to write local database copy at '{}': {}",
+                        local_path.to_string_lossy(),
+                        e
+                    )
+                });
+            }
+            local_path
+        } else {
+            PathBuf::from_str(s).unwrap().join(REMOTE_STATE_KEY)
+        };
+
+        Self {
+            provider,
+            local_path,
+            connection: None,
+        }
+    }
+
+    pub fn init_connection(&mut self) {
+        let conn = Connection::open_with_flags(&self.local_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Could not open sqlite database at path {:?}: {:?}",
+                    self.local_path, e
+                )
+            });
+
+        self.connection = Some(Arc::new(Mutex::new(conn)));
+    }
+
+    pub async fn backup(&self) -> anyhow::Result<()> {
+        if self.provider.config().is_local() {
+            return Ok(());
+        }
+
+        info!("Backing up database to remote storage");
+        let start = Instant::now();
+        let backup_file = temp_dir().join(format!("arroyo-db-backup-{}.sqlite", random::<u32>()));
+
+        spawn_blocking({
+            let connection = self.connection.as_ref().unwrap().clone();
+            let backup_file = backup_file.clone();
+            move || {
+                connection
+                    .lock()
+                    .unwrap()
+                    .backup(DatabaseName::Main, &backup_file, None)
+                    .map_err(|e| {
+                        anyhow!(
+                            "Unable to create backup file in tmp dir ({:?}): {e}",
+                            backup_file
+                        )
+                    })?;
+                Ok::<_, anyhow::Error>(())
+            }
+        })
+        .await??;
+
+        // TODO: make this streaming so we don't need to read in the whole database into memory
+        self.provider
+            .put(
+                REMOTE_STATE_KEY,
+                tokio::fs::read(&backup_file).await.map_err(|e| {
+                    anyhow!(
+                        "Unable to read local database backup file '{:?}': {e}",
+                        backup_file
+                    )
+                })?,
+            )
+            .await
+            .map_err(|e| anyhow!("Unable to backup database to state: {e}"))?;
+
+        info!(
+            "Finished backing up database; took {:.3} seconds",
+            start.elapsed().as_secs_f32()
+        );
+
+        Ok(())
+    }
+}
+
 pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging_with_filter(
         "pipeline",
@@ -220,20 +353,31 @@ pub async fn run(args: RunArgs) {
         },
     );
 
-    let query = match config().query.clone() {
+    let query = match config().run.query.clone() {
         Some(query) => query,
         None => std::io::read_to_string(args.query).unwrap(),
     };
 
     let mut shutdown = Shutdown::new("pipeline", SignalBehavior::Handle);
 
-    let db_path = args.database.clone().unwrap_or_else(|| {
-        PathBuf::from_str(&format!("/tmp/arroyo/{}.arroyo", random::<u32>())).unwrap()
-    });
+    let state_dir = args
+        .state_dir
+        .or_else(|| config().run.state_dir.clone())
+        .unwrap_or_else(|| {
+            format!(
+                "{}/pipeline-{}",
+                config().checkpoint_url,
+                to_millis(SystemTime::now())
+            )
+        });
+
+    let mut maybe_local_db = MaybeLocalDb::from_dir(&state_dir).await;
 
     config::update(|c| {
         c.database.r#type = DatabaseType::Sqlite;
-        c.database.sqlite.path = db_path.clone();
+        c.database.sqlite.path = maybe_local_db.local_path.clone();
+
+        c.checkpoint_url = state_dir.clone();
 
         if let Some(port) = c.api.run_http_port {
             c.api.http_port = port;
@@ -247,6 +391,9 @@ pub async fn run(args: RunArgs) {
     });
 
     let db = db_source().await;
+    maybe_local_db.init_connection();
+
+    // check if this is the correct database for this pipeline
 
     log_event("pipeline_cluster_start", json!({}));
 
@@ -268,6 +415,31 @@ pub async fn run(args: RunArgs) {
             .unwrap(),
     ));
 
+    // start DB backup task
+    let backup_guard = shutdown.guard("backup_db");
+    tokio::spawn(async move {
+        let guard = backup_guard;
+        let token = guard.token();
+        let mut timer = interval(Duration::from_secs(60));
+        timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        let mut rx = init_db_notifier();
+
+        while !token.is_cancelled() {
+            select! {
+                _ = timer.tick() => {}
+                Some(_) = rx.recv() => {}
+                _ = token.cancelled() => {
+                    // do one final backup before shutting down
+                }
+            }
+
+            if let Err(e) = maybe_local_db.backup().await {
+                error!("Failed to back up database: {:?}", e);
+            }
+        }
+    });
+
     let shutdown_handler = PipelineShutdownHandler {
         client: client.clone(),
         pipeline_id: Arc::new(Mutex::new(None)),
@@ -283,6 +455,7 @@ pub async fn run(args: RunArgs) {
             args.parallelism,
             http_port,
             shutdown_handler,
+            args.force,
         )
         .await
     });

@@ -18,20 +18,20 @@ use rand::{thread_rng, Rng};
 
 use time::OffsetDateTime;
 
+use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
+use crate::types::public::CheckpointState as DbCheckpointState;
+use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::config::config;
+use arroyo_rpc::notify_db;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::checkpoint_state::CheckpointState;
+use arroyo_state::committing_state::CommittingState;
 use arroyo_state::parquet::ParquetBackend;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{debug, error, info, warn};
-
-use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
-use crate::types::public::CheckpointState as DbCheckpointState;
-use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
-use arroyo_state::committing_state::CommittingState;
 
 use self::checkpointer::CheckpointingOrCommittingState;
 
@@ -441,6 +441,8 @@ impl RunningJobModel {
                             epoch = self.epoch,
                             duration
                         );
+                        // trigger a DB backup now that we're done checkpointing
+                        notify_db();
                     } else {
                         Self::update_checkpoint_in_db(
                             &checkpointing,
@@ -476,6 +478,8 @@ impl RunningJobModel {
                         job_id = *self.job_id,
                         epoch = self.epoch,
                     );
+                    // trigger a DB backup now that we're done checkpointing
+                    notify_db();
                 }
             }
         }

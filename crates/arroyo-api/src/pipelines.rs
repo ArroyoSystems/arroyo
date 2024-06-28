@@ -158,10 +158,7 @@ async fn compile_sql<'a>(
         },
     )
     .await
-    .map_err(|err| {
-        warn!("{:?}", err);
-        bad_request(err.to_string())
-    })
+    .map_err(|err| bad_request(err.to_string()))
 }
 
 fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
