@@ -19,16 +19,16 @@ checkpoints-to-compact = 4
 
 [api]
 bind-address = "0.0.0.0"
-http-port = 8000
+http-port = 5115
 
 [controller]
 bind-address = "0.0.0.0"
-rpc-port = 9190
+rpc-port = 5116
 scheduler = "process"
 
 [compiler]
 bind-address = "0.0.0.0"
-rpc-port = 9191
+rpc-port = 5117
 install-clang = true
 install-rustc = true
 artifact-url = "/tmp/arroyo/artifacts"
@@ -43,12 +43,12 @@ queue-size = 8192
 
 [node]
 bind-address = "0.0.0.0"
-rpc-port = 9192
+rpc-port = 5118
 task-slots = 16
 
 [admin]
 bind-address = "0.0.0.0"
-http-port = 8001
+http-port = 5114
 
 
 # Schedulers

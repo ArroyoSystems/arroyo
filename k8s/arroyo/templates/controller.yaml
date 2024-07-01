@@ -149,11 +149,11 @@ spec:
     - name: grpc
       protocol: TCP
       port: {{ .Values.controller.service.grpcPort }}
-      targetPort: 9190
+      targetPort: 5116
     - name: admin
       protocol: TCP
       port: {{ .Values.controller.service.adminPort }}
-      targetPort: 9191
+      targetPort: 5114
     - name: http
       protocol: TCP
       port: {{ .Values.controller.service.httpPort }}

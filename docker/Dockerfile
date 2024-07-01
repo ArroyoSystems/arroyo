@@ -58,19 +58,21 @@ COPY --from=builder /arroyo ./
 
 ENV INSTALL_RUSTC=true \
     INSTALL_CLANG=true \
-    ARROYO__API__RUN_HTTP_PORT=8000
+    ARROYO__API__RUN_HTTP_PORT=5115
 
-EXPOSE 8000
+EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
+CMD ["cluster"]
 
 FROM rust:slim-bookworm AS arroyo-full
 WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl pkg-config
 
-ENV ARROYO__API__RUN_HTTP_PORT=8000
+ENV ARROYO__API__RUN_HTTP_PORT=5115
 
 COPY --from=builder /arroyo ./
 
-EXPOSE 8000
+EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
+CMD ["cluster"]

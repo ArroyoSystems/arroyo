@@ -80,7 +80,7 @@ export function CreatePipeline() {
   const [queryInput, setQueryInput] = useState<string>('');
   const [queryInputToCheck, setQueryInputToCheck] = useState<string | undefined>(undefined);
   const { isOpen, onOpen, onClose } = useDisclosure();
-  const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
+  const [options, setOptions] = useState<SqlOptions>({ parallelism: 1, checkpointMS: 10000 });
   const navigate = useNavigate();
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);

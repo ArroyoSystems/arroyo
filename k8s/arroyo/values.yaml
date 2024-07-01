@@ -17,9 +17,9 @@ controller:
       cpu: 500m
 
   service:
-    grpcPort: 9190
-    compilerPort: 9000
-    adminPort: 8001
+    grpcPort: 5116
+    compilerPort: 5117
+    adminPort: 5114
     httpPort: 80
 
 worker:
