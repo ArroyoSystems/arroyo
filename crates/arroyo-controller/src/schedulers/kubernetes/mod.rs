@@ -142,13 +142,13 @@ impl KubernetesScheduler {
             "spec": {
                 "volumes": c.worker.volumes,
                 "restartPolicy": "Never",
+                "imagePullSecrets": c.worker.image_pull_secrets,
                 "containers": [
                     {
                         "name": "worker",
                         "image": c.worker.image,
                         "command": command,
                         "imagePullPolicy": c.worker.image_pull_policy,
-                        "imagePullSecrets": c.worker.image_pull_secrets,
                         "resources": resources,
                         "ports": [
                             {

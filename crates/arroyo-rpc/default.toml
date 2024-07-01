@@ -64,7 +64,6 @@ resource-mode = "per-slot"
 name-prefix = "arroyo"
 image = "ghcr.io/arroyosystems/arroyo:latest"
 image-pull-policy = "IfNotPresent"
-image-pull-secrets = "IfNotPresent"
 service-account-name = "default"
 resources = { requests = { cpu = "900m",  memory = "500Mi" } }
 task-slots = 16
