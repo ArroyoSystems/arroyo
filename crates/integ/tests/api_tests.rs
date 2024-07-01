@@ -58,7 +58,7 @@ fn get_client() -> Arc<Client> {
                 &format!(
                     "{}/api",
                     env::var("API_ENDPOINT")
-                        .unwrap_or_else(|_| "http://localhost:8000".to_string())
+                        .unwrap_or_else(|_| "http://localhost:5115".to_string())
                 ),
                 client,
             ))

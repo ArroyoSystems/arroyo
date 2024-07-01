@@ -53,10 +53,10 @@ $ open "http://$(kubectl get service/arroyo-api -o jsonpath='{.spec.clusterIP}')
 or if that doesn't work, by proxying the service:
 
 ```
-$ kubectl port-forward service/arroyo-api 8000:80 8001:8001
+$ kubectl port-forward service/arroyo-api 5115:80
 ```
 
-and opening http://localhost:8000.
+and opening http://localhost:5115.
 
 
 ## Configuration

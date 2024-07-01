@@ -10,8 +10,8 @@ Once the release is fully deployed, you can navigate to the web ui by running
 
 If that doesn't work (for example on MacOS or a remote Kubernetes cluster), you can also try
 
-  $ kubectl port-forward service/{{ .Release.Name }} 8000:80
+  $ kubectl port-forward service/{{ .Release.Name }} 5115:80
 
-And opening http://localhost:8000 in your browser.
+And opening http://localhost:5115 in your browser.
 
 See the documentation at https://doc.arroyo.dev, and ask questions on our discord: https://discord.gg/cjCr5rVmyR
