@@ -640,7 +640,7 @@ export function CreatePipeline() {
           </Flex>
         </Panel>
         {sidebarElement != null && (
-          <PanelResizeHandle style={{ width: "4px", backgroundColor: "#111"}} />
+          <PanelResizeHandle style={{ width: '4px', backgroundColor: '#111' }} />
         )}
         <Panel minSize={60}>
           <Flex direction={'column'} bg={'#151515'} h={'100vh'}>
@@ -660,7 +660,7 @@ export function CreatePipeline() {
                   job={job}
                 />
               </Panel>
-              <PanelResizeHandle style={{ height: "4px", backgroundColor: "#111" }} />
+              <PanelResizeHandle style={{ height: '4px', backgroundColor: '#111' }} />
               <Panel minSize={20}>
                 <Flex direction={'column'} height={'100%'}>
                   {errorComponent}

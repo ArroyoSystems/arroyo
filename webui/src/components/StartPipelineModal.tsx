@@ -71,19 +71,25 @@ const StartPipelineModal: React.FC<StartPipelineModalProps> = ({
 
             <FormControl>
               <FormLabel>Parallelism</FormLabel>
-              <Box >
-                <NumberInput step={1} min={1} max={1024} bg={"gray.800"}
-                             value={options.parallelism || 1}
-                             onChange={v => setOptions({ ...options, parallelism: Number(v) })}>
+              <Box>
+                <NumberInput
+                  step={1}
+                  min={1}
+                  max={1024}
+                  bg={'gray.800'}
+                  value={options.parallelism || 1}
+                  onChange={v => setOptions({ ...options, parallelism: Number(v) })}
+                >
                   <NumberInputField />
                   <NumberInputStepper>
                     <NumberIncrementStepper />
                     <NumberDecrementStepper />
                   </NumberInputStepper>
                 </NumberInput>
-
               </Box>
-              <FormHelperText>How many parallel subtasks should be used for this pipeline</FormHelperText>
+              <FormHelperText>
+                How many parallel subtasks should be used for this pipeline
+              </FormHelperText>
             </FormControl>
           </Stack>
         </ModalBody>
