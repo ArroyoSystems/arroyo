@@ -2,6 +2,11 @@
 
 nameOverride: ""
 fullnameOverride: ""
+
+image:
+  repository: ghcr.io/arroyosystems/arroyo
+  tag: "tip"
+imagePullPolicy: IfNotPresent
 imagePullSecrets: []
 
 controller:
@@ -10,10 +15,7 @@ controller:
     requests:
       memory: 256Mi
       cpu: 500m
-  image:
-    repository: ghcr.io/arroyosystems/arroyo
-    pullPolicy: IfNotPresent
-    tag: "tip"
+
   service:
     grpcPort: 9190
     compilerPort: 9000
@@ -27,10 +29,6 @@ worker:
       memory: 490Mi
       cpu: 900m
   slots: 16
-  image:
-    repository: ghcr.io/arroyosystems/arroyo
-    pullPolicy: IfNotPresent
-    tag: "tip"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster

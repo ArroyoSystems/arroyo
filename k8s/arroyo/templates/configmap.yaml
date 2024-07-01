@@ -57,8 +57,8 @@ data:
           {{- with .Values.podAnnotations }}
           {{- toYaml . | nindent 10 }}
           {{- end }}    
-        image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
-        image-pull-policy: "{{ .Values.worker.image.pullPolicy }}"
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image-pull-policy: "{{ .Values.imagePullPolicy }}"
         image-pull-secrets:
         {{- with .Values.imagePullSecrets }}
         {{- toYaml . | nindent 10 }}
