@@ -56,7 +56,7 @@ spec:
           - name: arroyo-user-config
             mountPath: /config
           {{- end }}
-          
+
         env:
         {{- if .Values.postgresql.deploy }}
           - name: ARROYO__DATABASE__POSTGRES__PASSWORD

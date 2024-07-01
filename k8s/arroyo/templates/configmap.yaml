@@ -59,6 +59,10 @@ data:
           {{- end }}    
         image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
         image-pull-policy: "{{ .Values.worker.image.pullPolicy }}"
+        image-pull-secrets:
+        {{- with .Values.imagePullSecrets }}
+        {{- toYaml . | nindent 10 }}
+        {{- end }} 
         resources: {{ .Values.worker.resources | toYaml | nindent 10 }}
         service-account-name: {{ .Values.serviceAccount.name | quote }}
         volumes:
