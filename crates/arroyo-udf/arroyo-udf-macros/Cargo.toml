@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-udf-macros"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Arroyo Systems <support@arroyo.systems>"]
 license = "MIT OR Apache-2.0"
