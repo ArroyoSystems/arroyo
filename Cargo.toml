@@ -31,7 +31,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-tonic = { version = "0.11" }
+tonic = { version = "0.11", features = ["zstd"] }
 tonic-build = { version = "0.11" }
 tonic-web = { version = "0.11" }
 tonic-reflection = { version = "0.11" }

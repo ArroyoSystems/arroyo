@@ -36,6 +36,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
@@ -387,7 +388,7 @@ impl ControllerGrpc for ControllerServer {
                         remove.insert(i);
                     }
                     Err(TrySendError::Full(_)) => {
-                        warn!("queue full");
+                        debug!("queue full");
                     }
                 }
             }
@@ -455,6 +456,7 @@ impl ControllerGrpc for ControllerServer {
             .ok_or_else(|| Status::not_found("No metrics for job"))?
             .clone();
 
+        // TODO: send this over in a more efficient format like protobuf
         Ok(Response::new(JobMetricsResp {
             metrics: serde_json::to_string(&metrics.get_groups().await).unwrap(),
         }))
@@ -625,7 +627,11 @@ impl ControllerServer {
             local_addr,
             arroyo_server_common::grpc_server()
                 .accept_http1(true)
-                .add_service(ControllerGrpcServer::new(self.clone()))
+                .add_service(
+                    ControllerGrpcServer::new(self.clone())
+                        .send_compressed(CompressionEncoding::Zstd)
+                        .accept_compressed(CompressionEncoding::Zstd),
+                )
                 .add_service(reflection)
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         ));

@@ -33,6 +33,7 @@ prometheus = "0.13"
 async-trait = "0.1"
 lazy_static = "1.4.0"
 chrono = "0.4"
+zstd = "0.13"
 
 arrow-schema = {workspace = true}
 

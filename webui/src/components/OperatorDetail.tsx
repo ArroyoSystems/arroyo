@@ -30,7 +30,7 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
     return (
       <Alert status="warning">
         <AlertIcon />
-        <AlertDescription>Failed to get job's metrics.</AlertDescription>
+        <AlertDescription>Failed to get job metrics.</AlertDescription>
       </Alert>
     );
   }

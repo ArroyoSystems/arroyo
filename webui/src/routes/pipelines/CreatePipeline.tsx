@@ -80,7 +80,7 @@ export function CreatePipeline() {
   const [queryInput, setQueryInput] = useState<string>('');
   const [queryInputToCheck, setQueryInputToCheck] = useState<string | undefined>(undefined);
   const { isOpen, onOpen, onClose } = useDisclosure();
-  const [options, setOptions] = useState<SqlOptions>({ parallelism: 1, checkpointMS: 10000 });
+  const [options, setOptions] = useState<SqlOptions>({ parallelism: 1 });
   const navigate = useNavigate();
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);
@@ -627,12 +627,6 @@ export function CreatePipeline() {
     </Tabs>
   );
 
-  const panelResizer = (
-    <PanelResizeHandle>
-      <Box bg={'#111'} h={'2px'} w="100%" />
-    </PanelResizeHandle>
-  );
-
   return (
     <Flex height={'100vh'}>
       <PanelGroup direction="horizontal">
@@ -646,9 +640,7 @@ export function CreatePipeline() {
           </Flex>
         </Panel>
         {sidebarElement != null && (
-          <PanelResizeHandle>
-            <Box bg={'#111'} w={'2px'} h="100%" />
-          </PanelResizeHandle>
+          <PanelResizeHandle style={{ width: '4px', backgroundColor: '#111' }} />
         )}
         <Panel minSize={60}>
           <Flex direction={'column'} bg={'#151515'} h={'100vh'}>
@@ -668,7 +660,7 @@ export function CreatePipeline() {
                   job={job}
                 />
               </Panel>
-              {panelResizer}
+              <PanelResizeHandle style={{ height: '4px', backgroundColor: '#111' }} />
               <Panel minSize={20}>
                 <Flex direction={'column'} height={'100%'}>
                   {errorComponent}

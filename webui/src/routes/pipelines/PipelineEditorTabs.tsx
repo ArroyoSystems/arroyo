@@ -117,7 +117,12 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
   );
 
   const tabs = (
-    <Flex flexWrap={'nowrap'} overflowX={'auto'} style={{ scrollbarWidth: 'none' }}>
+    <Flex
+      flexWrap={'nowrap'}
+      overflowY={'hidden'}
+      overflowX={'auto'}
+      style={{ scrollbarWidth: 'none' }}
+    >
       <Tab gap={1} height={10}>
         <Icon as={PiFileSqlDuotone} boxSize={4} />
         Query

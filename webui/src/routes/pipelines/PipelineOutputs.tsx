@@ -146,6 +146,7 @@ export function PipelineOutputs({
           rowData={rows}
           columnDefs={cols}
           suppressDragLeaveHidesColumns={true}
+          enableCellTextSelection={true}
         />
       </Box>
       {onDemand && (
