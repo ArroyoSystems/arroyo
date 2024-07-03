@@ -76,17 +76,19 @@ There are already a number of existing streaming engines out there, including [A
 You can get started with a single node Arroyo cluster by running the following docker command:
 
 ```
-$ docker run -p 8000:8000 ghcr.io/arroyosystems/arroyo-single:latest
+$ docker run -p 5115:5115 ghcr.io/arroyosystems/arroyo:latest
 ```
 
-or if you have Cargo installed, you can use the `arroyo` cli:
+or you can download a binary for your platform from the [releases page](https://github.com/ArroyoSystems/arroyo/releases).
+
+For example, for MacOS:
 
 ```
-$ cargo install arroyo
-$ arroyo start
+$ curl https://github.com/ArroyoSystems/arroyo/releases/download/v0.11.0/arroyo-macos-m1 -Lo arroyo && chmod +x arroyo
+$ ./arroyo cluster
 ```
 
-Then, load the Web UI at http://localhost:8000.
+Then, load the Web UI at http://localhost:5115.
 
 For a more in-depth guide, see the [getting started guide](https://doc.arroyo.dev/getting-started).
 
