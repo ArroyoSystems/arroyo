@@ -1,5 +1,11 @@
 use cornucopia::{CodegenSettings, Error};
 use postgres::{Client, NoTls};
+use refinery_core::postgres::Client as MigrationClient;
+
+mod embedded {
+    use refinery::embed_migrations;
+    embed_migrations!("../arroyo-api/migrations");
+}
 
 fn main() -> Result<(), Error> {
     let queries_path = "queries";
@@ -25,6 +31,20 @@ fn main() -> Result<(), Error> {
         .unwrap_or_else(|_| {
             panic!("Could not connect to postgres: arroyo:arroyo@localhost:5432/arroyo")
         });
+
+        let mut migration_client = MigrationClient::configure()
+        .dbname("arroyo")
+        .host("localhost")
+        .port(5432)
+        .user("arroyo")
+        .password("arroyo")
+        .connect(NoTls)
+        .unwrap_or_else(|_| {
+            panic!("Could not connect to postgres: arroyo:arroyo@localhost:5432/arroyo")
+        });
+    embedded::migrations::runner()
+        .run(&mut migration_client)
+        .unwrap();
 
     let mut sqlite =
         rusqlite::Connection::open_in_memory().expect("Couldn't open sqlite memory connection");
