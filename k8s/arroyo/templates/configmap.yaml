@@ -59,8 +59,8 @@ data:
           {{- end }}    
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         image-pull-policy: "{{ .Values.imagePullPolicy }}"
-        image-pull-secrets:
         {{- with .Values.imagePullSecrets }}
+        image-pull-secrets:
         {{- toYaml . | nindent 10 }}
         {{- end }} 
         resources: {{ .Values.worker.resources | toYaml | nindent 10 }}
