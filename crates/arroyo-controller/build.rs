@@ -32,7 +32,7 @@ fn main() -> Result<(), Error> {
             panic!("Could not connect to postgres: arroyo:arroyo@localhost:5432/arroyo")
         });
 
-        let mut migration_client = MigrationClient::configure()
+    let mut migration_client = MigrationClient::configure()
         .dbname("arroyo")
         .host("localhost")
         .port(5432)
