@@ -9,7 +9,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@v3
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2.2.4
+        uses: pnpm/action-setup@v4
         with:
           version: 9.0.6
           run_install: |
@@ -39,7 +39,7 @@ jobs:
       - name: Check Formatting
         run: cargo fmt -- --check
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2.2.4
+        uses: pnpm/action-setup@v4
         with:
           version: 9.0.6
           run_install: |
@@ -109,7 +109,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@v3
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2.2.4
+        uses: pnpm/action-setup@v4
         with:
           version: 9.0.6
           run_install: |
