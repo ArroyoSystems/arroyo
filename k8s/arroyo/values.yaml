@@ -2,6 +2,7 @@
 
 nameOverride: ""
 fullnameOverride: ""
+clusterDomain: cluster.local
 
 image:
   repository: ghcr.io/arroyosystems/arroyo

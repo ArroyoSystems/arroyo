@@ -28,7 +28,7 @@ data:
       type: "postgres"
       postgres:
     {{- if .Values.postgresql.deploy }}
-        host: "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.cluster.local"
+        host: "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.{{ .Values.clusterDomain }}"
         port: {{ default "5432" .Values.postgresql.auth.port }}
         database-name: "arroyo"
         user: "arroyo"
