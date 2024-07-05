@@ -30,7 +30,7 @@ Prometheus endpoint
 {{- if .Values.prometheus.endpoint }}
 {{- .Values.prometheus.endpoint }}
 {{- else if .Values.prometheus.deploy -}}
-http://{{- template "prometheus.fullname" . }}-prometheus-server.{{- default .Release.Namespace }}.svc.cluster.local
+http://{{- template "prometheus.fullname" . }}-prometheus-server.{{- default .Release.Namespace }}.svc.{{ .Values.clusterDomain }}
 {{- end }}
 {{- end }}
 
