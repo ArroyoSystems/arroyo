@@ -51,11 +51,49 @@ deltalake = { version = "0.17.3" }
 cornucopia = { version = "0.9.0" }
 cornucopia_async = {version = "0.6.0"}
 deadpool-postgres = "0.12"
-[profile.release]
-debug = 1
+
+[workspace.package]
+edition = "2021"
+authors = ["Arroyo Systems <support@arroyo.systems>"]
+version = "0.12.0-dev"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/ArroyoSystems/arroyo"
+homepage = "https://arroyo.dev"
+description = """
+Arroyo is a distributed stream processor that lets users ask complex questions of high-volume real-time data by writing SQL.
+"""
+
+categories = ["database-implementations", "web-programming"]
+
+keywords = ["streaming", "data", "sql", "event-processing"]
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.18.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "homebrew"]
+# A GitHub repo to push Homebrew formulas to
+tap = "ArroyoSystems/homebrew-tap"
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
+# Publish jobs to run in CI
+publish-jobs = ["homebrew"]
+# Publish jobs to run in CI
+pr-run-mode = "plan"
+# Whether to install an updater program
+install-updater = false
 
 [profile.dev]
 split-debuginfo = "unpacked"
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 
 [patch.crates-io]

@@ -1,8 +1,14 @@
 [package]
 name = "arroyo-storage"
-version = "0.12.0-dev"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+
+authors.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description.workspace = true
+readme.workspace = true
+edition.workspace = true
 
 [features]
 default = []

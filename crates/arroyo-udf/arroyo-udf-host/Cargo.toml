@@ -1,8 +1,15 @@
 [package]
 name = "arroyo-udf-host"
-version = "0.12.0-dev"
-edition = "2021"
 description = "safe interface for interacting with dynamically-linked UDFs"
+
+authors.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+edition.workspace = true
+
 
 [dependencies]
 arroyo-udf-common = { path = "../arroyo-udf-common" }

@@ -1,7 +1,15 @@
 [package]
 name = "arroyo"
-version = "0.12.0-dev"
-edition = "2021"
+
+edition.workspace = true
+authors.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description.workspace = true
+readme.workspace = true
+
 
 [features]
 kafka-sasl = ["arroyo-connectors/kafka-sasl", "arroyo-worker/kafka-sal"]
