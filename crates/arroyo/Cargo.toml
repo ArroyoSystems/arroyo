@@ -3,9 +3,6 @@ name = "arroyo"
 version = "0.12.0-dev"
 edition = "2021"
 
-[features]
-kafka-sasl = ["arroyo-connectors/kafka-sasl", "arroyo-worker/kafka-sal"]
-
 [dependencies]
 arroyo-types = { path ="../arroyo-types" }
 arroyo-connectors = { path ="../arroyo-connectors" }
