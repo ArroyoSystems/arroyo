@@ -5,7 +5,6 @@ edition = "2021"
 
 [features]
 default = []
-kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
@@ -48,8 +47,9 @@ regex = "1"
 ##########################
 
 # Kafka
-rdkafka = { version = "0.33", features = ["cmake-build", "tracing"] }
+rdkafka = { version = "0.33", features = ["cmake-build", "tracing", "sasl", "ssl-vendored"] }
 rdkafka-sys = "4.5.0"
+sasl2-sys = { version = "0.1.6", features = ["vendored"] }
 
 # SSE
 eventsource-client = "0.12.0"

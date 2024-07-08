@@ -586,6 +586,7 @@ dependencies = [
  "rustls 0.21.12",
  "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
+ "sasl2-sys",
  "schemars",
  "serde",
  "serde_json",
