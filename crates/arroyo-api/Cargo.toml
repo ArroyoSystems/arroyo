@@ -6,7 +6,6 @@ license = "MIT OR Apache-2.0"
 
 [features]
 default = []
-kafka-sasl = ["arroyo-connectors/kafka-sasl"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
