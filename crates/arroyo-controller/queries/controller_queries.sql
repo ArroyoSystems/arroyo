@@ -21,7 +21,7 @@ SELECT
     s.restart_nonce as status_restart_nonce,
     restart_mode
 FROM job_configs c
-LEFT JOIN job_statuses s ON c.id = s.id;
+INNER JOIN job_statuses s ON c.id = s.id;
 
 --! update_job_status (start_time?, finish_time?, tasks?, failure_message?, pipeline_path?, wasm_path?)
 UPDATE job_statuses
