@@ -408,13 +408,28 @@ impl ControllerGrpc for ControllerServer {
         &self,
         request: Request<GrpcOutputSubscription>,
     ) -> Result<Response<Self::SubscribeToOutputStream>, Status> {
+        let job_id = request.into_inner().job_id;
+        if self
+            .job_state
+            .lock()
+            .await
+            .get(&job_id)
+            .ok_or_else(|| Status::not_found(format!("Job {} does not exist", job_id)))?
+            .state
+            .read()
+            .unwrap()
+            .as_str()
+            != "Running"
+        {
+            return Err(Status::failed_precondition(
+                "Job must be running to read output",
+            ));
+        }
+
         let (tx, rx) = tokio::sync::mpsc::channel(32);
 
         let mut data_txs = self.data_txs.lock().await;
-        data_txs
-            .entry(request.into_inner().job_id)
-            .or_default()
-            .push(tx);
+        data_txs.entry(job_id).or_default().push(tx);
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
