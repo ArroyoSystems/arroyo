@@ -19,7 +19,7 @@ export function PipelineOutputs({
   const outputSource = useRef<EventSource | undefined>(undefined);
   const currentJobId = useRef<string | undefined>(undefined);
   const [cols, setCols] = useState<any | undefined>(undefined);
-  const [rows, setRows] = useState<any[]>([]);
+  const [rows, _setRows] = useState<any[]>([]);
   const [subscribed, setSubscribed] = useState<boolean>(false);
   const rowsRead = useRef(0);
   const rowsInTable = useRef(0);
@@ -109,7 +109,7 @@ export function PipelineOutputs({
   }, []);
 
   useEffect(() => {
-    if (onDemand && !subscribed) {
+    if ((onDemand && !subscribed) || job.state != 'Running') {
       close();
       return;
     }
