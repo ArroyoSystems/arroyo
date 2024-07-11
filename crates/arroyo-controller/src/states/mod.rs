@@ -584,6 +584,7 @@ pub async fn run_to_completion(
 pub struct StateMachine {
     tx: Option<Sender<JobMessage>>,
     pub config: Arc<RwLock<JobConfig>>,
+    pub state: Arc<RwLock<String>>,
     metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     db: DatabaseSource,
     scheduler: Arc<dyn Scheduler>,
@@ -601,6 +602,7 @@ impl StateMachine {
         let mut this = Self {
             tx: None,
             config: Arc::new(RwLock::new(config)),
+            state: Arc::new(RwLock::new(status.state.clone())),
             metrics,
             db,
             scheduler,
@@ -726,6 +728,7 @@ impl StateMachine {
         status: JobStatus,
         shutdown_guard: &ShutdownGuard,
     ) {
+        *self.state.write().unwrap() = status.state.clone();
         if *self.config.read().unwrap() != config {
             let update = JobMessage::ConfigUpdate(config.clone());
             {
