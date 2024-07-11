@@ -22,7 +22,7 @@ use std::convert::Infallible;
 use std::{collections::HashMap, time::Duration};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
-use tonic::Request;
+use tonic::{Code, Request};
 use tracing::info;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
@@ -441,6 +441,7 @@ pub async fn get_job_output(
 
     // validate that the job exists, the user has access, and the graph has a GrpcSink
     query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
+
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
 
     if !pipeline
@@ -463,7 +464,10 @@ pub async fn get_job_output(
             job_id: job_pub_id.clone(),
         }))
         .await
-        .unwrap()
+        .map_err(|e| match e.code() {
+            Code::FailedPrecondition | Code::NotFound => bad_request(e.message().to_string()),
+            _ => log_and_map(e),
+        })?
         .into_inner();
 
     info!("Subscribed to output");
