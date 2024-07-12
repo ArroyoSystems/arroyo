@@ -83,6 +83,7 @@ impl JoinRewriter {
         name: &'static str,
     ) -> Result<LogicalPlan> {
         let key_count = join_expressions.len();
+
         let mut join_expressions: Vec<_> = join_expressions
             .into_iter()
             .enumerate()

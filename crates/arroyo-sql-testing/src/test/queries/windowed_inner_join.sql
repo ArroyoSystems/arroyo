@@ -33,4 +33,4 @@ INNER JOIN (
    COUNT(distinct driver_id) as pickup_drivers FROM cars where event_type = 'pickup'
   GROUP BY 1
 ) pickups
-ON dropoffs.window.start = pickups.window.start)
+ON dropoffs.window = pickups.window)
