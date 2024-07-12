@@ -342,14 +342,14 @@ impl Connector for KafkaConnector {
                         .insert("isolation.level".to_string(), "read_committed".to_string());
                 }
 
-                let schema_resolver: Arc<dyn SchemaResolver + Sync> =
+                let schema_resolver: Option<Arc<dyn SchemaResolver + Sync>> =
                     if let Some(SchemaRegistry::ConfluentSchemaRegistry {
                         endpoint,
                         api_key,
                         api_secret,
                     }) = &profile.schema_registry_enum
                     {
-                        Arc::new(
+                        Some(Arc::new(
                             ConfluentSchemaRegistry::new(
                                 endpoint,
                                 &table.subject(),
@@ -357,9 +357,9 @@ impl Connector for KafkaConnector {
                                 api_secret.clone(),
                             )
                             .expect("failed to construct confluent schema resolver"),
-                        )
+                        ))
                     } else {
-                        Arc::new(FailingSchemaResolver::new())
+                        None
                     };
 
                 Ok(OperatorNode::from_source(Box::new(KafkaSourceFunc {
