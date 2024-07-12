@@ -6,7 +6,7 @@ use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, Te
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::{
-    ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, FailingSchemaResolver, SchemaResolver,
+    ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, SchemaResolver,
 };
 use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
