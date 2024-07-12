@@ -18,7 +18,6 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
-use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{
     single_item_hash_map, to_micros, ArrowMessage, CheckpointBarrier, SignalMessage, TaskInfo,
@@ -85,7 +84,7 @@ impl KafkaTopicTester {
             format: Format::RawString(RawStringFormat {}),
             framing: None,
             bad_data: None,
-            schema_resolver: Arc::new(FailingSchemaResolver::new()),
+            schema_resolver: None,
             client_configs: HashMap::new(),
             messages_per_second: NonZeroU32::new(100).unwrap(),
         });

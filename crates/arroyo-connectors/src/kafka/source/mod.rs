@@ -32,7 +32,7 @@ pub struct KafkaSourceFunc {
     pub format: Format,
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
-    pub schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
     pub client_configs: HashMap<String, String>,
     pub messages_per_second: NonZeroU32,
 }
@@ -150,12 +150,20 @@ impl KafkaSourceFunc {
             .await;
         }
 
-        ctx.initialize_deserializer_with_resolver(
-            self.format.clone(),
-            self.framing.clone(),
-            self.bad_data.clone(),
-            self.schema_resolver.clone(),
-        );
+        if let Some(schema_resolver) = &self.schema_resolver {
+            ctx.initialize_deserializer_with_resolver(
+                self.format.clone(),
+                self.framing.clone(),
+                self.bad_data.clone(),
+                schema_resolver.clone(),
+            );
+        } else {
+            ctx.initialize_deserializer(
+                self.format.clone(),
+                self.framing.clone(),
+                self.bad_data.clone(),
+            );
+        }
 
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);

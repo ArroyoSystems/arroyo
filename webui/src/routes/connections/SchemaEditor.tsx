@@ -1,6 +1,17 @@
 import { Dispatch, useEffect, useRef, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
-import { Alert, AlertIcon, Box, Button, List, ListItem, Stack } from '@chakra-ui/react';
+import {
+  Alert,
+  AlertIcon,
+  Box,
+  Button,
+  Checkbox,
+  FormControl,
+  FormHelperText,
+  List,
+  ListItem,
+  Stack,
+} from '@chakra-ui/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { ConnectionSchema, post } from '../../lib/data_fetching';
 import { formatError } from '../../lib/util';
@@ -22,10 +33,22 @@ export function SchemaEditor({
   const [errors, setErrors] = useState<Array<string> | null>(null);
   const [testing, setTesting] = useState<boolean>(false);
   const [tested, setTested] = useState<string | undefined>();
+  const [rawDatum, setRawDatum] = useState<boolean>(false);
 
   const valid = tested == editor?.getValue() && errors?.length == 0;
 
   const testSchema = async () => {
+    // if avro and raw datum, then we need to add the raw datum encoding
+    if (format == 'avro' && rawDatum) {
+      // @ts-ignore
+      state.schema!.format['avro']!.rawDatums = rawDatum;
+      // update the state
+      setState({
+        ...state,
+        schema: state.schema,
+      });
+    }
+
     setTesting(true);
     setErrors(null);
     const { error } = await post('/v1/connection_tables/schemas/test', {
@@ -68,6 +91,28 @@ export function SchemaEditor({
     }
   }
 
+  let avroOptions = null;
+  if (format == 'avro') {
+    avroOptions = (
+      <Box maxW={'lg'}>
+        <FormControl>
+          <Checkbox
+            onChange={e => {
+              console.log('CHECKED = ', e.target.checked);
+              setRawDatum(e.target.checked);
+            }}
+          >
+            Raw datum encoding
+          </Checkbox>
+          <FormHelperText>
+            This encoding should be used for streams composed of individual <i>avro datums</i>,
+            rather than complete Avro documents with embedded schemas
+          </FormHelperText>
+        </FormControl>
+      </Box>
+    );
+  }
+
   useEffect(() => {
     if (monacoEl && !editor && !created.current) {
       let e = monaco.editor.create(monacoEl.current!, {
@@ -90,6 +135,7 @@ export function SchemaEditor({
 
         // @ts-ignore
         schema.format![format] = {};
+
         // @ts-ignore
         schema.definition![format + '_schema'] = e.getValue();
 
@@ -108,6 +154,7 @@ export function SchemaEditor({
 
   return (
     <Stack spacing={4}>
+      {avroOptions}
       <Box marginTop={5} width="100%">
         <div className="editor" ref={monacoEl}></div>
       </Box>
