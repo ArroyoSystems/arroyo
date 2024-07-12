@@ -5,6 +5,13 @@ use std::{collections::HashMap, time::Duration};
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 
+use crate::extension::remote_table::RemoteTableExtension;
+use crate::types::convert_data_type;
+use crate::{
+    external::{ProcessingMode, SqlSource},
+    ArroyoSchemaProvider,
+};
+use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
@@ -29,6 +36,7 @@ use datafusion::optimizer::eliminate_limit::EliminateLimit;
 use datafusion::optimizer::eliminate_nested_union::EliminateNestedUnion;
 use datafusion::optimizer::eliminate_one_union::EliminateOneUnion;
 use datafusion::optimizer::eliminate_outer_join::EliminateOuterJoin;
+use datafusion::optimizer::extract_equijoin_predicate::ExtractEquijoinPredicate;
 use datafusion::optimizer::filter_null_join_keys::FilterNullJoinKeys;
 use datafusion::optimizer::propagate_empty_relation::PropagateEmptyRelation;
 use datafusion::optimizer::push_down_filter::PushDownFilter;
@@ -49,14 +57,6 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
-
-use crate::extension::remote_table::RemoteTableExtension;
-use crate::types::convert_data_type;
-use crate::{
-    external::{ProcessingMode, SqlSource},
-    ArroyoSchemaProvider,
-};
-use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -124,8 +124,7 @@ fn produce_optimized_plan(
         Arc::new(EliminateJoin::new()),
         Arc::new(DecorrelatePredicateSubquery::new()),
         Arc::new(ScalarSubqueryToJoin::new()),
-        // Breaks window joins
-        // Arc::new(ExtractEquijoinPredicate::new()),
+        Arc::new(ExtractEquijoinPredicate::new()),
         Arc::new(SimplifyExpressions::new()),
         Arc::new(RewriteDisjunctivePredicate::new()),
         Arc::new(EliminateDuplicatedExpr::new()),

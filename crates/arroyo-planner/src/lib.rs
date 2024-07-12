@@ -72,7 +72,7 @@ use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::Item;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
@@ -552,6 +552,8 @@ pub async fn parse_and_get_arrow_program(
         };
 
         let plan_rewrite = rewrite_plan(plan, &schema_provider)?;
+
+        debug!("Plan = {:?}", plan_rewrite);
 
         let mut metadata = SourceMetadataVisitor::new(&schema_provider);
         plan_rewrite.visit(&mut metadata)?;
