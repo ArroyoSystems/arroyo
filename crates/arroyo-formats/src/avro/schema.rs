@@ -134,7 +134,7 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
         ),
         Schema::Float => (DataType::Float32, false, None),
         Schema::Double => (DataType::Float64, false, None),
-        Schema::Bytes | Schema::Fixed(_) | Schema::Decimal(_) => (DataType::Binary, false, None),
+        Schema::Bytes | Schema::Fixed(_) | Schema::Decimal(_) => (DataType::Utf8, false, None),
         Schema::String | Schema::Enum(_) | Schema::Uuid => (DataType::Utf8, false, None),
         Schema::Union(union) => {
             // currently just support unions that have [t, null] as variants, which is the
