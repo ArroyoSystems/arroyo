@@ -83,6 +83,7 @@ impl JoinRewriter {
         name: &'static str,
     ) -> Result<LogicalPlan> {
         let key_count = join_expressions.len();
+
         let mut join_expressions: Vec<_> = join_expressions
             .into_iter()
             .enumerate()
@@ -262,6 +263,10 @@ impl TreeNodeRewriter for JoinRewriter {
             return not_impl_err!("can't handle join constraint other than ON");
         };
         Self::check_updating(&left, &right)?;
+
+        if on.is_empty() && !is_instant {
+            return not_impl_err!("Updating joins must include an equijoin condition");
+        }
 
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
