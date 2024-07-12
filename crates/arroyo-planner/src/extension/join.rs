@@ -42,11 +42,13 @@ impl ArroyoExtension for JoinExtension {
             join_plan.clone(),
             &ArroyoPhysicalExtensionCodec::default(),
         )?;
+
         let operator_name = if self.is_instant {
             OperatorName::InstantJoin
         } else {
             OperatorName::Join
         };
+
         let config = JoinOperator {
             name: format!("join_{}", index),
             left_schema: Some(left_schema.as_ref().clone().into()),
@@ -54,6 +56,7 @@ impl ArroyoExtension for JoinExtension {
             output_schema: Some(self.output_schema().into()),
             join_plan: physical_plan_node.encode_to_vec(),
         };
+
         let logical_node = LogicalNode {
             operator_id: format!("join_{}", index),
             description: "join".to_string(),
@@ -61,6 +64,7 @@ impl ArroyoExtension for JoinExtension {
             operator_config: config.encode_to_vec(),
             parallelism: 1,
         };
+
         let left_edge =
             LogicalEdge::project_all(LogicalEdgeType::LeftJoin, left_schema.as_ref().clone());
         let right_edge =

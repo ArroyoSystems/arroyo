@@ -264,6 +264,10 @@ impl TreeNodeRewriter for JoinRewriter {
         };
         Self::check_updating(&left, &right)?;
 
+        if on.is_empty() && !is_instant {
+            return not_impl_err!("Updating joins must include an equijoin condition");
+        }
+
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
 
