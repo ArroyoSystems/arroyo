@@ -31,6 +31,23 @@ import { AddIcon, DeleteIcon, WarningIcon } from '@chakra-ui/icons';
 import Markdown from 'react-markdown';
 import { useCombobox } from 'downshift';
 
+const CustomMarkdown = (props: any) => (
+  <Markdown
+    components={{
+      a({ node, children, ...props }) {
+        let url = new URL(props.href ?? '', location.href);
+        if (url.origin !== location.origin) {
+          props.target = '_blank';
+          props.rel = 'noopener noreferrer';
+        }
+        return <a {...props}>{children}</a>;
+      },
+    }}
+  >
+    {props.children}
+  </Markdown>
+);
+
 function StringWidget({
   path,
   title,
@@ -96,21 +113,7 @@ function StringWidget({
       ) : (
         description && (
           <FormHelperText>
-            <Markdown
-              components={{
-                a({ node, children, ...props }) {
-                  let url = new URL(props.href ?? "", location.href);
-                  if (url.origin !== location.origin) {
-                    props.target = "_blank";
-                    props.rel = "noopener noreferrer";
-                  }
-
-                  return <a {...props}>{children}</a>;
-                },
-              }}
-            >
-              {description}
-            </Markdown>
+            <CustomMarkdown>{description}</CustomMarkdown>
             {format == 'var-str' && (
               <Text mt={1} fontSize="sm" color="gray.500">
                 This field supports{' '}
@@ -173,7 +176,7 @@ function NumberWidget({
       ) : (
         description && (
           <FormHelperText>
-            <Markdown>{description}</Markdown>
+            <CustomMarkdown>{description}</CustomMarkdown>
           </FormHelperText>
         )
       )}
@@ -216,7 +219,7 @@ function BooleanWidget({
       ) : (
         description && (
           <FormHelperText>
-            <Markdown>{description}</Markdown>
+            <CustomMarkdown>{description}</CustomMarkdown>
           </FormHelperText>
         )
       )}
@@ -360,7 +363,7 @@ function AutocompleteWidget({
       ) : (
         description && (
           <FormHelperText>
-            <Markdown>{description}</Markdown>
+            <CustomMarkdown>{description}</CustomMarkdown>
           </FormHelperText>
         )
       )}
@@ -430,7 +433,7 @@ function SelectWidget({
       </Select>
       {description && (
         <FormHelperText>
-          <Markdown>{description}</Markdown>
+          <CustomMarkdown>{description}</CustomMarkdown>
         </FormHelperText>
       )}
     </FormControl>
@@ -676,7 +679,7 @@ export function MapWidget({
             ) : (
               schema.description && (
                 <FormHelperText mt={0} pb={2}>
-                  <Markdown>{schema.description}</Markdown>
+                  <CustomMarkdown>{schema.description}</CustomMarkdown>
                 </FormHelperText>
               )
             )}
