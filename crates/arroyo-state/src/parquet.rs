@@ -257,14 +257,14 @@ impl ParquetBackend {
         let storage_client = get_storage_provider().await?;
 
         for epoch_to_remove in old_min_epoch..new_min_epoch {
-            let Some(metadata) =
+            let Some(operator_metadata) =
                 Self::load_operator_metadata(&job_id, &operator_id, epoch_to_remove).await?
             else {
                 continue;
             };
 
             // delete any files that are not in the new min epoch
-            for file in metadata
+            for file in operator_metadata
                 .table_checkpoint_metadata
                 .iter()
                 // TODO: factor this out
