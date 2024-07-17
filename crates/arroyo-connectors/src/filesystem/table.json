@@ -33,7 +33,7 @@
             "storageOptions": {
               "type": "object",
               "title": "Storage Options",
-              "description": "See the <a href=\"https://doc.arroyo.dev/connectors/filesystem\" target=\"_blank\">FileSystem connector docs</a> for the full list of options",
+              "description": "See the [FileSystem connector docs](https://doc.arroyo.dev/connectors/filesystem) for the full list of options",
               "additionalProperties": {
                 "type": "string"
               }
@@ -55,7 +55,7 @@
             "storageOptions": {
               "type": "object",
               "title": "Storage Options",
-              "description": "See the <a href=\"https://doc.arroyo.dev/connectors/filesystem\" target=\"_blank\">FileSystem connector docs</a> for the full list of options",
+              "description": "See the [FileSystem connector docs](https://doc.arroyo.dev/connectors/filesystem) for the full list of options",
               "additionalProperties": {
                 "type": "string"
               }
