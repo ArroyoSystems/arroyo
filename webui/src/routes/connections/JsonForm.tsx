@@ -96,7 +96,21 @@ function StringWidget({
       ) : (
         description && (
           <FormHelperText>
-            <Markdown>{description}</Markdown>
+            <Markdown
+              components={{
+                a({ node, children, ...props }) {
+                  let url = new URL(props.href ?? "", location.href);
+                  if (url.origin !== location.origin) {
+                    props.target = "_blank";
+                    props.rel = "noopener noreferrer";
+                  }
+
+                  return <a {...props}>{children}</a>;
+                },
+              }}
+            >
+              {description}
+            </Markdown>
             {format == 'var-str' && (
               <Text mt={1} fontSize="sm" color="gray.500">
                 This field supports{' '}
