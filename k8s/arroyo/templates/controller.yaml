@@ -21,7 +21,7 @@ spec:
         {{- if .Values.prometheus.setAnnotations }}
         prometheus.io/scrape: "true"
         prometheus.io/path: /metrics
-        prometheus.io/port: "8001"
+        prometheus.io/port: "{{ .Values.controller.service.adminPort }}"
         {{- end }}
       {{- with .Values.podAnnotations }}
       {{- toYaml . | nindent 8 }}
@@ -149,12 +149,12 @@ spec:
     - name: grpc
       protocol: TCP
       port: {{ .Values.controller.service.grpcPort }}
-      targetPort: 5116
+      targetPort: grpc
     - name: admin
       protocol: TCP
       port: {{ .Values.controller.service.adminPort }}
-      targetPort: 5114
+      targetPort: admin
     - name: http
       protocol: TCP
       port: {{ .Values.controller.service.httpPort }}
-      targetPort: 80
+      targetPort: http
