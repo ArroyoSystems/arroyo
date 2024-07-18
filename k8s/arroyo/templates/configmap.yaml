@@ -52,7 +52,7 @@ data:
           {{- if .Values.prometheus.setAnnotations }}
           prometheus.io/scrape: "true"
           prometheus.io/path: /metrics
-          prometheus.io/port: "8001"
+          prometheus.io/port: "6901"
           {{- end }}    
           {{- with .Values.podAnnotations }}
           {{- toYaml . | nindent 10 }}
