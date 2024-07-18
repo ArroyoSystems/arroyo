@@ -71,21 +71,33 @@ There are already a number of existing streaming engines out there, including [A
 * _Designed for non-experts_: Arroyo cleanly separates the pipeline APIs from its internal implementation. You don't
     need to be a streaming expert to build real-time data pipelines.
 
-## Getting Started
+## Installing
 
-You can get started with a single node Arroyo cluster by running the following docker command:
+Arroyo ships as a single binary. You can install it locally on MacOS using Homebrew
 
+```shellsession
+brew install arroyosystems/tap/arroyo
 ```
-$ docker run -p 5115:5115 ghcr.io/arroyosystems/arroyo:latest
+
+or on MacOS or Linux with this script:
+
+```shellsession
+curl -LsSf https://arroyo.dev/install.sh | sh
 ```
 
 or you can download a binary for your platform from the [releases page](https://github.com/ArroyoSystems/arroyo/releases).
 
-For example, for MacOS:
+Once you have Arroyo installed, start a cluster with
 
+```shellsession
+$ arroyo cluster
 ```
-$ curl https://github.com/ArroyoSystems/arroyo/releases/download/v0.11.0/arroyo-macos-m1 -Lo arroyo && chmod +x arroyo
-$ ./arroyo cluster
+
+You can also run a cluster in Docker, with
+
+```shellsession
+docker run -p 5115:5115 \
+      ghcr.io/arroyosystems/arroyo:latest
 ```
 
 Then, load the Web UI at http://localhost:5115.
@@ -106,7 +118,7 @@ to get started, and reach out to the team on [discord](https://discord.gg/cjCr5r
 * [GitHub issues](https://github.com/ArroyoSystems/arroyo/issues) &mdash; bugs and feature requests
 * [Arroyo Blog](https://arroyo.dev/blog) &mdash; updates from the Arroyo team
 
-## Arroyo Cloud
+## Arroyo Enterprise
 
-Don't want to self-host? Arroyo Systems provides fully-managed cloud hosting for Arroyo. Sign up
-[here](https://arroyo.dev).
+Running in production? Arroyo Systems provides [enterprise features and support](https://www.arroyo.dev/enterprise) for
+Arroyo users. Get in touch at [support@arroyo.systems](mailto:support@arroyo.systems).
