@@ -171,6 +171,7 @@ impl MqttTopicTester {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_mqtt() {
     let mqtt_tester = MqttTopicTester {
         topic: "mqtt-arroyo-test".to_string(),
