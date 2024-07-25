@@ -1,9 +1,8 @@
+use crate::StorageError;
 use aws_config::BehaviorVersion;
 use aws_credential_types::provider::ProvideCredentials;
 use object_store::{aws::AwsCredential, CredentialProvider};
 use std::sync::Arc;
-
-use crate::StorageError;
 
 pub struct ArroyoCredentialProvider {
     provider: aws_credential_types::provider::SharedCredentialsProvider,
@@ -17,6 +16,7 @@ impl std::fmt::Debug for ArroyoCredentialProvider {
 
 impl ArroyoCredentialProvider {
     pub async fn try_new() -> Result<Self, StorageError> {
+        println!("CREATING NEW crecential provider");
         let config = aws_config::defaults(BehaviorVersion::latest()).load().await;
 
         let credentials = config

@@ -21,7 +21,7 @@ use tokio::sync::{
 use arroyo_rpc::config::config;
 use tracing::{debug, error, info, warn};
 
-use crate::{tables::global_keyed_map::GlobalKeyedTable, StateMessage};
+use crate::{get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, StateMessage};
 use crate::{CheckpointMessage, TableData};
 
 use super::expiring_time_key_map::{
@@ -225,20 +225,6 @@ impl BackendWriter {
     }
 }
 
-async fn get_storage_provider() -> anyhow::Result<StorageProviderRef> {
-    // TODO: this should be encoded in the config so that the controller doesn't need
-    // to be synchronized with the workers
-
-    Ok(Arc::new(
-        StorageProvider::for_url(&config().checkpoint_url)
-            .await
-            .context(format!(
-                "failed to construct checkpoint backend for URL {}",
-                config().checkpoint_url
-            ))?,
-    ))
-}
-
 impl TableManager {
     pub async fn new(
         task_info: TaskInfoRef,
@@ -320,7 +306,7 @@ impl TableManager {
             tables,
             writer,
             task_info,
-            storage,
+            storage: Arc::clone(storage),
             caches: HashMap::new(),
         })
     }

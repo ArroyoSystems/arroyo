@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
@@ -9,12 +9,15 @@ use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
 
+use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_storage::StorageProvider;
 use prost::Message;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 pub mod checkpoint_state;
@@ -159,4 +162,26 @@ pub fn hash_key<K: Hash>(key: &K) -> u64 {
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
     hasher.finish()
+}
+
+static STORAGE_PROVIDER: tokio::sync::OnceCell<Arc<StorageProvider>> =
+    tokio::sync::OnceCell::const_new();
+
+pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>> {
+    // TODO: this should be encoded in the config so that the controller doesn't need
+    // to be synchronized with the workers
+
+    STORAGE_PROVIDER
+        .get_or_try_init(|| async {
+            let storage_url = &config().checkpoint_url;
+
+            StorageProvider::for_url(storage_url)
+                .await
+                .context(format!(
+                    "failed to construct checkpoint backend for URL {}",
+                    storage_url
+                ))
+                .map(Arc::new)
+        })
+        .await
 }
