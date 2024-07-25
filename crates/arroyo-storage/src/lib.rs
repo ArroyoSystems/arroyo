@@ -296,7 +296,7 @@ fn last<I: Sized, const COUNT: usize>(opts: [Option<I>; COUNT]) -> Option<I> {
 }
 
 pub async fn get_current_credentials() -> Result<Arc<AwsCredential>, StorageError> {
-    let provider = ArroyoCredentialProvider::try_new()?;
+    let provider = ArroyoCredentialProvider::try_new().await?;
     let credentials = provider.get_credential().await?;
     Ok(credentials)
 }
@@ -385,7 +385,7 @@ impl StorageProvider {
 
         if !aws_key_manually_set {
             let credentials: Arc<ArroyoCredentialProvider> =
-                Arc::new(ArroyoCredentialProvider::try_new()?);
+                Arc::new(ArroyoCredentialProvider::try_new().await?);
             builder = builder.with_credentials(credentials);
         }
 
