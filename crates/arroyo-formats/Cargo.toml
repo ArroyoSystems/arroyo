@@ -23,4 +23,6 @@ bincode = "2.0.0-rc.3"
 memchr = "2"
 typify = "0.0.13"
 schemars = "0.8"
-prost = "0.12"
+prost = { workspace = true}
+prost-reflect = "0.13.1"
+base64 = "0.22.1"

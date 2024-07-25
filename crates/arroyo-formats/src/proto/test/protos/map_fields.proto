@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+message TestMapFields {
+  message NestedMessage {
+    int32 inner_field = 1;
+  }
+
+  map<int32, string> int_to_string_map = 1;
+  map<string, NestedMessage> string_to_message_map = 2;
+}

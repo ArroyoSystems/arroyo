@@ -54,7 +54,7 @@ arrow-json = { workspace = true }
 uuid = {version = "1.4.1", features = ["v4"]}
 
 tonic = { workspace = true }
-prost = "0.12"
+prost = {workspace = true}
 
 governor = "0.6"
 

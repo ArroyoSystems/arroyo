@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+message TestStringAndBytes {
+  string string_field = 1;
+  bytes bytes_field = 2;
+}
+ 

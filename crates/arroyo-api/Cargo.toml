@@ -22,7 +22,7 @@ arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 tonic-web = { workspace = true }
-prost = "0.12"
+prost = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
 tower = "0.4"

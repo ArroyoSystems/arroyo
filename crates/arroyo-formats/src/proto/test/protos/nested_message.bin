@@ -1,0 +1,11 @@
+
+ß
+nested_message.proto"¾
+TestNestedMessageC
+nested_field (2 .TestNestedMessage.NestedMessageRnestedFieldV
+double_nested_field (2&.TestNestedMessage.DoubleNestedMessageRdoubleNestedField0
+NestedMessage
+inner_field (R
+innerFieldZ
+DoubleNestedMessageC
+inner_nested (2 .TestNestedMessage.NestedMessageRinnerNestedbproto3

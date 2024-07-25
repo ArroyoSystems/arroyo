@@ -31,10 +31,10 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-tonic = { version = "0.11", features = ["zstd"] }
-tonic-build = { version = "0.11" }
-tonic-web = { version = "0.11" }
-tonic-reflection = { version = "0.11" }
+tonic = { version = "0.12", features = ["zstd"] }
+tonic-build = { version = "0.12" }
+tonic-web = { version = "0.12" }
+tonic-reflection = { version = "0.12" }
 arrow = { version = "=52.1.0" }
 arrow-ord = { version = "=52.1.0" }
 arrow-array = { version = "=52.1.0" }
@@ -51,6 +51,7 @@ deltalake = { version = "0.18.2" }
 cornucopia = { version = "0.9.0" }
 cornucopia_async = {version = "0.6.0"}
 deadpool-postgres = "0.12"
+prost = "0.13.1"
 
 [profile.release]
 debug = 1

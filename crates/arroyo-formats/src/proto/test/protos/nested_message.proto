@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+message TestNestedMessage {
+  message NestedMessage {
+    int32 inner_field = 1;
+  }
+
+  message DoubleNestedMessage {
+    NestedMessage inner_nested = 1;
+  }
+
+  NestedMessage nested_field = 1;
+  DoubleNestedMessage double_nested_field = 2;
+}
