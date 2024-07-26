@@ -314,9 +314,9 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         if let CommitState::DeltaLake { last_version } = self.commit_state {
             let storage_provider = Arc::new(StorageProvider::for_url("/").await?);
             if let Some(version) = delta::commit_files_to_delta(
-                finished_files,
-                object_store::path::Path::parse(&self.final_dir)?,
-                storage_provider,
+                &finished_files,
+                &object_store::path::Path::parse(&self.final_dir)?,
+                &storage_provider,
                 last_version,
                 Arc::new(self.schema.as_ref().unwrap().schema_without_timestamp()),
             )
