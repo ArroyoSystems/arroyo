@@ -935,9 +935,9 @@ where
         }
         if let CommitState::DeltaLake { last_version } = self.commit_state {
             if let Some(new_version) = delta::commit_files_to_delta(
-                finished_files,
-                self.path.clone(),
-                self.object_store.clone(),
+                &finished_files,
+                &self.path,
+                &self.object_store,
                 last_version,
                 Arc::new(self.schema.schema_without_timestamp()),
             )

@@ -15,19 +15,18 @@ use object_store::{aws::AmazonS3ConfigKey, path::Path};
 use once_cell::sync::Lazy;
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
     time::SystemTime,
 };
-use tracing::info;
+use tracing::debug;
 
 static INIT: Lazy<()> = Lazy::new(|| {
     deltalake::aws::register_handlers(None);
 });
 
 pub(crate) async fn commit_files_to_delta(
-    finished_files: Vec<FinishedFile>,
-    relative_table_path: Path,
-    storage_provider: Arc<StorageProvider>,
+    finished_files: &[FinishedFile],
+    relative_table_path: &Path,
+    storage_provider: &StorageProvider,
     last_version: i64,
     schema: SchemaRef,
 ) -> Result<Option<i64>> {
@@ -37,8 +36,8 @@ pub(crate) async fn commit_files_to_delta(
 
     let add_actions = create_add_actions(&finished_files, &relative_table_path)?;
     let table_path = build_table_path(&storage_provider, &relative_table_path);
-    let storage_options = configure_storage_options(&table_path, storage_provider.clone()).await?;
-    let mut table = load_or_create_table(&table_path, storage_options.clone(), &schema).await?;
+    let storage_options = configure_storage_options(&table_path, &storage_provider).await?;
+    let mut table = load_or_create_table(&table_path, storage_options, &schema).await?;
 
     if let Some(new_version) = check_existing_files(
         &mut table,
@@ -93,7 +92,7 @@ async fn create_new_table(
 
 async fn configure_storage_options(
     table_path: &str,
-    storage_provider: Arc<StorageProvider>,
+    storage_provider: &StorageProvider,
 ) -> Result<HashMap<String, String>> {
     let mut options = storage_provider.storage_options().clone();
     if table_path.starts_with("s3://") {
@@ -132,7 +131,7 @@ fn create_add_actions(
 }
 
 fn create_add_action(file: &FinishedFile, relative_table_path: &Path) -> Result<Action> {
-    info!(
+    debug!(
         "creating add action for file {:?}, relative table path {}",
         file, relative_table_path
     );
@@ -142,7 +141,9 @@ fn create_add_action(file: &FinishedFile, relative_table_path: &Path) -> Result<
         .context(format!(
             "File {} is not in table {}",
             file.filename, relative_table_path
-        ))?;
+        ))?
+        .trim_start_matches('/');
+
     Ok(Action::Add(Add {
         path: subpath.to_string(),
         size: file.size as i64,

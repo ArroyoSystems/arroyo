@@ -525,7 +525,7 @@ impl WorkerGrpc for WorkerServer {
 
     async fn commit(&self, request: Request<CommitReq>) -> Result<Response<CommitResp>, Status> {
         let req = request.into_inner();
-        info!("received commit request {:?}", req);
+        debug!("received commit request {:?}", req);
         let sender_commit_map_pairs = {
             let state_mutex = self.state.lock().unwrap();
             let Some(state) = state_mutex.as_ref() else {

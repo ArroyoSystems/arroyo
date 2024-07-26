@@ -372,6 +372,7 @@ impl StorageProvider {
         let mut builder = AmazonS3Builder::from_env().with_bucket_name(&config.bucket);
         let mut aws_key_manually_set = false;
         let mut s3_options = HashMap::new();
+
         for (key, value) in options {
             let s3_config_key = key.parse().map_err(|_| {
                 StorageError::CredentialsError(format!("invalid S3 config key: {}", key))
