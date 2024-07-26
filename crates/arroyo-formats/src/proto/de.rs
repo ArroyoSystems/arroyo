@@ -1,12 +1,21 @@
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
-use prost_reflect::{DynamicMessage, FieldDescriptor, Kind, MapKey, Value};
+use prost_reflect::{DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MapKey, MessageDescriptor, Value};
 use serde_json::{Value as JsonValue};
+use arroyo_rpc::formats::ProtobufFormat;
+use arroyo_types::SourceError;
 use crate::float_to_json;
 
 pub(crate) async fn deserialize_proto(
-    format: &ProtoFormat,
-)
+    pool: &mut DescriptorPool,
+    proto: &ProtobufFormat,
+    msg: &[u8]
+) -> Result<serde_json::Value, SourceError> {
+    let msg = DynamicMessage::decode(descriptor, msg.as_ref())
+        .map_err(|e| SourceError::bad_data(format!("failed to deserialize protobuf: {:?}", e)))?;
+    
+    Ok(proto_to_json(&msg))
+}
 
 pub(crate) fn proto_to_json(message: &DynamicMessage) -> JsonValue {
     let mut obj = serde_json::Map::new();

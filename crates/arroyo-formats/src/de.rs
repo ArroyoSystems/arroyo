@@ -13,6 +13,7 @@ use arroyo_types::{to_nanos, SourceError};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
+use prost_reflect::DescriptorPool;
 use tokio::sync::Mutex;
 
 pub struct FramingIterator<'a> {
@@ -75,6 +76,7 @@ pub struct ArrowDeserializer {
     buffered_count: usize,
     buffered_since: Instant,
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
+    proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
 }
 
@@ -135,6 +137,7 @@ impl ArrowDeserializer {
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
             bad_data,
             schema_resolver,
+            proto_pool: DescriptorPool::new(),
             buffered_count: 0,
             buffered_since: Instant::now(),
         }
@@ -233,6 +236,9 @@ impl ArrowDeserializer {
                     .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                 timestamp_builder.append_value(to_nanos(timestamp) as i64);
                 self.buffered_count += 1;
+            }
+            Format::Protobuf(proto) => {
+                
             }
             Format::Avro(_) => unreachable!("this should not be called for avro"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),

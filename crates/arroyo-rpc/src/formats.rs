@@ -240,6 +240,9 @@ pub struct ProtobufFormat {
 
     #[serde(default)]
     pub schema: Option<Vec<u8>>,
+    
+    #[serde(default)]
+    pub message_name: Option<String>,
 }
 
 impl ProtobufFormat {
