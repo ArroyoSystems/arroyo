@@ -16,12 +16,9 @@ use object_store::multipart::PartId;
 use object_store::path::Path;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
 use object_store::{CredentialProvider, MultipartId};
-use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
-use std::time::{Duration, Instant};
 use thiserror::Error;
-use tokio::sync::RwLock;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
 mod aws;
 
@@ -296,22 +293,10 @@ fn last<I: Sized, const COUNT: usize>(opts: [Option<I>; COUNT]) -> Option<I> {
 }
 
 pub async fn get_current_credentials() -> Result<Arc<AwsCredential>, StorageError> {
-    let provider = ArroyoCredentialProvider::try_new()?;
+    let provider = ArroyoCredentialProvider::try_new().await?;
     let credentials = provider.get_credential().await?;
     Ok(credentials)
 }
-
-static OBJECT_STORE_CACHE: Lazy<RwLock<HashMap<String, CacheEntry<Arc<dyn ObjectStore>>>>> =
-    Lazy::new(Default::default);
-
-struct CacheEntry<T> {
-    value: T,
-    inserted_at: Instant,
-}
-
-// The bearer token should last for 3600 seconds,
-// but regenerating it every 5 minutes to avoid token expiry
-const GCS_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 
 impl StorageProvider {
     pub async fn for_url(url: &str) -> Result<Self, StorageError> {
@@ -360,11 +345,6 @@ impl StorageProvider {
         Ok(key.clone())
     }
 
-    pub async fn url_exists(url: &str) -> Result<bool, StorageError> {
-        let provider = Self::for_url(url).await?;
-        provider.exists("").await
-    }
-
     async fn construct_s3(
         mut config: S3Config,
         options: HashMap<String, String>,
@@ -386,7 +366,7 @@ impl StorageProvider {
 
         if !aws_key_manually_set {
             let credentials: Arc<ArroyoCredentialProvider> =
-                Arc::new(ArroyoCredentialProvider::try_new()?);
+                Arc::new(ArroyoCredentialProvider::try_new().await?);
             builder = builder.with_credentials(credentials);
         }
 
@@ -444,45 +424,6 @@ impl StorageProvider {
         })
     }
 
-    async fn get_or_create_object_store(
-        builder: GoogleCloudStorageBuilder,
-        bucket: &str,
-    ) -> Result<Arc<dyn ObjectStore>, StorageError> {
-        let mut cache = OBJECT_STORE_CACHE.write().await;
-
-        if let Some(entry) = cache.get(bucket) {
-            if entry.inserted_at.elapsed() < GCS_CACHE_TTL {
-                trace!(
-                    "Cache hit - using cached object store for bucket {}",
-                    bucket
-                );
-                return Ok(entry.value.clone());
-            } else {
-                debug!(
-                    "Cache expired - constructing new object store for bucket {}",
-                    bucket
-                );
-            }
-        } else {
-            debug!(
-                "Cache miss - constructing new object store for bucket {}",
-                bucket
-            );
-        }
-
-        let new_store = Arc::new(builder.build().map_err(Into::<StorageError>::into)?);
-
-        cache.insert(
-            bucket.to_string(),
-            CacheEntry {
-                value: new_store.clone(),
-                inserted_at: Instant::now(),
-            },
-        );
-
-        Ok(new_store)
-    }
-
     async fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
         let mut builder = GoogleCloudStorageBuilder::from_env().with_bucket_name(&config.bucket);
 
@@ -498,7 +439,7 @@ impl StorageProvider {
 
         let object_store_base_url = format!("https://{}.storage.googleapis.com", config.bucket);
 
-        let object_store = Self::get_or_create_object_store(builder, &config.bucket).await?;
+        let object_store = Arc::new(builder.build()?);
 
         Ok(Self {
             config: BackendConfig::GCS(config),

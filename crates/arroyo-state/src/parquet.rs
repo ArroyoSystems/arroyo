@@ -1,12 +1,11 @@
 use crate::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use crate::tables::global_keyed_map::GlobalKeyedTable;
 use crate::tables::{CompactionConfig, ErasedTable};
-use crate::BackingStore;
-use anyhow::{bail, Context, Result};
+use crate::{get_storage_provider, BackingStore};
+use anyhow::{bail, Result};
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
 };
-use arroyo_storage::StorageProvider;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 
@@ -22,17 +21,6 @@ use tracing::{debug, info};
 
 pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
 pub const GENERATIONS_TO_COMPACT: u32 = 1; // only compact generation 0 files
-
-async fn get_storage_provider() -> anyhow::Result<StorageProvider> {
-    // TODO: this should be encoded in the config so that the controller doesn't need
-    // to be synchronized with the workers
-    let storage_url = &config().checkpoint_url;
-
-    StorageProvider::for_url(storage_url).await.context(format!(
-        "failed to construct checkpoint backend for URL {}",
-        storage_url
-    ))
-}
 
 pub struct ParquetBackend;
 
@@ -178,11 +166,11 @@ impl ParquetBackend {
             Self::load_operator_metadata(&job_id, &operator_id, epoch)
                 .await?
                 .expect("expect operator metadata to still be present");
-        let storage_provider = Arc::new(get_storage_provider().await?);
+        let storage_provider = get_storage_provider().await?;
         let compaction_config = CompactionConfig {
-            storage_provider,
             compact_generations: vec![0].into_iter().collect(),
             min_compaction_epochs: min_files_to_compact,
+            storage_provider: Arc::clone(storage_provider),
         };
         let operator_metadata = operator_checkpoint_metadata.operator_metadata.unwrap();
 
