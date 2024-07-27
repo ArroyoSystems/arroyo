@@ -61,7 +61,9 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
         eprintln!("Failed to initialize log tracer {:?}", e);
     }
 
-    let filter = filter.add_directive("refinery_core=warn".parse().unwrap());
+    let filter = filter
+        .add_directive("refinery_core=warn".parse().unwrap())
+        .add_directive("aws_config::profile::credentials=warn".parse().unwrap());
 
     let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stderr());
 

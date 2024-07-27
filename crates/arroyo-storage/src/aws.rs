@@ -1,14 +1,11 @@
+use crate::StorageError;
+use aws_config::BehaviorVersion;
+use aws_credential_types::provider::ProvideCredentials;
+use object_store::{aws::AwsCredential, CredentialProvider};
 use std::sync::Arc;
 
-use object_store::{aws::AwsCredential, CredentialProvider};
-use rusoto_core::credential::{
-    AutoRefreshingProvider, ChainProvider, ProfileProvider, ProvideAwsCredentials,
-};
-
-use crate::StorageError;
-
 pub struct ArroyoCredentialProvider {
-    provider: AutoRefreshingProvider<ChainProvider>,
+    provider: aws_credential_types::provider::SharedCredentialsProvider,
 }
 
 impl std::fmt::Debug for ArroyoCredentialProvider {
@@ -18,38 +15,47 @@ impl std::fmt::Debug for ArroyoCredentialProvider {
 }
 
 impl ArroyoCredentialProvider {
-    pub fn try_new() -> Result<Self, StorageError> {
-        let inner: AutoRefreshingProvider<ChainProvider> =
-            AutoRefreshingProvider::new(ChainProvider::new())
-                .map_err(|e| StorageError::CredentialsError(e.to_string()))?;
+    pub async fn try_new() -> Result<Self, StorageError> {
+        let config = aws_config::defaults(BehaviorVersion::latest()).load().await;
 
-        Ok(Self { provider: inner })
+        let credentials = config
+            .credentials_provider()
+            .ok_or_else(|| {
+                StorageError::CredentialsError(
+                    "Unable to load S3 credentials from environment".to_string(),
+                )
+            })?
+            .clone();
+
+        Ok(Self {
+            provider: credentials,
+        })
     }
 
     pub async fn default_region() -> Option<String> {
-        ProfileProvider::region().ok()?
+        aws_config::defaults(BehaviorVersion::latest())
+            .load()
+            .await
+            .region()
+            .map(|r| r.to_string())
     }
 }
 
 #[async_trait::async_trait]
 impl CredentialProvider for ArroyoCredentialProvider {
-    #[doc = " The type of credential returned by this provider"]
     type Credential = AwsCredential;
 
-    /// Return a credential
     async fn get_credential(&self) -> object_store::Result<Arc<Self::Credential>> {
-        let credentials =
-            self.provider
-                .credentials()
-                .await
-                .map_err(|err| object_store::Error::Generic {
-                    store: "s3",
-                    source: Box::new(err),
-                })?;
+        let creds = self.provider.provide_credentials().await.map_err(|e| {
+            object_store::Error::Generic {
+                store: "S3",
+                source: Box::new(e),
+            }
+        })?;
         Ok(Arc::new(AwsCredential {
-            key_id: credentials.aws_access_key_id().to_string(),
-            secret_key: credentials.aws_secret_access_key().to_string(),
-            token: credentials.token().clone(),
+            key_id: creds.access_key_id().to_string(),
+            secret_key: creds.secret_access_key().to_string(),
+            token: creds.session_token().map(ToString::to_string),
         }))
     }
 }
