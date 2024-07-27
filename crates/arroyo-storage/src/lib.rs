@@ -5,16 +5,16 @@ use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
 };
-
+use std::fmt::{Debug, Formatter};
 use arroyo_rpc::retry;
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
 use object_store::gcp::GoogleCloudStorageBuilder;
-use object_store::multipart::PartId;
+use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
-use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
+use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, MultipartUpload, ObjectStore, PutPayload};
 use object_store::{CredentialProvider, MultipartId};
 use regex::{Captures, Regex};
 use thiserror::Error;
@@ -25,15 +25,22 @@ mod aws;
 /// A reference-counted reference to a [StorageProvider].
 pub type StorageProviderRef = Arc<StorageProvider>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct StorageProvider {
     config: BackendConfig,
     object_store: Arc<dyn ObjectStore>,
+    multi_part_store: Option<Arc<dyn MultipartStore>>,
     canonical_url: String,
     // A URL that object_store can parse.
     // May require storage_options to properly instantiate
     object_store_base_url: String,
     storage_options: HashMap<String, String>,
+}
+
+impl Debug for StorageProvider {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StorageProvider<{}>", self.canonical_url)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -572,7 +579,7 @@ impl StorageProvider {
         bytes: Vec<u8>,
     ) -> Result<String, StorageError> {
         let path = path.into().into();
-        let bytes: Bytes = bytes.into();
+        let bytes = PutPayload::from(Bytes::from(bytes));
         storage_retry!(
             self.object_store
                 .put(&self.qualify_path(&path), bytes.clone())
@@ -601,45 +608,8 @@ impl StorageProvider {
         }
     }
 
-    pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
-        Ok(
-            storage_retry!(self.object_store.initiate_multipart_upload(path).await)
-                .map_err(Into::<StorageError>::into)?
-                .0,
-        )
-    }
-
-    pub async fn add_multipart(
-        &self,
-        path: &Path,
-        multipart_id: &MultipartId,
-        part_number: usize,
-        bytes: Bytes,
-    ) -> Result<PartId, StorageError> {
-        storage_retry!(
-            self.object_store
-                .get_put_part(path, multipart_id)
-                .await?
-                .put_part(bytes.clone(), part_number)
-                .await
-        )
-        .map_err(Into::<StorageError>::into)
-    }
-
-    pub async fn close_multipart(
-        &self,
-        path: &Path,
-        multipart_id: &MultipartId,
-        parts: Vec<PartId>,
-    ) -> Result<(), StorageError> {
-        storage_retry!(
-            self.object_store
-                .get_put_part(path, multipart_id)
-                .await?
-                .complete(parts.clone())
-                .await
-        )
-        .map_err(Into::<StorageError>::into)
+    pub fn as_multipart(&self) -> Arc<dyn MultipartStore> {
+        self.object_store as Arc<dyn MultipartStore>
     }
 
     /// Produces a URL representation of this path that can be read by other systems,

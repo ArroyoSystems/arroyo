@@ -40,14 +40,14 @@ arrow-ord = { version = "52.1.0" }
 arrow-array = { version = "52.1.0" }
 arrow-schema = { version = "52.1.0" }
 arrow-json = { version = "52.1.0" }
-object_store = { version = "0.9.1" }
+object_store = { version = "0.10" }
 parquet = { version = "52.1.0" }
 ahash = { version = "=0.8.7" }
 datafusion = { version = "40.0.0" }
 datafusion-common = { version = "40.0.0" }
 datafusion-proto = { version = "40.0.0" }
 datafusion-functions = { version = "40.0.0" }
-deltalake = { version = "0.18.1" }
+deltalake = { version = "0.18.2" }
 cornucopia = { version = "0.9.0" }
 cornucopia_async = {version = "0.6.0"}
 deadpool-postgres = "0.12"
@@ -60,14 +60,11 @@ split-debuginfo = "unpacked"
 
 
 [patch.crates-io]
+deltalake = { git = 'https://github.com/delta-io/delta-rs', rev = 'e75a0b49b40f35ed361444bbea0e5720f359d732' }
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/parquet_bytes'}
-arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/parquet_bytes'}
-arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/parquet_bytes'}
-arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/parquet_bytes'}
-arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/parquet_bytes'}
 arrow-json = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/json'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'object_store_0.9.1_arroyo'}
+# object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'object_store_0.9.1_arroyo'}
 datafusion = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
 datafusion-common = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
 datafusion-execution = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}

@@ -48,7 +48,6 @@ ordered-float = "3"
 
 arrow = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
-parquet = { workspace = true, features = ["async"]}
 arrow-array = { workspace = true}
 arrow-json = { workspace = true }
 
