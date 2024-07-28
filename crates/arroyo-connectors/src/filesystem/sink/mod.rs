@@ -21,6 +21,7 @@ use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
+use datafusion::prelude::concat;
 use datafusion::{
     common::{Column, Result as DFResult},
     execution::{
@@ -28,14 +29,12 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{
-        expr::ScalarFunction, Expr, ScalarUDF, ScalarUDFImpl, Signature,
-        TypeSignature, Volatility,
+        expr::ScalarFunction, Expr, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
     },
     physical_plan::{ColumnarValue, PhysicalExpr},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
     scalar::ScalarValue,
 };
-use datafusion::prelude::concat;
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
@@ -201,7 +200,11 @@ fn partition_string_for_fields_and_time(
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let field_function = field_logical_expression(schema.clone(), partition_fields)?;
     let time_function = timestamp_logical_expression(time_partition_pattern)?;
-    let function = concat(vec![time_function, Expr::Literal(ScalarValue::Utf8(Some("/".to_string()))), field_function]);
+    let function = concat(vec![
+        time_function,
+        Expr::Literal(ScalarValue::Utf8(Some("/".to_string()))),
+        field_function,
+    ]);
     compile_expression(&function, schema)
 }
 

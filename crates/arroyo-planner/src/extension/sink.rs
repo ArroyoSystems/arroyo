@@ -5,7 +5,7 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     IS_RETRACT_FIELD,
 };
-use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference, Result};
+use datafusion::common::{internal_err, plan_err, DFSchemaRef, Result, TableReference};
 
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 
@@ -25,7 +25,7 @@ pub(crate) const SINK_NODE_NAME: &str = "SinkExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct SinkExtension {
-    pub(crate) name: OwnedTableReference,
+    pub(crate) name: TableReference,
     pub(crate) table: Table,
     pub(crate) schema: DFSchemaRef,
     input: Arc<LogicalPlan>,
@@ -33,7 +33,7 @@ pub(crate) struct SinkExtension {
 
 impl SinkExtension {
     pub fn new(
-        name: OwnedTableReference,
+        name: TableReference,
         table: Table,
         mut schema: DFSchemaRef,
         mut input: Arc<LogicalPlan>,
@@ -85,7 +85,7 @@ impl SinkExtension {
       If it isn't, wrap the input in a RemoteTableExtension.
     */
     pub fn add_remote_if_necessary(
-        name: &OwnedTableReference,
+        name: &TableReference,
         schema: &DFSchemaRef,
         input: &mut Arc<LogicalPlan>,
     ) {
@@ -125,27 +125,20 @@ impl UserDefinedLogicalNodeCore for SinkExtension {
     }
 
     fn fmt_for_explain(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "SinkExtension({:?}): {}",
-            self.name,
-            self.schema
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "SinkExtension({:?}): {}", self.name, self.schema)
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        assert_eq!(inputs.len(), 1, "input size inconsistent");
-        Self {
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        if inputs.len() != 1 {
+            return internal_err!("input size inconsistent");
+        }
+
+        Ok(Self {
             name: self.name.clone(),
             table: self.table.clone(),
             schema: self.schema.clone(),
             input: Arc::new(inputs[0].clone()),
-        }
+        })
     }
 }
 

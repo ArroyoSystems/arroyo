@@ -1,11 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use arroyo_datastream::WindowType;
 use datafusion::common::tree_node::Transformed;
 use datafusion::common::{
     plan_err,
     tree_node::{TreeNode, TreeNodeRewriter},
-    DFSchema, Result as DFResult,
+    Result as DFResult,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::{
@@ -15,7 +15,9 @@ use tracing::debug;
 
 use crate::{
     extension::{key_calculation::KeyCalculationExtension, window_fn::WindowFunctionExtension},
+    fields_with_qualifiers,
     plan::extract_column,
+    schema_from_df_fields,
 };
 
 use super::WindowDetectingVisitor;
@@ -92,7 +94,8 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
                             column.name
                         ));
                     };
-                    if input_window_fields.contains(input_field) {
+                    if input_window_fields.contains(&(column.relation.as_ref(), input_field).into())
+                    {
                         return Some(Ok((input_field.clone(), index)));
                     }
                 }
@@ -128,9 +131,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
             .collect();
 
         key_projection_expressions.extend(
-            input
-                .schema()
-                .fields()
+            fields_with_qualifiers(input.schema())
                 .iter()
                 .map(|field| Expr::Column(field.qualified_column())),
         );
@@ -139,14 +140,13 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         // know the types of the partition expressions before constructing the appropriate schema.
         let auto_schema =
             Projection::try_new(key_projection_expressions.clone(), input.clone())?.schema;
-        let mut key_fields = auto_schema
-            .fields()
+        let mut key_fields = fields_with_qualifiers(&auto_schema)
             .iter()
             .take(additional_keys.clone().len())
             .cloned()
             .collect::<Vec<_>>();
-        key_fields.extend(input.schema().fields().iter().cloned());
-        let key_schema = Arc::new(DFSchema::new_with_metadata(key_fields, HashMap::new())?);
+        key_fields.extend(fields_with_qualifiers(input.schema()));
+        let key_schema = Arc::new(schema_from_df_fields(&key_fields)?);
         let key_projection = LogicalPlan::Projection(Projection::try_new_with_schema(
             key_projection_expressions,
             input.clone(),

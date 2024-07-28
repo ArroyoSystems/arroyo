@@ -28,12 +28,13 @@ use arroyo_types::{
 };
 
 use futures::{StreamExt, TryStreamExt};
+use object_store::buffered::BufWriter;
 use parquet::{
     arrow::{async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder},
     basic::{Compression, ZstdLevel},
     file::properties::WriterProperties,
 };
-use tokio::{io::AsyncWrite, sync::mpsc::Sender};
+use tokio::sync::mpsc::Sender;
 
 use crate::{
     parquet::ParquetStats, schemas::SchemaWithHashAndOperation, CheckpointMessage, StateMessage,
@@ -449,7 +450,7 @@ impl Table for ExpiringTimeKeyTable {
 struct CompactedFileWriter {
     file_name: String,
     schema: SchemaWithHashAndOperation,
-    writer: Option<AsyncArrowWriter<Box<dyn AsyncWrite + Send + Unpin>>>,
+    writer: Option<AsyncArrowWriter<BufWriter>>,
     parquet_stats: Option<ParquetStats>,
 }
 
@@ -565,13 +566,10 @@ impl TimeTableCompactor {
                 self.operator_metadata.epoch,
                 true,
             );
-            let (_multipart_id, async_writer) = self
-                .storage_provider
-                .get_backing_store()
-                .put_multipart(&(file_name.clone().into()))
-                .await?;
+            let buf_writer = self.storage_provider.buf_writer(file_name.clone().into());
+
             let writer = Some(AsyncArrowWriter::try_new(
-                async_writer,
+                buf_writer,
                 self.schema.state_schema().schema.clone(),
                 None,
             )?);
@@ -634,7 +632,7 @@ pub struct ExpiringTimeKeyTableCheckpointer {
     file_name: String,
     parent: ExpiringTimeKeyTable,
     epoch: u32,
-    writer: Option<AsyncArrowWriter<Box<dyn AsyncWrite + Send + Unpin>>>,
+    writer: Option<AsyncArrowWriter<BufWriter>>,
     parquet_stats: Option<ParquetStats>,
     prior_files: Vec<ParquetTimeFile>,
 }
@@ -663,17 +661,15 @@ impl ExpiringTimeKeyTableCheckpointer {
         })
     }
     async fn init_writer(&mut self) -> Result<()> {
-        let (_multipart_id, async_writer) = self
+        let buf_writer = self
             .parent
             .storage_provider
-            .get_backing_store()
-            .put_multipart(&self.file_name.clone().into())
-            .await?;
+            .buf_writer(self.file_name.clone().into());
         let writer_properties = WriterProperties::builder()
             .set_compression(Compression::ZSTD(ZstdLevel::default()))
             .build();
         self.writer = Some(AsyncArrowWriter::try_new(
-            async_writer,
+            buf_writer,
             self.parent.schema.state_schema().schema.clone(),
             Some(writer_properties),
         )?);

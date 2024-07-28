@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, TIMESTAMP_FIELD};
-use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference, Result};
+use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
 use datafusion::logical_expr::{Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::protobuf::{physical_plan_node::PhysicalPlanType, PhysicalPlanNode};
 
@@ -20,14 +20,14 @@ pub(crate) struct UpdatingAggregateExtension {
     pub(crate) aggregate: LogicalPlan,
     pub(crate) key_fields: Vec<usize>,
     pub(crate) final_calculation: LogicalPlan,
-    pub(crate) timestamp_qualifier: Option<OwnedTableReference>,
+    pub(crate) timestamp_qualifier: Option<TableReference>,
 }
 
 impl UpdatingAggregateExtension {
     pub fn new(
         aggregate: LogicalPlan,
         key_fields: Vec<usize>,
-        timestamp_qualifier: Option<OwnedTableReference>,
+        timestamp_qualifier: Option<TableReference>,
     ) -> Self {
         let final_calculation = LogicalPlan::Extension(Extension {
             node: Arc::new(IsRetractExtension::new(
@@ -65,12 +65,16 @@ impl UserDefinedLogicalNodeCore for UpdatingAggregateExtension {
         write!(f, "UpdatingAggregateExtension")
     }
 
-    fn from_template(&self, _exprs: &[datafusion::prelude::Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::new(
+    fn with_exprs_and_inputs(
+        &self,
+        _exprs: Vec<datafusion::prelude::Expr>,
+        inputs: Vec<LogicalPlan>,
+    ) -> Result<Self> {
+        Ok(Self::new(
             inputs[0].clone(),
             self.key_fields.clone(),
             self.timestamp_qualifier.clone(),
-        )
+        ))
     }
 }
 
@@ -116,7 +120,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             .schema()
             .fields()
             .iter()
-            .map(|df_field| df_field.field().clone())
+            .map(|df_field| df_field.clone())
             .collect::<Vec<_>>();
         let timestamp_index = state_final_fields.len() - 1;
         state_final_fields[timestamp_index] = Arc::new(Field::new(

@@ -2,7 +2,6 @@ use arrow::array::cast::as_list_array;
 use arrow::array::{new_empty_array, Array, ArrayRef, ListArray};
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, FieldRef, IntervalUnit, TimeUnit};
-use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arroyo_udf_host::SyncUdfDylib;
 use datafusion::common::{Result, ScalarValue};
 use datafusion::logical_expr::Accumulator;
@@ -208,10 +207,3 @@ fn scalar_none(datatype: &DataType) -> ScalarValue {
         | DataType::LargeListView(_) => unimplemented!("views are not supported"),
     }
 }
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct FfiArraySchemaPair(FFI_ArrowArray, FFI_ArrowSchema);
-
-#[repr(C)]
-pub struct FfiArrayResult(FFI_ArrowArray, FFI_ArrowSchema, bool);

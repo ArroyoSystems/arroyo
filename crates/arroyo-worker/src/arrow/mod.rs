@@ -88,6 +88,10 @@ impl DisplayAs for RwLockRecordBatchReader {
 }
 
 impl ExecutionPlan for RwLockRecordBatchReader {
+    fn name(&self) -> &str {
+        "rw_lock_reader"
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -100,7 +104,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         &self.plan_properties
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![]
     }
 

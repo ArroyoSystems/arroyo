@@ -5,15 +5,12 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     IS_RETRACT_FIELD, TIMESTAMP_FIELD,
 };
-use datafusion::common::{
-    internal_err, plan_err, DFSchema, DFSchemaRef, OwnedTableReference, Result,
-};
+use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result, TableReference};
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion::physical_plan::DisplayAs;
 
-use crate::builder::{NamedNode, Planner};
-
 use super::{ArroyoExtension, NodeWithIncomingEdges};
+use crate::builder::{NamedNode, Planner};
 
 pub(crate) const DEBEZIUM_UNROLLING_EXTENSION_NAME: &str = "DebeziumUnrollingExtension";
 pub(crate) const TO_DEBEZIUM_EXTENSION_NAME: &str = "ToDebeziumExtension";
@@ -27,7 +24,7 @@ pub struct DebeziumUnrollingExtension {
 impl DebeziumUnrollingExtension {
     pub(crate) fn as_debezium_schema(
         input_schema: &DFSchemaRef,
-        qualifier: Option<OwnedTableReference>,
+        qualifier: Option<TableReference>,
     ) -> Result<DFSchemaRef> {
         let timestamp_field = if input_schema.has_column_with_unqualified_name(TIMESTAMP_FIELD) {
             Some(
@@ -42,9 +39,11 @@ impl DebeziumUnrollingExtension {
             .fields()
             .iter()
             .filter(|field| field.name() != TIMESTAMP_FIELD && field.name() != IS_RETRACT_FIELD)
-            .map(|field| field.field().clone())
+            .map(|f| f.clone())
             .collect();
+
         let struct_type = DataType::Struct(struct_schema.into());
+
         let before = Arc::new(arrow::datatypes::Field::new(
             "before",
             struct_type.clone(),
@@ -55,11 +54,14 @@ impl DebeziumUnrollingExtension {
             struct_type.clone(),
             true,
         ));
+
         let op = Arc::new(arrow::datatypes::Field::new("op", DataType::Utf8, true));
         let mut fields = vec![before, after, op];
+
         if let Some(timestamp_field) = timestamp_field {
-            fields.push(timestamp_field.field().clone());
+            fields.push(Arc::new(timestamp_field));
         }
+
         let schema = match qualifier {
             Some(qualifier) => {
                 DFSchema::try_from_qualified_schema(qualifier, &Schema::new(fields))?
@@ -72,13 +74,13 @@ impl DebeziumUnrollingExtension {
     pub fn try_new(input: LogicalPlan) -> Result<Self> {
         let input_schema = input.schema();
         // confirm that the input schema has before, after and op columns, and before and after match
-        let Some(before_index) = input_schema.index_of_column_by_name(None, "before")? else {
+        let Some(before_index) = input_schema.index_of_column_by_name(None, "before") else {
             return plan_err!("DebeziumUnrollingExtension requires a before column");
         };
-        let Some(after_index) = input_schema.index_of_column_by_name(None, "after")? else {
+        let Some(after_index) = input_schema.index_of_column_by_name(None, "after") else {
             return plan_err!("DebeziumUnrollingExtension requires an after column");
         };
-        let Some(op_index) = input_schema.index_of_column_by_name(None, "op")? else {
+        let Some(op_index) = input_schema.index_of_column_by_name(None, "op") else {
             return plan_err!("DebeziumUnrollingExtension requires an op column");
         };
         let before_type = input_schema.field(before_index).data_type();
@@ -104,8 +106,8 @@ impl DebeziumUnrollingExtension {
         };
         // determine the qualifier from the before and after columns
         let qualifier = match (
-            input_schema.field(before_index).qualifier(),
-            input_schema.field(after_index).qualifier(),
+            input_schema.qualified_field(before_index).0,
+            input_schema.qualified_field(after_index).0,
         ) {
             (Some(before_qualifier), Some(after_qualifier)) => {
                 if before_qualifier != after_qualifier {
@@ -124,11 +126,11 @@ impl DebeziumUnrollingExtension {
         )));
 
         let Some(input_timestamp_field) =
-            input_schema.index_of_column_by_name(None, TIMESTAMP_FIELD)?
+            input_schema.index_of_column_by_name(None, TIMESTAMP_FIELD)
         else {
             return plan_err!("DebeziumUnrollingExtension requires a timestamp field");
         };
-        fields.push(input_schema.field(input_timestamp_field).field().clone());
+        fields.push(Arc::new(input_schema.field(input_timestamp_field).clone()));
         let arrow_schema = Schema::new(fields);
 
         let schema = match qualifier {
@@ -163,8 +165,8 @@ impl UserDefinedLogicalNodeCore for DebeziumUnrollingExtension {
         write!(f, "DebeziumUnrollingExtension")
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::try_new(inputs[0].clone()).unwrap()
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        Self::try_new(inputs[0].clone())
     }
 }
 
@@ -240,8 +242,12 @@ impl UserDefinedLogicalNodeCore for ToDebeziumExtension {
         write!(f, "ToDebeziumExtension")
     }
 
-    fn from_template(&self, _exprs: &[datafusion::prelude::Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::try_new(inputs[0].clone()).unwrap()
+    fn with_exprs_and_inputs(
+        &self,
+        _exprs: Vec<datafusion::prelude::Expr>,
+        inputs: Vec<LogicalPlan>,
+    ) -> Result<Self> {
+        Self::try_new(inputs[0].clone())
     }
 }
 

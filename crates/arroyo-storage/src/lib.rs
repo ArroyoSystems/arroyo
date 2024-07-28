@@ -1,3 +1,18 @@
+use arroyo_rpc::retry;
+use aws::ArroyoCredentialProvider;
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
+use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
+use object_store::buffered::BufWriter;
+use object_store::gcp::GoogleCloudStorageBuilder;
+use object_store::multipart::{MultipartStore, PartId};
+use object_store::path::Path;
+use object_store::CredentialProvider;
+use object_store::{
+    aws::AmazonS3Builder, local::LocalFileSystem, MultipartId, ObjectStore, PutPayload,
+};
+use regex::{Captures, Regex};
+use std::fmt::{Debug, Formatter};
 use std::future::ready;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -5,18 +20,6 @@ use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
 };
-use std::fmt::{Debug, Formatter};
-use arroyo_rpc::retry;
-use aws::ArroyoCredentialProvider;
-use bytes::Bytes;
-use futures::{Stream, StreamExt};
-use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
-use object_store::gcp::GoogleCloudStorageBuilder;
-use object_store::multipart::{MultipartStore, PartId};
-use object_store::path::Path;
-use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, MultipartUpload, ObjectStore, PutPayload};
-use object_store::{CredentialProvider, MultipartId};
-use regex::{Captures, Regex};
 use thiserror::Error;
 use tracing::{debug, error};
 
@@ -29,7 +32,7 @@ pub type StorageProviderRef = Arc<StorageProvider>;
 pub struct StorageProvider {
     config: BackendConfig,
     object_store: Arc<dyn ObjectStore>,
-    multi_part_store: Option<Arc<dyn MultipartStore>>,
+    multipart_store: Option<Arc<dyn MultipartStore>>,
     canonical_url: String,
     // A URL that object_store can parse.
     // May require storage_options to properly instantiate
@@ -419,9 +422,13 @@ impl StorageProvider {
             canonical_url = format!("{}/{}", canonical_url, key);
         }
         let object_store_base_url = format!("s3://{}", config.bucket);
+
+        let object_store = Arc::new(builder.build().map_err(Into::<StorageError>::into)?);
+
         Ok(Self {
             config: BackendConfig::S3(config),
-            object_store: Arc::new(builder.build().map_err(Into::<StorageError>::into)?),
+            object_store: object_store.clone(),
+            multipart_store: Some(object_store),
             canonical_url,
             object_store_base_url,
             storage_options: s3_options
@@ -450,7 +457,8 @@ impl StorageProvider {
 
         Ok(Self {
             config: BackendConfig::GCS(config),
-            object_store,
+            object_store: object_store.clone(),
+            multipart_store: Some(object_store),
             object_store_base_url,
             canonical_url,
             storage_options: HashMap::new(),
@@ -474,6 +482,7 @@ impl StorageProvider {
         Ok(Self {
             config: BackendConfig::Local(config),
             object_store,
+            multipart_store: None,
             canonical_url,
             object_store_base_url,
             storage_options: HashMap::new(),
@@ -608,8 +617,14 @@ impl StorageProvider {
         }
     }
 
-    pub fn as_multipart(&self) -> Arc<dyn MultipartStore> {
-        self.object_store as Arc<dyn MultipartStore>
+    pub fn as_multipart(&self) -> Option<Arc<dyn MultipartStore>> {
+        self.multipart_store.clone()
+    }
+
+    fn get_multipart(&self) -> &Arc<dyn MultipartStore> {
+        self.multipart_store
+            .as_ref()
+            .unwrap_or_else(|| panic!("Not a multipart store: {:?}", self))
     }
 
     /// Produces a URL representation of this path that can be read by other systems,
@@ -639,6 +654,46 @@ impl StorageProvider {
 
     pub fn get_backing_store(&self) -> Arc<dyn ObjectStore> {
         self.object_store.clone()
+    }
+
+    pub fn buf_writer(&self, path: Path) -> BufWriter {
+        BufWriter::new(self.object_store.clone(), path)
+    }
+
+    pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
+        storage_retry!(self.get_multipart().create_multipart(path).await)
+            .map_err(Into::<StorageError>::into)
+    }
+
+    pub async fn add_multipart(
+        &self,
+        path: &Path,
+        multipart_id: &MultipartId,
+        part_number: usize,
+        bytes: Bytes,
+    ) -> Result<PartId, StorageError> {
+        storage_retry!(
+            self.get_multipart()
+                .put_part(path, multipart_id, part_number, bytes.clone().into())
+                .await
+        )
+        .map_err(Into::<StorageError>::into)
+    }
+
+    pub async fn close_multipart(
+        &self,
+        path: &Path,
+        multipart_id: &MultipartId,
+        parts: Vec<PartId>,
+    ) -> Result<(), StorageError> {
+        storage_retry!(
+            self.get_multipart()
+                .complete_multipart(path, multipart_id, parts.clone())
+                .await
+        )
+        .map_err(Into::<StorageError>::into)?;
+
+        Ok(())
     }
 }
 

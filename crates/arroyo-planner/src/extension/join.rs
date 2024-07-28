@@ -98,22 +98,13 @@ impl UserDefinedLogicalNodeCore for JoinExtension {
     }
 
     fn fmt_for_explain(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "JoinExtension: {}",
-            self.schema()
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "JoinExtension: {}", self.schema())
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        Self {
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        Ok(Self {
             rewritten_join: inputs[0].clone(),
             is_instant: self.is_instant,
-        }
+        })
     }
 }

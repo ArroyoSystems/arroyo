@@ -1,8 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use arroyo_datastream::logical::{LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion::common::{plan_err, DFField, DFSchema, DFSchemaRef, OwnedTableReference, Result};
+use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 
@@ -10,6 +10,7 @@ use prost::Message;
 
 use crate::{
     builder::{NamedNode, Planner},
+    schema_from_df_fields,
     schemas::add_timestamp_field,
     tables::ConnectorTable,
 };
@@ -19,25 +20,24 @@ pub(crate) const TABLE_SOURCE_NAME: &str = "TableSourceExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TableSourceExtension {
-    pub(crate) name: OwnedTableReference,
+    pub(crate) name: TableReference,
     pub(crate) table: ConnectorTable,
     pub(crate) schema: DFSchemaRef,
 }
 
 impl TableSourceExtension {
-    pub fn new(name: OwnedTableReference, table: ConnectorTable) -> Self {
+    pub fn new(name: TableReference, table: ConnectorTable) -> Self {
         let physical_fields = table
             .fields
             .iter()
             .filter_map(|field| match field {
                 crate::tables::FieldSpec::StructField(field) => {
-                    Some(DFField::from_qualified(&name, Arc::new(field.clone())))
+                    Some((Some(name.clone()), Arc::new(field.clone())).into())
                 }
                 crate::tables::FieldSpec::VirtualField { .. } => None,
             })
             .collect::<Vec<_>>();
-        let base_schema =
-            Arc::new(DFSchema::new_with_metadata(physical_fields, HashMap::new()).unwrap());
+        let base_schema = Arc::new(schema_from_df_fields(&physical_fields).unwrap());
         let schema = if table.is_updating() {
             DebeziumUnrollingExtension::as_debezium_schema(&base_schema, Some(name.clone()))
                 .unwrap()
@@ -71,24 +71,15 @@ impl UserDefinedLogicalNodeCore for TableSourceExtension {
     }
 
     fn fmt_for_explain(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "TableSourceExtension: {}",
-            self.schema
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "TableSourceExtension: {}", self.schema)
     }
 
-    fn from_template(&self, _exprs: &[Expr], _inputs: &[LogicalPlan]) -> Self {
-        Self {
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, _inputs: Vec<LogicalPlan>) -> Result<Self> {
+        Ok(Self {
             name: self.name.clone(),
             table: self.table.clone(),
             schema: self.schema.clone(),
-        }
+        })
     }
 }
 

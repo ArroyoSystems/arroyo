@@ -85,7 +85,7 @@ async fn create_new_table(
     let delta_schema: deltalake::kernel::Schema = (schema).try_into()?;
     CreateBuilder::new()
         .with_log_store(delta_object_store)
-        .with_columns(delta_schema.fields().clone())
+        .with_columns(delta_schema.fields().cloned())
         .await
         .map_err(Into::into)
 }
@@ -199,7 +199,7 @@ async fn commit_to_delta(table: deltalake::DeltaTable, add_actions: Vec<Action>)
                 partition_by: None,
                 predicate: None,
             },
-        )?
+        )
         .await?
         .version)
 }

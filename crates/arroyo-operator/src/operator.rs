@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
+use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::logical_expr::{
     create_udaf, AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
 };
@@ -706,5 +707,9 @@ impl FunctionRegistry for Registry {
 
     fn register_udwf(&mut self, udwf: Arc<WindowUDF>) -> DFResult<Option<Arc<WindowUDF>>> {
         Ok(self.udwfs.insert(udwf.name().to_string(), udwf))
+    }
+
+    fn expr_planners(&self) -> Vec<Arc<dyn ExprPlanner>> {
+        vec![]
     }
 }

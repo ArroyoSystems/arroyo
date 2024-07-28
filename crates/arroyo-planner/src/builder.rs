@@ -11,7 +11,7 @@ use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use async_trait::async_trait;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{
-    plan_err, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result, ScalarValue,
+    plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, TableReference,
 };
 use datafusion::execution::config::SessionConfig;
 use datafusion::execution::context::SessionState;
@@ -219,9 +219,9 @@ impl<'a> Planner<'a> {
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub(crate) enum NamedNode {
-    Source(OwnedTableReference),
-    Watermark(OwnedTableReference),
-    RemoteTable(OwnedTableReference),
+    Source(TableReference),
+    Watermark(TableReference),
+    RemoteTable(TableReference),
 }
 
 struct ArroyoExtensionPlanner {}
@@ -323,7 +323,7 @@ impl<'a> PlanToGraphVisitor<'a> {
     }
 }
 
-impl<'a> TreeNodeVisitor for PlanToGraphVisitor<'a> {
+impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {

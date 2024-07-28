@@ -1,21 +1,21 @@
 use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
+use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata};
 use arrow_schema::DataType;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
 use datafusion::common::{
-    not_impl_err, plan_err, Column, DFSchema, DFSchemaRef, DataFusionError, JoinConstraint,
-    JoinType, OwnedTableReference, Result, ScalarValue,
+    not_impl_err, plan_err, Column, DFSchemaRef, DataFusionError, JoinConstraint, JoinType, Result,
+    ScalarValue, TableReference,
 };
 use datafusion::logical_expr;
-use datafusion::logical_expr::expr::{Alias, ScalarFunction};
+use datafusion::logical_expr::expr::Alias;
 use datafusion::logical_expr::{
-    BinaryExpr, BuiltinScalarFunction, Case, Expr, ExprSchemable, Extension, Join, LogicalPlan,
-    Operator, Projection,
+    BinaryExpr, Case, Expr, ExprSchemable, Extension, Join, LogicalPlan, Operator, Projection,
 };
-use datafusion::prelude::{get_field, lit};
+use datafusion::prelude::{coalesce, get_field};
 use std::sync::Arc;
 
 pub(crate) struct JoinRewriter {}
@@ -89,15 +89,13 @@ impl JoinRewriter {
             .enumerate()
             .map(|(index, expr)| {
                 expr.alias_qualified(
-                    Some(OwnedTableReference::bare("_arroyo")),
+                    Some(TableReference::bare("_arroyo")),
                     format!("_key_{}", index),
                 )
             })
             .collect();
         join_expressions.extend(
-            input
-                .schema()
-                .fields()
+            fields_with_qualifiers(&input.schema())
                 .iter()
                 .map(|field| Expr::Column(Column::new(field.qualifier().cloned(), field.name()))),
         );
@@ -115,7 +113,7 @@ impl JoinRewriter {
 
     fn post_join_timestamp_projection(&mut self, input: LogicalPlan) -> Result<LogicalPlan> {
         let schema = input.schema().clone();
-        let mut schema_with_timestamp = schema.fields().clone();
+        let mut schema_with_timestamp = fields_with_qualifiers(&schema);
         let timestamp_fields = schema_with_timestamp
             .iter()
             .filter(|field| field.name() == "_timestamp")
@@ -137,8 +135,8 @@ impl JoinRewriter {
         // add a _timestamp field to the schema
         schema_with_timestamp.push(timestamp_fields[0].clone());
 
-        let output_schema = Arc::new(DFSchema::new_with_metadata(
-            schema_with_timestamp,
+        let output_schema = Arc::new(schema_from_df_fields_with_metadata(
+            &schema_with_timestamp,
             schema.metadata().clone(),
         )?);
         // then take a max of the two timestamp columns
@@ -168,10 +166,10 @@ impl JoinRewriter {
                     Box::new(right_column.clone()),
                 ),
             ],
-            else_expr: Some(Box::new(Expr::ScalarFunction(ScalarFunction::new(
-                BuiltinScalarFunction::Coalesce,
-                vec![left_column.clone(), right_column.clone()],
-            )))),
+            else_expr: Some(Box::new(coalesce(vec![
+                left_column.clone(),
+                right_column.clone(),
+            ]))),
         });
 
         projection_expr.push(Expr::Alias(Alias {
@@ -218,8 +216,8 @@ impl TreeNodeRewriter for StructEqRewriter {
                 }
 
                 let mut exprs = fields.iter().map(|f| {
-                    get_field((**left).clone(), lit(f.name().clone()))
-                        .eq(get_field((**right).clone(), lit(f.name().clone())))
+                    get_field((**left).clone(), f.name().clone())
+                        .eq(get_field((**right).clone(), f.name().clone()))
                 });
 
                 let Some(mut expr) = exprs.next() else {

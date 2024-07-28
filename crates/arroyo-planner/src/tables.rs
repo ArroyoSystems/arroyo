@@ -9,7 +9,7 @@ use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
     external::{ProcessingMode, SqlSource},
-    ArroyoSchemaProvider,
+    fields_with_qualifiers, ArroyoSchemaProvider, DFField,
 };
 use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 use arroyo_datastream::default_sink;
@@ -20,7 +20,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
-use datafusion::common::{config::ConfigOptions, DFField, DFSchema, Result};
+use datafusion::common::{config::ConfigOptions, DFSchema, Result};
 use datafusion::common::{plan_err, Column, DataFusionError};
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
@@ -114,7 +114,7 @@ fn produce_optimized_plan(
         analyzer.add_function_rewrite(rewriter.clone());
     }
     let analyzed_plan =
-        analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+        analyzer.execute_and_check(plan, &ConfigOptions::default(), |_plan, _rule| {})?;
 
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
         Arc::new(EliminateNestedUnion::new()),
@@ -154,7 +154,7 @@ fn produce_optimized_plan(
 
     let optimizer = Optimizer::with_rules(rules);
     let plan = optimizer.optimize(
-        &analyzed_plan,
+        analyzed_plan,
         &OptimizerContext::default(),
         |_plan, _rule| {},
     )?;
@@ -449,10 +449,25 @@ pub enum Table {
 
 fn value_to_inner_string(value: &Value) -> Result<String> {
     match value {
-        Value::SingleQuotedString(inner_string)
-        | Value::UnQuotedString(inner_string)
-        | Value::DoubleQuotedString(inner_string) => Ok(inner_string.clone()),
-        _ => plan_err!("Expected a string value, found {:?}", value),
+        Value::SingleQuotedString(s) => Ok(s.to_string()),
+        Value::DollarQuotedString(s) => Ok(s.to_string()),
+        Value::Number(_, _) | Value::Boolean(_) => Ok(value.to_string()),
+        Value::DoubleQuotedString(_)
+        | Value::EscapedStringLiteral(_)
+        | Value::NationalStringLiteral(_)
+        | Value::SingleQuotedByteStringLiteral(_)
+        | Value::DoubleQuotedByteStringLiteral(_)
+        | Value::TripleSingleQuotedString(_)
+        | Value::TripleDoubleQuotedString(_)
+        | Value::TripleSingleQuotedByteStringLiteral(_)
+        | Value::TripleDoubleQuotedByteStringLiteral(_)
+        | Value::SingleQuotedRawStringLiteral(_)
+        | Value::DoubleQuotedRawStringLiteral(_)
+        | Value::TripleSingleQuotedRawStringLiteral(_)
+        | Value::TripleDoubleQuotedRawStringLiteral(_)
+        | Value::HexStringLiteral(_)
+        | Value::Null
+        | Value::Placeholder(_) => plan_err!("Expected a string value, found {:?}", value),
     }
 }
 
@@ -504,11 +519,10 @@ impl Table {
             physical_fields
                 .iter()
                 .map(|f| {
-                    Ok(DFField::new_unqualified(
-                        f.name(),
-                        f.data_type().clone(),
-                        f.is_nullable(),
-                    ))
+                    Ok(
+                        DFField::new_unqualified(f.name(), f.data_type().clone(), f.is_nullable())
+                            .into(),
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?,
             HashMap::new(),
@@ -699,13 +713,13 @@ impl Table {
                 .schema()
                 .fields()
                 .iter()
-                .map(|f| f.field().clone())
+                .map(|f| f.clone())
                 .collect(),
             Table::PreviewSink { logical_plan } => logical_plan
                 .schema()
                 .fields()
                 .iter()
-                .map(|f| f.field().clone())
+                .map(|f| f.clone())
                 .collect(),
         }
     }
@@ -742,7 +756,7 @@ fn infer_sink_schema(
         .get_table_mut(&table_name)
         .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;
 
-    table.set_inferred_fields(plan.schema().fields().to_vec())?;
+    table.set_inferred_fields(fields_with_qualifiers(plan.schema()))?;
 
     Ok(())
 }
@@ -752,16 +766,10 @@ impl Insert {
         statement: &Statement,
         schema_provider: &mut ArroyoSchemaProvider,
     ) -> Result<Insert> {
-        if let Statement::Insert {
-            source,
-            into: true,
-            table_name,
-            ..
-        } = statement
-        {
+        if let Statement::Insert(insert) = statement {
             infer_sink_schema(
-                source.as_ref().unwrap(),
-                table_name.to_string(),
+                insert.source.as_ref().unwrap(),
+                insert.table_name.to_string(),
                 schema_provider,
             )?;
         }

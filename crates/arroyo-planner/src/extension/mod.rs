@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,9 +9,7 @@ use arroyo_datastream::logical::{
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
-use datafusion::common::{
-    DFField, DFSchema, DFSchemaRef, DataFusionError, OwnedTableReference, Result,
-};
+use datafusion::common::{internal_err, DFSchemaRef, DataFusionError, Result, TableReference};
 use datafusion::logical_expr::{
     Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore,
 };
@@ -24,7 +21,7 @@ use watermark_node::WatermarkNode;
 
 use crate::builder::{NamedNode, Planner};
 use crate::schemas::{add_timestamp_field, has_timestamp_field};
-use crate::ASYNC_RESULT_FIELD;
+use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
 use join::JoinExtension;
 
 use self::debezium::{DebeziumUnrollingExtension, ToDebeziumExtension};
@@ -105,12 +102,12 @@ impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtensio
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TimestampAppendExtension {
     pub(crate) input: LogicalPlan,
-    pub(crate) qualifier: Option<OwnedTableReference>,
+    pub(crate) qualifier: Option<TableReference>,
     pub(crate) schema: DFSchemaRef,
 }
 
 impl TimestampAppendExtension {
-    fn new(input: LogicalPlan, qualifier: Option<OwnedTableReference>) -> Self {
+    fn new(input: LogicalPlan, qualifier: Option<TableReference>) -> Self {
         if has_timestamp_field(input.schema()) {
             unreachable!("shouldn't be adding timestamp to a plan that already has it: plan :\n {:?}\n schema: {:?}", input, input.schema());
         }
@@ -148,14 +145,14 @@ impl UserDefinedLogicalNodeCore for TimestampAppendExtension {
             self.schema
                 .fields()
                 .iter()
-                .map(|f| f.qualified_name())
+                .map(|f| f.name().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         )
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::new(inputs[0].clone(), self.qualifier.clone())
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        Ok(Self::new(inputs[0].clone(), self.qualifier.clone()))
     }
 }
 
@@ -192,13 +189,14 @@ impl ArroyoExtension for AsyncUDFExtension {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let mut final_fields = self.input.schema().fields().clone();
-        final_fields.push(DFField::new_unqualified(
+        let mut final_fields = fields_with_qualifiers(self.input.schema());
+        final_fields.push(DFField::new(
+            None,
             ASYNC_RESULT_FIELD,
             self.udf.return_type.clone(),
             true,
         ));
-        let post_udf_schema = DFSchema::new_with_metadata(final_fields, HashMap::new())?;
+        let post_udf_schema = schema_from_df_fields(&final_fields)?;
 
         let final_exprs = self
             .final_exprs
@@ -250,7 +248,7 @@ impl ArroyoExtension for AsyncUDFExtension {
             self.final_schema
                 .fields()
                 .iter()
-                .map(|f| (**f.field()).clone())
+                .map(|f| (**f).clone())
                 .collect(),
         )
     }
@@ -260,15 +258,13 @@ impl ArroyoExtension for AsyncUDFExtension {
 pub(crate) struct IsRetractExtension {
     pub(crate) input: LogicalPlan,
     pub(crate) schema: DFSchemaRef,
-    pub(crate) timestamp_qualifier: Option<OwnedTableReference>,
+    pub(crate) timestamp_qualifier: Option<TableReference>,
 }
 
 impl IsRetractExtension {
-    pub(crate) fn new(
-        input: LogicalPlan,
-        timestamp_qualifier: Option<OwnedTableReference>,
-    ) -> Self {
-        let mut output_fields = input.schema().fields().clone();
+    pub(crate) fn new(input: LogicalPlan, timestamp_qualifier: Option<TableReference>) -> Self {
+        let mut output_fields = fields_with_qualifiers(&*input.schema());
+
         let timestamp_index = output_fields.len() - 1;
         output_fields[timestamp_index] = DFField::new(
             timestamp_qualifier.clone(),
@@ -276,14 +272,13 @@ impl IsRetractExtension {
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         );
-        output_fields.push(DFField::new_unqualified(
+        output_fields.push(DFField::new(
+            None,
             IS_RETRACT_FIELD,
             DataType::Boolean,
             false,
         ));
-        let schema = Arc::new(
-            DFSchema::new_with_metadata(output_fields, input.schema().metadata().clone()).unwrap(),
-        );
+        let schema = Arc::new(schema_from_df_fields(&output_fields).unwrap());
         Self {
             input,
             schema,
@@ -313,8 +308,11 @@ impl UserDefinedLogicalNodeCore for IsRetractExtension {
         write!(f, "IsRetractExtension")
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::new(inputs[0].clone(), self.timestamp_qualifier.clone())
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        Ok(Self::new(
+            inputs[0].clone(),
+            self.timestamp_qualifier.clone(),
+        ))
     }
 }
 
@@ -340,28 +338,18 @@ impl UserDefinedLogicalNodeCore for AsyncUDFExtension {
     }
 
     fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "AsyncUdfExtension<{}>: {}",
-            self.name,
-            self.final_schema
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "AsyncUdfExtension<{}>: {}", self.name, self.final_schema)
     }
 
-    fn from_template(&self, exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        assert_eq!(inputs.len(), 1, "input size inconsistent");
-        assert_eq!(
-            &UserDefinedLogicalNode::expressions(self),
-            exprs,
-            "Tried to recreate async UDF node with different expressions"
-        );
+    fn with_exprs_and_inputs(&self, exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        if inputs.len() != 1 {
+            return internal_err!("input size inconsistent");
+        }
+        if UserDefinedLogicalNode::expressions(self) != exprs {
+            return internal_err!("Tried to recreate async UDF node with different expressions");
+        }
 
-        Self {
+        Ok(Self {
             input: Arc::new(inputs[0].clone()),
             name: self.name.clone(),
             udf: self.udf.clone(),
@@ -371,6 +359,6 @@ impl UserDefinedLogicalNodeCore for AsyncUDFExtension {
             max_concurrency: self.max_concurrency,
             timeout: self.timeout,
             final_schema: self.final_schema.clone(),
-        }
+        })
     }
 }

@@ -5,7 +5,7 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::ValuePlanOperator,
 };
-use datafusion::common::{plan_err, DFSchemaRef, OwnedTableReference, Result};
+use datafusion::common::{internal_err, plan_err, DFSchemaRef, Result, TableReference};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
@@ -26,7 +26,7 @@ pub(crate) const REMOTE_TABLE_NAME: &str = "RemoteTableExtension";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RemoteTableExtension {
     pub(crate) input: LogicalPlan,
-    pub(crate) name: OwnedTableReference,
+    pub(crate) name: TableReference,
     pub(crate) schema: DFSchemaRef,
     pub(crate) materialize: bool,
 }
@@ -107,24 +107,19 @@ impl UserDefinedLogicalNodeCore for RemoteTableExtension {
     }
 
     fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "RemoteTableExtension: {}",
-            self.schema
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "RemoteTableExtension: {}", self.schema)
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        Self {
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        if inputs.len() != 1 {
+            return internal_err!("input size inconsistent");
+        }
+
+        Ok(Self {
             input: inputs[0].clone(),
             name: self.name.clone(),
             schema: self.schema.clone(),
             materialize: self.materialize,
-        }
+        })
     }
 }
