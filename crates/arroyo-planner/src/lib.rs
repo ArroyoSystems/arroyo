@@ -27,7 +27,7 @@ use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::physical_plan::functions::make_scalar_function;
 
-use datafusion::prelude::create_udf;
+use datafusion::prelude::{create_udf, SessionConfig};
 
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
@@ -55,7 +55,7 @@ use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::json::get_json_functions;
+use crate::json::{register_json_functions};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
 use crate::udafs::EmptyUdaf;
@@ -71,6 +71,8 @@ use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
+use datafusion::execution::context::SessionState;
+use datafusion::execution::runtime_env::RuntimeEnv;
 use syn::Item;
 use tracing::{debug, info, warn};
 use unicase::UniCase;
@@ -97,6 +99,13 @@ pub struct ArroyoSchemaProvider {
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
     pub function_rewriters: Vec<Arc<dyn FunctionRewrite + Send + Sync>>,
     pub expr_planners: Vec<Arc<dyn ExprPlanner>>,
+}
+
+pub fn register_functions(registry: &mut dyn FunctionRegistry) {
+    datafusion_functions::register_all(registry).unwrap();
+    datafusion::functions_array::register_all(registry).unwrap();
+    datafusion::functions_aggregate::register_all(registry).unwrap();
+    register_json_functions(registry);
 }
 
 impl ArroyoSchemaProvider {
@@ -166,17 +175,14 @@ impl ArroyoSchemaProvider {
                 )
             }),
         );
-
-        functions.extend(get_json_functions());
-
+        
         let mut registry = Self {
             functions,
             ..Default::default()
         };
 
-        datafusion_functions::register_all(&mut registry).unwrap();
-        datafusion::functions_array::register_all(&mut registry).unwrap();
-
+        register_functions(&mut registry);
+        
         registry
     }
 
@@ -536,14 +542,29 @@ pub async fn parse_and_get_arrow_program(
     _config: SqlConfig,
 ) -> Result<CompiledSql> {
     let dialect = PostgreSqlDialect {};
+
+    let mut config = SessionConfig::new();
+    config
+        .options_mut()
+        .optimizer
+        .enable_round_robin_repartition = false;
+    config.options_mut().optimizer.repartition_aggregations = false;
+    config.options_mut().optimizer.repartition_windows = false;
+    config.options_mut().optimizer.repartition_sorts = false;
+    let session_state =
+        SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
+            .with_physical_optimizer_rules(vec![]);
+    
+    
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
-        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider, &session_state)? {
             schema_provider.insert_table(table);
         } else {
             inserts.push(Insert::try_from_statement(
                 &statement,
                 &mut schema_provider,
+                &session_state,
             )?);
         };
     }
@@ -613,7 +634,7 @@ pub async fn parse_and_get_arrow_program(
             node: Arc::new(sink?),
         }));
     }
-    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider);
+    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider, &session_state);
     for extension in extensions {
         plan_to_graph_visitor.add_plan(extension)?;
     }

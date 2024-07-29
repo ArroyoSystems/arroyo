@@ -4,16 +4,13 @@ use arrow_array::{Array, ArrayRef, StringArray};
 use arrow_schema::{DataType, Field};
 use datafusion::common::Result;
 use datafusion::common::{DataFusionError, ScalarValue};
-use datafusion::logical_expr::{create_udf, ColumnarValue, ScalarUDF, Volatility};
+use datafusion::logical_expr::{create_udf, ColumnarValue, Volatility};
 use serde_json_path::JsonPath;
-use std::collections::HashMap;
 use std::sync::Arc;
+use datafusion::execution::FunctionRegistry;
 
-pub fn get_json_functions() -> HashMap<String, Arc<ScalarUDF>> {
-    let mut udfs = HashMap::new();
-
-    udfs.insert(
-        "get_first_json_object".to_string(),
+pub fn register_json_functions(registry: &mut dyn FunctionRegistry) {
+    registry.register_udf(
         Arc::new(create_udf(
             "get_first_json_object",
             vec![DataType::Utf8, DataType::Utf8],
@@ -21,10 +18,9 @@ pub fn get_json_functions() -> HashMap<String, Arc<ScalarUDF>> {
             Volatility::Immutable,
             Arc::new(get_first_json_object),
         )),
-    );
+    ).unwrap();
 
-    udfs.insert(
-        "extract_json".to_string(),
+    registry.register_udf(
         Arc::new(create_udf(
             "extract_json",
             vec![DataType::Utf8, DataType::Utf8],
@@ -36,10 +32,9 @@ pub fn get_json_functions() -> HashMap<String, Arc<ScalarUDF>> {
             Volatility::Immutable,
             Arc::new(extract_json),
         )),
-    );
+    ).unwrap();
 
-    udfs.insert(
-        "extract_json_string".to_string(),
+    registry.register_udf(
         Arc::new(create_udf(
             "extract_json_string",
             vec![DataType::Utf8, DataType::Utf8],
@@ -47,9 +42,7 @@ pub fn get_json_functions() -> HashMap<String, Arc<ScalarUDF>> {
             Volatility::Immutable,
             Arc::new(extract_json_string),
         )),
-    );
-
-    udfs
+    ).unwrap();
 }
 
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {

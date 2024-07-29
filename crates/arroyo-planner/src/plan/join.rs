@@ -97,7 +97,7 @@ impl JoinRewriter {
         join_expressions.extend(
             fields_with_qualifiers(&input.schema())
                 .iter()
-                .map(|field| Expr::Column(Column::new(field.qualifier().cloned(), field.name()))),
+                .map(|field| Expr::Column(field.qualified_column())),
         );
         // Calculate initial projection with default names
         let projection = Projection::try_new(join_expressions, input)?;
@@ -277,6 +277,9 @@ impl TreeNodeRewriter for JoinRewriter {
                 .map(|e| e.data)
             })
             .transpose()?;
+        
+        println!("LEFT = {:?}\nRIGHT = {:?}", left, right);
+        println!("LEFT SCHEMA = {:?}\nRIGHT SCHEMA = {:?}", left.schema(), right.schema());
 
         let left_input = self.create_join_key_plan(left.clone(), left_expressions, "left")?;
         let right_input = self.create_join_key_plan(right.clone(), right_expressions, "right")?;

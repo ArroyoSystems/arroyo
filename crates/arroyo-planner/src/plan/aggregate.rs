@@ -13,7 +13,7 @@ use datafusion::logical_expr;
 use datafusion::logical_expr::expr::AggregateFunction;
 use datafusion::logical_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{debug};
 
 #[derive(Debug, Default)]
 pub struct AggregateRewriter {}
@@ -55,7 +55,7 @@ impl AggregateRewriter {
                 key_schema.clone(),
             )?);
 
-        info!(
+        debug!(
             "key projection fields: {:?}",
             key_projection
                 .schema()
@@ -99,7 +99,7 @@ impl AggregateRewriter {
             aggr_expr,
             output_schema,
         )?;
-        info!(
+        debug!(
             "aggregate field names: {:?}",
             aggregate
                 .schema

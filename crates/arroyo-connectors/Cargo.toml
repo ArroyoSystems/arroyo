@@ -58,7 +58,7 @@ eventsource-client = "0.12.0"
 tokio-tungstenite = { version = "0.20.1", features = ["native-tls"] }
 
 # Webhook
-reqwest = "0.11.20"
+reqwest = { version = "0.11.20", features = ["stream"] }
 
 # Redis
 redis = { version = "0.24.0", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }

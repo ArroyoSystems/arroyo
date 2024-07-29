@@ -57,6 +57,9 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
+use datafusion::execution::FunctionRegistry;
+use datafusion::execution::session_state::SessionState;
+use datafusion::optimizer::eliminate_group_by_constant::EliminateGroupByConstant;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -105,8 +108,13 @@ impl From<Field> for FieldSpec {
 fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
+    session_state: &SessionState,
 ) -> Result<LogicalPlan> {
-    let sql_to_rel = SqlToRel::new(schema_provider);
+    let mut sql_to_rel = SqlToRel::new(schema_provider);
+    for planner in session_state.expr_planners() {
+        sql_to_rel = sql_to_rel.with_user_defined_planner(planner);
+    }
+
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
     let mut analyzer = Analyzer::default();
@@ -125,6 +133,9 @@ fn produce_optimized_plan(
         Arc::new(DecorrelatePredicateSubquery::new()),
         Arc::new(ScalarSubqueryToJoin::new()),
         Arc::new(ExtractEquijoinPredicate::new()),
+        // simplify expressions does not simplify expressions in subqueries, so we
+        // run it again after running the optimizations that potentially converted
+        // subqueries to joins
         Arc::new(SimplifyExpressions::new()),
         Arc::new(RewriteDisjunctivePredicate::new()),
         Arc::new(EliminateDuplicatedExpr::new()),
@@ -148,6 +159,7 @@ fn produce_optimized_plan(
         Arc::new(SimplifyExpressions::new()),
         Arc::new(UnwrapCastInComparison::new()),
         Arc::new(CommonSubexprEliminate::new()),
+        Arc::new(EliminateGroupByConstant::new()),
         // This rule can drop event time calculation fields if they aren't used elsewhere.
         //Arc::new(OptimizeProjections::new()),
     ];
@@ -556,6 +568,7 @@ impl Table {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &ArroyoSchemaProvider,
+        session_state: &SessionState,
     ) -> Result<Option<Self>> {
         if let Statement::CreateTable {
             name,
@@ -628,7 +641,7 @@ impl Table {
                 }
             }
         } else {
-            match &produce_optimized_plan(statement, schema_provider) {
+            match &produce_optimized_plan(statement, schema_provider, session_state) {
                 // views and memory tables are the same now.
                 Ok(LogicalPlan::Ddl(DdlStatement::CreateView(CreateView {
                     name, input, ..
@@ -749,9 +762,10 @@ fn infer_sink_schema(
     source: &Query,
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
+    session_state: &SessionState,
 ) -> Result<()> {
     let plan =
-        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)?;
+        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider, session_state)?;
     let table = schema_provider
         .get_table_mut(&table_name)
         .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;
@@ -765,16 +779,18 @@ impl Insert {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &mut ArroyoSchemaProvider,
+        session_state: &SessionState,
     ) -> Result<Insert> {
         if let Statement::Insert(insert) = statement {
             infer_sink_schema(
                 insert.source.as_ref().unwrap(),
                 insert.table_name.to_string(),
                 schema_provider,
+                session_state,
             )?;
         }
 
-        let logical_plan = produce_optimized_plan(statement, schema_provider)?;
+        let logical_plan = produce_optimized_plan(statement, schema_provider, session_state)?;
 
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {

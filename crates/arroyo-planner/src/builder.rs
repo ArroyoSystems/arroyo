@@ -53,13 +53,13 @@ pub(crate) struct PlanToGraphVisitor<'a> {
 }
 
 impl<'a> PlanToGraphVisitor<'a> {
-    pub fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
+    pub fn new(schema_provider: &'a ArroyoSchemaProvider, session_state: &'a SessionState) -> Self {
         Self {
             graph: Default::default(),
             output_schemas: Default::default(),
             named_nodes: Default::default(),
             traversal: vec![],
-            planner: Planner::new(schema_provider),
+            planner: Planner::new(schema_provider, session_state),
         }
     }
 }
@@ -67,25 +67,14 @@ impl<'a> PlanToGraphVisitor<'a> {
 pub(crate) struct Planner<'a> {
     schema_provider: &'a ArroyoSchemaProvider,
     planner: DefaultPhysicalPlanner,
-    session_state: SessionState,
+    session_state: &'a SessionState,
 }
 
 impl<'a> Planner<'a> {
-    pub(crate) fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
+    pub(crate) fn new(schema_provider: &'a ArroyoSchemaProvider, session_state: &'a SessionState) -> Self {
         let planner = DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(
             ArroyoExtensionPlanner {},
         )]);
-        let mut config = SessionConfig::new();
-        config
-            .options_mut()
-            .optimizer
-            .enable_round_robin_repartition = false;
-        config.options_mut().optimizer.repartition_aggregations = false;
-        config.options_mut().optimizer.repartition_windows = false;
-        config.options_mut().optimizer.repartition_sorts = false;
-        let session_state =
-            SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
-                .with_physical_optimizer_rules(vec![]);
         Self {
             schema_provider,
             planner,
@@ -296,6 +285,7 @@ impl<'a> PlanToGraphVisitor<'a> {
                 );
             }
         }
+        
         let input_schemas = input_nodes
             .iter()
             .map(|index| {
@@ -306,16 +296,21 @@ impl<'a> PlanToGraphVisitor<'a> {
                     .clone())
             })
             .collect::<Result<Vec<_>>>()?;
+        
         let NodeWithIncomingEdges { node, edges } = extension
             .plan_node(&self.planner, self.graph.node_count(), input_schemas)
             .map_err(|e| e.context("planning extension"))?;
+        
         let node_index = self.graph.add_node(node);
         self.add_index_to_traversal(node_index);
+        
         for (source, edge) in input_nodes.into_iter().zip(edges.into_iter()) {
             self.graph.add_edge(source, node_index, edge);
         }
+        
         self.output_schemas
             .insert(node_index, extension.output_schema().into());
+        
         if let Some(node_name) = extension.node_name() {
             self.named_nodes.insert(node_name, node_index);
         }
@@ -336,6 +331,7 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
         if arroyo_extension.transparent() {
             return Ok(TreeNodeRecursion::Continue);
         }
+        
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(node_index) = self.named_nodes.get(&name) {
                 self.add_index_to_traversal(*node_index);

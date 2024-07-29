@@ -34,7 +34,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "version_check",
- "zerocopy 0.7.35",
+ "zerocopy",
 ]
 
 [[package]]
@@ -248,9 +248,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-buffer"
-version = "52.1.0"
+version = "52.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cae6970bab043c4fbc10aee1660ceb5b306d0c42c8cc5f6ae564efcd9759b663"
+checksum = "c975484888fc95ec4a632cdc98be39c085b1bb518531b0c80c5d462063e5daa1"
 dependencies = [
  "bytes",
  "half",
@@ -1053,7 +1053,7 @@ dependencies = [
  "arroyo-udf-common",
  "proc-macro2",
  "quote",
- "rand 0.9.0-alpha.1",
+ "rand 0.9.0-alpha.2",
  "syn 2.0.72",
 ]
 
@@ -2460,9 +2460,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.1.6"
+version = "1.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aba8f4e9906c7ce3c73463f62a7f0c65183ada1a2d47e397cc8810827f9694f"
+checksum = "26a5c3fd7bfa1ce3897a3a3501d362b2d87b7f2583ebcb4a949ec25911025cbc"
 dependencies = [
  "jobserver",
  "libc",
@@ -2986,7 +2986,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 [[package]]
 name = "datafusion"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "ahash",
  "arrow",
@@ -3039,7 +3039,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "ahash",
  "arrow",
@@ -3060,7 +3060,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "tokio",
 ]
@@ -3068,7 +3068,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "arrow",
  "chrono",
@@ -3088,7 +3088,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "ahash",
  "arrow",
@@ -3128,7 +3128,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "arrow",
  "base64 0.22.1",
@@ -3153,7 +3153,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "ahash",
  "arrow",
@@ -3170,7 +3170,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-array"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3190,7 +3190,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3209,7 +3209,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "ahash",
  "arrow",
@@ -3238,7 +3238,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "ahash",
  "arrow",
@@ -3251,7 +3251,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "ahash",
  "arrow",
@@ -3284,7 +3284,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "arrow",
  "chrono",
@@ -3299,7 +3299,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "arrow",
  "chrono",
@@ -3311,7 +3311,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#bb6931156c363d3a3c2c701fec849edddb5b324a"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -6743,7 +6743,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor#5fededb4f56191e833cb2263b5c1f99b48a229cc"
+source = "git+https://github.com/oxidecomputer/progenitor#6c80d102011e59e55fe6020e877ba42899163fe2"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -6753,7 +6753,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor#5fededb4f56191e833cb2263b5c1f99b48a229cc"
+source = "git+https://github.com/oxidecomputer/progenitor#6c80d102011e59e55fe6020e877ba42899163fe2"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6767,7 +6767,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor#5fededb4f56191e833cb2263b5c1f99b48a229cc"
+source = "git+https://github.com/oxidecomputer/progenitor#6c80d102011e59e55fe6020e877ba42899163fe2"
 dependencies = [
  "heck 0.5.0",
  "http 0.2.12",
@@ -6788,7 +6788,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor#5fededb4f56191e833cb2263b5c1f99b48a229cc"
+source = "git+https://github.com/oxidecomputer/progenitor#6c80d102011e59e55fe6020e877ba42899163fe2"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -7000,13 +7000,13 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.0-alpha.1"
+version = "0.9.0-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d31e63ea85be51c423e52ba8f2e68a3efd53eed30203ee029dd09947333693e"
+checksum = "c3e256ff62cee3e03def855c4d4260106d2bb1696fdc01af03e9935b993720a5"
 dependencies = [
- "rand_chacha 0.9.0-alpha.1",
- "rand_core 0.9.0-alpha.1",
- "zerocopy 0.8.0-alpha.6",
+ "rand_chacha 0.9.0-alpha.2",
+ "rand_core 0.9.0-alpha.2",
+ "zerocopy",
 ]
 
 [[package]]
@@ -7021,12 +7021,12 @@ dependencies = [
 
 [[package]]
 name = "rand_chacha"
-version = "0.9.0-alpha.1"
+version = "0.9.0-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78674ef918c19451dbd250f8201f8619b494f64c9aa6f3adb28fd8a0f1f6da46"
+checksum = "d299e9db34f6623b2a9e86c015d6e173d5f46d64d4b9b8cc46ae8a982a50b04c"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.9.0-alpha.1",
+ "rand_core 0.9.0-alpha.2",
 ]
 
 [[package]]
@@ -7040,12 +7040,12 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.9.0-alpha.1"
+version = "0.9.0-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc89dffba8377c5ec847d12bb41492bda235dba31a25e8b695cd0fe6589eb8c9"
+checksum = "f4e93f5a5e3c528cda9acb0928c31b2ba868c551cc46e67b778075e34aab9906"
 dependencies = [
  "getrandom",
- "zerocopy 0.8.0-alpha.6",
+ "zerocopy",
 ]
 
 [[package]]
@@ -7941,12 +7941,13 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.120"
+version = "1.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e0d21c9a8cae1235ad58a00c11cb40d4b1e5c784f1ef2c537876ed6ffd8b7c5"
+checksum = "4ab380d7d9f22ef3f21ad3e6c1ebe8e4fc7a2000ccba2e4d71fc96f15b2cb609"
 dependencies = [
  "indexmap 2.2.6",
  "itoa",
+ "memchr",
  "ryu",
  "serde",
 ]
@@ -9197,7 +9198,7 @@ dependencies = [
 [[package]]
 name = "typify"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/typify#e1ef79f972152355ba80a255d6086d1ad3404815"
+source = "git+https://github.com/oxidecomputer/typify#c284d872be21fa49bc166793345b0e4c2226676c"
 dependencies = [
  "typify-impl 0.1.0",
  "typify-macro 0.1.0",
@@ -9223,7 +9224,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/typify#e1ef79f972152355ba80a255d6086d1ad3404815"
+source = "git+https://github.com/oxidecomputer/typify#c284d872be21fa49bc166793345b0e4c2226676c"
 dependencies = [
  "heck 0.5.0",
  "log",
@@ -9257,7 +9258,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/typify#e1ef79f972152355ba80a255d6086d1ad3404815"
+source = "git+https://github.com/oxidecomputer/typify#c284d872be21fa49bc166793345b0e4c2226676c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10016,16 +10017,7 @@ version = "0.7.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
 dependencies = [
- "zerocopy-derive 0.7.35",
-]
-
-[[package]]
-name = "zerocopy"
-version = "0.8.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db678a6ee512bd06adf35c35be471cae2f9c82a5aed2b5d15e03628c98bddd57"
-dependencies = [
- "zerocopy-derive 0.8.0-alpha.6",
+ "zerocopy-derive",
 ]
 
 [[package]]
@@ -10033,17 +10025,6 @@ name = "zerocopy-derive"
 version = "0.7.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.72",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.8.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "201585ea96d37ee69f2ac769925ca57160cef31acb137c16f38b02b76f4c1e62"
 dependencies = [
  "proc-macro2",
  "quote",

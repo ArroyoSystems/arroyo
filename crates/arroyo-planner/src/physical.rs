@@ -26,7 +26,6 @@ use datafusion::{
     },
 };
 
-use crate::json::get_json_functions;
 use crate::rewriters::UNNESTED_COL;
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
@@ -52,6 +51,7 @@ use prost::Message;
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use crate::register_functions;
 
 pub fn window_function(columns: &[ColumnarValue]) -> Result<ColumnarValue> {
     if columns.len() != 2 {
@@ -192,12 +192,7 @@ pub enum DecodingContext {
 pub fn new_registry() -> Registry {
     let mut registry = Registry::default();
     registry.add_udf(Arc::new(window_scalar_function()));
-    for json_function in get_json_functions().values() {
-        registry.add_udf(json_function.clone());
-    }
-
-    datafusion::functions::register_all(&mut registry).unwrap();
-    datafusion::functions_array::register_all(&mut registry).unwrap();
+    register_functions(&mut registry);
     registry
 }
 

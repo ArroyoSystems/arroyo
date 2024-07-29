@@ -452,12 +452,7 @@ impl UserDefinedLogicalNodeCore for AggregateExtension {
         write!(
             f,
             "AggregateExtension: {} | window_behavior: {:?}",
-            self.schema()
-                .fields()
-                .iter()
-                .map(|f| f.name().to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
+            self.schema(),
             match &self.window_behavior {
                 WindowBehavior::InData => "InData".to_string(),
                 WindowBehavior::FromOperator { window, .. } =>

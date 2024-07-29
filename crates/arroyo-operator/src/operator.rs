@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{debug, error, info, warn, Instrument, trace};
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -229,7 +229,7 @@ async fn operator_run_behavior(
                     Some(((idx, message), s)) => {
                         let local_idx = idx;
 
-                        debug!("[{}] Handling message {}-{}, {:?}",
+                        trace!("[{}] Handling message {}-{}, {:?}",
                             ctx.task_info.operator_name, 0, local_idx, message);
 
                         match message {

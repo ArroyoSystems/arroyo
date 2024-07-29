@@ -62,21 +62,25 @@ async fn run_smoketest(path: &Path) {
             .1
             .trim()
     });
-    match correctness_run_codegen(test_name, query.clone(), 20).await {
-        Ok(_) => {}
-        Err(err) => {
-            if fail {
-                if let Some(error_message) = error_message {
-                    assert!(
-                        err.to_string().contains(error_message),
-                        "expected error message '{}' not found; instead got '{}'",
-                        error_message,
-                        err
-                    );
-                }
-            } else {
-                panic!("smoke test failed: {}", err);
+    match (correctness_run_codegen(test_name, query.clone(), 20).await, fail) {
+        (Ok(_), false) => {
+            // ok
+        }
+        (Ok(_), true) => {
+            panic!("Expected pipeline to fail, but it passed");
+        }
+        (Err(err), true) => {
+            if let Some(error_message) = error_message {
+                assert!(
+                    err.to_string().contains(error_message),
+                    "expected error message '{}' not found; instead got '{}'",
+                    error_message,
+                    err
+                );
             }
+        }
+        (Err(err), false) => {
+            panic!("Expected pipeline to pass, but it failed: {:?}", err);
         }
     }
 }
