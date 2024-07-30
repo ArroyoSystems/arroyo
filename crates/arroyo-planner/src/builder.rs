@@ -13,7 +13,6 @@ use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor
 use datafusion::common::{
     plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, TableReference,
 };
-use datafusion::execution::config::SessionConfig;
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::functions::datetime::date_bin;
@@ -263,7 +262,8 @@ impl<'a> PlanToGraphVisitor<'a> {
 
     pub(crate) fn add_plan(&mut self, plan: LogicalPlan) -> Result<()> {
         self.traversal.clear();
-        plan.visit(self)?;
+        println!("VISIT PLAN = {}", plan.display_graphviz());
+        plan.visit_with_subqueries(self)?;
         Ok(())
     }
 
@@ -302,6 +302,7 @@ impl<'a> PlanToGraphVisitor<'a> {
             .map_err(|e| e.context("planning extension"))?;
         
         let node_index = self.graph.add_node(node);
+        println!("GRAPH = {:?}", self.graph);
         self.add_index_to_traversal(node_index);
         
         for (source, edge) in input_nodes.into_iter().zip(edges.into_iter()) {
@@ -323,8 +324,10 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
 
     fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
         let LogicalPlan::Extension(Extension { node }) = node else {
+            println!("\tEARLY EXIT FROM {}", node.display());
             return Ok(TreeNodeRecursion::Continue);
         };
+        println!("DOWN {}", node.name());
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
             .map_err(|e: DataFusionError| e.context("converting extension"))?;
@@ -351,6 +354,7 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return Ok(TreeNodeRecursion::Continue);
         };
+        println!("UP {}", node.name());
 
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
@@ -362,6 +366,7 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
 
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(_) = self.named_nodes.get(&name) {
+                println!("JUMPING ON {:?}", name);
                 return Ok(TreeNodeRecursion::Jump);
             }
         }

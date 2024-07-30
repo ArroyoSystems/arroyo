@@ -19,6 +19,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hasher;
+use petgraph::dot::Dot;
 use strum::{Display, EnumString};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
@@ -217,6 +218,10 @@ impl LogicalProgram {
                 node.parallelism = *p;
             }
         }
+    }
+    
+    pub fn dot(&self) -> String {
+        format!("{:?}", Dot::with_config(&self.graph, &[]))
     }
 
     pub fn task_count(&self) -> usize {

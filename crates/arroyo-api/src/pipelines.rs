@@ -341,6 +341,8 @@ pub(crate) async fn create_pipeline_int<'a>(
             ),
         })?;
 
+    println!("!!PROGRAM\n{}", compiled.program.dot());
+
     let proto_program: ArrowProgram = compiled.program.clone().into();
 
     let program_bytes = proto_program.encode_to_vec();

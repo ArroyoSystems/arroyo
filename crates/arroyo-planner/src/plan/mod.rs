@@ -1,5 +1,5 @@
 use std::{collections::HashSet, sync::Arc};
-
+use arrow::compute::kernels::numeric::sub;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
@@ -10,7 +10,7 @@ use datafusion::common::{
 };
 
 use aggregate::AggregateRewriter;
-use datafusion::logical_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan};
+use datafusion::logical_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan, SubqueryAlias};
 use join::JoinRewriter;
 
 use crate::{
@@ -47,7 +47,7 @@ impl WindowDetectingVisitor {
             window: None,
             fields: HashSet::new(),
         };
-        logical_plan.visit(&mut visitor)?;
+        logical_plan.visit_with_subqueries(&mut visitor)?;
         Ok(visitor.window.take())
     }
 }
@@ -355,7 +355,10 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
             }
             LogicalPlan::EmptyRelation(_) => {}
             LogicalPlan::Subquery(_) => {}
-            LogicalPlan::SubqueryAlias(_) => {}
+            LogicalPlan::SubqueryAlias(sa) => {
+                // recreate from our children, in case the schemas have changed
+                return Ok(Transformed::yes(LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(sa.input, sa.alias)?)));
+            }
             LogicalPlan::Limit(_) => {
                 return plan_err!("LIMIT is not currently supported ({})", node.display());
             }

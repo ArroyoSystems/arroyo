@@ -166,7 +166,7 @@ impl TreeNodeRewriter for AggregateRewriter {
             .collect::<Vec<_>>();
 
         let mut window_detecting_visitor = WindowDetectingVisitor::default();
-        input.visit(&mut window_detecting_visitor)?;
+        input.visit_with_subqueries(&mut window_detecting_visitor)?;
 
         let window = window_detecting_visitor.window;
         let window_behavior = match (window.is_some(), !window_group_expr.is_empty()) {

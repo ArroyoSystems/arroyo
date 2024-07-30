@@ -526,12 +526,16 @@ pub fn rewrite_plan(
     plan: LogicalPlan,
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
+    println!("original: {}", plan.display_graphviz());
     let rewritten_plan = plan
-        .rewrite(&mut UnnestRewriter {})?
+        .rewrite_with_subqueries(&mut UnnestRewriter {})?
         .data
-        .rewrite(&mut ArroyoRewriter { schema_provider })?;
+        .rewrite_with_subqueries(&mut ArroyoRewriter { schema_provider })?;
+    println!("Rrewrittern: {}", rewritten_plan.data.display_graphviz());
+    
     // check for window functions
-    rewritten_plan.data.visit(&mut TimeWindowUdfChecker {})?;
+    rewritten_plan.data.visit_with_subqueries(&mut TimeWindowUdfChecker {})?;
+    
     Ok(rewritten_plan.data)
 }
 
@@ -578,7 +582,6 @@ pub async fn parse_and_get_arrow_program(
 
     for insert in inserts {
         let (plan, sink_name) = match insert {
-            // TODO: implement inserts
             Insert::InsertQuery {
                 sink_name,
                 logical_plan,
@@ -591,7 +594,7 @@ pub async fn parse_and_get_arrow_program(
         debug!("Plan = {:?}", plan_rewrite);
 
         let mut metadata = SourceMetadataVisitor::new(&schema_provider);
-        plan_rewrite.visit(&mut metadata)?;
+        plan_rewrite.visit_with_subqueries(&mut metadata)?;
         used_connections.extend(metadata.connection_ids.iter());
 
         let sink = match sink_name {
@@ -639,13 +642,14 @@ pub async fn parse_and_get_arrow_program(
         plan_to_graph_visitor.add_plan(extension)?;
     }
     let graph = plan_to_graph_visitor.into_graph();
+
     let program = LogicalProgram::new(
         graph,
         ProgramConfig {
             udf_dylibs: schema_provider.dylib_udfs.clone(),
         },
     );
-
+    
     Ok(CompiledSql {
         program,
         connection_ids: used_connections.into_iter().collect(),

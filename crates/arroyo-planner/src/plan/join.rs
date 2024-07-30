@@ -1,8 +1,8 @@
 use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
-use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata};
-use arrow_schema::DataType;
+use crate::{DFField, fields_with_qualifiers, schema_from_df_fields_with_metadata};
+use arrow_schema::{DataType, TimeUnit};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
@@ -12,9 +12,7 @@ use datafusion::common::{
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::Alias;
-use datafusion::logical_expr::{
-    BinaryExpr, Case, Expr, ExprSchemable, Extension, Join, LogicalPlan, Operator, Projection,
-};
+use datafusion::logical_expr::{BinaryExpr, build_join_schema, Case, Expr, ExprSchemable, Extension, Join, LogicalPlan, Operator, Projection};
 use datafusion::prelude::{coalesce, get_field};
 use std::sync::Arc;
 
@@ -119,9 +117,12 @@ impl JoinRewriter {
             .filter(|field| field.name() == "_timestamp")
             .cloned()
             .collect::<Vec<_>>();
+        
+
         if timestamp_fields.len() != 2 {
             return not_impl_err!("join must have two timestamp fields");
         }
+
         schema_with_timestamp.retain(|field| field.name() != "_timestamp");
         let mut projection_expr = schema_with_timestamp
             .iter()
@@ -284,12 +285,12 @@ impl TreeNodeRewriter for JoinRewriter {
         let left_input = self.create_join_key_plan(left.clone(), left_expressions, "left")?;
         let right_input = self.create_join_key_plan(right.clone(), right_expressions, "right")?;
         let rewritten_join = LogicalPlan::Join(Join {
+            schema: Arc::new(build_join_schema(left_input.schema(), right_input.schema(), &join_type)?),
             left: Arc::new(left_input),
             right: Arc::new(right_input),
             on,
             join_type,
             join_constraint: JoinConstraint::On,
-            schema: schema.clone(),
             null_equals_null: false,
             filter,
         });

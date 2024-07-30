@@ -354,7 +354,8 @@ impl ArrowCollector {
             c.inc_by(record.get_array_memory_size() as u64)
         });
 
-        let out_schema = self.out_schema.as_ref().unwrap();
+        let out_schema = self.out_schema.as_ref()
+            .unwrap_or_else(|| panic!("No out-schema in {}!", self.task_info.operator_name));
 
         let record = if let Some(projection) = &self.projection {
             record.project(projection).unwrap_or_else(|e| {

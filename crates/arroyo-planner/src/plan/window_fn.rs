@@ -49,7 +49,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
             LogicalPlan::Window(window.clone())
         );
         let mut window_detecting_visitor = WindowDetectingVisitor::default();
-        window.input.visit(&mut window_detecting_visitor)?;
+        window.input.visit_with_subqueries(&mut window_detecting_visitor)?;
 
         let Some(input_window) = window_detecting_visitor.window else {
             return plan_err!("Window functions require already windowed input");
