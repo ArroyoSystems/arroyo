@@ -1,3 +1,4 @@
+use datafusion::common::display::GraphvizBuilder;
 use datafusion_proto::protobuf::ArrowType;
 
 use anyhow::anyhow;
@@ -295,6 +296,40 @@ impl LogicalProgram {
         }
 
         s
+    }
+
+    pub fn display_graphviz(&self) -> impl Display + '_ {
+        // Boilerplate structure to wrap LogicalGraph with something
+        // that that can be formatted
+        struct Wrapper<'a>(&'a LogicalGraph);
+        impl<'a> Display for Wrapper<'a> {
+            fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+                let mut graphviz_builder = GraphvizBuilder::default();
+                graphviz_builder.start_graph(f)?;
+                graphviz_builder.start_cluster(f, "LogicalGraph")?;
+                for from_index in self.0.node_indices() {
+                    let node = self.0.node_weight(from_index).unwrap();
+                    let _ = graphviz_builder.add_node(
+                        f,
+                        from_index.index(),
+                        format!("{}", node).as_str(),
+                        None,
+                    )?;
+                    for edge in self.0.edges_directed(from_index, Direction::Outgoing) {
+                        // because fixed dir=back, we should reverse the edge
+                        let _ = graphviz_builder.add_edge(
+                            f,
+                            edge.target().index(),
+                            edge.source().index(),
+                        )?;
+                    }
+                }
+                graphviz_builder.end_cluster(f)?;
+                graphviz_builder.end_graph(f)?;
+                Ok(())
+            }
+        }
+        Wrapper(&self.graph)
     }
 }
 
