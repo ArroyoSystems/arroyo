@@ -2,7 +2,7 @@ use std::any::Any;
 
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::CompactionResult;
 use arroyo_rpc::{
     grpc::rpc::{
@@ -11,14 +11,13 @@ use arroyo_rpc::{
     },
     CheckpointCompleted, ControlResp,
 };
-use arroyo_storage::{StorageProvider, StorageProviderRef};
+use arroyo_storage::StorageProviderRef;
 use arroyo_types::{to_micros, CheckpointBarrier, Data, Key, TaskInfoRef};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
 };
 
-use arroyo_rpc::config::config;
 use tracing::{debug, error, info, warn};
 
 use crate::{get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, StateMessage};

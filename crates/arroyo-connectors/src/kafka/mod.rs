@@ -125,6 +125,8 @@ impl KafkaConnector {
                         Some("exactly_once") => SinkCommitMode::ExactlyOnce,
                         Some(other) => bail!("invalid value for commit_mode '{}'", other),
                     },
+                    timestamp_field: options.remove("sink.timestamp_field"),
+                    key_field: options.remove("sink.key_field"),
                 }
             }
             _ => {
@@ -382,19 +384,25 @@ impl Connector for KafkaConnector {
                     .unwrap(),
                 })))
             }
-            TableType::Sink { commit_mode } => {
-                Ok(OperatorNode::from_operator(Box::new(KafkaSinkFunc {
-                    bootstrap_servers: profile.bootstrap_servers.to_string(),
-                    producer: None,
-                    consistency_mode: (*commit_mode).into(),
-                    write_futures: vec![],
-                    client_config: client_configs(&profile, &table),
-                    topic: table.topic,
-                    serializer: ArrowSerializer::new(
-                        config.format.expect("Format must be defined for KafkaSink"),
-                    ),
-                })))
-            }
+            TableType::Sink {
+                commit_mode,
+                key_field,
+                timestamp_field,
+            } => Ok(OperatorNode::from_operator(Box::new(KafkaSinkFunc {
+                bootstrap_servers: profile.bootstrap_servers.to_string(),
+                producer: None,
+                consistency_mode: (*commit_mode).into(),
+                timestamp_field: timestamp_field.clone(),
+                timestamp_col: None,
+                key_field: key_field.clone(),
+                key_col: None,
+                write_futures: vec![],
+                client_config: client_configs(&profile, &table),
+                topic: table.topic,
+                serializer: ArrowSerializer::new(
+                    config.format.expect("Format must be defined for KafkaSink"),
+                ),
+            }))),
         }
     }
 }
