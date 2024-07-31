@@ -75,9 +75,13 @@ impl KafkaTopicTester {
             bootstrap_servers: self.server.to_string(),
             producer: None,
             consistency_mode: ConsistencyMode::AtLeastOnce,
+            timestamp_field: None,
+            timestamp_col: None,
+            key_field: None,
             write_futures: vec![],
             client_config: HashMap::new(),
             serializer: ArrowSerializer::new(Format::Json(JsonFormat::default())),
+            key_col: None,
         };
 
         let (_, control_rx) = channel(128);

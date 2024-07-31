@@ -12,17 +12,18 @@ use rdkafka::util::Timeout;
 
 use rdkafka::ClientConfig;
 
-use arrow::array::RecordBatch;
+use super::SinkCommitMode;
+use arrow::array::{Array, AsArray, RecordBatch};
+use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
 use prost::Message;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use std::time::{Duration, SystemTime};
-
-use super::SinkCommitMode;
 
 #[cfg(test)]
 mod test;
@@ -31,6 +32,10 @@ pub struct KafkaSinkFunc {
     pub topic: String,
     pub bootstrap_servers: String,
     pub consistency_mode: ConsistencyMode,
+    pub timestamp_field: Option<String>,
+    pub timestamp_col: Option<usize>,
+    pub key_field: Option<String>,
+    pub key_col: Option<usize>,
     pub producer: Option<FutureProducer>,
     pub write_futures: Vec<DeliveryFuture>,
     pub client_config: HashMap<String, String>,
@@ -60,6 +65,54 @@ impl From<SinkCommitMode> for ConsistencyMode {
 impl KafkaSinkFunc {
     fn is_committing(&self) -> bool {
         matches!(self.consistency_mode, ConsistencyMode::ExactlyOnce { .. })
+    }
+
+    fn set_timestamp_col(&mut self, schema: &ArroyoSchema) {
+        if let Some(f) = &self.timestamp_field {
+            if let Ok(f) = schema.schema.field_with_name(f) {
+                match f.data_type() {
+                    DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                        self.timestamp_col = Some(schema.schema.index_of(f.name()).unwrap());
+                        return;
+                    }
+                    _ => {
+                        warn!(
+                            "Kafka sink configured with timestamp_field '{f}', but it has type \
+                        {}, not TIMESTAMP... ignoring",
+                            f.data_type()
+                        );
+                    }
+                }
+            } else {
+                warn!(
+                    "Kafka sink configured with timestamp_field '{f}', but that \
+                does not appear in the schema... ignoring"
+                );
+            }
+        }
+
+        self.timestamp_col = Some(schema.timestamp_index);
+    }
+
+    fn set_key_col(&mut self, schema: &ArroyoSchema) {
+        if let Some(f) = &self.key_field {
+            if let Ok(f) = schema.schema.field_with_name(f) {
+                if matches!(f.data_type(), DataType::Utf8) {
+                    self.key_col = Some(schema.schema.index_of(f.name()).unwrap());
+                } else {
+                    warn!(
+                        "Kafka sink configured with key_field '{f}', but it has type \
+                {}, not TEXT... ignoring",
+                        f.data_type()
+                    );
+                }
+            } else {
+                warn!(
+                    "Kafka sink configured with key_field '{f}', but that \
+                does not appear in the schema... ignoring"
+                );
+            }
+        }
     }
 
     fn init_producer(&mut self, task_info: &TaskInfo) -> Result<()> {
@@ -117,12 +170,13 @@ impl KafkaSinkFunc {
         }
     }
 
-    async fn publish(&mut self, k: Option<Vec<u8>>, v: Vec<u8>, ctx: &mut ArrowContext) {
+    async fn publish(&mut self, ts: i64, k: Option<Vec<u8>>, v: Vec<u8>, ctx: &mut ArrowContext) {
         let mut rec = {
+            let rec = FutureRecord::<Vec<u8>, Vec<u8>>::to(&self.topic).timestamp(ts);
             if let Some(k) = k.as_ref() {
-                FutureRecord::to(&self.topic).key(k).payload(&v)
+                rec.key(&k).payload(&v)
             } else {
-                FutureRecord::to(&self.topic).payload(&v)
+                rec.payload(&v)
             }
         };
 
@@ -176,15 +230,36 @@ impl ArrowOperator for KafkaSinkFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        self.set_timestamp_col(&ctx.in_schemas[0]);
+        self.set_key_col(&ctx.in_schemas[0]);
+
         self.init_producer(&ctx.task_info)
             .expect("Producer creation failed");
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
         let values = self.serializer.serialize(&batch);
+        let timestamps = batch
+            .column(
+                self.timestamp_col
+                    .expect("timestamp column not initialized!"),
+            )
+            .as_any()
+            .downcast_ref::<arrow::array::TimestampNanosecondArray>()
+            .expect("Timestamp column is not a timestamp nanosecond!");
 
-        for v in values {
-            self.publish(None, v, ctx).await;
+        let keys = self.key_col.map(|i| batch.column(i).as_string::<i32>());
+
+        for (i, v) in values.enumerate() {
+            // kafka timestamp as unix millis
+            let timestamp = if timestamps.is_null(i) {
+                0
+            } else {
+                timestamps.value(i) / 1_000_000
+            };
+            // TODO: this copy should be unnecessary but likely needs a custom trait impl
+            let key = keys.map(|k| k.value(i).as_bytes().to_vec());
+            self.publish(timestamp, key, v, ctx).await;
         }
     }
 

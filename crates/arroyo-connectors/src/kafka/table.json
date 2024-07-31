@@ -61,6 +61,16 @@
                                 "at_least_once",
                                 "exactly_once"
                             ]
+                        },
+                        "key_field": {
+                            "type": "string",
+                            "title": "key field",
+                            "description": "Field to use to set the key of the message written to Kafka"
+                        },
+                        "timestamp_field": {
+                            "type": "string",
+                            "title": "timestamp field",
+                            "description": "Field to use to set the timestamp of the message written to Kafka; defaults to the event time"
                         }
                     },
                     "additionalProperties": false,
