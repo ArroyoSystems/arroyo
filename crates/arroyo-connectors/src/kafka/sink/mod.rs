@@ -170,14 +170,23 @@ impl KafkaSinkFunc {
         }
     }
 
-    async fn publish(&mut self, ts: i64, k: Option<Vec<u8>>, v: Vec<u8>, ctx: &mut ArrowContext) {
+    async fn publish(
+        &mut self,
+        ts: Option<i64>,
+        k: Option<Vec<u8>>,
+        v: Vec<u8>,
+        ctx: &mut ArrowContext,
+    ) {
         let mut rec = {
-            let rec = FutureRecord::<Vec<u8>, Vec<u8>>::to(&self.topic).timestamp(ts);
-            if let Some(k) = k.as_ref() {
-                rec.key(&k).payload(&v)
-            } else {
-                rec.payload(&v)
+            let mut rec = FutureRecord::<Vec<u8>, Vec<u8>>::to(&self.topic);
+            if let Some(ts) = ts {
+                rec = rec.timestamp(ts);
             }
+            if let Some(k) = k.as_ref() {
+                rec = rec.key(&k);
+            }
+
+            rec.payload(&v)
         };
 
         loop {
@@ -245,17 +254,20 @@ impl ArrowOperator for KafkaSinkFunc {
                     .expect("timestamp column not initialized!"),
             )
             .as_any()
-            .downcast_ref::<arrow::array::TimestampNanosecondArray>()
-            .expect("Timestamp column is not a timestamp nanosecond!");
+            .downcast_ref::<arrow::array::TimestampNanosecondArray>();
 
         let keys = self.key_col.map(|i| batch.column(i).as_string::<i32>());
 
         for (i, v) in values.enumerate() {
             // kafka timestamp as unix millis
-            let timestamp = if timestamps.is_null(i) {
-                0
+            let timestamp = if let Some(ts) = timestamps {
+                Some(if ts.is_null(i) {
+                    0
+                } else {
+                    ts.value(i) / 1_000_000
+                })
             } else {
-                timestamps.value(i) / 1_000_000
+                None
             };
             // TODO: this copy should be unnecessary but likely needs a custom trait impl
             let key = keys.map(|k| k.value(i).as_bytes().to_vec());
