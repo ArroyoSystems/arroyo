@@ -40,6 +40,7 @@ use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode},
 };
+use petgraph::dot::Dot;
 
 pub(crate) struct PlanToGraphVisitor<'a> {
     graph: DiGraph<LogicalNode, LogicalEdge>,
@@ -263,7 +264,7 @@ impl<'a> PlanToGraphVisitor<'a> {
     pub(crate) fn add_plan(&mut self, plan: LogicalPlan) -> Result<()> {
         self.traversal.clear();
         println!("VISIT PLAN = {}", plan.display_graphviz());
-        plan.visit_with_subqueries(self)?;
+        plan.visit(self)?;
         Ok(())
     }
 
@@ -302,7 +303,6 @@ impl<'a> PlanToGraphVisitor<'a> {
             .map_err(|e| e.context("planning extension"))?;
         
         let node_index = self.graph.add_node(node);
-        println!("GRAPH = {:?}", self.graph);
         self.add_index_to_traversal(node_index);
         
         for (source, edge) in input_nodes.into_iter().zip(edges.into_iter()) {
@@ -367,7 +367,7 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(_) = self.named_nodes.get(&name) {
                 println!("JUMPING ON {:?}", name);
-                return Ok(TreeNodeRecursion::Jump);
+                return Ok(TreeNodeRecursion::Continue);
             }
         }
 
@@ -382,6 +382,8 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
         self.build_extension(input_nodes, arroyo_extension)
             .map_err(|e| e.context("building extension"))?;
 
+        println!("GRAPH = {:?}", Dot::with_config(&self.graph, &[]));
+        
         Ok(TreeNodeRecursion::Continue)
     }
 }

@@ -82,7 +82,7 @@ impl JoinRewriter {
     ) -> Result<LogicalPlan> {
         let key_count = join_expressions.len();
 
-        let mut join_expressions: Vec<_> = join_expressions
+        let join_expressions: Vec<_> = join_expressions
             .into_iter()
             .enumerate()
             .map(|(index, expr)| {
@@ -91,12 +91,14 @@ impl JoinRewriter {
                     format!("_key_{}", index),
                 )
             })
+            .chain(
+                fields_with_qualifiers(&input.schema())
+                    .iter()
+                    .map(|field| Expr::Column(field.qualified_column())))
             .collect();
-        join_expressions.extend(
-            fields_with_qualifiers(&input.schema())
-                .iter()
-                .map(|field| Expr::Column(field.qualified_column())),
-        );
+        
+        println!("Join expression ({}): {:?}", name, join_expressions);
+
         // Calculate initial projection with default names
         let projection = Projection::try_new(join_expressions, input)?;
         let key_calculation_extension = KeyCalculationExtension::new_named_and_trimmed(
@@ -270,20 +272,22 @@ impl TreeNodeRewriter for JoinRewriter {
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
 
-        let filter = filter
-            .map(|expr| {
-                expr.rewrite(&mut StructEqRewriter {
-                    schema: schema.clone(),
-                })
-                .map(|e| e.data)
-            })
-            .transpose()?;
+        // let filter = filter
+        //     .map(|expr| {
+        //         expr.rewrite(&mut StructEqRewriter {
+        //             schema: schema.clone(),
+        //         })
+        //         .map(|e| e.data)
+        //     })
+        //     .transpose()?;
         
         println!("LEFT = {:?}\nRIGHT = {:?}", left, right);
         println!("LEFT SCHEMA = {:?}\nRIGHT SCHEMA = {:?}", left.schema(), right.schema());
+        
+        println!("FILTER = {:?}\nON={:?}", filter, on);
 
-        let left_input = self.create_join_key_plan(left.clone(), left_expressions, "left")?;
-        let right_input = self.create_join_key_plan(right.clone(), right_expressions, "right")?;
+        let left_input = self.create_join_key_plan(left, left_expressions, "left")?;
+        let right_input = self.create_join_key_plan(right, right_expressions, "right")?;
         let rewritten_join = LogicalPlan::Join(Join {
             schema: Arc::new(build_join_schema(left_input.schema(), right_input.schema(), &join_type)?),
             left: Arc::new(left_input),

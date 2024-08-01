@@ -26,9 +26,7 @@ use datafusion::common::{
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
-use datafusion::logical_expr::{
-    BinaryExpr, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
-};
+use datafusion::logical_expr::{BinaryExpr, Expr, Extension, LogicalPlan, Operator, Projection, TableScan, Unnest};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -594,24 +592,33 @@ impl<'a> TreeNodeVisitor<'_> for SourceMetadataVisitor<'a> {
     }
 }
 
-struct TimeWindowExprChecker {}
+struct TimeWindowExprChecker<'a> {
+    ctx: &'a LogicalPlan,
+}
 
 pub struct TimeWindowUdfChecker {}
 
-impl TreeNodeVisitor<'_> for TimeWindowExprChecker {
+pub fn is_time_window(expr: &Expr) -> Option<&str> {
+    if let Expr::ScalarFunction(ScalarFunction { func, args: _ }) = expr {
+        match func.name() {
+            "tumble" | "hop" | "session" => {
+                return Some(func.name());
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+impl <'a> TreeNodeVisitor<'_> for TimeWindowExprChecker<'a> {
     type Node = Expr;
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
-        if let Expr::ScalarFunction(ScalarFunction { func, args: _ }) = node {
-            match func.name() {
-                "tumble" | "hop" | "session" => {
-                    return plan_err!(
-                        "time window function {} is not allowed in this context. Are you missing a GROUP BY clause?",
-                        func.name()
-                    );
-                }
-                _ => {}
-            }
+        if let Some(w) = is_time_window(node) {
+            return plan_err!(
+                "time window function {} is not allowed in this context. Are you missing a GROUP BY clause?",
+                w
+            );
         }
         Ok(TreeNodeRecursion::Continue)
     }
@@ -622,10 +629,30 @@ impl TreeNodeVisitor<'_> for TimeWindowUdfChecker {
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         node.expressions().iter().try_for_each(|expr| {
-            let mut checker = TimeWindowExprChecker {};
+            let mut checker = TimeWindowExprChecker {
+                ctx: node,
+            };
             expr.visit(&mut checker)?;
             Ok::<(), DataFusionError>(())
         })?;
         Ok(TreeNodeRecursion::Continue)
+    }
+}
+
+
+pub struct TimeWindowNullCheckRemover {
+}
+
+impl TreeNodeRewriter for TimeWindowNullCheckRemover {
+    type Node = Expr;
+
+    fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+        if let Expr::IsNotNull(expr) = &node {
+            if is_time_window(expr).is_some() {
+                return Ok(Transformed::yes(Expr::Literal(ScalarValue::Boolean(Some(true)))));
+            }
+        }
+        
+        return Ok(Transformed::no(node));
     }
 }

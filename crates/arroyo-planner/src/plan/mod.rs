@@ -1,5 +1,4 @@
 use std::{collections::HashSet, sync::Arc};
-use arrow::compute::kernels::numeric::sub;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
@@ -10,7 +9,7 @@ use datafusion::common::{
 };
 
 use aggregate::AggregateRewriter;
-use datafusion::logical_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan, SubqueryAlias};
+use datafusion::logical_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan, SubqueryAlias, Filter};
 use join::JoinRewriter;
 
 use crate::{
@@ -28,7 +27,7 @@ use crate::{
     extension::{remote_table::RemoteTableExtension, ArroyoExtension},
     rewriters::AsyncUdfRewriter,
 };
-
+use crate::rewriters::TimeWindowNullCheckRemover;
 use self::window_fn::WindowFunctionRewriter;
 
 mod aggregate;
@@ -251,6 +250,10 @@ impl TreeNodeVisitor<'_> for WindowDetectingVisitor {
     }
 }
 
+struct WindowExpressionRemover {
+    
+}
+
 // This is one rewriter so that we can rely on inputs having already been rewritten
 // ensuring they have _timestamp field, amongst other things.
 pub struct ArroyoRewriter<'a> {
@@ -268,7 +271,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         .input
                         .schema()
                         .qualified_field_with_unqualified_name(TIMESTAMP_FIELD).map_err(|_| {
-                            DataFusionError::Plan("No timestamp field found in projection input. Query should've been rewritten".to_string())
+                            DataFusionError::Plan(format!("No timestamp field found in projection input ({}). Query should've been rewritten", projection.input.display()))
                         })?.into();
                     projection.schema = add_timestamp_field(
                         projection.schema.clone(),
@@ -316,7 +319,20 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 }
                 .f_up(LogicalPlan::TableScan(table_scan));
             }
-            LogicalPlan::Filter(_) => {}
+            LogicalPlan::Filter(f) => {
+                // Joins with windows in the join condition can cause IS NOT NULL predicates to get
+                // pushed down to the table scan; however windows can never be null, and they can't
+                // be evaluated in filters—so we just remove them
+                let expr = f.predicate.clone().rewrite(&mut TimeWindowNullCheckRemover{})?;
+                return Ok(if expr.transformed {
+                    Transformed::yes(LogicalPlan::Filter(Filter::try_new(
+                        expr.data,
+                        f.input,
+                    )?))
+                } else {
+                    Transformed::no(LogicalPlan::Filter(f))
+                });
+            }
             LogicalPlan::Window(_) => {
                 return WindowFunctionRewriter {}.f_up(node);
             }
@@ -333,7 +349,10 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 );
             }
             LogicalPlan::Union(mut union) => {
-                // Need all the elements of the union to be materialized, so that
+                println!("INPUT = {}", union.inputs[0].display());
+                union.schema = union.inputs[0].schema().clone();
+                
+                // Need all the elements of the union to be materialized
                 for input in union.inputs.iter_mut() {
                     if let LogicalPlan::Extension(Extension { node }) = input.as_ref() {
                         let arroyo_extension: &dyn ArroyoExtension = node.try_into().unwrap();
@@ -351,6 +370,8 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         node: remote_table_extension,
                     }));
                 }
+                
+                
                 return Ok(Transformed::yes(LogicalPlan::Union(union)));
             }
             LogicalPlan::EmptyRelation(_) => {}

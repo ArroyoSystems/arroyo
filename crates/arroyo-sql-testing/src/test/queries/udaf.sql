@@ -23,7 +23,7 @@ CREATE TABLE udaf (
 INSERT INTO udaf
 SELECT median, none_value, max_product FROM (
   SELECT
-      tumble(interval '1' month) as window,
+      tumble(interval '30' day) as window,
       my_median(counter) as median,
       none_udf(counter) as none_value,
       max_product(counter, subtask_index) as max_product
