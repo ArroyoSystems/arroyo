@@ -26,7 +26,7 @@ use datafusion::{
     },
 };
 
-use crate::json::get_json_functions;
+use crate::register_functions;
 use crate::rewriters::UNNESTED_COL;
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
@@ -40,7 +40,6 @@ use datafusion::logical_expr::{
     ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, Signature,
     TypeSignature, Volatility,
 };
-use datafusion::physical_expr::expressions::Column;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion::physical_plan::{ExecutionMode, PlanProperties};
@@ -193,12 +192,7 @@ pub enum DecodingContext {
 pub fn new_registry() -> Registry {
     let mut registry = Registry::default();
     registry.add_udf(Arc::new(window_scalar_function()));
-    for json_function in get_json_functions().values() {
-        registry.add_udf(json_function.clone());
-    }
-
-    datafusion::functions::register_all(&mut registry).unwrap();
-    datafusion::functions_array::register_all(&mut registry).unwrap();
+    register_functions(&mut registry);
     registry
 }
 
@@ -282,15 +276,13 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                 let schema: Schema = serde_json::from_str(&unnest.schema).map_err(|e| {
                     DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
                 })?;
-                let column = Column::new(
-                    UNNESTED_COL,
-                    schema.index_of(UNNESTED_COL).map_err(|_| {
-                        DataFusionError::Internal(format!(
-                            "unnest node schema does not contain {} col",
-                            UNNESTED_COL
-                        ))
-                    })?,
-                );
+
+                let column = schema.index_of(UNNESTED_COL).map_err(|_| {
+                    DataFusionError::Internal(format!(
+                        "unnest node schema does not contain {} col",
+                        UNNESTED_COL
+                    ))
+                })?;
 
                 Ok(Arc::new(UnnestExec::new(
                     inputs
@@ -299,7 +291,8 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                             DataFusionError::Internal("no input for unnest node".to_string())
                         })?
                         .clone(),
-                    column,
+                    vec![column],
+                    vec![],
                     Arc::new(schema),
                     UnnestOptions::default(),
                 )))
@@ -430,7 +423,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         self.schema.clone()
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![]
     }
 
@@ -470,6 +463,10 @@ impl ExecutionPlan for RwLockRecordBatchReader {
     fn properties(&self) -> &PlanProperties {
         &self.properties
     }
+
+    fn name(&self) -> &str {
+        "rw_lock_reader"
+    }
 }
 
 #[derive(Debug)]
@@ -503,6 +500,10 @@ impl DisplayAs for UnboundedRecordBatchReader {
 }
 
 impl ExecutionPlan for UnboundedRecordBatchReader {
+    fn name(&self) -> &str {
+        "unbounded_reader"
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -515,7 +516,7 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         &self.properties
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![]
     }
 
@@ -581,6 +582,10 @@ impl DisplayAs for RecordBatchVecReader {
 }
 
 impl ExecutionPlan for RecordBatchVecReader {
+    fn name(&self) -> &str {
+        "vec_reader"
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -593,7 +598,7 @@ impl ExecutionPlan for RecordBatchVecReader {
         &self.properties
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![]
     }
 
@@ -654,6 +659,10 @@ impl ArroyoMemExec {
 }
 
 impl ExecutionPlan for ArroyoMemExec {
+    fn name(&self) -> &str {
+        "mem_exec"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -666,7 +675,7 @@ impl ExecutionPlan for ArroyoMemExec {
         &self.properties
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![]
     }
 
@@ -761,6 +770,10 @@ impl DisplayAs for DebeziumUnrollingExec {
 }
 
 impl ExecutionPlan for DebeziumUnrollingExec {
+    fn name(&self) -> &str {
+        "debezium_unrolling_exec"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
     }
@@ -773,8 +786,8 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         &self.properties
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
-        vec![self.input.clone()]
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
     }
 
     fn with_new_children(
@@ -974,6 +987,10 @@ impl DisplayAs for ToDebeziumExec {
 }
 
 impl ExecutionPlan for ToDebeziumExec {
+    fn name(&self) -> &str {
+        "to_debezium_exec"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
     }
@@ -986,8 +1003,8 @@ impl ExecutionPlan for ToDebeziumExec {
         &self.properties
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
-        vec![self.input.clone()]
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
     }
 
     fn with_new_children(

@@ -7,7 +7,10 @@ use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
-use crate::{ArroyoSchemaProvider, ASYNC_RESULT_FIELD};
+use crate::{
+    fields_with_qualifiers, schema_from_df_fields, ArroyoSchemaProvider, DFField,
+    ASYNC_RESULT_FIELD,
+};
 
 use arrow_schema::DataType;
 use arroyo_rpc::IS_RETRACT_FIELD;
@@ -19,16 +22,14 @@ use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    plan_err, Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
-    ScalarValue,
+    plan_err, Column, DataFusionError, Result as DFResult, ScalarValue, TableReference,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    BinaryExpr, Expr, Extension, LogicalPlan, Projection, ScalarFunctionDefinition, TableScan,
-    Unnest,
+    BinaryExpr, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -76,7 +77,7 @@ impl<'a> SourceRewriter<'a> {
 
     fn projection_expressions(
         table: &ConnectorTable,
-        qualifier: &OwnedTableReference,
+        qualifier: &TableReference,
         projection: &Option<Vec<usize>>,
     ) -> DFResult<Vec<Expr>> {
         let mut expressions = table
@@ -207,9 +208,7 @@ impl<'a> SourceRewriter<'a> {
         logical_plan: &LogicalPlan,
     ) -> DFResult<Transformed<LogicalPlan>> {
         let column_expressions: Vec<_> = if let Some(projection) = &table_scan.projection {
-            logical_plan
-                .schema()
-                .fields()
+            fields_with_qualifiers(logical_plan.schema())
                 .iter()
                 .enumerate()
                 .filter_map(|(i, f)| {
@@ -224,16 +223,14 @@ impl<'a> SourceRewriter<'a> {
                 })
                 .collect()
         } else {
-            logical_plan
-                .schema()
-                .fields()
+            fields_with_qualifiers(logical_plan.schema())
                 .iter()
                 .map(|f| Expr::Column(Column::new(f.qualifier().cloned(), f.name().to_string())))
                 .collect()
         };
         let expressions = column_expressions
             .into_iter()
-            .zip(table_scan.projected_schema.fields().iter())
+            .zip(fields_with_qualifiers(&table_scan.projected_schema))
             .map(|(expr, field)| {
                 expr.alias_qualified(field.qualifier().cloned(), field.name().to_string())
             })
@@ -301,12 +298,8 @@ impl UnnestRewriter {
     fn split_unnest(expr: Expr) -> DFResult<(Expr, Option<Expr>)> {
         let mut c: Option<Expr> = None;
 
-        let expr = expr.transform_up_mut(&mut |e| {
-            if let Expr::ScalarFunction(ScalarFunction {
-                func_def: ScalarFunctionDefinition::UDF(udf),
-                args,
-            }) = &e
-            {
+        let expr = expr.transform_up(&mut |e| {
+            if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e {
                 if udf.name() == "unnest" {
                     match args.len() {
                         1 => {
@@ -393,9 +386,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                 .unwrap(),
             ));
 
-            let unnest_fields = produce_list
-                .schema()
-                .fields()
+            let unnest_fields = fields_with_qualifiers(&produce_list.schema())
                 .iter()
                 .enumerate()
                 .map(|(i, f)| {
@@ -419,11 +410,15 @@ impl TreeNodeRewriter for UnnestRewriter {
                 .collect::<DFResult<Vec<_>>>()?;
 
             let unnest_node = LogicalPlan::Unnest(Unnest {
-                column: produce_list.schema().fields()[unnest_idx].qualified_column(),
+                exec_columns: vec![DFField::from(
+                    produce_list.schema().qualified_field(unnest_idx),
+                )
+                .qualified_column()],
                 input: produce_list,
-                schema: Arc::new(
-                    DFSchema::new_with_metadata(unnest_fields, HashMap::new()).unwrap(),
-                ),
+                list_type_columns: vec![],
+                struct_type_columns: vec![],
+                dependency_indices: vec![],
+                schema: Arc::new(schema_from_df_fields(&unnest_fields).unwrap()),
                 options: Default::default(),
             });
 
@@ -435,7 +430,10 @@ impl TreeNodeRewriter for UnnestRewriter {
                         if *has_unnest {
                             expr.clone()
                         } else {
-                            Expr::Column(unnest_node.schema().fields()[i].qualified_column())
+                            Expr::Column(
+                                DFField::from(unnest_node.schema().qualified_field(i))
+                                    .qualified_column(),
+                            )
                         }
                     })
                     .collect(),
@@ -465,12 +463,8 @@ impl<'a> AsyncUdfRewriter<'a> {
         provider: &ArroyoSchemaProvider,
     ) -> DFResult<(Expr, Option<AsyncSplitResult>)> {
         let mut c: Option<(String, AsyncOptions, Vec<Expr>)> = None;
-        let expr = expr.transform_up_mut(&mut |e| {
-            if let Expr::ScalarFunction(ScalarFunction {
-                func_def: ScalarFunctionDefinition::UDF(udf),
-                args,
-            }) = &e
-            {
+        let expr = expr.transform_up(&mut |e| {
+            if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e {
                 if let Some(UdfType::Async(opts)) =
                     provider.udf_defs.get(udf.name()).map(|udf| udf.udf_type)
                 {
@@ -589,7 +583,7 @@ impl<'a> SourceMetadataVisitor<'a> {
     }
 }
 
-impl<'a> TreeNodeVisitor for SourceMetadataVisitor<'a> {
+impl<'a> TreeNodeVisitor<'_> for SourceMetadataVisitor<'a> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
@@ -604,26 +598,33 @@ struct TimeWindowExprChecker {}
 
 pub struct TimeWindowUdfChecker {}
 
-impl TreeNodeVisitor for TimeWindowExprChecker {
+pub fn is_time_window(expr: &Expr) -> Option<&str> {
+    if let Expr::ScalarFunction(ScalarFunction { func, args: _ }) = expr {
+        match func.name() {
+            "tumble" | "hop" | "session" => {
+                return Some(func.name());
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+impl TreeNodeVisitor<'_> for TimeWindowExprChecker {
     type Node = Expr;
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
-        if let Expr::ScalarFunction(ScalarFunction { func_def, args: _ }) = node {
-            match func_def.name() {
-                "tumble" | "hop" | "session" => {
-                    return plan_err!(
-                        "time window function {} is not allowed in this context. Are you missing a GROUP BY clause?",
-                        func_def.name()
-                    );
-                }
-                _ => {}
-            }
+        if let Some(w) = is_time_window(node) {
+            return plan_err!(
+                "time window function {} is not allowed in this context. Are you missing a GROUP BY clause?",
+                w
+            );
         }
         Ok(TreeNodeRecursion::Continue)
     }
 }
 
-impl TreeNodeVisitor for TimeWindowUdfChecker {
+impl TreeNodeVisitor<'_> for TimeWindowUdfChecker {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
@@ -633,5 +634,23 @@ impl TreeNodeVisitor for TimeWindowUdfChecker {
             Ok::<(), DataFusionError>(())
         })?;
         Ok(TreeNodeRecursion::Continue)
+    }
+}
+
+pub struct TimeWindowNullCheckRemover {}
+
+impl TreeNodeRewriter for TimeWindowNullCheckRemover {
+    type Node = Expr;
+
+    fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+        if let Expr::IsNotNull(expr) = &node {
+            if is_time_window(expr).is_some() {
+                return Ok(Transformed::yes(Expr::Literal(ScalarValue::Boolean(Some(
+                    true,
+                )))));
+            }
+        }
+
+        return Ok(Transformed::no(node));
     }
 }

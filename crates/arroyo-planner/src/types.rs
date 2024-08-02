@@ -1,9 +1,6 @@
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{sync::Arc, time::SystemTime};
 
-use arrow::datatypes::{DataType, Field, IntervalMonthDayNanoType};
+use arrow::datatypes::{DataType, Field};
 use datafusion::common::{plan_err, Result};
 
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
@@ -13,17 +10,6 @@ use datafusion::sql::sqlparser::ast::{
 
 use arroyo_types::ArroyoExtensionType;
 
-/* this returns a duration with the same length as the postgres interval. */
-pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration {
-    let (month, day, nanos) = IntervalMonthDayNanoType::to_parts(serialized_value);
-    let years = month / 12;
-    let extra_month = month % 12;
-    let year_hours = 1461 * years * 24 / 4;
-    let days_to_seconds = ((year_hours + 24 * (day + 30 * extra_month)) as u64) * 60 * 60;
-    let nanos = nanos as u64;
-    std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
-}
-
 // Pulled from DataFusion
 
 pub(crate) fn convert_data_type(
@@ -31,7 +17,7 @@ pub(crate) fn convert_data_type(
 ) -> Result<(DataType, Option<ArroyoExtensionType>)> {
     match sql_type {
         SQLDataType::Array(ArrayElemTypeDef::AngleBracket(inner_sql_type))
-        | SQLDataType::Array(ArrayElemTypeDef::SquareBracket(inner_sql_type)) => {
+        | SQLDataType::Array(ArrayElemTypeDef::SquareBracket(inner_sql_type, _)) => {
             let (data_type, extension) = convert_simple_data_type(inner_sql_type)?;
 
             Ok((

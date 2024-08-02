@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Formatter, sync::Arc, time::Duration};
+use std::{fmt::Formatter, sync::Arc, time::Duration};
 
 use arrow::datatypes::IntervalMonthDayNanoType;
 
@@ -14,12 +14,14 @@ use arroyo_rpc::{
     },
     TIMESTAMP_FIELD,
 };
-use datafusion::common::{plan_err, Column, DFField, DFSchema, DFSchemaRef, Result, ScalarValue};
+use datafusion::common::{
+    internal_err, plan_err, Column, DFSchema, DFSchemaRef, Result, ScalarValue,
+};
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr;
 use datafusion::logical_expr::{
     expr::ScalarFunction, Aggregate, BinaryExpr, Expr, Extension, LogicalPlan,
-    ScalarFunctionDefinition, UserDefinedLogicalNodeCore,
+    UserDefinedLogicalNodeCore,
 };
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
@@ -29,8 +31,9 @@ use prost::Message;
 use crate::physical::window_scalar_function;
 use crate::{
     builder::{NamedNode, Planner, SplitPlanOutput},
+    fields_with_qualifiers,
     physical::ArroyoPhysicalExtensionCodec,
-    WindowBehavior,
+    schema_from_df_fields, schema_from_df_fields_with_metadata, DFField, WindowBehavior,
 };
 
 use super::{ArroyoExtension, NodeWithIncomingEdges, TimestampAppendExtension};
@@ -174,14 +177,14 @@ impl AggregateExtension {
         else {
             return plan_err!("expected sliding window");
         };
-        let output_schema = self.aggregate.schema().clone();
+        let output_schema = fields_with_qualifiers(self.aggregate.schema());
         let LogicalPlan::Aggregate(agg) = self.aggregate.clone() else {
             return plan_err!("expected aggregate");
         };
         let key_count = self.key_fields.len();
-        let unkeyed_aggregate_schema = Arc::new(DFSchema::new_with_metadata(
-            output_schema.fields()[key_count..].to_vec(),
-            output_schema.metadata().clone(),
+        let unkeyed_aggregate_schema = Arc::new(schema_from_df_fields_with_metadata(
+            &output_schema[key_count..],
+            self.aggregate.schema().metadata().clone(),
         )?);
 
         let unkeyed_aggregate = Aggregate::try_new_with_schema(
@@ -283,17 +286,18 @@ impl AggregateExtension {
         aggregate_plan: &LogicalPlan,
         window_behavior: WindowBehavior,
     ) -> Result<LogicalPlan> {
-        let timestamp_field = aggregate_plan.inputs()[0]
+        let timestamp_field: DFField = aggregate_plan.inputs()[0]
             .schema()
-            .field_with_unqualified_name(TIMESTAMP_FIELD)?
-            .clone();
+            .qualified_field_with_unqualified_name(TIMESTAMP_FIELD)?
+            .clone()
+            .into();
         let timestamp_append = LogicalPlan::Extension(Extension {
             node: Arc::new(TimestampAppendExtension::new(
                 aggregate_plan.clone(),
                 timestamp_field.qualifier().cloned(),
             )),
         });
-        let mut aggregate_fields = aggregate_plan.schema().fields().clone();
+        let mut aggregate_fields = fields_with_qualifiers(aggregate_plan.schema());
         let mut aggregate_expressions: Vec<_> = aggregate_fields
             .iter()
             .map(|field| Expr::Column(field.qualified_column()))
@@ -333,7 +337,7 @@ impl AggregateExtension {
             Column::new(timestamp_field.qualifier().cloned(), timestamp_field.name());
         aggregate_fields.insert(window_index, window_field.clone());
         let window_expression = Expr::ScalarFunction(ScalarFunction {
-            func_def: ScalarFunctionDefinition::UDF(Arc::new(window_scalar_function())),
+            func: Arc::new(window_scalar_function()),
             args: vec![
                 // copy bin_start as first argument
                 Expr::Column(timestamp_column.clone()),
@@ -352,7 +356,7 @@ impl AggregateExtension {
             window_expression
                 .alias_qualified(window_field.qualifier().cloned(), window_field.name()),
         );
-        aggregate_fields.push(timestamp_field.clone());
+        aggregate_fields.push(timestamp_field);
         let bin_end_calculation = Expr::BinaryExpr(BinaryExpr {
             left: Box::new(Expr::Column(timestamp_column.clone())),
             op: logical_expr::Operator::Plus,
@@ -365,10 +369,7 @@ impl AggregateExtension {
             logical_expr::Projection::try_new_with_schema(
                 aggregate_expressions,
                 Arc::new(timestamp_append),
-                Arc::new(DFSchema::new_with_metadata(
-                    aggregate_fields,
-                    HashMap::new(),
-                )?),
+                Arc::new(schema_from_df_fields(&aggregate_fields)?),
             )?,
         ))
     }
@@ -379,22 +380,22 @@ impl AggregateExtension {
         window_index: usize,
         width: Duration,
     ) -> Result<LogicalPlan> {
-        let timestamp_field = aggregate_plan
+        let timestamp_field: DFField = aggregate_plan
             .schema()
-            .field_with_unqualified_name(TIMESTAMP_FIELD)
+            .qualified_field_with_unqualified_name(TIMESTAMP_FIELD)
             .unwrap()
-            .clone();
+            .into();
         let timestamp_column =
             Column::new(timestamp_field.qualifier().cloned(), timestamp_field.name());
 
-        let mut aggregate_fields = aggregate_plan.schema().fields().clone();
+        let mut aggregate_fields = fields_with_qualifiers(aggregate_plan.schema());
         let mut aggregate_expressions: Vec<_> = aggregate_fields
             .iter()
             .map(|field| Expr::Column(field.qualified_column()))
             .collect();
         aggregate_fields.insert(window_index, window_field.clone());
         let window_expression = Expr::ScalarFunction(ScalarFunction {
-            func_def: ScalarFunctionDefinition::UDF(Arc::new(window_scalar_function())),
+            func: Arc::new(window_scalar_function()),
             args: vec![
                 // calculate the start of the bin
                 Expr::BinaryExpr(BinaryExpr {
@@ -423,7 +424,7 @@ impl AggregateExtension {
             logical_expr::Projection::try_new_with_schema(
                 aggregate_expressions,
                 Arc::new(aggregate_plan),
-                Arc::new(DFSchema::new_with_metadata(aggregate_fields, HashMap::new()).unwrap()),
+                Arc::new(schema_from_df_fields(&aggregate_fields).unwrap()),
             )
             .unwrap(),
         ))
@@ -451,12 +452,7 @@ impl UserDefinedLogicalNodeCore for AggregateExtension {
         write!(
             f,
             "AggregateExtension: {} | window_behavior: {:?}",
-            self.schema()
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", "),
+            self.schema(),
             match &self.window_behavior {
                 WindowBehavior::InData => "InData".to_string(),
                 WindowBehavior::FromOperator { window, .. } =>
@@ -465,14 +461,16 @@ impl UserDefinedLogicalNodeCore for AggregateExtension {
         )
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        assert_eq!(inputs.len(), 1, "input size inconsistent");
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        if inputs.len() != 1 {
+            return internal_err!("input size inconsistent");
+        }
 
-        Self::new(
+        Ok(Self::new(
             self.window_behavior.clone(),
             inputs[0].clone(),
             self.key_fields.clone(),
-        )
+        ))
     }
 }
 
@@ -556,14 +554,14 @@ struct WindowAppendExtension {
 
 impl WindowAppendExtension {
     fn new(input: LogicalPlan, window_field: DFField, window_index: usize) -> Self {
-        let mut fields = input.schema().fields().clone();
+        let mut fields = fields_with_qualifiers(input.schema());
         fields.insert(window_index, window_field.clone());
         let metadata = input.schema().metadata().clone();
         Self {
             input,
             window_field,
             window_index,
-            schema: Arc::new(DFSchema::new_with_metadata(fields, metadata).unwrap()),
+            schema: Arc::new(schema_from_df_fields_with_metadata(&fields, metadata).unwrap()),
         }
     }
 }
@@ -593,11 +591,11 @@ impl UserDefinedLogicalNodeCore for WindowAppendExtension {
         )
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::new(
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        Ok(Self::new(
             inputs[0].clone(),
             self.window_field.clone(),
             self.window_index,
-        )
+        ))
     }
 }

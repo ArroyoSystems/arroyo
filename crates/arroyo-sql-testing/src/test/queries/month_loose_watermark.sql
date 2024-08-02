@@ -24,6 +24,6 @@ CREATE TABLE cars(
         INSERT INTO group_by_aggregate
         SELECT window.start as month, count
         FROM (
-        SELECT TUMBLE(INTERVAL '1' month) as window, COUNT(*) as count
+        SELECT TUMBLE(INTERVAL '30 days') as window, COUNT(*) as count
         FROM cars
         GROUP BY 1);

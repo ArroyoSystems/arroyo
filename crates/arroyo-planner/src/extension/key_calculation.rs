@@ -5,7 +5,7 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::KeyPlanOperator,
 };
-use datafusion::common::{plan_err, DFSchema, DFSchemaRef, Result};
+use datafusion::common::{internal_err, plan_err, DFSchemaRef, Result};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
@@ -13,7 +13,9 @@ use prost::Message;
 
 use crate::{
     builder::{NamedNode, Planner},
+    fields_with_qualifiers,
     physical::ArroyoPhysicalExtensionCodec,
+    schema_from_df_fields_with_metadata,
 };
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
@@ -34,10 +36,8 @@ pub(crate) struct KeyCalculationExtension {
 
 impl KeyCalculationExtension {
     pub fn new_named_and_trimmed(input: LogicalPlan, keys: Vec<usize>, name: String) -> Self {
-        let output_fields: Vec<_> = input
-            .schema()
-            .fields()
-            .iter()
+        let output_fields: Vec<_> = fields_with_qualifiers(input.schema())
+            .into_iter()
             .enumerate()
             .filter_map(|(index, field)| {
                 if !keys.contains(&index) {
@@ -48,7 +48,8 @@ impl KeyCalculationExtension {
             })
             .collect();
         let schema =
-            DFSchema::new_with_metadata(output_fields, input.schema().metadata().clone()).unwrap();
+            schema_from_df_fields_with_metadata(&output_fields, input.schema().metadata().clone())
+                .unwrap();
         Self {
             name: Some(name),
             input,
@@ -132,25 +133,19 @@ impl UserDefinedLogicalNodeCore for KeyCalculationExtension {
     }
 
     fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "KeyCalculationExtension: {}",
-            self.schema()
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "KeyCalculationExtension: {}", self.schema())
     }
 
-    fn from_template(&self, _exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        assert_eq!(inputs.len(), 1, "input size inconsistent");
-        match self.name {
+    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        if inputs.len() != 1 {
+            return internal_err!("input size inconsistent");
+        }
+
+        Ok(match self.name {
             Some(ref name) => {
                 Self::new_named_and_trimmed(inputs[0].clone(), self.keys.clone(), name.clone())
             }
             None => Self::new(inputs[0].clone(), self.keys.clone()),
-        }
+        })
     }
 }

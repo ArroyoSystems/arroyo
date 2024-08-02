@@ -21,6 +21,7 @@ use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
+use datafusion::prelude::concat;
 use datafusion::{
     common::{Column, Result as DFResult},
     execution::{
@@ -28,8 +29,7 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{
-        expr::ScalarFunction, BuiltinScalarFunction, Expr, ScalarUDF, ScalarUDFImpl, Signature,
-        TypeSignature, Volatility,
+        expr::ScalarFunction, Expr, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
     },
     physical_plan::{ColumnarValue, PhysicalExpr},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
@@ -200,14 +200,11 @@ fn partition_string_for_fields_and_time(
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let field_function = field_logical_expression(schema.clone(), partition_fields)?;
     let time_function = timestamp_logical_expression(time_partition_pattern)?;
-    let function = Expr::ScalarFunction(ScalarFunction::new(
-        BuiltinScalarFunction::Concat,
-        vec![
-            time_function,
-            Expr::Literal(ScalarValue::Utf8(Some("/".to_string()))),
-            field_function,
-        ],
-    ));
+    let function = concat(vec![
+        time_function,
+        Expr::Literal(ScalarValue::Utf8(Some("/".to_string()))),
+        field_function,
+    ]);
     compile_expression(&function, schema)
 }
 
@@ -239,8 +236,7 @@ fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]
             Ok((field.name(), expr))
         })
         .collect::<Result<Vec<_>>>()?;
-    let function = Expr::ScalarFunction(ScalarFunction::new(
-        BuiltinScalarFunction::Concat,
+    let function = concat(
         columns_as_string
             .into_iter()
             .enumerate()
@@ -253,7 +249,7 @@ fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]
                 vec![Expr::Literal(ScalarValue::Utf8(Some(preamble))), expr]
             })
             .collect(),
-    ));
+    );
     Ok(function)
 }
 
@@ -1071,7 +1067,7 @@ where
 type BoxedTryFuture<T> = Pin<Box<dyn Future<Output = Result<T>> + Send>>;
 
 struct MultipartManager {
-    object_store: Arc<StorageProvider>,
+    storage_provider: Arc<StorageProvider>,
     location: Path,
     partition: Option<String>,
     multipart_id: Option<MultipartId>,
@@ -1085,7 +1081,7 @@ struct MultipartManager {
 impl MultipartManager {
     fn new(object_store: Arc<StorageProvider>, location: Path, partition: Option<String>) -> Self {
         Self {
-            object_store,
+            storage_provider: object_store,
             location,
             partition,
             multipart_id: None,
@@ -1141,7 +1137,7 @@ impl MultipartManager {
             .multipart_id
             .clone()
             .ok_or_else(|| anyhow::anyhow!("missing multipart id"))?;
-        let object_store = self.object_store.clone();
+        let object_store = self.storage_provider.clone();
         Ok(Box::pin(async move {
             let upload_part = object_store
                 .add_multipart(
@@ -1164,7 +1160,7 @@ impl MultipartManager {
     fn get_initialize_multipart_future(
         &mut self,
     ) -> Result<BoxedTryFuture<MultipartCallbackWithName>> {
-        let object_store = self.object_store.clone();
+        let object_store = self.storage_provider.clone();
         let location = self.location.clone();
         Ok(Box::pin(async move {
             let multipart_id = object_store.start_multipart(&location).await?;

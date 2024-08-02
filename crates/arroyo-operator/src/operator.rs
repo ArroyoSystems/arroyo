@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
+use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::logical_expr::{
     create_udaf, AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
 };
@@ -31,7 +32,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{debug, error, info, trace, warn, Instrument};
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -228,7 +229,7 @@ async fn operator_run_behavior(
                     Some(((idx, message), s)) => {
                         let local_idx = idx;
 
-                        debug!("[{}] Handling message {}-{}, {:?}",
+                        trace!("[{}] Handling message {}-{}, {:?}",
                             ctx.task_info.operator_name, 0, local_idx, message);
 
                         match message {
@@ -706,5 +707,9 @@ impl FunctionRegistry for Registry {
 
     fn register_udwf(&mut self, udwf: Arc<WindowUDF>) -> DFResult<Option<Arc<WindowUDF>>> {
         Ok(self.udwfs.insert(udwf.name().to_string(), udwf))
+    }
+
+    fn expr_planners(&self) -> Vec<Arc<dyn ExprPlanner>> {
+        vec![]
     }
 }

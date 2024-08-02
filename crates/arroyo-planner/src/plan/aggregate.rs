@@ -2,15 +2,18 @@ use crate::extension::aggregate::AggregateExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::extension::updating_aggregate::UpdatingAggregateExtension;
 use crate::plan::WindowDetectingVisitor;
-use crate::{find_window, WindowBehavior};
+use crate::{
+    fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, DFField,
+    WindowBehavior,
+};
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
-use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
-use datafusion::common::{not_impl_err, plan_err, DFField, DFSchema, DataFusionError, Result};
+use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
+use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::AggregateFunction;
 use datafusion::logical_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
 use std::sync::Arc;
-use tracing::info;
+use tracing::debug;
 
 #[derive(Debug, Default)]
 pub struct AggregateRewriter {}
@@ -31,18 +34,16 @@ impl AggregateRewriter {
         }
 
         let key_count = key_fields.len();
-        key_fields.extend(input.schema().fields().clone());
+        key_fields.extend(fields_with_qualifiers(input.schema()));
 
-        let key_schema = Arc::new(DFSchema::new_with_metadata(
-            key_fields,
+        let key_schema = Arc::new(schema_from_df_fields_with_metadata(
+            &key_fields,
             schema.metadata().clone(),
         )?);
 
         let mut key_projection_expressions = group_expr.clone();
         key_projection_expressions.extend(
-            input
-                .schema()
-                .fields()
+            fields_with_qualifiers(input.schema())
                 .iter()
                 .map(|field| Expr::Column(field.qualified_column())),
         );
@@ -54,7 +55,7 @@ impl AggregateRewriter {
                 key_schema.clone(),
             )?);
 
-        info!(
+        debug!(
             "key projection fields: {:?}",
             key_projection
                 .schema()
@@ -70,14 +71,13 @@ impl AggregateRewriter {
                 (0..key_count).collect(),
             )),
         });
-        let Some(timestamp_field) = key_plan
+        let Ok(timestamp_field) = key_plan
             .schema()
-            .fields()
-            .iter()
-            .find(|field| field.name() == TIMESTAMP_FIELD)
+            .qualified_field_with_unqualified_name(TIMESTAMP_FIELD)
         else {
             return plan_err!("no timestamp field found in schema");
         };
+        let timestamp_field: DFField = timestamp_field.into();
         let column = timestamp_field.qualified_column();
         aggr_expr.push(Expr::AggregateFunction(AggregateFunction::new(
             aggregate_function::AggregateFunction::Max,
@@ -87,10 +87,10 @@ impl AggregateRewriter {
             None,
             None,
         )));
-        let mut output_schema_fields = schema.fields().clone();
+        let mut output_schema_fields = fields_with_qualifiers(&schema);
         output_schema_fields.push(timestamp_field.clone());
-        let output_schema = Arc::new(DFSchema::new_with_metadata(
-            output_schema_fields,
+        let output_schema = Arc::new(schema_from_df_fields_with_metadata(
+            &output_schema_fields,
             schema.metadata().clone(),
         )?);
         let aggregate = Aggregate::try_new_with_schema(
@@ -99,7 +99,7 @@ impl AggregateRewriter {
             aggr_expr,
             output_schema,
         )?;
-        info!(
+        debug!(
             "aggregate field names: {:?}",
             aggregate
                 .schema
@@ -151,8 +151,7 @@ impl TreeNodeRewriter for AggregateRewriter {
             );
         }
 
-        let mut key_fields: Vec<DFField> = schema
-            .fields()
+        let mut key_fields: Vec<DFField> = fields_with_qualifiers(&schema)
             .iter()
             .take(group_expr.len())
             .cloned()
@@ -167,7 +166,7 @@ impl TreeNodeRewriter for AggregateRewriter {
             .collect::<Vec<_>>();
 
         let mut window_detecting_visitor = WindowDetectingVisitor::default();
-        input.visit(&mut window_detecting_visitor)?;
+        input.visit_with_subqueries(&mut window_detecting_visitor)?;
 
         let window = window_detecting_visitor.window;
         let window_behavior = match (window.is_some(), !window_group_expr.is_empty()) {
@@ -193,7 +192,7 @@ impl TreeNodeRewriter for AggregateRewriter {
                         }
                         group_expr.remove(window_index);
                         key_fields.remove(window_index);
-                        let window_field = schema.field(window_index).clone();
+                        let window_field = schema.qualified_field(window_index).into();
                         WindowBehavior::FromOperator {
                             window: input_window,
                             window_field,
@@ -209,7 +208,7 @@ impl TreeNodeRewriter for AggregateRewriter {
                 let (window_index, window_type) = window_group_expr.pop().unwrap();
                 group_expr.remove(window_index);
                 key_fields.remove(window_index);
-                let window_field = schema.field(window_index).clone();
+                let window_field = schema.qualified_field(window_index).into();
                 WindowBehavior::FromOperator {
                     window: window_type,
                     window_field,
@@ -225,18 +224,16 @@ impl TreeNodeRewriter for AggregateRewriter {
         };
 
         let key_count = key_fields.len();
-        key_fields.extend(input.schema().fields().clone());
+        key_fields.extend(fields_with_qualifiers(input.schema()));
 
-        let key_schema = Arc::new(DFSchema::new_with_metadata(
-            key_fields,
+        let key_schema = Arc::new(schema_from_df_fields_with_metadata(
+            &key_fields,
             schema.metadata().clone(),
         )?);
 
         let mut key_projection_expressions = group_expr.clone();
         key_projection_expressions.extend(
-            input
-                .schema()
-                .fields()
+            fields_with_qualifiers(input.schema())
                 .iter()
                 .map(|field| Expr::Column(field.qualified_column())),
         );
@@ -254,7 +251,7 @@ impl TreeNodeRewriter for AggregateRewriter {
                 (0..key_count).collect(),
             )),
         });
-        let mut aggregate_schema_fields = schema.fields().clone();
+        let mut aggregate_schema_fields = fields_with_qualifiers(&schema);
         if let WindowBehavior::FromOperator {
             window: _,
             window_field: _,
@@ -264,8 +261,8 @@ impl TreeNodeRewriter for AggregateRewriter {
         {
             aggregate_schema_fields.remove(*window_index);
         }
-        let internal_schema = Arc::new(DFSchema::new_with_metadata(
-            aggregate_schema_fields,
+        let internal_schema = Arc::new(schema_from_df_fields_with_metadata(
+            &aggregate_schema_fields,
             schema.metadata().clone(),
         )?);
 

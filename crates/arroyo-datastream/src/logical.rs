@@ -8,6 +8,7 @@ use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{
     ArrowDylibUdfConfig, ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
 };
+use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use petgraph::Direction;
@@ -217,6 +218,10 @@ impl LogicalProgram {
                 node.parallelism = *p;
             }
         }
+    }
+
+    pub fn dot(&self) -> String {
+        format!("{:?}", Dot::with_config(&self.graph, &[]))
     }
 
     pub fn task_count(&self) -> usize {

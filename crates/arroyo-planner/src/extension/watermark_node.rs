@@ -4,7 +4,7 @@ use crate::schemas::add_timestamp_field;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
-use datafusion::common::{DFSchemaRef, OwnedTableReference, Result};
+use datafusion::common::{internal_err, DFSchemaRef, Result, TableReference};
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
@@ -17,7 +17,7 @@ pub(crate) const WATERMARK_NODE_NAME: &str = "WatermarkNode";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WatermarkNode {
     pub input: LogicalPlan,
-    pub qualifier: OwnedTableReference,
+    pub qualifier: TableReference,
     pub watermark_expression: Expr,
     pub schema: DFSchemaRef,
     timestamp_index: usize,
@@ -41,35 +41,29 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
     }
 
     fn fmt_for_explain(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "WatermarkNode({}): {}",
-            self.qualifier,
-            self.schema
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "WatermarkNode({}): {}", self.qualifier, self.schema)
     }
 
-    fn from_template(&self, exprs: &[Expr], inputs: &[LogicalPlan]) -> Self {
-        assert_eq!(inputs.len(), 1, "input size inconsistent");
-        assert_eq!(exprs.len(), 1, "expression size inconsistent");
+    fn with_exprs_and_inputs(&self, exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+        if inputs.len() != 1 {
+            return internal_err!("input size inconsistent");
+        }
+        if exprs.len() != 1 {
+            return internal_err!("expected one expression; found {}", exprs.len());
+        }
+
         let timestamp_index = self
             .schema
             .index_of_column_by_name(Some(&self.qualifier), "_timestamp")
-            .unwrap()
-            .unwrap();
+            .ok_or_else(|| DataFusionError::Plan("missing timestamp column".to_string()))?;
 
-        Self {
+        Ok(Self {
             input: inputs[0].clone(),
             qualifier: self.qualifier.clone(),
-            watermark_expression: exprs[0].clone(),
+            watermark_expression: exprs.into_iter().next().unwrap(),
             schema: self.schema.clone(),
             timestamp_index,
-        }
+        })
     }
 }
 
@@ -114,12 +108,12 @@ impl ArroyoExtension for WatermarkNode {
 impl WatermarkNode {
     pub(crate) fn new(
         input: LogicalPlan,
-        qualifier: OwnedTableReference,
+        qualifier: TableReference,
         watermark_expression: Expr,
     ) -> Result<Self> {
         let schema = add_timestamp_field(input.schema().clone(), Some(qualifier.clone()))?;
         let timestamp_index = schema
-            .index_of_column_by_name(None, "_timestamp")?
+            .index_of_column_by_name(None, "_timestamp")
             .ok_or_else(|| DataFusionError::Plan("missing _timestamp column".to_string()))?;
         Ok(Self {
             input,

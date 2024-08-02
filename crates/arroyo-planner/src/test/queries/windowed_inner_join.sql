@@ -1,4 +1,4 @@
-CREATE TABLE cars (
+ CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
   event_type TEXT,

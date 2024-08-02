@@ -149,6 +149,7 @@ mod tests {
     use crate::de::ArrowDeserializer;
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::RecordBatch;
+    use arrow_json::writer::record_batch_to_vec;
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{AvroFormat, BadData, Format};
@@ -309,13 +310,16 @@ mod tests {
             deserializer.flush_buffer().unwrap().unwrap()
         };
 
-        #[allow(deprecated)]
-        arrow_json::writer::record_batches_to_json_rows(&[&batch])
+        record_batch_to_vec(&batch, true, arrow_json::writer::TimestampFormat::RFC3339)
             .unwrap()
-            .into_iter()
-            .map(|mut r| {
-                r.remove("_timestamp");
-                r
+            .iter()
+            .map(|b| {
+                serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(b.as_slice())
+                    .unwrap()
+            })
+            .map(|mut f| {
+                f.remove("_timestamp");
+                f
             })
             .collect()
     }
@@ -405,6 +409,7 @@ mod tests {
             json!([{
                 "name": "Alyssa",
                 "favorite_number": 256,
+                "favorite_color": null,
             }])
         );
     }
@@ -459,6 +464,7 @@ mod tests {
             json!([{
                 "name": "Alyssa",
                 "favorite_number": 256,
+                "favorite_color": null,
                 "removed_field": "hello!"
             }])
         );

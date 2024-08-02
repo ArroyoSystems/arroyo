@@ -9,7 +9,7 @@ use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
     external::{ProcessingMode, SqlSource},
-    ArroyoSchemaProvider,
+    fields_with_qualifiers, ArroyoSchemaProvider, DFField,
 };
 use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 use arroyo_datastream::default_sink;
@@ -20,8 +20,10 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
-use datafusion::common::{config::ConfigOptions, DFField, DFSchema, Result};
+use datafusion::common::{config::ConfigOptions, DFSchema, Result};
 use datafusion::common::{plan_err, Column, DataFusionError};
+use datafusion::execution::session_state::SessionState;
+use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
     WriteOp,
@@ -31,6 +33,7 @@ use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateS
 use datafusion::optimizer::eliminate_cross_join::EliminateCrossJoin;
 use datafusion::optimizer::eliminate_duplicated_expr::EliminateDuplicatedExpr;
 use datafusion::optimizer::eliminate_filter::EliminateFilter;
+use datafusion::optimizer::eliminate_group_by_constant::EliminateGroupByConstant;
 use datafusion::optimizer::eliminate_join::EliminateJoin;
 use datafusion::optimizer::eliminate_limit::EliminateLimit;
 use datafusion::optimizer::eliminate_nested_union::EliminateNestedUnion;
@@ -105,8 +108,13 @@ impl From<Field> for FieldSpec {
 fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
+    session_state: &SessionState,
 ) -> Result<LogicalPlan> {
-    let sql_to_rel = SqlToRel::new(schema_provider);
+    let mut sql_to_rel = SqlToRel::new(schema_provider);
+    for planner in session_state.expr_planners() {
+        sql_to_rel = sql_to_rel.with_user_defined_planner(planner);
+    }
+
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
     let mut analyzer = Analyzer::default();
@@ -114,7 +122,7 @@ fn produce_optimized_plan(
         analyzer.add_function_rewrite(rewriter.clone());
     }
     let analyzed_plan =
-        analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+        analyzer.execute_and_check(plan, &ConfigOptions::default(), |_plan, _rule| {})?;
 
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
         Arc::new(EliminateNestedUnion::new()),
@@ -125,6 +133,9 @@ fn produce_optimized_plan(
         Arc::new(DecorrelatePredicateSubquery::new()),
         Arc::new(ScalarSubqueryToJoin::new()),
         Arc::new(ExtractEquijoinPredicate::new()),
+        // simplify expressions does not simplify expressions in subqueries, so we
+        // run it again after running the optimizations that potentially converted
+        // subqueries to joins
         Arc::new(SimplifyExpressions::new()),
         Arc::new(RewriteDisjunctivePredicate::new()),
         Arc::new(EliminateDuplicatedExpr::new()),
@@ -148,13 +159,14 @@ fn produce_optimized_plan(
         Arc::new(SimplifyExpressions::new()),
         Arc::new(UnwrapCastInComparison::new()),
         Arc::new(CommonSubexprEliminate::new()),
+        Arc::new(EliminateGroupByConstant::new()),
         // This rule can drop event time calculation fields if they aren't used elsewhere.
         //Arc::new(OptimizeProjections::new()),
     ];
 
     let optimizer = Optimizer::with_rules(rules);
     let plan = optimizer.optimize(
-        &analyzed_plan,
+        analyzed_plan,
         &OptimizerContext::default(),
         |_plan, _rule| {},
     )?;
@@ -449,10 +461,25 @@ pub enum Table {
 
 fn value_to_inner_string(value: &Value) -> Result<String> {
     match value {
-        Value::SingleQuotedString(inner_string)
-        | Value::UnQuotedString(inner_string)
-        | Value::DoubleQuotedString(inner_string) => Ok(inner_string.clone()),
-        _ => plan_err!("Expected a string value, found {:?}", value),
+        Value::SingleQuotedString(s) => Ok(s.to_string()),
+        Value::DollarQuotedString(s) => Ok(s.to_string()),
+        Value::Number(_, _) | Value::Boolean(_) => Ok(value.to_string()),
+        Value::DoubleQuotedString(_)
+        | Value::EscapedStringLiteral(_)
+        | Value::NationalStringLiteral(_)
+        | Value::SingleQuotedByteStringLiteral(_)
+        | Value::DoubleQuotedByteStringLiteral(_)
+        | Value::TripleSingleQuotedString(_)
+        | Value::TripleDoubleQuotedString(_)
+        | Value::TripleSingleQuotedByteStringLiteral(_)
+        | Value::TripleDoubleQuotedByteStringLiteral(_)
+        | Value::SingleQuotedRawStringLiteral(_)
+        | Value::DoubleQuotedRawStringLiteral(_)
+        | Value::TripleSingleQuotedRawStringLiteral(_)
+        | Value::TripleDoubleQuotedRawStringLiteral(_)
+        | Value::HexStringLiteral(_)
+        | Value::Null
+        | Value::Placeholder(_) => plan_err!("Expected a string value, found {:?}", value),
     }
 }
 
@@ -504,11 +531,10 @@ impl Table {
             physical_fields
                 .iter()
                 .map(|f| {
-                    Ok(DFField::new_unqualified(
-                        f.name(),
-                        f.data_type().clone(),
-                        f.is_nullable(),
-                    ))
+                    Ok(
+                        DFField::new_unqualified(f.name(), f.data_type().clone(), f.is_nullable())
+                            .into(),
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?,
             HashMap::new(),
@@ -542,6 +568,7 @@ impl Table {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &ArroyoSchemaProvider,
+        session_state: &SessionState,
     ) -> Result<Option<Self>> {
         if let Statement::CreateTable {
             name,
@@ -614,7 +641,7 @@ impl Table {
                 }
             }
         } else {
-            match &produce_optimized_plan(statement, schema_provider) {
+            match &produce_optimized_plan(statement, schema_provider, session_state) {
                 // views and memory tables are the same now.
                 Ok(LogicalPlan::Ddl(DdlStatement::CreateView(CreateView {
                     name, input, ..
@@ -699,13 +726,13 @@ impl Table {
                 .schema()
                 .fields()
                 .iter()
-                .map(|f| f.field().clone())
+                .map(|f| f.clone())
                 .collect(),
             Table::PreviewSink { logical_plan } => logical_plan
                 .schema()
                 .fields()
                 .iter()
-                .map(|f| f.field().clone())
+                .map(|f| f.clone())
                 .collect(),
         }
     }
@@ -735,14 +762,18 @@ fn infer_sink_schema(
     source: &Query,
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
+    session_state: &SessionState,
 ) -> Result<()> {
-    let plan =
-        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)?;
+    let plan = produce_optimized_plan(
+        &Statement::Query(Box::new(source.clone())),
+        schema_provider,
+        session_state,
+    )?;
     let table = schema_provider
         .get_table_mut(&table_name)
         .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;
 
-    table.set_inferred_fields(plan.schema().fields().to_vec())?;
+    table.set_inferred_fields(fields_with_qualifiers(plan.schema()))?;
 
     Ok(())
 }
@@ -751,22 +782,18 @@ impl Insert {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &mut ArroyoSchemaProvider,
+        session_state: &SessionState,
     ) -> Result<Insert> {
-        if let Statement::Insert {
-            source,
-            into: true,
-            table_name,
-            ..
-        } = statement
-        {
+        if let Statement::Insert(insert) = statement {
             infer_sink_schema(
-                source.as_ref().unwrap(),
-                table_name.to_string(),
+                insert.source.as_ref().unwrap(),
+                insert.table_name.to_string(),
                 schema_provider,
+                session_state,
             )?;
         }
 
-        let logical_plan = produce_optimized_plan(statement, schema_provider)?;
+        let logical_plan = produce_optimized_plan(statement, schema_provider, session_state)?;
 
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {

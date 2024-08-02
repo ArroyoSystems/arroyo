@@ -58,14 +58,14 @@ eventsource-client = "0.12.0"
 tokio-tungstenite = { version = "0.20.1", features = ["native-tls"] }
 
 # Webhook
-reqwest = "0.11.20"
+reqwest = { version = "0.11.20", features = ["stream"] }
 
 # Redis
 redis = { version = "0.24.0", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
 
 # Fluvio
-fluvio = {version = "0.21", features = ["openssl"]}
-fluvio-future = "0.6"
+fluvio = {version = "0.23", features = ["openssl"]}
+fluvio-future = "0.7"
 
 # Kinesis
 aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
@@ -75,7 +75,7 @@ uuid = { version = "1.7.0", features = ["v4"] }
 # Filesystem
 parquet = { workspace = true, features = ["async"]}
 object_store = { workspace = true }
-deltalake = { workspace = true, features = ["s3", "datafusion"] }
+deltalake = { workspace = true, features = ["s3"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 
 # MQTT

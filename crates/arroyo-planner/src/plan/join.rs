@@ -1,21 +1,20 @@
 use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
-use arrow_schema::DataType;
+use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
-use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
+use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{
-    not_impl_err, plan_err, Column, DFSchema, DFSchemaRef, DataFusionError, JoinConstraint,
-    JoinType, OwnedTableReference, Result, ScalarValue,
+    not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue,
+    TableReference,
 };
 use datafusion::logical_expr;
-use datafusion::logical_expr::expr::{Alias, ScalarFunction};
+use datafusion::logical_expr::expr::Alias;
 use datafusion::logical_expr::{
-    BinaryExpr, BuiltinScalarFunction, Case, Expr, ExprSchemable, Extension, Join, LogicalPlan,
-    Operator, Projection,
+    build_join_schema, BinaryExpr, Case, Expr, Extension, Join, LogicalPlan, Projection,
 };
-use datafusion::prelude::{get_field, lit};
+use datafusion::prelude::coalesce;
 use std::sync::Arc;
 
 pub(crate) struct JoinRewriter {}
@@ -84,23 +83,22 @@ impl JoinRewriter {
     ) -> Result<LogicalPlan> {
         let key_count = join_expressions.len();
 
-        let mut join_expressions: Vec<_> = join_expressions
+        let join_expressions: Vec<_> = join_expressions
             .into_iter()
             .enumerate()
             .map(|(index, expr)| {
                 expr.alias_qualified(
-                    Some(OwnedTableReference::bare("_arroyo")),
+                    Some(TableReference::bare("_arroyo")),
                     format!("_key_{}", index),
                 )
             })
+            .chain(
+                fields_with_qualifiers(&input.schema())
+                    .iter()
+                    .map(|field| Expr::Column(field.qualified_column())),
+            )
             .collect();
-        join_expressions.extend(
-            input
-                .schema()
-                .fields()
-                .iter()
-                .map(|field| Expr::Column(Column::new(field.qualifier().cloned(), field.name()))),
-        );
+
         // Calculate initial projection with default names
         let projection = Projection::try_new(join_expressions, input)?;
         let key_calculation_extension = KeyCalculationExtension::new_named_and_trimmed(
@@ -115,15 +113,17 @@ impl JoinRewriter {
 
     fn post_join_timestamp_projection(&mut self, input: LogicalPlan) -> Result<LogicalPlan> {
         let schema = input.schema().clone();
-        let mut schema_with_timestamp = schema.fields().clone();
+        let mut schema_with_timestamp = fields_with_qualifiers(&schema);
         let timestamp_fields = schema_with_timestamp
             .iter()
             .filter(|field| field.name() == "_timestamp")
             .cloned()
             .collect::<Vec<_>>();
+
         if timestamp_fields.len() != 2 {
             return not_impl_err!("join must have two timestamp fields");
         }
+
         schema_with_timestamp.retain(|field| field.name() != "_timestamp");
         let mut projection_expr = schema_with_timestamp
             .iter()
@@ -137,8 +137,8 @@ impl JoinRewriter {
         // add a _timestamp field to the schema
         schema_with_timestamp.push(timestamp_fields[0].clone());
 
-        let output_schema = Arc::new(DFSchema::new_with_metadata(
-            schema_with_timestamp,
+        let output_schema = Arc::new(schema_from_df_fields_with_metadata(
+            &schema_with_timestamp,
             schema.metadata().clone(),
         )?);
         // then take a max of the two timestamp columns
@@ -168,10 +168,10 @@ impl JoinRewriter {
                     Box::new(right_column.clone()),
                 ),
             ],
-            else_expr: Some(Box::new(Expr::ScalarFunction(ScalarFunction::new(
-                BuiltinScalarFunction::Coalesce,
-                vec![left_column.clone(), right_column.clone()],
-            )))),
+            else_expr: Some(Box::new(coalesce(vec![
+                left_column.clone(),
+                right_column.clone(),
+            ]))),
         });
 
         projection_expr.push(Expr::Alias(Alias {
@@ -184,59 +184,6 @@ impl JoinRewriter {
             Arc::new(input),
             output_schema.clone(),
         )?))
-    }
-}
-
-struct StructEqRewriter {
-    schema: DFSchemaRef,
-}
-
-impl TreeNodeRewriter for StructEqRewriter {
-    type Node = Expr;
-
-    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
-        if let Expr::BinaryExpr(BinaryExpr {
-            op: Operator::Eq,
-            left,
-            right,
-        }) = &node
-        {
-            let (left_t, _) = left.data_type_and_nullable(&self.schema)?;
-            let (right_t, _) = right.data_type_and_nullable(&self.schema)?;
-
-            if let DataType::Struct(fields) = &left_t {
-                if fields.iter().find(|e| e.data_type().is_nested()).is_some() {
-                    return plan_err!("Joins on struct fields are only supported for structs with a single layer of nesting (in {})",
-                        node.canonical_name());
-                }
-
-                if left_t != right_t {
-                    return plan_err!(
-                        "Joins on structs must have the same types on both sides of '=' (in {})",
-                        node.canonical_name()
-                    );
-                }
-
-                let mut exprs = fields.iter().map(|f| {
-                    get_field((**left).clone(), lit(f.name().clone()))
-                        .eq(get_field((**right).clone(), lit(f.name().clone())))
-                });
-
-                let Some(mut expr) = exprs.next() else {
-                    return plan_err!(
-                        "Struct types used in join comparison must have at least one field"
-                    );
-                };
-
-                for next in exprs {
-                    expr = expr.and(next);
-                }
-
-                return Ok(Transformed::yes(expr));
-            }
-        }
-
-        Ok(Transformed::no(node))
     }
 }
 
@@ -256,7 +203,7 @@ impl TreeNodeRewriter for JoinRewriter {
             filter,
             join_type,
             join_constraint: JoinConstraint::On,
-            schema,
+            schema: _,
             null_equals_null: false,
         } = join
         else {
@@ -271,24 +218,19 @@ impl TreeNodeRewriter for JoinRewriter {
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
 
-        let filter = filter
-            .map(|expr| {
-                expr.rewrite(&mut StructEqRewriter {
-                    schema: schema.clone(),
-                })
-                .map(|e| e.data)
-            })
-            .transpose()?;
-
-        let left_input = self.create_join_key_plan(left.clone(), left_expressions, "left")?;
-        let right_input = self.create_join_key_plan(right.clone(), right_expressions, "right")?;
+        let left_input = self.create_join_key_plan(left, left_expressions, "left")?;
+        let right_input = self.create_join_key_plan(right, right_expressions, "right")?;
         let rewritten_join = LogicalPlan::Join(Join {
+            schema: Arc::new(build_join_schema(
+                left_input.schema(),
+                right_input.schema(),
+                &join_type,
+            )?),
             left: Arc::new(left_input),
             right: Arc::new(right_input),
             on,
             join_type,
             join_constraint: JoinConstraint::On,
-            schema: schema.clone(),
             null_equals_null: false,
             filter,
         });

@@ -1,6 +1,6 @@
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
-use fluvio::{Fluvio, FluvioConfig, TopicProducer};
+use fluvio::{Fluvio, FluvioConfig, TopicProducerPool};
 
 use arroyo_formats::ser::ArrowSerializer;
 use tracing::info;
@@ -12,7 +12,7 @@ use arroyo_types::CheckpointBarrier;
 pub struct FluvioSinkFunc {
     pub topic: String,
     pub endpoint: Option<String>,
-    pub producer: Option<TopicProducer>,
+    pub producer: Option<TopicProducerPool>,
     pub serializer: ArrowSerializer,
 }
 
@@ -56,7 +56,7 @@ impl ArrowOperator for FluvioSinkFunc {
 }
 
 impl FluvioSinkFunc {
-    async fn get_producer(&mut self) -> anyhow::Result<TopicProducer> {
+    async fn get_producer(&mut self) -> anyhow::Result<TopicProducerPool> {
         info!("Creating fluvio producer for {:?}", self.endpoint);
 
         let config: Option<FluvioConfig> = self.endpoint.as_ref().map(FluvioConfig::new);

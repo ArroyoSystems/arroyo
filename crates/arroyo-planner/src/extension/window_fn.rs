@@ -48,20 +48,15 @@ impl UserDefinedLogicalNodeCore for WindowFunctionExtension {
     }
 
     fn fmt_for_explain(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "WindowFunction: {}",
-            self.schema()
-                .fields()
-                .iter()
-                .map(|f| f.qualified_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        write!(f, "WindowFunction: {}", self.schema())
     }
 
-    fn from_template(&self, _exprs: &[datafusion::prelude::Expr], inputs: &[LogicalPlan]) -> Self {
-        Self::new(inputs[0].clone(), self.key_fields.clone())
+    fn with_exprs_and_inputs(
+        &self,
+        _exprs: Vec<datafusion::prelude::Expr>,
+        inputs: Vec<LogicalPlan>,
+    ) -> Result<Self> {
+        Ok(Self::new(inputs[0].clone(), self.key_fields.clone()))
     }
 }
 

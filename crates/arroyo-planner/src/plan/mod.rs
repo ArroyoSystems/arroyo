@@ -1,34 +1,36 @@
-use std::{collections::HashSet, sync::Arc};
-
 use arroyo_datastream::WindowType;
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{
     plan_err,
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor},
-    Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result,
+    Column, DataFusionError, Result, TableReference,
 };
+use std::{collections::HashSet, sync::Arc};
 
 use aggregate::AggregateRewriter;
-use datafusion::logical_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan};
+use datafusion::logical_expr::{
+    expr::Alias, Aggregate, Expr, Extension, Filter, LogicalPlan, SubqueryAlias,
+};
 use join::JoinRewriter;
 
+use self::window_fn::WindowFunctionRewriter;
+use crate::rewriters::TimeWindowNullCheckRemover;
 use crate::{
     extension::{
         aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
         join::JOIN_NODE_NAME,
     },
-    find_window,
+    fields_with_qualifiers, find_window,
     rewriters::SourceRewriter,
+    schema_from_df_fields_with_metadata,
     schemas::{add_timestamp_field, has_timestamp_field},
-    ArroyoSchemaProvider, WindowBehavior,
+    ArroyoSchemaProvider, DFField, WindowBehavior,
 };
 use crate::{
     extension::{remote_table::RemoteTableExtension, ArroyoExtension},
     rewriters::AsyncUdfRewriter,
 };
-
-use self::window_fn::WindowFunctionRewriter;
 
 mod aggregate;
 mod join;
@@ -46,7 +48,7 @@ impl WindowDetectingVisitor {
             window: None,
             fields: HashSet::new(),
         };
-        logical_plan.visit(&mut visitor)?;
+        logical_plan.visit_with_subqueries(&mut visitor)?;
         Ok(visitor.window.take())
     }
 }
@@ -59,7 +61,7 @@ fn extract_column(expr: &Expr) -> Option<&Column> {
     }
 }
 
-impl TreeNodeVisitor for WindowDetectingVisitor {
+impl TreeNodeVisitor<'_> for WindowDetectingVisitor {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
@@ -107,7 +109,9 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                                     return Some(Err(err));
                                 }
                             };
-                            if self.fields.contains(input_field) {
+                            if self.fields.contains(
+                                &(column.relation.clone(), Arc::new(input_field.clone())).into(),
+                            ) {
                                 return self.window.clone().map(|window| Ok((index, window)));
                             }
                         }
@@ -127,7 +131,8 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                                 window
                             );
                         }
-                        self.fields.insert(projection.schema.field(index).clone());
+                        self.fields
+                            .insert(projection.schema.qualified_field(index).into());
                     } else {
                         // If the input doesn't have an input window, we shouldn't be creating a window.
                         return plan_err!(
@@ -144,13 +149,13 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                     .map(|field| {
                         Ok(subquery_alias
                             .schema
-                            .field(
+                            .qualified_field(
                                 subquery_alias
                                     .input
                                     .schema()
                                     .index_of_column(&field.qualified_column())?,
                             )
-                            .clone())
+                            .into())
                     })
                     .collect::<Result<HashSet<_>>>()?;
             }
@@ -175,7 +180,10 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                                     return Some(Err(err));
                                 }
                             };
-                            if self.fields.contains(input_field) {
+                            if self
+                                .fields
+                                .contains(&(column.relation.as_ref(), input_field).into())
+                            {
                                 return self.window.clone().map(|window| Ok((index, window)));
                             }
                         }
@@ -196,7 +204,7 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                     } else {
                         self.window = Some(window);
                     }
-                    self.fields.insert(schema.field(index).clone());
+                    self.fields.insert(schema.qualified_field(index).into());
                 }
             }
             LogicalPlan::Extension(Extension { node }) => {
@@ -224,9 +232,9 @@ impl TreeNodeVisitor for WindowDetectingVisitor {
                         WindowBehavior::InData => {
                             let input_fields = self.fields.clone();
                             self.fields.clear();
-                            for field in node.schema().fields() {
-                                if input_fields.contains(field) {
-                                    self.fields.insert(field.clone());
+                            for field in fields_with_qualifiers(node.schema()) {
+                                if input_fields.contains(&field) {
+                                    self.fields.insert(field);
                                 }
                             }
                             if self.fields.is_empty() {
@@ -257,12 +265,12 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
         match node {
             LogicalPlan::Projection(ref mut projection) => {
                 if !has_timestamp_field(&projection.schema) {
-                    let timestamp_field = projection
+                    let timestamp_field: DFField = projection
                         .input
                         .schema()
-                        .fields_with_unqualified_name(TIMESTAMP_FIELD).first().cloned().ok_or_else(|| {
-                            DataFusionError::Plan("No timestamp field found in projection input. Query should've been rewritten".to_string())
-                        })?;
+                        .qualified_field_with_unqualified_name(TIMESTAMP_FIELD).map_err(|_| {
+                            DataFusionError::Plan(format!("No timestamp field found in projection input ({}). Query should've been rewritten", projection.input.display()))
+                        })?.into();
                     projection.schema = add_timestamp_field(
                         projection.schema.clone(),
                         timestamp_field.qualifier().cloned(),
@@ -281,14 +289,15 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         .schema
                         .has_column_with_unqualified_name(IS_RETRACT_FIELD)
                 {
-                    let field = projection
+                    let field: DFField = projection
                         .input
                         .schema()
-                        .field_with_unqualified_name(IS_RETRACT_FIELD)?;
-                    let mut output_fields = projection.schema.fields().to_vec();
+                        .qualified_field_with_unqualified_name(IS_RETRACT_FIELD)?
+                        .into();
+                    let mut output_fields = fields_with_qualifiers(&projection.schema);
                     output_fields.push(field.clone());
-                    projection.schema = Arc::new(DFSchema::new_with_metadata(
-                        output_fields,
+                    projection.schema = Arc::new(schema_from_df_fields_with_metadata(
+                        &output_fields,
                         projection.schema.metadata().clone(),
                     )?);
                     projection.expr.push(Expr::Column(field.qualified_column()));
@@ -308,7 +317,20 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 }
                 .f_up(LogicalPlan::TableScan(table_scan));
             }
-            LogicalPlan::Filter(_) => {}
+            LogicalPlan::Filter(f) => {
+                // Joins with windows in the join condition can cause IS NOT NULL predicates to get
+                // pushed down to the table scan; however windows can never be null, and they can't
+                // be evaluated in filters—so we just remove them
+                let expr = f
+                    .predicate
+                    .clone()
+                    .rewrite(&mut TimeWindowNullCheckRemover {})?;
+                return Ok(if expr.transformed {
+                    Transformed::yes(LogicalPlan::Filter(Filter::try_new(expr.data, f.input)?))
+                } else {
+                    Transformed::no(LogicalPlan::Filter(f))
+                });
+            }
             LogicalPlan::Window(_) => {
                 return WindowFunctionRewriter {}.f_up(node);
             }
@@ -325,7 +347,9 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 );
             }
             LogicalPlan::Union(mut union) => {
-                // Need all the elements of the union to be materialized, so that
+                union.schema = union.inputs[0].schema().clone();
+
+                // Need all the elements of the union to be materialized
                 for input in union.inputs.iter_mut() {
                     if let LogicalPlan::Extension(Extension { node }) = input.as_ref() {
                         let arroyo_extension: &dyn ArroyoExtension = node.try_into().unwrap();
@@ -335,7 +359,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                     }
                     let remote_table_extension = Arc::new(RemoteTableExtension {
                         input: input.as_ref().clone(),
-                        name: OwnedTableReference::bare("union_input"),
+                        name: TableReference::bare("union_input"),
                         schema: union.schema.clone(),
                         materialize: false,
                     });
@@ -343,11 +367,17 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         node: remote_table_extension,
                     }));
                 }
+
                 return Ok(Transformed::yes(LogicalPlan::Union(union)));
             }
             LogicalPlan::EmptyRelation(_) => {}
             LogicalPlan::Subquery(_) => {}
-            LogicalPlan::SubqueryAlias(_) => {}
+            LogicalPlan::SubqueryAlias(sa) => {
+                // recreate from our children, in case the schemas have changed
+                return Ok(Transformed::yes(LogicalPlan::SubqueryAlias(
+                    SubqueryAlias::try_new(sa.input, sa.alias)?,
+                )));
+            }
             LogicalPlan::Limit(_) => {
                 return plan_err!("LIMIT is not currently supported ({})", node.display());
             }
