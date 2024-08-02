@@ -263,7 +263,6 @@ impl<'a> PlanToGraphVisitor<'a> {
 
     pub(crate) fn add_plan(&mut self, plan: LogicalPlan) -> Result<()> {
         self.traversal.clear();
-        println!("VISIT PLAN = {}", plan.display_graphviz());
         plan.visit(self)?;
         Ok(())
     }
@@ -324,10 +323,9 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
 
     fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
         let LogicalPlan::Extension(Extension { node }) = node else {
-            println!("\tEARLY EXIT FROM {}", node.display());
             return Ok(TreeNodeRecursion::Continue);
         };
-        println!("DOWN {}", node.name());
+
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
             .map_err(|e: DataFusionError| e.context("converting extension"))?;
@@ -354,7 +352,6 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return Ok(TreeNodeRecursion::Continue);
         };
-        println!("UP {}", node.name());
 
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
@@ -366,7 +363,6 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
 
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(_) = self.named_nodes.get(&name) {
-                println!("JUMPING ON {:?}", name);
                 return Ok(TreeNodeRecursion::Continue);
             }
         }
@@ -381,8 +377,6 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
             .map_err(|e: DataFusionError| e.context("converting extension"))?;
         self.build_extension(input_nodes, arroyo_extension)
             .map_err(|e| e.context("building extension"))?;
-
-        println!("GRAPH = {:?}", Dot::with_config(&self.graph, &[]));
         
         Ok(TreeNodeRecursion::Continue)
     }

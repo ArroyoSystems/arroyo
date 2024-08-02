@@ -349,7 +349,6 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 );
             }
             LogicalPlan::Union(mut union) => {
-                println!("INPUT = {}", union.inputs[0].display());
                 union.schema = union.inputs[0].schema().clone();
                 
                 // Need all the elements of the union to be materialized

@@ -1,13 +1,12 @@
 use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
-use crate::{DFField, fields_with_qualifiers, schema_from_df_fields_with_metadata};
-use arrow_schema::{DataType, TimeUnit};
+use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
-use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
+use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{
-    not_impl_err, plan_err, Column, DFSchemaRef, DataFusionError, JoinConstraint, JoinType, Result,
+    not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result,
     ScalarValue, TableReference,
 };
 use datafusion::logical_expr;
@@ -97,8 +96,6 @@ impl JoinRewriter {
                     .map(|field| Expr::Column(field.qualified_column())))
             .collect();
         
-        println!("Join expression ({}): {:?}", name, join_expressions);
-
         // Calculate initial projection with default names
         let projection = Projection::try_new(join_expressions, input)?;
         let key_calculation_extension = KeyCalculationExtension::new_named_and_trimmed(
@@ -188,58 +185,6 @@ impl JoinRewriter {
     }
 }
 
-struct StructEqRewriter {
-    schema: DFSchemaRef,
-}
-
-impl TreeNodeRewriter for StructEqRewriter {
-    type Node = Expr;
-
-    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
-        if let Expr::BinaryExpr(BinaryExpr {
-            op: Operator::Eq,
-            left,
-            right,
-        }) = &node
-        {
-            let (left_t, _) = left.data_type_and_nullable(&self.schema)?;
-            let (right_t, _) = right.data_type_and_nullable(&self.schema)?;
-
-            if let DataType::Struct(fields) = &left_t {
-                if fields.iter().find(|e| e.data_type().is_nested()).is_some() {
-                    return plan_err!("Joins on struct fields are only supported for structs with a single layer of nesting (in {})",
-                        node.canonical_name());
-                }
-
-                if left_t != right_t {
-                    return plan_err!(
-                        "Joins on structs must have the same types on both sides of '=' (in {})",
-                        node.canonical_name()
-                    );
-                }
-
-                let mut exprs = fields.iter().map(|f| {
-                    get_field((**left).clone(), f.name().clone())
-                        .eq(get_field((**right).clone(), f.name().clone()))
-                });
-
-                let Some(mut expr) = exprs.next() else {
-                    return plan_err!(
-                        "Struct types used in join comparison must have at least one field"
-                    );
-                };
-
-                for next in exprs {
-                    expr = expr.and(next);
-                }
-
-                return Ok(Transformed::yes(expr));
-            }
-        }
-
-        Ok(Transformed::no(node))
-    }
-}
 
 impl TreeNodeRewriter for JoinRewriter {
     type Node = LogicalPlan;
@@ -257,7 +202,7 @@ impl TreeNodeRewriter for JoinRewriter {
             filter,
             join_type,
             join_constraint: JoinConstraint::On,
-            schema,
+            schema: _,
             null_equals_null: false,
         } = join
         else {
@@ -271,20 +216,6 @@ impl TreeNodeRewriter for JoinRewriter {
 
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
-
-        // let filter = filter
-        //     .map(|expr| {
-        //         expr.rewrite(&mut StructEqRewriter {
-        //             schema: schema.clone(),
-        //         })
-        //         .map(|e| e.data)
-        //     })
-        //     .transpose()?;
-        
-        println!("LEFT = {:?}\nRIGHT = {:?}", left, right);
-        println!("LEFT SCHEMA = {:?}\nRIGHT SCHEMA = {:?}", left.schema(), right.schema());
-        
-        println!("FILTER = {:?}\nON={:?}", filter, on);
 
         let left_input = self.create_join_key_plan(left, left_expressions, "left")?;
         let right_input = self.create_join_key_plan(right, right_expressions, "right")?;

@@ -54,8 +54,6 @@ impl ArroyoExtension for RemoteTableExtension {
                 let first = input_schemas[0].clone();
                 for schema in input_schemas.iter().skip(1) {
                     if *schema != first {
-                        println!("SCHEMA1 = {:?}", schema);
-                        println!("SCHEMA2 = {:?}", schema);
                         return plan_err!(
                             "If a node has multiple inputs, they must all have the same schema"
                         );

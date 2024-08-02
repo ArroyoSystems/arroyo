@@ -153,7 +153,6 @@ impl ArroyoExtension for SinkExtension {
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
-        println!("PLAN SINK");
         if input_schemas.len() != 1 {
             return plan_err!("sink should have exactly one input");
         }

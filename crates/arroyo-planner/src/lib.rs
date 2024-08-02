@@ -526,12 +526,10 @@ pub fn rewrite_plan(
     plan: LogicalPlan,
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
-    println!("original: {}", plan.display_graphviz());
     let rewritten_plan = plan
-        .rewrite_with_subqueries(&mut UnnestRewriter {})?
+        .rewrite_with_subqueries(&mut ArroyoRewriter { schema_provider })?
         .data
-        .rewrite_with_subqueries(&mut ArroyoRewriter { schema_provider })?;
-    println!("Rrewrittern: {}", rewritten_plan.data.display_graphviz());
+        .rewrite_with_subqueries(&mut UnnestRewriter {})?;
     
     // check for window functions
     rewritten_plan.data.visit_with_subqueries(&mut TimeWindowUdfChecker {})?;
