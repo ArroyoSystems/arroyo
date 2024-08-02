@@ -40,7 +40,6 @@ use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode},
 };
-use petgraph::dot::Dot;
 
 pub(crate) struct PlanToGraphVisitor<'a> {
     graph: DiGraph<LogicalNode, LogicalEdge>,
@@ -71,7 +70,10 @@ pub(crate) struct Planner<'a> {
 }
 
 impl<'a> Planner<'a> {
-    pub(crate) fn new(schema_provider: &'a ArroyoSchemaProvider, session_state: &'a SessionState) -> Self {
+    pub(crate) fn new(
+        schema_provider: &'a ArroyoSchemaProvider,
+        session_state: &'a SessionState,
+    ) -> Self {
         let planner = DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(
             ArroyoExtensionPlanner {},
         )]);
@@ -285,7 +287,7 @@ impl<'a> PlanToGraphVisitor<'a> {
                 );
             }
         }
-        
+
         let input_schemas = input_nodes
             .iter()
             .map(|index| {
@@ -296,21 +298,21 @@ impl<'a> PlanToGraphVisitor<'a> {
                     .clone())
             })
             .collect::<Result<Vec<_>>>()?;
-        
+
         let NodeWithIncomingEdges { node, edges } = extension
             .plan_node(&self.planner, self.graph.node_count(), input_schemas)
             .map_err(|e| e.context("planning extension"))?;
-        
+
         let node_index = self.graph.add_node(node);
         self.add_index_to_traversal(node_index);
-        
+
         for (source, edge) in input_nodes.into_iter().zip(edges.into_iter()) {
             self.graph.add_edge(source, node_index, edge);
         }
-        
+
         self.output_schemas
             .insert(node_index, extension.output_schema().into());
-        
+
         if let Some(node_name) = extension.node_name() {
             self.named_nodes.insert(node_name, node_index);
         }
@@ -332,7 +334,7 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
         if arroyo_extension.transparent() {
             return Ok(TreeNodeRecursion::Continue);
         }
-        
+
         if let Some(name) = arroyo_extension.node_name() {
             if let Some(node_index) = self.named_nodes.get(&name) {
                 self.add_index_to_traversal(*node_index);
@@ -377,7 +379,7 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
             .map_err(|e: DataFusionError| e.context("converting extension"))?;
         self.build_extension(input_nodes, arroyo_extension)
             .map_err(|e| e.context("building extension"))?;
-        
+
         Ok(TreeNodeRecursion::Continue)
     }
 }

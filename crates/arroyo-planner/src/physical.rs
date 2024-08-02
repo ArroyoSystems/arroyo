@@ -26,6 +26,7 @@ use datafusion::{
     },
 };
 
+use crate::register_functions;
 use crate::rewriters::UNNESTED_COL;
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
@@ -51,7 +52,6 @@ use prost::Message;
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use crate::register_functions;
 
 pub fn window_function(columns: &[ColumnarValue]) -> Result<ColumnarValue> {
     if columns.len() != 2 {

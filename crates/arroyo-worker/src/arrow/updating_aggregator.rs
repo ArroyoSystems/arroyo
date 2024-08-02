@@ -58,23 +58,23 @@ impl UpdatingAggregatingFunc {
         {
             self.sender.take();
         }
-        
+
         let mut partial_batches = vec![];
         let mut flushing_exec = self.exec.lock().await.take().unwrap();
-        
+
         while let Some(batch) = flushing_exec.next().await {
             partial_batches.push(batch?);
         }
-        
+
         let new_partial_batch =
             concat_batches(&self.state_partial_schema.schema, &partial_batches)?;
         let prior_partials = ctx
             .table_manager
             .get_last_key_value_table("p", ctx.last_present_watermark())
             .await?;
-        
+
         let mut final_input_batches = vec![];
-        
+
         if let Some((prior_partial_batch, _filter)) =
             prior_partials.get_current_matching_values(&new_partial_batch)?
         {
@@ -87,7 +87,7 @@ impl UpdatingAggregatingFunc {
                 self.combine_plan
                     .execute(0, SessionContext::new().task_ctx())?
             };
-            
+
             while let Some(batch) = combine_exec.next().await {
                 let batch = batch?;
                 let renamed_batch = RecordBatch::try_new(
@@ -104,9 +104,9 @@ impl UpdatingAggregatingFunc {
                 .await?;
             final_input_batches.push(new_partial_batch);
         }
-        
+
         let final_input_batch = concat_batches(&self.partial_schema.schema, &final_input_batches)?;
-        
+
         let mut final_exec = {
             let (sender, receiver) = unbounded_channel();
             sender.send(final_input_batch)?;
@@ -115,21 +115,21 @@ impl UpdatingAggregatingFunc {
             self.finish_execution_plan
                 .execute(0, SessionContext::new().task_ctx())?
         };
-        
+
         let final_output_table = ctx
             .table_manager
             .get_last_key_value_table("f", ctx.last_present_watermark())
             .await?;
-        
+
         let mut batches_to_write = vec![];
-        
+
         while let Some(results) = final_exec.next().await {
             let results = results?;
             let renamed_results = RecordBatch::try_new(
                 self.state_final_schema.schema.clone(),
                 results.columns().to_vec(),
             )?;
-            
+
             if let Some((prior_batch, _filter)) =
                 final_output_table.get_current_matching_values(&renamed_results)?
             {
@@ -142,14 +142,14 @@ impl UpdatingAggregatingFunc {
                     RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), columns)?;
                 batches_to_write.push(retract_batch);
             }
-            
+
             final_output_table
                 .insert_batch(renamed_results.clone())
                 .await?;
-            
+
             let is_retract = ColumnarValue::Scalar(ScalarValue::Boolean(Some(false)))
                 .into_array(results.num_rows())?;
-            
+
             let mut columns = results.columns().to_vec();
             columns.push(is_retract);
 
@@ -157,11 +157,11 @@ impl UpdatingAggregatingFunc {
                 RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), columns)?;
             batches_to_write.push(result_batch);
         }
-        
+
         for batch in batches_to_write.into_iter() {
             ctx.collect(batch).await;
         }
-        
+
         Ok(())
     }
 

@@ -22,6 +22,8 @@ use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::{config::ConfigOptions, DFSchema, Result};
 use datafusion::common::{plan_err, Column, DataFusionError};
+use datafusion::execution::session_state::SessionState;
+use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
     WriteOp,
@@ -31,6 +33,7 @@ use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateS
 use datafusion::optimizer::eliminate_cross_join::EliminateCrossJoin;
 use datafusion::optimizer::eliminate_duplicated_expr::EliminateDuplicatedExpr;
 use datafusion::optimizer::eliminate_filter::EliminateFilter;
+use datafusion::optimizer::eliminate_group_by_constant::EliminateGroupByConstant;
 use datafusion::optimizer::eliminate_join::EliminateJoin;
 use datafusion::optimizer::eliminate_limit::EliminateLimit;
 use datafusion::optimizer::eliminate_nested_union::EliminateNestedUnion;
@@ -57,9 +60,6 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
-use datafusion::execution::FunctionRegistry;
-use datafusion::execution::session_state::SessionState;
-use datafusion::optimizer::eliminate_group_by_constant::EliminateGroupByConstant;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -764,8 +764,11 @@ fn infer_sink_schema(
     schema_provider: &mut ArroyoSchemaProvider,
     session_state: &SessionState,
 ) -> Result<()> {
-    let plan =
-        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider, session_state)?;
+    let plan = produce_optimized_plan(
+        &Statement::Query(Box::new(source.clone())),
+        schema_provider,
+        session_state,
+    )?;
     let table = schema_provider
         .get_table_mut(&table_name)
         .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;

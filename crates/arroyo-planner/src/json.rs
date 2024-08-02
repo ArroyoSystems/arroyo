@@ -4,24 +4,24 @@ use arrow_array::{Array, ArrayRef, StringArray};
 use arrow_schema::{DataType, Field};
 use datafusion::common::Result;
 use datafusion::common::{DataFusionError, ScalarValue};
+use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{create_udf, ColumnarValue, Volatility};
 use serde_json_path::JsonPath;
 use std::sync::Arc;
-use datafusion::execution::FunctionRegistry;
 
 pub fn register_json_functions(registry: &mut dyn FunctionRegistry) {
-    registry.register_udf(
-        Arc::new(create_udf(
+    registry
+        .register_udf(Arc::new(create_udf(
             "get_first_json_object",
             vec![DataType::Utf8, DataType::Utf8],
             Arc::new(DataType::Utf8),
             Volatility::Immutable,
             Arc::new(get_first_json_object),
-        )),
-    ).unwrap();
+        )))
+        .unwrap();
 
-    registry.register_udf(
-        Arc::new(create_udf(
+    registry
+        .register_udf(Arc::new(create_udf(
             "extract_json",
             vec![DataType::Utf8, DataType::Utf8],
             Arc::new(DataType::List(Arc::new(Field::new(
@@ -31,18 +31,18 @@ pub fn register_json_functions(registry: &mut dyn FunctionRegistry) {
             )))),
             Volatility::Immutable,
             Arc::new(extract_json),
-        )),
-    ).unwrap();
+        )))
+        .unwrap();
 
-    registry.register_udf(
-        Arc::new(create_udf(
+    registry
+        .register_udf(Arc::new(create_udf(
             "extract_json_string",
             vec![DataType::Utf8, DataType::Utf8],
             Arc::new(DataType::Utf8),
             Volatility::Immutable,
             Arc::new(extract_json_string),
-        )),
-    ).unwrap();
+        )))
+        .unwrap();
 }
 
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {

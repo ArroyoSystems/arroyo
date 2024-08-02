@@ -26,7 +26,9 @@ use datafusion::common::{
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
-use datafusion::logical_expr::{BinaryExpr, Expr, Extension, LogicalPlan, Operator, Projection, TableScan, Unnest};
+use datafusion::logical_expr::{
+    BinaryExpr, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
+};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -592,9 +594,7 @@ impl<'a> TreeNodeVisitor<'_> for SourceMetadataVisitor<'a> {
     }
 }
 
-struct TimeWindowExprChecker<'a> {
-    ctx: &'a LogicalPlan,
-}
+struct TimeWindowExprChecker {}
 
 pub struct TimeWindowUdfChecker {}
 
@@ -610,7 +610,7 @@ pub fn is_time_window(expr: &Expr) -> Option<&str> {
     None
 }
 
-impl <'a> TreeNodeVisitor<'_> for TimeWindowExprChecker<'a> {
+impl TreeNodeVisitor<'_> for TimeWindowExprChecker {
     type Node = Expr;
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
@@ -629,9 +629,7 @@ impl TreeNodeVisitor<'_> for TimeWindowUdfChecker {
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
         node.expressions().iter().try_for_each(|expr| {
-            let mut checker = TimeWindowExprChecker {
-                ctx: node,
-            };
+            let mut checker = TimeWindowExprChecker {};
             expr.visit(&mut checker)?;
             Ok::<(), DataFusionError>(())
         })?;
@@ -639,9 +637,7 @@ impl TreeNodeVisitor<'_> for TimeWindowUdfChecker {
     }
 }
 
-
-pub struct TimeWindowNullCheckRemover {
-}
+pub struct TimeWindowNullCheckRemover {}
 
 impl TreeNodeRewriter for TimeWindowNullCheckRemover {
     type Node = Expr;
@@ -649,10 +645,12 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         if let Expr::IsNotNull(expr) = &node {
             if is_time_window(expr).is_some() {
-                return Ok(Transformed::yes(Expr::Literal(ScalarValue::Boolean(Some(true)))));
+                return Ok(Transformed::yes(Expr::Literal(ScalarValue::Boolean(Some(
+                    true,
+                )))));
             }
         }
-        
+
         return Ok(Transformed::no(node));
     }
 }

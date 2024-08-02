@@ -2,11 +2,7 @@ use std::sync::Arc;
 
 use arroyo_datastream::WindowType;
 use datafusion::common::tree_node::Transformed;
-use datafusion::common::{
-    plan_err,
-    tree_node::{TreeNode, TreeNodeRewriter},
-    Result as DFResult,
-};
+use datafusion::common::{plan_err, tree_node::TreeNodeRewriter, Result as DFResult};
 use datafusion::logical_expr;
 use datafusion::logical_expr::{
     expr::WindowFunction, Expr, Extension, LogicalPlan, Projection, Sort, Window,
@@ -49,7 +45,9 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
             LogicalPlan::Window(window.clone())
         );
         let mut window_detecting_visitor = WindowDetectingVisitor::default();
-        window.input.visit_with_subqueries(&mut window_detecting_visitor)?;
+        window
+            .input
+            .visit_with_subqueries(&mut window_detecting_visitor)?;
 
         let Some(input_window) = window_detecting_visitor.window else {
             return plan_err!("Window functions require already windowed input");

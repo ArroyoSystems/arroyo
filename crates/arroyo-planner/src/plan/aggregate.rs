@@ -7,13 +7,13 @@ use crate::{
     WindowBehavior,
 };
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
-use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
+use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::AggregateFunction;
 use datafusion::logical_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
 use std::sync::Arc;
-use tracing::{debug};
+use tracing::debug;
 
 #[derive(Debug, Default)]
 pub struct AggregateRewriter {}

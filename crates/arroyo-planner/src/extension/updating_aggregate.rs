@@ -95,21 +95,21 @@ impl ArroyoExtension for UpdatingAggregateExtension {
                 input_schemas.len()
             );
         }
-        
+
         let input_schema = input_schemas[0].clone();
         let SplitPlanOutput {
             partial_aggregation_plan,
             partial_schema,
             finish_plan,
         } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate, false)?;
-        
+
         let mut state_fields = partial_schema.schema.fields().to_vec();
         state_fields[partial_schema.timestamp_index] = Arc::new(Field::new(
             TIMESTAMP_FIELD,
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         ));
-        
+
         let state_partial_schema = ArroyoSchema::new_keyed(
             Arc::new(Schema::new_with_metadata(
                 state_fields,
@@ -118,7 +118,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             partial_schema.timestamp_index,
             self.key_fields.clone(),
         );
-        
+
         let mut state_final_fields = self
             .aggregate
             .schema()
@@ -141,10 +141,11 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             self.key_fields.clone(),
         );
 
-        let Some(PhysicalPlanType::Aggregate(aggregate)) = finish_plan.physical_plan_type.as_ref() else {
+        let Some(PhysicalPlanType::Aggregate(aggregate)) = finish_plan.physical_plan_type.as_ref()
+        else {
             return plan_err!("expect finish plan to be an aggregate");
         };
-        
+
         let mut combine_aggregate = aggregate.as_ref().clone();
         combine_aggregate.set_mode(datafusion_proto::protobuf::AggregateMode::CombinePartial);
         let combine_plan = PhysicalPlanNode {
@@ -171,9 +172,9 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             operator_config: config.encode_to_vec(),
             parallelism: 1,
         };
-        
+
         let edge = LogicalEdge::project_all(LogicalEdgeType::Shuffle, (*input_schema).clone());
-        
+
         Ok(NodeWithIncomingEdges {
             node,
             edges: vec![edge],

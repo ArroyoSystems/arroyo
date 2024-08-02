@@ -1,4 +1,3 @@
-use std::{collections::HashSet, sync::Arc};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
@@ -7,11 +6,16 @@ use datafusion::common::{
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor},
     Column, DataFusionError, Result, TableReference,
 };
+use std::{collections::HashSet, sync::Arc};
 
 use aggregate::AggregateRewriter;
-use datafusion::logical_expr::{expr::Alias, Aggregate, Expr, Extension, LogicalPlan, SubqueryAlias, Filter};
+use datafusion::logical_expr::{
+    expr::Alias, Aggregate, Expr, Extension, Filter, LogicalPlan, SubqueryAlias,
+};
 use join::JoinRewriter;
 
+use self::window_fn::WindowFunctionRewriter;
+use crate::rewriters::TimeWindowNullCheckRemover;
 use crate::{
     extension::{
         aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
@@ -27,8 +31,6 @@ use crate::{
     extension::{remote_table::RemoteTableExtension, ArroyoExtension},
     rewriters::AsyncUdfRewriter,
 };
-use crate::rewriters::TimeWindowNullCheckRemover;
-use self::window_fn::WindowFunctionRewriter;
 
 mod aggregate;
 mod join;
@@ -250,10 +252,6 @@ impl TreeNodeVisitor<'_> for WindowDetectingVisitor {
     }
 }
 
-struct WindowExpressionRemover {
-    
-}
-
 // This is one rewriter so that we can rely on inputs having already been rewritten
 // ensuring they have _timestamp field, amongst other things.
 pub struct ArroyoRewriter<'a> {
@@ -323,12 +321,12 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 // Joins with windows in the join condition can cause IS NOT NULL predicates to get
                 // pushed down to the table scan; however windows can never be null, and they can't
                 // be evaluated in filters—so we just remove them
-                let expr = f.predicate.clone().rewrite(&mut TimeWindowNullCheckRemover{})?;
+                let expr = f
+                    .predicate
+                    .clone()
+                    .rewrite(&mut TimeWindowNullCheckRemover {})?;
                 return Ok(if expr.transformed {
-                    Transformed::yes(LogicalPlan::Filter(Filter::try_new(
-                        expr.data,
-                        f.input,
-                    )?))
+                    Transformed::yes(LogicalPlan::Filter(Filter::try_new(expr.data, f.input)?))
                 } else {
                     Transformed::no(LogicalPlan::Filter(f))
                 });
@@ -350,7 +348,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
             }
             LogicalPlan::Union(mut union) => {
                 union.schema = union.inputs[0].schema().clone();
-                
+
                 // Need all the elements of the union to be materialized
                 for input in union.inputs.iter_mut() {
                     if let LogicalPlan::Extension(Extension { node }) = input.as_ref() {
@@ -369,15 +367,16 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                         node: remote_table_extension,
                     }));
                 }
-                
-                
+
                 return Ok(Transformed::yes(LogicalPlan::Union(union)));
             }
             LogicalPlan::EmptyRelation(_) => {}
             LogicalPlan::Subquery(_) => {}
             LogicalPlan::SubqueryAlias(sa) => {
                 // recreate from our children, in case the schemas have changed
-                return Ok(Transformed::yes(LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(sa.input, sa.alias)?)));
+                return Ok(Transformed::yes(LogicalPlan::SubqueryAlias(
+                    SubqueryAlias::try_new(sa.input, sa.alias)?,
+                )));
             }
             LogicalPlan::Limit(_) => {
                 return plan_err!("LIMIT is not currently supported ({})", node.display());

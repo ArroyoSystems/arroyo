@@ -8,6 +8,7 @@ use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{
     ArrowDylibUdfConfig, ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
 };
+use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use petgraph::Direction;
@@ -19,7 +20,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hasher;
-use petgraph::dot::Dot;
 use strum::{Display, EnumString};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
@@ -219,7 +219,7 @@ impl LogicalProgram {
             }
         }
     }
-    
+
     pub fn dot(&self) -> String {
         format!("{:?}", Dot::with_config(&self.graph, &[]))
     }

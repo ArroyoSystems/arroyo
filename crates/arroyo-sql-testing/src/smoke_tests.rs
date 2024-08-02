@@ -62,7 +62,10 @@ async fn run_smoketest(path: &Path) {
             .1
             .trim()
     });
-    match (correctness_run_codegen(test_name, query.clone(), 20).await, fail) {
+    match (
+        correctness_run_codegen(test_name, query.clone(), 20).await,
+        fail,
+    ) {
         (Ok(_), false) => {
             // ok
         }

@@ -6,13 +6,15 @@ use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{
-    not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result,
-    ScalarValue, TableReference,
+    not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue,
+    TableReference,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::Alias;
-use datafusion::logical_expr::{BinaryExpr, build_join_schema, Case, Expr, ExprSchemable, Extension, Join, LogicalPlan, Operator, Projection};
-use datafusion::prelude::{coalesce, get_field};
+use datafusion::logical_expr::{
+    build_join_schema, BinaryExpr, Case, Expr, Extension, Join, LogicalPlan, Projection,
+};
+use datafusion::prelude::coalesce;
 use std::sync::Arc;
 
 pub(crate) struct JoinRewriter {}
@@ -93,9 +95,10 @@ impl JoinRewriter {
             .chain(
                 fields_with_qualifiers(&input.schema())
                     .iter()
-                    .map(|field| Expr::Column(field.qualified_column())))
+                    .map(|field| Expr::Column(field.qualified_column())),
+            )
             .collect();
-        
+
         // Calculate initial projection with default names
         let projection = Projection::try_new(join_expressions, input)?;
         let key_calculation_extension = KeyCalculationExtension::new_named_and_trimmed(
@@ -116,7 +119,6 @@ impl JoinRewriter {
             .filter(|field| field.name() == "_timestamp")
             .cloned()
             .collect::<Vec<_>>();
-        
 
         if timestamp_fields.len() != 2 {
             return not_impl_err!("join must have two timestamp fields");
@@ -185,7 +187,6 @@ impl JoinRewriter {
     }
 }
 
-
 impl TreeNodeRewriter for JoinRewriter {
     type Node = LogicalPlan;
 
@@ -220,7 +221,11 @@ impl TreeNodeRewriter for JoinRewriter {
         let left_input = self.create_join_key_plan(left, left_expressions, "left")?;
         let right_input = self.create_join_key_plan(right, right_expressions, "right")?;
         let rewritten_join = LogicalPlan::Join(Join {
-            schema: Arc::new(build_join_schema(left_input.schema(), right_input.schema(), &join_type)?),
+            schema: Arc::new(build_join_schema(
+                left_input.schema(),
+                right_input.schema(),
+                &join_type,
+            )?),
             left: Arc::new(left_input),
             right: Arc::new(right_input),
             on,

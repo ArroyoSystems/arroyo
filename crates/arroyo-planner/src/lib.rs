@@ -33,7 +33,6 @@ use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
-use datafusion::common::tree_node::TreeNode;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
     create_udaf, Expr, Extension, LogicalPlan, ReturnTypeFunction, ScalarUDF, Signature,
@@ -55,7 +54,7 @@ use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::json::{register_json_functions};
+use crate::json::register_json_functions;
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
 use crate::udafs::EmptyUdaf;
@@ -65,14 +64,14 @@ use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
+use datafusion::execution::context::SessionState;
+use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
-use datafusion::execution::context::SessionState;
-use datafusion::execution::runtime_env::RuntimeEnv;
 use syn::Item;
 use tracing::{debug, info, warn};
 use unicase::UniCase;
@@ -175,14 +174,14 @@ impl ArroyoSchemaProvider {
                 )
             }),
         );
-        
+
         let mut registry = Self {
             functions,
             ..Default::default()
         };
 
         register_functions(&mut registry);
-        
+
         registry
     }
 
@@ -530,10 +529,12 @@ pub fn rewrite_plan(
         .rewrite_with_subqueries(&mut ArroyoRewriter { schema_provider })?
         .data
         .rewrite_with_subqueries(&mut UnnestRewriter {})?;
-    
+
     // check for window functions
-    rewritten_plan.data.visit_with_subqueries(&mut TimeWindowUdfChecker {})?;
-    
+    rewritten_plan
+        .data
+        .visit_with_subqueries(&mut TimeWindowUdfChecker {})?;
+
     Ok(rewritten_plan.data)
 }
 
@@ -553,14 +554,14 @@ pub async fn parse_and_get_arrow_program(
     config.options_mut().optimizer.repartition_aggregations = false;
     config.options_mut().optimizer.repartition_windows = false;
     config.options_mut().optimizer.repartition_sorts = false;
-    let session_state =
-        SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
-            .with_physical_optimizer_rules(vec![]);
-    
-    
+    let session_state = SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
+        .with_physical_optimizer_rules(vec![]);
+
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
-        if let Some(table) = Table::try_from_statement(&statement, &schema_provider, &session_state)? {
+        if let Some(table) =
+            Table::try_from_statement(&statement, &schema_provider, &session_state)?
+        {
             schema_provider.insert_table(table);
         } else {
             inserts.push(Insert::try_from_statement(
@@ -647,7 +648,7 @@ pub async fn parse_and_get_arrow_program(
             udf_dylibs: schema_provider.dylib_udfs.clone(),
         },
     );
-    
+
     Ok(CompiledSql {
         program,
         connection_ids: used_connections.into_iter().collect(),

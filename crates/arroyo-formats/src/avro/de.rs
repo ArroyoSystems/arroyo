@@ -409,6 +409,7 @@ mod tests {
             json!([{
                 "name": "Alyssa",
                 "favorite_number": 256,
+                "favorite_color": null,
             }])
         );
     }
@@ -463,6 +464,7 @@ mod tests {
             json!([{
                 "name": "Alyssa",
                 "favorite_number": 256,
+                "favorite_color": null,
                 "removed_field": "hello!"
             }])
         );

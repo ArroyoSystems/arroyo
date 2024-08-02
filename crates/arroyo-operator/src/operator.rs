@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, warn, Instrument, trace};
+use tracing::{debug, error, info, trace, warn, Instrument};
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
