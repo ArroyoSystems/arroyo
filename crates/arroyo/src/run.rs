@@ -333,6 +333,11 @@ impl MaybeLocalDb {
             start.elapsed().as_secs_f32()
         );
 
+        // delete the temp backup
+        if let Err(e) = tokio::fs::remove_file(&backup_file).await {
+            warn!("Unable to remove temporary db backup file: {:?}", e);
+        }
+
         Ok(())
     }
 }
