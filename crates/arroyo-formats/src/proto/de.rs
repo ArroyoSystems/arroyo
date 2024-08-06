@@ -11,6 +11,9 @@ pub(crate) async fn deserialize_proto(
     proto: &ProtobufFormat,
     msg: &[u8]
 ) -> Result<serde_json::Value, SourceError> {
+    let message = proto.message_name.as_ref().expect("no message name");
+    let descriptor = pool.get_message_by_name(message).expect("no descriptor");
+    
     let msg = DynamicMessage::decode(descriptor, msg.as_ref())
         .map_err(|e| SourceError::bad_data(format!("failed to deserialize protobuf: {:?}", e)))?;
     

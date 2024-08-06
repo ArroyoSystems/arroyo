@@ -1,6 +1,10 @@
+use std::path::Path;
 use prost_reflect::{MessageDescriptor, FieldDescriptor, Kind, Cardinality};
 use arrow_schema::{DataType, Field, Schema};
 use std::sync::Arc;
+use anyhow::bail;
+use protobuf_native::compiler::{SimpleErrorCollector, SourceTreeDescriptorDatabase, VirtualSourceTree};
+use protobuf_native::{DescriptorDatabase, MessageLite};
 use arroyo_types::ArroyoExtensionType;
 
 fn protobuf_to_arrow_datatype(field: &FieldDescriptor, in_list: bool) -> (DataType, Option<ArroyoExtensionType>) {
@@ -48,11 +52,29 @@ fn fields_for_message(message: &MessageDescriptor) -> Vec<Arc<Field>> {
 } 
 
 /// Computes an Arrow schema from a protobuf schema
-pub fn protobuf_to_arrow(proto_schema: MessageDescriptor) -> anyhow::Result<Schema> {
-    let fields = fields_for_message(&proto_schema);
+pub fn protobuf_to_arrow(proto_schema: &MessageDescriptor) -> anyhow::Result<Schema> {
+    let fields = fields_for_message(proto_schema);
     Ok(Schema::new(fields))
 }
 
-fn is_nullable(field: &FieldDescriptor) -> bool {
+
+fn is_nullable(field: &FieldDescriptor) -> bool { 
     field.cardinality() == Cardinality::Optional || field.is_list() || field.is_map()
+}
+
+pub fn schema_file_to_descriptor(schema: &str) -> anyhow::Result<Vec<u8>> {
+    let mut source_tree = VirtualSourceTree::new();
+    source_tree.as_mut().add_file(Path::new("schema.proto"), schema.as_bytes().to_vec());
+
+    let mut error_collector = SimpleErrorCollector::new();
+    let mut db = SourceTreeDescriptorDatabase::new(source_tree.as_mut());
+    db.as_mut().record_errors_to(error_collector.as_mut());
+    let res = db.as_mut().find_file_by_name(Path::new("schema.proto")).unwrap();
+    drop(db);
+    let errors: Vec<_> = error_collector.as_mut().collect();
+    if !errors.is_empty() {
+        bail!("errors parsing proto file:\n{}", 
+            errors.iter().map(|e| format!("  * {}", e)).collect::<Vec<_>>().join("\n"))
+    }
+    Ok(res.serialize().unwrap())
 }

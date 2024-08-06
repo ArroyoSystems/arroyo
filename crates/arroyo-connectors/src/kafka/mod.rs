@@ -670,6 +670,9 @@ impl KafkaTester {
             Format::RawBytes(_) => {
                 // all bytes are valid
             }
+            Format::Protobuf(_) => {
+                todo!("Validate protobuf schema");
+            }
         };
 
         Ok(())

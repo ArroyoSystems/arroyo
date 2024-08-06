@@ -24,5 +24,8 @@ memchr = "2"
 typify = "0.0.13"
 schemars = "0.8"
 prost = { workspace = true}
-prost-reflect = "0.13.1"
+prost-reflect = { workspace = true}
+prost-build = { workspace = true }
+protobuf-native = { version = "0.3.1+26.1" }
+
 base64 = "0.22.1"

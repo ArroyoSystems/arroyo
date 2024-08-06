@@ -22,7 +22,7 @@ use arroyo_rpc::api_types::connections::{
     SchemaDefinition,
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
-use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat};
+use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, ProtobufFormat};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
@@ -40,6 +40,8 @@ use crate::{
     to_micros, AuthData,
 };
 use cornucopia_async::{Database, DatabaseSource};
+use prost_reflect::DescriptorPool;
+use arroyo_formats::proto::schema::{protobuf_to_arrow, schema_file_to_descriptor};
 
 async fn get_and_validate_connector(
     req: &ConnectionTablePost,
@@ -466,6 +468,16 @@ pub(crate) async fn expand_schema(
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
         Format::RawBytes(_) => Ok(schema),
+        Format::Protobuf(_) => {
+            expand_proto_schema(
+                name,
+                connector,
+                connection_type,
+                schema,
+                profile_config,
+                table_config,
+            ).await
+        }
     }
 }
 
@@ -529,6 +541,45 @@ async fn expand_avro_schema(
         .collect();
 
     schema.fields = fields.map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+
+    Ok(schema)
+}
+
+async fn expand_proto_schema(
+    name: &str,
+    connector: &str,
+    connection_type: ConnectionType,
+    mut schema: ConnectionSchema,
+    profile_config: &Value,
+    table_config: &Value,
+) -> Result<ConnectionSchema, ErrorResp> {
+    let Some(Format::Protobuf(ProtobufFormat { schema: proto_schema, message_name, compiled_schema, .. })) = &mut schema.format else {
+        panic!("not proto");
+    };
+
+    let proto_schema = proto_schema.as_ref().expect("no schema provided");
+    let message_name = message_name.as_ref().expect("no message name provided");
+    
+    let encoded = schema_file_to_descriptor(proto_schema)
+        .map_err(|e| bad_request(e.to_string()))?;
+    
+    let mut pool = DescriptorPool::new();
+    pool.decode_file_descriptor_proto(encoded.as_slice()).expect("invalid proto");
+
+    *compiled_schema = Some(encoded);
+
+    let descriptor = pool.get_message_by_name(message_name).expect("message is not in proto file");
+
+    let arrow = protobuf_to_arrow(&descriptor)
+        .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+
+    let fields: Result<_, String> = arrow.fields
+        .into_iter()
+        .map(|f| (**f).clone().try_into())
+        .collect();
+    
+    schema.fields =
+        fields.map_err(|e| bad_request(format!("failed to convert schema: {}", e)))?;
 
     Ok(schema)
 }
