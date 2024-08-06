@@ -22,6 +22,7 @@ use arrow::datatypes::{self, DataType};
 use arrow_schema::{Field, FieldRef, Schema};
 use arroyo_datastream::WindowType;
 
+use builder::NamedNode;
 use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
@@ -36,10 +37,11 @@ use datafusion::sql::{planner::ContextProvider, TableReference};
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
     create_udaf, Expr, Extension, LogicalPlan, ReturnTypeFunction, ScalarUDF, Signature,
-    Volatility, WindowUDF,
+    UserDefinedLogicalNode, Volatility, WindowUDF,
 };
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
+use extension::ArroyoExtension;
 use logical::LogicalBatchInput;
 
 use schemas::window_arrow_struct;
@@ -538,6 +540,25 @@ pub fn rewrite_plan(
     Ok(rewritten_plan.data)
 }
 
+fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<LogicalPlan>> {
+    let mut sink_inputs = HashMap::<NamedNode, Vec<LogicalPlan>>::new();
+    for extension in extensions.iter() {
+        if let LogicalPlan::Extension(extension) = extension {
+            if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
+                if let Some(named_node) = sink_node.node_name() {
+                    let inputs = sink_node
+                        .inputs()
+                        .into_iter()
+                        .map(|x| x.clone())
+                        .collect::<Vec<LogicalPlan>>();
+                    sink_inputs.entry(named_node).or_default().extend(inputs);
+                }
+            }
+        }
+    }
+    sink_inputs
+}
+
 pub async fn parse_and_get_arrow_program(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
@@ -636,7 +657,10 @@ pub async fn parse_and_get_arrow_program(
             node: Arc::new(sink?),
         }));
     }
-    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider, &session_state);
+
+    let sink_inputs = build_sink_inputs(&extensions);
+    let mut plan_to_graph_visitor =
+        PlanToGraphVisitor::new(&schema_provider, &session_state, sink_inputs);
     for extension in extensions {
         plan_to_graph_visitor.add_plan(extension)?;
     }

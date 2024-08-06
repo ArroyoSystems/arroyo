@@ -9,7 +9,9 @@ use arroyo_datastream::logical::{LogicalEdge, LogicalGraph, LogicalNode};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 
 use async_trait::async_trait;
-use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
+use datafusion::common::tree_node::{
+    TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
+};
 use datafusion::common::{
     plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, TableReference,
 };
@@ -27,6 +29,7 @@ use tokio::sync::oneshot;
 
 use crate::extension::debezium::{DEBEZIUM_UNROLLING_EXTENSION_NAME, TO_DEBEZIUM_EXTENSION_NAME};
 use crate::extension::key_calculation::KeyCalculationExtension;
+use crate::extension::sink::SinkExtension;
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::physical::{
     ArroyoMemExec, ArroyoPhysicalExtensionCodec, DebeziumUnrollingExec, DecodingContext,
@@ -49,16 +52,24 @@ pub(crate) struct PlanToGraphVisitor<'a> {
     // In post_visit each node should clean up its vec and push its index to the last vec, if present.
     traversal: Vec<Vec<NodeIndex>>,
     planner: Planner<'a>,
+    // each sink node can get itself inputs (is merged previously) by sink_inputs.
+    // input sink node's named node which get by `named_node()` to get inputs.
+    sink_inputs: HashMap<NamedNode, Vec<LogicalPlan>>,
 }
 
 impl<'a> PlanToGraphVisitor<'a> {
-    pub fn new(schema_provider: &'a ArroyoSchemaProvider, session_state: &'a SessionState) -> Self {
+    pub fn new(
+        schema_provider: &'a ArroyoSchemaProvider,
+        session_state: &'a SessionState,
+        sink_inputs: HashMap<NamedNode, Vec<LogicalPlan>>,
+    ) -> Self {
         Self {
             graph: Default::default(),
             output_schemas: Default::default(),
             named_nodes: Default::default(),
             traversal: vec![],
             planner: Planner::new(schema_provider, session_state),
+            sink_inputs,
         }
     }
 }
@@ -213,6 +224,7 @@ pub(crate) enum NamedNode {
     Source(TableReference),
     Watermark(TableReference),
     RemoteTable(TableReference),
+    Sink(TableReference),
 }
 
 struct ArroyoExtensionPlanner {}
@@ -265,7 +277,9 @@ impl<'a> PlanToGraphVisitor<'a> {
 
     pub(crate) fn add_plan(&mut self, plan: LogicalPlan) -> Result<()> {
         self.traversal.clear();
-        plan.visit(self)?;
+        let mut rewriter = SinkInputRewriter::new(&self.sink_inputs);
+        let new_plan = plan.rewrite(&mut rewriter)?.data;
+        new_plan.visit(self)?;
         Ok(())
     }
 
@@ -381,6 +395,40 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
             .map_err(|e| e.context("building extension"))?;
 
         Ok(TreeNodeRecursion::Continue)
+    }
+}
+
+struct SinkInputRewriter<'a> {
+    sink_inputs: &'a HashMap<NamedNode, Vec<LogicalPlan>>,
+}
+
+impl<'a> SinkInputRewriter<'a> {
+    fn new(sink_inputs: &'a HashMap<NamedNode, Vec<LogicalPlan>>) -> Self {
+        Self { sink_inputs }
+    }
+}
+
+impl<'a> TreeNodeRewriter for SinkInputRewriter<'a> {
+    type Node = LogicalPlan;
+
+    fn f_down(
+        &mut self,
+        node: Self::Node,
+    ) -> Result<datafusion::common::tree_node::Transformed<Self::Node>> {
+        if let LogicalPlan::Extension(extension) = &node {
+            if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
+                if let Some(named_node) = sink_node.node_name() {
+                    if let Some(inputs) = self.sink_inputs.get(&named_node) {
+                        return Ok(datafusion::common::tree_node::Transformed::yes(
+                            LogicalPlan::Extension(Extension {
+                                node: sink_node.with_exprs_and_inputs(vec![], inputs.clone())?,
+                            }),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(datafusion::common::tree_node::Transformed::no(node))
     }
 }
 
