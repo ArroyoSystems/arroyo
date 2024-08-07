@@ -72,8 +72,8 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
             tracing::subscriber::set_global_default(
                 Registry::default().with(
                     tracing_subscriber::fmt::layer()
-                        .with_line_number(false)
-                        .with_file(false)
+                        .with_line_number(true)
+                        .with_file(true)
                         .with_span_events(FmtSpan::NONE)
                         .with_writer(nonblocking)
                         .with_filter(filter),
@@ -85,6 +85,8 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
             tracing::subscriber::set_global_default(
                 Registry::default().with(
                     tracing_subscriber::fmt::layer()
+                        .with_line_number(true)
+                        .with_file(true)
                         .event_format(tracing_logfmt::EventsFormatter)
                         .fmt_fields(tracing_logfmt::FieldsFormatter)
                         .with_writer(nonblocking)
@@ -97,6 +99,8 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
             tracing::subscriber::set_global_default(
                 Registry::default().with(
                     tracing_subscriber::fmt::layer()
+                        .with_line_number(true)
+                        .with_file(true)
                         .event_format(Format::default().json())
                         .with_writer(nonblocking)
                         .with_filter(filter),
