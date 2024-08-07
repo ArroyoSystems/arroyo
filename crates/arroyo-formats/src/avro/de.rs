@@ -1,3 +1,4 @@
+use crate::float_to_json;
 use apache_avro::types::{Value, Value as AvroValue};
 use apache_avro::{from_avro_datum, AvroResult, Reader, Schema};
 use arroyo_rpc::formats::AvroFormat;
@@ -8,7 +9,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
-use crate::float_to_json;
 
 pub(crate) async fn avro_messages(
     format: &AvroFormat,
@@ -81,7 +81,6 @@ pub(crate) async fn avro_messages(
     };
     Ok(messages)
 }
-
 
 fn encode_vec(v: Vec<u8>) -> JsonValue {
     JsonValue::String(v.into_iter().map(char::from).collect())

@@ -3,7 +3,7 @@ use crate::primitive_to_sql;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
@@ -228,7 +228,11 @@ impl TryFrom<Field> for SourceField {
 #[serde(rename_all = "snake_case")]
 pub enum SchemaDefinition {
     JsonSchema(String),
-    ProtobufSchema(String),
+    ProtobufSchema {
+        schema: String,
+        #[serde(default)]
+        dependencies: HashMap<String, String>,
+    },
     AvroSchema(String),
     RawSchema(String),
 }

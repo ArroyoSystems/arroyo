@@ -1,5 +1,3 @@
-extern crate core;
-
 use arroyo_rpc::config::config;
 use serde_json::{json, Value};
 use std::time::Instant;
@@ -8,8 +6,8 @@ pub mod avro;
 pub mod json;
 
 pub mod de;
-pub mod ser;
 pub mod proto;
+pub mod ser;
 
 pub fn should_flush(size: usize, time: Instant) -> bool {
     size > 0
@@ -28,7 +26,7 @@ pub(crate) fn float_to_json(f: f64) -> Value {
             } else {
                 "NaN"
             })
-                .to_string(),
+            .to_string(),
         ),
     }
 }

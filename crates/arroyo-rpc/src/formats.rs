@@ -1,3 +1,4 @@
+use prost_reflect::DescriptorPool;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
@@ -5,7 +6,6 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::sync::OnceLock;
-use prost_reflect::DescriptorPool;
 use utoipa::ToSchema;
 
 #[derive(
@@ -231,7 +231,6 @@ impl AvroFormat {
 #[serde(rename_all = "camelCase")]
 pub struct ParquetFormat {}
 
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtobufFormat {
@@ -239,14 +238,10 @@ pub struct ProtobufFormat {
     pub into_unstructured_json: bool,
 
     #[serde(default)]
-    pub schema: Option<String>,
-
-    #[serde(default)]
     pub message_name: Option<String>,
 
     #[serde(default)]
     pub compiled_schema: Option<Vec<u8>>,
-
 }
 
 impl ProtobufFormat {
@@ -295,7 +290,11 @@ impl Format {
     pub fn is_updating(&self) -> bool {
         match self {
             Format::Json(JsonFormat { debezium: true, .. }) => true,
-            Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::RawString(_) | Format::Protobuf(_) => false,
+            Format::Json(_)
+            | Format::Avro(_)
+            | Format::Parquet(_)
+            | Format::RawString(_)
+            | Format::Protobuf(_) => false,
             Format::RawBytes(_) => false,
         }
     }

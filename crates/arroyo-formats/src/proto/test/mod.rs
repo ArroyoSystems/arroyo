@@ -1,8 +1,8 @@
-use prost_reflect::{DescriptorPool};
-use arrow_schema::{DataType, Field, Schema};
-use std::sync::Arc;
-use arroyo_types::ArroyoExtensionType;
 use crate::proto::schema::protobuf_to_arrow;
+use arrow_schema::{DataType, Field, Schema};
+use arroyo_types::ArroyoExtensionType;
+use prost_reflect::DescriptorPool;
+use std::sync::Arc;
 
 #[test]
 fn test_basic_types() {
@@ -22,7 +22,8 @@ fn test_basic_types() {
 
 #[test]
 fn test_string_and_bytes() {
-    let pool = DescriptorPool::decode(include_bytes!("protos/string_and_bytes.bin").as_ref()).unwrap();
+    let pool =
+        DescriptorPool::decode(include_bytes!("protos/string_and_bytes.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(message).unwrap();
 
@@ -33,46 +34,81 @@ fn test_string_and_bytes() {
 
 #[test]
 fn test_nested_message() {
-    let pool = DescriptorPool::decode(include_bytes!("protos/nested_message.bin").as_ref()).unwrap();
+    let pool =
+        DescriptorPool::decode(include_bytes!("protos/nested_message.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 2);
-    assert_field(&arrow_schema, "nested_field", DataType::Struct(vec![
-        Arc::new(Field::new("inner_field", DataType::Int32, true))
-    ].into()), true);
-    assert_field(&arrow_schema, "double_nested_field", DataType::Struct(vec![
-        Arc::new(Field::new("inner_nested", DataType::Struct(vec![
-            Arc::new(Field::new("inner_field", DataType::Int32, true))
-        ].into()), true))
-    ].into()), true);
+    assert_field(
+        &arrow_schema,
+        "nested_field",
+        DataType::Struct(vec![Arc::new(Field::new("inner_field", DataType::Int32, true))].into()),
+        true,
+    );
+    assert_field(
+        &arrow_schema,
+        "double_nested_field",
+        DataType::Struct(
+            vec![Arc::new(Field::new(
+                "inner_nested",
+                DataType::Struct(
+                    vec![Arc::new(Field::new("inner_field", DataType::Int32, true))].into(),
+                ),
+                true,
+            ))]
+            .into(),
+        ),
+        true,
+    );
 }
 
 #[test]
 fn test_repeated_fields() {
-    let pool = DescriptorPool::decode(include_bytes!("protos/repeated_fields.bin").as_ref()).unwrap();
+    let pool =
+        DescriptorPool::decode(include_bytes!("protos/repeated_fields.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 2);
-    assert_field(&arrow_schema, "repeated_int", DataType::List(Arc::new(Field::new("item", DataType::Int32, true))), true);
-    assert_field(&arrow_schema, "repeated_string", DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))), true);
+    assert_field(
+        &arrow_schema,
+        "repeated_int",
+        DataType::List(Arc::new(Field::new("item", DataType::Int32, true))),
+        true,
+    );
+    assert_field(
+        &arrow_schema,
+        "repeated_string",
+        DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+        true,
+    );
 }
 
 #[test]
 fn test_map_fields() {
     let pool = DescriptorPool::decode(include_bytes!("protos/map_fields.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
-    
+
     let arrow_schema = protobuf_to_arrow(message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 2);
-    assert_eq!(arrow_schema.field_with_name("int_to_string_map").unwrap(),
-        &ArroyoExtensionType::add_metadata(Some(ArroyoExtensionType::JSON), 
-            Field::new("int_to_string_map".to_string(), DataType::Utf8, true)));
-    assert_eq!(arrow_schema.field_with_name("string_to_message_map").unwrap(),
-       &ArroyoExtensionType::add_metadata(Some(ArroyoExtensionType::JSON),
-          Field::new("string_to_message_map".to_string(), DataType::Utf8, true)));
+    assert_eq!(
+        arrow_schema.field_with_name("int_to_string_map").unwrap(),
+        &ArroyoExtensionType::add_metadata(
+            Some(ArroyoExtensionType::JSON),
+            Field::new("int_to_string_map".to_string(), DataType::Utf8, true)
+        )
+    );
+    assert_eq!(
+        arrow_schema
+            .field_with_name("string_to_message_map")
+            .unwrap(),
+        &ArroyoExtensionType::add_metadata(
+            Some(ArroyoExtensionType::JSON),
+            Field::new("string_to_message_map".to_string(), DataType::Utf8, true)
+        )
+    );
 }
 
 #[test]

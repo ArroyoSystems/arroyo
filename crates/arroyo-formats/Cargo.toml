@@ -26,6 +26,6 @@ schemars = "0.8"
 prost = { workspace = true}
 prost-reflect = { workspace = true}
 prost-build = { workspace = true }
-protobuf-native = { version = "0.3.1+26.1" }
-
+prost-types = { workspace = true}
 base64 = "0.22.1"
+uuid = { version = "1.10.0", features = ["v4"] }

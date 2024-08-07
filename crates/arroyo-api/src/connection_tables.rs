@@ -15,7 +15,7 @@ use tracing::debug;
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::connector_for_type;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
-use arroyo_formats::{avro, json};
+use arroyo_formats::{avro, json, proto};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
@@ -39,9 +39,9 @@ use crate::{
     queries::api_queries::{self, DbConnectionTable},
     to_micros, AuthData,
 };
+use arroyo_formats::proto::schema::{protobuf_to_arrow, schema_file_to_descriptor};
 use cornucopia_async::{Database, DatabaseSource};
 use prost_reflect::DescriptorPool;
-use arroyo_formats::proto::schema::{protobuf_to_arrow, schema_file_to_descriptor};
 
 async fn get_and_validate_connector(
     req: &ConnectionTablePost,
@@ -476,7 +476,8 @@ pub(crate) async fn expand_schema(
                 schema,
                 profile_config,
                 table_config,
-            ).await
+            )
+            .await
         }
     }
 }
@@ -553,33 +554,57 @@ async fn expand_proto_schema(
     profile_config: &Value,
     table_config: &Value,
 ) -> Result<ConnectionSchema, ErrorResp> {
-    let Some(Format::Protobuf(ProtobufFormat { schema: proto_schema, message_name, compiled_schema, .. })) = &mut schema.format else {
+    let Some(Format::Protobuf(ProtobufFormat {
+        message_name,
+        compiled_schema,
+        ..
+    })) = &mut schema.format
+    else {
         panic!("not proto");
     };
 
-    let proto_schema = proto_schema.as_ref().expect("no schema provided");
-    let message_name = message_name.as_ref().expect("no message name provided");
-    
-    let encoded = schema_file_to_descriptor(proto_schema)
-        .map_err(|e| bad_request(e.to_string()))?;
-    
-    let mut pool = DescriptorPool::new();
-    pool.decode_file_descriptor_proto(encoded.as_slice()).expect("invalid proto");
+    if let Some(definition) = &schema.definition {
+        let SchemaDefinition::ProtobufSchema {
+            schema: protobuf_schema,
+            dependencies,
+        } = &definition
+        else {
+            return Err(bad_request("Schema is not a protobuf schema"));
+        };
 
-    *compiled_schema = Some(encoded);
+        let message_name = message_name.as_ref().expect("no message name provided");
 
-    let descriptor = pool.get_message_by_name(message_name).expect("message is not in proto file");
+        let encoded = schema_file_to_descriptor(protobuf_schema, dependencies)
+            .await
+            .map_err(|e| bad_request(e.to_string()))?;
 
-    let arrow = protobuf_to_arrow(&descriptor)
-        .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+        let pool = proto::schema::get_pool(&encoded)
+            .map_err(|e| bad_request(format!("error handling protobuf: {}", e)))?;
+        *compiled_schema = Some(encoded);
 
-    let fields: Result<_, String> = arrow.fields
-        .into_iter()
-        .map(|f| (**f).clone().try_into())
-        .collect();
-    
-    schema.fields =
-        fields.map_err(|e| bad_request(format!("failed to convert schema: {}", e)))?;
+        let descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
+            bad_request(format!(
+                "Message '{}' not found in proto definition; messages are {}",
+                message_name,
+                pool.all_messages()
+                    .map(|m| m.full_name().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?;
+
+        let arrow = protobuf_to_arrow(&descriptor)
+            .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+
+        let fields: Result<_, String> = arrow
+            .fields
+            .into_iter()
+            .map(|f| (**f).clone().try_into())
+            .collect();
+
+        schema.fields =
+            fields.map_err(|e| bad_request(format!("failed to convert schema: {}", e)))?;
+    };
 
     Ok(schema)
 }
