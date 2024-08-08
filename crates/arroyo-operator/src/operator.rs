@@ -89,6 +89,16 @@ impl OperatorNode {
                     "Running source {}-{}",
                     ctx.task_info.operator_name, ctx.task_info.task_index
                 );
+
+                ctx.control_tx
+                    .send(ControlResp::TaskStarted {
+                        operator_id: ctx.task_info.operator_id.clone(),
+                        task_index: ctx.task_info.task_index,
+                        start_time: SystemTime::now(),
+                    })
+                    .await
+                    .unwrap();
+
                 let result = s.run(ctx).await;
 
                 s.on_close(ctx).await;
@@ -193,6 +203,15 @@ async fn operator_run_behavior(
         "Running operator {}-{}",
         ctx.task_info.operator_name, ctx.task_info.task_index
     );
+
+    ctx.control_tx
+        .send(ControlResp::TaskStarted {
+            operator_id: ctx.task_info.operator_id.clone(),
+            task_index: ctx.task_info.task_index,
+            start_time: SystemTime::now(),
+        })
+        .await
+        .unwrap();
 
     let task_info = ctx.task_info.clone();
     let name = this.name();

@@ -884,4 +884,24 @@ mod tests {
 
         assert_eq!(tx.capacity(), 8);
     }
+
+    #[tokio::test]
+    async fn test_panic_propagation() {
+        let (tx, mut rx) = batch_bounded(8);
+
+        let msg = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)])),
+            vec![Arc::new(Int64Array::from(vec![1, 2, 3, 4]))],
+        )
+        .unwrap();
+
+        tokio::task::spawn(async move {
+            let f = rx.recv();
+            panic!("at the disco");
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(tx.send(ArrowMessage::Data(msg)).await.is_err());
+    }
 }
