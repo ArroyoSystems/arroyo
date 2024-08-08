@@ -738,14 +738,6 @@ impl Engine {
 
         let send_copy = control_tx.clone();
         tokio::spawn(async move {
-            send_copy
-                .send(ControlResp::TaskStarted {
-                    operator_id: operator_id.clone(),
-                    task_index,
-                    start_time: SystemTime::now(),
-                })
-                .await
-                .unwrap();
             if let Err(error) = join_task.await {
                 send_copy
                     .send(ControlResp::TaskFailed {

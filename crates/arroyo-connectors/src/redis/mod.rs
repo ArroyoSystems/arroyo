@@ -1,7 +1,5 @@
 mod operator;
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, bail};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
@@ -11,6 +9,7 @@ use redis::aio::ConnectionManager;
 use redis::cluster::ClusterClient;
 use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
 
@@ -113,7 +112,7 @@ async fn test_inner(
     match &client {
         RedisClient::Standard(client) => {
             let mut connection = client
-                .get_async_connection()
+                .get_multiplexed_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
             tx.send(TestSourceMessage::info(
