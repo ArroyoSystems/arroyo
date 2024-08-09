@@ -3111,6 +3111,8 @@ checksum = "a369332afd0ef5bd565f6db2139fb9f1dfdd0afa75a7f70f000b74208d76994f"
 dependencies = [
  "arrow",
  "base64 0.22.1",
+ "blake2",
+ "blake3",
  "chrono",
  "datafusion-common",
  "datafusion-execution",
@@ -3119,8 +3121,10 @@ dependencies = [
  "hex",
  "itertools 0.12.1",
  "log",
+ "md-5",
  "rand 0.8.5",
  "regex",
+ "sha2",
  "unicode-segmentation",
  "uuid",
 ]
