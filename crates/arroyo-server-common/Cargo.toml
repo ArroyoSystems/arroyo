@@ -7,6 +7,9 @@ edition = "2021"
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 
+# tikv-jemallocator = { version = "0.6.0", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
+jemalloc_pprof = "0.4.2"
+
 # logging
 tracing = "0.1"
 tracing-logfmt = "0.2.0"
