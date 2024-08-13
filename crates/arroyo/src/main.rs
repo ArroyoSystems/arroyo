@@ -32,7 +32,6 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[export_name = "malloc_conf"]
 pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 
-
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {

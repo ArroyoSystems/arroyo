@@ -2988,7 +2988,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 [[package]]
 name = "datafusion"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "ahash",
  "arrow",
@@ -3005,7 +3005,7 @@ dependencies = [
  "datafusion-common-runtime",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo)",
+ "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation)",
  "datafusion-functions-aggregate",
  "datafusion-functions-array",
  "datafusion-optimizer",
@@ -3041,7 +3041,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "ahash",
  "arrow",
@@ -3062,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "tokio",
 ]
@@ -3070,7 +3070,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "arrow",
  "chrono",
@@ -3090,7 +3090,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "ahash",
  "arrow",
@@ -3134,7 +3134,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "arrow",
  "base64 0.22.1",
@@ -3159,7 +3159,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "ahash",
  "arrow",
@@ -3176,7 +3176,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-array"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3186,7 +3186,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo)",
+ "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation)",
  "datafusion-functions-aggregate",
  "itertools 0.12.1",
  "log",
@@ -3196,7 +3196,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3215,7 +3215,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "ahash",
  "arrow",
@@ -3244,7 +3244,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "ahash",
  "arrow",
@@ -3257,7 +3257,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "ahash",
  "arrow",
@@ -3290,7 +3290,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "arrow",
  "chrono",
@@ -3305,7 +3305,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "arrow",
  "chrono",
@@ -3317,7 +3317,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#026e282d53ebf98898e8d04939769c0eccfa3c15"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=leak_investigation#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
 dependencies = [
  "arrow",
  "arrow-array",

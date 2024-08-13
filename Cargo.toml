@@ -64,12 +64,12 @@ deltalake = { git = 'https://github.com/delta-io/delta-rs', rev = 'e75a0b49b40f3
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/parquet_bytes'}
 arrow-json = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '52.1.0/json'}
-datafusion = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
-datafusion-common = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
-datafusion-execution = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
-datafusion-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
-datafusion-physical-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
-datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
-datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
+datafusion = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'leak_investigation'}
+datafusion-common = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'leak_investigation'}
+datafusion-execution = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'leak_investigation'}
+datafusion-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'leak_investigation'}
+datafusion-physical-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'leak_investigation'}
+datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'leak_investigation'}
+datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = 'leak_investigation'}
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
 cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }

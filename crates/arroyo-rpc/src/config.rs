@@ -387,6 +387,9 @@ pub struct AdminConfig {
 
     /// HTTP port the admin service will listen on
     pub http_port: u16,
+
+    /// The HTTP port for the admin service in run mode; defaults to a random port
+    pub run_http_port: Option<u16>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]

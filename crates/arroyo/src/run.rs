@@ -4,8 +4,8 @@ use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, Val
 use arroyo_openapi::Client;
 use arroyo_rpc::config::{config, DatabaseType, DefaultSink, Scheduler};
 use arroyo_rpc::{config, init_db_notifier, notify_db, retry};
-use arroyo_server_common::log_event;
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
+use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_storage::StorageProvider;
 use arroyo_types::to_millis;
 use async_trait::async_trait;
@@ -389,6 +389,13 @@ pub async fn run(args: RunArgs) {
         } else {
             c.api.http_port = 0;
         }
+
+        if let Some(port) = c.admin.run_http_port {
+            c.admin.http_port = port;
+        } else {
+            c.admin.http_port = 0;
+        }
+
         c.controller.rpc_port = 0;
         c.controller.scheduler = Scheduler::Process;
 
@@ -409,6 +416,8 @@ pub async fn run(args: RunArgs) {
         .expect("could not start system");
 
     config::update(|c| c.controller.rpc_port = controller_port);
+
+    shutdown.spawn_task("admin", start_admin_server("pipeline-cluster"));
 
     let http_port = arroyo_api::start_server(db.clone(), shutdown.guard("api")).unwrap();
 
