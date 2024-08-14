@@ -1,4 +1,3 @@
-use prost_reflect::DescriptorPool;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
@@ -242,19 +241,14 @@ pub struct ProtobufFormat {
 
     #[serde(default)]
     pub compiled_schema: Option<Vec<u8>>,
+
+    #[serde(default)]
+    pub confluent_schema_registry: bool,
 }
 
 impl ProtobufFormat {
-    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
-        // Ok(Self {
-        //     schema: None,
-        //     into_unstructured_json: opts.remove("protobuf.into_unstructured_json")
-        //         .filter(|t| t == "true")
-        //         .is_some(),
-        //     message_name: None,
-        //     compiled_schema: None,
-        // })
-        todo!("from opts")
+    pub fn from_opts(_opts: &mut HashMap<String, String>) -> Result<Self, String> {
+        Err("Protobuf is not yet supported in CREATE TABLE statements".to_string())
     }
 }
 

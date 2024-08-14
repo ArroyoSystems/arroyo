@@ -3,9 +3,7 @@ use arroyo_rpc::formats::ProtobufFormat;
 use arroyo_types::SourceError;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
-use prost_reflect::{
-    DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MapKey, MessageDescriptor, Value,
-};
+use prost_reflect::{DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MapKey, Value};
 use serde_json::Value as JsonValue;
 
 pub(crate) fn deserialize_proto(

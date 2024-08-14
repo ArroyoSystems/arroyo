@@ -41,7 +41,6 @@ use crate::{
 };
 use arroyo_formats::proto::schema::{protobuf_to_arrow, schema_file_to_descriptor};
 use cornucopia_async::{Database, DatabaseSource};
-use prost_reflect::DescriptorPool;
 
 async fn get_and_validate_connector(
     req: &ConnectionTablePost,
@@ -468,17 +467,7 @@ pub(crate) async fn expand_schema(
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
         Format::RawBytes(_) => Ok(schema),
-        Format::Protobuf(_) => {
-            expand_proto_schema(
-                name,
-                connector,
-                connection_type,
-                schema,
-                profile_config,
-                table_config,
-            )
-            .await
-        }
+        Format::Protobuf(_) => expand_proto_schema(schema).await,
     }
 }
 
@@ -546,14 +535,7 @@ async fn expand_avro_schema(
     Ok(schema)
 }
 
-async fn expand_proto_schema(
-    name: &str,
-    connector: &str,
-    connection_type: ConnectionType,
-    mut schema: ConnectionSchema,
-    profile_config: &Value,
-    table_config: &Value,
-) -> Result<ConnectionSchema, ErrorResp> {
+async fn expand_proto_schema(mut schema: ConnectionSchema) -> Result<ConnectionSchema, ErrorResp> {
     let Some(Format::Protobuf(ProtobufFormat {
         message_name,
         compiled_schema,
@@ -572,7 +554,10 @@ async fn expand_proto_schema(
             return Err(bad_request("Schema is not a protobuf schema"));
         };
 
-        let message_name = message_name.as_ref().expect("no message name provided");
+        let message_name = message_name
+            .as_ref()
+            .filter(|m| !m.is_empty())
+            .ok_or_else(|| bad_request("message name must be provided for protobuf schemas"))?;
 
         let encoded = schema_file_to_descriptor(protobuf_schema, dependencies)
             .await
@@ -588,6 +573,7 @@ async fn expand_proto_schema(
                 message_name,
                 pool.all_messages()
                     .map(|m| m.full_name().to_string())
+                    .filter(|m| !m.starts_with("google.protobuf."))
                     .collect::<Vec<_>>()
                     .join(", ")
             ))
@@ -741,7 +727,7 @@ async fn get_schema(
 pub(crate) async fn test_schema(
     WithRejection(Json(req), _): WithRejection<Json<ConnectionSchema>, ApiError>,
 ) -> Result<(), ErrorResp> {
-    let Some(schema_def) = req.definition else {
+    let Some(schema_def) = &req.definition else {
         return Ok(());
     };
 
@@ -752,6 +738,10 @@ pub(crate) async fn test_schema(
             } else {
                 Ok(())
             }
+        }
+        SchemaDefinition::ProtobufSchema { .. } => {
+            let _ = expand_proto_schema(req.clone()).await?;
+            Ok(())
         }
         _ => {
             // TODO: add testing for other schema types

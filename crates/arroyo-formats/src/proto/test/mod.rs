@@ -8,7 +8,7 @@ use std::sync::Arc;
 fn test_basic_types() {
     let pool = DescriptorPool::decode(include_bytes!("protos/basic_types.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
-    let arrow_schema = protobuf_to_arrow(message).unwrap();
+    let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 7);
     assert_field(&arrow_schema, "bool_field", DataType::Boolean, true);
@@ -25,7 +25,7 @@ fn test_string_and_bytes() {
     let pool =
         DescriptorPool::decode(include_bytes!("protos/string_and_bytes.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
-    let arrow_schema = protobuf_to_arrow(message).unwrap();
+    let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 2);
     assert_field(&arrow_schema, "string_field", DataType::Utf8, true);
@@ -37,7 +37,7 @@ fn test_nested_message() {
     let pool =
         DescriptorPool::decode(include_bytes!("protos/nested_message.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
-    let arrow_schema = protobuf_to_arrow(message).unwrap();
+    let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 2);
     assert_field(
@@ -68,7 +68,7 @@ fn test_repeated_fields() {
     let pool =
         DescriptorPool::decode(include_bytes!("protos/repeated_fields.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
-    let arrow_schema = protobuf_to_arrow(message).unwrap();
+    let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 2);
     assert_field(
@@ -90,7 +90,7 @@ fn test_map_fields() {
     let pool = DescriptorPool::decode(include_bytes!("protos/map_fields.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
 
-    let arrow_schema = protobuf_to_arrow(message).unwrap();
+    let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 2);
     assert_eq!(
@@ -115,7 +115,7 @@ fn test_map_fields() {
 fn test_enum_fields() {
     let pool = DescriptorPool::decode(include_bytes!("protos/enum_fields.bin").as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
-    let arrow_schema = protobuf_to_arrow(message).unwrap();
+    let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
     assert_eq!(arrow_schema.fields().len(), 1);
     assert_field(&arrow_schema, "enum_field", DataType::Utf8, true);

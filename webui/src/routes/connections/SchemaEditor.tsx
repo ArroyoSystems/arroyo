@@ -8,6 +8,8 @@ import {
   Checkbox,
   FormControl,
   FormHelperText,
+  FormLabel,
+  Input,
   List,
   ListItem,
   Stack,
@@ -25,7 +27,7 @@ export function SchemaEditor({
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
-  format: 'avro' | 'json';
+  format: 'avro' | 'json' | 'protobuf';
 }) {
   const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoEl = useRef(null);
@@ -34,6 +36,7 @@ export function SchemaEditor({
   const [testing, setTesting] = useState<boolean>(false);
   const [tested, setTested] = useState<string | undefined>();
   const [rawDatum, setRawDatum] = useState<boolean>(false);
+  const [messageName, setMessageName] = useState<string>('');
 
   const valid = tested == editor?.getValue() && errors?.length == 0;
 
@@ -42,6 +45,17 @@ export function SchemaEditor({
     if (format == 'avro' && rawDatum) {
       // @ts-ignore
       state.schema!.format['avro']!.rawDatums = rawDatum;
+      // update the state
+      setState({
+        ...state,
+        schema: state.schema,
+      });
+    }
+
+    // if protobuf, then we need to add the message name
+    if (format == 'protobuf') {
+      // @ts-ignore
+      state.schema!.format['protobuf']!.messageName = messageName;
       // update the state
       setState({
         ...state,
@@ -91,14 +105,13 @@ export function SchemaEditor({
     }
   }
 
-  let avroOptions = null;
+  let formatOptions = null;
   if (format == 'avro') {
-    avroOptions = (
+    formatOptions = (
       <Box maxW={'lg'}>
         <FormControl>
           <Checkbox
             onChange={e => {
-              console.log('CHECKED = ', e.target.checked);
               setRawDatum(e.target.checked);
             }}
           >
@@ -113,10 +126,30 @@ export function SchemaEditor({
     );
   }
 
+  if (format == 'protobuf') {
+    formatOptions = (
+      <Box maxW={'lg'}>
+        <FormControl>
+          <FormLabel>Message name</FormLabel>
+          <Input
+            value={messageName}
+            onChange={e => {
+              console.log('message name', e.target.value);
+              setMessageName(e.target.value);
+            }}
+          />
+          <FormHelperText>
+            The name of the protobuf message for the data in this table
+          </FormHelperText>
+        </FormControl>
+      </Box>
+    );
+  }
+
   useEffect(() => {
     if (monacoEl && !editor && !created.current) {
       let e = monaco.editor.create(monacoEl.current!, {
-        language: 'json',
+        language: format == 'protobuf' ? 'protobuf' : 'json',
         theme: 'vs-dark',
         minimap: {
           enabled: false,
@@ -136,8 +169,12 @@ export function SchemaEditor({
         // @ts-ignore
         schema.format![format] = {};
 
-        // @ts-ignore
-        schema.definition![format + '_schema'] = e.getValue();
+        if (format == 'protobuf') {
+          schema.definition!['protobuf_schema'] = { schema: e.getValue() };
+        } else {
+          // @ts-ignore
+          schema.definition![format + '_schema'] = e.getValue();
+        }
 
         setState({
           ...state,
@@ -154,7 +191,7 @@ export function SchemaEditor({
 
   return (
     <Stack spacing={4}>
-      {avroOptions}
+      {formatOptions}
       <Box marginTop={5} width="100%">
         <div className="editor" ref={monacoEl}></div>
       </Box>
