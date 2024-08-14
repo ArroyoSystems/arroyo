@@ -629,6 +629,10 @@ pub struct LogConfig {
     /// Set the log format
     #[serde(default)]
     pub format: LogFormat,
+
+    /// Nonblocking logging may reduce tail latency at the cost of higher memory usage
+    #[serde(default)]
+    pub nonblocking: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
