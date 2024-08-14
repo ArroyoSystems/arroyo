@@ -18,7 +18,7 @@ arroyo-worker = { path = "../arroyo-worker" }
 tonic = {workspace = true}
 tonic-reflection = {workspace = true}
 
-prost = "0.12"
+prost = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
 rand = "0.8"

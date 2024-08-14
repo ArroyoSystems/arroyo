@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+message TestRepeatedFields {
+  repeated int32 repeated_int = 1;
+  repeated string repeated_string = 2;
+}

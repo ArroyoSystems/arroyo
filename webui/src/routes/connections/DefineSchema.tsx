@@ -35,7 +35,7 @@ const SchemaFormatEditor = ({
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
-  format: 'json' | 'avro';
+  format: 'json' | 'avro' | 'protobuf';
 }) => {
   type SchemaTypeOption = { name: string; value: string };
   let schemaTypeOptions: SchemaTypeOption[] = [
@@ -61,13 +61,16 @@ const SchemaFormatEditor = ({
     schemaTypeOptions.push({ name: 'Confluent Schema Registry', value: 'confluent' });
   }
 
-  let def_name: 'json_schema' | 'avro_schema';
+  let def_name: 'json_schema' | 'avro_schema' | 'protobuf_schema';
   switch (format) {
     case 'json':
       def_name = 'json_schema';
       break;
     case 'avro':
       def_name = 'avro_schema';
+      break;
+    case 'protobuf':
+      def_name = 'protobuf_schema';
       break;
     default:
       throw new Error('unknown format: ' + format);
@@ -359,9 +362,19 @@ export const DefineSchema = ({
       el: <RawBytesEditor state={state} setState={setState} next={next} />,
     },
     {
-      name: 'Protobuf (coming soon)',
+      name: 'Protobuf',
       value: 'protobuf',
-      disabled: true,
+      el: (
+        <SchemaFormatEditor
+          key="protoeditor"
+          connector={connector}
+          connectionProfiles={connectionProfiles!}
+          state={state}
+          setState={setState}
+          next={next}
+          format={'protobuf'}
+        />
+      ),
     },
   ];
 

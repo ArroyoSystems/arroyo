@@ -1,3 +1,4 @@
+use crate::float_to_json;
 use apache_avro::types::{Value, Value as AvroValue};
 use apache_avro::{from_avro_datum, AvroResult, Reader, Schema};
 use arroyo_rpc::formats::AvroFormat;
@@ -81,22 +82,6 @@ pub(crate) async fn avro_messages(
     Ok(messages)
 }
 
-fn convert_float(f: f64) -> JsonValue {
-    match serde_json::Number::from_f64(f) {
-        Some(n) => JsonValue::Number(n),
-        None => JsonValue::String(
-            (if f.is_infinite() && f.is_sign_positive() {
-                "+Inf"
-            } else if f.is_infinite() {
-                "-Inf"
-            } else {
-                "NaN"
-            })
-            .to_string(),
-        ),
-    }
-}
-
 fn encode_vec(v: Vec<u8>) -> JsonValue {
     JsonValue::String(v.into_iter().map(char::from).collect())
 }
@@ -114,8 +99,8 @@ pub(crate) fn avro_to_json(value: AvroValue) -> JsonValue {
         | Value::TimestampMicros(i)
         | Value::LocalTimestampMillis(i)
         | Value::LocalTimestampMicros(i) => JsonValue::Number(serde_json::Number::from(i)),
-        Value::Float(f) => convert_float(f as f64),
-        Value::Double(f) => convert_float(f),
+        Value::Float(f) => float_to_json(f as f64),
+        Value::Double(f) => float_to_json(f),
         Value::String(s) | Value::Enum(_, s) => JsonValue::String(s),
         // this isn't the standard Avro json encoding, which just
         Value::Bytes(b) | Value::Fixed(_, b) => encode_vec(b),

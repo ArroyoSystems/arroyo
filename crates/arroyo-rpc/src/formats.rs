@@ -230,11 +230,34 @@ impl AvroFormat {
 #[serde(rename_all = "camelCase")]
 pub struct ParquetFormat {}
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtobufFormat {
+    #[serde(default)]
+    pub into_unstructured_json: bool,
+
+    #[serde(default)]
+    pub message_name: Option<String>,
+
+    #[serde(default)]
+    pub compiled_schema: Option<Vec<u8>>,
+
+    #[serde(default)]
+    pub confluent_schema_registry: bool,
+}
+
+impl ProtobufFormat {
+    pub fn from_opts(_opts: &mut HashMap<String, String>) -> Result<Self, String> {
+        Err("Protobuf is not yet supported in CREATE TABLE statements".to_string())
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Format {
     Json(JsonFormat),
     Avro(AvroFormat),
+    Protobuf(ProtobufFormat),
     Parquet(ParquetFormat),
     RawString(RawStringFormat),
     RawBytes(RawBytesFormat),
@@ -249,7 +272,7 @@ impl Format {
         Ok(Some(match name.as_str() {
             "json" => Format::Json(JsonFormat::from_opts(false, opts)?),
             "debezium_json" => Format::Json(JsonFormat::from_opts(true, opts)?),
-            "protobuf" => return Err("protobuf is not yet supported".to_string()),
+            "protobuf" => Format::Protobuf(ProtobufFormat::from_opts(opts)?),
             "avro" => Format::Avro(AvroFormat::from_opts(opts)?),
             "raw_string" => Format::RawString(RawStringFormat {}),
             "raw_bytes" => Format::RawBytes(RawBytesFormat {}),
@@ -261,7 +284,11 @@ impl Format {
     pub fn is_updating(&self) -> bool {
         match self {
             Format::Json(JsonFormat { debezium: true, .. }) => true,
-            Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::RawString(_) => false,
+            Format::Json(_)
+            | Format::Avro(_)
+            | Format::Parquet(_)
+            | Format::RawString(_)
+            | Format::Protobuf(_) => false,
             Format::RawBytes(_) => false,
         }
     }

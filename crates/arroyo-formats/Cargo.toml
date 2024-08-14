@@ -23,4 +23,9 @@ bincode = "2.0.0-rc.3"
 memchr = "2"
 typify = "0.0.13"
 schemars = "0.8"
-prost = "0.12"
+prost = { workspace = true}
+prost-reflect = { workspace = true}
+prost-build = { workspace = true }
+prost-types = { workspace = true}
+base64 = "0.22.1"
+uuid = { version = "1.10.0", features = ["v4"] }

@@ -15,14 +15,14 @@ use tracing::debug;
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::connector_for_type;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
-use arroyo_formats::{avro, json};
+use arroyo_formats::{avro, json, proto};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
     SchemaDefinition,
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
-use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat};
+use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, ProtobufFormat};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
@@ -39,6 +39,7 @@ use crate::{
     queries::api_queries::{self, DbConnectionTable},
     to_micros, AuthData,
 };
+use arroyo_formats::proto::schema::{protobuf_to_arrow, schema_file_to_descriptor};
 use cornucopia_async::{Database, DatabaseSource};
 
 async fn get_and_validate_connector(
@@ -466,6 +467,7 @@ pub(crate) async fn expand_schema(
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
         Format::RawBytes(_) => Ok(schema),
+        Format::Protobuf(_) => expand_proto_schema(schema).await,
     }
 }
 
@@ -529,6 +531,66 @@ async fn expand_avro_schema(
         .collect();
 
     schema.fields = fields.map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+
+    Ok(schema)
+}
+
+async fn expand_proto_schema(mut schema: ConnectionSchema) -> Result<ConnectionSchema, ErrorResp> {
+    let Some(Format::Protobuf(ProtobufFormat {
+        message_name,
+        compiled_schema,
+        ..
+    })) = &mut schema.format
+    else {
+        panic!("not proto");
+    };
+
+    if let Some(definition) = &schema.definition {
+        let SchemaDefinition::ProtobufSchema {
+            schema: protobuf_schema,
+            dependencies,
+        } = &definition
+        else {
+            return Err(bad_request("Schema is not a protobuf schema"));
+        };
+
+        let message_name = message_name
+            .as_ref()
+            .filter(|m| !m.is_empty())
+            .ok_or_else(|| bad_request("message name must be provided for protobuf schemas"))?;
+
+        let encoded = schema_file_to_descriptor(protobuf_schema, dependencies)
+            .await
+            .map_err(|e| bad_request(e.to_string()))?;
+
+        let pool = proto::schema::get_pool(&encoded)
+            .map_err(|e| bad_request(format!("error handling protobuf: {}", e)))?;
+        *compiled_schema = Some(encoded);
+
+        let descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
+            bad_request(format!(
+                "Message '{}' not found in proto definition; messages are {}",
+                message_name,
+                pool.all_messages()
+                    .map(|m| m.full_name().to_string())
+                    .filter(|m| !m.starts_with("google.protobuf."))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?;
+
+        let arrow = protobuf_to_arrow(&descriptor)
+            .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+
+        let fields: Result<_, String> = arrow
+            .fields
+            .into_iter()
+            .map(|f| (**f).clone().try_into())
+            .collect();
+
+        schema.fields =
+            fields.map_err(|e| bad_request(format!("failed to convert schema: {}", e)))?;
+    };
 
     Ok(schema)
 }
@@ -665,7 +727,7 @@ async fn get_schema(
 pub(crate) async fn test_schema(
     WithRejection(Json(req), _): WithRejection<Json<ConnectionSchema>, ApiError>,
 ) -> Result<(), ErrorResp> {
-    let Some(schema_def) = req.definition else {
+    let Some(schema_def) = &req.definition else {
         return Ok(());
     };
 
@@ -676,6 +738,10 @@ pub(crate) async fn test_schema(
             } else {
                 Ok(())
             }
+        }
+        SchemaDefinition::ProtobufSchema { .. } => {
+            let _ = expand_proto_schema(req.clone()).await?;
+            Ok(())
         }
         _ => {
             // TODO: add testing for other schema types

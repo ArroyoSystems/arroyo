@@ -10,7 +10,7 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
-prost = "0.12"
+prost = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 fork = "0.1"
