@@ -37,7 +37,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use arroyo_rpc::config::{config, LogFormat};
-use tracing_appender::non_blocking::{WorkerGuard};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
 use uuid::Uuid;
 
