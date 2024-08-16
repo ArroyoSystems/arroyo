@@ -444,6 +444,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tikv-jemallocator",
  "tokio",
  "tokio-postgres",
  "tracing",
@@ -492,7 +493,7 @@ dependencies = [
  "postgres-types",
  "proc-macro2",
  "prometheus-http-query",
- "prost",
+ "prost 0.12.6",
  "prost-reflect 0.12.0",
  "quote",
  "rand 0.8.5",
@@ -536,7 +537,7 @@ dependencies = [
  "arroyo-types",
  "base64 0.21.7",
  "dlopen2",
- "prost",
+ "prost 0.12.6",
  "serde_json",
  "tokio",
  "toml",
@@ -579,7 +580,7 @@ dependencies = [
  "object_store",
  "once_cell",
  "parquet",
- "prost",
+ "prost 0.12.6",
  "rand 0.8.5",
  "rdkafka",
  "rdkafka-sys",
@@ -637,7 +638,7 @@ dependencies = [
  "prettyplease 0.2.20",
  "proc-macro2",
  "prometheus",
- "prost",
+ "prost 0.12.6",
  "quote",
  "rand 0.8.5",
  "refinery",
@@ -676,7 +677,7 @@ dependencies = [
  "hex",
  "petgraph",
  "proc-macro2",
- "prost",
+ "prost 0.12.6",
  "quote",
  "rand 0.8.5",
  "regex",
@@ -716,7 +717,7 @@ dependencies = [
  "petgraph",
  "prettyplease 0.2.20",
  "proc-macro2",
- "prost",
+ "prost 0.12.6",
  "quote",
  "regex",
  "rstest",
@@ -750,7 +751,7 @@ dependencies = [
  "bincode",
  "chrono",
  "memchr",
- "prost",
+ "prost 0.12.6",
  "prost-build",
  "prost-reflect 0.12.0",
  "prost-types",
@@ -786,7 +787,7 @@ dependencies = [
  "lazy_static",
  "local-ip-address",
  "prometheus",
- "prost",
+ "prost 0.12.6",
  "rand 0.8.5",
  "tokio",
  "tokio-stream",
@@ -835,7 +836,7 @@ dependencies = [
  "datafusion",
  "dlopen2",
  "futures",
- "prost",
+ "prost 0.12.6",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -866,7 +867,7 @@ dependencies = [
  "k8s-openapi",
  "log",
  "nanoid",
- "prost",
+ "prost 0.12.6",
  "prost-reflect 0.13.1",
  "rand 0.8.5",
  "regex",
@@ -895,6 +896,7 @@ dependencies = [
  "dirs",
  "futures",
  "hyper 0.14.30",
+ "jemalloc_pprof",
  "lazy_static",
  "once_cell",
  "prometheus",
@@ -980,7 +982,7 @@ dependencies = [
  "once_cell",
  "parquet",
  "prometheus",
- "prost",
+ "prost 0.12.6",
  "rand 0.8.5",
  "tokio",
  "tonic",
@@ -1123,7 +1125,7 @@ dependencies = [
  "ordered-float 3.9.2",
  "petgraph",
  "prometheus",
- "prost",
+ "prost 0.12.6",
  "rand 0.8.5",
  "regex",
  "regress 0.6.0",
@@ -3304,7 +3306,7 @@ dependencies = [
  "datafusion-expr",
  "datafusion-proto-common",
  "object_store",
- "prost",
+ "prost 0.12.6",
 ]
 
 [[package]]
@@ -3316,7 +3318,7 @@ dependencies = [
  "chrono",
  "datafusion-common",
  "object_store",
- "prost",
+ "prost 0.12.6",
 ]
 
 [[package]]
@@ -4852,7 +4854,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2 0.5.7",
  "tokio",
  "tower-service",
  "tracing",
@@ -5125,6 +5127,15 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "itertools"
+version = "0.10.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
@@ -5155,6 +5166,23 @@ name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
+
+[[package]]
+name = "jemalloc_pprof"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96368c0fc161a0a1a20b3952b6fd31ee342fffc87ed9e48ac1ed49fb25686655"
+dependencies = [
+ "anyhow",
+ "libc",
+ "mappings",
+ "once_cell",
+ "pprof_util",
+ "tempfile",
+ "tikv-jemalloc-ctl",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "jobserver"
@@ -5619,6 +5647,19 @@ name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
+name = "mappings"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fa2605f461115ef6336342b12f0d8cabdfd7b258fed86f5f98c725535843601"
+dependencies = [
+ "anyhow",
+ "libc",
+ "once_cell",
+ "pprof_util",
+ "tracing",
+]
 
 [[package]]
 name = "matchers"
@@ -6638,6 +6679,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
+name = "pprof_util"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c620a1858d6ebf10d7c60256629078b2d106968d0e6ff63b850d9ecd84008fbe"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "num",
+ "paste",
+ "prost 0.11.9",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6849,12 +6903,22 @@ dependencies = [
 
 [[package]]
 name = "prost"
+version = "0.11.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b82eaa1d779e9a4bc1c3217db8ffbeabaae1dca241bf70183242128d48681cd"
+dependencies = [
+ "bytes",
+ "prost-derive 0.11.9",
+]
+
+[[package]]
+name = "prost"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "deb1435c188b76130da55f17a466d252ff7b1418b2ad3e037d127b94e3411f29"
 dependencies = [
  "bytes",
- "prost-derive",
+ "prost-derive 0.12.6",
 ]
 
 [[package]]
@@ -6865,17 +6929,30 @@ checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes",
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
  "petgraph",
  "prettyplease 0.2.20",
- "prost",
+ "prost 0.12.6",
  "prost-types",
  "regex",
  "syn 2.0.72",
  "tempfile",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.11.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
+dependencies = [
+ "anyhow",
+ "itertools 0.10.5",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -6885,7 +6962,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.72",
@@ -6898,7 +6975,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "057237efdb71cf4b3f9396302a3d6599a92fa94063ba537b66130980ea9909f3"
 dependencies = [
  "once_cell",
- "prost",
+ "prost 0.12.6",
  "prost-types",
 ]
 
@@ -6909,7 +6986,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f5eec97d5d34bdd17ad2db2219aabf46b054c6c41bd5529767c9ce55be5898f"
 dependencies = [
  "once_cell",
- "prost",
+ "prost 0.12.6",
  "prost-types",
 ]
 
@@ -6919,7 +6996,7 @@ version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9091c90b0a32608e984ff2fa4091273cbdd755d54935c51d520887f4a1dbd5b0"
 dependencies = [
- "prost",
+ "prost 0.12.6",
 ]
 
 [[package]]
@@ -8662,6 +8739,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "tikv-jemalloc-ctl"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "619bfed27d807b54f7f776b9430d4f8060e66ee138a28632ca898584d462c31c"
+dependencies = [
+ "libc",
+ "paste",
+ "tikv-jemalloc-sys",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.5.4+5.3.0-patched"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9402443cb8fd499b6f327e40565234ff34dbda27460c5b47db0db77443dd85d1"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "965fe0c26be5c56c94e38ba547249074803efd52adfb66de62107d95aab3eaca"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
+]
+
+[[package]]
 name = "time"
 version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8931,7 +9039,7 @@ dependencies = [
  "hyper-timeout 0.4.1",
  "percent-encoding",
  "pin-project",
- "prost",
+ "prost 0.12.6",
  "tokio",
  "tokio-stream",
  "tower",
@@ -8960,7 +9068,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "548c227bd5c0fae5925812c4ec6c66ffcfced23ea370cb823f4d18f0fc1cb6a7"
 dependencies = [
- "prost",
+ "prost 0.12.6",
  "prost-types",
  "tokio",
  "tokio-stream",
