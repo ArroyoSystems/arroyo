@@ -19,11 +19,11 @@ jobs:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
           - { runner: ubuntu-22.04, protoc: linux-x86_64, artifact: linux-x86_64 }
-          # TODO: add linux arm runner, maybe ubicloud?
+          # TODO: add linux arm runner, maybe ubicloud e.g. - { runner: ubicloud-standard-8-arm, protoc: linux-aarch_64 , artifact: linux-arm64 } ?
     runs-on: ${{ matrix.config.runner }}
     services:
       postgres:
-        image: postgres:14.3-alpine3.20
+        image: postgres:14.13-alpine3.20
         env:
           POSTGRES_USER: arroyo
           POSTGRES_PASSWORD: arroyo
