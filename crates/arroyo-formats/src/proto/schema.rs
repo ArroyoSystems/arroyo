@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Context};
 use arrow_schema::{DataType, Field, Schema};
 use arroyo_types::ArroyoExtensionType;
 use prost_reflect::{Cardinality, DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
+use regex::Regex;
 use std::collections::HashMap;
 use std::env::temp_dir;
 use std::path::Path;
@@ -91,6 +92,8 @@ async fn write_files(base_path: &Path, files: &HashMap<String, String>) -> anyho
         }
 
         let full_path = base_path.join(path);
+
+        println!("Writing {:?}", full_path);
         if let Some(parent) = full_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -101,29 +104,36 @@ async fn write_files(base_path: &Path, files: &HashMap<String, String>) -> anyho
     Ok(())
 }
 
+#[allow(async_fn_in_trait)]
+pub trait ProtoSchemaResolver {
+    async fn resolve(&self, path: &str) -> anyhow::Result<Option<String>>;
+}
+
+pub struct DefaultProtoSchemaResolver {}
+
+impl ProtoSchemaResolver for DefaultProtoSchemaResolver {
+    async fn resolve(&self, _path: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+}
+
 pub async fn schema_file_to_descriptor(
     schema: &str,
     dependencies: &HashMap<String, String>,
 ) -> anyhow::Result<Vec<u8>> {
-    //    let mut source_tree = VirtualSourceTree::new();
-    //    source_tree.as_mut().add_file(Path::new("schema.proto"), schema.as_bytes().to_vec());
-    //
-    //    let mut error_collector = SimpleErrorCollector::new();
-    //    let mut db = SourceTreeDescriptorDatabase::new(source_tree.as_mut());
-    //    db.as_mut().record_errors_to(error_collector.as_mut());
-    //    let res = db.as_mut().find_file_by_name(Path::new("schema.proto")).unwrap();
-    //    drop(db);
-    //    let errors: Vec<_> = error_collector.as_mut().collect();
-    //    if !errors.is_empty() {
-    //        bail!("errors parsing proto file:\n{}",
-    //            errors.iter().map(|e| format!("  * {}", e)).collect::<Vec<_>>().join("\n"))
-    //    }
-    //    Ok(res.serialize().unwrap())
+    schema_file_to_descriptor_with_resolver(schema, dependencies, DefaultProtoSchemaResolver {})
+        .await
+}
+
+pub async fn schema_file_to_descriptor_with_resolver<R: ProtoSchemaResolver>(
+    schema: &str,
+    dependencies: &HashMap<String, String>,
+    schema_resolver: R,
+) -> anyhow::Result<Vec<u8>> {
     let protoc = prost_build::protoc_from_env();
     let uuid = Uuid::new_v4().to_string();
     let dir = temp_dir().join(uuid);
     tokio::fs::create_dir_all(&dir).await?;
-    println!("writing proto to {:?}", dir);
 
     write_files(&dir, dependencies).await?;
     let input = dir.join("schema.proto");
@@ -131,22 +141,52 @@ pub async fn schema_file_to_descriptor(
 
     let output_file = dir.join("schema.bin");
 
-    let output = tokio::process::Command::new(&protoc)
-        .current_dir(&dir)
-        .arg("--descriptor_set_out=schema.bin")
-        .arg("-I")
-        .arg(".")
-        .arg("schema.proto")
-        .output()
-        .await
-        .map_err(|e| anyhow!("unable to compile protobuf; is protoc installed? {e}"))?;
+    let import_regex = Regex::new(r"([\w\-_.]+\.proto+): File not found.").unwrap();
 
-    if !output.status.success() {
-        let output = String::from_utf8_lossy(&output.stderr);
-        bail!("failed to compile proto: {}", output);
+    for _ in 0..10 {
+        let output = tokio::process::Command::new(&protoc)
+            .current_dir(&dir)
+            .arg("--descriptor_set_out=schema.bin")
+            .arg("-I")
+            .arg(".")
+            .arg("schema.proto")
+            .output()
+            .await
+            .map_err(|e| anyhow!("unable to compile protobuf; is protoc installed? {e}"))?;
+
+        if !output.status.success() {
+            let output = String::from_utf8_lossy(&output.stderr);
+            let imports: Vec<_> = output
+                .lines()
+                .filter_map(|l| {
+                    import_regex
+                        .captures(l)
+                        .map(|c| c.get(1).unwrap().as_str().to_string())
+                })
+                .collect();
+
+            if imports.is_empty() {
+                bail!("failed to compile proto: {}", output);
+            }
+
+            let mut extra_deps = HashMap::new();
+            for import in imports {
+                let schema = schema_resolver
+                    .resolve(&import)
+                    .await
+                    .map_err(|e| anyhow!("Could not resolve protobuf import {import}: {e}"))?
+                    .ok_or_else(|| anyhow!("Protobuf import {import} not found"))?;
+                extra_deps.insert(import, schema);
+            }
+
+            write_files(&dir, &extra_deps).await?;
+            continue;
+        }
+
+        return tokio::fs::read(output_file)
+            .await
+            .context("failed to read protoc output");
     }
 
-    tokio::fs::read(output_file)
-        .await
-        .context("failed to read protoc output")
+    bail!("Protobuf imports nested more than 10 layers deep, which is not supported");
 }

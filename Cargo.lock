@@ -756,6 +756,7 @@ dependencies = [
  "prost-build",
  "prost-reflect 0.12.0",
  "prost-types",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

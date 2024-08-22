@@ -1,15 +1,0 @@
-
-°
-map_fields.proto"“
-TestMapFieldsM
-int_to_string_map (2".TestMapFields.IntToStringMapEntryRintToStringMapY
-string_to_message_map (2&.TestMapFields.StringToMessageMapEntryRstringToMessageMap0
-NestedMessage
-inner_field (R
-innerFieldA
-IntToStringMapEntry
-key (Rkey
-value (	Rvalue:8c
-StringToMessageMapEntry
-key (	Rkey2
-value (2.TestMapFields.NestedMessageRvalue:8bproto3

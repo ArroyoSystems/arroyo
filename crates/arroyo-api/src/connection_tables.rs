@@ -6,6 +6,7 @@ use axum::Json;
 use axum_extra::extract::WithRejection;
 use futures_util::stream::Stream;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
@@ -19,7 +20,7 @@ use arroyo_formats::{avro, json, proto};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
-    SchemaDefinition,
+    SchemaDefinition, SourceField,
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, ProtobufFormat};
@@ -467,7 +468,16 @@ pub(crate) async fn expand_schema(
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
         Format::RawBytes(_) => Ok(schema),
-        Format::Protobuf(_) => expand_proto_schema(schema).await,
+        Format::Protobuf(_) => {
+            expand_proto_schema(
+                connector,
+                connection_type,
+                schema,
+                profile_config,
+                table_config,
+            )
+            .await
+        }
     }
 }
 
@@ -535,64 +545,109 @@ async fn expand_avro_schema(
     Ok(schema)
 }
 
-async fn expand_proto_schema(mut schema: ConnectionSchema) -> Result<ConnectionSchema, ErrorResp> {
+async fn expand_proto_schema(
+    connector: &str,
+    connection_type: ConnectionType,
+    mut schema: ConnectionSchema,
+    profile_config: &Value,
+    table_config: &Value,
+) -> Result<ConnectionSchema, ErrorResp> {
     let Some(Format::Protobuf(ProtobufFormat {
         message_name,
         compiled_schema,
+        confluent_schema_registry,
         ..
     })) = &mut schema.format
     else {
         panic!("not proto");
     };
 
-    if let Some(definition) = &schema.definition {
-        let SchemaDefinition::ProtobufSchema {
-            schema: protobuf_schema,
-            dependencies,
-        } = &definition
-        else {
-            return Err(bad_request("Schema is not a protobuf schema"));
-        };
+    if *confluent_schema_registry {
+        let schema_response = get_schema(connector, table_config, profile_config).await?;
+        match connection_type {
+            ConnectionType::Source => {
+                let schema_response = schema_response.ok_or_else(|| bad_request(
+                    "No schema was found; ensure that the topic exists and has a value schema configured in the schema registry".to_string()))?;
 
-        let message_name = message_name
-            .as_ref()
-            .filter(|m| !m.is_empty())
-            .ok_or_else(|| bad_request("message name must be provided for protobuf schemas"))?;
+                if schema_response.schema_type != ConfluentSchemaType::Protobuf {
+                    return Err(bad_request(format!(
+                        "Format configured is protobuf, but confluent schema repository returned a {:?} schema",
+                        schema_response.schema_type
+                    )));
+                }
 
-        let encoded = schema_file_to_descriptor(protobuf_schema, dependencies)
-            .await
-            .map_err(|e| bad_request(e.to_string()))?;
+                schema.definition = Some(SchemaDefinition::ProtobufSchema {
+                    schema: schema_response.schema,
+                    dependencies: Default::default(),
+                });
+            }
+            ConnectionType::Sink => {
+                // don't fetch schemas for sinks for now
+            }
+        }
+    }
 
-        let pool = proto::schema::get_pool(&encoded)
-            .map_err(|e| bad_request(format!("error handling protobuf: {}", e)))?;
-        *compiled_schema = Some(encoded);
-
-        let descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
-            bad_request(format!(
-                "Message '{}' not found in proto definition; messages are {}",
-                message_name,
-                pool.all_messages()
-                    .map(|m| m.full_name().to_string())
-                    .filter(|m| !m.starts_with("google.protobuf."))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-        })?;
-
-        let arrow = protobuf_to_arrow(&descriptor)
-            .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
-
-        let fields: Result<_, String> = arrow
-            .fields
-            .into_iter()
-            .map(|f| (**f).clone().try_into())
-            .collect();
-
-        schema.fields =
-            fields.map_err(|e| bad_request(format!("failed to convert schema: {}", e)))?;
+    let Some(definition) = &schema.definition else {
+        return Err(bad_request("No definition for protobuf schema"));
     };
 
+    let SchemaDefinition::ProtobufSchema {
+        schema: protobuf_schema,
+        dependencies,
+    } = &definition
+    else {
+        return Err(bad_request("Schema is not a protobuf schema"));
+    };
+
+    let (compiled, fields) =
+        expand_local_proto_schema(protobuf_schema, message_name, dependencies).await?;
+    *compiled_schema = Some(compiled);
+    schema.fields = fields;
+
     Ok(schema)
+}
+
+async fn expand_local_proto_schema(
+    schema_def: &str,
+    message_name: &Option<String>,
+    dependencies: &HashMap<String, String>,
+) -> Result<(Vec<u8>, Vec<SourceField>), ErrorResp> {
+    let message_name = message_name
+        .as_ref()
+        .filter(|m| !m.is_empty())
+        .ok_or_else(|| bad_request("message name must be provided for protobuf schemas"))?;
+
+    let encoded = schema_file_to_descriptor(schema_def, dependencies)
+        .await
+        .map_err(|e| bad_request(e.to_string()))?;
+
+    let pool = proto::schema::get_pool(&encoded)
+        .map_err(|e| bad_request(format!("error handling protobuf: {}", e)))?;
+
+    let descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
+        bad_request(format!(
+            "Message '{}' not found in proto definition; messages are {}",
+            message_name,
+            pool.all_messages()
+                .map(|m| m.full_name().to_string())
+                .filter(|m| !m.starts_with("google.protobuf."))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    })?;
+
+    let arrow = protobuf_to_arrow(&descriptor)
+        .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+
+    let fields: Result<_, String> = arrow
+        .fields
+        .into_iter()
+        .map(|f| (**f).clone().try_into())
+        .collect();
+
+    let fields = fields.map_err(|e| bad_request(format!("failed to convert schema: {}", e)))?;
+
+    Ok((encoded, fields))
 }
 
 async fn expand_json_schema(
@@ -739,8 +794,17 @@ pub(crate) async fn test_schema(
                 Ok(())
             }
         }
-        SchemaDefinition::ProtobufSchema { .. } => {
-            let _ = expand_proto_schema(req.clone()).await?;
+        SchemaDefinition::ProtobufSchema {
+            schema,
+            dependencies,
+        } => {
+            let Some(Format::Protobuf(ProtobufFormat { message_name, .. })) = &req.format else {
+                return Err(bad_request(
+                    "Schema has a protobuf definition but is not protobuf format",
+                ));
+            };
+
+            let _ = expand_local_proto_schema(schema, message_name, dependencies).await?;
             Ok(())
         }
         _ => {
