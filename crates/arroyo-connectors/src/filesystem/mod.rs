@@ -4,6 +4,7 @@ mod source;
 
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
+use regex::Regex;
 use std::collections::HashMap;
 
 use typify::import_types;
@@ -51,7 +52,7 @@ impl Connector for FileSystemConnector {
             enabled: true,
             source: true,
             sink: true,
-            testing: false,
+            testing: true,
             hidden: false,
             custom_schemas: true,
             connection_config: None,
@@ -63,15 +64,37 @@ impl Connector for FileSystemConnector {
         &self,
         _: &str,
         _: Self::ProfileT,
-        _: Self::TableT,
+        table: Self::TableT,
         _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
+        let mut failed = false;
+        let mut message = "Successfully validated connection".to_string();
+        match table.table_type {
+            TableType::Source { regex_pattern, .. } => {
+                let r = regex_pattern
+                    .as_ref()
+                    .map(|pattern| Regex::new(pattern))
+                    .transpose();
+                if let Err(e) = r {
+                    failed = true;
+                    message = format!(
+                        "Invalid regex pattern: {}, {}",
+                        regex_pattern.as_ref().unwrap(),
+                        e
+                    );
+                }
+            }
+            TableType::Sink { .. } => {
+                // TODO: implement sink testing
+            }
+        }
+
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
-                error: false,
+                error: failed,
                 done: true,
-                message: "Successfully validated connection".to_string(),
+                message: message,
             };
             tx.send(message).await.unwrap();
         });
