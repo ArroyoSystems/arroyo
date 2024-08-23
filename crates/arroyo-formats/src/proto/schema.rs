@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context};
 use arrow_schema::{DataType, Field, Schema};
+use arroyo_rpc::schema_resolver::ConfluentSchemaRegistry;
 use arroyo_types::ArroyoExtensionType;
 use prost_reflect::{Cardinality, DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
 use regex::Regex;
@@ -7,6 +8,7 @@ use std::collections::HashMap;
 use std::env::temp_dir;
 use std::path::Path;
 use std::sync::Arc;
+use tracing::warn;
 use uuid::Uuid;
 
 fn protobuf_to_arrow_datatype(
@@ -93,7 +95,6 @@ async fn write_files(base_path: &Path, files: &HashMap<String, String>) -> anyho
 
         let full_path = base_path.join(path);
 
-        println!("Writing {:?}", full_path);
         if let Some(parent) = full_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -133,6 +134,7 @@ pub async fn schema_file_to_descriptor_with_resolver<R: ProtoSchemaResolver>(
     let protoc = prost_build::protoc_from_env();
     let uuid = Uuid::new_v4().to_string();
     let dir = temp_dir().join(uuid);
+
     tokio::fs::create_dir_all(&dir).await?;
 
     write_files(&dir, dependencies).await?;
@@ -147,6 +149,7 @@ pub async fn schema_file_to_descriptor_with_resolver<R: ProtoSchemaResolver>(
         let output = tokio::process::Command::new(&protoc)
             .current_dir(&dir)
             .arg("--descriptor_set_out=schema.bin")
+            .arg("--include_imports")
             .arg("-I")
             .arg(".")
             .arg("schema.proto")
@@ -183,9 +186,18 @@ pub async fn schema_file_to_descriptor_with_resolver<R: ProtoSchemaResolver>(
             continue;
         }
 
-        return tokio::fs::read(output_file)
+        let bin = tokio::fs::read(&output_file)
             .await
             .context("failed to read protoc output");
+
+        if let Err(e) = tokio::fs::remove_dir_all(&dir).await {
+            warn!(
+                "Could not clean up temp directory '{:?}' from protobuf compilation: {}",
+                dir, e
+            );
+        }
+
+        return bin;
     }
 
     bail!("Protobuf imports nested more than 10 layers deep, which is not supported");

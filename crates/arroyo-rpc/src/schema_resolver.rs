@@ -1,9 +1,13 @@
 use crate::var_str::VarStr;
+use ahash::{HashSet, HashSetExt};
 use anyhow::{anyhow, bail, Context};
 use apache_avro::Schema;
 use async_trait::async_trait;
 use base64::prelude::BASE64_STANDARD;
 use base64::write::EncoderWriter;
+use futures::future;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Client, StatusCode, Url};
 use serde::de::DeserializeOwned;
@@ -78,6 +82,13 @@ pub enum ConfluentSchemaType {
     Protobuf,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
+pub struct ConfluentSchemaReference {
+    pub name: String,
+    pub subject: String,
+    pub version: i32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfluentSchemaSubjectResponse {
@@ -85,6 +96,8 @@ pub struct ConfluentSchemaSubjectResponse {
     pub schema: String,
     #[serde(default)]
     pub schema_type: ConfluentSchemaType,
+    #[serde(default)]
+    pub references: Vec<ConfluentSchemaReference>,
     pub subject: String,
     pub version: u32,
 }
@@ -95,6 +108,8 @@ pub struct ConfluentSchemaIdResponse {
     pub schema: String,
     #[serde(default)]
     pub schema_type: ConfluentSchemaType,
+    #[serde(default)]
+    pub references: Vec<ConfluentSchemaReference>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -330,10 +345,10 @@ impl ConfluentSchemaRegistry {
         })
     }
 
-    fn subject_endpoint(&self) -> anyhow::Result<Url> {
+    fn subject_endpoint(&self, subject: &str) -> anyhow::Result<Url> {
         self.client
             .endpoint
-            .join(&format!("subjects/{}/versions/", self.subject))
+            .join(&format!("subjects/{}/versions/", subject))
             .map_err(|e| {
                 anyhow!(
                     "'{}' is not a valid schema registry endpoint: {}",
@@ -343,13 +358,68 @@ impl ConfluentSchemaRegistry {
             })
     }
 
+    pub async fn resolve_references(
+        &self,
+        references: &[ConfluentSchemaReference],
+    ) -> anyhow::Result<Vec<(String, ConfluentSchemaSubjectResponse)>> {
+        let mut futures = FuturesUnordered::new();
+        let mut fetched = HashSet::new();
+
+        for r in references {
+            fetched.insert(r.subject.clone());
+            futures.push(future::join(
+                future::ready(r.name.clone()),
+                self.client
+                    .get_schema_for_url::<ConfluentSchemaSubjectResponse>(
+                        self.subject_endpoint(&r.subject)?.join("latest").unwrap(),
+                    ),
+            ));
+        }
+
+        let mut results = Vec::with_capacity(futures.len());
+        while let Some((name, res)) = futures.next().await {
+            let res = res
+                .map_err(|e| {
+                    anyhow!(
+                        "Failed to fetch schema reference '{}' from registry: {}",
+                        name,
+                        e
+                    )
+                })?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Schema reference '{}' was not found in schema registry",
+                        name
+                    )
+                })?;
+
+            for reference in &res.references {
+                if !fetched.contains(&reference.subject) {
+                    futures.push(future::join(
+                        future::ready(reference.name.clone()),
+                        self.client
+                            .get_schema_for_url::<ConfluentSchemaSubjectResponse>(
+                                self.subject_endpoint(&reference.subject)?
+                                    .join("latest")
+                                    .unwrap(),
+                            ),
+                    ));
+                }
+            }
+
+            results.push((name, res));
+        }
+
+        Ok(results)
+    }
+
     pub async fn write_schema(
         &self,
         schema: impl Into<String>,
         schema_type: ConfluentSchemaType,
     ) -> anyhow::Result<i32> {
         self.client
-            .write_schema(self.subject_endpoint()?, schema, schema_type)
+            .write_schema(self.subject_endpoint(&self.subject)?, schema, schema_type)
             .await
             .context(format!("subject '{}'", self.subject))
     }
@@ -378,7 +448,10 @@ impl ConfluentSchemaRegistry {
             .map(|v| format!("{}", v))
             .unwrap_or_else(|| "latest".to_string());
 
-        let url = self.subject_endpoint()?.join(&version).unwrap();
+        let url = self
+            .subject_endpoint(&self.subject)?
+            .join(&version)
+            .unwrap();
 
         self.client.get_schema_for_url(url).await.context(format!(
             "failed to fetch schema for subject '{}' with version {}",

@@ -866,6 +866,7 @@ dependencies = [
  "datafusion-common",
  "dirs",
  "figment",
+ "futures",
  "k8s-openapi",
  "log",
  "nanoid",

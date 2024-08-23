@@ -496,7 +496,7 @@ async fn expand_avro_schema(
         let schema_response = get_schema(connector, table_config, profile_config).await?;
         match connection_type {
             ConnectionType::Source => {
-                let schema_response = schema_response.ok_or_else(|| bad_request(
+                let (schema_response, _) = schema_response.ok_or_else(|| bad_request(
                         "No schema was found; ensure that the topic exists and has a value schema configured in the schema registry".to_string()))?;
 
                 if schema_response.schema_type != ConfluentSchemaType::Avro {
@@ -566,7 +566,7 @@ async fn expand_proto_schema(
         let schema_response = get_schema(connector, table_config, profile_config).await?;
         match connection_type {
             ConnectionType::Source => {
-                let schema_response = schema_response.ok_or_else(|| bad_request(
+                let (schema_response, dependencies) = schema_response.ok_or_else(|| bad_request(
                     "No schema was found; ensure that the topic exists and has a value schema configured in the schema registry".to_string()))?;
 
                 if schema_response.schema_type != ConfluentSchemaType::Protobuf {
@@ -576,9 +576,23 @@ async fn expand_proto_schema(
                     )));
                 }
 
+                let dependencies: Result<HashMap<_, _>, ErrorResp> = dependencies
+                    .into_iter()
+                    .map(|(name, s)| {
+                        if s.schema_type != ConfluentSchemaType::Protobuf {
+                            return Err(bad_request(format!(
+                                "Schema reference {} has type {:?}, but must be protobuf",
+                                name, s.schema_type
+                            )));
+                        } else {
+                            Ok((name, s.schema))
+                        }
+                    })
+                    .collect();
+
                 schema.definition = Some(SchemaDefinition::ProtobufSchema {
                     schema: schema_response.schema,
-                    dependencies: Default::default(),
+                    dependencies: dependencies?,
                 });
             }
             ConnectionType::Sink => {
@@ -671,15 +685,15 @@ async fn expand_json_schema(
                 let schema_response = schema_response.ok_or_else(|| bad_request(
                     "No schema was found; ensure that the topic exists and has a value schema configured in the schema registry".to_string()))?;
 
-                if schema_response.schema_type != ConfluentSchemaType::Json {
+                if schema_response.0.schema_type != ConfluentSchemaType::Json {
                     return Err(bad_request(format!(
                         "Format configured is json, but confluent schema repository returned a {:?} schema",
-                        schema_response.schema_type
+                        schema_response.0.schema_type
                     )));
                 }
-                confluent_schema_id.replace(schema_response.version);
+                confluent_schema_id.replace(schema_response.0.version);
 
-                schema.definition = Some(SchemaDefinition::JsonSchema(schema_response.schema));
+                schema.definition = Some(SchemaDefinition::JsonSchema(schema_response.0.schema));
             }
             ConnectionType::Sink => {
                 // don't fetch schemas for sinks for now until we're better able to conform our output to the schema
@@ -713,7 +727,13 @@ async fn get_schema(
     connector: &str,
     table_config: &Value,
     profile_config: &Value,
-) -> Result<Option<ConfluentSchemaSubjectResponse>, ErrorResp> {
+) -> Result<
+    Option<(
+        ConfluentSchemaSubjectResponse,
+        Vec<(String, ConfluentSchemaSubjectResponse)>,
+    )>,
+    ErrorResp,
+> {
     let profile: KafkaConfig = match connector {
         "kafka" => {
             // we unwrap here because this should already have been validated
@@ -753,20 +773,30 @@ async fn get_schema(
     )
     .map_err(|e| {
         bad_request(format!(
-            "failed to fetch schemas from schema repository: {}",
+            "failed to fetch schemas from schema registry: {}",
             e
         ))
     })?;
 
-    resolver.get_schema_for_version(None).await.map_err(|e| {
+    let Some(resp) = resolver.get_schema_for_version(None).await.map_err(|e| {
         bad_request(format!(
-            "failed to fetch schemas from schema repository: {}",
+            "failed to fetch schemas from schema registry: {}",
             e.chain()
                 .map(|e| e.to_string())
                 .collect::<Vec<_>>()
                 .join(": ")
         ))
-    })
+    })?
+    else {
+        return Ok(None);
+    };
+
+    let references = resolver
+        .resolve_references(&resp.references)
+        .await
+        .map_err(|e| bad_request(e.to_string()))?;
+
+    Ok(Some((resp, references)))
 }
 
 /// Test a Connection Schema
