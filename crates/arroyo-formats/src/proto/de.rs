@@ -9,8 +9,12 @@ use serde_json::Value as JsonValue;
 pub(crate) fn deserialize_proto(
     pool: &mut DescriptorPool,
     proto: &ProtobufFormat,
-    msg: &[u8],
+    mut msg: &[u8],
 ) -> Result<serde_json::Value, SourceError> {
+    if proto.confluent_schema_registry {
+        msg = &msg[5..];
+    }
+
     let message = proto.message_name.as_ref().expect("no message name");
     let descriptor = pool.get_message_by_name(message).expect("no descriptor");
 

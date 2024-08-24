@@ -1,15 +1,0 @@
-
-™
-basic_types.proto"û
-TestBasicTypes
-
-bool_field (R	boolField
-int32_field (R
-int32Field
-int64_field (R
-int64Field!
-uint32_field (Ruint32Field!
-uint64_field (Ruint64Field
-float_field (R
-floatField!
-double_field (RdoubleFieldbproto3

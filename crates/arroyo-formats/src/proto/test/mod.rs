@@ -1,12 +1,23 @@
-use crate::proto::schema::protobuf_to_arrow;
+use crate::proto::schema::{
+    protobuf_to_arrow, schema_file_to_descriptor, schema_file_to_descriptor_with_resolver,
+    ProtoSchemaResolver,
+};
 use arrow_schema::{DataType, Field, Schema};
 use arroyo_types::ArroyoExtensionType;
 use prost_reflect::DescriptorPool;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-#[test]
-fn test_basic_types() {
-    let pool = DescriptorPool::decode(include_bytes!("protos/basic_types.bin").as_ref()).unwrap();
+#[tokio::test]
+async fn test_basic_types() {
+    let bytes = schema_file_to_descriptor(
+        include_str!("protos/basic_types.proto"),
+        &HashMap::default(),
+    )
+    .await
+    .unwrap();
+
+    let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
@@ -20,10 +31,16 @@ fn test_basic_types() {
     assert_field(&arrow_schema, "double_field", DataType::Float64, true);
 }
 
-#[test]
-fn test_string_and_bytes() {
-    let pool =
-        DescriptorPool::decode(include_bytes!("protos/string_and_bytes.bin").as_ref()).unwrap();
+#[tokio::test]
+async fn test_string_and_bytes() {
+    let bytes = schema_file_to_descriptor(
+        include_str!("protos/string_and_bytes.proto"),
+        &HashMap::default(),
+    )
+    .await
+    .unwrap();
+
+    let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
@@ -32,10 +49,17 @@ fn test_string_and_bytes() {
     assert_field(&arrow_schema, "bytes_field", DataType::Utf8, true);
 }
 
-#[test]
-fn test_nested_message() {
-    let pool =
-        DescriptorPool::decode(include_bytes!("protos/nested_message.bin").as_ref()).unwrap();
+#[tokio::test]
+async fn test_nested_message() {
+    let bytes = schema_file_to_descriptor(
+        include_str!("protos/nested_message.proto"),
+        &HashMap::default(),
+    )
+    .await
+    .unwrap();
+
+    let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
+
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
@@ -63,10 +87,17 @@ fn test_nested_message() {
     );
 }
 
-#[test]
-fn test_repeated_fields() {
-    let pool =
-        DescriptorPool::decode(include_bytes!("protos/repeated_fields.bin").as_ref()).unwrap();
+#[tokio::test]
+async fn test_repeated_fields() {
+    let bytes = schema_file_to_descriptor(
+        include_str!("protos/repeated_fields.proto"),
+        &HashMap::default(),
+    )
+    .await
+    .unwrap();
+
+    let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
+
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
@@ -85,9 +116,14 @@ fn test_repeated_fields() {
     );
 }
 
-#[test]
-fn test_map_fields() {
-    let pool = DescriptorPool::decode(include_bytes!("protos/map_fields.bin").as_ref()).unwrap();
+#[tokio::test]
+async fn test_map_fields() {
+    let bytes =
+        schema_file_to_descriptor(include_str!("protos/map_fields.proto"), &HashMap::default())
+            .await
+            .unwrap();
+
+    let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
     let message = pool.all_messages().next().unwrap();
 
     let arrow_schema = protobuf_to_arrow(&message).unwrap();
@@ -111,9 +147,17 @@ fn test_map_fields() {
     );
 }
 
-#[test]
-fn test_enum_fields() {
-    let pool = DescriptorPool::decode(include_bytes!("protos/enum_fields.bin").as_ref()).unwrap();
+#[tokio::test]
+async fn test_enum_fields() {
+    let bytes = schema_file_to_descriptor(
+        include_str!("protos/enum_fields.proto"),
+        &HashMap::default(),
+    )
+    .await
+    .unwrap();
+
+    let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
+
     let message = pool.all_messages().next().unwrap();
     let arrow_schema = protobuf_to_arrow(&message).unwrap();
 
@@ -127,4 +171,39 @@ fn assert_field(schema: &Schema, name: &str, data_type: DataType, nullable: bool
     assert_eq!(field.name(), name);
     assert_eq!(field.data_type(), &data_type);
     assert_eq!(field.is_nullable(), nullable);
+}
+
+#[tokio::test]
+async fn test_imports() {
+    struct TestResolver {}
+
+    impl ProtoSchemaResolver for TestResolver {
+        async fn resolve(&self, path: &str) -> anyhow::Result<Option<String>> {
+            if path == "address.proto" {
+                Ok(Some(
+                    r#"syntax = "proto3";
+                    package proto_common;
+                    
+                    message Address {
+                      string street = 1;
+                      string city = 2;
+                      string state = 3;
+                      string postal_code = 4;
+                      string country = 5;
+                    }"#
+                    .to_string(),
+                ))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    schema_file_to_descriptor_with_resolver(
+        include_str!("protos/orders.proto"),
+        &HashMap::default(),
+        TestResolver {},
+    )
+    .await
+    .unwrap();
 }

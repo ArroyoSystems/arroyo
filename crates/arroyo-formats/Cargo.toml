@@ -29,3 +29,4 @@ prost-build = { workspace = true }
 prost-types = { workspace = true}
 base64 = "0.22.1"
 uuid = { version = "1.10.0", features = ["v4"] }
+regex = "1.10.6"
