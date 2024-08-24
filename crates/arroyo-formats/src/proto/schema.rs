@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Context};
 use arrow_schema::{DataType, Field, Schema};
-use arroyo_rpc::schema_resolver::ConfluentSchemaRegistry;
 use arroyo_types::ArroyoExtensionType;
 use prost_reflect::{Cardinality, DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
 use regex::Regex;
