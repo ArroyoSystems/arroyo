@@ -67,7 +67,7 @@ CMD ["cluster"]
 FROM rust:slim-bookworm AS arroyo-full
 WORKDIR /app
 RUN apt-get update && \
-    apt-get -y install libsasl2-2 ca-certificates curl pkg-config
+    apt-get -y install libsasl2-2 ca-certificates curl pkg-config protobuf
 
 ENV ARROYO__API__RUN_HTTP_PORT=5115
 
