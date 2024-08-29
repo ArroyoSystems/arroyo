@@ -75,6 +75,7 @@ export function Home() {
   let runningJobs = 0;
   let allJobs = 0;
   let failedJobs = 0;
+  let finishedJobs = 0;
 
   if (!jobs || jobsLoading) {
     return <Loading />;
@@ -85,6 +86,7 @@ export function Home() {
       j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting'
     ).length;
     allJobs = jobs.length;
+    finishedJobs = jobs.filter(j => j.state == 'Finished').length;
     failedJobs = jobs.filter(j => j.state == 'Failed').length;
   }
 
@@ -157,6 +159,7 @@ export function Home() {
           >
             <Stat label="Running Jobs" value={runningJobs?.toString()} />
             <Stat label="All Jobs" value={allJobs?.toString()} />
+            <Stat label="Finished Jobs" value={finishedJobs?.toString()} />
             <Stat
               label="Failed Jobs"
               value={failedJobs?.toString()}
