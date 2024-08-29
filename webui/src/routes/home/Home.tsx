@@ -74,8 +74,8 @@ export function Home() {
 
   let runningJobs = 0;
   let allJobs = 0;
-  let failedJobs = 0;
   let finishedJobs = 0;
+  let failedJobs = 0;
 
   if (!jobs || jobsLoading) {
     return <Loading />;
