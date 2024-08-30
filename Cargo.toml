@@ -25,7 +25,7 @@ members = [
     "crates/arroyo-udf/arroyo-udf-macros",
     "crates/arroyo-worker",
     "crates/copy-artifacts",
-    "crates/integ",
+    "crates/integ", "crates/arroyo-udf/arroyo-udf-python",
 ]
 
 resolver = "2"

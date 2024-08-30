@@ -1,0 +1,10 @@
+[package]
+name = "arroyo-udf-python"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+arrow = { workspace = true }
+datafusion = { workspace = true }
+pyo3 = { version = "0.22.2", features = ["gil-refs"] }
+anyhow = "1"

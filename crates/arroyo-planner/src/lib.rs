@@ -590,7 +590,7 @@ pub async fn parse_and_get_arrow_program(
 
         let plan_rewrite = rewrite_plan(plan, &schema_provider)?;
 
-        debug!("Plan = {:?}", plan_rewrite);
+        debug!("Plan = {}", plan_rewrite.display_graphviz());
 
         let mut metadata = SourceMetadataVisitor::new(&schema_provider);
         plan_rewrite.visit_with_subqueries(&mut metadata)?;
