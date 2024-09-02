@@ -124,11 +124,7 @@ impl ExpiringTimeKeyTable {
     {
         let mut result = vec![];
         for (file, needs_filtering) in files {
-            let object_meta = self
-                .storage_provider
-                .get_backing_store()
-                .head(&(file.into()))
-                .await?;
+            let object_meta = self.storage_provider.head(file.as_str()).await?;
             let object_reader =
                 ParquetObjectReader::new(self.storage_provider.get_backing_store(), object_meta);
             let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
@@ -494,11 +490,7 @@ impl TimeTableCompactor {
             }
             let reader = ParquetObjectReader::new(
                 compactor.storage_provider.get_backing_store(),
-                compactor
-                    .storage_provider
-                    .get_backing_store()
-                    .head(&(file_name.clone().into()))
-                    .await?,
+                compactor.storage_provider.head(file_name.as_str()).await?,
             );
             let first_partition =
                 server_for_hash(file.min_routing_key, operator_metadata.parallelism as usize);
@@ -566,7 +558,7 @@ impl TimeTableCompactor {
                 self.operator_metadata.epoch,
                 true,
             );
-            let buf_writer = self.storage_provider.buf_writer(file_name.clone().into());
+            let buf_writer = self.storage_provider.buf_writer(file_name.as_str());
 
             let writer = Some(AsyncArrowWriter::try_new(
                 buf_writer,
@@ -664,7 +656,7 @@ impl ExpiringTimeKeyTableCheckpointer {
         let buf_writer = self
             .parent
             .storage_provider
-            .buf_writer(self.file_name.clone().into());
+            .buf_writer(self.file_name.as_str());
         let writer_properties = WriterProperties::builder()
             .set_compression(Compression::ZSTD(ZstdLevel::default()))
             .build();
@@ -724,8 +716,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
             let meta = self
                 .parent
                 .storage_provider
-                .get_backing_store()
-                .head(&(self.file_name.clone().into()))
+                .head(self.file_name.as_str())
                 .await?;
             bytes += meta.size;
             let file = ParquetTimeFile {

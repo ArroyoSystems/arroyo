@@ -7,11 +7,12 @@ use object_store::buffered::BufWriter;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
-use object_store::CredentialProvider;
 use object_store::{
     aws::AmazonS3Builder, local::LocalFileSystem, MultipartId, ObjectStore, PutPayload,
 };
+use object_store::{CredentialProvider, ObjectMeta};
 use regex::{Captures, Regex};
+use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::future::ready;
 use std::path::PathBuf;
@@ -152,7 +153,7 @@ pub struct S3Config {
     endpoint: Option<String>,
     region: Option<String>,
     bucket: String,
-    key: Option<String>,
+    key: Option<Path>,
 }
 
 impl S3Config {
@@ -161,7 +162,7 @@ impl S3Config {
             endpoint: None,
             region: Some(region),
             bucket,
-            key: Some(key),
+            key: Some(key.into()),
         }
     }
 }
@@ -169,13 +170,13 @@ impl S3Config {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GCSConfig {
     bucket: String,
-    key: Option<String>,
+    key: Option<Path>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalConfig {
     pub path: String,
-    pub key: Option<String>,
+    pub key: Option<Path>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,7 +238,7 @@ impl BackendConfig {
                 .transpose()?,
         ]);
 
-        let key = matches.name("key").map(|m| m.as_str().to_string());
+        let key = matches.name("key").map(|m| m.as_str().into());
 
         Ok(BackendConfig::S3(S3Config {
             endpoint,
@@ -254,7 +255,7 @@ impl BackendConfig {
             .as_str()
             .to_string();
 
-        let key = matches.name("key").map(|r| r.as_str().to_string());
+        let key = matches.name("key").map(|r| r.as_str().into());
 
         Ok(BackendConfig::GCS(GCSConfig { bucket, key }))
     }
@@ -272,7 +273,9 @@ impl BackendConfig {
         };
 
         let key = if with_key {
-            let key = path.file_name().map(|k| k.to_str().unwrap().to_string());
+            let key = path
+                .file_name()
+                .map(|k| k.to_str().unwrap().to_string().into());
             path.pop();
             key
         } else {
@@ -285,7 +288,7 @@ impl BackendConfig {
         }))
     }
 
-    fn key(&self) -> Option<&String> {
+    fn key(&self) -> Option<&Path> {
         match self {
             BackendConfig::S3(s3) => s3.key.as_ref(),
             BackendConfig::GCS(gcs) => gcs.key.as_ref(),
@@ -344,7 +347,7 @@ impl StorageProvider {
         provider.get("").await
     }
 
-    pub fn get_key(url: &str) -> Result<String, StorageError> {
+    pub fn get_key(url: &str) -> Result<Path, StorageError> {
         let config = BackendConfig::parse_url(url, true)?;
         let key = match &config {
             BackendConfig::S3(s3) => s3.key.as_ref(),
@@ -352,7 +355,7 @@ impl StorageProvider {
             BackendConfig::Local(local) => local.key.as_ref(),
         }
         .ok_or_else(|| StorageError::NoKeyInUrl)?;
-        Ok(key.clone())
+        Ok(key.to_owned())
     }
 
     async fn construct_s3(
@@ -522,11 +525,11 @@ impl StorageProvider {
         Ok(list)
     }
 
-    pub async fn get<P: Into<String>>(&self, path: P) -> Result<Bytes, StorageError> {
-        let path: String = path.into();
+    pub async fn get(&self, path: impl Into<Path>) -> Result<Bytes, StorageError> {
+        let path = path.into();
         let bytes = self
             .object_store
-            .get(&self.qualify_path(&path.into()))
+            .get(&self.qualify_path(&path))
             .await
             .map_err(Into::<StorageError>::into)?
             .bytes()
@@ -535,16 +538,12 @@ impl StorageProvider {
         Ok(bytes)
     }
 
-    pub async fn get_if_present<P: Into<String>>(
+    pub async fn get_if_present(
         &self,
-        path: P,
+        path: impl Into<Path>,
     ) -> Result<Option<Bytes>, StorageError> {
-        let path: String = path.into();
-        match self
-            .object_store
-            .get(&self.qualify_path(&path.into()))
-            .await
-        {
+        let path: Path = path.into();
+        match self.object_store.get(&self.qualify_path(&path)).await {
             Ok(obj) => {
                 let bytes = obj.bytes().await?;
                 Ok(Some(bytes))
@@ -569,12 +568,12 @@ impl StorageProvider {
         }
     }
 
-    pub async fn get_as_stream<P: Into<String>>(
+    pub async fn get_as_stream(
         &self,
-        path: P,
+        path: impl Into<Path>,
     ) -> Result<impl tokio::io::AsyncRead, StorageError> {
-        let path: Path = path.into().into();
-
+        let path = path.into();
+        let path = self.qualify_path(&path);
         let bytes = storage_retry!(self.object_store.get(&path).await)
             .map_err(Into::<StorageError>::into)?
             .into_stream();
@@ -582,35 +581,26 @@ impl StorageProvider {
         Ok(tokio_util::io::StreamReader::new(bytes))
     }
 
-    pub async fn put<P: Into<String>>(
-        &self,
-        path: P,
-        bytes: Vec<u8>,
-    ) -> Result<String, StorageError> {
-        let path = path.into().into();
+    pub async fn put(&self, path: impl Into<Path>, bytes: Vec<u8>) -> Result<(), StorageError> {
         let bytes = PutPayload::from(Bytes::from(bytes));
-        storage_retry!(
-            self.object_store
-                .put(&self.qualify_path(&path), bytes.clone())
-                .await
-        )?;
+        let path = path.into();
+        let path = self.qualify_path(&path);
+        storage_retry!(self.object_store.put(&path, bytes.clone()).await)?;
 
-        Ok(format!("{}/{}", self.canonical_url, path))
+        Ok(())
     }
 
-    fn qualify_path(&self, path: &Path) -> Path {
+    pub fn qualify_path<'a>(&self, path: &'a Path) -> Cow<'a, Path> {
         match self.config.key() {
-            Some(prefix) => {
-                let prefix_path: Path = prefix.to_string().into();
-                prefix_path.parts().chain(path.parts()).collect()
-            }
-            None => path.clone(),
+            Some(prefix) => Cow::Owned(prefix.parts().chain(path.parts()).collect()),
+            None => Cow::Borrowed(path),
         }
     }
 
-    pub async fn delete_if_present<P: Into<String>>(&self, path: P) -> Result<(), StorageError> {
+    pub async fn delete_if_present(&self, path: impl Into<Path>) -> Result<(), StorageError> {
         let path = path.into();
-        match self.object_store.delete(&path.into()).await {
+        let path = self.qualify_path(&path);
+        match self.object_store.delete(&path).await {
             Ok(_) => Ok(()),
             Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(e) => Err(e.into()),
@@ -652,12 +642,31 @@ impl StorageProvider {
         &self.config
     }
 
+    /// Provides an Arc'd copy of the underlying ObjectStore implementation. Be *very* careful
+    /// using this. An objectstore URL is made up of two components: a bucket and a key, like
+    /// s3://my-bucket/my/key.
+    ///
+    /// The backing store only knows about buckets, so it is *your* responsibility when using
+    /// raw object store methods to prepend the key as well (for example, by using
+    /// `ArroyoStorage::qualify_path`).
     pub fn get_backing_store(&self) -> Arc<dyn ObjectStore> {
         self.object_store.clone()
     }
 
-    pub fn buf_writer(&self, path: Path) -> BufWriter {
-        BufWriter::new(self.object_store.clone(), path)
+    pub async fn head(&self, path: impl Into<Path>) -> Result<ObjectMeta, StorageError> {
+        let path = path.into();
+        self.object_store
+            .head(&self.qualify_path(&path))
+            .await
+            .map_err(Into::<StorageError>::into)
+    }
+
+    pub fn buf_writer(&self, path: impl Into<Path>) -> BufWriter {
+        let path = path.into();
+        BufWriter::new(
+            self.object_store.clone(),
+            self.qualify_path(&path).into_owned(),
+        )
     }
 
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
@@ -699,9 +708,9 @@ impl StorageProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
-
     use arroyo_types::to_nanos;
+    use object_store::path::Path;
+    use std::time::SystemTime;
 
     use crate::{matchers, BackendConfig, StorageProvider};
 
@@ -819,19 +828,19 @@ mod tests {
 
         let now = to_nanos(SystemTime::now());
         let data = now.to_le_bytes().to_vec();
-        let key = format!("my-test/{}", now);
+        let key = Path::parse(format!("my-test/{}", now)).unwrap();
 
-        let full_url = storage.put(&key, data.clone()).await;
-        assert!(full_url.is_ok());
-
+        assert!(storage.put(&key, data.clone()).await.is_ok());
         assert_eq!(storage.get(&key).await.unwrap(), data.clone());
 
+        let full_url = storage.canonical_url_for(&key);
+
         assert_eq!(
-            StorageProvider::get_url(&full_url.unwrap()).await.unwrap(),
+            StorageProvider::get_url(&full_url).await.unwrap(),
             data.clone()
         );
 
-        storage.delete_if_present(&key).await.unwrap();
+        storage.delete_if_present(key.into()).await.unwrap();
 
         assert!(
             !tokio::fs::try_exists(format!("/tmp/arroyo-testing/storage-tests/{}", key))
