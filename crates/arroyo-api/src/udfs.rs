@@ -85,6 +85,7 @@ pub async fn create_udf(
         &auth_data.user_id,
         &req.prefix,
         &udf_name,
+        &req.language.to_string(),
         &req.definition,
         &req.description.unwrap_or_default(),
         &udf_url,

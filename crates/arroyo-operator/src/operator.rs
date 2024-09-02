@@ -5,7 +5,7 @@ use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
 use anyhow::anyhow;
 use arrow::array::RecordBatch;
 use arrow::datatypes::DataType;
-use arroyo_datastream::logical::DylibUdfConfig;
+use arroyo_datastream::logical::{DylibUdfConfig, PythonUdfConfig};
 use arroyo_metrics::TaskCounters;
 use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
@@ -33,6 +33,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace, warn, Instrument};
+use arroyo_udf_python::PythonUDF;
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -667,6 +668,14 @@ impl Registry {
             self.udfs
                 .insert(dylib.name().to_string(), Arc::new(ScalarUDF::from(dylib)));
         }
+    }
+    
+    pub fn add_python_udf(&mut self, udf: &PythonUdfConfig) -> anyhow::Result<()> {
+        let udf = PythonUDF::parse(&*udf.definition)?;
+        
+        self.udfs.insert((*udf.name).clone(), Arc::new(udf.into()));
+        
+        Ok(())
     }
 
     pub fn get_dylib(&self, path: &str) -> Option<Arc<UdfDylib>> {

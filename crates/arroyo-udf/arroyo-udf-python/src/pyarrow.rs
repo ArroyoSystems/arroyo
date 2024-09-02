@@ -105,7 +105,6 @@ impl Converter {
             DataType::UInt64 => get_pyobject!(UInt64Array, py, array, i),
             DataType::Float32 => get_pyobject!(Float32Array, py, array, i),
             DataType::Float64 => get_pyobject!(Float64Array, py, array, i),
-            // TODO: make this a macro
             // DataType::Utf8 => match field.metadata().get("ARROW:extension:name") {
             //     Some(x) if x == "arroyo.json" => {
             //         let array = array.as_any().downcast_ref::<StringArray>().unwrap();
@@ -116,6 +115,7 @@ impl Converter {
             //     }
             //     _ => get_pyobject!(StringArray, py, array, i),
             // },
+            DataType::Utf8 => get_pyobject!(StringArray, py, array, i),
             DataType::LargeUtf8 => get_pyobject!(LargeStringArray, py, array, i),
             DataType::Binary => get_pyobject!(BinaryArray, py, array, i),
             DataType::LargeBinary => get_pyobject!(LargeBinaryArray, py, array, i),
@@ -165,6 +165,7 @@ impl Converter {
             DataType::UInt64 => build_array!(UInt64Builder, py, values),
             DataType::Float32 => build_array!(Float32Builder, py, values),
             DataType::Float64 => build_array!(Float64Builder, py, values),
+            DataType::Utf8 => build_array!(StringBuilder, &str, py, values),
             // DataType::Utf8 => match field.metadata().get("ARROW:extension:name") {
             //     Some(x) if x == "arroyo.json" => {
             //         build_json_array!(py, values)

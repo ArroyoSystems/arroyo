@@ -4,7 +4,8 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-arrow = { workspace = true }
+arroyo-udf-common = { path = "../arroyo-udf-common" }
+arrow = { workspace = true, features = ["ffi"] }
 datafusion = { workspace = true }
-pyo3 = { version = "0.22.2", features = ["gil-refs"] }
+pyo3 = { version = "0.22.2", features = ["gil-refs", "auto-initialize"] }
 anyhow = "1"

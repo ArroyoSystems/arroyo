@@ -708,6 +708,7 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "arroyo-udf-host",
+ "arroyo-udf-python",
  "async-trait",
  "bincode",
  "datafusion",
@@ -831,6 +832,7 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "arroyo-udf-host",
+ "arroyo-udf-python",
  "async-ffi",
  "async-stream",
  "async-trait",
@@ -1087,6 +1089,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "arrow",
+ "arroyo-udf-common",
  "datafusion",
  "pyo3",
 ]

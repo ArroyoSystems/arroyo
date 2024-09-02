@@ -16,7 +16,7 @@ pub mod udafs;
 #[cfg(test)]
 mod test;
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType};
 use arrow_schema::{Field, FieldRef, Schema};
@@ -48,7 +48,7 @@ use tables::{Insert, Table};
 use crate::builder::PlanToGraphVisitor;
 use crate::extension::sink::SinkExtension;
 use crate::plan::ArroyoRewriter;
-use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig};
+use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig, PythonUdfConfig};
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion::common::DataFusionError;
 use std::collections::HashSet;
@@ -64,6 +64,7 @@ use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
+use arroyo_udf_python::PythonUDF;
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::execution::FunctionRegistry;
@@ -96,6 +97,7 @@ pub struct ArroyoSchemaProvider {
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
+    pub python_udfs: HashMap<String, PythonUdfConfig>,
     pub function_rewriters: Vec<Arc<dyn FunctionRewrite + Send + Sync>>,
     pub expr_planners: Vec<Arc<dyn ExprPlanner>>,
 }
@@ -298,6 +300,36 @@ impl ArroyoSchemaProvider {
         );
 
         Ok(parsed.udf.name)
+    }
+
+    pub fn add_python_udf(&mut self, body: &str) -> anyhow::Result<String> {
+        let parsed = PythonUDF::parse(body).map_err(|e| e.context("parsing Python UDF"))?;
+
+        let name = parsed.name.clone();
+
+        self.python_udfs.insert(
+            (*name).clone(),
+            PythonUdfConfig {
+                arg_types: parsed
+                    .arg_types
+                    .iter()
+                    .map(|t| t.data_type.clone())
+                    .collect(),
+                return_type: parsed.return_type.data_type.clone(),
+                name: name.clone(),
+                definition: parsed.definition.clone(),
+            },
+        );
+
+        let replaced = self
+            .functions
+            .insert((*parsed.name).clone(), Arc::new(parsed.into()));
+
+        if replaced.is_some() {
+            warn!("Existing UDF '{}' is being overwritten", name);
+        }
+
+        Ok((*name).clone())
     }
 }
 
@@ -646,6 +678,7 @@ pub async fn parse_and_get_arrow_program(
         graph,
         ProgramConfig {
             udf_dylibs: schema_provider.dylib_udfs.clone(),
+            python_udfs: schema_provider.python_udfs.clone(),
         },
     );
 

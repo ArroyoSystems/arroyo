@@ -424,6 +424,15 @@ impl WorkerGrpc for WorkerServer {
                 continue;
             }
         }
+        
+        for (udf_name, python_udf) in &logical.program_config.python_udfs {
+            info!("Loading Python UDF {}", udf_name);
+            registry
+                .add_python_udf(python_udf)
+                .map_err(|e| {
+                    Status::failed_precondition(e.context(format!("loading Python UDF {udf_name}")).to_string())
+                })?;
+        }
 
         let (engine, control_rx) = {
             let network = { self.network.lock().unwrap().take().unwrap() };

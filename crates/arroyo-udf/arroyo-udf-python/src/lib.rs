@@ -15,6 +15,7 @@ use pyo3::{Bound, Py, PyAny, Python};
 use std::any::Any;
 use std::fmt::Debug;
 use std::sync::Arc;
+use arroyo_udf_common::parse::NullableType;
 
 pub const SUPPORT_CODE: &str = r#"
 def udf(func):
@@ -24,10 +25,12 @@ def udf(func):
 
 #[derive(Debug)]
 pub struct PythonUDF {
-    name: Arc<String>,
-    function: Py<PyFunction>,
-    signature: Arc<Signature>,
-    return_type: Arc<DataType>,
+    pub name: Arc<String>,
+    pub definition: Arc<String>,
+    pub function: Py<PyFunction>,
+    pub signature: Arc<Signature>,
+    pub arg_types: Arc<Vec<NullableType>>,
+    pub return_type: Arc<NullableType>,
 }
 
 impl ScalarUDFImpl for PythonUDF {
@@ -44,7 +47,7 @@ impl ScalarUDFImpl for PythonUDF {
     }
 
     fn return_type(&self, _: &[DataType]) -> DFResult<DataType> {
-        Ok((*self.return_type).clone())
+        Ok(self.return_type.data_type.clone())
     }
 
     fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
@@ -87,7 +90,7 @@ impl ScalarUDFImpl for PythonUDF {
                 .collect();
 
             let results =
-                Converter::build_array(&*self.return_type, py, &results?).map_err(|e| {
+                Converter::build_array(&self.return_type.data_type, py, &results?).map_err(|e| {
                     DataFusionError::Execution(format!(
                         "could not convert results from Python UDF '{}' to arrow: {}",
                         self.name, e
@@ -101,7 +104,7 @@ impl ScalarUDFImpl for PythonUDF {
 
 fn extract_type_info(
     udf: &Bound<PyAny>,
-) -> anyhow::Result<(Vec<(DataType, bool)>, (DataType, bool))> {
+) -> anyhow::Result<(Vec<NullableType>, NullableType)> {
     let attr = udf.getattr("__annotations__")?;
     let annotations: &Bound<PyDict> = attr.downcast().map_err(|e| {
         anyhow!(
@@ -145,7 +148,7 @@ impl PythonUDF {
     pub fn parse(body: impl Into<String>) -> anyhow::Result<Self> {
         let body = format!("{}\n{}", SUPPORT_CODE, body.into());
         let (name, args, ret, function) = Python::with_gil(|py| {
-            let mut globals = PyDict::new_bound(py);
+            let globals = PyDict::new_bound(py);
             globals.set_item("udf_registry", PyList::empty_bound(py))?;
             py.run_bound(&body, Some(&globals), None)?;
 
@@ -165,15 +168,18 @@ impl PythonUDF {
             }
         })?;
 
-        let args = args.iter().map(|(t, _)| t.clone()).collect();
+        let arg_dts = args.iter().map(|t| t.data_type.clone()).collect();
+
         Ok(Self {
             name: Arc::new(name),
             function,
+            definition: Arc::new(body),
             signature: Arc::new(Signature {
-                type_signature: TypeSignature::Exact(args),
+                type_signature: TypeSignature::Exact(arg_dts),
                 volatility: Volatility::Volatile,
             }),
-            return_type: Arc::new(ret.0),
+            arg_types: Arc::new(args),
+            return_type: Arc::new(ret),
         })
     }
 }
@@ -182,7 +188,7 @@ fn python_type_to_arrow(
     var_name: &str,
     py_type: &Bound<PyAny>,
     nullable: bool,
-) -> anyhow::Result<(DataType, bool)> {
+) -> anyhow::Result<NullableType> {
     let name = py_type
         .getattr("__name__")
         .map_err(|e| anyhow!("Could not get name of type for argument {var_name}: {e}"))?
@@ -212,7 +218,7 @@ fn python_type_to_arrow(
         other => bail!("Unsupported Python type: {}", other),
     };
 
-    Ok((data_type, nullable))
+    Ok(NullableType::new(data_type, nullable))
 }
 
 #[cfg(test)]
@@ -245,7 +251,8 @@ def my_add(x: int, y: float) -> float:
             panic!("Expected exact type signature");
         }
 
-        assert_eq!(*udf.return_type, arrow::datatypes::DataType::Float64);
+        assert_eq!(udf.return_type.data_type, arrow::datatypes::DataType::Float64);
+        assert_eq!(udf.return_type.nullable, false);
 
         let data = vec![
             ColumnarValue::Array(Arc::new(arrow::array::Int64Array::from(vec![1, 2, 3]))),
