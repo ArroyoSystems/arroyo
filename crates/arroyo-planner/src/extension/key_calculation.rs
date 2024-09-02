@@ -110,7 +110,7 @@ impl ArroyoExtension for KeyCalculationExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        let arrow_schema = Arc::new(self.input.schema().as_ref().into());
+        let arrow_schema = Arc::new(self.schema().as_ref().into());
         ArroyoSchema::from_schema_keys(arrow_schema, self.keys.clone()).unwrap()
     }
 }
