@@ -136,7 +136,7 @@ impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
         let table = self.table.clone();
         let format = self.format.clone();
         tokio::spawn(async move {
-            let storage_path: Path = StorageProvider::get_key(&write_path).unwrap().into();
+            let storage_path: Path = StorageProvider::get_key(&write_path).unwrap();
             let provider =
                 StorageProvider::for_url_with_options(&write_path, storage_options.clone())
                     .await
@@ -995,7 +995,7 @@ where
                     filename, err
                 );
                 // check if the file is already there with the correct size.
-                let contents = self.object_store.get(&filename).await?;
+                let contents = self.object_store.get(filename.as_str()).await?;
                 if contents.len() == size {
                     Ok(Some(FinishedFile {
                         filename,

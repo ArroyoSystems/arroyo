@@ -896,7 +896,7 @@ mod tests {
         .unwrap();
 
         tokio::task::spawn(async move {
-            let f = rx.recv();
+            let _f = rx.recv();
             panic!("at the disco");
         });
 

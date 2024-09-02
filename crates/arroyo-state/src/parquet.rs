@@ -45,7 +45,7 @@ impl BackingStore for ParquetBackend {
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Result<CheckpointMetadata> {
         let storage_client = get_storage_provider().await?;
         let data = storage_client
-            .get(&metadata_path(&base_path(job_id, epoch)))
+            .get(metadata_path(&base_path(job_id, epoch)).as_str())
             .await?;
         let metadata = CheckpointMetadata::decode(&data[..])?;
         Ok(metadata)
@@ -58,7 +58,7 @@ impl BackingStore for ParquetBackend {
     ) -> Result<Option<OperatorCheckpointMetadata>> {
         let storage_client = get_storage_provider().await?;
         storage_client
-            .get_if_present(&metadata_path(&operator_path(job_id, epoch, operator_id)))
+            .get_if_present(metadata_path(&operator_path(job_id, epoch, operator_id)).as_str())
             .await?
             .map(|data| Ok(OperatorCheckpointMetadata::decode(&data[..])?))
             .transpose()
@@ -77,7 +77,9 @@ impl BackingStore for ParquetBackend {
             operator_metadata.epoch,
             &operator_metadata.operator_id,
         ));
-        storage_client.put(&path, metadata.encode_to_vec()).await?;
+        storage_client
+            .put(path.as_str(), metadata.encode_to_vec())
+            .await?;
         // TODO: propagate error
         Ok(())
     }
@@ -86,7 +88,9 @@ impl BackingStore for ParquetBackend {
         debug!("writing checkpoint {:?}", metadata);
         let storage_client = get_storage_provider().await?;
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
-        storage_client.put(&path, metadata.encode_to_vec()).await?;
+        storage_client
+            .put(path.as_str(), metadata.encode_to_vec())
+            .await?;
         Ok(())
     }
 

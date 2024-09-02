@@ -74,7 +74,7 @@ impl GlobalKeyedTable {
     ) -> anyhow::Result<GlobalKeyedView<K, V>> {
         let mut data = HashMap::new();
         for file in &self.files {
-            let contents = self.storage_provider.get(file).await?;
+            let contents = self.storage_provider.get(file.as_str()).await?;
             let reader = ParquetRecordBatchReaderBuilder::try_new(contents)?.build()?;
             for batch in reader {
                 for (key, value) in self.get_key_value_iterator(&batch?)? {
@@ -291,7 +291,9 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
             self.epoch,
             false,
         );
-        self.storage_provider.put(&path, parquet_bytes).await?;
+        self.storage_provider
+            .put(path.as_str(), parquet_bytes)
+            .await?;
         let _finish_time = to_micros(SystemTime::now());
         Ok(Some((
             GlobalKeyedTableSubtaskCheckpointMetadata {

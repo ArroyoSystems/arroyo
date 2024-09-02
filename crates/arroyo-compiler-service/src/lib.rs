@@ -307,7 +307,7 @@ impl CompilerGrpc for CompileService {
                 )
                 .await?;
 
-                self.storage.put(&path, dylib).await.map_err(|e| {
+                self.storage.put(path.as_str(), dylib).await.map_err(|e| {
                     Status::internal(format!(
                         "Failed to write UDF library to artifact storage: {}",
                         e
