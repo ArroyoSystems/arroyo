@@ -727,7 +727,7 @@ mod tests {
                 endpoint: None,
                 region: None,
                 bucket: "mybucket".to_string(),
-                key: Some("puppy.jpg".to_string()),
+                key: Some("puppy.jpg".into()),
             })
         );
 
@@ -741,7 +741,7 @@ mod tests {
                 endpoint: None,
                 region: Some("us-west-2".to_string()),
                 bucket: "my-bucket1".to_string(),
-                key: Some("puppy.jpg".to_string()),
+                key: Some("puppy.jpg".into()),
             })
         );
 
@@ -766,7 +766,7 @@ mod tests {
                 endpoint: None,
                 region: Some("us-west-2".to_string()),
                 bucket: "my-bucket".to_string(),
-                key: Some("my/path/test.pdf".to_string()),
+                key: Some("my/path/test.pdf".into()),
             })
         );
 
@@ -780,7 +780,7 @@ mod tests {
                 endpoint: Some("https://my-custom-endpoint.com:1234".to_string()),
                 region: None,
                 bucket: "my-bucket".to_string(),
-                key: Some("path/test.pdf".to_string()),
+                key: Some("path/test.pdf".into()),
             })
         );
     }
@@ -815,7 +815,7 @@ mod tests {
             BackendConfig::parse_url("/my/path/directory/my-file.pdf", true).unwrap(),
             BackendConfig::Local(crate::LocalConfig {
                 path: "/my/path/directory".to_string(),
-                key: Some("my-file.pdf".to_string()),
+                key: Some("my-file.pdf".into()),
             })
         );
     }
@@ -830,17 +830,17 @@ mod tests {
         let data = now.to_le_bytes().to_vec();
         let key = Path::parse(format!("my-test/{}", now)).unwrap();
 
-        assert!(storage.put(&key, data.clone()).await.is_ok());
-        assert_eq!(storage.get(&key).await.unwrap(), data.clone());
+        assert!(storage.put(key.clone(), data.clone()).await.is_ok());
+        assert_eq!(storage.get(key.clone()).await.unwrap(), data.clone());
 
-        let full_url = storage.canonical_url_for(&key);
+        let full_url = storage.canonical_url_for(&key.to_string());
 
         assert_eq!(
             StorageProvider::get_url(&full_url).await.unwrap(),
             data.clone()
         );
 
-        storage.delete_if_present(key.into()).await.unwrap();
+        storage.delete_if_present(key.clone()).await.unwrap();
 
         assert!(
             !tokio::fs::try_exists(format!("/tmp/arroyo-testing/storage-tests/{}", key))
