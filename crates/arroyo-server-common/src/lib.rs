@@ -94,8 +94,8 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         LogFormat::Plaintext => {
             register_log!(
                 tracing_subscriber::fmt::layer()
-                    .with_line_number(false)
-                    .with_file(false)
+                    .with_line_number(config().logging.enable_file_line)
+                    .with_file(config().logging.enable_file_name)
                     .with_span_events(FmtSpan::NONE),
                 nonblocking,
                 filter
@@ -104,6 +104,8 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         LogFormat::Logfmt => {
             register_log!(
                 tracing_subscriber::fmt::layer()
+                    .with_line_number(config().logging.enable_file_line)
+                    .with_file(config().logging.enable_file_name)
                     .event_format(tracing_logfmt::EventsFormatter)
                     .fmt_fields(tracing_logfmt::FieldsFormatter),
                 nonblocking,
@@ -112,7 +114,10 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         }
         LogFormat::Json => {
             register_log!(
-                tracing_subscriber::fmt::layer().event_format(Format::default().json()),
+                tracing_subscriber::fmt::layer()
+                    .with_line_number(config().logging.enable_file_line)
+                    .with_file(config().logging.enable_file_name)
+                    .event_format(Format::default().json()),
                 nonblocking,
                 filter
             )

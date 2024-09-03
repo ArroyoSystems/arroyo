@@ -630,6 +630,14 @@ pub struct LogConfig {
     /// Nonblocking logging may reduce tail latency at the cost of higher memory usage
     #[serde(default)]
     pub nonblocking: bool,
+
+    /// Set switch whether record file line number in log
+    #[serde(default)]
+    pub enable_file_line: bool,
+
+    /// Set switch whether record file name in log
+    #[serde(default)]
+    pub enable_file_name: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
