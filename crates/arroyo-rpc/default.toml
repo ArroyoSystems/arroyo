@@ -82,3 +82,7 @@ user = "arroyo"
 password = "arroyo"
 
 [logging]
+format = "plaintext" # option: plaintext / json / logfmt 
+nonblocking = true
+enable-file-line = false
+enable-file-name = false 
