@@ -253,6 +253,8 @@ export interface components {
     }, {
       avro: components["schemas"]["AvroFormat"];
     }, {
+      protobuf: components["schemas"]["ProtobufFormat"];
+    }, {
       parquet: components["schemas"]["ParquetFormat"];
     }, {
       raw_string: components["schemas"]["RawStringFormat"];
@@ -436,6 +438,13 @@ export interface components {
     };
     /** @enum {string} */
     PrimitiveType: "Int32" | "Int64" | "UInt32" | "UInt64" | "F32" | "F64" | "Bool" | "String" | "Bytes" | "UnixMillis" | "UnixMicros" | "UnixNanos" | "DateTime" | "Json";
+    ProtobufFormat: {
+      /** Format: binary */
+      compiledSchema?: string | null;
+      confluentSchemaRegistry?: boolean;
+      intoUnstructuredJson?: boolean;
+      messageName?: string | null;
+    };
     QueryValidationResult: {
       errors: (string)[];
       graph?: components["schemas"]["PipelineGraph"] | null;
@@ -445,7 +454,12 @@ export interface components {
     SchemaDefinition: OneOf<[{
       json_schema: string;
     }, {
-      protobuf_schema: string;
+      protobuf_schema: {
+        dependencies?: {
+          [key: string]: string | undefined;
+        };
+        schema: string;
+      };
     }, {
       avro_schema: string;
     }, {

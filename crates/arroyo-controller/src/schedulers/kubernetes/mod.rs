@@ -116,6 +116,12 @@ impl KubernetesScheduler {
             }));
         }
 
+        for var in &config().kubernetes_scheduler.worker.env {
+            env.as_array_mut()
+                .unwrap()
+                .push(serde_json::to_value(var).unwrap());
+        }
+
         let owner: Vec<_> = config()
             .kubernetes_scheduler
             .controller
@@ -123,11 +129,7 @@ impl KubernetesScheduler {
             .cloned()
             .collect();
 
-        let command: Vec<_> = c
-            .worker
-            .command
-            .split(|w: char| w.is_whitespace())
-            .collect();
+        let command: Vec<_> = shlex::split(&c.worker.command).expect("cannot split command");
 
         serde_json::from_value(json!({
             "apiVersion": "v1",

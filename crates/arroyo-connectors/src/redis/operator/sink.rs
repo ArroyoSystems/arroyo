@@ -197,11 +197,7 @@ impl RedisWriter {
         }
 
         while attempts < 20 {
-            match self
-                .pipeline
-                .query_async::<_, ()>(&mut self.connection)
-                .await
-            {
+            match self.pipeline.query_async::<()>(&mut self.connection).await {
                 Ok(_) => {
                     self.pipeline.clear();
                     self.size_estimate = 0;
@@ -219,7 +215,7 @@ impl RedisWriter {
             }
 
             tokio::time::sleep(Duration::from_millis((50 * (1 << attempts)).min(5_000))).await;
-            attempts -= 1;
+            attempts += 1;
         }
 
         panic!("Exhausted retries writing to Redis");
@@ -319,7 +315,7 @@ impl ArrowOperator for RedisSinkFunc {
             }
 
             tokio::time::sleep(Duration::from_millis((50 * (1 << attempts)).min(5_000))).await;
-            attempts -= 1;
+            attempts += 1;
         }
 
         panic!("Failed to establish connection to redis after 20 retries");

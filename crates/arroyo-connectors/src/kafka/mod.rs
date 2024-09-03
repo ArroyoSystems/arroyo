@@ -670,6 +670,28 @@ impl KafkaTester {
             Format::RawBytes(_) => {
                 // all bytes are valid
             }
+            Format::Protobuf(_) => {
+                let aschema: ArroyoSchema = schema.clone().into();
+                let mut deserializer =
+                    ArrowDeserializer::new(format.clone(), aschema.clone(), None, BadData::Fail {});
+                let mut builders = aschema.builders();
+
+                let mut error = deserializer
+                    .deserialize_slice(&mut builders, &msg, SystemTime::now())
+                    .await
+                    .into_iter()
+                    .next();
+                if let Some(Err(e)) = deserializer.flush_buffer() {
+                    error.replace(e);
+                }
+
+                if let Some(error) = error {
+                    bail!(
+                        "Failed to parse message according to the provided Protobuf schema: {}",
+                        error.details()
+                    );
+                }
+            }
         };
 
         Ok(())

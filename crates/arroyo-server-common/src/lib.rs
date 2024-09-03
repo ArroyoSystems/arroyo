@@ -7,6 +7,7 @@ use arroyo_types::POSTHOG_KEY;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use hyper::Body;
@@ -47,7 +48,7 @@ pub const VERSION: &str = "0.12.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(name: &str) -> WorkerGuard {
+pub fn init_logging(name: &str) -> Option<WorkerGuard> {
     init_logging_with_filter(
         name,
         EnvFilter::builder()
@@ -56,7 +57,24 @@ pub fn init_logging(name: &str) -> WorkerGuard {
     )
 }
 
-pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
+macro_rules! register_log {
+    ($e: expr, $nonblocking: expr, $filter: expr) => {{
+        let layer = $e;
+        if let Some(nonblocking) = $nonblocking {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(layer.with_writer(nonblocking).with_filter($filter)),
+            )
+            .expect("Unable to set global log subscriber")
+        } else {
+            tracing::subscriber::set_global_default(
+                Registry::default().with(layer.with_writer(std::io::stderr).with_filter($filter)),
+            )
+            .expect("Unable to set global log subscriber")
+        }
+    }};
+}
+
+pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {:?}", e);
     }
@@ -65,48 +83,39 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> WorkerGuard {
         .add_directive("refinery_core=warn".parse().unwrap())
         .add_directive("aws_config::profile::credentials=warn".parse().unwrap());
 
-    let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+    let (nonblocking, guard) = if config().logging.nonblocking {
+        let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+        (Some(nonblocking), Some(guard))
+    } else {
+        (None, None)
+    };
 
     match config().logging.format {
         LogFormat::Plaintext => {
-            tracing::subscriber::set_global_default(
-                Registry::default().with(
-                    tracing_subscriber::fmt::layer()
-                        .with_line_number(true)
-                        .with_file(true)
-                        .with_span_events(FmtSpan::NONE)
-                        .with_writer(nonblocking)
-                        .with_filter(filter),
-                ),
+            register_log!(
+                tracing_subscriber::fmt::layer()
+                    .with_line_number(false)
+                    .with_file(false)
+                    .with_span_events(FmtSpan::NONE),
+                nonblocking,
+                filter
             )
-            .expect("Unable to set global log subscriber");
         }
         LogFormat::Logfmt => {
-            tracing::subscriber::set_global_default(
-                Registry::default().with(
-                    tracing_subscriber::fmt::layer()
-                        .with_line_number(true)
-                        .with_file(true)
-                        .event_format(tracing_logfmt::EventsFormatter)
-                        .fmt_fields(tracing_logfmt::FieldsFormatter)
-                        .with_writer(nonblocking)
-                        .with_filter(filter),
-                ),
+            register_log!(
+                tracing_subscriber::fmt::layer()
+                    .event_format(tracing_logfmt::EventsFormatter)
+                    .fmt_fields(tracing_logfmt::FieldsFormatter),
+                nonblocking,
+                filter
             )
-            .expect("Unable to set global log subscriber");
         }
         LogFormat::Json => {
-            tracing::subscriber::set_global_default(
-                Registry::default().with(
-                    tracing_subscriber::fmt::layer()
-                        .with_line_number(true)
-                        .with_file(true)
-                        .event_format(Format::default().json())
-                        .with_writer(nonblocking)
-                        .with_filter(filter),
-                ),
+            register_log!(
+                tracing_subscriber::fmt::layer().event_format(Format::default().json()),
+                nonblocking,
+                filter
             )
-            .expect("Unable to set global log subscriber");
         }
     }
 
@@ -236,6 +245,29 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     .unwrap()
 }
 
+pub async fn handle_get_heap() -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut prof_ctl = jemalloc_pprof::PROF_CTL.as_ref().unwrap().lock().await;
+    require_profiling_activated(&prof_ctl)?;
+    let pprof = prof_ctl
+        .dump_pprof()
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(pprof)
+}
+
+/// Checks whether jemalloc profiling is activated an returns an error response if not.
+fn require_profiling_activated(
+    prof_ctl: &jemalloc_pprof::JemallocProfCtl,
+) -> Result<(), (StatusCode, String)> {
+    if prof_ctl.activated() {
+        Ok(())
+    } else {
+        Err((
+            axum::http::StatusCode::FORBIDDEN,
+            "heap profiling not activated".into(),
+        ))
+    }
+}
+
 pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
     let addr = config().admin.bind_address;
     let port = config().admin.http_port;
@@ -252,6 +284,7 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
         .route("/metrics.pb", get(metrics_proto))
         .route("/details", get(details))
         .route("/config", get(config_route))
+        .route("/debug/pprof/heap", get(handle_get_heap))
         .with_state(state);
 
     let addr = SocketAddr::new(addr, port);

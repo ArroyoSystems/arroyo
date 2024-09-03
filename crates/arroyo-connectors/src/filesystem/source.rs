@@ -209,7 +209,7 @@ impl FileSystemSourceFunc {
     async fn get_record_batch_stream(
         &mut self,
         storage_provider: &StorageProvider,
-        path: String,
+        path: &str,
         out_schema: SchemaRef,
     ) -> Result<Box<dyn Stream<Item = Result<RecordBatch, UserError>> + Unpin + Send>, UserError>
     {
@@ -217,7 +217,7 @@ impl FileSystemSourceFunc {
             Format::Parquet(_) => {
                 let object_meta = storage_provider
                     .get_backing_store()
-                    .head(&(path.clone().into()))
+                    .head(&(path.into()))
                     .await
                     .map_err(|err| {
                         UserError::new("could not get object metadata", err.to_string())
@@ -306,7 +306,7 @@ impl FileSystemSourceFunc {
                 let record_batch_stream = self
                     .get_record_batch_stream(
                         storage_provider,
-                        obj_key.to_string(),
+                        obj_key,
                         ctx.out_schema.as_ref().unwrap().schema.clone(),
                     )
                     .await?
@@ -317,6 +317,7 @@ impl FileSystemSourceFunc {
             }
             Format::RawString(_) => todo!(),
             Format::RawBytes(_) => todo!(),
+            Format::Protobuf(_) => todo!("Protobuf not supported"),
         }
     }
 

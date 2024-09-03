@@ -18,7 +18,7 @@
             "compressionFormat": {
               "title": "Compression format",
               "type": "string",
-              "description": "Compression format of the files in S3",
+              "description": "Compression format of the files in the source path",
               "enum": [
                 "none",
                 "zstd",
@@ -28,7 +28,7 @@
             "regexPattern": {
               "title": "File Regex Pattern",
               "type": "string",
-              "description": "Regex matching pattern for files to include in source. Will search everything under the source path."
+              "description": "[Regex matching pattern](https://docs.rs/regex/latest/regex/#examples) for files to include in source. Will search everything under the source path."
             },
             "storageOptions": {
               "type": "object",

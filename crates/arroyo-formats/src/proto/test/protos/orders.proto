@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package online_store;
+
+// Represents an order in the online store.
+message Order {
+  string order_id = 1;
+  string customer_id = 2;
+  repeated OrderItem items = 3;
+  string order_status = 4;
+  double total_amount = 5;
+  string currency = 6;
+  PaymentDetails payment = 7;
+  proto_common.Address shipping_address = 8;
+  proto_common.Address billing_address = 9;
+}
+
+// Represents an item in the order.
+message OrderItem {
+  string product_id = 1;
+  string product_name = 2;
+  int32 quantity = 3;
+  double price_per_unit = 4;
+}
+
+// Represents payment details.
+message PaymentDetails {
+  string payment_method = 1;
+  string transaction_id = 2;
+}
+
+import "address.proto";
