@@ -46,14 +46,17 @@ jobs:
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
           unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
-      - name: Run DB migrations
+      - name: Update rust
         run: |
+          rustup update
+      - name: Run DB migrations
+        run: |          
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
         run: cd webui && pnpm install && pnpm build
       - name: Build Arroyo
-        run: cargo build --release --package arroyo
+        run: cargo build --release --package arroyo && strip target/release/arroyo
       - uses: actions/upload-artifact@v4
         with:
           name: arroyo-${{ matrix.config.artifact }}
