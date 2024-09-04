@@ -25,7 +25,7 @@ hex = "0.4"
 tokio = "1"
 tonic = {workspace = true}
 anyhow = "1.0.70"
-prost = "0.12"
+prost = {workspace = true}
 regex = "1.9.5"
 serde_json = "1.0.108"
 strum = { version = "0.25.0", features = ["derive"] }

@@ -46,11 +46,15 @@ ahash = { version = "=0.8.7" }
 datafusion = { version = "40.0.0" }
 datafusion-common = { version = "40.0.0" }
 datafusion-proto = { version = "40.0.0" }
-datafusion-functions = { version = "40.0.0" }
+datafusion-functions = { version = "40.0.0", features = ["crypto_expressions"] }
 deltalake = { version = "0.18.2" }
 cornucopia = { version = "0.9.0" }
 cornucopia_async = {version = "0.6.0"}
 deadpool-postgres = "0.12"
+prost = { version = "0.12", features = ["no-recursion-limit"] }
+prost-reflect = "0.12.0"
+prost-build = {version = "0.12" }
+prost-types = "0.12"
 
 [profile.release]
 debug = 1

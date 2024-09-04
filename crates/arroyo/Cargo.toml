@@ -3,6 +3,9 @@ name = "arroyo"
 version = "0.12.0-dev"
 edition = "2021"
 
+[features]
+profiling = ["tikv-jemallocator/profiling"]
+
 [dependencies]
 arroyo-types = { path ="../arroyo-types" }
 arroyo-connectors = { path ="../arroyo-connectors" }
@@ -36,3 +39,6 @@ rand = "0.8.5"
 reqwest = "0.11"
 clio = { version = "0.3.5", features = ["clap", "clap-parse"] }
 async-trait = "0.1.80"
+
+[target.'cfg(all(not(target_env = "msvc"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+tikv-jemallocator = { version = "0.5.4", features = ["unprefixed_malloc_on_supported_platforms"]}

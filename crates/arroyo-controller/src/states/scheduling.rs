@@ -24,7 +24,8 @@ use arroyo_state::{
 
 use crate::job_controller::job_metrics::JobMetrics;
 use crate::{
-    job_controller::JobController, queries::controller_queries, states::stop_if_desired_non_running,
+    job_controller::JobController, queries::controller_queries,
+    states::stop_if_desired_non_running, RunningMessage,
 };
 use crate::{schedulers::SchedulerError, JobMessage};
 use crate::{
@@ -520,6 +521,10 @@ impl State for Scheduling {
                             ..
                         }) => {
                             started_tasks.insert((operator_id, operator_subtask));
+                        }
+                        Some(JobMessage::RunningMessage(RunningMessage::TaskFailed {worker_id, operator_id, subtask_index, reason})) => {
+                            return Err(ctx.retryable(self, "task failed on startup",
+                                anyhow!("task failed on job startup on {:?}: {}:{}: {}", worker_id, operator_id, subtask_index, reason), 10));
                         }
                         Some(JobMessage::ConfigUpdate(c)) => {
                             stop_if_desired_non_running!(self, &c);

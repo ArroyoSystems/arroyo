@@ -55,6 +55,8 @@ RUN apt-get update && \
     mkdir /config
 
 COPY --from=builder /arroyo ./
+COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
+COPY --from=builder /app/include/google /usr/local/include/google
 
 ENV INSTALL_RUSTC=true \
     INSTALL_CLANG=true \
@@ -72,6 +74,8 @@ RUN apt-get update && \
 ENV ARROYO__API__RUN_HTTP_PORT=5115
 
 COPY --from=builder /arroyo ./
+COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
+COPY --from=builder /app/include/google /usr/local/include/google
 
 EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]

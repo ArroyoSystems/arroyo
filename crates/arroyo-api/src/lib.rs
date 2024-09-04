@@ -291,6 +291,7 @@ impl IntoResponse for HttpError {
         TestSourceMessage,
         JsonFormat,
         AvroFormat,
+        ProtobufFormat,
         ParquetFormat,
         RawStringFormat,
         RawBytesFormat,

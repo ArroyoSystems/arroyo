@@ -438,8 +438,16 @@ impl ControllerGrpc for ControllerServer {
         &self,
         request: Request<WorkerErrorReq>,
     ) -> Result<Response<WorkerErrorRes>, Status> {
-        info!("Got worker error.");
         let req = request.into_inner();
+
+        info!(
+            job_id = req.job_id,
+            operator_id = req.operator_id,
+            message = "operator error",
+            error_message = req.message,
+            error_details = req.details
+        );
+
         let client = self.db.client().await.unwrap();
         match queries::controller_queries::execute_create_job_log_message(
             &client,

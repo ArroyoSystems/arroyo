@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+message TestEnumFields {
+  enum TestEnum {
+    UNKNOWN = 0;
+    VALUE1 = 1;
+    VALUE2 = 2;
+  }
+
+  TestEnum enum_field = 1;
+}
