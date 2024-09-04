@@ -1,0 +1,103 @@
+name: Build Binaries
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+    branches:
+      - '*_build'
+
+env:
+  REFINERY_CONFIG: postgres://arroyo:arroyo@localhost:5432/arroyo
+  REFINERY_VERSION: 0.8.14
+  PROTOC_VERSION: 27.3
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: true
+      matrix:
+        # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        config:
+          - { runner: buildjet-32vcpu-ubuntu-2204, protoc: linux-x86_64, artifact: linux-x86_64 }
+          - { runner: buildjet-32vcpu-ubuntu-2204-arm, protoc: linux-aarch_64, artifact: linux-arm64 }
+    runs-on: ${{ matrix.config.runner }}
+    services:
+      postgres:
+        image: postgres:14.13-alpine3.20
+        env:
+          POSTGRES_USER: arroyo
+          POSTGRES_PASSWORD: arroyo
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.1
+      - name: Install protoc compiler
+        run: |
+          wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
+          unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
+      - name: Update rust
+        run: |
+          rustup update
+      - name: Run DB migrations
+        run: |          
+          cargo install --debug refinery_cli --version $REFINERY_VERSION
+          refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
+      - name: Run frontend build
+        run: cd webui && pnpm install && pnpm build
+      - name: Build Arroyo
+        run: cargo build --release --package arroyo && strip target/release/arroyo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arroyo-${{ matrix.config.artifact }}
+          path: target/release/arroyo
+          if-no-files-found: error
+  
+  macos:
+    strategy:
+      fail-fast: true
+      matrix:
+        # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        config:
+          - { runner: macos-13, protoc: osx-x86_64, artifact: macos-x86_64 }
+          - { runner: macos-14, protoc: osx-aarch_64, artifact: macos-m1 }
+    runs-on: ${{ matrix.config.runner }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.1
+      - name: Install protoc compiler
+        run: |
+          wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
+          unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
+      - name: Install Postgres and prepare DB
+        run: |
+          brew install postgresql@14 && brew services start postgresql && sleep 10
+          psql postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
+          createdb arroyo
+      - name: Run DB migrations
+        run: |
+          cargo install --debug refinery_cli --version $REFINERY_VERSION
+          refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
+      - name: Run frontend build
+        run: cd webui && pnpm install && pnpm build
+      - name: Build Arroyo
+        run: cargo build --release --package arroyo && strip target/release/arroyo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arroyo-${{ matrix.config.artifact }}
+          path: target/release/arroyo
+          if-no-files-found: error
