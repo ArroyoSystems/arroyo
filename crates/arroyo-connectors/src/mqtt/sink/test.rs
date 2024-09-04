@@ -139,7 +139,9 @@ async fn test_mqtt() {
         }
     }
 
-    for message in 1u32..200 {
+    let expect_messages = 200;
+
+    for message in 1u32..expect_messages {
         let data = StringArray::from_iter_values(vec![message.to_string()].into_iter());
         let batch = RecordBatch::try_new(schema(), vec![Arc::new(data)]).unwrap();
 
@@ -149,7 +151,7 @@ async fn test_mqtt() {
             .await;
     }
 
-    let mut message = 1u32;
+    let mut actual_messages = 0u32;
 
     loop {
         match eventloop.poll().await {
@@ -162,8 +164,8 @@ async fn test_mqtt() {
                     message,
                     String::from_utf8_lossy(p.payload.as_bytes())
                 );
-                message += 1;
-                if message >= 200 {
+                actual_messages += 1;
+                if actual_messages >= expect_messages {
                     break;
                 }
             }
