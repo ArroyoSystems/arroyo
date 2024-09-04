@@ -23,6 +23,7 @@ use arrow_schema::{Field, FieldRef, Schema};
 use arroyo_datastream::WindowType;
 
 use builder::NamedNode;
+use datafusion::common::tree_node::TreeNode;
 use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
@@ -57,7 +58,9 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::json::register_json_functions;
-use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
+use crate::rewriters::{
+    SinkInputRewriter, SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter,
+};
 
 use crate::udafs::EmptyUdaf;
 use arroyo_datastream::logical::LogicalProgram;
@@ -549,7 +552,7 @@ fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<Logic
                     let inputs = sink_node
                         .inputs()
                         .into_iter()
-                        .map(|x| x.clone())
+                        .cloned()
                         .collect::<Vec<LogicalPlan>>();
                     sink_inputs.entry(named_node).or_default().extend(inputs);
                 }
@@ -658,9 +661,20 @@ pub async fn parse_and_get_arrow_program(
         }));
     }
 
+    // Collect inputs of `SinkExtension`, it's help to merge `SinkExtension` with same table.
+    // Each `SinkExtension` can get itself inputs (is merged previously) by named_node,
+    // input `SinkExtension`'s named node which get by `named_node()` to get inputs.
     let sink_inputs = build_sink_inputs(&extensions);
-    let mut plan_to_graph_visitor =
-        PlanToGraphVisitor::new(&schema_provider, &session_state, sink_inputs);
+    let extensions = extensions
+        .into_iter()
+        .map(|plan| {
+            plan.rewrite(&mut SinkInputRewriter::new(&sink_inputs))
+                .unwrap()
+                .data
+        })
+        .collect::<Vec<LogicalPlan>>();
+
+    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider, &session_state);
     for extension in extensions {
         plan_to_graph_visitor.add_plan(extension)?;
     }
