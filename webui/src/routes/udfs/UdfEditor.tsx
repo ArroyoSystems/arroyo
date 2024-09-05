@@ -3,6 +3,7 @@ import { CodeEditor } from '../pipelines/CodeEditor';
 import { LocalUdf, LocalUdfsContext } from '../../udf_state';
 import { GlobalUdf, UdfValidationResult, useUdfValidation } from '../../lib/data_fetching';
 import { debounce } from 'lodash';
+import {language} from "monaco-sql-languages/out/esm/sql/sql";
 
 export interface UdfEditorProps {
   udf: LocalUdf | GlobalUdf;
@@ -27,7 +28,7 @@ const UdfEditor: React.FC<UdfEditorProps> = ({ udf }) => {
     }
   };
 
-  useUdfValidation(updateName, definitionToCheck);
+  useUdfValidation(updateName, definitionToCheck, udf.language);
 
   return (
     <CodeEditor
@@ -38,7 +39,7 @@ const UdfEditor: React.FC<UdfEditorProps> = ({ udf }) => {
         setLocalDefinition(s);
         debounceSetCheck(s);
       }}
-      language="rust"
+      language={udf.language}
     />
   );
 };

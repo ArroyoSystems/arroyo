@@ -246,6 +246,7 @@ fn sqlite_connection() -> rusqlite::Connection {
             error!("Unable to migrate database to latest schema: {e}");
             error!("To continue, delete or move the existing database at '{}'",
                 path.to_string_lossy());
+            exit(1);
         }
     }
 

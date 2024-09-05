@@ -281,11 +281,12 @@ WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_i
 ORDER BY jlm.created_at DESC
 LIMIT cast(:limit as integer);
 
+
 ----------- udfs -----------------------
 
---: DbUdf (description?)
+--: DbUdf (description?, dylib_url?)
 
---! create_udf
+--! create_udf (dylib_url?)
 INSERT INTO udfs (pub_id, organization_id, created_by, prefix, name, language, definition, description, dylib_url)
 VALUES (:pub_id, :organization_id, :created_by, :prefix, :name,  :language, :definition, :description, :dylib_url);
     

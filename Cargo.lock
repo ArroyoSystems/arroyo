@@ -471,6 +471,7 @@ dependencies = [
  "arroyo-state",
  "arroyo-types",
  "arroyo-udf-host",
+ "arroyo-udf-python",
  "async-trait",
  "axum",
  "axum-extra",

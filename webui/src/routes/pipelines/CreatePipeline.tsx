@@ -162,6 +162,7 @@ export function CreatePipeline() {
             const { data: udfValidation } = await post('/v1/udfs/validate', {
               body: {
                 definition: udf.definition,
+                language: udf.language,
               },
             });
 
@@ -220,6 +221,7 @@ export function CreatePipeline() {
       const { data: udfsValiation, error: udfsValiationError } = await post('/v1/udfs/validate', {
         body: {
           definition: udf.definition,
+          language: udf.language,
         },
       });
 
@@ -246,6 +248,7 @@ export function CreatePipeline() {
   const queryValid = async () => {
     const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
       definition: u.definition,
+      language: u.language,
     }));
     const { data: queryValidation } = await post('/v1/pipelines/validate_query', {
       body: {
@@ -295,6 +298,7 @@ export function CreatePipeline() {
 
     const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
       definition: u.definition,
+      language: u.language,
     }));
 
     const { data: newPipeline, error } = await post('/v1/pipelines/preview', {

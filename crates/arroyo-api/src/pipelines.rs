@@ -83,8 +83,24 @@ async fn compile_sql<'a>(
     // }
 
     for udf in global_udfs {
-        if let Err(e) = schema_provider.add_rust_udf(&udf.definition, &udf.dylib_url) {
-            warn!("Invalid global UDF {}: {}", udf.name, e);
+        match udf.language {
+            UdfLanguage::Python => {
+                if let Err(e) = schema_provider
+                    .add_python_udf(&udf.definition) {
+                    warn!("Invalid global python UDF '{}': {}", udf.name, e);
+                }
+            }
+            UdfLanguage::Rust => {
+                let Some(dylib_url) = &udf.dylib_url else {
+                    warn!("Rust global UDF {} is not compiled", udf.name);
+                    continue;
+                };
+                
+                if let Err(e) = schema_provider.add_rust_udf(&udf.definition, dylib_url) {
+                    warn!("Invalid global UDF {}: {}", udf.name, e);
+                }
+                
+            }
         }
     }
 
@@ -96,14 +112,14 @@ async fn compile_sql<'a>(
                 UdfLanguage::Python => {
                     schema_provider
                         .add_python_udf(&udf.definition)
-                        .map_err(|e| bad_request(format!("Invalid Python UDF: {:?}", e)))?;
+                        .map_err(|e| bad_request(format!("invalid Python UDF: {:?}", e)))?;
                 }
                 UdfLanguage::Rust => {
                     let parsed = ParsedUdfFile::try_parse(&udf.definition)
                         .map_err(|e| bad_request(format!("invalid UDF: {e}")))?;
 
                     let url = if !validate_only {
-                        let res = build_udf(&mut compiler_service, &udf.definition, true).await?;
+                        let res = build_udf(&mut compiler_service, &udf.definition, UdfLanguage::Rust, true).await?;
 
                         if !res.errors.is_empty() {
                             return Err(bad_request(format!(
