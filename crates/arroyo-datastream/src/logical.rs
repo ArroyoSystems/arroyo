@@ -1,4 +1,3 @@
-use datafusion::common::display::GraphvizBuilder;
 use datafusion_proto::protobuf::ArrowType;
 
 use anyhow::anyhow;
@@ -9,6 +8,7 @@ use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{
     ArrowDylibUdfConfig, ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
 };
+use petgraph::dot::{Config, Dot};
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use petgraph::Direction;
@@ -304,28 +304,19 @@ impl LogicalProgram {
         struct Wrapper<'a>(&'a LogicalGraph);
         impl<'a> Display for Wrapper<'a> {
             fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-                let mut graphviz_builder = GraphvizBuilder::default();
-                graphviz_builder.start_graph(f)?;
-                graphviz_builder.start_cluster(f, "LogicalGraph")?;
-                for from_index in self.0.node_indices() {
-                    let node = self.0.node_weight(from_index).unwrap();
-                    let _ = graphviz_builder.add_node(
-                        f,
-                        from_index.index(),
-                        format!("{}", node).as_str(),
-                        None,
-                    )?;
-                    for edge in self.0.edges_directed(from_index, Direction::Outgoing) {
-                        // because fixed dir=back, we should reverse the edge
-                        let _ = graphviz_builder.add_edge(
-                            f,
-                            edge.target().index(),
-                            edge.source().index(),
-                        )?;
-                    }
-                }
-                graphviz_builder.end_cluster(f)?;
-                graphviz_builder.end_graph(f)?;
+                writeln!(f, "")?;
+                writeln!(f, "// Begin Arroyo GraphViz LogicalGraph,")?;
+                writeln!(
+                    f,
+                    "// display it online here: https://dreampuf.github.io/GraphvizOnline"
+                )?;
+                writeln!(f, "")?;
+                writeln!(
+                    f,
+                    "{:?}",
+                    Dot::with_config(self.0, &[Config::NodeIndexLabel, Config::EdgeIndexLabel])
+                )?;
+                writeln!(f, "// End Arroyo GraphViz LogicalGraph")?;
                 Ok(())
             }
         }

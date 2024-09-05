@@ -666,8 +666,6 @@ dependencies = [
  "arroyo-types",
  "bincode",
  "bytes",
- "datafusion",
- "datafusion-common",
  "datafusion-proto",
  "dyn-clone",
  "hex",
