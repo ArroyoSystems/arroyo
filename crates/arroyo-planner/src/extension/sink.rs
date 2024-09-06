@@ -141,6 +141,9 @@ impl UserDefinedLogicalNodeCore for SinkExtension {
 
 impl ArroyoExtension for SinkExtension {
     fn node_name(&self) -> Option<NamedNode> {
+        if cfg!(feature = "disable_merge_sinker") {
+            return None;
+        }
         match &self.table {
             Table::PreviewSink { .. } => None,
             _ => Some(NamedNode::Sink(self.name.clone())),
