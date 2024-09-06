@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
+    branches:
+      - '*_build'
 
 env:
   REFINERY_CONFIG: postgres://arroyo:arroyo@localhost:5432/arroyo
@@ -17,8 +19,8 @@ jobs:
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
-          - { runner: ubuntu-22.04, protoc: linux-x86_64, artifact: linux-x86_64 }
-          # TODO: add linux arm runner, maybe ubicloud e.g. - { runner: ubicloud-standard-8-arm, protoc: linux-aarch_64 , artifact: linux-arm64 } ?
+          - { runner: buildjet-32vcpu-ubuntu-2204, protoc: linux-x86_64, artifact: linux-x86_64 }
+          - { runner: buildjet-32vcpu-ubuntu-2204-arm, protoc: linux-aarch_64, artifact: linux-arm64 }
     runs-on: ${{ matrix.config.runner }}
     services:
       postgres:
@@ -44,14 +46,17 @@ jobs:
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
           unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
-      - name: Run DB migrations
+      - name: Update rust
         run: |
+          rustup update
+      - name: Run DB migrations
+        run: |          
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
         run: cd webui && pnpm install && pnpm build
       - name: Build Arroyo
-        run: cargo build --release --package arroyo
+        run: cargo build --release --package arroyo && strip target/release/arroyo
       - uses: actions/upload-artifact@v4
         with:
           name: arroyo-${{ matrix.config.artifact }}
@@ -90,7 +95,7 @@ jobs:
       - name: Run frontend build
         run: cd webui && pnpm install && pnpm build
       - name: Build Arroyo
-        run: cargo build --release --package arroyo
+        run: cargo build --release --package arroyo && strip target/release/arroyo
       - uses: actions/upload-artifact@v4
         with:
           name: arroyo-${{ matrix.config.artifact }}
