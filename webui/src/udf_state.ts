@@ -147,6 +147,8 @@ fn ${functionName}(x: i64) -> i64 {
 }`;
 
     const defaultPython = `
+from arroyo_udf import udf
+    
 @udf
 def ${functionName}(x: int) -> int:
     # Write your function here

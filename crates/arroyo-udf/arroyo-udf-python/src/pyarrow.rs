@@ -68,6 +68,7 @@ macro_rules! build_array {
     }};
 }
 
+#[allow(unused_macros)]
 macro_rules! build_json_array {
     ($py:expr, $pyobjects:expr) => {{
         let json_dumps = $py.eval_bound("json.dumps", None, None)?;
@@ -119,7 +120,7 @@ impl Converter {
             DataType::LargeUtf8 => get_pyobject!(LargeStringArray, py, array, i),
             DataType::Binary => get_pyobject!(BinaryArray, py, array, i),
             DataType::LargeBinary => get_pyobject!(LargeBinaryArray, py, array, i),
-            DataType::List(field) => {
+            DataType::List(_) => {
                 let array = array.as_any().downcast_ref::<ListArray>().unwrap();
                 let list = array.value(i);
                 let mut values = Vec::with_capacity(list.len());

@@ -1,33 +1,34 @@
 mod pyarrow;
+mod interpreter;
+mod threaded;
 
-use crate::pyarrow::Converter;
 use anyhow::{anyhow, bail};
-use arrow::array::Array;
+use arrow::array::{Array, ArrayRef};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{
-    ColumnarValue, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+    ColumnarValue, ScalarUDFImpl, Signature
 };
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyFunction, PyList, PyString, PyTuple};
-use pyo3::{Bound, Py, PyAny, Python};
+use pyo3::types::{PyDict, PyString, PyTuple};
+use pyo3::{Bound, PyAny};
 use std::any::Any;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{Receiver, SyncSender};
 use arroyo_udf_common::parse::NullableType;
+use crate::threaded::ThreadedUdfInterpreter;
 
-pub const SUPPORT_CODE: &str = r#"
-def udf(func):
-    udf_registry.append(func)
-    return func
-"#;
+const UDF_PY_LIB: &str = include_str!("../python/arroyo_udf.py");
+
 
 #[derive(Debug)]
 pub struct PythonUDF {
     pub name: Arc<String>,
+    pub task_tx: SyncSender<Vec<ArrayRef>>,
+    pub result_rx: Arc<Mutex<Receiver<anyhow::Result<ArrayRef>>>>,
     pub definition: Arc<String>,
-    pub function: Py<PyFunction>,
     pub signature: Arc<Signature>,
     pub arg_types: Arc<Vec<NullableType>>,
     pub return_type: Arc<NullableType>,
@@ -51,54 +52,32 @@ impl ScalarUDFImpl for PythonUDF {
     }
 
     fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
-        Python::with_gil(|py| {
-            let size = args
-                .get(0)
-                .map(|c| match c {
-                    ColumnarValue::Array(a) => a.len(),
-                    ColumnarValue::Scalar(_) => 1,
-                })
-                .unwrap_or(1);
+        let size = args.iter()
+            .map(|e| match e {
+                ColumnarValue::Array(a) => a.len(),
+                ColumnarValue::Scalar(_) => 1,
+            }).max().unwrap_or(0);
+        
+        let args = args.iter()
+            .map(|e| {
+                match e {
+                    ColumnarValue::Array(a) => {
+                        a.clone()
+                    }
+                    ColumnarValue::Scalar(s) => {
+                        Arc::new(s.to_array_of_size(size).unwrap())
+                    }
+                }
+            }).collect();
+        
+        self.task_tx.send(args)
+            .map_err(|e| DataFusionError::Execution("Python UDF interpreter shut down unexpectedly".to_string()))?;
+        
+        let result = self.result_rx.lock().unwrap().recv()
+            .map_err(|_| DataFusionError::Execution("Python UDF interpreter shut down unexpectedly".to_string()))?
+            .map_err(|e| DataFusionError::Execution(format!("Error in Python UDF {}: {}", self.name, e)))?;
 
-            let results: DFResult<Vec<_>> = (0..size)
-                .map(|i| {
-                    let args: datafusion::common::Result<Vec<_>> =
-                        args.iter()
-                            .map(|c| match c {
-                                ColumnarValue::Array(a) => Converter::get_pyobject(py, &*a, i)
-                                    .map_err(|e| {
-                                        DataFusionError::Execution(format!(
-                                            "Could not convert datatype to python: {}",
-                                            e
-                                        ))
-                                    }),
-                                ColumnarValue::Scalar(s) => {
-                                    todo!("scalars")
-                                }
-                            })
-                            .collect();
-
-                    let args = PyTuple::new_bound(py, args?.drain(..));
-
-                    self.function.call1(py, args).map_err(|e| {
-                        DataFusionError::Execution(format!(
-                            "failed while calling Python UDF '{}': {}",
-                            self.name, e
-                        ))
-                    })
-                })
-                .collect();
-
-            let results =
-                Converter::build_array(&self.return_type.data_type, py, &results?).map_err(|e| {
-                    DataFusionError::Execution(format!(
-                        "could not convert results from Python UDF '{}' to arrow: {}",
-                        self.name, e
-                    ))
-                })?;
-
-            Ok(ColumnarValue::Array(results))
-        })
+        Ok(ColumnarValue::Array(result))
     }
 }
 
@@ -144,43 +123,13 @@ fn extract_type_info(
     Ok((result, ret))
 }
 
+fn pe<T>(r: Result<T, PyErr>) -> Result<T, anyhow::Error> {
+    r.map_err(|e| anyhow!("{}", e))
+}
 impl PythonUDF {
-    pub fn parse(body: impl Into<String>) -> anyhow::Result<Self> {
-        let body = format!("{}\n{}", SUPPORT_CODE, body.into());
-        let (name, args, ret, function) = Python::with_gil(|py| {
-            let globals = PyDict::new_bound(py);
-            globals.set_item("udf_registry", PyList::empty_bound(py))?;
-            py.run_bound(&body, Some(&globals), None)?;
-
-            let udfs = globals.get_item("udf_registry")?.unwrap();
-            match udfs.len()? {
-                0 => bail!("The supplied code does not contain a UDF (UDF functions must be annotated with @udf)"),
-                1 => {
-                    let udf = udfs.get_item(0)?;
-                    let name = udf.getattr("__name__")?.downcast::<PyString>().unwrap()
-                        .to_string();
-                    let (args, ret) = extract_type_info(&udfs.get_item(0).unwrap())?;
-                    Ok((name, args, ret, udf.downcast().unwrap().clone().unbind()))
-                }
-                _ => {
-                    bail!("More than one function was annotated with @udf, which is not supported");
-                }
-            }
-        })?;
-
-        let arg_dts = args.iter().map(|t| t.data_type.clone()).collect();
-
-        Ok(Self {
-            name: Arc::new(name),
-            function,
-            definition: Arc::new(body),
-            signature: Arc::new(Signature {
-                type_signature: TypeSignature::Exact(arg_dts),
-                volatility: Volatility::Volatile,
-            }),
-            arg_types: Arc::new(args),
-            return_type: Arc::new(ret),
-        })
+    pub async fn parse(body: impl Into<String>) -> anyhow::Result<Self> {
+        ThreadedUdfInterpreter::new(Arc::new(body.into()))
+            .await
     }
 }
 
@@ -227,16 +176,17 @@ mod test {
     use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl};
     use std::sync::Arc;
 
-    #[test]
-    fn test() {
-        pyo3::prepare_freethreaded_python();
+    #[tokio::test]
+    async fn test() {
         let udf = r#"
+from arroyo_udf import udf
+
 @udf
 def my_add(x: int, y: float) -> float:
     return float(x) + y
 "#;
 
-        let udf = PythonUDF::parse(udf).unwrap();
+        let udf = PythonUDF::parse(udf).await.unwrap();
         assert_eq!(udf.name.as_str(), "my_add");
         if let datafusion::logical_expr::TypeSignature::Exact(args) = &udf.signature.type_signature
         {

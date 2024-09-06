@@ -302,8 +302,8 @@ impl ArroyoSchemaProvider {
         Ok(parsed.udf.name)
     }
 
-    pub fn add_python_udf(&mut self, body: &str) -> anyhow::Result<String> {
-        let parsed = PythonUDF::parse(body).map_err(|e| e.context("parsing Python UDF"))?;
+    pub async fn add_python_udf(&mut self, body: &str) -> anyhow::Result<String> {
+        let parsed = PythonUDF::parse(body).await.map_err(|e| e.context("parsing Python UDF"))?;
 
         let name = parsed.name.clone();
 

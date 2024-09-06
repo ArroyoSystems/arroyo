@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbUdf;
@@ -39,10 +40,8 @@ impl From<DbUdf> for GlobalUdf {
             updated_at: to_micros(val.updated_at),
             description: val.description,
             dylib_url: val.dylib_url,
-            language: match val.language.as_str() {
-                "python" => UdfLanguage::Python,
-                "rust" | _ => UdfLanguage::Rust,
-            }
+            language: UdfLanguage::from_str(&val.language)
+                .unwrap_or_default()
         }
     }
 }
@@ -191,7 +190,7 @@ pub async fn build_udf(
 ) -> Result<UdfResp, ErrorResp> {
     match language {
         UdfLanguage::Python => {
-            match PythonUDF::parse(udf_definition) {
+            match PythonUDF::parse(udf_definition).await {
                 Ok(udf) => {
                     Ok(UdfResp {
                         errors: vec![],

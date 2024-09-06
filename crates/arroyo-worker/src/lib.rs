@@ -429,6 +429,7 @@ impl WorkerGrpc for WorkerServer {
             info!("Loading Python UDF {}", udf_name);
             registry
                 .add_python_udf(python_udf)
+                .await
                 .map_err(|e| {
                     Status::failed_precondition(e.context(format!("loading Python UDF {udf_name}")).to_string())
                 })?;

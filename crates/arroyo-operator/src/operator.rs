@@ -670,8 +670,8 @@ impl Registry {
         }
     }
     
-    pub fn add_python_udf(&mut self, udf: &PythonUdfConfig) -> anyhow::Result<()> {
-        let udf = PythonUDF::parse(&*udf.definition)?;
+    pub async fn add_python_udf(&mut self, udf: &PythonUdfConfig) -> anyhow::Result<()> {
+        let udf = PythonUDF::parse(&*udf.definition).await?;
         
         self.udfs.insert((*udf.name).clone(), Arc::new(udf.into()));
         

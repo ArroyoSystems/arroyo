@@ -86,7 +86,7 @@ async fn compile_sql<'a>(
         match udf.language {
             UdfLanguage::Python => {
                 if let Err(e) = schema_provider
-                    .add_python_udf(&udf.definition) {
+                    .add_python_udf(&udf.definition).await {
                     warn!("Invalid global python UDF '{}': {}", udf.name, e);
                 }
             }
@@ -111,7 +111,7 @@ async fn compile_sql<'a>(
             match udf.language {
                 UdfLanguage::Python => {
                     schema_provider
-                        .add_python_udf(&udf.definition)
+                        .add_python_udf(&udf.definition).await
                         .map_err(|e| bad_request(format!("invalid Python UDF: {:?}", e)))?;
                 }
                 UdfLanguage::Rust => {
