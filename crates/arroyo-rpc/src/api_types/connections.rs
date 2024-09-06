@@ -283,6 +283,16 @@ impl ConnectionSchema {
                     bail!("raw_string format requires a schema with a single field called `value` of type TEXT");
                 }
             }
+            Some(Format::Json(json_format)) => {
+                if json_format.unstructured
+                    && (self.fields.len() != 1
+                        || self.fields.first().unwrap().field_type.r#type
+                            != FieldType::Primitive(PrimitiveType::Json)
+                        || self.fields.first().unwrap().field_name != "value")
+                {
+                    bail!("json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON");
+                }
+            }
             _ => {
                 // Right now only RawString has checks, but we may add checks for other formats in the future
             }
