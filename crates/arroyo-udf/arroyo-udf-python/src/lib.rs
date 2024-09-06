@@ -174,7 +174,7 @@ fn python_type_to_arrow(
 #[cfg(test)]
 mod test {
     use crate::PythonUDF;
-    use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl};
+    use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, TypeSignature};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -189,17 +189,47 @@ def my_add(x: int, y: float) -> float:
 
         let udf = PythonUDF::parse(udf).await.unwrap();
         assert_eq!(udf.name.as_str(), "my_add");
-        if let datafusion::logical_expr::TypeSignature::Exact(args) = &udf.signature.type_signature
+        if let datafusion::logical_expr::TypeSignature::OneOf(args) = &udf.signature.type_signature
         {
+            let ts: Vec<_> = args
+                .iter()
+                .map(|e| {
+                    if let TypeSignature::Exact(v) = e {
+                        v
+                    } else {
+                        panic!(
+                            "expected inner typesignature sto be exact, but found {:?}",
+                            e
+                        )
+                    }
+                })
+                .collect();
+
+            use arrow::datatypes::DataType::*;
+
             assert_eq!(
-                args,
-                &vec![
-                    arrow::datatypes::DataType::Int64,
-                    arrow::datatypes::DataType::Float64
+                ts,
+                vec![
+                    &vec![Int8, Float32],
+                    &vec![Int8, Float64],
+                    &vec![Int16, Float32],
+                    &vec![Int16, Float64],
+                    &vec![Int32, Float32],
+                    &vec![Int32, Float64],
+                    &vec![Int64, Float32],
+                    &vec![Int64, Float64],
+                    &vec![UInt8, Float32],
+                    &vec![UInt8, Float64],
+                    &vec![UInt16, Float32],
+                    &vec![UInt16, Float64],
+                    &vec![UInt32, Float32],
+                    &vec![UInt32, Float64],
+                    &vec![UInt64, Float32],
+                    &vec![UInt64, Float64]
                 ]
             );
         } else {
-            panic!("Expected exact type signature");
+            panic!("Expected oneof type signature");
         }
 
         assert_eq!(
