@@ -30,8 +30,6 @@ pub struct SubInterpreter {
 impl SubInterpreter {
     /// Create a new sub-interpreter.
     pub fn new() -> Result<Self, PyError> {
-        println!("Creating sub interpreter");
-
         prepare_freethreaded_python();
         // XXX: import the `decimal` module in the main interpreter before creating sub-interpreters.
         //      otherwise it will cause `SIGABRT: pointer being freed was not allocated`

@@ -61,8 +61,6 @@ impl ThreadedUdfInterpreter {
 
         let type_signature = Self::get_typesignature(&arg_types);
 
-        println!("TYPE = {:?}", type_signature);
-
         Ok(PythonUDF {
             name,
             task_tx,
