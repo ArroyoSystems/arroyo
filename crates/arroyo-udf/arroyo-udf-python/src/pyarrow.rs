@@ -19,7 +19,7 @@
 
 use arrow::array::{array::*, builder::*};
 use arrow::buffer::OffsetBuffer;
-use arrow::datatypes::{DataType};
+use arrow::datatypes::DataType;
 use pyo3::{exceptions::PyTypeError, types::PyAnyMethods, IntoPy, PyObject, PyResult, Python};
 use std::sync::Arc;
 

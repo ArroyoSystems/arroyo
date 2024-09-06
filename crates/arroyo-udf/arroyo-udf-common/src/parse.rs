@@ -21,7 +21,7 @@ impl NullableType {
             nullable,
         }
     }
-    
+
     pub fn null(data_type: DataType) -> Self {
         Self {
             data_type,

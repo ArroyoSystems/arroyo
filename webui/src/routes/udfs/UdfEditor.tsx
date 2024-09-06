@@ -3,7 +3,6 @@ import { CodeEditor } from '../pipelines/CodeEditor';
 import { LocalUdf, LocalUdfsContext } from '../../udf_state';
 import { GlobalUdf, UdfValidationResult, useUdfValidation } from '../../lib/data_fetching';
 import { debounce } from 'lodash';
-import {language} from "monaco-sql-languages/out/esm/sql/sql";
 
 export interface UdfEditorProps {
   udf: LocalUdf | GlobalUdf;

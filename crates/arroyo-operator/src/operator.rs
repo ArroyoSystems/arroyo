@@ -13,6 +13,7 @@ use arroyo_storage::StorageProvider;
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::parse::inner_type;
 use arroyo_udf_host::{ContainerOrLocal, LocalUdf, SyncUdfDylib, UdfDylib, UdfInterface};
+use arroyo_udf_python::PythonUDF;
 use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
@@ -33,7 +34,6 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace, warn, Instrument};
-use arroyo_udf_python::PythonUDF;
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -669,12 +669,12 @@ impl Registry {
                 .insert(dylib.name().to_string(), Arc::new(ScalarUDF::from(dylib)));
         }
     }
-    
+
     pub async fn add_python_udf(&mut self, udf: &PythonUdfConfig) -> anyhow::Result<()> {
         let udf = PythonUDF::parse(&*udf.definition).await?;
-        
+
         self.udfs.insert((*udf.name).clone(), Arc::new(udf.into()));
-        
+
         Ok(())
     }
 

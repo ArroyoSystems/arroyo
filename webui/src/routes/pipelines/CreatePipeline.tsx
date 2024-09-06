@@ -151,6 +151,7 @@ export function CreatePipeline() {
               id: name,
               name, // this gets updated after validation
               definition: u.definition,
+              language: u.language!,
               open: false,
               errors: [],
             };
@@ -335,6 +336,7 @@ export function CreatePipeline() {
     console.log('starting');
     const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
       definition: u.definition,
+      language: u.language,
     }));
 
     const { data, error } = await post('/v1/pipelines', {

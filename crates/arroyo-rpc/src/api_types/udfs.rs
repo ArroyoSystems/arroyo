@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use strum_macros::{Display, EnumString, ToString};
+use strum_macros::{Display, EnumString};
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -25,7 +25,19 @@ pub struct UdfValidationResult {
     pub errors: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, ToSchema, Default, Display, EnumString, Eq, PartialEq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    ToSchema,
+    Default,
+    Display,
+    EnumString,
+    Eq,
+    PartialEq,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum UdfLanguage {
     Python,

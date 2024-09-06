@@ -1,5 +1,3 @@
-use std::str::FromStr;
-use std::sync::Arc;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbUdf;
 use crate::rest::AppState;
@@ -8,19 +6,23 @@ use crate::rest_utils::{
     BearerAuth, ErrorResp,
 };
 use crate::{compiler_service, to_micros};
-use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfLanguage, UdfPost, UdfValidationResult, ValidateUdfPost};
+use arroyo_rpc::api_types::udfs::{
+    GlobalUdf, UdfLanguage, UdfPost, UdfValidationResult, ValidateUdfPost,
+};
 use arroyo_rpc::api_types::GlobalUdfCollection;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::rpc::{BuildUdfReq, UdfCrate};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_udf_host::ParsedUdfFile;
+use arroyo_udf_python::PythonUDF;
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
+use std::str::FromStr;
+use std::sync::Arc;
 use tonic::transport::Channel;
 use tracing::error;
-use arroyo_udf_python::PythonUDF;
 
 const PLUGIN_VERSION: &str = "=0.2.0";
 
@@ -40,8 +42,7 @@ impl From<DbUdf> for GlobalUdf {
             updated_at: to_micros(val.updated_at),
             description: val.description,
             dylib_url: val.dylib_url,
-            language: UdfLanguage::from_str(&val.language)
-                .unwrap_or_default()
+            language: UdfLanguage::from_str(&val.language).unwrap_or_default(),
         }
     }
 }
@@ -70,7 +71,13 @@ pub async fn create_udf(
     //     .map_err(log_and_map)?;
 
     // build udf
-    let build_udf_resp = build_udf(&mut compiler_service().await?, &req.definition, req.language, true).await?;
+    let build_udf_resp = build_udf(
+        &mut compiler_service().await?,
+        &req.definition,
+        req.language,
+        true,
+    )
+    .await?;
 
     if !build_udf_resp.errors.is_empty() {
         return Err(bad_request("UDF is invalid"));
@@ -92,7 +99,7 @@ pub async fn create_udf(
         &req.language.to_string(),
         &req.definition,
         &req.description.unwrap_or_default(),
-        &build_udf_resp.url
+        &build_udf_resp.url,
     )
     .await
     .map_err(|e| map_insert_err("udf", e))?;
@@ -189,26 +196,18 @@ pub async fn build_udf(
     save: bool,
 ) -> Result<UdfResp, ErrorResp> {
     match language {
-        UdfLanguage::Python => {
-            match PythonUDF::parse(udf_definition).await {
-                Ok(udf) => {
-                    Ok(UdfResp {
-                        errors: vec![],
-                        name: Some(Arc::unwrap_or_clone(udf.name)),
-                        url: None,
-                    })
-                }
-                Err(e) => {
-                    Ok(UdfResp {
-                        errors: vec![
-                            e.to_string()
-                        ],
-                        name: None,
-                        url: None,
-                    })
-                }
-            }
-        }
+        UdfLanguage::Python => match PythonUDF::parse(udf_definition).await {
+            Ok(udf) => Ok(UdfResp {
+                errors: vec![],
+                name: Some(Arc::unwrap_or_clone(udf.name)),
+                url: None,
+            }),
+            Err(e) => Ok(UdfResp {
+                errors: vec![e.to_string()],
+                name: None,
+                url: None,
+            }),
+        },
         UdfLanguage::Rust => {
             // use the arroyo-udf lib to do some validation and to get the function name
             let file = match ParsedUdfFile::try_parse(udf_definition) {
@@ -223,8 +222,8 @@ pub async fn build_udf(
                         "path".to_string(),
                         toml::Value::String(LOCAL_UDF_LIB_CRATE.to_string()),
                     )]
-                        .into_iter()
-                        .collect(),
+                    .into_iter()
+                    .collect(),
                 )
             } else {
                 toml::Value::String(PLUGIN_VERSION.to_string())
@@ -258,7 +257,6 @@ pub async fn build_udf(
                 name: Some(file.udf.name),
                 url: check_udfs_resp.udf_path,
             })
-
         }
     }
 }
@@ -276,7 +274,13 @@ pub async fn build_udf(
 pub async fn validate_udf(
     WithRejection(Json(req), _): WithRejection<Json<ValidateUdfPost>, ApiError>,
 ) -> Result<Json<UdfValidationResult>, ErrorResp> {
-    let check_udfs_resp = build_udf(&mut compiler_service().await?, &req.definition, req.language, false).await?;
+    let check_udfs_resp = build_udf(
+        &mut compiler_service().await?,
+        &req.definition,
+        req.language,
+        false,
+    )
+    .await?;
 
     Ok(Json(UdfValidationResult {
         udf_name: check_udfs_resp.name,

@@ -1,27 +1,24 @@
-mod pyarrow;
 mod interpreter;
+mod pyarrow;
 mod threaded;
 
+use crate::threaded::ThreadedUdfInterpreter;
 use anyhow::{anyhow, bail};
 use arrow::array::{Array, ArrayRef};
 use arrow::datatypes::DataType;
+use arroyo_udf_common::parse::NullableType;
 use datafusion::common::Result as DFResult;
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarUDFImpl, Signature
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, Signature};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString, PyTuple};
 use pyo3::{Bound, PyAny};
 use std::any::Any;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, SyncSender};
-use arroyo_udf_common::parse::NullableType;
-use crate::threaded::ThreadedUdfInterpreter;
+use std::sync::{Arc, Mutex};
 
 const UDF_PY_LIB: &str = include_str!("../python/arroyo_udf.py");
-
 
 #[derive(Debug)]
 pub struct PythonUDF {
@@ -52,38 +49,46 @@ impl ScalarUDFImpl for PythonUDF {
     }
 
     fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
-        let size = args.iter()
+        let size = args
+            .iter()
             .map(|e| match e {
                 ColumnarValue::Array(a) => a.len(),
                 ColumnarValue::Scalar(_) => 1,
-            }).max().unwrap_or(0);
-        
-        let args = args.iter()
-            .map(|e| {
-                match e {
-                    ColumnarValue::Array(a) => {
-                        a.clone()
-                    }
-                    ColumnarValue::Scalar(s) => {
-                        Arc::new(s.to_array_of_size(size).unwrap())
-                    }
-                }
-            }).collect();
-        
-        self.task_tx.send(args)
-            .map_err(|e| DataFusionError::Execution("Python UDF interpreter shut down unexpectedly".to_string()))?;
-        
-        let result = self.result_rx.lock().unwrap().recv()
-            .map_err(|_| DataFusionError::Execution("Python UDF interpreter shut down unexpectedly".to_string()))?
-            .map_err(|e| DataFusionError::Execution(format!("Error in Python UDF {}: {}", self.name, e)))?;
+            })
+            .max()
+            .unwrap_or(0);
+
+        let args = args
+            .iter()
+            .map(|e| match e {
+                ColumnarValue::Array(a) => a.clone(),
+                ColumnarValue::Scalar(s) => Arc::new(s.to_array_of_size(size).unwrap()),
+            })
+            .collect();
+
+        self.task_tx.send(args).map_err(|_| {
+            DataFusionError::Execution("Python UDF interpreter shut down unexpectedly".to_string())
+        })?;
+
+        let result = self
+            .result_rx
+            .lock()
+            .unwrap()
+            .recv()
+            .map_err(|_| {
+                DataFusionError::Execution(
+                    "Python UDF interpreter shut down unexpectedly".to_string(),
+                )
+            })?
+            .map_err(|e| {
+                DataFusionError::Execution(format!("Error in Python UDF {}: {}", self.name, e))
+            })?;
 
         Ok(ColumnarValue::Array(result))
     }
 }
 
-fn extract_type_info(
-    udf: &Bound<PyAny>,
-) -> anyhow::Result<(Vec<NullableType>, NullableType)> {
+fn extract_type_info(udf: &Bound<PyAny>) -> anyhow::Result<(Vec<NullableType>, NullableType)> {
     let attr = udf.getattr("__annotations__")?;
     let annotations: &Bound<PyDict> = attr.downcast().map_err(|e| {
         anyhow!(
@@ -123,13 +128,9 @@ fn extract_type_info(
     Ok((result, ret))
 }
 
-fn pe<T>(r: Result<T, PyErr>) -> Result<T, anyhow::Error> {
-    r.map_err(|e| anyhow!("{}", e))
-}
 impl PythonUDF {
     pub async fn parse(body: impl Into<String>) -> anyhow::Result<Self> {
-        ThreadedUdfInterpreter::new(Arc::new(body.into()))
-            .await
+        ThreadedUdfInterpreter::new(Arc::new(body.into())).await
     }
 }
 
@@ -201,7 +202,10 @@ def my_add(x: int, y: float) -> float:
             panic!("Expected exact type signature");
         }
 
-        assert_eq!(udf.return_type.data_type, arrow::datatypes::DataType::Float64);
+        assert_eq!(
+            udf.return_type.data_type,
+            arrow::datatypes::DataType::Float64
+        );
         assert_eq!(udf.return_type.nullable, false);
 
         let data = vec![

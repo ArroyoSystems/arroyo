@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { Text, Flex, Icon } from '@chakra-ui/react';
-import {DiPython, DiRust} from 'react-icons/di';
+import { DiPython, DiRust } from 'react-icons/di';
 import { LocalUdf, LocalUdfsContext, nameRoot } from '../../udf_state';
 import { GlobalUdf } from '../../lib/data_fetching';
 import '@fontsource/ibm-plex-mono';

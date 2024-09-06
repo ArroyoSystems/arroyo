@@ -1092,6 +1092,7 @@ dependencies = [
  "arrow",
  "arroyo-udf-common",
  "datafusion",
+ "itertools 0.13.0",
  "pyo3",
  "tokio",
 ]

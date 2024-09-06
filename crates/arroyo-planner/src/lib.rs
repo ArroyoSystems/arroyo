@@ -16,7 +16,7 @@ pub mod udafs;
 #[cfg(test)]
 mod test;
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType};
 use arrow_schema::{Field, FieldRef, Schema};
@@ -303,7 +303,9 @@ impl ArroyoSchemaProvider {
     }
 
     pub async fn add_python_udf(&mut self, body: &str) -> anyhow::Result<String> {
-        let parsed = PythonUDF::parse(body).await.map_err(|e| e.context("parsing Python UDF"))?;
+        let parsed = PythonUDF::parse(body)
+            .await
+            .map_err(|e| e.context("parsing Python UDF"))?;
 
         let name = parsed.name.clone();
 

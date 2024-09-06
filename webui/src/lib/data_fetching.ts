@@ -6,7 +6,6 @@ import createClient from 'openapi-fetch';
 
 import { LocalUdf } from '../udf_state';
 import { useRef } from 'react';
-import {language} from "monaco-sql-languages/out/esm/sql/sql";
 
 type schemas = components['schemas'];
 
@@ -408,7 +407,7 @@ export const useQueryValidation = (query?: string, localUdfs?: LocalUdf[]) => {
 
 const udfValidationFetcher = () => {
   const controller = useRef<AbortController>();
-  return async (params: { key: string; definition: string, language: 'python' | 'rust' }) => {
+  return async (params: { key: string; definition: string; language: 'python' | 'rust' }) => {
     controller.current?.abort();
     controller.current = new AbortController();
     const { data, error } = await post('/v1/udfs/validate', {
@@ -676,7 +675,12 @@ export const useGlobalUdfs = () => {
     udfsFetcher
   );
 
-  const createGlobalUdf = async (prefix: string, definition: string, language: 'python' | 'rust', description: string) => {
+  const createGlobalUdf = async (
+    prefix: string,
+    definition: string,
+    language: 'python' | 'rust',
+    description: string
+  ) => {
     const { data, error } = await post('/v1/udfs', {
       body: {
         prefix,

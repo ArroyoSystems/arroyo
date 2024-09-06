@@ -24,7 +24,7 @@ use arroyo_rpc::grpc::api::{ArrowProgram, ConnectorOp};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalNode, LogicalProgram, OperatorName};
-use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
+use arroyo_df::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
@@ -71,22 +71,10 @@ async fn compile_sql<'a>(
         .map(|u| u.into())
         .collect::<Vec<GlobalUdf>>();
 
-    // error if there are duplicate local or duplicate global UDF names,
-    // but allow  global UDFs to override local ones
-
-    // if has_duplicate_udf_names(global_udfs.iter().map(|u| &u.definition)) {
-    //     return Err(bad_request("Global UDFs have duplicate function names"));
-    // }
-    //
-    // if has_duplicate_udf_names(local_udfs.iter().map(|u| &u.definition)) {
-    //     return Err(bad_request("Local UDFs have duplicate function names"));
-    // }
-
     for udf in global_udfs {
         match udf.language {
             UdfLanguage::Python => {
-                if let Err(e) = schema_provider
-                    .add_python_udf(&udf.definition).await {
+                if let Err(e) = schema_provider.add_python_udf(&udf.definition).await {
                     warn!("Invalid global python UDF '{}': {}", udf.name, e);
                 }
             }
@@ -95,11 +83,10 @@ async fn compile_sql<'a>(
                     warn!("Rust global UDF {} is not compiled", udf.name);
                     continue;
                 };
-                
+
                 if let Err(e) = schema_provider.add_rust_udf(&udf.definition, dylib_url) {
                     warn!("Invalid global UDF {}: {}", udf.name, e);
                 }
-                
             }
         }
     }
@@ -111,7 +98,8 @@ async fn compile_sql<'a>(
             match udf.language {
                 UdfLanguage::Python => {
                     schema_provider
-                        .add_python_udf(&udf.definition).await
+                        .add_python_udf(&udf.definition)
+                        .await
                         .map_err(|e| bad_request(format!("invalid Python UDF: {:?}", e)))?;
                 }
                 UdfLanguage::Rust => {
@@ -119,7 +107,13 @@ async fn compile_sql<'a>(
                         .map_err(|e| bad_request(format!("invalid UDF: {e}")))?;
 
                     let url = if !validate_only {
-                        let res = build_udf(&mut compiler_service, &udf.definition, UdfLanguage::Rust, true).await?;
+                        let res = build_udf(
+                            &mut compiler_service,
+                            &udf.definition,
+                            UdfLanguage::Rust,
+                            true,
+                        )
+                        .await?;
 
                         if !res.errors.is_empty() {
                             return Err(bad_request(format!(
@@ -135,8 +129,9 @@ async fn compile_sql<'a>(
 
                     schema_provider
                         .add_rust_udf(&parsed.definition, &url)
-                        .map_err(|e| bad_request(format!("Invalid UDF {}: {}", parsed.udf.name, e)))?;
-
+                        .map_err(|e| {
+                            bad_request(format!("Invalid UDF {}: {}", parsed.udf.name, e))
+                        })?;
                 }
             }
         }

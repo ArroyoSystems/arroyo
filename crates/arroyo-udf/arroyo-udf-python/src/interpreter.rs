@@ -1,6 +1,5 @@
-// Original source from https://github.com/risingwavelabs/arrow-udf/tree/main/arrow-udf-python
+// Adapted from https://github.com/risingwavelabs/arrow-udf/tree/main/arrow-udf-python
 // Copyright 2024 RisingWave Labs
-//
 // Modified in 2024 by Arroyo Systems
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,28 +16,16 @@
 
 //! High-level API for Python sub-interpreters.
 
-use std::ffi::CStr;
-use std::sync::Arc;
-use std::thread;
-use anyhow::bail;
-use arrow::array::ArrayRef;
 #[allow(deprecated)]
 use pyo3::GILPool;
 use pyo3::{ffi::*, prepare_freethreaded_python, PyErr, Python};
-use pyo3::prelude::*;
-use pyo3::types::{PyList, PyString};
-use tokio::sync::mpsc::Sender;
-use arroyo_udf_common::parse::NullableType;
-use crate::{extract_type_info, UDF_PY_LIB};
-
-
+use std::ffi::CStr;
 
 /// A Python sub-interpreter with its own GIL.
 #[derive(Debug)]
 pub struct SubInterpreter {
     state: *mut PyThreadState,
 }
-
 
 impl SubInterpreter {
     /// Create a new sub-interpreter.
@@ -75,7 +62,7 @@ impl SubInterpreter {
                 "failed to create sub-interpreter: {}",
                 msg.to_string_lossy()
             )
-                .into());
+            .into());
         }
         // release the GIL
         unsafe { PyEval_SaveThread() };
@@ -87,9 +74,9 @@ impl SubInterpreter {
     /// Please note that if the return value contains any `Py` object (e.g. `PyErr`),
     /// this object must be dropped in this sub-interpreter, otherwise it will cause
     /// `SIGABRT: pointer being freed was not allocated`.
-    pub fn with_gil<F, R>(&self, f: F) -> R
+    pub fn with_gil<F, R>(&self, f: F) -> Result<R, PyError>
     where
-        F: for<'py> FnOnce(Python<'py>) -> R,
+        F: for<'py> FnOnce(Python<'py>) -> Result<R, PyError>,
     {
         // switch to the sub-interpreter and acquire GIL
         unsafe { PyEval_RestoreThread(self.state) };
@@ -104,11 +91,6 @@ impl SubInterpreter {
         // release the GIL
         unsafe { PyEval_SaveThread() };
         ret
-    }
-
-    /// Run Python code in the sub-interpreter.
-    pub fn run(&self, code: &str) -> Result<(), PyError> {
-        self.with_gil(|py| py.run_bound(code, None, None).map_err(|e| e.into()))
     }
 }
 

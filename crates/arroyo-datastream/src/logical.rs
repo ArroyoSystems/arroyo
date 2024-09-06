@@ -5,9 +5,7 @@ use arrow_schema::DataType;
 use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc::api::{
-    ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
-};
+use arroyo_rpc::grpc::api::{ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType};
 use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
@@ -22,7 +20,6 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hasher;
 use std::sync::Arc;
 use strum::{Display, EnumString};
-use tonic::codegen::Body;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
 pub enum OperatorName {
@@ -416,19 +413,20 @@ impl From<api::DylibUdfConfig> for DylibUdfConfig {
 impl From<api::PythonUdfConfig> for PythonUdfConfig {
     fn from(value: api::PythonUdfConfig) -> Self {
         PythonUdfConfig {
-            arg_types:  value
+            arg_types: value
                 .arg_types
                 .iter()
                 .map(|t| {
                     DataType::try_from(
                         &ArrowType::decode(&mut t.as_slice()).expect("invalid arrow type"),
                     )
-                        .expect("invalid arrow type")
+                    .expect("invalid arrow type")
                 })
                 .collect(),
             return_type: DataType::try_from(
                 &ArrowType::decode(&mut value.return_type.as_slice()).unwrap(),
-            ).expect("invalid arrow type"),
+            )
+            .expect("invalid arrow type"),
             name: Arc::new(value.name),
             definition: Arc::new(value.definition),
         }
@@ -467,8 +465,8 @@ impl From<ProgramConfig> for ArrowProgramConfig {
             python_udfs: from
                 .python_udfs
                 .into_iter()
-                .map(|(k ,v )| (k, v.into()))
-                .collect()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
         }
     }
 }
@@ -485,7 +483,7 @@ impl From<ArrowProgramConfig> for ProgramConfig {
                 .python_udfs
                 .into_iter()
                 .map(|(k, v)| (k, v.into()))
-                .collect()
+                .collect(),
         }
     }
 }
