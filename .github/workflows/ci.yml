@@ -35,9 +35,13 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          override: true
+          override: true          
       - name: Check Formatting
         run: cargo fmt -- --check
+      - uses: actions/setup-python@v5
+        name: Setup Python
+        with:
+          python-version: '3.12'            
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:

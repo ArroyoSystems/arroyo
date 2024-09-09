@@ -1,0 +1,13 @@
+[package]
+name = "arroyo-udf-python"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+arroyo-udf-common = { path = "../arroyo-udf-common" }
+arrow = { workspace = true, features = ["ffi"] }
+datafusion = { workspace = true }
+pyo3 = { version = "0.21"}
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+itertools = "0.13.0"

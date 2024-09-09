@@ -83,7 +83,7 @@ enum AsyncUdfOrdering {
 
 message AsyncUdfOperator {
   string name = 1;
-  ArrowDylibUdfConfig udf = 2;
+  DylibUdfConfig udf = 2;
   repeated bytes arg_exprs = 3;
   repeated bytes final_exprs = 4;
   AsyncUdfOrdering ordering = 5;
@@ -241,7 +241,7 @@ message OperatorCheckpointDetail {
 
 
 
-message ArrowDylibUdfConfig {
+message DylibUdfConfig {
   string dylib_path = 1;
   repeated bytes arg_types = 2;
   bytes return_type = 3;
@@ -249,8 +249,16 @@ message ArrowDylibUdfConfig {
   bool is_async = 5;
 }
 
+message PythonUdfConfig {
+  string name = 1;
+  repeated bytes arg_types = 2;
+  bytes return_type = 3;
+  string definition = 4;
+}
+
 message ArrowProgramConfig {
-  map<string, ArrowDylibUdfConfig> udf_dylibs = 1;
+  map<string, DylibUdfConfig> udf_dylibs = 1;
+  map<string, PythonUdfConfig> python_udfs = 2; 
 }
 
 // Arrow

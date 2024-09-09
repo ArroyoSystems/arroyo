@@ -129,8 +129,8 @@ const queryValidationKey = (query?: string, localUdfs?: LocalUdf[]) => {
   return query != undefined ? { key: 'PipelineGraph', query, localUdfs } : null;
 };
 
-const udfValidationKey = (definition: string) => {
-  return { key: 'UdfValidation', definition };
+const udfValidationKey = (definition: string, language: 'python' | 'rust') => {
+  return { key: 'UdfValidation', definition, language };
 };
 
 const pipelineKey = (pipelineId?: string) => {
@@ -377,7 +377,7 @@ const queryValidationFetcher = () => {
     let udfs: PipelineLocalUdf[] = [];
     if (params.localUdfs) {
       udfs = params.localUdfs.map(udf => {
-        return { definition: udf.definition };
+        return { definition: udf.definition, language: udf.language };
       });
     }
 
@@ -407,12 +407,13 @@ export const useQueryValidation = (query?: string, localUdfs?: LocalUdf[]) => {
 
 const udfValidationFetcher = () => {
   const controller = useRef<AbortController>();
-  return async (params: { key: string; definition: string }) => {
+  return async (params: { key: string; definition: string; language: 'python' | 'rust' }) => {
     controller.current?.abort();
     controller.current = new AbortController();
     const { data, error } = await post('/v1/udfs/validate', {
       body: {
         definition: params.definition,
+        language: params.language,
       },
       signal: controller.current?.signal,
     });
@@ -422,10 +423,11 @@ const udfValidationFetcher = () => {
 
 export const useUdfValidation = (
   onSuccess: (data: UdfValidationResult, key: any, config: any) => void,
-  definition: string
+  definition: string,
+  language: 'rust' | 'python'
 ) => {
   const { data, error, isLoading } = useSWR<schemas['UdfValidationResult']>(
-    udfValidationKey(definition),
+    udfValidationKey(definition, language),
     udfValidationFetcher(),
     { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false, onSuccess }
   );
@@ -673,11 +675,17 @@ export const useGlobalUdfs = () => {
     udfsFetcher
   );
 
-  const createGlobalUdf = async (prefix: string, definition: string, description: string) => {
+  const createGlobalUdf = async (
+    prefix: string,
+    definition: string,
+    language: 'python' | 'rust',
+    description: string
+  ) => {
     const { data, error } = await post('/v1/udfs', {
       body: {
         prefix,
         definition,
+        language,
         description,
       },
     });
