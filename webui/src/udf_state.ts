@@ -6,6 +6,7 @@ import { generate_udf_id } from './lib/util';
 export interface LocalUdf {
   name: string;
   definition: string;
+  language: 'python' | 'rust';
   id: string;
   open: boolean;
   errors?: string[];
@@ -26,7 +27,7 @@ export const LocalUdfsContext = React.createContext<{
     update: { definition?: string; open?: boolean; name?: string }
   ) => void;
   isGlobal: (udf: LocalUdf | GlobalUdf) => boolean;
-  newUdf: () => void;
+  newUdf: (language: 'python' | 'rust') => void;
   editorTab: number;
   handleEditorTabChange: (index: number) => void;
 }>({
@@ -41,7 +42,7 @@ export const LocalUdfsContext = React.createContext<{
   isOverridden: _ => false,
   updateLocalUdf: (_, __) => {},
   isGlobal: _ => false,
-  newUdf: () => {},
+  newUdf: (language: 'python' | 'rust') => {},
   editorTab: 0,
   handleEditorTabChange: _ => {},
 });
@@ -127,21 +128,35 @@ export const getLocalUdfsContextValue = () => {
     return globalUdfs != undefined && globalUdfs.some(g => g.id === udf.id);
   };
 
-  const newUdf = () => {
+  const newUdf = (language: 'python' | 'rust') => {
     const id = generate_udf_id();
     const functionName = `new_udf`;
-    const definition =
-      `/*\n` +
-      `[dependencies]\n\n` +
-      `*/\n\n` +
-      `use arroyo_udf_plugin::udf;\n\n` +
-      `#[udf]\n` +
-      `fn ${functionName}(x: i64) -> i64 {\n` +
-      '    // Write your function here\n' +
-      '    // Tip: rename the function to something descriptive\n\n' +
-      '}';
 
-    const newUdf = { name: functionName, definition, id, open: true };
+    const defaultRust = `
+/*
+[dependencies]
+
+*/
+
+use arroyo_udf_plugin::udf;
+
+#[udf]
+fn ${functionName}(x: i64) -> i64 {
+    // Write your function here
+    // Tip: rename the function to something descriptive
+}`;
+
+    const defaultPython = `
+from arroyo_udf import udf
+    
+@udf
+def ${functionName}(x: int) -> int:
+    # Write your function here
+    # Tip: rename the function to something descriptive`;
+
+    let definition = language == 'python' ? defaultPython : defaultRust;
+
+    const newUdf = { name: functionName, definition, id, language, open: true };
     const newLocalUdfs = [...localUdfs, newUdf];
     setLocalUdfs(newLocalUdfs);
     setSelectedUdfId(id);

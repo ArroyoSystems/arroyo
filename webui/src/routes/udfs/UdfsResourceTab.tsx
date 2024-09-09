@@ -10,9 +10,13 @@ import {
   Box,
   Button,
   Flex,
+  Icon,
+  Stack,
   Text,
 } from '@chakra-ui/react';
 import { LocalUdf, LocalUdfsContext } from '../../udf_state';
+import { DiPython, DiRust } from 'react-icons/di';
+import { FiPlus } from 'react-icons/fi';
 
 export interface UdfsTabProps {}
 
@@ -83,11 +87,16 @@ const UdfsResourceTab: React.FC<UdfsTabProps> = () => {
             <UdfNodeViewer key={udf.id} node={udf} />
           ))}
         </Box>
-        <Box>
-          <Button height={7} onClick={newUdf} width={'100%'}>
-            New
+        <Stack direction={'row'}>
+          <Button onClick={() => newUdf('rust')} size={'sm'} title={'New Rust UDF'}>
+            <Icon as={FiPlus} boxSize={5} />
+            <Icon as={DiRust} boxSize={6} />
           </Button>
-        </Box>
+          <Button onClick={() => newUdf('python')} size={'sm'} title={'New Python UDF'}>
+            <Icon as={FiPlus} boxSize={5} />
+            <Icon as={DiPython} boxSize={6} />
+          </Button>
+        </Stack>
       </AccordionPanel>
     </AccordionItem>
   );

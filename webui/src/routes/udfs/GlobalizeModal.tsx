@@ -45,7 +45,7 @@ const GlobalizeModal: React.FC<GlobalizeModalProps> = ({ isOpen, onClose, udf })
   }
 
   const share = async () => {
-    const { error } = await createGlobalUdf(cleanPrefix, udf.definition, description);
+    const { error } = await createGlobalUdf(cleanPrefix, udf.definition, udf.language, description);
 
     if (error) {
       setCreateError(formatError(error));

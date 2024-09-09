@@ -18,6 +18,7 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
+arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
