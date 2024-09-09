@@ -1,54 +1,9 @@
-use arrow::datatypes::{Field, Fields, SchemaRef};
-use arrow_array::builder::{ArrayBuilder, StringBuilder};
+use arrow::datatypes::{Field, Fields};
 use arrow_schema::DataType;
-use arroyo_rpc::formats::JsonFormat;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
 pub mod schema;
-
-pub fn deserialize_slice_json(
-    schema: &SchemaRef,
-    buffer: &mut [Box<dyn ArrayBuilder>],
-    format: &JsonFormat,
-    msg: &[u8],
-) -> Result<(), String> {
-    let msg = if format.confluent_schema_registry {
-        &msg[5..]
-    } else {
-        msg
-    };
-
-    if format.unstructured {
-        let (idx, _) = schema
-            .column_with_name("value")
-            .expect("no 'value' column for unstructured json format");
-        let array = buffer[idx]
-            .as_any_mut()
-            .downcast_mut::<StringBuilder>()
-            .expect("'value' column has incorrect type");
-
-        if format.include_schema {
-            // we need to deserialize it to pull out the payload
-            let v: Value = serde_json::from_slice(msg)
-                .map_err(|e| format!("Failed to deserialize json: {:?}", e))?;
-            let payload = v.get("payload").ok_or_else(|| {
-                "`include_schema` set to true, but record does not have a payload field".to_string()
-            })?;
-
-            array.append_value(serde_json::to_string(payload).unwrap());
-        } else {
-            array.append_value(
-                String::from_utf8(msg.to_vec()).map_err(|_| "data is not valid UTF-8")?,
-            );
-        };
-    } else {
-        serde_json::from_slice(msg)
-            .map_err(|e| format!("Failed to deserialize JSON into schema: {:?}", e))?;
-    }
-
-    Ok(())
-}
 
 pub fn field_to_json_schema(field: &Field) -> Value {
     match field.data_type() {
