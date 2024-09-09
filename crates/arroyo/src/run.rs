@@ -100,11 +100,12 @@ impl ShutdownHandler for PipelineShutdownHandler {
             return;
         }
 
-        if let Err(_) = timeout(
+        if (timeout(
             Duration::from_secs(120),
             wait_for_state(&self.client, &pipeline_id, &["Stopped", "Failed"]),
         )
-        .await
+        .await)
+            .is_err()
         {
             error!(
                 "Pipeline did not complete checkpoint within timeout; shutting down immediately"
@@ -188,7 +189,7 @@ async fn run_pipeline(
         None => {
             // or create it, unless there are other pipelines, which would indicate that this is
             // a DB for another query
-            if client.get_pipelines().send().await?.data.len() > 0 {
+            if !client.get_pipelines().send().await?.data.is_empty() {
                 let msg =
                     "The specified state is for a different pipeline; this likely means either \
                     the state directory is incorrect or the query is incorrect.";
@@ -345,7 +346,7 @@ impl MaybeLocalDb {
 pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging_with_filter(
         "pipeline",
-        if !env::var("RUST_LOG").is_ok() {
+        if env::var("RUST_LOG").is_err() {
             set_var("RUST_LOG", "WARN");
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::WARN.into())

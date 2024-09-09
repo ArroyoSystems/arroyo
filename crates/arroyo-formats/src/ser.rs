@@ -132,14 +132,12 @@ impl ArrowSerializer {
 
                 serde_json::to_writer(&mut buf, &record).unwrap();
                 buf
+            } else if let Some(header) = header {
+                let mut buf = header.to_vec();
+                buf.extend(&row);
+                buf
             } else {
-                if let Some(header) = header {
-                    let mut buf = header.to_vec();
-                    buf.extend(&row);
-                    buf
-                } else {
-                    row
-                }
+                row
             }
         }))
     }

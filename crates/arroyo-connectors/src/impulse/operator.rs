@@ -80,7 +80,7 @@ impl ImpulseSourceFunc {
             return 8192;
         }
         let batch_size = Duration::from_millis(100).as_micros() / duration_micros;
-        batch_size.max(1).min(8192) as usize
+        batch_size.clamp(1, 8192) as usize
     }
 
     fn delay(&self, ctx: &mut ArrowContext) -> Duration {

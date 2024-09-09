@@ -147,7 +147,7 @@ pub struct WorkerServer {
 
 impl WorkerServer {
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
-        let id = WorkerId(config().worker.id.unwrap_or_else(|| random()));
+        let id = WorkerId(config().worker.id.unwrap_or_else(random));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
 

@@ -3,6 +3,9 @@ name = "arroyo-connectors"
 version = "0.12.0-dev"
 edition = "2021"
 
+[lints.clippy]
+to_string_trait_impl = "allow"
+
 [features]
 default = []
 

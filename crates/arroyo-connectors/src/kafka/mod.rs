@@ -49,6 +49,7 @@ import_types!(
         {type = "string", format = "var-str"} = VarStr
     }
 );
+
 import_types!(schema = "src/kafka/table.json");
 
 impl KafkaTable {
@@ -421,7 +422,7 @@ impl KafkaTester {
         client_config
             .set(
                 "bootstrap.servers",
-                &self.connection.bootstrap_servers.to_string(),
+                self.connection.bootstrap_servers.to_string(),
             )
             .set("enable.auto.commit", "false")
             .set("auto.offset.reset", "earliest")

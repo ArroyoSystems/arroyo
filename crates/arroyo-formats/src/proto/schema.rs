@@ -63,7 +63,7 @@ fn fields_for_message(message: &MessageDescriptor) -> Vec<Arc<Field>> {
 
 pub fn get_pool(encoded: &[u8]) -> anyhow::Result<DescriptorPool> {
     let mut pool = DescriptorPool::global();
-    pool.decode_file_descriptor_set(&encoded[..])?;
+    pool.decode_file_descriptor_set(encoded)?;
     Ok(pool)
 }
 

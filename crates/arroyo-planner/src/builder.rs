@@ -85,7 +85,7 @@ impl<'a> Planner<'a> {
     }
 
     pub(crate) fn sync_plan(&self, plan: &LogicalPlan) -> Result<Arc<dyn ExecutionPlan>> {
-        let fut = self.planner.create_physical_plan(plan, &self.session_state);
+        let fut = self.planner.create_physical_plan(plan, self.session_state);
         let (tx, mut rx) = oneshot::channel();
         thread::scope(|s| {
             let _handle = tokio::runtime::Handle::current();
@@ -97,7 +97,7 @@ impl<'a> Planner<'a> {
                 builder
             };
             builder
-                .spawn_scoped(&s, move || {
+                .spawn_scoped(s, move || {
                     let rt = Builder::new_current_thread().enable_all().build().unwrap();
                     rt.block_on(async {
                         let plan = fut.await;
@@ -115,7 +115,7 @@ impl<'a> Planner<'a> {
         input_dfschema: &DFSchema,
     ) -> Result<Arc<dyn PhysicalExpr>> {
         self.planner
-            .create_physical_expr(expr, input_dfschema, &self.session_state)
+            .create_physical_expr(expr, input_dfschema, self.session_state)
     }
 
     // This splits aggregates into two parts, the partial aggregation and the final aggregation.
@@ -135,9 +135,7 @@ impl<'a> Planner<'a> {
         let PhysicalPlanType::Aggregate(mut final_aggregate_proto) = physical_plan_node
             .physical_plan_type
             .take()
-            .ok_or_else(|| {
-                return DataFusionError::Plan("missing physical plan type".to_string());
-            })?
+            .ok_or_else(|| DataFusionError::Plan("missing physical plan type".to_string()))?
         else {
             return plan_err!("unexpected physical plan type");
         };
@@ -364,7 +362,7 @@ impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
         }
 
         if let Some(name) = arroyo_extension.node_name() {
-            if let Some(_) = self.named_nodes.get(&name) {
+            if self.named_nodes.contains_key(&name) {
                 return Ok(TreeNodeRecursion::Continue);
             }
         }

@@ -305,7 +305,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             );
             tokio::fs::rename(tmp_file, destination).await?;
             finished_files.push(FinishedFile {
-                filename: object_store::path::Path::parse(&destination.to_string_lossy())?
+                filename: object_store::path::Path::parse(destination.to_string_lossy())?
                     .to_string(),
                 partition: None,
                 size: destination.metadata()?.len() as usize,

@@ -94,7 +94,7 @@ impl Connector for FileSystemConnector {
             let message = TestSourceMessage {
                 error: failed,
                 done: true,
-                message: message,
+                message,
             };
             tx.send(message).await.unwrap();
         });

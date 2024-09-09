@@ -263,7 +263,7 @@ pub(crate) struct IsRetractExtension {
 
 impl IsRetractExtension {
     pub(crate) fn new(input: LogicalPlan, timestamp_qualifier: Option<TableReference>) -> Self {
-        let mut output_fields = fields_with_qualifiers(&*input.schema());
+        let mut output_fields = fields_with_qualifiers(input.schema());
 
         let timestamp_index = output_fields.len() - 1;
         output_fields[timestamp_index] = DFField::new(

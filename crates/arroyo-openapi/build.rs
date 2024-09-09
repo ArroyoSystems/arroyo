@@ -9,7 +9,7 @@ fn main() {
     let api_spec = "../../target/api-spec.json";
 
     let doc = ApiDoc::openapi().to_pretty_json().unwrap();
-    fs::write(&api_spec, &doc).unwrap();
+    fs::write(api_spec, &doc).unwrap();
 
     let spec = serde_json::from_str(&doc).unwrap();
     let mut settings = GenerationSettings::new();

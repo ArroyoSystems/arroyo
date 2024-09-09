@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 pub mod schema;
 
+#[allow(dependency_on_unit_never_type_fallback)]
 pub fn deserialize_slice_json(
     schema: &SchemaRef,
     buffer: &mut [Box<dyn ArrayBuilder>],

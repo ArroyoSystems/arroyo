@@ -82,7 +82,7 @@ impl JobMetrics {
         };
 
         for (metric, value) in values {
-            if let Some(rate) = task.rates.get_mut(&metric) {
+            if let Some(rate) = task.rates.get_mut(metric) {
                 rate.add(now, *value);
             }
         }
@@ -154,7 +154,7 @@ impl JobMetrics {
                             name,
                             subtasks: subtasks
                                 .into_iter()
-                                .filter(|t| t.metrics.len() > 0)
+                                .filter(|t| !t.metrics.is_empty())
                                 .collect(),
                         })
                         .collect(),

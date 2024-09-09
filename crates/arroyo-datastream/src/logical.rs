@@ -453,7 +453,7 @@ impl From<LogicalProgram> for ArrowProgram {
                 api::ArrowEdge {
                     source: source.index() as i32,
                     target: target.index() as i32,
-                    schema: Some(edge.schema.clone().try_into().unwrap()),
+                    schema: Some(edge.schema.clone().into()),
                     edge_type: edge_type as i32,
                     projection: edge
                         .projection
