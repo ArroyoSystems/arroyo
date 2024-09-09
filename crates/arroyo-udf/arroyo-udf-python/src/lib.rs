@@ -236,7 +236,7 @@ def my_add(x: int, y: float) -> float:
             udf.return_type.data_type,
             arrow::datatypes::DataType::Float64
         );
-        assert_eq!(udf.return_type.nullable, false);
+        assert!(!udf.return_type.nullable);
 
         let data = vec![
             ColumnarValue::Array(Arc::new(arrow::array::Int64Array::from(vec![1, 2, 3]))),
