@@ -86,7 +86,7 @@ pub fn timestamp_table_config(
             description: description.into(),
             retention_micros: retention.as_micros() as u64,
             generational,
-            schema: Some(schema.try_into().unwrap()),
+            schema: Some(schema.into()),
         }
         .encode_to_vec(),
     }

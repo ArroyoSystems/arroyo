@@ -386,7 +386,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                 .unwrap(),
             ));
 
-            let unnest_fields = fields_with_qualifiers(&produce_list.schema())
+            let unnest_fields = fields_with_qualifiers(produce_list.schema())
                 .iter()
                 .enumerate()
                 .map(|(i, f)| {
@@ -651,6 +651,6 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
             }
         }
 
-        return Ok(Transformed::no(node));
+        Ok(Transformed::no(node))
     }
 }

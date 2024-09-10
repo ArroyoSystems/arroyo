@@ -18,7 +18,7 @@ pub(crate) fn deserialize_proto(
     let message = proto.message_name.as_ref().expect("no message name");
     let descriptor = pool.get_message_by_name(message).expect("no descriptor");
 
-    let msg = DynamicMessage::decode(descriptor, msg.as_ref())
+    let msg = DynamicMessage::decode(descriptor, msg)
         .map_err(|e| SourceError::bad_data(format!("failed to deserialize protobuf: {:?}", e)))?;
 
     Ok(proto_to_json(&msg))
@@ -44,7 +44,7 @@ fn proto_value_to_json(field: &FieldDescriptor, value: &Value) -> JsonValue {
         Value::F32(f) => float_to_json(*f as f64),
         Value::F64(f) => float_to_json(*f),
         Value::String(s) => JsonValue::String(s.clone()),
-        Value::Bytes(b) => JsonValue::String(BASE64_STANDARD.encode(&b)),
+        Value::Bytes(b) => JsonValue::String(BASE64_STANDARD.encode(b)),
         Value::EnumNumber(i) => JsonValue::String(
             (match field.kind() {
                 Kind::Enum(desc) => desc.get_value(*i).map(|v| v.name().to_string()),
@@ -52,12 +52,10 @@ fn proto_value_to_json(field: &FieldDescriptor, value: &Value) -> JsonValue {
             })
             .unwrap_or_default(),
         ),
-        Value::Message(m) => proto_to_json(&m),
-        Value::List(l) => JsonValue::Array(
-            l.into_iter()
-                .map(|v| proto_value_to_json(field, v))
-                .collect(),
-        ),
+        Value::Message(m) => proto_to_json(m),
+        Value::List(l) => {
+            JsonValue::Array(l.iter().map(|v| proto_value_to_json(field, v)).collect())
+        }
         Value::Map(m) => {
             let value_field = match field.kind() {
                 Kind::Message(m) => {

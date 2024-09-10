@@ -158,7 +158,7 @@ impl TreeNodeRewriter for AggregateRewriter {
             .map(|field| {
                 DFField::new(
                     field.qualifier().cloned(),
-                    &format!("_key_{}", field.name()),
+                    format!("_key_{}", field.name()),
                     field.data_type().clone(),
                     field.is_nullable(),
                 )

@@ -98,7 +98,7 @@ impl AggregateExtension {
                 )?
                 .into(),
             ),
-            partial_schema: Some(partial_schema.try_into().unwrap()),
+            partial_schema: Some(partial_schema.into()),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),
             final_projection: Some(final_physical_plan_node.encode_to_vec()),
@@ -289,7 +289,6 @@ impl AggregateExtension {
         let timestamp_field: DFField = aggregate_plan.inputs()[0]
             .schema()
             .qualified_field_with_unqualified_name(TIMESTAMP_FIELD)?
-            .clone()
             .into();
         let timestamp_append = LogicalPlan::Extension(Extension {
             node: Arc::new(TimestampAppendExtension::new(

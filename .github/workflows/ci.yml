@@ -91,6 +91,8 @@ jobs:
         run: |
           cd webui
           pnpm build
+      - name: Run Clippy
+        run: cargo clippy --all-targets --workspace -- -D warnings
       - name: Build
         run: cargo build --all-features
       - name: Test

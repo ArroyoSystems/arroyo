@@ -55,8 +55,8 @@ pub fn initialize_config(path: Option<&Path>, dir: Option<&Path>) {
     }
 
     let current = CONFIG.load();
-    if current.is_none() {
-        if CONFIG
+    if current.is_none()
+        && CONFIG
             .compare_and_swap(
                 current,
                 match load_config(&paths).extract() {
@@ -72,9 +72,8 @@ pub fn initialize_config(path: Option<&Path>, dir: Option<&Path>) {
                 },
             )
             .is_none()
-        {
-            return;
-        }
+    {
+        return;
     }
 
     panic!("Unable to initialize configuration; it's already initialized!");
@@ -95,7 +94,7 @@ pub fn config() -> Arc<Config> {
     let cur = CONFIG.load();
     if cur.is_none() {
         warn!("Config accessed before initialization! This should only happen in tests.");
-        CONFIG.compare_and_swap(cur, Some(load_config(&vec![]).extract().unwrap()));
+        CONFIG.compare_and_swap(cur, Some(load_config(&[]).extract().unwrap()));
     } else {
         drop(cur);
     }
@@ -690,7 +689,7 @@ mod tests {
     fn test_config() {
         figment::Jail::expect_with(|jail| {
             // test default loading
-            let _config: Config = load_config(&vec![]).extract().unwrap();
+            let _config: Config = load_config(&[]).extract().unwrap();
 
             // try overriding database by config file
             jail.create_file(
@@ -702,13 +701,13 @@ mod tests {
             )
             .unwrap();
 
-            let config: Config = load_config(&vec![]).extract().unwrap();
+            let config: Config = load_config(&[]).extract().unwrap();
             assert_eq!(config.database.sqlite.path, SqliteConfig::default().path);
             assert_eq!(config.database.r#type, DatabaseType::Sqlite);
 
             // try overriding with environment variables
             jail.set_env("ARROYO__ADMIN__HTTP_PORT", 9111);
-            let config: Config = load_config(&vec![]).extract().unwrap();
+            let config: Config = load_config(&[]).extract().unwrap();
             assert_eq!(config.admin.http_port, 9111);
 
             Ok(())
@@ -724,7 +723,7 @@ mod tests {
             jail.set_env("ARTIFACT_URL", "s3:///artifact/path");
             jail.set_env("DATABASE_PORT", "5000");
 
-            let config: Config = load_config(&vec![]).extract().unwrap();
+            let config: Config = load_config(&[]).extract().unwrap();
             assert_eq!(config.controller.scheduler, Scheduler::Kubernetes);
             assert_eq!(
                 config.controller_endpoint,
@@ -742,7 +741,7 @@ mod tests {
         figment::Jail::expect_with(|jail| {
             jail.set_env("ARROYO__DATABASE__POSTGRES__PASSWORD", "sup3r-s3cr3t-p@ss");
 
-            let config: Config = load_config(&vec![]).extract().unwrap();
+            let config: Config = load_config(&[]).extract().unwrap();
             assert_eq!(&*config.database.postgres.password, "sup3r-s3cr3t-p@ss");
 
             let v: serde_json::Value =

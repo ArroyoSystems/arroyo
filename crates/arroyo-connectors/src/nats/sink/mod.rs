@@ -75,9 +75,7 @@ impl ArrowOperator for NatsSinkFunc {
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
-        let s = match &self.sink_type {
-            SinkType::Subject(s) => s,
-        };
+        let SinkType::Subject(s) = &self.sink_type;
         let nats_subject = async_nats::Subject::from(s.clone());
         for msg in self.serializer.serialize(&batch) {
             let publisher = self
@@ -97,7 +95,7 @@ impl ArrowOperator for NatsSinkFunc {
                         })
                         .await
                         .expect("Something went wrong, data will never be received.");
-                    panic!("Panicked while processing element: {}", e.to_string());
+                    panic!("Panicked while processing element: {}", e);
                 }
             }
         }

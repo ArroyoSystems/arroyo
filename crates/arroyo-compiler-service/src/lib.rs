@@ -46,7 +46,7 @@ pub async fn start_service() -> anyhow::Result<()> {
 
     wrap_start(
         "compiler service",
-        addr.clone(),
+        addr,
         arroyo_server_common::grpc_server()
             .add_service(CompilerGrpcServer::new(service))
             .serve(addr),

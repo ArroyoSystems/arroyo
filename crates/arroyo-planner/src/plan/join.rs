@@ -93,7 +93,7 @@ impl JoinRewriter {
                 )
             })
             .chain(
-                fields_with_qualifiers(&input.schema())
+                fields_with_qualifiers(input.schema())
                     .iter()
                     .map(|field| Expr::Column(field.qualified_column())),
             )

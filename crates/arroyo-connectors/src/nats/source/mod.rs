@@ -238,19 +238,19 @@ impl NatsSourceFunc {
                     ReplayPolicy::Original => consumer::ReplayPolicy::Original,
                     ReplayPolicy::Instant => consumer::ReplayPolicy::Instant,
                 },
-                ack_wait: Duration::from_secs(ack_wait.clone() as u64),
+                ack_wait: Duration::from_secs(*ack_wait as u64),
                 description: description.clone(),
                 filter_subjects: filter_subjects.clone(),
-                rate_limit: rate_limit.clone() as u64,
-                sample_frequency: sample_frequency.clone() as u8,
-                num_replicas: num_replicas.clone() as usize,
-                inactive_threshold: Duration::from_secs(inactive_threshold.clone() as u64),
-                max_ack_pending: max_ack_pending.clone(),
-                max_deliver: max_deliver.clone(),
-                max_waiting: max_waiting.clone(),
-                max_batch: max_batch.clone(),
-                max_bytes: max_bytes.clone(),
-                max_expires: Duration::from_secs(max_expires.clone() as u64),
+                rate_limit: *rate_limit as u64,
+                sample_frequency: *sample_frequency as u8,
+                num_replicas: *num_replicas as usize,
+                inactive_threshold: Duration::from_secs(*inactive_threshold as u64),
+                max_ack_pending: *max_ack_pending,
+                max_deliver: *max_deliver,
+                max_waiting: *max_waiting,
+                max_batch: *max_batch,
+                max_bytes: *max_bytes,
+                max_expires: Duration::from_secs(*max_expires as u64),
                 deliver_policy,
                 ..Default::default()
             },
@@ -367,7 +367,7 @@ impl NatsSourceFunc {
                                     let message_info = msg.info().expect("Couldn't get message information");
                                     let timestamp = message_info.published.into() ;
 
-                                    ctx.deserialize_slice(&payload, timestamp).await?;
+                                    ctx.deserialize_slice(payload, timestamp).await?;
 
                                     debug!("---------------------------------------------->");
                                     debug!(
@@ -407,7 +407,7 @@ impl NatsSourceFunc {
                                         ctx.task_info.operator_id.clone(),
                                         NatsState {
                                             stream_name: stream.clone(),
-                                            stream_sequence_number: message_info.stream_sequence.clone()
+                                            stream_sequence_number: message_info.stream_sequence
                                         }
                                     );
 
@@ -493,7 +493,7 @@ impl NatsSourceFunc {
                                 Some(msg) => {
                                     let payload = msg.payload.as_ref();
                                     let timestamp = SystemTime::now();
-                                    ctx.deserialize_slice(&payload, timestamp).await?;
+                                    ctx.deserialize_slice(payload, timestamp).await?;
                                     if ctx.should_flush() {
                                         ctx.flush_buffer().await?;
                                     }

@@ -15,6 +15,7 @@ use std::thread;
 pub struct ThreadedUdfInterpreter {}
 
 impl ThreadedUdfInterpreter {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(body: Arc<String>) -> anyhow::Result<PythonUDF> {
         let (task_tx, task_rx) = std::sync::mpsc::sync_channel(0);
         let (result_tx, result_rx) = std::sync::mpsc::sync_channel(0);
@@ -24,7 +25,7 @@ impl ThreadedUdfInterpreter {
             let body = body.clone();
             move || {
                 let interpreter = SubInterpreter::new().unwrap();
-                let (name, arg_types, ret) = match Self::parse(&interpreter, &*body) {
+                let (name, arg_types, ret) = match Self::parse(&interpreter, &body) {
                     Ok(p) => p,
                     Err(e) => {
                         parse_tx.send(Err(anyhow!("{}", e.to_string()))).unwrap();
@@ -36,23 +37,16 @@ impl ThreadedUdfInterpreter {
                     .send(Ok((name.clone(), arg_types.clone(), ret.clone())))
                     .unwrap();
 
-                loop {
-                    match task_rx.recv() {
-                        Ok(args) => {
-                            result_tx
-                                .send(Self::execute(
-                                    &interpreter,
-                                    &name,
-                                    &arg_types,
-                                    args,
-                                    &ret.data_type,
-                                ))
-                                .expect("python result queue closed");
-                        }
-                        Err(_) => {
-                            break;
-                        }
-                    }
+                while let Ok(args) = task_rx.recv() {
+                    result_tx
+                        .send(Self::execute(
+                            &interpreter,
+                            &name,
+                            &arg_types,
+                            args,
+                            &ret.data_type,
+                        ))
+                        .expect("python result queue closed");
                 }
             }
         });
@@ -115,14 +109,14 @@ impl ThreadedUdfInterpreter {
                 let function = py.eval_bound(name, None, None).unwrap();
                 let function = function.downcast::<PyFunction>().unwrap();
 
-                let size = args.get(0).map(|e| e.len()).unwrap_or(0);
+                let size = args.first().map(|e| e.len()).unwrap_or(0);
 
                 let results: anyhow::Result<Vec<_>> = (0..size)
                     .map(|i| {
                         let args: anyhow::Result<Vec<_>> = args
                             .iter()
                             .map(|a| {
-                                Converter::get_pyobject(py, &*a, i).map_err(|e| {
+                                Converter::get_pyobject(py, a, i).map_err(|e| {
                                     anyhow!("Could not convert datatype to python: {}", e)
                                 })
                             })
@@ -151,7 +145,7 @@ impl ThreadedUdfInterpreter {
                     })
                     .collect();
 
-                Converter::build_array(&ret_type, py, &results?).map_err(|e| {
+                Converter::build_array(ret_type, py, &results?).map_err(|e| {
                     anyhow!(
                         "could not convert results from Python UDF '{}' to arrow: {}",
                         name,
@@ -163,6 +157,7 @@ impl ThreadedUdfInterpreter {
             .map_err(|e| e.into())
     }
 
+    #[allow(clippy::type_complexity)]
     fn parse(
         interpreter: &SubInterpreter,
         body: &str,
@@ -170,7 +165,7 @@ impl ThreadedUdfInterpreter {
         interpreter.with_gil(|py| {
             let lib = PyModule::from_code_bound(py, UDF_PY_LIB, "arroyo_udf", "arroyo_udf")?;
 
-            py.run_bound(&body, None, None)?;
+            py.run_bound(body, None, None)?;
 
             let udfs = lib.call_method0( "get_udfs")?;
             let udfs: &Bound<PyList> = udfs.downcast().unwrap();

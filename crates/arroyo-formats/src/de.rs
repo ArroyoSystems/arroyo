@@ -117,7 +117,7 @@ impl ArrowDeserializer {
             ..
         }) = &format
         {
-            get_pool(&schema).expect("unable to handle protobuf schema")
+            get_pool(schema).expect("unable to handle protobuf schema")
         } else {
             DescriptorPool::global()
         };
@@ -325,7 +325,8 @@ impl ArrowDeserializer {
         };
 
         let into_json = format.into_unstructured_json;
-        let errors = messages
+
+        messages
             .into_iter()
             .map(|record| {
                 let value = record.map_err(|e| {
@@ -353,9 +354,7 @@ impl ArrowDeserializer {
                 Ok(())
             })
             .filter_map(|r: Result<(), SourceError>| r.err())
-            .collect();
-
-        errors
+            .collect()
     }
 
     fn deserialize_raw_string(&mut self, buffer: &mut [Box<dyn ArrayBuilder>], msg: &[u8]) {
@@ -620,7 +619,7 @@ mod tests {
 
         let time = SystemTime::now();
         let result = deserializer
-            .deserialize_slice(&mut arrays, &vec![0, 1, 2, 3, 4, 5], time)
+            .deserialize_slice(&mut arrays, &[0, 1, 2, 3, 4, 5], time)
             .await;
         assert!(result.is_empty());
 

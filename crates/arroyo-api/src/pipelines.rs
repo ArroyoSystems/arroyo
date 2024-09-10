@@ -285,6 +285,7 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_pipeline_int<'a>(
     name: String,
     query: String,
@@ -388,7 +389,7 @@ pub(crate) async fn create_pipeline_int<'a>(
         api_queries::fetch_get_pipeline_id(&db.client().await?, &pub_id, &auth.organization_id)
             .await
             .map_err(log_and_map)?
-            .get(0)
+            .first()
             .unwrap()
             .id;
 
@@ -410,7 +411,7 @@ pub(crate) async fn create_pipeline_int<'a>(
         checkpoint_interval,
         is_preview,
         &auth,
-        &db,
+        db,
     )
     .await?;
 
