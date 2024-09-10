@@ -307,6 +307,7 @@ pub enum DebeziumOp {
     Delete,
 }
 
+#[allow(clippy::to_string_trait_impl)]
 impl ToString for DebeziumOp {
     fn to_string(&self) -> String {
         match self {

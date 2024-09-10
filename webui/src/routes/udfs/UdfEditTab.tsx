@@ -69,6 +69,7 @@ const UdfEditTab: React.FC<UdfEditTabProps> = ({ udf }) => {
     const { data: udfValiation } = await post('/v1/udfs/validate', {
       body: {
         definition: udf.definition,
+        language: udf.language,
       },
     });
     setLoading(false);

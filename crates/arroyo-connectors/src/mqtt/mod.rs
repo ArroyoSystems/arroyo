@@ -38,6 +38,7 @@ import_types!(
         {type = "string", format = "var-str"} = VarStr
     }
 );
+
 import_types!(schema = "src/mqtt/table.json");
 pub struct MqttConnector {}
 

@@ -418,6 +418,7 @@ pub struct StateHolder {
 }
 
 impl Transition {
+    #[allow(clippy::multiple_bound_locations)]
     pub fn next<ThisState: State, NextState: State>(t: ThisState, n: NextState) -> Transition
     where
         ThisState: TransitionTo<NextState>,
@@ -545,6 +546,7 @@ async fn execute_state<'a>(
     (next, ctx)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_to_completion(
     config: Arc<RwLock<JobConfig>>,
     mut program: LogicalProgram,

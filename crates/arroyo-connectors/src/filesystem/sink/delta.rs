@@ -34,16 +34,16 @@ pub(crate) async fn commit_files_to_delta(
         return Ok(None);
     }
 
-    let add_actions = create_add_actions(&finished_files, &relative_table_path)?;
-    let table_path = build_table_path(&storage_provider, &relative_table_path);
-    let storage_options = configure_storage_options(&table_path, &storage_provider).await?;
+    let add_actions = create_add_actions(finished_files, relative_table_path)?;
+    let table_path = build_table_path(storage_provider, relative_table_path);
+    let storage_options = configure_storage_options(&table_path, storage_provider).await?;
     let mut table = load_or_create_table(&table_path, storage_options, &schema).await?;
 
     if let Some(new_version) = check_existing_files(
         &mut table,
         last_version,
-        &finished_files,
-        &relative_table_path,
+        finished_files,
+        relative_table_path,
     )
     .await?
     {

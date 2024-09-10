@@ -32,6 +32,7 @@ import_types!(
         {type = "string", format = "var-str"} = VarStr
     }
 );
+
 import_types!(schema = "src/nats/table.json");
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -48,7 +49,7 @@ impl NatsConnector {
     ) -> anyhow::Result<NatsConfig> {
         let nats_servers = VarStr::new(pull_opt("servers", options)?);
         let nats_auth = options.remove("auth.type");
-        let nats_auth: NatsConfigAuthentication = match nats_auth.as_ref().map(|t| t.as_str()) {
+        let nats_auth: NatsConfigAuthentication = match nats_auth.as_deref() {
             Some("none") | None => NatsConfigAuthentication::None {},
             Some("credentials") => NatsConfigAuthentication::Credentials {
                 username: VarStr::new(pull_opt("auth.username", options)?),
@@ -78,71 +79,70 @@ impl NatsConnector {
                             .remove("consumer.ack_policy")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| AcknowledgmentPolicy::Explicit),
+                            .unwrap_or(AcknowledgmentPolicy::Explicit),
                         replay_policy: options
                             .remove("consumer.replay_policy")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| ReplayPolicy::Instant),
+                            .unwrap_or(ReplayPolicy::Instant),
                         ack_wait: options
                             .remove("consumer.ack_wait")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 30),
-                        filter_subjects: options.remove("consumer.filter_subjects").map_or_else(
-                            || Vec::new(),
-                            |s| s.split(',').map(String::from).collect(),
-                        ),
+                            .unwrap_or(30),
+                        filter_subjects: options
+                            .remove("consumer.filter_subjects")
+                            .map_or_else(Vec::new, |s| s.split(',').map(String::from).collect()),
                         sample_frequency: options
                             .remove("consumer.sample_frequency")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 0),
+                            .unwrap_or(0),
                         num_replicas: options
                             .remove("consumer.num_replicas")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 1),
+                            .unwrap_or(1),
                         inactive_threshold: options
                             .remove("consumer.inactive_threshold")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 600),
+                            .unwrap_or(600),
                         rate_limit: options
                             .remove("consumer.rate_limit")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| -1),
+                            .unwrap_or(-1),
                         max_ack_pending: options
                             .remove("consumer.max_ack_pending")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| -1),
+                            .unwrap_or(-1),
                         max_deliver: options
                             .remove("consumer.max_deliver")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| -1),
+                            .unwrap_or(-1),
                         max_waiting: options
                             .remove("consumer.max_waiting")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 1000000),
+                            .unwrap_or(1000000),
                         max_batch: options
                             .remove("consumer.max_batch")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 10000),
+                            .unwrap_or(10000),
                         max_bytes: options
                             .remove("consumer.max_bytes")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 104857600),
+                            .unwrap_or(104857600),
                         max_expires: options
                             .remove("consumer.max_expires")
                             .unwrap_or_default()
                             .parse()
-                            .unwrap_or_else(|_| 300000),
+                            .unwrap_or(300000),
                     }),
                     (None, Some(subject)) => Some(SourceType::Core { subject }),
                     (Some(_), Some(_)) => bail!("Exactly one of `stream` or `subject` must be set"),
@@ -325,7 +325,7 @@ impl Connector for NatsConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(&self, None, name, connection, table, schema)
+        Self::from_config(self, None, name, connection, table, schema)
     }
 
     fn make_operator(

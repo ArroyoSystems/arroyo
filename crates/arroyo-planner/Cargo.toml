@@ -15,6 +15,7 @@ arroyo-formats = { path = "../arroyo-formats" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
+arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 datafusion = { workspace = true }
 datafusion-proto = { workspace = true }

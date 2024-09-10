@@ -183,7 +183,7 @@ impl KafkaSinkFunc {
                 rec = rec.timestamp(ts);
             }
             if let Some(k) = k.as_ref() {
-                rec = rec.key(&k);
+                rec = rec.key(k);
             }
 
             rec.payload(&v)
@@ -260,15 +260,13 @@ impl ArrowOperator for KafkaSinkFunc {
 
         for (i, v) in values.enumerate() {
             // kafka timestamp as unix millis
-            let timestamp = if let Some(ts) = timestamps {
-                Some(if ts.is_null(i) {
+            let timestamp = timestamps.map(|ts| {
+                if ts.is_null(i) {
                     0
                 } else {
                     ts.value(i) / 1_000_000
-                })
-            } else {
-                None
-            };
+                }
+            });
             // TODO: this copy should be unnecessary but likely needs a custom trait impl
             let key = keys.map(|k| k.value(i).as_bytes().to_vec());
             self.publish(timestamp, key, v, ctx).await;

@@ -27,7 +27,7 @@ const UdfEditor: React.FC<UdfEditorProps> = ({ udf }) => {
     }
   };
 
-  useUdfValidation(updateName, definitionToCheck);
+  useUdfValidation(updateName, definitionToCheck, udf.language);
 
   return (
     <CodeEditor
@@ -38,7 +38,7 @@ const UdfEditor: React.FC<UdfEditorProps> = ({ udf }) => {
         setLocalDefinition(s);
         debounceSetCheck(s);
       }}
-      language="rust"
+      language={udf.language}
     />
   );
 };

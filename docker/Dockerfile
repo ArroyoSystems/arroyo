@@ -8,8 +8,11 @@ ARG PROFILE=release
 
 RUN apt-get update && \
     apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
-    cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash libsasl2-dev && \
+    cmake clang wget postgresql postgresql-client supervisor sudo bash libsasl2-dev && \
     cargo install refinery_cli
+
+# Install Python (manually, as no bookworm package for 3.12)
+
 
 # Install node & pnpm
 RUN mkdir -p /etc/apt/keyrings && \
@@ -57,6 +60,14 @@ RUN apt-get update && \
 COPY --from=builder /arroyo ./
 COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
 COPY --from=builder /app/include/google /usr/local/include/google
+COPY --from=builder /app/python /python
+
+RUN cp -r /python/bin/* /usr/local/bin/ && \
+    cp -r /python/include/* /usr/local/include/ && \
+    cp -r /python/lib/* /usr/local/lib/ && \
+    cp -r /python/share/* /usr/local/share/ && \
+    rm -rf /python && \
+    ldconfig
 
 ENV INSTALL_RUSTC=true \
     INSTALL_CLANG=true \
@@ -76,6 +87,15 @@ ENV ARROYO__API__RUN_HTTP_PORT=5115
 COPY --from=builder /arroyo ./
 COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
 COPY --from=builder /app/include/google /usr/local/include/google
+COPY --from=builder /app/python /python
+
+RUN cp -r /python/bin/* /usr/local/bin/ && \
+    cp -r /python/include/* /usr/local/include/ && \
+    cp -r /python/lib/* /usr/local/lib/ && \
+    cp -r /python/share/* /usr/local/share/ && \
+    rm -rf /python && \
+    ldconfig
+  
 
 EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]

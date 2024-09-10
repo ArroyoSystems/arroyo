@@ -14,6 +14,7 @@ arroyo-types = { path = "../arroyo-types" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
+arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 anyhow = "1.0.71"
 arrow = { workspace = true, features = ["ffi"] }

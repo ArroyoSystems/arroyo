@@ -173,7 +173,7 @@ async fn patch_and_wait(
         .await?;
 
     println!("Waiting for {}", expected_state);
-    wait_for_state(&get_client(), &pipeline_id, expected_state).await?;
+    wait_for_state(&get_client(), pipeline_id, expected_state).await?;
 
     Ok(())
 }
@@ -244,8 +244,8 @@ async fn basic_pipeline() {
             .await
             .unwrap()
             .into_inner();
-        if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len() {
-            if metrics
+        if metrics.data.len() == valid.graph.as_ref().unwrap().nodes.len()
+            && metrics
                 .data
                 .iter()
                 .filter(|op| !op.operator_id.contains("sink"))
@@ -256,14 +256,13 @@ async fn basic_pipeline() {
                 })
                 .all(|m| {
                     m.map(|m| {
-                        m.subtasks[0].metrics.len() > 0
+                        !m.subtasks[0].metrics.is_empty()
                             && m.subtasks[0].metrics.iter().last().unwrap().value > 0.0
                     })
                     .unwrap_or(false)
                 })
-            {
-                break;
-            }
+        {
+            break;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -448,7 +447,7 @@ async fn connection_table() {
         .unwrap()
         .into_inner();
 
-    assert!(connectors.data.iter().find(|c| c.name == "Kafka").is_some());
+    assert!(connectors.data.iter().any(|c| c.name == "Kafka"));
 
     let run_id: u32 = random();
     let table_name = format!("kafka_table_{run_id}");

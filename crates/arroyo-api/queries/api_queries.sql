@@ -281,26 +281,27 @@ WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_i
 ORDER BY jlm.created_at DESC
 LIMIT cast(:limit as integer);
 
+
 ----------- udfs -----------------------
 
---: DbUdf (description?)
+--: DbUdf (description?, dylib_url?)
 
---! create_udf
-INSERT INTO udfs (pub_id, organization_id, created_by, prefix, name, definition, description, dylib_url)
-VALUES (:pub_id, :organization_id, :created_by, :prefix, :name, :definition, :description, :dylib_url);
-
+--! create_udf (dylib_url?)
+INSERT INTO udfs (pub_id, organization_id, created_by, prefix, name, language, definition, description, dylib_url)
+VALUES (:pub_id, :organization_id, :created_by, :prefix, :name,  :language, :definition, :description, :dylib_url);
+    
 --! get_udf: DbUdf
-SELECT pub_id, prefix, name, definition, created_at, updated_at, description, dylib_url
+SELECT pub_id, prefix, name, language, definition, created_at, updated_at, description, dylib_url
 FROM udfs
 WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --! get_udf_by_name: DbUdf
-SELECT pub_id, prefix, name, definition, created_at, updated_at, description, dylib_url
+SELECT pub_id, prefix, name, language, definition, created_at, updated_at, description, dylib_url
 FROM udfs
 WHERE organization_id = :organization_id AND name = :name;
 
 --! get_udfs: DbUdf
-SELECT pub_id, prefix, name, definition, created_at, updated_at, description, dylib_url
+SELECT pub_id, prefix, name, language, definition, created_at, updated_at, description, dylib_url
 FROM udfs
 WHERE organization_id = :organization_id;
 

@@ -236,11 +236,10 @@ pub(crate) async fn get_all_connection_tables(
     let vec: Vec<ConnectionTable> = tables
         .into_iter()
         .map(|t| t.try_into())
-        .map(|result| {
-            if let Err(err) = &result {
+        .inspect(|result| {
+            if let Err(err) = result {
                 debug!("Error building connection table: {}", err);
             }
-            result
         })
         .filter_map(Result::ok)
         .collect();
@@ -414,11 +413,10 @@ pub(crate) async fn get_connection_tables(
     let tables: Vec<ConnectionTable> = tables
         .into_iter()
         .map(|t| t.try_into())
-        .map(|result| {
-            if let Err(err) = &result {
+        .inspect(|result| {
+            if let Err(err) = result {
                 debug!("Error building connection table: {}", err);
             }
-            result
         })
         .filter_map(Result::ok)
         .collect();
@@ -580,10 +578,10 @@ async fn expand_proto_schema(
                     .into_iter()
                     .map(|(name, s)| {
                         if s.schema_type != ConfluentSchemaType::Protobuf {
-                            return Err(bad_request(format!(
+                            Err(bad_request(format!(
                                 "Schema reference {} has type {:?}, but must be protobuf",
                                 name, s.schema_type
-                            )));
+                            )))
                         } else {
                             Ok((name, s.schema))
                         }
@@ -818,7 +816,7 @@ pub(crate) async fn test_schema(
 
     match schema_def {
         SchemaDefinition::JsonSchema(schema) => {
-            if let Err(e) = json::schema::to_arrow("test", &schema) {
+            if let Err(e) = json::schema::to_arrow("test", schema) {
                 Err(bad_request(e.to_string()))
             } else {
                 Ok(())
