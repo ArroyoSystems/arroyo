@@ -122,7 +122,7 @@ async fn test_inner(
             .unwrap();
 
             redis::cmd("PING")
-                .query_async(&mut connection)
+                .query_async::<()>(&mut connection)
                 .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
         }
@@ -138,7 +138,7 @@ async fn test_inner(
             .unwrap();
 
             redis::cmd("PING")
-                .query_async(&mut connection)
+                .query_async::<()>(&mut connection)
                 .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
         }
