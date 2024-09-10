@@ -3,9 +3,6 @@ name = "arroyo-df"
 version = "0.12.0-dev"
 edition = "2021"
 
-[features]
-disable_merge_sinker = []
-
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = {path = "../arroyo-rpc"}
