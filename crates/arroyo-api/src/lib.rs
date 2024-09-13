@@ -310,6 +310,7 @@ impl IntoResponse for HttpError {
         ValidateUdfPost,
         UdfValidationResult,
         Udf,
+        UdfLanguage,
         UdfPost,
         GlobalUdf,
         GlobalUdfCollection,

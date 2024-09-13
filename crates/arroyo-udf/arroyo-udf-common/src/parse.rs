@@ -15,6 +15,13 @@ pub struct NullableType {
 }
 
 impl NullableType {
+    pub fn new(data_type: DataType, nullable: bool) -> Self {
+        Self {
+            data_type,
+            nullable,
+        }
+    }
+
     pub fn null(data_type: DataType) -> Self {
         Self {
             data_type,

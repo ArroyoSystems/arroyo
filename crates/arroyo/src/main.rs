@@ -240,6 +240,16 @@ fn sqlite_connection() -> rusqlite::Connection {
             [&uuid],
         )
         .expect("Unable to write to sqlite database");
+    } else {
+        // migrate database
+        if let Err(e) = sqlite_migrations::migrations::runner().run(&mut conn) {
+            error!("Unable to migrate database to latest schema: {e}");
+            error!(
+                "To continue, delete or move the existing database at '{}'",
+                path.to_string_lossy()
+            );
+            exit(1);
+        }
     }
 
     let mut statement = conn.prepare("select id from cluster_info").unwrap();

@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { Text, Flex, Icon } from '@chakra-ui/react';
-import { DiRust } from 'react-icons/di';
+import { DiPython, DiRust } from 'react-icons/di';
 import { LocalUdf, LocalUdfsContext, nameRoot } from '../../udf_state';
 import { GlobalUdf } from '../../lib/data_fetching';
 import '@fontsource/ibm-plex-mono';
@@ -15,7 +15,7 @@ const UdfLabel: React.FC<UdfLabelProps> = ({ udf }) => {
 
   return (
     <Flex alignItems={'center'} onClick={() => openTab(udf)} cursor={'pointer'} w={'min-content'}>
-      <Icon as={DiRust} boxSize={5} />
+      <Icon as={udf.language == 'rust' ? DiRust : DiPython} boxSize={5} />
       <Text
         borderRadius={3}
         fontSize={'sm'}

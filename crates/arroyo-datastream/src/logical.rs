@@ -5,9 +5,7 @@ use arrow_schema::DataType;
 use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc::api::{
-    ArrowDylibUdfConfig, ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
-};
+use arroyo_rpc::grpc::api::{ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType};
 use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
@@ -20,6 +18,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hasher;
+use std::sync::Arc;
 use strum::{Display, EnumString};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
@@ -186,9 +185,18 @@ pub struct DylibUdfConfig {
     pub is_async: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct PythonUdfConfig {
+    pub arg_types: Vec<DataType>,
+    pub return_type: DataType,
+    pub name: Arc<String>,
+    pub definition: Arc<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ProgramConfig {
     pub udf_dylibs: HashMap<String, DylibUdfConfig>,
+    pub python_udfs: HashMap<String, PythonUdfConfig>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -348,6 +356,7 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
             .program_config
             .unwrap_or_else(|| ArrowProgramConfig {
                 udf_dylibs: HashMap::new(),
+                python_udfs: HashMap::new(),
             })
             .into();
 
@@ -355,9 +364,9 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
     }
 }
 
-impl From<DylibUdfConfig> for ArrowDylibUdfConfig {
+impl From<DylibUdfConfig> for api::DylibUdfConfig {
     fn from(from: DylibUdfConfig) -> Self {
-        ArrowDylibUdfConfig {
+        api::DylibUdfConfig {
             dylib_path: from.dylib_path,
             arg_types: from
                 .arg_types
@@ -377,8 +386,8 @@ impl From<DylibUdfConfig> for ArrowDylibUdfConfig {
     }
 }
 
-impl From<ArrowDylibUdfConfig> for DylibUdfConfig {
-    fn from(from: ArrowDylibUdfConfig) -> Self {
+impl From<api::DylibUdfConfig> for DylibUdfConfig {
+    fn from(from: api::DylibUdfConfig) -> Self {
         DylibUdfConfig {
             dylib_path: from.dylib_path,
             arg_types: from
@@ -401,11 +410,60 @@ impl From<ArrowDylibUdfConfig> for DylibUdfConfig {
     }
 }
 
+impl From<api::PythonUdfConfig> for PythonUdfConfig {
+    fn from(value: api::PythonUdfConfig) -> Self {
+        PythonUdfConfig {
+            arg_types: value
+                .arg_types
+                .iter()
+                .map(|t| {
+                    DataType::try_from(
+                        &ArrowType::decode(&mut t.as_slice()).expect("invalid arrow type"),
+                    )
+                    .expect("invalid arrow type")
+                })
+                .collect(),
+            return_type: DataType::try_from(
+                &ArrowType::decode(&mut value.return_type.as_slice()).unwrap(),
+            )
+            .expect("invalid arrow type"),
+            name: Arc::new(value.name),
+            definition: Arc::new(value.definition),
+        }
+    }
+}
+
+impl From<PythonUdfConfig> for api::PythonUdfConfig {
+    fn from(from: PythonUdfConfig) -> Self {
+        api::PythonUdfConfig {
+            arg_types: from
+                .arg_types
+                .iter()
+                .map(|t| {
+                    ArrowType::try_from(t)
+                        .expect("unsupported data type")
+                        .encode_to_vec()
+                })
+                .collect(),
+            return_type: ArrowType::try_from(&from.return_type)
+                .expect("unsupported data type")
+                .encode_to_vec(),
+            name: (*from.name).clone(),
+            definition: (*from.definition).clone(),
+        }
+    }
+}
+
 impl From<ProgramConfig> for ArrowProgramConfig {
     fn from(from: ProgramConfig) -> Self {
         ArrowProgramConfig {
             udf_dylibs: from
                 .udf_dylibs
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            python_udfs: from
+                .python_udfs
                 .into_iter()
                 .map(|(k, v)| (k, v.into()))
                 .collect(),
@@ -418,6 +476,11 @@ impl From<ArrowProgramConfig> for ProgramConfig {
         ProgramConfig {
             udf_dylibs: from
                 .udf_dylibs
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            python_udfs: from
+                .python_udfs
                 .into_iter()
                 .map(|(k, v)| (k, v.into()))
                 .collect(),
@@ -453,7 +516,7 @@ impl From<LogicalProgram> for ArrowProgram {
                 api::ArrowEdge {
                     source: source.index() as i32,
                     target: target.index() as i32,
-                    schema: Some(edge.schema.clone().try_into().unwrap()),
+                    schema: Some(edge.schema.clone().into()),
                     edge_type: edge_type as i32,
                     projection: edge
                         .projection

@@ -147,7 +147,7 @@ pub struct WorkerServer {
 
 impl WorkerServer {
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
-        let id = WorkerId(config().worker.id.unwrap_or_else(|| random()));
+        let id = WorkerId(config().worker.id.unwrap_or_else(random));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
 
@@ -423,6 +423,16 @@ impl WorkerGrpc for WorkerServer {
             if dylib_config.is_async {
                 continue;
             }
+        }
+
+        for (udf_name, python_udf) in &logical.program_config.python_udfs {
+            info!("Loading Python UDF {}", udf_name);
+            registry.add_python_udf(python_udf).await.map_err(|e| {
+                Status::failed_precondition(
+                    e.context(format!("loading Python UDF {udf_name}"))
+                        .to_string(),
+                )
+            })?;
         }
 
         let (engine, control_rx) = {

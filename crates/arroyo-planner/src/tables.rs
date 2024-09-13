@@ -722,25 +722,19 @@ impl Table {
                         .map(|field| field.field().clone().into())
                         .collect()
                 }),
-            Table::TableFromQuery { logical_plan, .. } => logical_plan
-                .schema()
-                .fields()
-                .iter()
-                .map(|f| f.clone())
-                .collect(),
-            Table::PreviewSink { logical_plan } => logical_plan
-                .schema()
-                .fields()
-                .iter()
-                .map(|f| f.clone())
-                .collect(),
+            Table::TableFromQuery { logical_plan, .. } => {
+                logical_plan.schema().fields().iter().cloned().collect()
+            }
+            Table::PreviewSink { logical_plan } => {
+                logical_plan.schema().fields().iter().cloned().collect()
+            }
         }
     }
 
     pub fn connector_op(&self) -> Result<ConnectorOp> {
         match self {
             Table::ConnectorTable(c) => Ok(c.connector_op()),
-            Table::MemoryTable { .. } => return plan_err!("can't write to a memory table"),
+            Table::MemoryTable { .. } => plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
             Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
         }

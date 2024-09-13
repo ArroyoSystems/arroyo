@@ -274,6 +274,7 @@ export interface components {
       description?: string | null;
       dylibUrl: string;
       id: string;
+      language: components["schemas"]["UdfLanguage"];
       name: string;
       prefix: string;
       /** Format: int64 */
@@ -501,10 +502,14 @@ export interface components {
     TimestampFormat: "rfc3339" | "unix_millis";
     Udf: {
       definition: string;
+      language?: components["schemas"]["UdfLanguage"];
     };
+    /** @enum {string} */
+    UdfLanguage: "python" | "rust";
     UdfPost: {
       definition: string;
       description?: string | null;
+      language?: components["schemas"]["UdfLanguage"];
       prefix: string;
     };
     UdfValidationResult: {
@@ -517,6 +522,7 @@ export interface components {
     };
     ValidateUdfPost: {
       definition: string;
+      language?: components["schemas"]["UdfLanguage"];
     };
   };
   responses: never;

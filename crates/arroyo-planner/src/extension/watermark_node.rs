@@ -89,7 +89,7 @@ impl ArroyoExtension for WatermarkNode {
                 period_micros: 1_000_000,
                 idle_time_micros: None,
                 expression: expression.encode_to_vec(),
-                input_schema: Some(self.arroyo_schema().try_into().unwrap()),
+                input_schema: Some(self.arroyo_schema().into()),
             }
             .encode_to_vec(),
         };

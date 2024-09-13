@@ -34,6 +34,7 @@ import_types!(
         {type = "string", format = "var-str"} = VarStr
     }
 );
+
 import_types!(schema = "src/redis/table.json");
 
 enum RedisClient {
@@ -99,6 +100,7 @@ fn from_address(config: &RedisConfig, address: &str) -> anyhow::Result<Connectio
     Ok(info)
 }
 
+#[allow(dependency_on_unit_never_type_fallback)]
 async fn test_inner(
     c: RedisConfig,
     tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
@@ -122,7 +124,7 @@ async fn test_inner(
             .unwrap();
 
             redis::cmd("PING")
-                .query_async(&mut connection)
+                .query_async::<()>(&mut connection)
                 .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
         }
@@ -138,7 +140,7 @@ async fn test_inner(
             .unwrap();
 
             redis::cmd("PING")
-                .query_async(&mut connection)
+                .query_async::<()>(&mut connection)
                 .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
         }

@@ -124,7 +124,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             .schema()
             .fields()
             .iter()
-            .map(|df_field| df_field.clone())
+            .cloned()
             .collect::<Vec<_>>();
         let timestamp_index = state_final_fields.len() - 1;
         state_final_fields[timestamp_index] = Arc::new(Field::new(

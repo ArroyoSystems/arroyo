@@ -259,7 +259,7 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
         "grpc",
         wrap_start(
             "node",
-            bind_addr.clone(),
+            bind_addr,
             arroyo_server_common::grpc_server()
                 .max_frame_size(Some((1 << 24) - 1)) // 16MB
                 .add_service(NodeGrpcServer::new(server))

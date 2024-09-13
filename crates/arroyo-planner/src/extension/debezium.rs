@@ -39,7 +39,7 @@ impl DebeziumUnrollingExtension {
             .fields()
             .iter()
             .filter(|field| field.name() != TIMESTAMP_FIELD && field.name() != IS_RETRACT_FIELD)
-            .map(|f| f.clone())
+            .cloned()
             .collect();
 
         let struct_type = DataType::Struct(struct_schema.into());

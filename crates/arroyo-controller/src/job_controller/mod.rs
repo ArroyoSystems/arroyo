@@ -560,6 +560,7 @@ pub enum ControllerProgress {
 }
 
 impl JobController {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: DatabaseSource,
         config: JobConfig,

@@ -29,7 +29,7 @@ pub(crate) fn convert_data_type(
             ))
         }
         SQLDataType::Array(ArrayElemTypeDef::None) => {
-            return plan_err!("Arrays with unspecified type is not supported");
+            plan_err!("Arrays with unspecified type is not supported")
         }
         other => convert_simple_data_type(other),
     }
@@ -124,9 +124,9 @@ pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> R
 
     // Arrow decimal is i128 meaning 38 maximum decimal digits
     if precision == 0 || precision > DECIMAL128_MAX_PRECISION || scale.unsigned_abs() > precision {
-        return plan_err!(
+        plan_err!(
             "Decimal(precision = {precision}, scale = {scale}) should satisfy `0 < precision <= 38`, and `scale <= precision`."
-        );
+        )
     } else {
         Ok(DataType::Decimal128(precision, scale))
     }

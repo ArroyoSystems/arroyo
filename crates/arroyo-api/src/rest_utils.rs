@@ -32,7 +32,7 @@ pub enum ApiError {
 
 pub fn map_insert_err(name: &str, error: DbError) -> ErrorResp {
     if error == DbError::DuplicateViolation {
-        return bad_request(format!("{} with that name already exists", name));
+        bad_request(format!("{} with that name already exists", name))
     } else {
         error.into()
     }
@@ -40,10 +40,10 @@ pub fn map_insert_err(name: &str, error: DbError) -> ErrorResp {
 
 pub fn map_delete_err(name: &str, user: &str, error: DbError) -> ErrorResp {
     if error == DbError::ForeignKeyViolation {
-        return bad_request(format!(
+        bad_request(format!(
             "Cannot delete {}; it is still being used by {}",
             name, user
-        ));
+        ))
     } else {
         error.into()
     }

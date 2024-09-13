@@ -833,7 +833,7 @@ mod tests {
         assert!(storage.put(key.clone(), data.clone()).await.is_ok());
         assert_eq!(storage.get(key.clone()).await.unwrap(), data.clone());
 
-        let full_url = storage.canonical_url_for(&key.to_string());
+        let full_url = storage.canonical_url_for(key.as_ref());
 
         assert_eq!(
             StorageProvider::get_url(&full_url).await.unwrap(),
