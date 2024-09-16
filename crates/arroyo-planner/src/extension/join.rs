@@ -11,6 +11,7 @@ use datafusion_proto::generated::datafusion::PhysicalPlanNode;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use prost::Message;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub(crate) const JOIN_NODE_NAME: &str = "JoinNode";
 
@@ -18,6 +19,7 @@ pub(crate) const JOIN_NODE_NAME: &str = "JoinNode";
 pub struct JoinExtension {
     pub(crate) rewritten_join: LogicalPlan,
     pub(crate) is_instant: bool,
+    pub(crate) ttl: Option<Duration>,
 }
 
 impl ArroyoExtension for JoinExtension {
@@ -55,6 +57,7 @@ impl ArroyoExtension for JoinExtension {
             right_schema: Some(right_schema.as_ref().clone().into()),
             output_schema: Some(self.output_schema().into()),
             join_plan: physical_plan_node.encode_to_vec(),
+            ttl_micros: self.ttl.map(|t| t.as_micros() as u64),
         };
 
         let logical_node = LogicalNode {
@@ -105,6 +108,7 @@ impl UserDefinedLogicalNodeCore for JoinExtension {
         Ok(Self {
             rewritten_join: inputs[0].clone(),
             is_instant: self.is_instant,
+            ttl: self.ttl,
         })
     }
 }

@@ -31,7 +31,7 @@ use datafusion::prelude::{create_udf, SessionConfig};
 
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
-use datafusion::sql::{planner::ContextProvider, TableReference};
+use datafusion::sql::{planner::ContextProvider, sqlparser, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
@@ -58,6 +58,7 @@ use crate::json::register_json_functions;
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
 use crate::udafs::EmptyUdaf;
+use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
@@ -71,6 +72,7 @@ use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
+use datafusion::sql::sqlparser::ast::{OneOrManyWithParens, Statement};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::Item;
@@ -84,6 +86,19 @@ pub const ASYNC_RESULT_FIELD: &str = "__async_result";
 pub struct CompiledSql {
     pub program: LogicalProgram,
     pub connection_ids: Vec<i64>,
+}
+
+#[derive(Clone)]
+pub struct PlanningOptions {
+    ttl: Duration,
+}
+
+impl Default for PlanningOptions {
+    fn default() -> Self {
+        Self {
+            ttl: Duration::from_secs(24 * 60 * 60),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -100,6 +115,7 @@ pub struct ArroyoSchemaProvider {
     pub python_udfs: HashMap<String, PythonUdfConfig>,
     pub function_rewriters: Vec<Arc<dyn FunctionRewrite + Send + Sync>>,
     pub expr_planners: Vec<Arc<dyn ExprPlanner>>,
+    pub planning_options: PlanningOptions,
 }
 
 pub fn register_functions(registry: &mut dyn FunctionRegistry) {
@@ -572,6 +588,53 @@ pub fn rewrite_plan(
     Ok(rewritten_plan.data)
 }
 
+fn try_handle_set_variable(
+    statement: &Statement,
+    schema_provider: &mut ArroyoSchemaProvider,
+) -> Result<bool> {
+    if let Statement::SetVariable {
+        variables, value, ..
+    } = statement
+    {
+        let OneOrManyWithParens::One(opt) = variables else {
+            return plan_err!("invalid syntax for `SET` call");
+        };
+
+        if opt.to_string() != "updating_ttl" {
+            return plan_err!(
+                "invalid option '{}'; supported options are 'updating_ttl'",
+                opt
+            );
+        }
+
+        if value.len() != 1 {
+            return plan_err!("invalid `SET updating_ttl` call; expected exactly one expression");
+        }
+
+        let sqlparser::ast::Expr::Value(sqlparser::ast::Value::SingleQuotedString(s)) =
+            value.first().unwrap()
+        else {
+            return plan_err!(
+                "invalid `SET updating_ttl`; expected a singly-quoted string argument"
+            );
+        };
+
+        let interval = parse_interval_day_time(s).map_err(|_| {
+            DataFusionError::Plan(format!(
+                "could not parse '{}' as an interval in `SET updating_ttl` statement",
+                s
+            ))
+        })?;
+
+        schema_provider.planning_options.ttl =
+            Duration::from_secs(interval.days as u64 * 24 * 60 * 60)
+                + Duration::from_millis(interval.milliseconds as u64);
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
 pub async fn parse_and_get_arrow_program(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
@@ -593,6 +656,10 @@ pub async fn parse_and_get_arrow_program(
 
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
+        if try_handle_set_variable(&statement, &mut schema_provider)? {
+            continue;
+        }
+
         if let Some(table) =
             Table::try_from_statement(&statement, &schema_provider, &session_state)?
         {
