@@ -612,7 +612,7 @@ fn try_handle_set_variable(
         }
 
         let sqlparser::ast::Expr::Value(sqlparser::ast::Value::SingleQuotedString(s)) =
-            value.get(0).unwrap()
+            value.first().unwrap()
         else {
             return plan_err!(
                 "invalid `SET updating_ttl`; expected a singly-quoted string argument"
