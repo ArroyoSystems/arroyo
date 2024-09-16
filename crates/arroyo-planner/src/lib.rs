@@ -122,6 +122,7 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
     datafusion_functions::register_all(registry).unwrap();
     datafusion::functions_array::register_all(registry).unwrap();
     datafusion::functions_aggregate::register_all(registry).unwrap();
+    datafusion_functions_json::register_all(registry).unwrap();
     register_json_functions(registry);
 }
 
