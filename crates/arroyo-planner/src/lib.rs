@@ -73,7 +73,6 @@ use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::sql::sqlparser::ast::{OneOrManyWithParens, Statement};
-use std::env::var;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::Item;

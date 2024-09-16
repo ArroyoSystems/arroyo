@@ -171,8 +171,6 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             ttl_micros: self.ttl.as_micros() as u64,
         };
 
-        println!("{:#?}", config);
-
         let node = LogicalNode {
             operator_id: format!("updating_aggregate_{}", index),
             description: "UpdatingAggregate".to_string(),
