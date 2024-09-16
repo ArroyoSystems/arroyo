@@ -306,10 +306,16 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 return AsyncUdfRewriter::new(self.schema_provider).f_up(node);
             }
             LogicalPlan::Aggregate(aggregate) => {
-                return AggregateRewriter {}.f_up(LogicalPlan::Aggregate(aggregate));
+                return AggregateRewriter {
+                    schema_provider: self.schema_provider,
+                }
+                .f_up(LogicalPlan::Aggregate(aggregate));
             }
             LogicalPlan::Join(join) => {
-                return JoinRewriter {}.f_up(LogicalPlan::Join(join));
+                return JoinRewriter {
+                    schema_provider: self.schema_provider,
+                }
+                .f_up(LogicalPlan::Join(join));
             }
             LogicalPlan::TableScan(table_scan) => {
                 return SourceRewriter {
