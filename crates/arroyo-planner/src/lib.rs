@@ -54,7 +54,7 @@ use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::json::register_json_functions;
+use crate::json::{is_json_union, register_json_functions, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
 use crate::udafs::EmptyUdaf;
@@ -72,6 +72,7 @@ use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
+use datafusion::optimizer::Analyzer;
 use datafusion::sql::sqlparser::ast::{OneOrManyWithParens, Statement};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
@@ -113,9 +114,9 @@ pub struct ArroyoSchemaProvider {
     config_options: datafusion::config::ConfigOptions,
     pub dylib_udfs: HashMap<String, DylibUdfConfig>,
     pub python_udfs: HashMap<String, PythonUdfConfig>,
-    pub function_rewriters: Vec<Arc<dyn FunctionRewrite + Send + Sync>>,
     pub expr_planners: Vec<Arc<dyn ExprPlanner>>,
     pub planning_options: PlanningOptions,
+    pub analyzer: Analyzer,
 }
 
 pub fn register_functions(registry: &mut dyn FunctionRegistry) {
@@ -435,7 +436,7 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         &mut self,
         rewrite: Arc<dyn FunctionRewrite + Send + Sync>,
     ) -> Result<()> {
-        self.function_rewriters.push(rewrite);
+        self.analyzer.add_function_rewrite(rewrite);
         Ok(())
     }
 
@@ -661,15 +662,12 @@ pub async fn parse_and_get_arrow_program(
             continue;
         }
 
-        if let Some(table) =
-            Table::try_from_statement(&statement, &schema_provider, &session_state)?
-        {
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
             schema_provider.insert_table(table);
         } else {
             inserts.push(Insert::try_from_statement(
                 &statement,
                 &mut schema_provider,
-                &session_state,
             )?);
         };
     }
@@ -690,7 +688,20 @@ pub async fn parse_and_get_arrow_program(
             Insert::Anonymous { logical_plan } => (logical_plan, None),
         };
 
-        let plan_rewrite = rewrite_plan(plan, &schema_provider)?;
+        let mut plan_rewrite = rewrite_plan(plan, &schema_provider)?;
+
+        // if any of the outgoing fields are datafusion_json_function's union JSON
+        // representation, we need to serialize them to strings before we can output
+        // them to sinks, as our output formats can't convert unions (and the format
+        // is an internal implementation detail anyways).
+        if plan_rewrite
+            .schema()
+            .fields()
+            .iter()
+            .any(|f| is_json_union(f.data_type()))
+        {
+            plan_rewrite = serialize_outgoing_json(&schema_provider, Arc::new(plan_rewrite));
+        }
 
         debug!("Plan = {}", plan_rewrite.display_graphviz());
 

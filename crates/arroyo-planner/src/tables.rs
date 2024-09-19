@@ -22,7 +22,6 @@ use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::{config::ConfigOptions, DFSchema, Result};
 use datafusion::common::{plan_err, Column, DataFusionError};
-use datafusion::execution::session_state::SessionState;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
@@ -54,7 +53,7 @@ use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
-    optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
+    optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
         planner::SqlToRel,
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
@@ -108,21 +107,19 @@ impl From<Field> for FieldSpec {
 fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
-    session_state: &SessionState,
 ) -> Result<LogicalPlan> {
     let mut sql_to_rel = SqlToRel::new(schema_provider);
-    for planner in session_state.expr_planners() {
+    for planner in schema_provider.expr_planners() {
         sql_to_rel = sql_to_rel.with_user_defined_planner(planner);
     }
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
-    let mut analyzer = Analyzer::default();
-    for rewriter in &schema_provider.function_rewriters {
-        analyzer.add_function_rewrite(rewriter.clone());
-    }
-    let analyzed_plan =
-        analyzer.execute_and_check(plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+    let analyzed_plan = schema_provider.analyzer.execute_and_check(
+        plan,
+        &ConfigOptions::default(),
+        |_plan, _rule| {},
+    )?;
 
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
         Arc::new(EliminateNestedUnion::new()),
@@ -568,7 +565,6 @@ impl Table {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &ArroyoSchemaProvider,
-        session_state: &SessionState,
     ) -> Result<Option<Self>> {
         if let Statement::CreateTable {
             name,
@@ -641,7 +637,7 @@ impl Table {
                 }
             }
         } else {
-            match &produce_optimized_plan(statement, schema_provider, session_state) {
+            match &produce_optimized_plan(statement, schema_provider) {
                 // views and memory tables are the same now.
                 Ok(LogicalPlan::Ddl(DdlStatement::CreateView(CreateView {
                     name, input, ..
@@ -756,13 +752,9 @@ fn infer_sink_schema(
     source: &Query,
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
-    session_state: &SessionState,
 ) -> Result<()> {
-    let plan = produce_optimized_plan(
-        &Statement::Query(Box::new(source.clone())),
-        schema_provider,
-        session_state,
-    )?;
+    let plan =
+        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)?;
     let table = schema_provider
         .get_table_mut(&table_name)
         .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;
@@ -776,18 +768,16 @@ impl Insert {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &mut ArroyoSchemaProvider,
-        session_state: &SessionState,
     ) -> Result<Insert> {
         if let Statement::Insert(insert) = statement {
             infer_sink_schema(
                 insert.source.as_ref().unwrap(),
                 insert.table_name.to_string(),
                 schema_provider,
-                session_state,
             )?;
         }
 
-        let logical_plan = produce_optimized_plan(statement, schema_provider, session_state)?;
+        let logical_plan = produce_optimized_plan(statement, schema_provider)?;
 
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {
