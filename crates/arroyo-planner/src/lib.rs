@@ -662,12 +662,15 @@ pub async fn parse_and_get_arrow_program(
             continue;
         }
 
-        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
+        if let Some(table) =
+            Table::try_from_statement(&statement, &schema_provider, &session_state)?
+        {
             schema_provider.insert_table(table);
         } else {
             inserts.push(Insert::try_from_statement(
                 &statement,
                 &mut schema_provider,
+                &session_state,
             )?);
         };
     }

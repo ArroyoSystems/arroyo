@@ -726,7 +726,7 @@ impl FunctionRegistry for Registry {
     }
 
     fn register_expr_planner(&mut self, _expr_planner: Arc<dyn ExprPlanner>) -> DFResult<()> {
-        // no-opa
+        // no-op
         Ok(())
     }
 
