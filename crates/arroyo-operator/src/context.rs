@@ -516,7 +516,7 @@ impl ArrowContext {
                 tx: control_tx,
                 task_info,
             },
-            buffer: out_schema.map(|t| ContextBuffer::new(t.schema)),
+            buffer: None,
             error_rate_limiter: RateLimiter::new(),
             deserializer: None,
             buffered_error: None,
@@ -675,6 +675,14 @@ impl ArrowContext {
             .deserializer
             .as_mut()
             .expect("deserializer not initialized!");
+
+        if self.buffer.is_none() {
+            self.buffer = self
+                .out_schema
+                .as_ref()
+                .map(|t| ContextBuffer::new(t.schema.clone()));
+        }
+
         let errors = deserializer
             .deserialize_slice(
                 &mut self.buffer.as_mut().expect("no out schema").buffer,

@@ -71,7 +71,7 @@ impl SinkExtension {
                 }
             }
         }
-        Self::add_remote_if_necessary(&name, &schema, &mut input);
+        Self::add_remote_if_necessary(&schema, &mut input);
 
         Ok(Self {
             name,
@@ -84,11 +84,7 @@ impl SinkExtension {
     /* The input to a sink needs to be a non-transparent logical plan extension.
       If it isn't, wrap the input in a RemoteTableExtension.
     */
-    pub fn add_remote_if_necessary(
-        name: &TableReference,
-        schema: &DFSchemaRef,
-        input: &mut Arc<LogicalPlan>,
-    ) {
+    pub fn add_remote_if_necessary(schema: &DFSchemaRef, input: &mut Arc<LogicalPlan>) {
         if let LogicalPlan::Extension(node) = input.as_ref() {
             let arroyo_extension: &dyn ArroyoExtension = (&node.node).try_into().unwrap();
             if !arroyo_extension.transparent() {
@@ -97,7 +93,7 @@ impl SinkExtension {
         }
         let remote_table_extension = RemoteTableExtension {
             input: input.as_ref().clone(),
-            name: name.clone(),
+            name: TableReference::bare("sink projection"),
             schema: schema.clone(),
             materialize: false,
         };

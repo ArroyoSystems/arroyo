@@ -1,13 +1,20 @@
+use crate::ArroyoSchemaProvider;
 use arrow_array::builder::{ListBuilder, StringBuilder};
-use arrow_array::cast::as_string_array;
-use arrow_array::{Array, ArrayRef, StringArray};
-use arrow_schema::{DataType, Field};
-use datafusion::common::Result;
+use arrow_array::cast::{as_string_array, AsArray};
+use arrow_array::types::{Float64Type, Int64Type};
+use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
+use arrow_schema::{DataType, Field, UnionFields, UnionMode};
 use datafusion::common::{DataFusionError, ScalarValue};
+use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
-use datafusion::logical_expr::{create_udf, ColumnarValue, Volatility};
+use datafusion::logical_expr::expr::{Alias, ScalarFunction};
+use datafusion::logical_expr::{create_udf, ColumnarValue, LogicalPlan, Projection, Volatility};
+use datafusion::prelude::{col, Expr};
 use serde_json_path::JsonPath;
-use std::sync::Arc;
+use std::fmt::Write;
+use std::sync::{Arc, OnceLock};
+
+const SERIALIZE_JSON_UNION: &str = "serialize_json_union";
 
 pub fn register_json_functions(registry: &mut dyn FunctionRegistry) {
     registry
@@ -41,6 +48,16 @@ pub fn register_json_functions(registry: &mut dyn FunctionRegistry) {
             Arc::new(DataType::Utf8),
             Volatility::Immutable,
             Arc::new(extract_json_string),
+        )))
+        .unwrap();
+
+    registry
+        .register_udf(Arc::new(create_udf(
+            SERIALIZE_JSON_UNION,
+            vec![DataType::Union(union_fields(), UnionMode::Sparse)],
+            Arc::new(DataType::Utf8),
+            Volatility::Immutable,
+            Arc::new(serialize_json_union),
         )))
         .unwrap();
 }
@@ -175,6 +192,150 @@ pub fn extract_json_string(args: &[ColumnarValue]) -> Result<ColumnarValue> {
         |s| s.as_deref().into(),
         args,
     )
+}
+
+// This code is vendored from
+// https://github.com/datafusion-contrib/datafusion-functions-json/blob/main/src/common_union.rs
+// as the `is_json_union` function is not public. It should be kept in sync with that code so
+// that we are able to detect JSON unions and rewrite them to serialized JSON for sinks.
+pub(crate) fn is_json_union(data_type: &DataType) -> bool {
+    match data_type {
+        DataType::Union(fields, UnionMode::Sparse) => fields == &union_fields(),
+        _ => false,
+    }
+}
+
+pub(crate) const TYPE_ID_NULL: i8 = 0;
+const TYPE_ID_BOOL: i8 = 1;
+const TYPE_ID_INT: i8 = 2;
+const TYPE_ID_FLOAT: i8 = 3;
+const TYPE_ID_STR: i8 = 4;
+const TYPE_ID_ARRAY: i8 = 5;
+const TYPE_ID_OBJECT: i8 = 6;
+
+fn union_fields() -> UnionFields {
+    static FIELDS: OnceLock<UnionFields> = OnceLock::new();
+    FIELDS
+        .get_or_init(|| {
+            UnionFields::from_iter([
+                (
+                    TYPE_ID_NULL,
+                    Arc::new(Field::new("null", DataType::Null, true)),
+                ),
+                (
+                    TYPE_ID_BOOL,
+                    Arc::new(Field::new("bool", DataType::Boolean, false)),
+                ),
+                (
+                    TYPE_ID_INT,
+                    Arc::new(Field::new("int", DataType::Int64, false)),
+                ),
+                (
+                    TYPE_ID_FLOAT,
+                    Arc::new(Field::new("float", DataType::Float64, false)),
+                ),
+                (
+                    TYPE_ID_STR,
+                    Arc::new(Field::new("str", DataType::Utf8, false)),
+                ),
+                (
+                    TYPE_ID_ARRAY,
+                    Arc::new(Field::new("array", DataType::Utf8, false)),
+                ),
+                (
+                    TYPE_ID_OBJECT,
+                    Arc::new(Field::new("object", DataType::Utf8, false)),
+                ),
+            ])
+        })
+        .clone()
+}
+// End vendored code
+
+pub fn serialize_json_union(args: &[ColumnarValue]) -> Result<ColumnarValue> {
+    assert_eq!(args.len(), 1);
+    let array = match args.first().unwrap() {
+        ColumnarValue::Array(a) => a.clone(),
+        ColumnarValue::Scalar(s) => s.to_array_of_size(1)?,
+    };
+
+    let mut b = StringBuilder::with_capacity(array.len(), array.get_array_memory_size());
+
+    write_union(&mut b, &array)?;
+
+    Ok(ColumnarValue::Array(Arc::new(b.finish())))
+}
+
+fn write_union(b: &mut StringBuilder, array: &ArrayRef) -> Result<(), std::fmt::Error> {
+    assert!(
+        is_json_union(array.data_type()),
+        "array item is not a valid JSON union"
+    );
+    let json_union = array.as_any().downcast_ref::<UnionArray>().unwrap();
+
+    for i in 0..json_union.len() {
+        if json_union.is_null(i) {
+            b.append_null();
+        } else {
+            write_value(b, json_union.type_id(i), &json_union.value(i))?;
+            b.append_value("");
+        }
+    }
+
+    Ok(())
+}
+
+fn write_value(b: &mut StringBuilder, id: i8, a: &ArrayRef) -> Result<(), std::fmt::Error> {
+    match id {
+        TYPE_ID_NULL => write!(b, "null")?,
+        TYPE_ID_BOOL => write!(b, "{}", a.as_boolean().value(0))?,
+        TYPE_ID_INT => write!(b, "{}", a.as_primitive::<Int64Type>().value(0))?,
+        TYPE_ID_FLOAT => write!(b, "{}", a.as_primitive::<Float64Type>().value(0))?,
+        TYPE_ID_STR => {
+            // assumes that this is already a valid (escaped) json string as the only way to
+            // construct these values are by parsing (valid) JSON
+            b.write_char('"')?;
+            b.write_str(a.as_string::<i32>().value(0))?;
+            b.write_char('"')?;
+        }
+        TYPE_ID_ARRAY => {
+            // write_array(b, a.as_list::<i32>())?;
+            b.write_str(a.as_string::<i32>().value(0))?;
+        }
+        TYPE_ID_OBJECT => {
+            b.write_str(a.as_string::<i32>().value(0))?;
+        }
+        _ => unreachable!("invalid union type in JSON union: {}", id),
+    }
+
+    Ok(())
+}
+
+pub(crate) fn serialize_outgoing_json(
+    registry: &ArroyoSchemaProvider,
+    node: Arc<LogicalPlan>,
+) -> LogicalPlan {
+    let exprs = node
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| {
+            if is_json_union(f.data_type()) {
+                Expr::Alias(Alias::new(
+                    Expr::ScalarFunction(ScalarFunction::new_udf(
+                        registry.udf(SERIALIZE_JSON_UNION).unwrap(),
+                        vec![col(f.name())],
+                    )),
+                    Option::<TableReference>::None,
+                    f.name(),
+                ))
+            } else {
+                col(f.name())
+            }
+        })
+        .collect();
+
+    LogicalPlan::Projection(Projection::try_new(exprs, node).unwrap())
 }
 
 #[cfg(test)]
