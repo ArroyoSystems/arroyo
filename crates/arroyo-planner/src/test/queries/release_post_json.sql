@@ -9,7 +9,7 @@ CREATE TABLE events (
   'json.unstructured' = 'true'
 );
 
-SELECT 
+SELECT
   -- using the json_get function
   json_get('user', 'name')::TEXT as name,
   -- or using the -> operator
