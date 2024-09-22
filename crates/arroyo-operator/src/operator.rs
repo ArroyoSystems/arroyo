@@ -725,6 +725,11 @@ impl FunctionRegistry for Registry {
         Ok(())
     }
 
+    fn register_expr_planner(&mut self, _expr_planner: Arc<dyn ExprPlanner>) -> DFResult<()> {
+        // no-op
+        Ok(())
+    }
+
     fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> DFResult<Option<Arc<ScalarUDF>>> {
         Ok(self.udfs.insert(udf.name().to_string(), udf))
     }

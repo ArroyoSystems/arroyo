@@ -33,6 +33,7 @@ use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
+use tracing::log::warn;
 
 pub struct UpdatingAggregatingFunc {
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
@@ -48,6 +49,7 @@ pub struct UpdatingAggregatingFunc {
     // In particular, if it is a global aggregate it will emit a record batch with 1 row initialized with the empty aggregate state,
     // while if it does have group by keys it will emit a record batch with 0 rows.
     exec: Arc<Mutex<Option<SendableRecordBatchStream>>>,
+    ttl: Duration,
 }
 
 impl UpdatingAggregatingFunc {
@@ -204,7 +206,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
                 timestamp_table_config(
                     "f",
                     "final_table",
-                    Duration::from_secs(60 * 60 * 24),
+                    self.ttl,
                     true,
                     self.state_final_schema.as_ref().clone(),
                 ),
@@ -214,7 +216,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
                 timestamp_table_config(
                     "p",
                     "partial_table",
-                    Duration::from_secs(60 * 60 * 24),
+                    self.ttl,
                     true,
                     self.state_partial_schema.as_ref().clone(),
                 ),
@@ -344,6 +346,13 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
             &codec,
         )?;
 
+        let ttl = if config.ttl_micros == 0 {
+            warn!("ttl was not set for updating aggregate");
+            24 * 60 * 60 * 1000 * 1000
+        } else {
+            config.ttl_micros
+        };
+
         Ok(OperatorNode::from_operator(Box::new(
             UpdatingAggregatingFunc {
                 partial_aggregation_plan,
@@ -366,6 +375,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
                 receiver,
                 sender: None,
                 exec: Arc::new(Mutex::new(None)),
+                ttl: Duration::from_micros(ttl),
             },
         )))
     }

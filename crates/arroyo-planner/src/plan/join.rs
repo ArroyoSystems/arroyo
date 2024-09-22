@@ -1,7 +1,7 @@
 use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
-use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata};
+use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata, ArroyoSchemaProvider};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::IS_RETRACT_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
@@ -17,9 +17,11 @@ use datafusion::logical_expr::{
 use datafusion::prelude::coalesce;
 use std::sync::Arc;
 
-pub(crate) struct JoinRewriter {}
+pub(crate) struct JoinRewriter<'a> {
+    pub schema_provider: &'a ArroyoSchemaProvider,
+}
 
-impl JoinRewriter {
+impl<'a> JoinRewriter<'a> {
     fn check_join_windowing(join: &Join) -> Result<bool> {
         let left_window = WindowDetectingVisitor::get_window(&join.left)?;
         let right_window = WindowDetectingVisitor::get_window(&join.right)?;
@@ -187,7 +189,7 @@ impl JoinRewriter {
     }
 }
 
-impl TreeNodeRewriter for JoinRewriter {
+impl<'a> TreeNodeRewriter for JoinRewriter<'a> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
@@ -240,6 +242,8 @@ impl TreeNodeRewriter for JoinRewriter {
         let join_extension = JoinExtension {
             rewritten_join: final_logical_plan,
             is_instant,
+            // only non-instant (updating) joins have a TTL
+            ttl: (!is_instant).then_some(self.schema_provider.planning_options.ttl),
         };
 
         Ok(Transformed::yes(LogicalPlan::Extension(Extension {

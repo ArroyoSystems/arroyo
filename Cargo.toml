@@ -48,6 +48,7 @@ datafusion = { version = "40.0.0" }
 datafusion-common = { version = "40.0.0" }
 datafusion-proto = { version = "40.0.0" }
 datafusion-functions = { version = "40.0.0", features = ["crypto_expressions"] }
+datafusion-functions-json = { version = "0.40.0" }
 deltalake = { version = "0.18.2" }
 cornucopia = { version = "0.9.0" }
 cornucopia_async = {version = "0.6.0"}
