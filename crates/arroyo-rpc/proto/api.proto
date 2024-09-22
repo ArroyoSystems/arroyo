@@ -67,6 +67,7 @@ message JoinOperator {
   ArroyoSchema right_schema = 3;
   ArroyoSchema output_schema = 4;
   bytes join_plan = 5;
+  optional uint64 ttl_micros = 6;
 }
 
 message WindowFunctionOperator {
@@ -100,6 +101,7 @@ message UpdatingAggregateOperator {
   bytes combine_plan = 6;
   bytes final_aggregation_plan = 7;
   uint64 flush_interval_micros = 8;
+  uint64 ttl_micros = 9;
 }
 
 message WasmUdfs {

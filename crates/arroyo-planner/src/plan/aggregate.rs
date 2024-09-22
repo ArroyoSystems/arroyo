@@ -3,8 +3,8 @@ use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::extension::updating_aggregate::UpdatingAggregateExtension;
 use crate::plan::WindowDetectingVisitor;
 use crate::{
-    fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, DFField,
-    WindowBehavior,
+    fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, ArroyoSchemaProvider,
+    DFField, WindowBehavior,
 };
 use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
@@ -15,16 +15,18 @@ use datafusion::logical_expr::{aggregate_function, Aggregate, Expr, Extension, L
 use std::sync::Arc;
 use tracing::debug;
 
-#[derive(Debug, Default)]
-pub struct AggregateRewriter {}
+pub struct AggregateRewriter<'a> {
+    pub schema_provider: &'a ArroyoSchemaProvider,
+}
 
-impl AggregateRewriter {
+impl<'a> AggregateRewriter<'a> {
     pub fn rewrite_non_windowed_aggregate(
         input: Arc<LogicalPlan>,
         mut key_fields: Vec<DFField>,
         group_expr: Vec<Expr>,
         mut aggr_expr: Vec<Expr>,
         schema: Arc<DFSchema>,
+        schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Transformed<LogicalPlan>> {
         if input
             .schema()
@@ -112,6 +114,7 @@ impl AggregateRewriter {
             LogicalPlan::Aggregate(aggregate),
             (0..key_count).collect(),
             column.relation,
+            schema_provider.planning_options.ttl,
         );
         let final_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(updating_aggregate_extension),
@@ -120,7 +123,7 @@ impl AggregateRewriter {
     }
 }
 
-impl TreeNodeRewriter for AggregateRewriter {
+impl<'a> TreeNodeRewriter for AggregateRewriter<'a> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
@@ -218,7 +221,12 @@ impl TreeNodeRewriter for AggregateRewriter {
             }
             (false, false) => {
                 return Self::rewrite_non_windowed_aggregate(
-                    input, key_fields, group_expr, aggr_expr, schema,
+                    input,
+                    key_fields,
+                    group_expr,
+                    aggr_expr,
+                    schema,
+                    self.schema_provider,
                 );
             }
         };

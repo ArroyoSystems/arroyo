@@ -22,7 +22,7 @@ use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::{config::ConfigOptions, DFSchema, Result};
 use datafusion::common::{plan_err, Column, DataFusionError};
-use datafusion::execution::session_state::SessionState;
+use datafusion::execution::context::SessionState;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
@@ -54,7 +54,7 @@ use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
-    optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
+    optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
         planner::SqlToRel,
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
@@ -111,18 +111,21 @@ fn produce_optimized_plan(
     session_state: &SessionState,
 ) -> Result<LogicalPlan> {
     let mut sql_to_rel = SqlToRel::new(schema_provider);
+
     for planner in session_state.expr_planners() {
+        sql_to_rel = sql_to_rel.with_user_defined_planner(planner);
+    }
+    for planner in schema_provider.expr_planners() {
         sql_to_rel = sql_to_rel.with_user_defined_planner(planner);
     }
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
-    let mut analyzer = Analyzer::default();
-    for rewriter in &schema_provider.function_rewriters {
-        analyzer.add_function_rewrite(rewriter.clone());
-    }
-    let analyzed_plan =
-        analyzer.execute_and_check(plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+    let analyzed_plan = schema_provider.analyzer.execute_and_check(
+        plan,
+        &ConfigOptions::default(),
+        |_plan, _rule| {},
+    )?;
 
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
         Arc::new(EliminateNestedUnion::new()),

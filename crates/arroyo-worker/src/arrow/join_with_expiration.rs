@@ -21,6 +21,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use prost::Message;
+use tracing::warn;
 
 pub struct JoinWithExpiration {
     left_expiration: Duration,
@@ -217,9 +218,20 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
         let left_schema = left_input_schema.schema_without_keys()?;
         let right_schema = right_input_schema.schema_without_keys()?;
 
+        let mut ttl = Duration::from_micros(
+            config
+                .ttl_micros
+                .expect("ttl must be set for non-instant join"),
+        );
+
+        if ttl == Duration::ZERO {
+            warn!("TTL was not set for join with expiration");
+            ttl = Duration::from_secs(24 * 60 * 60);
+        }
+
         Ok(OperatorNode::from_operator(Box::new(JoinWithExpiration {
-            left_expiration: Duration::from_secs(3600),
-            right_expiration: Duration::from_secs(3600),
+            left_expiration: ttl,
+            right_expiration: ttl,
             left_input_schema,
             right_input_schema,
             left_schema,

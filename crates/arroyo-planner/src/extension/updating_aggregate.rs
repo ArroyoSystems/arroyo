@@ -1,11 +1,11 @@
-use std::sync::Arc;
-
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, TIMESTAMP_FIELD};
 use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
 use datafusion::logical_expr::{Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::protobuf::{physical_plan_node::PhysicalPlanType, PhysicalPlanNode};
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::builder::{NamedNode, SplitPlanOutput};
 
@@ -21,6 +21,7 @@ pub(crate) struct UpdatingAggregateExtension {
     pub(crate) key_fields: Vec<usize>,
     pub(crate) final_calculation: LogicalPlan,
     pub(crate) timestamp_qualifier: Option<TableReference>,
+    pub(crate) ttl: Duration,
 }
 
 impl UpdatingAggregateExtension {
@@ -28,6 +29,7 @@ impl UpdatingAggregateExtension {
         aggregate: LogicalPlan,
         key_fields: Vec<usize>,
         timestamp_qualifier: Option<TableReference>,
+        ttl: Duration,
     ) -> Self {
         let final_calculation = LogicalPlan::Extension(Extension {
             node: Arc::new(IsRetractExtension::new(
@@ -40,6 +42,7 @@ impl UpdatingAggregateExtension {
             key_fields,
             final_calculation,
             timestamp_qualifier,
+            ttl,
         }
     }
 }
@@ -74,6 +77,7 @@ impl UserDefinedLogicalNodeCore for UpdatingAggregateExtension {
             inputs[0].clone(),
             self.key_fields.clone(),
             self.timestamp_qualifier.clone(),
+            self.ttl,
         ))
     }
 }
@@ -164,7 +168,9 @@ impl ArroyoExtension for UpdatingAggregateExtension {
                 .pipeline
                 .update_aggregate_flush_interval
                 .as_micros() as u64,
+            ttl_micros: self.ttl.as_micros() as u64,
         };
+
         let node = LogicalNode {
             operator_id: format!("updating_aggregate_{}", index),
             description: "UpdatingAggregate".to_string(),
