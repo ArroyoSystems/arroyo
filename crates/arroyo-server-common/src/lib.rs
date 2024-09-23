@@ -38,7 +38,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use arroyo_rpc::config::{config, LogFormat};
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_log::LogTracer;
 use uuid::Uuid;
 
@@ -84,7 +84,9 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         .add_directive("aws_config::profile::credentials=warn".parse().unwrap());
 
     let (nonblocking, guard) = if config().logging.nonblocking {
-        let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+        let (nonblocking, guard) = NonBlockingBuilder::default()
+            .buffered_lines_limit(config().logging.buffered_lines_limit)
+            .finish(std::io::stderr());
         (Some(nonblocking), Some(guard))
     } else {
         (None, None)
@@ -94,8 +96,8 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         LogFormat::Plaintext => {
             register_log!(
                 tracing_subscriber::fmt::layer()
-                    .with_line_number(false)
-                    .with_file(false)
+                    .with_line_number(config().logging.enable_file_line)
+                    .with_file(config().logging.enable_file_name)
                     .with_span_events(FmtSpan::NONE),
                 nonblocking,
                 filter
@@ -104,6 +106,8 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         LogFormat::Logfmt => {
             register_log!(
                 tracing_subscriber::fmt::layer()
+                    .with_line_number(config().logging.enable_file_line)
+                    .with_file(config().logging.enable_file_name)
                     .event_format(tracing_logfmt::EventsFormatter)
                     .fmt_fields(tracing_logfmt::FieldsFormatter),
                 nonblocking,
@@ -112,7 +116,10 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         }
         LogFormat::Json => {
             register_log!(
-                tracing_subscriber::fmt::layer().event_format(Format::default().json()),
+                tracing_subscriber::fmt::layer()
+                    .with_line_number(config().logging.enable_file_line)
+                    .with_file(config().logging.enable_file_name)
+                    .event_format(Format::default().json()),
                 nonblocking,
                 filter
             )
