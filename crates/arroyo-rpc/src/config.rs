@@ -630,6 +630,10 @@ pub struct LogConfig {
     #[serde(default)]
     pub nonblocking: bool,
 
+    /// Set the number of lines to buffer before dropping logs or exerting backpressure on senders
+    /// Only valid when nonblocking is set to true
+    pub buffered_lines_limit: usize,
+
     /// Set switch whether record file line number in log
     #[serde(default)]
     pub enable_file_line: bool,

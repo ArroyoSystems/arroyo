@@ -38,7 +38,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use arroyo_rpc::config::{config, LogFormat};
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_log::LogTracer;
 use uuid::Uuid;
 
@@ -84,7 +84,9 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         .add_directive("aws_config::profile::credentials=warn".parse().unwrap());
 
     let (nonblocking, guard) = if config().logging.nonblocking {
-        let (nonblocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+        let (nonblocking, guard) = NonBlockingBuilder::default()
+            .buffered_lines_limit(config().logging.buffered_lines_limit)
+            .finish(std::io::stderr());
         (Some(nonblocking), Some(guard))
     } else {
         (None, None)
