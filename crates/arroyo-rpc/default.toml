@@ -83,7 +83,7 @@ password = "arroyo"
 
 [logging]
 format = "plaintext" # option: plaintext / json / logfmt 
-nonblocking = true
+nonblocking = false
 enable-file-line = false
 enable-file-name = false 
 buffered_lines_limit = 4096
