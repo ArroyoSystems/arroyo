@@ -86,4 +86,4 @@ format = "plaintext" # option: plaintext / json / logfmt
 nonblocking = false
 enable-file-line = false
 enable-file-name = false 
-buffered_lines_limit = 4096
+buffered-lines-limit = 4096
