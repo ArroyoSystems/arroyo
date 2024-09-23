@@ -110,3 +110,12 @@ volumes: []
 volumeMounts: []
 
 existingConfigMap: ""
+
+persistence:
+  enabled: true
+  accessModes: [ "ReadWriteOnce" ]
+  size: 20Gi # resize it according to your machine
+  local:
+    path: /tmp/arroyo-pv # must create dir before helm installing
+  nodeAffinity:
+    hostname: [ "localhost" ] # replace by your hostname
