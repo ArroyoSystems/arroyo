@@ -143,6 +143,7 @@ kind: Service
 metadata:
   name: {{ include "arroyo.fullname" . }}
 spec:
+  type: NodePort
   selector:
     app: {{ include "arroyo.fullname" . }}-controller
   ports:
@@ -150,11 +151,14 @@ spec:
       protocol: TCP
       port: {{ .Values.controller.service.grpcPort }}
       targetPort: grpc
+      nodePort: {{ .Values.controller.service.grpcNodePort }}
     - name: admin
       protocol: TCP
       port: {{ .Values.controller.service.adminPort }}
       targetPort: admin
+      nodePort: {{ .Values.controller.service.adminNodePort }}
     - name: http
       protocol: TCP
       port: {{ .Values.controller.service.httpPort }}
       targetPort: http
+      nodePort: {{ .Values.controller.service.httpNodePort }}
