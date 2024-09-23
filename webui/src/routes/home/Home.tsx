@@ -153,7 +153,7 @@ export function Home() {
           <SimpleGrid
             columns={{
               base: 1,
-              md: 3,
+              md: 4,
             }}
             gap="6"
           >
