@@ -48,7 +48,7 @@
                             "type": "integer",
                             "title": "Batch Max Size (bytes)",
                             "description": "The maximum size of a batch of records to write to Kinesis",
-                            "maximum": 5000000
+                            "maximum": 4000000
                         },
                         "batch_flush_interval_millis": {
                             "type": "integer",

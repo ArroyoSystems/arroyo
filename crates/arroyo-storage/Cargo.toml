@@ -14,7 +14,7 @@ bytes = "1.4.0"
 tracing = "0.1"
 
 aws-credential-types = "1.2.0"
-aws-config = { version = "1.5.4" }
+aws-config = { workspace = true }
 rand = "0.8"
 object_store = {workspace = true, features = ["aws", "gcp"]}
 regex = "1.9.5"

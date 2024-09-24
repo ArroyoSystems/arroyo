@@ -98,12 +98,7 @@ async fn get_and_validate_connector(
         .validate_table(&req.config)
         .map_err(|e| bad_request(format!("Failed to parse config: {:?}", e)))?;
 
-    let schema: Option<ConnectionSchema> = req
-        .schema
-        .clone()
-        .map(|t| t.validate())
-        .transpose()
-        .map_err(|e| bad_request(format!("Invalid schema: {}", e)))?;
+    let schema: Option<ConnectionSchema> = req.schema.clone();
 
     let schema = if let Some(schema) = schema {
         let name = connector.name();
@@ -116,7 +111,9 @@ async fn get_and_validate_connector(
                 &profile_config,
                 &req.config,
             )
-            .await?,
+            .await?
+            .validate()
+            .map_err(|e| bad_request(format!("Invalid schema: {}", e)))?,
         )
     } else {
         None
@@ -808,8 +805,11 @@ async fn get_schema(
     ),
 )]
 pub(crate) async fn test_schema(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
     WithRejection(Json(req), _): WithRejection<Json<ConnectionSchema>, ApiError>,
 ) -> Result<(), ErrorResp> {
+    let _ = authenticate(&state.database, bearer_auth).await?;
     let Some(schema_def) = &req.definition else {
         return Ok(());
     };

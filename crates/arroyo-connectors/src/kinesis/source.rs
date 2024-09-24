@@ -17,14 +17,12 @@ use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::{from_nanos, UserError};
 use async_trait::async_trait;
-use aws_config::from_env;
-use aws_sdk_kinesis::{
-    client::fluent_builders::GetShardIterator,
-    model::{Shard, ShardIteratorType},
-    output::GetRecordsOutput,
-    types::SdkError,
-    Client as KinesisClient, Region,
-};
+use aws_config::{from_env, Region};
+use aws_sdk_kinesis::error::SdkError;
+use aws_sdk_kinesis::operation::get_records::GetRecordsOutput;
+use aws_sdk_kinesis::operation::get_shard_iterator::builders::GetShardIteratorFluentBuilder;
+use aws_sdk_kinesis::types::{Shard, ShardIteratorType};
+use aws_sdk_kinesis::Client as KinesisClient;
 use bincode::{Decode, Encode};
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use tokio::{
@@ -67,10 +65,7 @@ impl TryFrom<(String, Shard, SourceOffset)> for ShardState {
     fn try_from(
         (stream_name, shard, source_offset): (String, Shard, SourceOffset),
     ) -> Result<Self> {
-        let shard_id = shard
-            .shard_id()
-            .map(|s| s.to_string())
-            .ok_or_else(|| anyhow!("missing_shard_id"))?;
+        let shard_id = shard.shard_id().to_string();
         let offset = match source_offset {
             SourceOffset::Earliest => KinesisOffset::Earliest,
             SourceOffset::Latest => KinesisOffset::Latest,
@@ -89,7 +84,7 @@ impl ShardState {
     fn new(stream_name: String, shard: Shard, source_offset: SourceOffset) -> Self {
         Self {
             stream_name,
-            shard_id: shard.shard_id().unwrap().to_string(),
+            shard_id: shard.shard_id().to_string(),
             offset: match source_offset {
                 SourceOffset::Earliest => KinesisOffset::Earliest,
                 SourceOffset::Latest => KinesisOffset::Latest,
@@ -101,10 +96,11 @@ impl ShardState {
         &self,
         kinesis_client: &KinesisClient,
     ) -> BoxedFuture<AsyncNamedResult<AsyncResult>> {
-        let shard_iterator_call: GetShardIterator = kinesis_client
+        let shard_iterator_call: GetShardIteratorFluentBuilder = kinesis_client
             .get_shard_iterator()
             .stream_name(&self.stream_name)
             .set_shard_id(Some(self.shard_id.clone()));
+
         let shard_iterator_call = match &self.offset {
             KinesisOffset::Earliest => {
                 shard_iterator_call.shard_iterator_type(ShardIteratorType::TrimHorizon)
@@ -280,13 +276,13 @@ impl KinesisSourceFunc {
             match get_records_call.send().await {
                 Ok(result) => return Ok(AsyncResult::GetRecords(result)),
                 Err(error) => match &error {
-                    SdkError::ServiceError { err, raw: _ } => {
-                        if err.is_expired_iterator_exception() {
+                    SdkError::ServiceError(e) => {
+                        if e.err().is_expired_iterator_exception() {
                             warn!("Expired iterator exception, requesting new iterator");
                             return Ok(AsyncResult::NeedNewIterator);
                         }
-                        if err.is_kms_throttling_exception()
-                            || err.is_provisioned_throughput_exceeded_exception()
+                        if e.err().is_kms_throttling_exception()
+                            || e.err().is_provisioned_throughput_exceeded_exception()
                         {
                             // TODO: make retry behavior configurable
                             if retries == 5 {
@@ -310,11 +306,10 @@ impl KinesisSourceFunc {
         get_records: GetRecordsOutput,
         ctx: &mut ArrowContext,
     ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
-        let last_sequence_number = get_records.records().and_then(|records| {
-            records
-                .last()
-                .map(|record| record.sequence_number().unwrap().to_owned())
-        });
+        let last_sequence_number = get_records
+            .records()
+            .last()
+            .map(|record| record.sequence_number().to_owned());
 
         let next_shard_iterator = self.process_records(get_records, ctx).await?;
         let shard_state = self.shards.get_mut(&shard_id).unwrap();
@@ -435,9 +430,9 @@ impl KinesisSourceFunc {
         get_records_output: GetRecordsOutput,
         ctx: &mut ArrowContext,
     ) -> Result<Option<String>, UserError> {
-        let records = get_records_output.records.unwrap_or_default();
+        let records = get_records_output.records;
         for record in records {
-            let data = record.data.unwrap().into_inner();
+            let data = record.data.into_inner();
             let timestamp = record.approximate_arrival_timestamp.unwrap();
 
             ctx.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128))
@@ -457,7 +452,7 @@ impl KinesisSourceFunc {
         let mut futures = Vec::new();
         for shard in self.get_splits().await? {
             // check hash
-            let shard_id = shard.shard_id().unwrap().to_string();
+            let shard_id = shard.shard_id().to_string();
             let mut hasher = DefaultHasher::new();
             shard_id.hash(&mut hasher);
             let shard_hash = hasher.finish() as usize;
@@ -488,14 +483,8 @@ impl KinesisSourceFunc {
             .stream_name(&self.stream_name)
             .send()
             .await?;
-        match list_shard_output.shards() {
-            Some(shards) => {
-                shard_collect.extend(shards.iter().cloned());
-            }
-            None => {
-                bail!("no shards for stream {}", self.stream_name);
-            }
-        }
+        shard_collect.extend(list_shard_output.shards().iter().cloned());
+
         while let Some(next_token) = list_shard_output.next_token() {
             list_shard_output = self
                 .kinesis_client
@@ -505,17 +494,7 @@ impl KinesisSourceFunc {
                 .set_next_token(Some(next_token.to_string()))
                 .send()
                 .await?;
-            match list_shard_output.shards() {
-                Some(shards) => {
-                    shard_collect.extend(shards.iter().cloned());
-                }
-                None => {
-                    bail!(
-                        "received a list_shard_output with no new shards for stream {}",
-                        self.stream_name
-                    );
-                }
-            }
+            shard_collect.extend(list_shard_output.shards().iter().cloned());
         }
         Ok(shard_collect)
     }
