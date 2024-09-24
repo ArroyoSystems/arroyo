@@ -84,7 +84,7 @@ jobs:
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
-          - { runner: macos-13, protoc: osx-x86_64, artifact: macos-x86_64 }
+          # - { runner: macos-13, protoc: osx-x86_64, artifact: macos-x86_64 }
           - { runner: macos-14-xlarge, protoc: osx-aarch_64, artifact: macos-m1 }
     runs-on: ${{ matrix.config.runner }}
     steps:
