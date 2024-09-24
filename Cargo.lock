@@ -430,6 +430,7 @@ dependencies = [
  "arroyo-server-common",
  "arroyo-storage",
  "arroyo-types",
+ "arroyo-udf-python",
  "arroyo-worker",
  "async-trait",
  "clap",
