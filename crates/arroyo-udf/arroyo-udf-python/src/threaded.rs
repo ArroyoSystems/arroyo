@@ -1,6 +1,7 @@
 use crate::interpreter::SubInterpreter;
 use crate::pyarrow::Converter;
-use crate::{extract_type_info, PythonUDF, UDF_PY_LIB};
+use crate::types::extract_type_info;
+use crate::{PythonUDF, UDF_PY_LIB};
 use anyhow::anyhow;
 use arrow::array::{Array, ArrayRef};
 use arrow::datatypes::DataType;
