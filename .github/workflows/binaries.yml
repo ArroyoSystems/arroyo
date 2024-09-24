@@ -53,11 +53,11 @@ jobs:
         run: |
           curl -OL https://github.com/indygreg/python-build-standalone/releases/download/20240814/cpython-3.12.5+20240814-${{ matrix.config.pyarch }}-unknown-linux-gnu-install_only.tar.gz
           tar xvfz cpython*.tar.gz
-          cp -r python/bin/* /usr/local/bin/
-          cp -r python/include/* /usr/local/include/
-          cp -r python/lib/* /usr/local/lib/
-          cp -r python/share/* /usr/local/share/
-          ldconfig          
+          sudo cp -r python/bin/* /usr/local/bin/
+          sudo cp -r python/include/* /usr/local/include/
+          sudo cp -r python/lib/* /usr/local/lib/
+          sudo cp -r python/share/* /usr/local/share/
+          sudo ldconfig          
 
       - name: Run DB migrations
         run: |          
