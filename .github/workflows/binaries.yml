@@ -19,8 +19,8 @@ jobs:
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
-          - { runner: buildjet-32vcpu-ubuntu-2204, protoc: linux-x86_64, artifact: linux-x86_64 }
-          - { runner: buildjet-32vcpu-ubuntu-2204-arm, protoc: linux-aarch_64, artifact: linux-arm64 }
+          - { runner: buildjet-32vcpu-ubuntu-2204, protoc: linux-x86_64, pyarch: x86_64, artifact: linux-x86_64 }
+          - { runner: buildjet-32vcpu-ubuntu-2204-arm, protoc: linux-aarch_64, pyarch: aarch64, artifact: linux-arm64 }
     runs-on: ${{ matrix.config.runner }}
     services:
       postgres:
@@ -49,20 +49,34 @@ jobs:
       - name: Update rust
         run: |
           rustup update
+      - name: Install Python 3.12
+        run: |
+          curl -OL https://github.com/indygreg/python-build-standalone/releases/download/20240814/cpython-3.12.5+20240814-${{ matrix.config.pyarch }}-unknown-linux-gnu-install_only.tar.gz
+          tar xvfz cpython*.tar.gz
+          sudo cp -r python/bin/* /usr/local/bin/
+          sudo cp -r python/include/* /usr/local/include/
+          sudo cp -r python/lib/* /usr/local/lib/
+          sudo cp -r python/share/* /usr/local/share/
+          sudo ldconfig
+
       - name: Run DB migrations
         run: |          
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
         run: cd webui && pnpm install && pnpm build
-      - name: Build Arroyo
-        run: cargo build --release --package arroyo && strip target/release/arroyo
+      - name: Create output directory
+        run: mkdir artifacts
+      - name: Build Arroyo with Python
+        run: cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
+      - name: Build Arroyo without Python
+        run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
       - uses: actions/upload-artifact@v4
         with:
           name: arroyo-${{ matrix.config.artifact }}
-          path: target/release/arroyo
+          path: artifacts/*
           if-no-files-found: error
-  
+
   macos:
     strategy:
       fail-fast: true
@@ -70,7 +84,7 @@ jobs:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
           - { runner: macos-13, protoc: osx-x86_64, artifact: macos-x86_64 }
-          - { runner: macos-14, protoc: osx-aarch_64, artifact: macos-m1 }
+          - { runner: macos-14-xlarge, protoc: osx-aarch_64, artifact: macos-m1 }
     runs-on: ${{ matrix.config.runner }}
     steps:
       - name: Check out
@@ -79,6 +93,8 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 9.7.1
+      - name: Install Python 3.12 via homebrew
+        run: brew install python@3.12
       - name: Install protoc compiler
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
@@ -94,10 +110,14 @@ jobs:
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
         run: cd webui && pnpm install && pnpm build
-      - name: Build Arroyo
-        run: cargo build --release --package arroyo && strip target/release/arroyo
+      - name: Create output directory
+        run: mkdir artifacts
+      - name: Build Arroyo with Python
+        run: PYO3_PYTHON=/opt/homebrew/opt/python@3.12/Frameworks/Python.framework/Versions/3.12/Python cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
+      - name: Build Arroyo without Python
+        run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
       - uses: actions/upload-artifact@v4
         with:
           name: arroyo-${{ matrix.config.artifact }}
-          path: target/release/arroyo
+          path: artifacts/*
           if-no-files-found: error
