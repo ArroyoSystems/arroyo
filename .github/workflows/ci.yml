@@ -94,7 +94,7 @@ jobs:
       - name: Build
         run: cargo build --all-features
       - name: Run Clippy
-        run: cargo clippy --all-targets --workspace -- -D warnings
+        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
       - name: Test
         run: cargo nextest run -E 'kind(lib)' --all-features
       - name: Integ postgres
