@@ -614,6 +614,22 @@ fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<Logic
     sink_inputs
 }
 
+/// rewrite_sinks will rewrite sink's inputs and remove duplicated sinks
+/// Collect inputs of [`SinkExtension`], it's help to merge [`SinkExtension`] with same table.
+/// Each `SinkExtension` can get itself inputs (is merged previously) by named_node,
+/// input [`SinkExtension`]'s named node which get by `named_node()` to get inputs.
+fn rewrite_sinks(extensions: Vec<LogicalPlan>) -> Result<Vec<LogicalPlan>> {
+    let mut sink_inputs = build_sink_inputs(&extensions);
+    let mut new_extensions = vec![];
+    for extension in extensions {
+        let result = extension.rewrite(&mut SinkInputRewriter::new(&mut sink_inputs))?;
+        if result.transformed {
+            new_extensions.push(result.data);
+        }
+    }
+    Ok(new_extensions)
+}
+
 fn try_handle_set_variable(
     statement: &Statement,
     schema_provider: &mut ArroyoSchemaProvider,
@@ -777,18 +793,8 @@ pub async fn parse_and_get_arrow_program(
         }));
     }
 
-    // Collect inputs of `SinkExtension`, it's help to merge `SinkExtension` with same table.
-    // Each `SinkExtension` can get itself inputs (is merged previously) by named_node,
-    // input `SinkExtension`'s named node which get by `named_node()` to get inputs.
-    let sink_inputs = build_sink_inputs(&extensions);
-    let extensions = extensions
-        .into_iter()
-        .map(|plan| {
-            plan.rewrite(&mut SinkInputRewriter::new(&sink_inputs))
-                .unwrap()
-                .data
-        })
-        .collect::<Vec<LogicalPlan>>();
+    // rewrite sink's inputs, and remove duplicated sink
+    let extensions = rewrite_sinks(extensions)?;
 
     let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider, &session_state);
     for extension in extensions {

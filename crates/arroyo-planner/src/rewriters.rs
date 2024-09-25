@@ -658,12 +658,14 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
     }
 }
 
+type SinkInputs = HashMap<NamedNode, Vec<LogicalPlan>>;
+
 pub(crate) struct SinkInputRewriter<'a> {
-    sink_inputs: &'a HashMap<NamedNode, Vec<LogicalPlan>>,
+    sink_inputs: &'a mut SinkInputs,
 }
 
 impl<'a> SinkInputRewriter<'a> {
-    pub(crate) fn new(sink_inputs: &'a HashMap<NamedNode, Vec<LogicalPlan>>) -> Self {
+    pub(crate) fn new(sink_inputs: &'a mut SinkInputs) -> Self {
         Self { sink_inputs }
     }
 }
@@ -675,7 +677,7 @@ impl<'a> TreeNodeRewriter for SinkInputRewriter<'a> {
         if let LogicalPlan::Extension(extension) = &node {
             if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
                 if let Some(named_node) = sink_node.node_name() {
-                    if let Some(inputs) = self.sink_inputs.get(&named_node) {
+                    if let Some(inputs) = self.sink_inputs.remove(&named_node) {
                         return Ok(Transformed::yes(LogicalPlan::Extension(Extension {
                             // NOTE: new version from_template is replace by
                             // with_exprs_and_inputs(Vec<Expr>, Vec<LogicalPlan>) -> Result<Arc<dyn UserDefinedLogicalNode>>
