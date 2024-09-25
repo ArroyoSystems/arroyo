@@ -662,11 +662,15 @@ type SinkInputs = HashMap<NamedNode, Vec<LogicalPlan>>;
 
 pub(crate) struct SinkInputRewriter<'a> {
     sink_inputs: &'a mut SinkInputs,
+    is_rewrited: &'a mut bool,
 }
 
 impl<'a> SinkInputRewriter<'a> {
-    pub(crate) fn new(sink_inputs: &'a mut SinkInputs) -> Self {
-        Self { sink_inputs }
+    pub(crate) fn new(sink_inputs: &'a mut SinkInputs, is_rewrited: &'a mut bool) -> Self {
+        Self {
+            sink_inputs,
+            is_rewrited,
+        }
     }
 }
 
@@ -678,11 +682,14 @@ impl<'a> TreeNodeRewriter for SinkInputRewriter<'a> {
             if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
                 if let Some(named_node) = sink_node.node_name() {
                     if let Some(inputs) = self.sink_inputs.remove(&named_node) {
-                        return Ok(Transformed::yes(LogicalPlan::Extension(Extension {
+                        let extension = LogicalPlan::Extension(Extension {
                             // NOTE: new version from_template is replace by
                             // with_exprs_and_inputs(Vec<Expr>, Vec<LogicalPlan>) -> Result<Arc<dyn UserDefinedLogicalNode>>
                             node: sink_node.with_exprs_and_inputs(vec![], inputs.clone())?,
-                        })));
+                        });
+                        return Ok(Transformed::new(extension, true, TreeNodeRecursion::Jump));
+                    } else {
+                        *self.is_rewrited = true;
                     }
                 }
             }
