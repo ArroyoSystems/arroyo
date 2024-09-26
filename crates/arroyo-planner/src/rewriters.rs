@@ -683,9 +683,7 @@ impl<'a> TreeNodeRewriter for SinkInputRewriter<'a> {
                 if let Some(named_node) = sink_node.node_name() {
                     if let Some(inputs) = self.sink_inputs.remove(&named_node) {
                         let extension = LogicalPlan::Extension(Extension {
-                            // NOTE: new version from_template is replace by
-                            // with_exprs_and_inputs(Vec<Expr>, Vec<LogicalPlan>) -> Result<Arc<dyn UserDefinedLogicalNode>>
-                            node: sink_node.with_exprs_and_inputs(vec![], inputs.clone())?,
+                            node: sink_node.with_exprs_and_inputs(vec![], inputs)?,
                         });
                         return Ok(Transformed::new(extension, true, TreeNodeRecursion::Jump));
                     } else {
