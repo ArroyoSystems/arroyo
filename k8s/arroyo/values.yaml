@@ -22,6 +22,10 @@ controller:
     compilerPort: 5117
     adminPort: 5114
     httpPort: 80
+    # node port export to used by users outside the cluster
+    grpcNodePort: 31116
+    adminNodePort: 31114
+    httpNodePort: 31115
 
 worker:
   resources:
