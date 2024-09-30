@@ -44,7 +44,7 @@ use uuid::Uuid;
 
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
-pub const VERSION: &str = "0.12.0-dev";
+pub const VERSION: &str = "0.13.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
