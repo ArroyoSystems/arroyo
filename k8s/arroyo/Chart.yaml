@@ -3,8 +3,8 @@ name: arroyo
 description: Helm chart for the Arroyo stream processing engine
 
 type: application
-version: 0.12.0-dev
-appVersion: "0.12.0-dev"
+version: 0.13.0-dev
+appVersion: "0.13.0-dev"
 
 keywords:
   - stream-processing

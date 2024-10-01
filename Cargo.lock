@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-api",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-api"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-compiler-service"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-connectors"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arrow",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-controller"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arrow-schema",
@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-datastream"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "ahash",
  "anyhow",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-df"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-formats"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-metrics"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "arroyo-types",
  "lazy_static",
@@ -782,7 +782,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-node"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-openapi"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "arroyo-api",
  "chrono",
@@ -822,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-operator"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "ahash",
  "anyhow",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-rpc"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "ahash",
  "anyhow",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-server-common"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -927,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql-testing"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arrow",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-state"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "ahash",
  "anyhow",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-storage"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "arroyo-rpc",
  "arroyo-types",
@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-types"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-udf-host"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-worker"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2478,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "copy-artifacts"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "arroyo-storage",
  "regex",
@@ -4865,7 +4865,7 @@ dependencies = [
 
 [[package]]
 name = "integ"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-openapi",
