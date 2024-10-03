@@ -1,5 +1,6 @@
+use std::any::Any;
 use crate::ArroyoSchemaProvider;
-use arrow_array::builder::{ListBuilder, StringBuilder};
+use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
 use arrow_array::cast::{as_string_array, AsArray};
 use arrow_array::types::{Float64Type, Int64Type};
 use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
@@ -8,15 +9,45 @@ use datafusion::common::{DataFusionError, ScalarValue};
 use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr::{Alias, ScalarFunction};
-use datafusion::logical_expr::{create_udf, ColumnarValue, LogicalPlan, Projection, Volatility};
+use datafusion::logical_expr::{create_udf, ColumnarValue, LogicalPlan, Projection, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use datafusion::prelude::{col, Expr};
 use serde_json_path::JsonPath;
-use std::fmt::Write;
+use std::fmt::{Debug, Write};
 use std::sync::{Arc, OnceLock};
+use arrow::row::{RowConverter, SortField};
 
 const SERIALIZE_JSON_UNION: &str = "serialize_json_union";
 
-pub fn register_json_functions(registry: &mut dyn FunctionRegistry) {
+/// Borrowed from DataFusion
+/// 
+/// Creates a singleton `ScalarUDF` of the `$UDF` function named `$GNAME` and a
+/// function named `$NAME` which returns that function named $NAME.
+///
+/// This is used to ensure creating the list of `ScalarUDF` only happens once.
+macro_rules! make_udf_function {
+    ($UDF:ty, $GNAME:ident, $NAME:ident) => {
+        /// Singleton instance of the function
+        static $GNAME: std::sync::OnceLock<std::sync::Arc<datafusion::logical_expr::ScalarUDF>> =
+            std::sync::OnceLock::new();
+
+        /// Return a [`ScalarUDF`] for [`$UDF`]
+        ///
+        /// [`ScalarUDF`]: datafusion_expr::ScalarUDF
+        pub fn $NAME() -> std::sync::Arc<datafusion::logical_expr::ScalarUDF> {
+            $GNAME
+                .get_or_init(|| {
+                    std::sync::Arc::new(datafusion::logical_expr::ScalarUDF::new_from_impl(
+                        <$UDF>::default(),
+                    ))
+                })
+                .clone()
+        }
+    };
+}
+
+make_udf_function!(MultiHashFunction, MULTI_HASH, multi_hash);
+
+pub fn register_all(registry: &mut dyn FunctionRegistry) {
     registry
         .register_udf(Arc::new(create_udf(
             "get_first_json_object",
@@ -60,6 +91,9 @@ pub fn register_json_functions(registry: &mut dyn FunctionRegistry) {
             Arc::new(serialize_json_union),
         )))
         .unwrap();
+    
+    registry.register_udf(multi_hash()).unwrap();
+    
 }
 
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
@@ -80,6 +114,70 @@ fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
 
     Ok(Arc::new(path))
 }
+
+// Hash function that can take any number of arguments and produces a fast (non-cryptographic)
+// 128-bit hash from their string representations
+#[derive(Debug)]
+struct MultiHashFunction {
+    signature: Signature
+}
+
+impl Default for MultiHashFunction {
+    fn default() -> Self {
+        Self {
+            signature: Signature::new(TypeSignature::VariadicAny, Volatility::Immutable)
+        }
+    }
+}
+
+impl ScalarUDFImpl for MultiHashFunction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        "multi_hash"
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
+        Ok(DataType::FixedSizeBinary(size_of::<u128>() as i32))
+    }
+
+    fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
+        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+
+        let length = args.iter().map(|t| match t {
+            ColumnarValue::Scalar(s) => 1,
+            ColumnarValue::Array(a) => a.len(),
+        }).max().ok_or_else(|| DataFusionError::Plan("multi_hash must have at least one argument".to_string()))?;
+        
+        let row_builder = RowConverter::new(
+            args.iter()
+                .map(|t| SortField::new(t.data_type().clone()))
+                .collect()
+        )?;
+
+        let arrays = args.iter()
+            .map(|c| c.clone().into_array(length))
+            .collect::<Result<Vec<_>>>()?;
+        let rows = row_builder.convert_columns(&arrays)?;
+        
+        let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
+
+        for row in rows.iter() {
+            hasher.update(row.as_ref());
+            builder.append_value(hasher.digest128().to_be_bytes())?;
+            hasher.reset();
+        }
+        
+        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
+    }
+}
+
 
 fn json_function<T, ArrayT, F, ToS>(
     name: &str,

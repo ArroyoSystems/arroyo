@@ -6,7 +6,7 @@ use crate::{
     fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, ArroyoSchemaProvider,
     DFField, WindowBehavior,
 };
-use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
+use arroyo_rpc::{UPDATING_META_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
 use datafusion::logical_expr;
@@ -30,7 +30,7 @@ impl<'a> AggregateRewriter<'a> {
     ) -> Result<Transformed<LogicalPlan>> {
         if input
             .schema()
-            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+            .has_column_with_unqualified_name(UPDATING_META_FIELD)
         {
             return plan_err!("can't currently nest updating aggregates");
         }

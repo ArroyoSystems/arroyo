@@ -3,7 +3,7 @@
 pub mod builder;
 pub(crate) mod extension;
 pub mod external;
-mod json;
+mod functions;
 pub mod logical;
 pub mod physical;
 mod plan;
@@ -54,7 +54,7 @@ use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::json::{is_json_union, register_json_functions, serialize_outgoing_json};
+use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
 use crate::udafs::EmptyUdaf;
@@ -124,7 +124,7 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
     datafusion::functions_array::register_all(registry).unwrap();
     datafusion::functions_aggregate::register_all(registry).unwrap();
     datafusion_functions_json::register_all(registry).unwrap();
-    register_json_functions(registry);
+    functions::register_all(registry);
 }
 
 impl ArroyoSchemaProvider {

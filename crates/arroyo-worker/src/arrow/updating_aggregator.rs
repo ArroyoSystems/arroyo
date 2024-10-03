@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use arrow::compute::concat_batches;
-use arrow_array::RecordBatch;
+use arrow_array::{Array, BooleanArray, RecordBatch, StructArray};
 use std::borrow::Cow;
 use std::{
     any::Any,
@@ -11,15 +11,13 @@ use std::{
 
 use arroyo_operator::{
     context::ArrowContext,
-    operator::{ArrowOperator, OperatorConstructor, OperatorNode},
+    operator::{ArrowOperator, OperatorConstructor, OperatorNode, AsDisplayable, DisplayableOperator, Registry},
 };
 use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_rpc::df::ArroyoSchemaRef;
 use datafusion::common::ScalarValue;
 use datafusion::execution::{
@@ -31,9 +29,12 @@ use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNod
 use futures::{lock::Mutex, Future};
 use prost::Message;
 use std::time::Duration;
+use arrow_array::cast::AsArray;
+use arrow_schema::SchemaRef;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::log::warn;
+use arroyo_rpc::UPDATING_META_FIELD;
 
 pub struct UpdatingAggregatingFunc {
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
@@ -68,6 +69,8 @@ impl UpdatingAggregatingFunc {
             partial_batches.push(batch?);
         }
 
+        println!("Schema: {:?}", self.state_partial_schema);
+        println!("Batches: {:?}", partial_batches);
         let new_partial_batch =
             concat_batches(&self.state_partial_schema.schema, &partial_batches)?;
         let prior_partials = ctx
@@ -125,6 +128,8 @@ impl UpdatingAggregatingFunc {
 
         let mut batches_to_write = vec![];
 
+        let out_schema = ctx.out_schema.as_ref().unwrap().schema.clone();
+        
         while let Some(results) = final_exec.next().await {
             let results = results?;
             let renamed_results = RecordBatch::try_new(
@@ -135,36 +140,48 @@ impl UpdatingAggregatingFunc {
             if let Some((prior_batch, _filter)) =
                 final_output_table.get_current_matching_values(&renamed_results)?
             {
-                let is_retract = ColumnarValue::Scalar(ScalarValue::Boolean(Some(true)))
-                    .into_array(prior_batch.num_rows())
-                    .unwrap();
-                let mut columns = prior_batch.columns().to_vec();
-                columns.push(is_retract);
-                let retract_batch =
-                    RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), columns)?;
-                batches_to_write.push(retract_batch);
+                batches_to_write.push(Self::set_retract_metadata(out_schema.clone(), prior_batch, true)?);
             }
 
             final_output_table
                 .insert_batch(renamed_results.clone())
                 .await?;
 
-            let is_retract = ColumnarValue::Scalar(ScalarValue::Boolean(Some(false)))
-                .into_array(results.num_rows())?;
-
-            let mut columns = results.columns().to_vec();
-            columns.push(is_retract);
-
-            let result_batch =
-                RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), columns)?;
+            // Update the is_retract field within the _updating_meta struct for additions
+            let result_batch = Self::set_retract_metadata(out_schema.clone(), results, false)?;
             batches_to_write.push(result_batch);
         }
-
-        for batch in batches_to_write.into_iter() {
-            ctx.collect(batch).await;
+        
+        if !batches_to_write.is_empty() {
+            ctx.collect(concat_batches(&batches_to_write[0].schema(), batches_to_write.iter())?).await;            
         }
-
+        
         Ok(())
+    }
+    
+    fn set_retract_metadata(out_schema: SchemaRef, batch: RecordBatch, is_retract: bool) -> Result<RecordBatch> {
+        let updating_idx = batch.schema().index_of(UPDATING_META_FIELD)?;
+
+        let columns = batch.columns().iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if i == updating_idx {
+                    let s = c.as_struct().clone();
+                    let len = s.len();
+                    let (fields, arrays, nulls) = s.into_parts();
+
+                    Arc::new(StructArray::new(fields, vec![
+                        ColumnarValue::Scalar(ScalarValue::Boolean(Some(is_retract)))
+                            .into_array(len)
+                            .unwrap(),
+                        arrays[1].clone()
+                    ], nulls))
+                } else {
+                    c.clone()
+                }
+            }).collect();
+
+        Ok(RecordBatch::try_new(out_schema, columns)?)
     }
 
     fn init_exec(&mut self) {
@@ -261,7 +278,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
     }
 
     async fn handle_tick(&mut self, _tick: u64, ctx: &mut ArrowContext) {
-        self.flush(ctx).await.unwrap();
+         self.flush(ctx).await.unwrap();
     }
 
     async fn handle_watermark(
@@ -309,7 +326,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
     }
 
     async fn handle_future_result(&mut self, _result: Box<dyn Any + Send>, _: &mut ArrowContext) {
-        unreachable!("should not have future result")
+        //unreachable!("should not have future result")
     }
 
     async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {
@@ -349,6 +366,9 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
 
         let partial_aggregation_plan =
             PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
+        
+        
+        println!("Partial aggregation plan {:#?}", partial_aggregation_plan);
 
         // deserialize partial aggregation into execution plan with an UnboundedBatchStream source.
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
@@ -368,7 +388,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
-
+        
         let finish_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
 
         let finish_execution_plan = finish_plan.try_into_physical_plan(
@@ -377,6 +397,8 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
             &codec,
         )?;
 
+        println!("Finish plan {:#?}", finish_plan);        
+        
         let ttl = if config.ttl_micros == 0 {
             warn!("ttl was not set for updating aggregate");
             24 * 60 * 60 * 1000 * 1000

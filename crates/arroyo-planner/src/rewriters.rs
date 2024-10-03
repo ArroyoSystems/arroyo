@@ -13,7 +13,7 @@ use crate::{
 };
 
 use arrow_schema::DataType;
-use arroyo_rpc::IS_RETRACT_FIELD;
+use arroyo_rpc::UPDATING_META_FIELD;
 use arroyo_rpc::TIMESTAMP_FIELD;
 
 use crate::extension::AsyncUDFExtension;
@@ -134,7 +134,7 @@ impl<'a> SourceRewriter<'a> {
         if table.is_updating() {
             expressions.push(Expr::Column(Column::new(
                 Some(qualifier.clone()),
-                IS_RETRACT_FIELD,
+                UPDATING_META_FIELD,
             )))
         }
         Ok(expressions)

@@ -1,5 +1,5 @@
 use arroyo_datastream::WindowType;
-use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
+use arroyo_rpc::{UPDATING_META_FIELD, TIMESTAMP_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{
     plan_err,
@@ -284,15 +284,15 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 if projection
                     .input
                     .schema()
-                    .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+                    .has_column_with_unqualified_name(UPDATING_META_FIELD)
                     && !projection
                         .schema
-                        .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+                        .has_column_with_unqualified_name(UPDATING_META_FIELD)
                 {
                     let field: DFField = projection
                         .input
                         .schema()
-                        .qualified_field_with_unqualified_name(IS_RETRACT_FIELD)?
+                        .qualified_field_with_unqualified_name(UPDATING_META_FIELD)?
                         .into();
                     let mut output_fields = fields_with_qualifiers(&projection.schema);
                     output_fields.push(field.clone());

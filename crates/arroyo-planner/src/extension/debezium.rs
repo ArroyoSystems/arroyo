@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use arrow_schema::{DataType, Schema};
-use arroyo_rpc::{
-    df::{ArroyoSchema, ArroyoSchemaRef},
-    IS_RETRACT_FIELD, TIMESTAMP_FIELD,
-};
+use arroyo_rpc::{df::{ArroyoSchema, ArroyoSchemaRef}, UPDATING_META_FIELD, TIMESTAMP_FIELD, updating_meta_field};
 use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result, TableReference};
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion::physical_plan::DisplayAs;
@@ -38,7 +35,7 @@ impl DebeziumUnrollingExtension {
         let struct_schema: Vec<_> = input_schema
             .fields()
             .iter()
-            .filter(|field| field.name() != TIMESTAMP_FIELD && field.name() != IS_RETRACT_FIELD)
+            .filter(|field| field.name() != TIMESTAMP_FIELD && field.name() != UPDATING_META_FIELD)
             .cloned()
             .collect();
 
@@ -119,11 +116,7 @@ impl DebeziumUnrollingExtension {
             _ => return plan_err!("before and after columns must both have an alias or neither"),
         };
         let mut fields = fields.to_vec();
-        fields.push(Arc::new(arrow::datatypes::Field::new(
-            IS_RETRACT_FIELD,
-            DataType::Boolean,
-            false,
-        )));
+        fields.push(updating_meta_field());
 
         let Some(input_timestamp_field) =
             input_schema.index_of_column_by_name(None, TIMESTAMP_FIELD)

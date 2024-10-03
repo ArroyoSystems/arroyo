@@ -1,17 +1,22 @@
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
-use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, TIMESTAMP_FIELD};
-use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
-use datafusion::logical_expr::{Extension, LogicalPlan, UserDefinedLogicalNodeCore};
-use datafusion_proto::protobuf::{physical_plan_node::PhysicalPlanType, PhysicalPlanNode};
+use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, updating_meta_field, TIMESTAMP_FIELD, UPDATING_META_FIELD};
+use datafusion::common::{plan_err, DFSchema, DFSchemaRef, Result, TableReference};
+use datafusion::logical_expr::{col, lit, AggregateFunction, Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion_proto::protobuf::{physical_plan_node::PhysicalPlanType, PhysicalExprNode, PhysicalPlanNode};
 use std::sync::Arc;
 use std::time::Duration;
-
-use crate::builder::{NamedNode, SplitPlanOutput};
+use datafusion::functions_aggregate::first_last::first_value;
+use datafusion::logical_expr::expr::ScalarFunction;
+use datafusion::prelude::{named_struct, r#struct};
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use crate::builder::{NamedNode, Planner, SplitPlanOutput};
 
 use super::{ArroyoExtension, IsRetractExtension, NodeWithIncomingEdges};
 use arroyo_rpc::config::config;
 use prost::Message;
+use crate::functions::multi_hash;
+use crate::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 
 pub(crate) const UPDATING_AGGREGATE_EXTENSION_NAME: &str = "UpdatingAggregateExtension";
 
@@ -89,10 +94,10 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
     fn plan_node(
         &self,
-        planner: &crate::builder::Planner,
+        planner: &Planner,
         index: usize,
         input_schemas: Vec<arroyo_rpc::df::ArroyoSchemaRef>,
-    ) -> Result<super::NodeWithIncomingEdges> {
+    ) -> Result<NodeWithIncomingEdges> {
         if input_schemas.len() != 1 {
             return plan_err!(
                 "UpdatingAggregateExtension requires exactly one input schema, found {}",
@@ -102,10 +107,56 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
         let input_schema = input_schemas[0].clone();
         let SplitPlanOutput {
-            partial_aggregation_plan,
-            partial_schema,
-            finish_plan,
+            mut partial_aggregation_plan,
+            mut partial_schema,
+            mut finish_plan,
         } = planner.split_physical_plan(self.key_fields.clone(), &self.aggregate, false)?;
+
+        let key_exprs: Vec<Expr> = self.key_fields
+            .iter()
+            .map(|&i| first_value(col(input_schema.schema.field(i).name()), None))
+            .collect();
+        let hash_expr = Expr::ScalarFunction(ScalarFunction {
+            func: multi_hash(),
+            args: key_exprs,
+        });
+        
+        let updating_meta_expr = named_struct(vec![
+            lit("is_retract"),
+            lit(false),
+            lit("id"),
+            hash_expr,
+        ]);
+        
+        let codec = ArroyoPhysicalExtensionCodec {
+            context: DecodingContext::Planning,
+        };
+        let physical_meta_expr = planner.create_physical_expr(&updating_meta_expr, 
+                                                              &DFSchema::try_from(input_schema.schema.clone())?)?;
+        
+        if let Some(PhysicalPlanType::Aggregate(ref mut agg)) = partial_aggregation_plan.physical_plan_type.as_mut() {
+            agg.aggr_expr.push(serialize_physical_expr(physical_meta_expr, &codec)?);
+            agg.aggr_expr_name.push(UPDATING_META_FIELD.to_string());
+            //agg.groups.push(false);
+        } else {
+            return plan_err!("UpdatingAggregateExtension requires an aggregate node");
+        }
+
+        // create new partial schema with updating_meta field
+        partial_schema = {
+            let mut fields = partial_schema.schema.fields().to_vec();
+            fields.push(updating_meta_field());
+            ArroyoSchema::new(
+                Arc::new(Schema::new_with_metadata(
+                    fields,
+                    partial_schema.schema.metadata().clone(),
+                )),
+                partial_schema.timestamp_index,
+                partial_schema.key_indices,
+            )
+        };
+            
+        println!("PArtial schema {:?}", partial_schema);
 
         let mut state_fields = partial_schema.schema.fields().to_vec();
         state_fields[partial_schema.timestamp_index] = Arc::new(Field::new(
@@ -123,6 +174,8 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             self.key_fields.clone(),
         );
 
+        println!("State partial schema {:?}", state_partial_schema);
+
         let mut state_final_fields = self
             .aggregate
             .schema()
@@ -136,6 +189,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         ));
+        state_final_fields.insert(self.key_fields.len(), updating_meta_field());
         let state_final_schema = ArroyoSchema::new_keyed(
             Arc::new(Schema::new_with_metadata(
                 state_final_fields,
@@ -152,9 +206,24 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
         let mut combine_aggregate = aggregate.as_ref().clone();
         combine_aggregate.set_mode(datafusion_proto::protobuf::AggregateMode::CombinePartial);
-        let combine_plan = PhysicalPlanNode {
-            physical_plan_type: Some(PhysicalPlanType::Aggregate(Box::new(combine_aggregate))),
-        };
+
+        // Ensure combine plan preserves _updating_meta
+        combine_aggregate.group_expr.push(PhysicalExprNode {
+            expr_type: Some(datafusion_proto::protobuf::physical_expr_node::ExprType::Column(
+                datafusion_proto::protobuf::PhysicalColumn {
+                    name: UPDATING_META_FIELD.to_string(),
+                    index: combine_aggregate.group_expr.len() as u32,
+                }
+            )),
+        });
+
+        // Ensure finish plan includes _updating_meta in output
+        if let Some(PhysicalPlanType::Aggregate(ref mut agg)) = finish_plan.physical_plan_type.as_mut() {
+            agg.group_expr.push(PhysicalExprNode {
+                expr_type: Some(datafusion_proto::protobuf::physical_expr_node::ExprType::Column(
+                    datafusion_proto::protobuf::PhysicalColumn { name: UPDATING_META_FIELD.to_string(), index: agg.group_expr.len() as u32, })),
+            });
+        }
 
         let config = UpdatingAggregateOperator {
             name: "UpdatingAggregate".to_string(),
@@ -162,7 +231,9 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             state_partial_schema: Some(state_partial_schema.into()),
             state_final_schema: Some(state_final_schema.into()),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
-            combine_plan: combine_plan.encode_to_vec(),
+            combine_plan: PhysicalPlanNode {
+                physical_plan_type: Some(PhysicalPlanType::Aggregate(Box::new(combine_aggregate))),
+            }.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),
             flush_interval_micros: config()
                 .pipeline
