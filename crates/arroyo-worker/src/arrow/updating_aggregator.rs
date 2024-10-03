@@ -34,7 +34,7 @@ use arrow_schema::SchemaRef;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::log::warn;
-use arroyo_rpc::UPDATING_META_FIELD;
+use arroyo_rpc::{updating_meta_field, updating_meta_fields, UPDATING_META_FIELD};
 
 pub struct UpdatingAggregatingFunc {
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
@@ -160,22 +160,24 @@ impl UpdatingAggregatingFunc {
     }
     
     fn set_retract_metadata(out_schema: SchemaRef, batch: RecordBatch, is_retract: bool) -> Result<RecordBatch> {
-        let updating_idx = batch.schema().index_of(UPDATING_META_FIELD)?;
+        let updating_idx = batch.schema().index_of("id")?;
 
         let columns = batch.columns().iter()
             .enumerate()
             .map(|(i, c)| {
                 if i == updating_idx {
-                    let s = c.as_struct().clone();
-                    let len = s.len();
-                    let (fields, arrays, nulls) = s.into_parts();
-
-                    Arc::new(StructArray::new(fields, vec![
-                        ColumnarValue::Scalar(ScalarValue::Boolean(Some(is_retract)))
-                            .into_array(len)
-                            .unwrap(),
-                        arrays[1].clone()
-                    ], nulls))
+                    let ids = c.as_fixed_size_binary();
+                    let len = ids.len();
+                    
+                    let arrays: Vec<Arc<dyn Array>> = vec![
+                        Arc::new(BooleanArray::from(vec![is_retract; len])),
+                        c.clone(),
+                    ];
+                    Arc::new(StructArray::new(
+                        updating_meta_fields(),
+                        arrays,
+                        None
+                    ))
                 } else {
                     c.clone()
                 }

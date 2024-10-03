@@ -114,29 +114,29 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
         let key_exprs: Vec<Expr> = self.key_fields
             .iter()
-            .map(|&i| first_value(col(input_schema.schema.field(i).name()), None))
+            .map(|&i| col(input_schema.schema.field(i).name()))
             .collect();
         let hash_expr = Expr::ScalarFunction(ScalarFunction {
             func: multi_hash(),
             args: key_exprs,
         });
         
-        let updating_meta_expr = named_struct(vec![
-            lit("is_retract"),
-            lit(false),
-            lit("id"),
-            hash_expr,
-        ]);
+        // let updating_meta_expr = named_struct(vec![
+        //     lit("is_retract"),
+        //     lit(false),
+        //     lit("id"),
+        //     hash_expr,
+        // ]);
         
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::Planning,
         };
-        let physical_meta_expr = planner.create_physical_expr(&updating_meta_expr, 
+        let physical_meta_expr = planner.create_physical_expr(&hash_expr, 
                                                               &DFSchema::try_from(input_schema.schema.clone())?)?;
         
         if let Some(PhysicalPlanType::Aggregate(ref mut agg)) = partial_aggregation_plan.physical_plan_type.as_mut() {
-            agg.aggr_expr.push(serialize_physical_expr(physical_meta_expr, &codec)?);
-            agg.aggr_expr_name.push(UPDATING_META_FIELD.to_string());
+            agg.group_expr.push(serialize_physical_expr(physical_meta_expr, &codec)?);
+            agg.group_expr_name.push("id".to_string());
             //agg.groups.push(false);
         } else {
             return plan_err!("UpdatingAggregateExtension requires an aggregate node");
@@ -145,13 +145,13 @@ impl ArroyoExtension for UpdatingAggregateExtension {
         // create new partial schema with updating_meta field
         partial_schema = {
             let mut fields = partial_schema.schema.fields().to_vec();
-            fields.push(updating_meta_field());
+            fields.insert(self.key_fields.len(), Arc::new(Field::new("id", DataType::FixedSizeBinary(16), true)));
             ArroyoSchema::new(
                 Arc::new(Schema::new_with_metadata(
                     fields,
                     partial_schema.schema.metadata().clone(),
                 )),
-                partial_schema.timestamp_index,
+                partial_schema.timestamp_index + 1,
                 partial_schema.key_indices,
             )
         };
@@ -183,13 +183,13 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
+        state_final_fields.push(updating_meta_field());
         let timestamp_index = state_final_fields.len() - 1;
         state_final_fields[timestamp_index] = Arc::new(Field::new(
             TIMESTAMP_FIELD,
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         ));
-        state_final_fields.insert(self.key_fields.len(), updating_meta_field());
         let state_final_schema = ArroyoSchema::new_keyed(
             Arc::new(Schema::new_with_metadata(
                 state_final_fields,
@@ -198,6 +198,8 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             timestamp_index,
             self.key_fields.clone(),
         );
+        
+        println!("Final schema: {:?}", state_final_schema);
 
         let Some(PhysicalPlanType::Aggregate(aggregate)) = finish_plan.physical_plan_type.as_ref()
         else {
