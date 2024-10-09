@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-udf-host"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 edition = "2021"
 description = "safe interface for interacting with dynamically-linked UDFs"
 
