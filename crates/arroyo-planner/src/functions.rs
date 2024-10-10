@@ -3,7 +3,7 @@ use crate::ArroyoSchemaProvider;
 use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
 use arrow_array::cast::{as_string_array, AsArray};
 use arrow_array::types::{Float64Type, Int64Type};
-use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
+use arrow_array::{Array, ArrayRef, StringArray, UInt64Array, UnionArray};
 use arrow_schema::{DataType, Field, UnionFields, UnionMode};
 use datafusion::common::{DataFusionError, ScalarValue};
 use datafusion::common::{Result, TableReference};
@@ -144,7 +144,8 @@ impl ScalarUDFImpl for MultiHashFunction {
     }
 
     fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
-        Ok(DataType::FixedSizeBinary(size_of::<u128>() as i32))
+        //Ok(DataType::FixedSizeBinary(size_of::<u128>() as i32))
+        Ok(DataType::UInt64)
     }
 
     fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
@@ -166,11 +167,12 @@ impl ScalarUDFImpl for MultiHashFunction {
             .collect::<Result<Vec<_>>>()?;
         let rows = row_builder.convert_columns(&arrays)?;
         
-        let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
+        //let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
+        let mut builder = UInt64Array::builder(length);
 
         for row in rows.iter() {
             hasher.update(row.as_ref());
-            builder.append_value(hasher.digest128().to_be_bytes())?;
+            builder.append_value(hasher.digest());
             hasher.reset();
         }
         

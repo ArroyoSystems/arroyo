@@ -24,7 +24,6 @@ use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
-use datafusion::logical_expr::ColumnarValue;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::{lock::Mutex, Future};
 use prost::Message;
