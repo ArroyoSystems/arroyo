@@ -390,6 +390,8 @@ impl ScalarUDFImpl for SyncUdfDylib {
             .max()
             .unwrap();
 
+        let all_scalars = args.iter().all(|c| matches!(c, ColumnarValue::Scalar(_)));
+
         let args = args
             .iter()
             .map(|arg| arg.clone().into_array(num_rows).unwrap().to_data())
@@ -402,7 +404,15 @@ impl ScalarUDFImpl for SyncUdfDylib {
         match result {
             RunResult::Ok(FfiArraySchema(array, schema)) => {
                 let result_array = unsafe { from_ffi(array, &schema).unwrap() };
-                Ok(ColumnarValue::Array(make_array(result_array)))
+
+                let array = make_array(result_array);
+                if all_scalars {
+                    Ok(ColumnarValue::Scalar(ScalarValue::try_from_array(
+                        &array, 0,
+                    )?))
+                } else {
+                    Ok(ColumnarValue::Array(array))
+                }
             }
             RunResult::Err => {
                 panic!("panic in UDF {}", self.name);
