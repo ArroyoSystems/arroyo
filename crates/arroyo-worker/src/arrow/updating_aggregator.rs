@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use arrow::compute::concat_batches;
-use arrow_array::{Array, BooleanArray, RecordBatch, StructArray};
 use std::borrow::Cow;
 use std::{
     any::Any,
@@ -8,6 +7,8 @@ use std::{
     pin::Pin,
     sync::{Arc, RwLock},
 };
+
+use arrow_array::{Array, BooleanArray, Datum, RecordBatch, StructArray};
 
 use arroyo_operator::{
     context::ArrowContext,
@@ -159,18 +160,18 @@ impl UpdatingAggregatingFunc {
     }
     
     fn set_retract_metadata(out_schema: SchemaRef, batch: RecordBatch, is_retract: bool) -> Result<RecordBatch> {
-        let updating_idx = batch.schema().index_of("id")?;
+        let updating_idx = batch.schema().index_of(UPDATING_META_FIELD)?;
 
         let columns = batch.columns().iter()
             .enumerate()
             .map(|(i, c)| {
                 if i == updating_idx {
-                    let ids = c.as_fixed_size_binary();
-                    let len = ids.len();
+                    let metadata = c.as_struct();                    
+                    let len = metadata.len();
                     
                     let arrays: Vec<Arc<dyn Array>> = vec![
                         Arc::new(BooleanArray::from(vec![is_retract; len])),
-                        c.clone(),
+                        metadata.column(1).clone(),
                     ];
                     Arc::new(StructArray::new(
                         updating_meta_fields(),

@@ -58,6 +58,9 @@ async fn validate_query(path: &Path) {
             );
         }
     } else {
-        result.unwrap();
+        if let Err(e) = result {
+            println!("{}", e.to_string());
+            panic!("{}", e);
+        }
     }
 }

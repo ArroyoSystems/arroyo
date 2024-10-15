@@ -119,7 +119,7 @@ fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
 // 128-bit hash from their string representations
 #[derive(Debug)]
 struct MultiHashFunction {
-    signature: Signature
+    signature: Signature,
 }
 
 impl Default for MultiHashFunction {
@@ -144,15 +144,14 @@ impl ScalarUDFImpl for MultiHashFunction {
     }
 
     fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
-        //Ok(DataType::FixedSizeBinary(size_of::<u128>() as i32))
-        Ok(DataType::UInt64)
+        Ok(DataType::FixedSizeBinary(size_of::<u128>() as i32))
     }
 
     fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
         let mut hasher = xxhash_rust::xxh3::Xxh3::new();
 
         let length = args.iter().map(|t| match t {
-            ColumnarValue::Scalar(s) => 1,
+            ColumnarValue::Scalar(_) => 1,
             ColumnarValue::Array(a) => a.len(),
         }).max().ok_or_else(|| DataFusionError::Plan("multi_hash must have at least one argument".to_string()))?;
         
@@ -167,12 +166,11 @@ impl ScalarUDFImpl for MultiHashFunction {
             .collect::<Result<Vec<_>>>()?;
         let rows = row_builder.convert_columns(&arrays)?;
         
-        //let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
-        let mut builder = UInt64Array::builder(length);
+        let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
 
         for row in rows.iter() {
             hasher.update(row.as_ref());
-            builder.append_value(hasher.digest());
+            builder.append_value(hasher.digest128().to_be_bytes())?;
             hasher.reset();
         }
         

@@ -115,7 +115,7 @@ impl<'a> AggregateRewriter<'a> {
             (0..key_count).collect(),
             column.relation,
             schema_provider.planning_options.ttl,
-        );
+        )?;
         let final_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(updating_aggregate_extension),
         });

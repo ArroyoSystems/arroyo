@@ -15,6 +15,7 @@ pub mod udafs;
 
 #[cfg(test)]
 mod test;
+mod utils;
 
 use anyhow::bail;
 use arrow::array::ArrayRef;
