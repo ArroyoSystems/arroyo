@@ -5,7 +5,7 @@ use arrow_array::{RecordBatch, TimestampNanosecondArray};
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+    ArrowOperator, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
 };
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
@@ -27,7 +27,6 @@ use std::borrow::Cow;
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap},
-    fmt,
     pin::Pin,
     sync::{Arc, RwLock},
     time::{Duration, SystemTime},

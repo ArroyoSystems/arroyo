@@ -5,7 +5,7 @@ use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use tracing::{error, warn};
 
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{env, fs, io};
+use std::{env, fs};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::timeout;
 use tokio_postgres::{Client, Connection, NoTls};

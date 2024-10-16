@@ -22,7 +22,6 @@ use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;

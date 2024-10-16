@@ -21,8 +21,6 @@ use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::StreamExt;
 use prost::Message as ProstMessage;
 use std::borrow::Cow;
-use std::fmt;
-use std::fmt::Formatter;
 use std::sync::Arc;
 use std::sync::RwLock;
 

@@ -74,7 +74,7 @@ impl OperatorNode {
 
     pub fn display(&self) -> DisplayableOperator {
         match self {
-            OperatorNode::Source(s) => DisplayableOperator {
+            OperatorNode::Source(_) => DisplayableOperator {
                 name: self.name().into(),
                 fields: vec![],
             },

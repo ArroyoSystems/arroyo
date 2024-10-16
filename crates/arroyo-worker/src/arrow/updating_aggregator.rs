@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use std::borrow::Cow;
-use std::fmt::{Debug, Formatter};
 use std::{
     any::Any,
     collections::HashMap,

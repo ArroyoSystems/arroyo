@@ -10,7 +10,7 @@ use arroyo_types::{Data, SignalMessage, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config;
 use prost::Message;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::{collections::HashMap, time::SystemTime};
 use tracing::{info, warn};
 

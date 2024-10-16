@@ -20,7 +20,6 @@ use arroyo_types::{
 use local_ip_address::local_ip;
 use rand::random;
 
-use datafusion::physical_plan::{displayable, ExecutionPlan};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
@@ -413,7 +412,7 @@ impl WorkerGrpc for WorkerServer {
         let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
             .expect("Failed to create LogicalProgram");
 
-        println!("Starting execution for graph\n{}", to_d2(&logical));
+        debug!("Starting execution for graph\n{}", to_d2(&logical));
 
         for (udf_name, dylib_config) in &logical.program_config.udf_dylibs {
             info!("Loading UDF {}", udf_name);
