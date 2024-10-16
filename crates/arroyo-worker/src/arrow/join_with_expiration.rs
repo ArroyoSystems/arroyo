@@ -1,15 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
-
 use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+};
 use arroyo_rpc::{
     df::ArroyoSchema,
     grpc::{api, rpc::TableConfig},
@@ -21,6 +17,12 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use prost::Message;
+use std::borrow::Cow;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use tracing::warn;
 
 pub struct JoinWithExpiration {
@@ -138,6 +140,26 @@ impl JoinWithExpiration {
 impl ArrowOperator for JoinWithExpiration {
     fn name(&self) -> String {
         "JoinWithExpiration".to_string()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("JoinWithExpiration"),
+            fields: vec![
+                (
+                    "left_expiration",
+                    AsDisplayable::Debug(&self.left_expiration),
+                ),
+                (
+                    "right_expiration",
+                    AsDisplayable::Debug(&self.right_expiration),
+                ),
+                (
+                    "join_execution_plan",
+                    self.join_execution_plan.as_ref().into(),
+                ),
+            ],
+        }
     }
 
     async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut ArrowContext) {

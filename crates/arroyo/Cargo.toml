@@ -20,6 +20,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-openapi = { path ="../arroyo-openapi" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
+arroyo-df = { path = "../arroyo-planner" }
 
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
@@ -41,6 +42,8 @@ rand = "0.8.5"
 reqwest = "0.11"
 clio = { version = "0.3.5", features = ["clap", "clap-parse"] }
 async-trait = "0.1.80"
+open = '5.3.0'
+
 
 [target.'cfg(all(not(target_env = "msvc"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
 tikv-jemallocator = { version = "0.5.4", features = ["unprefixed_malloc_on_supported_platforms"]}

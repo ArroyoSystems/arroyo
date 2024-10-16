@@ -38,6 +38,7 @@ pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 
+use crate::utils::to_d2;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_df::physical::new_registry;
 use arroyo_rpc::config::config;
@@ -48,6 +49,7 @@ pub mod arrow;
 
 pub mod engine;
 mod network_manager;
+pub mod utils;
 
 pub static TIMER_TABLE: char = '[';
 
@@ -409,6 +411,8 @@ impl WorkerGrpc for WorkerServer {
 
         let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
             .expect("Failed to create LogicalProgram");
+
+        debug!("Starting execution for graph\n{}", to_d2(&logical));
 
         for (udf_name, dylib_config) in &logical.program_config.udf_dylibs {
             info!("Loading UDF {}", udf_name);

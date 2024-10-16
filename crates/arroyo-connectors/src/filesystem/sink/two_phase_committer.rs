@@ -1,5 +1,3 @@
-use std::{collections::HashMap, time::SystemTime};
-
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::{context::ArrowContext, operator::ArrowOperator};
@@ -12,6 +10,8 @@ use arroyo_types::{Data, SignalMessage, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config;
 use prost::Message;
+use std::fmt::Debug;
+use std::{collections::HashMap, time::SystemTime};
 use tracing::{info, warn};
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {

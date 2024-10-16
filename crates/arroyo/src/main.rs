@@ -1,22 +1,23 @@
 mod run;
 
 use anyhow::{anyhow, bail};
-use std::path::PathBuf;
-use std::{env, fs};
-
+use arroyo_df::{ArroyoSchemaProvider, SqlConfig};
 use arroyo_rpc::config;
 use arroyo_rpc::config::{config, DatabaseType};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
 use arroyo_server_common::{log_event, start_admin_server};
-use arroyo_worker::WorkerServer;
+use arroyo_worker::{utils, WorkerServer};
 use clap::{Args, Parser, Subcommand};
 use clio::Input;
 use cornucopia_async::DatabaseSource;
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use serde_json::json;
+use std::env::temp_dir;
+use std::path::PathBuf;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{env, fs};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::timeout;
 use tokio_postgres::{Client, Connection, NoTls};
@@ -108,6 +109,17 @@ enum Commands {
         #[arg(long)]
         wait: Option<u32>,
     },
+
+    /// Visualizes a query plan
+    Visualize {
+        /// Open the visualization in the browser
+        #[clap(short, long, action)]
+        open: bool,
+
+        /// The query to visualize
+        #[clap(value_parser, default_value = "-")]
+        query: Input,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -165,6 +177,9 @@ async fn main() {
         }
         Commands::Run(args) => {
             run::run(args).await;
+        }
+        Commands::Visualize { query, open } => {
+            visualize(query, open).await;
         }
     };
 }
@@ -457,4 +472,40 @@ async fn start_node() {
     shutdown.spawn_task("admin", start_admin_server("worker"));
 
     Shutdown::handle_shutdown(shutdown.wait_for_shutdown(Duration::from_secs(30)).await);
+}
+
+async fn visualize(query: Input, open: bool) {
+    let query = std::io::read_to_string(query).expect("Failed to read query");
+
+    let schema_provider = ArroyoSchemaProvider::new();
+    let compiled = arroyo_df::parse_and_get_program(&query, schema_provider, SqlConfig::default())
+        .await
+        .expect("Failed while planning query");
+
+    if open {
+        let tmp = temp_dir().join("plan.d2");
+        tokio::fs::write(&tmp, utils::to_d2(&compiled.program))
+            .await
+            .expect("Failed to write plan");
+        let output = tmp.with_extension("svg");
+        let result = tokio::process::Command::new("d2")
+            .arg(&tmp)
+            .arg(&output)
+            .output()
+            .await
+            .expect("d2 must be installed to visualize the plan");
+
+        if !result.status.success() {
+            panic!(
+                "Failed to run d2: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+
+        eprintln!("Wrote svg to {:?}", output);
+
+        let _ = open::that(format!("file://{}", output.to_string_lossy()));
+    } else {
+        println!("{}", utils::to_d2(&compiled.program));
+    }
 }
