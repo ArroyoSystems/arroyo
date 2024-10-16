@@ -1,6 +1,7 @@
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
 use fluvio::{Fluvio, FluvioConfig, TopicProducerPool};
+use std::fmt::Debug;
 
 use arroyo_formats::ser::ArrowSerializer;
 use tracing::info;
@@ -14,6 +15,15 @@ pub struct FluvioSinkFunc {
     pub endpoint: Option<String>,
     pub producer: Option<TopicProducerPool>,
     pub serializer: ArrowSerializer,
+}
+
+impl Debug for FluvioSinkFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FluvioSinkFunc")
+            .field("topic", &self.topic)
+            .field("endpoint", &self.endpoint)
+            .finish()
+    }
 }
 
 #[async_trait]

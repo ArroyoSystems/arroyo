@@ -1,13 +1,14 @@
+use anyhow::{anyhow, Result};
+use arrow::compute::concat_batches;
+use arrow_array::RecordBatch;
+use std::borrow::Cow;
+use std::fmt::{Debug, Formatter};
 use std::{
     any::Any,
     collections::HashMap,
     pin::Pin,
     sync::{Arc, RwLock},
 };
-
-use anyhow::{anyhow, Result};
-use arrow::compute::concat_batches;
-use arrow_array::RecordBatch;
 
 use arroyo_operator::{
     context::ArrowContext,
@@ -19,7 +20,7 @@ use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::operator::Registry;
+use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_rpc::df::ArroyoSchemaRef;
 use datafusion::common::ScalarValue;
 use datafusion::execution::{
@@ -186,6 +187,37 @@ impl UpdatingAggregatingFunc {
 impl ArrowOperator for UpdatingAggregatingFunc {
     fn name(&self) -> String {
         "UpdatingAggregatingFunc".to_string()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("UpdatingAggregatingFunc"),
+            fields: vec![
+                ("flush_interval", AsDisplayable::Debug(&self.flush_interval)),
+                ("ttl", AsDisplayable::Debug(&self.ttl)),
+                (
+                    "partial_aggregation_schema",
+                    (&*self.partial_schema.schema).into(),
+                ),
+                (
+                    "partial_aggregation_plan",
+                    self.partial_aggregation_plan.as_ref().into(),
+                ),
+                (
+                    "state_partial_schema",
+                    (&*self.state_partial_schema.schema).into(),
+                ),
+                ("combine_plan", self.combine_plan.as_ref().into()),
+                (
+                    "state_final_schema",
+                    (&*self.state_final_schema.schema).into(),
+                ),
+                (
+                    "finish_execution_plan",
+                    self.finish_execution_plan.as_ref().into(),
+                ),
+            ],
+        }
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {

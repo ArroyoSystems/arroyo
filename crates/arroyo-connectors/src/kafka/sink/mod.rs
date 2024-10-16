@@ -1,10 +1,11 @@
 use anyhow::Result;
+use std::borrow::Cow;
 
 use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
-
+use std::fmt::{Debug, Display, Formatter};
 use tracing::{error, warn};
 
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
@@ -17,7 +18,7 @@ use arrow::array::{Array, AsArray, RecordBatch};
 use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::ArrowOperator;
+use arroyo_operator::operator::{ArrowOperator, AsDisplayable, DisplayableOperator};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
@@ -48,6 +49,15 @@ pub enum ConsistencyMode {
         next_transaction_index: usize,
         producer_to_complete: Option<FutureProducer>,
     },
+}
+
+impl Display for ConsistencyMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConsistencyMode::AtLeastOnce => write!(f, "AtLeastOnce"),
+            ConsistencyMode::ExactlyOnce { .. } => write!(f, "ExactlyOnce"),
+        }
+    }
 }
 
 impl From<SinkCommitMode> for ConsistencyMode {
@@ -217,6 +227,26 @@ impl KafkaSinkFunc {
 impl ArrowOperator for KafkaSinkFunc {
     fn name(&self) -> String {
         format!("kafka-producer-{}", self.topic)
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("KafkaSinkFunc"),
+            fields: vec![
+                ("topic", self.topic.as_str().into()),
+                ("bootstrap_servers", self.bootstrap_servers.as_str().into()),
+                (
+                    "consistency_mode",
+                    AsDisplayable::Display(&self.consistency_mode),
+                ),
+                (
+                    "timestamp_field",
+                    AsDisplayable::Debug(&self.timestamp_field),
+                ),
+                ("key_field", AsDisplayable::Debug(&self.key_field)),
+                ("client_config", AsDisplayable::Debug(&self.client_config)),
+            ],
+        }
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

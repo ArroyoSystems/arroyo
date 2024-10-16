@@ -2,7 +2,9 @@ use arrow::compute::kernels;
 use arrow_array::RecordBatch;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::get_timestamp_col;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::rpc::TableConfig;
@@ -17,6 +19,7 @@ use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -93,6 +96,17 @@ impl ArrowOperator for WatermarkGenerator {
 
     fn name(&self) -> String {
         "expression_watermark_generator".to_string()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("WatermarkGenerator"),
+            fields: vec![
+                ("interval", AsDisplayable::Debug(&self.interval)),
+                ("idle_time", AsDisplayable::Debug(&self.idle_time)),
+                ("expression", AsDisplayable::Debug(&self.expression)),
+            ],
+        }
     }
 
     fn tick_interval(&self) -> Option<Duration> {

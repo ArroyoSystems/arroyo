@@ -1,10 +1,3 @@
-use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    fmt::{Display, Formatter},
-    sync::{Arc, RwLock},
-    time::SystemTime,
-};
-
 use anyhow::{anyhow, bail, Result};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
@@ -18,11 +11,18 @@ use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::common::ScalarValue;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
+use std::borrow::Cow;
+use std::{
+    collections::{BTreeMap, HashMap, VecDeque},
+    fmt::{Display, Formatter},
+    sync::{Arc, RwLock},
+    time::SystemTime,
+};
 
 use futures::stream::FuturesUnordered;
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::operator::Registry;
+use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
@@ -533,6 +533,25 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
 impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
     fn name(&self) -> String {
         "sliding_window".to_string()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("SlidingAggregatingWindowFunc"),
+            fields: vec![
+                ("slide", AsDisplayable::Debug(&self.slide)),
+                ("width", AsDisplayable::Debug(&self.width)),
+                (
+                    "partial_aggregation_plan",
+                    self.partial_aggregation_plan.as_ref().into(),
+                ),
+                (
+                    "finish_execution_plan",
+                    self.finish_execution_plan.as_ref().into(),
+                ),
+                ("final_projection", self.final_projection.as_ref().into()),
+            ],
+        }
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
