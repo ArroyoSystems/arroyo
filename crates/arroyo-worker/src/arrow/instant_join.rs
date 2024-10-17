@@ -1,17 +1,12 @@
-use std::{
-    any::Any,
-    collections::{BTreeMap, HashMap},
-    pin::Pin,
-    sync::{Arc, RwLock},
-    time::{Duration, SystemTime},
-};
-
+use super::sync::streams::KeyedCloneableStreamFuture;
 use anyhow::Result;
 use arrow::compute::{max, min, partition, sort_to_indices, take};
 use arrow_array::{RecordBatch, TimestampNanosecondArray};
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::{api, rpc::TableConfig},
@@ -28,10 +23,16 @@ use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNod
 use futures::StreamExt;
 use futures::{lock::Mutex, stream::FuturesUnordered, Future};
 use prost::Message;
+use std::borrow::Cow;
+use std::{
+    any::Any,
+    collections::{BTreeMap, HashMap},
+    pin::Pin,
+    sync::{Arc, RwLock},
+    time::{Duration, SystemTime},
+};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::debug;
-
-use super::sync::streams::KeyedCloneableStreamFuture;
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
 pub struct InstantJoin {
@@ -190,6 +191,13 @@ type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 impl ArrowOperator for InstantJoin {
     fn name(&self) -> String {
         "InstantJoin".to_string()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("InstantJoin"),
+            fields: vec![("join_execution_plan", self.join_exec.as_ref().into())],
+        }
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {

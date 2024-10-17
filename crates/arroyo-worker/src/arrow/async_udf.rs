@@ -5,7 +5,9 @@ use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_df::ASYNC_RESULT_FIELD;
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+};
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
@@ -18,7 +20,9 @@ use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -104,6 +108,39 @@ impl OperatorConstructor for AsyncUdfConstructor {
 impl ArrowOperator for AsyncUdfOperator {
     fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("AsyncUdfOperator"),
+            fields: vec![
+                ("name", self.name.as_str().into()),
+                ("ordered", AsDisplayable::Debug(&self.ordered)),
+                (
+                    "allowed_in_flight",
+                    AsDisplayable::Debug(&self.allowed_in_flight),
+                ),
+                ("timeout", AsDisplayable::Debug(&self.timeout)),
+                (
+                    "input_exprs",
+                    self.input_exprs
+                        .iter()
+                        .map(|e| format!("{}", e))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                        .into(),
+                ),
+                (
+                    "final_exprs",
+                    self.final_exprs
+                        .iter()
+                        .map(|e| format!("{}", e))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                        .into(),
+                ),
+            ],
+        }
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

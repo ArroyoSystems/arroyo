@@ -3,7 +3,9 @@ use arrow_array::RecordBatch;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+};
 use arroyo_rpc::grpc::api;
 use datafusion::common::DataFusionError;
 use datafusion::common::Result as DFResult;
@@ -18,6 +20,7 @@ use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::StreamExt;
 use prost::Message as ProstMessage;
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -59,6 +62,13 @@ impl OperatorConstructor for ValueExecutionConstructor {
 impl ArrowOperator for ValueExecutionOperator {
     fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: (&self.name).into(),
+            fields: vec![("plan", (&*self.executor.plan).into())],
+        }
     }
 
     async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
@@ -174,6 +184,16 @@ impl OperatorConstructor for KeyExecutionConstructor {
 impl ArrowOperator for KeyExecutionOperator {
     fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed(&self.name),
+            fields: vec![
+                ("key_fields", AsDisplayable::Debug(&self.key_fields)),
+                ("plan", AsDisplayable::Plan(self.executor.plan.as_ref())),
+            ],
+        }
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {

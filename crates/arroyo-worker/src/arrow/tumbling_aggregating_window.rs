@@ -1,4 +1,20 @@
+use anyhow::{anyhow, Result};
+use arrow::compute::{partition, sort_to_indices, take};
+use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
+use arrow_schema::SchemaRef;
+use arroyo_df::schemas::add_timestamp_field_arrow;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+};
+use arroyo_rpc::grpc::{api, rpc::TableConfig};
+use arroyo_state::timestamp_table_config;
+use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
+use datafusion::common::ScalarValue;
+use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
+use futures::{stream::FuturesUnordered, StreamExt};
 use std::any::Any;
+use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 use std::{
@@ -7,20 +23,6 @@ use std::{
     sync::{Arc, RwLock},
     time::SystemTime,
 };
-
-use anyhow::{anyhow, Result};
-use arrow::compute::{partition, sort_to_indices, take};
-use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
-use arrow_schema::SchemaRef;
-use arroyo_df::schemas::add_timestamp_field_arrow;
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
-use arroyo_rpc::grpc::{api, rpc::TableConfig};
-use arroyo_state::timestamp_table_config;
-use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
-use datafusion::common::ScalarValue;
-use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use futures::{stream::FuturesUnordered, StreamExt};
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
@@ -202,6 +204,30 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
 impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
     fn name(&self) -> String {
         "tumbling_window".to_string()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("TumblingAggregatingWindowFunc"),
+            fields: vec![
+                ("width", AsDisplayable::Debug(&self.width)),
+                (
+                    "partial_aggregation_plan",
+                    self.partial_aggregation_plan.as_ref().into(),
+                ),
+                (
+                    "finish_execution_plan",
+                    self.finish_execution_plan.as_ref().into(),
+                ),
+                (
+                    "final_projection",
+                    self.final_projection
+                        .as_ref()
+                        .map(|t| t.as_ref().into())
+                        .unwrap_or_else(|| "None".into()),
+                ),
+            ],
+        }
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {

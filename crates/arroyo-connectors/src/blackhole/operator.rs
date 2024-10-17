@@ -3,6 +3,7 @@ use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
 use async_trait::async_trait;
 
+#[derive(Debug)]
 pub struct BlackholeSinkFunc {}
 
 impl BlackholeSinkFunc {
