@@ -1,8 +1,10 @@
+use crate::builder::NamedNode;
 use crate::extension::debezium::DebeziumUnrollingExtension;
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::extension::sink::SinkExtension;
 use crate::extension::table_source::TableSourceExtension;
 use crate::extension::watermark_node::WatermarkNode;
+use crate::extension::ArroyoExtension;
 use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
@@ -27,8 +29,9 @@ use datafusion::common::{
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    BinaryExpr, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
+    BinaryExpr, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest, UserDefinedLogicalNode,
 };
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -651,6 +654,44 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
             }
         }
 
+        Ok(Transformed::no(node))
+    }
+}
+
+type SinkInputs = HashMap<NamedNode, Vec<LogicalPlan>>;
+
+pub(crate) struct SinkInputRewriter<'a> {
+    sink_inputs: &'a mut SinkInputs,
+    is_rewrited: &'a mut bool,
+}
+
+impl<'a> SinkInputRewriter<'a> {
+    pub(crate) fn new(sink_inputs: &'a mut SinkInputs, is_rewrited: &'a mut bool) -> Self {
+        Self {
+            sink_inputs,
+            is_rewrited,
+        }
+    }
+}
+
+impl<'a> TreeNodeRewriter for SinkInputRewriter<'a> {
+    type Node = LogicalPlan;
+
+    fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+        if let LogicalPlan::Extension(extension) = &node {
+            if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
+                if let Some(named_node) = sink_node.node_name() {
+                    if let Some(inputs) = self.sink_inputs.remove(&named_node) {
+                        let extension = LogicalPlan::Extension(Extension {
+                            node: sink_node.with_exprs_and_inputs(vec![], inputs)?,
+                        });
+                        return Ok(Transformed::new(extension, true, TreeNodeRecursion::Jump));
+                    } else {
+                        *self.is_rewrited = true;
+                    }
+                }
+            }
+        }
         Ok(Transformed::no(node))
     }
 }

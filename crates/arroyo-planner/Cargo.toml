@@ -3,7 +3,6 @@ name = "arroyo-df"
 version = "0.13.0-dev"
 edition = "2021"
 
-
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = {path = "../arroyo-rpc"}
