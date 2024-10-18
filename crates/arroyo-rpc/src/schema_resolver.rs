@@ -8,6 +8,7 @@ use base64::write::EncoderWriter;
 use futures::future;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Client, StatusCode, Url};
 use serde::de::DeserializeOwned;
@@ -346,9 +347,10 @@ impl ConfluentSchemaRegistry {
     }
 
     fn subject_endpoint(&self, subject: &str) -> anyhow::Result<Url> {
+        let encoded_subject = percent_encode(subject.as_bytes(), NON_ALPHANUMERIC).to_string();
         self.client
             .endpoint
-            .join(&format!("subjects/{}/versions/", subject))
+            .join(&format!("subjects/{}/versions/", encoded_subject))
             .map_err(|e| {
                 anyhow!(
                     "'{}' is not a valid schema registry endpoint: {}",
