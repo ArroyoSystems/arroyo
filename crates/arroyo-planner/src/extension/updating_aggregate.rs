@@ -9,6 +9,7 @@ use std::time::Duration;
 use datafusion::functions_aggregate::first_last::first_value;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::prelude::{named_struct, r#struct};
+use datafusion::scalar::ScalarValue;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use crate::builder::{NamedNode, Planner, SplitPlanOutput};
 
@@ -113,10 +114,14 @@ impl ArroyoExtension for UpdatingAggregateExtension {
                 .iter()
                 .map(|&i| col(input_schema.schema.field(i).name()))
                 .collect();
-            let hash_expr = Expr::ScalarFunction(ScalarFunction {
-                func: multi_hash(),
-                args: key_exprs,
-            });
+            let hash_expr = if key_exprs.is_empty() {
+                Expr::Literal(ScalarValue::FixedSizeBinary(16, Some(vec![0; 16])))
+            } else {
+                Expr::ScalarFunction(ScalarFunction {
+                    func: multi_hash(),
+                    args: key_exprs,
+                })
+            };
 
             let updating_meta_expr = named_struct(vec![
                 lit("is_retract"),
@@ -139,9 +144,6 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             mut finish_plan,
         } = planner.split_physical_plan(self.key_fields.clone(), &plan, false)?;
 
-        // create new partial schema with updating_meta field
-        println!("PArtial schema {:?}", partial_schema);
-
         let mut state_fields = partial_schema.schema.fields().to_vec();
         state_fields[partial_schema.timestamp_index] = Arc::new(Field::new(
             TIMESTAMP_FIELD,
@@ -158,8 +160,6 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             self.key_fields.clone(),
         );
 
-        println!("State partial schema {:?}", state_partial_schema);
-
         let mut state_final_fields = self
             .aggregate
             .schema()
@@ -168,7 +168,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             .cloned()
             .collect::<Vec<_>>();
         
-        state_final_fields.insert(state_final_fields.len() - 1, updating_meta_field());
+        state_final_fields.insert(self.key_fields.len(), updating_meta_field());
         
         let timestamp_index = state_final_fields.len() - 1;
         state_final_fields[timestamp_index] = Arc::new(Field::new(
@@ -184,8 +184,6 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             timestamp_index,
             self.key_fields.clone(),
         );
-
-        println!("Final schema: {:?}", state_final_schema);
 
         let Some(PhysicalPlanType::Aggregate(aggregate)) = finish_plan.physical_plan_type.as_ref()
         else {

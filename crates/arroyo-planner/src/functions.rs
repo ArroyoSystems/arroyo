@@ -118,7 +118,7 @@ fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
 // Hash function that can take any number of arguments and produces a fast (non-cryptographic)
 // 128-bit hash from their string representations
 #[derive(Debug)]
-struct MultiHashFunction {
+pub struct MultiHashFunction {
     signature: Signature,
 }
 
@@ -149,6 +149,8 @@ impl ScalarUDFImpl for MultiHashFunction {
 
     fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
         let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+        
+        let all_scalar = args.iter().all(|a| matches!(a, ColumnarValue::Scalar(_)));
 
         let length = args.iter().map(|t| match t {
             ColumnarValue::Scalar(_) => 1,
@@ -166,15 +168,22 @@ impl ScalarUDFImpl for MultiHashFunction {
             .collect::<Result<Vec<_>>>()?;
         let rows = row_builder.convert_columns(&arrays)?;
         
-        let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
-
-        for row in rows.iter() {
-            hasher.update(row.as_ref());
-            builder.append_value(hasher.digest128().to_be_bytes())?;
+        if all_scalar {
+            hasher.update(rows.row(0).as_ref());
+            let result = hasher.digest128().to_be_bytes().to_vec();
             hasher.reset();
+            Ok(ColumnarValue::Scalar(ScalarValue::FixedSizeBinary(size_of::<u128>() as i32, Some(result))))
+        } else {
+            let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
+
+            for row in rows.iter() {
+                hasher.update(row.as_ref());
+                builder.append_value(hasher.digest128().to_be_bytes())?;
+                hasher.reset();
+            }
+
+            Ok(ColumnarValue::Array(Arc::new(builder.finish())))
         }
-        
-        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
     }
 }
 

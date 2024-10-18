@@ -334,6 +334,8 @@ async fn run_pipeline_and_assert_outputs(
     )
     .await;
 
+    panic!("blah");
+    
     set_internal_parallelism(&mut graph, 2);
 
     run_and_checkpoint(
@@ -381,17 +383,31 @@ async fn run_completely(
     }
 }
 
-// return the inner value and whether it is a retract
-fn decode_debezium(value: &Value) -> Result<(Value, bool)> {
-    if !is_debezium(value) {
-        bail!("not a debezium record");
+fn merge_debezium(rows: Vec<Value>) -> HashSet<String> {
+    let mut state = HashSet::new();
+    for r in rows {
+        let before = r.get("before").map(|t| roundtrip(t));
+        let after = r. get("after").map(|t| roundtrip(t));
+        let op = r.get("op").expect("no 'op' for debezium");
+            
+        match op.as_str().expect("op isn't string") {
+            "c" => {
+                assert!(state.insert(after.expect("no after for c")), "'c' for existing row");                
+            }
+            "u" => {
+                assert!(state.remove(&before.expect("no before for 'u'")), "'u' for non-existent row");
+                assert!(state.insert(after.expect("no after for 'u'")), "'u' overwrote existing row");
+            }
+            "d" => {
+                assert!(state.remove(&before.expect("no 'before' for 'd'")), "'d' for non-existent row");
+            }
+            c=> {
+                panic!("unknown debezium op '{}'", c);
+            }
+        }
     }
-    let op = value.get("op").unwrap().as_str().unwrap();
-    match op {
-        "c" => Ok((value.get("after").unwrap().clone(), false)),
-        "d" => Ok((value.get("before").unwrap().clone(), true)),
-        _ => bail!("unknown op {}", op),
-    }
+    
+    state
 }
 
 fn is_debezium(value: &Value) -> bool {
@@ -402,39 +418,24 @@ fn is_debezium(value: &Value) -> bool {
 }
 
 fn check_debezium(
+    name: &str,
     output_location: String,
     golden_output_location: String,
     output_lines: Vec<Value>,
     golden_output_lines: Vec<Value>,
 ) {
-    let output_deduped = dedup_debezium(output_lines);
-    let golden_output_deduped = dedup_debezium(golden_output_lines);
+    let output_merged = merge_debezium(output_lines);
+    let golden_output_medged = merge_debezium(golden_output_lines);
     assert_eq!(
-        output_deduped, golden_output_deduped,
-        "failed to check debezium equality for\noutput: {}\ngolden: {}",
-        output_location, golden_output_location
+        output_merged, golden_output_medged,
+        "failed to check debezium equality ({}) for\noutput: {}\ngolden: {}",
+        name, output_location, golden_output_location
     );
 }
-
-fn dedup_debezium(values: Vec<Value>) -> HashMap<String, i64> {
-    let mut deduped = HashMap::new();
-    for value in &values {
-        let (row_data, value) = decode_debezium(value).unwrap();
-        let row_data_str = roundtrip(&row_data);
-        let count = deduped.entry(row_data_str.clone()).or_insert(0);
-        if value {
-            *count -= 1;
-        } else {
-            *count += 1;
-        }
-        if *count == 0 {
-            deduped.remove(&row_data_str);
-        }
-    }
-    deduped
-}
-
 fn roundtrip(v: &Value) -> String {
+    if v.is_null() {
+        return "null".to_string();
+    }
     // round trip string through a btreemap to get consistent key ordering
     serde_json::to_string(&serde_json::from_value::<BTreeMap<String, Value>>(v.clone()).unwrap())
         .unwrap()
@@ -476,6 +477,7 @@ async fn check_output_files(
         };
         if is_debezium(first_output) {
             check_debezium(
+                check_name,
                 output_location,
                 golden_output_location,
                 output_lines,

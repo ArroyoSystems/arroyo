@@ -11,7 +11,7 @@ use std::{
     sync::{Arc, RwLock},
     task::{Context, Poll},
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use arrow_array::{array, Array, BooleanArray, NullArray, PrimitiveArray, RecordBatch, StringArray, StructArray, UInt64Array};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::common::{
@@ -32,11 +32,8 @@ use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
     arroyo_exec_node, ArroyoExecNode, DebeziumEncodeNode, MemExecNode, UnnestExecNode,
 };
-use arroyo_rpc::{grpc::api::{arroyo_exec_node::Node, DebeziumDecodeNode}, UPDATING_META_FIELD, TIMESTAMP_FIELD, updating_meta_field};
-use datafusion::logical_expr::{
-    ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, Signature,
-    TypeSignature, Volatility,
-};
+use arroyo_rpc::{grpc::api::{arroyo_exec_node::Node, DebeziumDecodeNode}, UPDATING_META_FIELD, TIMESTAMP_FIELD, updating_meta_field, updating_meta_fields};
+use datafusion::logical_expr::{ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion::physical_plan::{ExecutionMode, PlanProperties};
@@ -47,9 +44,13 @@ use futures::{
 };
 use prost::Message;
 use std::fmt::Debug;
-use arrow_array::types::UInt64Type;
+use std::time::SystemTime;
+use arrow_array::builder::{ArrayBuilder, FixedSizeBinaryBuilder};
+use arrow_array::types::{TimestampNanosecondType, UInt64Type};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing_subscriber::fmt::time;
+use crate::functions::{multi_hash, MultiHashFunction};
 
 pub fn window_function(columns: &[ColumnarValue]) -> Result<ColumnarValue> {
     if columns.len() != 2 {
@@ -861,8 +862,9 @@ impl DebeziumUnrollingStream {
 
         let num_rows = batch.num_rows();
         let combined_array = concat(&[before, after])?;
-        let mut take_indices = UInt32Builder::with_capacity(2 * num_rows);
-        let mut is_retract_builder = BooleanBuilder::with_capacity(2 * num_rows);
+        let mut take_indices = UInt32Builder::with_capacity(num_rows);
+        let mut is_retract_builder = BooleanBuilder::with_capacity(num_rows);
+        
         let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(2 * num_rows);
         for i in 0..num_rows {
             let op = op.value(i);
@@ -895,8 +897,17 @@ impl DebeziumUnrollingStream {
         }
         let take_indices = take_indices.finish();
         let unrolled_array = take(&combined_array, &take_indices, None)?;
+        
         let mut columns = unrolled_array.as_struct().columns().to_vec();
-        columns.push(Arc::new(is_retract_builder.finish()));
+        
+        let hash = MultiHashFunction::default()
+            .invoke(&columns.iter().map(|c| ColumnarValue::Array(c.clone())).collect::<Vec<_>>())?;
+        let ColumnarValue::Array(ids) = hash else {
+            unreachable!();
+        };
+        
+        let meta = StructArray::try_new(updating_meta_fields(), vec![Arc::new(is_retract_builder.finish()), ids], None)?;
+        columns.push(Arc::new(meta));
         columns.push(Arc::new(timestamp_builder.finish()));
         Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
     }
@@ -1030,6 +1041,7 @@ impl ExecutionPlan for ToDebeziumExec {
                     && *index != timestamp_index
             })
             .collect();
+
         Ok(Box::pin(ToDebeziumStream {
             input: self.input.execute(partition, context)?,
             schema: self.schema.clone(),
@@ -1055,7 +1067,7 @@ struct ToDebeziumStream {
 impl ToDebeziumStream {
     fn as_debezium_batch(&mut self, batch: &RecordBatch) -> Result<RecordBatch> {
         let value_struct = batch.project(&self.struct_projection)?;
-        let timestamp_column = batch.column(self.timestamp_index).clone();
+        let timestamps = batch.column(self.timestamp_index).as_primitive::<TimestampNanosecondType>();
 
         let columns: Vec<Arc<dyn Array>> = if let Some(metadata_index) = self.updating_meta_index {
             let metadata = batch
@@ -1072,43 +1084,53 @@ impl ToDebeziumStream {
                 .column(1)
                 .as_fixed_size_binary();
 
-            // mapping is (first idx, last idx, has create)
-            let mut id_map: HashMap<&[u8], (usize, usize, bool)> = HashMap::new();
+            // (first idx, last idx, has create, latest time)
+            let mut id_map: HashMap<&[u8], (usize, usize, bool, i64)> = HashMap::new();
+            let mut order = vec![];
             for i in 0..batch.num_rows() {
                 let row_id = id.value(i);
                 let is_retract = is_retract.value(i);
+                let timestamp = timestamps.value(i);
+                
                 id_map
                     .entry(row_id)
                     .and_modify(|e| {
                         e.1 = i;
                         e.2 |= !is_retract;
+                        e.3 = e.3.max(timestamp);
                     })
-                    .or_insert((i, i, !is_retract));
+                    .or_insert_with(|| {
+                        order.push(row_id);                        
+                        (i, i, !is_retract, timestamp)
+                    });
             }
 
             let mut before = Vec::with_capacity(id_map.len());
             let mut after = Vec::with_capacity(id_map.len());
             let mut op = Vec::with_capacity(id_map.len());
+            let mut ts = TimestampNanosecondBuilder::with_capacity(id_map.len());
 
-            for (_, (first_idx, last_idx, has_create)) in id_map {
+            for row_id in order {
+                let (first_idx, last_idx, has_create, timestamp) = id_map.get(row_id).unwrap();
                 if first_idx == last_idx {
-                    if has_create {
+                    if *has_create {
                         // Single append
                         before.push(None);
-                        after.push(Some(last_idx));
+                        after.push(Some(*last_idx));
                         op.push("c");
                     } else {
                         // Single retract
-                        before.push(Some(first_idx));
+                        before.push(Some(*first_idx));
                         after.push(None);
                         op.push("d");
                     }
                 } else {
                     // Update
-                    before.push(Some(first_idx));
-                    after.push(Some(last_idx));
+                    before.push(Some(*first_idx));
+                    after.push(Some(*last_idx));
                     op.push("u");
                 }
+                ts.append_value(*timestamp);
             }
 
             let before_array = Self::create_output_array(&value_struct, &before)?;
@@ -1119,7 +1141,7 @@ impl ToDebeziumStream {
                 Arc::new(before_array),
                 Arc::new(after_array),
                 Arc::new(op_array),
-                timestamp_column,
+                Arc::new(ts.finish()),
             ]
         } else {
             // Append-only
@@ -1129,11 +1151,14 @@ impl ToDebeziumStream {
                 None,
             )?;
 
+            let before_array = StructArray::new_null(value_struct.schema().fields().clone(),
+                                                     value_struct.num_rows());
+
             vec![
-                Arc::new(NullArray::new(value_struct.num_rows())),
+                Arc::new(before_array),
                 Arc::new(after_array),
                 Arc::new(StringArray::from(vec!["c"; value_struct.num_rows()])),
-                timestamp_column,
+                batch.column(self.timestamp_index).clone(),
             ]
         };
 

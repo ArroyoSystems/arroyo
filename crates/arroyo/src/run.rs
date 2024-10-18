@@ -391,7 +391,10 @@ pub async fn run(args: RunArgs) {
             c.api.http_port = 0;
         }
         c.controller.rpc_port = 0;
-        c.controller.scheduler = Scheduler::Process;
+        
+        if c.controller.scheduler != Scheduler::Embedded {
+            c.controller.scheduler = Scheduler::Process;
+        }
 
         c.pipeline.default_sink = DefaultSink::Stdout;
     });
