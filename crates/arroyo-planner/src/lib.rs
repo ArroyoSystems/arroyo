@@ -194,7 +194,18 @@ impl ArroyoSchemaProvider {
                 )
             }),
         );
-
+        // Registering kafka connector metadata function
+        functions.insert(
+            "metadata".to_string(),
+            Arc::new(create_udf(
+                "metadata",
+                vec![DataType::Utf8],
+                Arc::new(DataType::Utf8),
+                Volatility::Volatile,
+                #[allow(deprecated)]
+                make_scalar_function(fn_impl),
+            )),
+        );
         let mut registry = Self {
             functions,
             ..Default::default()
