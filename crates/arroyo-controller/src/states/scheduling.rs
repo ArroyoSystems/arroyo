@@ -202,7 +202,7 @@ impl Scheduling {
                         self,
                         "encountered error during scheduling",
                         anyhow::anyhow!("scheduling error: {}", s),
-                        10,
+                        20,
                     ));
                 }
             }
@@ -358,7 +358,7 @@ impl State for Scheduling {
                 })?;
 
             if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
-                return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 10));
+                return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 20));
             }
             metadata.min_epoch = min_epoch;
             if needs_commits {
@@ -524,7 +524,7 @@ impl State for Scheduling {
                         }
                         Some(JobMessage::RunningMessage(RunningMessage::TaskFailed {worker_id, operator_id, subtask_index, reason})) => {
                             return Err(ctx.retryable(self, "task failed on startup",
-                                anyhow!("task failed on job startup on {:?}: {}:{}: {}", worker_id, operator_id, subtask_index, reason), 10));
+                                anyhow!("task failed on job startup on {:?}: {}:{}: {}", worker_id, operator_id, subtask_index, reason), 20));
                         }
                         Some(JobMessage::ConfigUpdate(c)) => {
                             stop_if_desired_non_running!(self, &c);

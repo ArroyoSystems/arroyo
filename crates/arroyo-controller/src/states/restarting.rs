@@ -23,7 +23,7 @@ impl State for Restarting {
         match self.mode {
             RestartMode::safe => {
                 if let Err(e) = job_controller.checkpoint(true).await {
-                    return Err(ctx.retryable(self, "failed to initiate final checkpoint", e, 10));
+                    return Err(ctx.retryable(self, "failed to initiate final checkpoint", e, 20));
                 }
 
                 loop {
@@ -38,7 +38,7 @@ impl State for Restarting {
                                 self,
                                 "failed while monitoring final checkpoint",
                                 e,
-                                10,
+                                20,
                             ));
                         }
                     }
@@ -50,7 +50,7 @@ impl State for Restarting {
                                     self,
                                     "failed while waiting for job finish",
                                     e,
-                                    10,
+                                    20,
                                 ));
                             }
                         }
@@ -73,7 +73,7 @@ impl State for Restarting {
             }
             RestartMode::force => {
                 if let Err(e) = Recovering::cleanup(ctx).await {
-                    return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 10));
+                    return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 20));
                 }
 
                 Ok(Transition::next(*self, Scheduling {}))

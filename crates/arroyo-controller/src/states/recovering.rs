@@ -93,7 +93,7 @@ impl State for Recovering {
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         // tear down the existing cluster
         if let Err(e) = Self::cleanup(ctx).await {
-            return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 10));
+            return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 20));
         }
 
         Ok(Transition::next(*self, Compiling))

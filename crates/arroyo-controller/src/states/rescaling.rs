@@ -28,7 +28,7 @@ impl State for Rescaling {
                         self,
                         "failed while monitoring final checkpoint",
                         e,
-                        10,
+                        20,
                     ));
                 }
             }
@@ -41,7 +41,7 @@ impl State for Rescaling {
                             self,
                             "failed to initiate final checkpoint",
                             e,
-                            10,
+                            20,
                         ));
                     }
                 }
@@ -54,7 +54,7 @@ impl State for Rescaling {
                             self,
                             "failed while waiting for job finish",
                             e,
-                            10,
+                            20,
                         ));
                     }
                 }

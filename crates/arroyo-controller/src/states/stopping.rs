@@ -30,7 +30,7 @@ impl State for Stopping {
         match (ctx.job_controller.as_mut(), self.stop_mode) {
             (Some(job_controller), StopBehavior::StopJob(stop_mode)) => {
                 if let Err(e) = job_controller.stop_job(stop_mode).await {
-                    return Err(ctx.retryable(self, "failed while stopping job", e, 10));
+                    return Err(ctx.retryable(self, "failed while stopping job", e, 20));
                 }
 
                 info!(

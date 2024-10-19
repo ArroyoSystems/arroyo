@@ -36,7 +36,7 @@ impl State for CheckpointStopping {
                         self,
                         "failed while monitoring final checkpoint",
                         e,
-                        10,
+                        20,
                     ));
                 }
             }
@@ -49,7 +49,7 @@ impl State for CheckpointStopping {
                             self,
                             "failed to initiate final checkpoint",
                             e,
-                            10,
+                            20,
                         ));
                     }
                 }
@@ -62,7 +62,7 @@ impl State for CheckpointStopping {
                             self,
                             "failed while waiting for job finish",
                             e,
-                            10,
+                            20,
                         ));
                     }
                 }
