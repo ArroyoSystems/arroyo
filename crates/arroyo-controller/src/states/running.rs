@@ -76,7 +76,7 @@ impl State for Running {
                         }
                         Some(JobMessage::RunningMessage(msg)) => {
                             if let Err(e) = ctx.job_controller.as_mut().unwrap().handle_message(msg).await {
-                                return Err(ctx.retryable(self, "job encountered an error", e, 20));
+                                return Err(ctx.retryable(self, "job encountered an error", e, 10));
                             }
                         }
                         Some(msg) => {

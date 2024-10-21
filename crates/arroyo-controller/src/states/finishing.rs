@@ -19,7 +19,7 @@ impl State for Finishing {
             .wait_for_finish(ctx.rx)
             .await
         {
-            return Err(ctx.retryable(self, "failed while waiting for job to finish", e, 20));
+            return Err(ctx.retryable(self, "failed while waiting for job to finish", e, 10));
         }
 
         Ok(Transition::next(*self, Finished {}))
