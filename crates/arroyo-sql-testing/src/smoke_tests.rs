@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
@@ -80,7 +80,7 @@ async fn run_smoketest(path: &Path) {
         correctness_run_codegen(
             test_name,
             query.clone(),
-            pk.as_ref().map(|c| c.as_slice()),
+            pk.as_deref(),
             20,
         )
         .await,
@@ -423,8 +423,8 @@ fn get_key(v: &str, primary_keys: Option<&[&str]>) -> Vec<String> {
 fn merge_debezium(rows: Vec<Value>, primary_keys: Option<&[&str]>) -> HashSet<String> {
     let mut state = HashMap::new();
     for r in rows {
-        let before = r.get("before").map(|t| roundtrip(t));
-        let after = r.get("after").map(|t| roundtrip(t));
+        let before = r.get("before").map(roundtrip);
+        let after = r.get("after").map(roundtrip);
         let op = r.get("op").expect("no 'op' for debezium");
 
         match op.as_str().expect("op isn't string") {
@@ -442,7 +442,7 @@ fn merge_debezium(rows: Vec<Value>, primary_keys: Option<&[&str]>) -> HashSet<St
                     "'u' for non-existent row ({})",
                     r
                 );
-                let key = get_key(&after.as_ref().expect("no after for 'u'"), primary_keys);
+                let key = get_key(after.as_ref().expect("no after for 'u'"), primary_keys);
                 assert!(
                     state
                         .insert(key, after.expect("no after for 'u'"))

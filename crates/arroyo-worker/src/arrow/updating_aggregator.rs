@@ -29,7 +29,6 @@ use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
-use datafusion::physical_plan::displayable;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::{lock::Mutex, Future};

@@ -3,7 +3,7 @@ use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
 use arrow_array::cast::{as_string_array, AsArray};
 use arrow_array::types::{Float64Type, Int64Type};
-use arrow_array::{Array, ArrayRef, StringArray, UInt64Array, UnionArray};
+use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
 use arrow_schema::{DataType, Field, UnionFields, UnionMode};
 use datafusion::common::{DataFusionError, ScalarValue};
 use datafusion::common::{Result, TableReference};

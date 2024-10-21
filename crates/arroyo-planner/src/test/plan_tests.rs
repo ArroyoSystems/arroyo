@@ -57,10 +57,8 @@ async fn validate_query(path: &Path) {
                 err
             );
         }
-    } else {
-        if let Err(e) = result {
-            println!("{}", e.to_string());
-            panic!("{}", e);
-        }
+    } else if let Err(e) = result {
+        println!("{}", e);
+        panic!("{}", e);
     }
 }

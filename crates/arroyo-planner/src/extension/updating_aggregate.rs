@@ -5,15 +5,13 @@ use arroyo_rpc::{
     df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, updating_meta_field, TIMESTAMP_FIELD,
     UPDATING_META_FIELD,
 };
-use datafusion::common::{plan_err, DFSchema, DFSchemaRef, Result, TableReference};
-use datafusion::functions_aggregate::first_last::first_value;
+use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    col, lit, AggregateFunction, Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore,
+    col, lit, Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore,
 };
-use datafusion::prelude::{named_struct, r#struct};
+use datafusion::prelude::named_struct;
 use datafusion::scalar::ScalarValue;
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::protobuf::{
     physical_plan_node::PhysicalPlanType, PhysicalExprNode, PhysicalPlanNode,
 };
@@ -22,7 +20,6 @@ use std::time::Duration;
 
 use super::{ArroyoExtension, IsRetractExtension, NodeWithIncomingEdges};
 use crate::functions::multi_hash;
-use crate::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::config::config;
 use prost::Message;
 

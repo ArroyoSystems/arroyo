@@ -1,11 +1,11 @@
 use arrow::{
     array::{AsArray, BooleanBuilder, TimestampNanosecondBuilder, UInt32Builder},
-    buffer::{BooleanBuffer, NullBuffer},
-    compute::{concat, kernels::zip, not, take},
+    buffer::NullBuffer,
+    compute::{concat, take},
 };
 use arrow_array::{
-    array, Array, ArrayAccessor, BooleanArray, NullArray, PrimitiveArray, RecordBatch, StringArray,
-    StructArray, UInt64Array,
+    array, Array, PrimitiveArray, RecordBatch, StringArray,
+    StructArray,
 };
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::common::{
@@ -20,7 +20,7 @@ use datafusion::{
         DisplayAs, ExecutionPlan, Partitioning,
     },
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::{
     any::Any,
     mem,
@@ -29,11 +29,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::functions::{multi_hash, MultiHashFunction};
+use crate::functions::MultiHashFunction;
 use crate::register_functions;
 use crate::rewriters::UNNESTED_COL;
-use arrow_array::builder::{ArrayBuilder, FixedSizeBinaryBuilder};
-use arrow_array::types::{Int32Type, TimestampNanosecondType, UInt64Type};
+use arrow_array::types::{TimestampNanosecondType, UInt64Type};
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
     arroyo_exec_node, ArroyoExecNode, DebeziumEncodeNode, MemExecNode, UnnestExecNode,
@@ -56,10 +55,8 @@ use futures::{
 };
 use prost::Message;
 use std::fmt::Debug;
-use std::time::SystemTime;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing_subscriber::fmt::time;
 
 pub fn window_function(columns: &[ColumnarValue]) -> Result<ColumnarValue> {
     if columns.len() != 2 {
@@ -374,7 +371,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                 node: Some(arroyo_exec_node::Node::DebeziumDecode(DebeziumDecodeNode {
                     schema: serde_json::to_string(&decode.schema).unwrap(),
                     primary_keys: (*decode.primary_keys)
-                        .into_iter()
+                        .iter()
                         .map(|c| *c as u64)
                         .collect(),
                 })),
@@ -864,13 +861,6 @@ impl DebeziumUnrollingStream {
         let op_index = input_schema.index_of("op")?;
         let timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
 
-        let unrolled_schema =
-            if let DataType::Struct(fields) = input_schema.field(before_index).data_type() {
-                fields
-            } else {
-                return plan_err!("before schema is not a struct");
-            };
-
         Ok(Self {
             input,
             schema,
@@ -1106,13 +1096,6 @@ struct ToDebeziumStream {
     updating_meta_index: Option<usize>,
     timestamp_index: usize,
     struct_projection: Vec<usize>,
-}
-
-#[derive(Debug, Copy, Clone)]
-enum Op {
-    Create,
-    Update,
-    Delete,
 }
 
 impl ToDebeziumStream {

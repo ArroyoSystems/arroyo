@@ -115,7 +115,7 @@ impl DebeziumUnrollingExtension {
         // get the primary keys
         let primary_key_idx = primary_keys
             .iter()
-            .map(|pk| fields.find(pk).map(|((i, _))| i))
+            .map(|pk| fields.find(pk).map(|(i, _)| i))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| {
                 DataFusionError::Plan("primary key field not found in Debezium schema".to_string())
