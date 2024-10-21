@@ -877,6 +877,7 @@ dependencies = [
  "k8s-openapi",
  "log",
  "nanoid",
+ "percent-encoding",
  "prost 0.12.4",
  "prost-reflect 0.13.1",
  "rand 0.8.5",
