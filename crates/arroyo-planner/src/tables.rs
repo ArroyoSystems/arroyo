@@ -313,10 +313,12 @@ impl ConnectorTable {
             );
         }
 
-        if table.connection_type == ConnectionType::Source && table.is_updating() && primary_keys.is_empty() {
+        if table.connection_type == ConnectionType::Source
+            && table.is_updating()
+            && primary_keys.is_empty()
+        {
             return plan_err!("Debezium source must have at least one PRIMARY KEY field");
         }
-
 
         table.primary_keys = Arc::new(primary_keys);
 
@@ -596,10 +598,17 @@ impl Table {
             let connector = with_map.remove("connector");
             let fields = Self::schema_from_columns(columns, schema_provider)?;
 
-            let primary_keys = columns.iter()
+            let primary_keys = columns
+                .iter()
                 .filter(|c| {
                     c.options.iter().any(|opt| {
-                        matches!(opt.option, ColumnOption::Unique { is_primary: true, ..} )
+                        matches!(
+                            opt.option,
+                            ColumnOption::Unique {
+                                is_primary: true,
+                                ..
+                            }
+                        )
                     })
                 })
                 .map(|c| c.name.value.clone())

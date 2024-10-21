@@ -62,8 +62,28 @@ async fn run_smoketest(path: &Path) {
             .1
             .trim()
     });
+
+    let pk = query.starts_with("--pk=").then(|| {
+        query
+            .lines()
+            .next()
+            .unwrap()
+            .split_once('=')
+            .unwrap()
+            .1
+            .trim()
+            .split(',')
+            .collect::<Vec<_>>()
+    });
+
     match (
-        correctness_run_codegen(test_name, query.clone(), 20).await,
+        correctness_run_codegen(
+            test_name,
+            query.clone(),
+            pk.as_ref().map(|c| c.as_slice()),
+            20,
+        )
+        .await,
         fail,
     ) {
         (Ok(_), false) => {
@@ -317,6 +337,7 @@ async fn run_pipeline_and_assert_outputs(
     output_location: String,
     golden_output_location: String,
     udfs: &[LocalUdf],
+    primary_keys: Option<&[&str]>,
 ) {
     // remove output_location before running the pipeline
     if std::path::Path::new(&output_location).exists() {
@@ -331,6 +352,7 @@ async fn run_pipeline_and_assert_outputs(
         get_program(&graph),
         output_location.clone(),
         golden_output_location.clone(),
+        primary_keys,
     )
     .await;
 
@@ -351,6 +373,7 @@ async fn run_pipeline_and_assert_outputs(
         "resuming from checkpointing",
         output_location,
         golden_output_location,
+        primary_keys,
     )
     .await;
 }
@@ -360,6 +383,7 @@ async fn run_completely(
     program: Program,
     output_location: String,
     golden_output_location: String,
+    primary_keys: Option<&[&str]>,
 ) {
     let engine = Engine::for_local(program, job_id.to_string());
     let (running_engine, mut control_rx) = engine
@@ -374,6 +398,7 @@ async fn run_completely(
         "initial run",
         output_location.clone(),
         golden_output_location,
+        primary_keys,
     )
     .await;
     if std::path::Path::new(&output_location).exists() {
@@ -381,31 +406,66 @@ async fn run_completely(
     }
 }
 
-fn merge_debezium(rows: Vec<Value>) -> HashSet<String> {
-    let mut state = HashSet::new();
+fn get_key(v: &str, primary_keys: Option<&[&str]>) -> Vec<String> {
+    let v: Value = serde_json::from_str(v).unwrap();
+
+    match primary_keys {
+        Some(pks) => pks
+            .iter()
+            .map(|pk| v.get(pk).expect("primary key not found in row").to_string())
+            .collect::<Vec<_>>(),
+        None => {
+            vec![v.to_string()]
+        }
+    }
+}
+
+fn merge_debezium(rows: Vec<Value>, primary_keys: Option<&[&str]>) -> HashSet<String> {
+    let mut state = HashMap::new();
     for r in rows {
         let before = r.get("before").map(|t| roundtrip(t));
-        let after = r. get("after").map(|t| roundtrip(t));
+        let after = r.get("after").map(|t| roundtrip(t));
         let op = r.get("op").expect("no 'op' for debezium");
 
         match op.as_str().expect("op isn't string") {
             "c" => {
-                assert!(state.insert(after.expect("no after for c")), "'c' for existing row");
+                let key = get_key(after.as_ref().expect("no after for c"), primary_keys);
+                assert!(
+                    state.insert(key, after.expect("no after for c")).is_none(),
+                    "'c' for existing row"
+                );
             }
             "u" => {
-                assert!(state.remove(&before.expect("no before for 'u'")), "'u' for non-existent row ({})", r);
-                assert!(state.insert(after.expect("no after for 'u'")), "'u' overwrote existing row");
+                let key = get_key(&before.expect("no before for 'u'"), primary_keys);
+                assert!(
+                    state.remove(&key).is_some(),
+                    "'u' for non-existent row ({})",
+                    r
+                );
+                let key = get_key(&after.as_ref().expect("no after for 'u'"), primary_keys);
+                assert!(
+                    state
+                        .insert(key, after.expect("no after for 'u'"))
+                        .is_none(),
+                    "'u' overwrote existing row"
+                );
             }
             "d" => {
-                assert!(state.remove(&before.expect("no 'before' for 'd'")), "'d' for non-existent row");
+                let key = get_key(&before.expect("no before for 'd'"), primary_keys);
+                assert!(
+                    state.remove(&key).is_some(),
+                    "'d' for non-existent row: {} ({:?})",
+                    r,
+                    primary_keys
+                );
             }
-            c=> {
+            c => {
                 panic!("unknown debezium op '{}'", c);
             }
         }
     }
 
-    state
+    state.into_values().collect()
 }
 
 fn is_debezium(value: &Value) -> bool {
@@ -421,9 +481,10 @@ fn check_debezium(
     golden_output_location: String,
     output_lines: Vec<Value>,
     golden_output_lines: Vec<Value>,
+    primary_keys: Option<&[&str]>,
 ) {
-    let output_merged = merge_debezium(output_lines);
-    let golden_output_medged = merge_debezium(golden_output_lines);
+    let output_merged = merge_debezium(output_lines, primary_keys);
+    let golden_output_medged = merge_debezium(golden_output_lines, primary_keys);
     assert_eq!(
         output_merged, golden_output_medged,
         "failed to check debezium equality ({}) for\noutput: {}\ngolden: {}",
@@ -443,6 +504,7 @@ async fn check_output_files(
     check_name: &str,
     output_location: String,
     golden_output_location: String,
+    primary_keys: Option<&[&str]>,
 ) {
     let mut output_lines: Vec<Value> = read_to_string(output_location.clone())
         .await
@@ -480,6 +542,7 @@ async fn check_output_files(
                 golden_output_location,
                 output_lines,
                 golden_output_lines,
+                primary_keys,
             );
             return;
         }
@@ -512,6 +575,7 @@ async fn check_output_files(
 pub async fn correctness_run_codegen(
     test_name: impl Into<String>,
     query: impl Into<String>,
+    primary_keys: Option<&[&str]>,
     checkpoint_interval: i32,
 ) -> Result<()> {
     let test_name = test_name.into();
@@ -558,6 +622,7 @@ pub async fn correctness_run_codegen(
         physical_output,
         golden_output_location,
         &udfs,
+        primary_keys,
     )
     .await;
     Ok(())

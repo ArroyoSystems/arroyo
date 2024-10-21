@@ -218,25 +218,29 @@ pub const UPDATING_META_FIELD: &str = "_updating_meta";
 
 pub fn updating_meta_fields() -> Fields {
     static UPDATING_META_FIELDS: OnceLock<Fields> = OnceLock::new();
-    
-    UPDATING_META_FIELDS.get_or_init(|| {
-        Fields::from(vec![
-            Field::new("is_retract", DataType::Boolean, true),
-            Field::new("id", DataType::FixedSizeBinary(16), true),
-        ])
-    }).clone()
+
+    UPDATING_META_FIELDS
+        .get_or_init(|| {
+            Fields::from(vec![
+                Field::new("is_retract", DataType::Boolean, true),
+                Field::new("id", DataType::FixedSizeBinary(16), true),
+            ])
+        })
+        .clone()
 }
 
 pub fn updating_meta_field() -> Arc<Field> {
     static UPDATING_META_DATATYPE: OnceLock<Arc<Field>> = OnceLock::new();
 
-    UPDATING_META_DATATYPE.get_or_init(|| {
-        Arc::new(Field::new(
-            UPDATING_META_FIELD,
-            DataType::Struct(updating_meta_fields()),
-            false,
-        ))
-    }).clone()
+    UPDATING_META_DATATYPE
+        .get_or_init(|| {
+            Arc::new(Field::new(
+                UPDATING_META_FIELD,
+                DataType::Struct(updating_meta_fields()),
+                false,
+            ))
+        })
+        .clone()
 }
 // need to handle the empty case as a row converter without sort fields emits empty Rows.
 #[derive(Debug)]

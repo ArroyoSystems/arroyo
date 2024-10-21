@@ -1,5 +1,5 @@
-use std::any::Any;
 use crate::ArroyoSchemaProvider;
+use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
 use arrow_array::cast::{as_string_array, AsArray};
 use arrow_array::types::{Float64Type, Int64Type};
@@ -9,17 +9,20 @@ use datafusion::common::{DataFusionError, ScalarValue};
 use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr::{Alias, ScalarFunction};
-use datafusion::logical_expr::{create_udf, ColumnarValue, LogicalPlan, Projection, ScalarUDFImpl, Signature, TypeSignature, Volatility};
+use datafusion::logical_expr::{
+    create_udf, ColumnarValue, LogicalPlan, Projection, ScalarUDFImpl, Signature, TypeSignature,
+    Volatility,
+};
 use datafusion::prelude::{col, Expr};
 use serde_json_path::JsonPath;
+use std::any::Any;
 use std::fmt::{Debug, Write};
 use std::sync::{Arc, OnceLock};
-use arrow::row::{RowConverter, SortField};
 
 const SERIALIZE_JSON_UNION: &str = "serialize_json_union";
 
 /// Borrowed from DataFusion
-/// 
+///
 /// Creates a singleton `ScalarUDF` of the `$UDF` function named `$GNAME` and a
 /// function named `$NAME` which returns that function named $NAME.
 ///
@@ -91,9 +94,8 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
             Arc::new(serialize_json_union),
         )))
         .unwrap();
-    
+
     registry.register_udf(multi_hash()).unwrap();
-    
 }
 
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
@@ -125,7 +127,7 @@ pub struct MultiHashFunction {
 impl Default for MultiHashFunction {
     fn default() -> Self {
         Self {
-            signature: Signature::new(TypeSignature::VariadicAny, Volatility::Immutable)
+            signature: Signature::new(TypeSignature::VariadicAny, Volatility::Immutable),
         }
     }
 }
@@ -149,32 +151,43 @@ impl ScalarUDFImpl for MultiHashFunction {
 
     fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
         let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-        
+
         let all_scalar = args.iter().all(|a| matches!(a, ColumnarValue::Scalar(_)));
 
-        let length = args.iter().map(|t| match t {
-            ColumnarValue::Scalar(_) => 1,
-            ColumnarValue::Array(a) => a.len(),
-        }).max().ok_or_else(|| DataFusionError::Plan("multi_hash must have at least one argument".to_string()))?;
-        
+        let length = args
+            .iter()
+            .map(|t| match t {
+                ColumnarValue::Scalar(_) => 1,
+                ColumnarValue::Array(a) => a.len(),
+            })
+            .max()
+            .ok_or_else(|| {
+                DataFusionError::Plan("multi_hash must have at least one argument".to_string())
+            })?;
+
         let row_builder = RowConverter::new(
             args.iter()
                 .map(|t| SortField::new(t.data_type().clone()))
-                .collect()
+                .collect(),
         )?;
 
-        let arrays = args.iter()
+        let arrays = args
+            .iter()
             .map(|c| c.clone().into_array(length))
             .collect::<Result<Vec<_>>>()?;
         let rows = row_builder.convert_columns(&arrays)?;
-        
+
         if all_scalar {
             hasher.update(rows.row(0).as_ref());
             let result = hasher.digest128().to_be_bytes().to_vec();
             hasher.reset();
-            Ok(ColumnarValue::Scalar(ScalarValue::FixedSizeBinary(size_of::<u128>() as i32, Some(result))))
+            Ok(ColumnarValue::Scalar(ScalarValue::FixedSizeBinary(
+                size_of::<u128>() as i32,
+                Some(result),
+            )))
         } else {
-            let mut builder = FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
+            let mut builder =
+                FixedSizeBinaryBuilder::with_capacity(length, size_of::<u128>() as i32);
 
             for row in rows.iter() {
                 hasher.update(row.as_ref());
@@ -186,7 +199,6 @@ impl ScalarUDFImpl for MultiHashFunction {
         }
     }
 }
-
 
 fn json_function<T, ArrayT, F, ToS>(
     name: &str,

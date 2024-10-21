@@ -8,34 +8,37 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use arrow_array::{Array, BooleanArray,  RecordBatch, StructArray};
+use arrow_array::{Array, BooleanArray, RecordBatch, StructArray};
 
+use arrow_array::cast::AsArray;
+use arrow_schema::SchemaRef;
+use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::{
     context::ArrowContext,
-    operator::{ArrowOperator, OperatorConstructor, OperatorNode, AsDisplayable, DisplayableOperator, Registry},
+    operator::{
+        ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode,
+        Registry,
+    },
 };
+use arroyo_rpc::df::ArroyoSchemaRef;
 use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
+use arroyo_rpc::{updating_meta_fields, UPDATING_META_FIELD};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
-use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_rpc::df::ArroyoSchemaRef;
 use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
+use datafusion::physical_plan::displayable;
+use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::{lock::Mutex, Future};
+use itertools::Itertools;
 use prost::Message;
 use std::time::Duration;
-use arrow_array::cast::AsArray;
-use arrow_schema::SchemaRef;
-use datafusion::physical_plan::displayable;
-use itertools::Itertools;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::log::warn;
-use arroyo_rpc::{updating_meta_fields, UPDATING_META_FIELD};
 
 pub struct UpdatingAggregatingFunc {
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
@@ -69,7 +72,6 @@ impl UpdatingAggregatingFunc {
         while let Some(batch) = flushing_exec.next().await {
             partial_batches.push(batch?);
         }
-
 
         let new_partial_batch =
             concat_batches(&self.state_partial_schema.schema, &partial_batches)?;
@@ -129,10 +131,9 @@ impl UpdatingAggregatingFunc {
         let mut batches_to_write = vec![];
 
         let out_schema = ctx.out_schema.as_ref().unwrap().schema.clone();
-        
+
         while let Some(results) = final_exec.next().await {
             let results = results?;
-            println!("batch: {:?}", results);
             let renamed_results = RecordBatch::try_new(
                 self.state_final_schema.schema.clone(),
                 results.columns().to_vec(),
@@ -141,7 +142,11 @@ impl UpdatingAggregatingFunc {
             if let Some((prior_batch, _filter)) =
                 final_output_table.get_current_matching_values(&renamed_results)?
             {
-                batches_to_write.push(Self::set_retract_metadata(out_schema.clone(), prior_batch, true)?);
+                batches_to_write.push(Self::set_retract_metadata(
+                    out_schema.clone(),
+                    prior_batch,
+                    true,
+                )?);
             }
 
             final_output_table
@@ -152,15 +157,23 @@ impl UpdatingAggregatingFunc {
             let result_batch = Self::set_retract_metadata(out_schema.clone(), results, false)?;
             batches_to_write.push(result_batch);
         }
-        
+
         if !batches_to_write.is_empty() {
-            ctx.collect(concat_batches(&batches_to_write[0].schema(), batches_to_write.iter())?).await;            
+            ctx.collect(concat_batches(
+                &batches_to_write[0].schema(),
+                batches_to_write.iter(),
+            )?)
+            .await;
         }
-        
+
         Ok(())
     }
-    
-    fn set_retract_metadata(out_schema: SchemaRef, mut batch: RecordBatch, is_retract: bool) -> Result<RecordBatch> {
+
+    fn set_retract_metadata(
+        out_schema: SchemaRef,
+        mut batch: RecordBatch,
+        is_retract: bool,
+    ) -> Result<RecordBatch> {
         let updating_idx = batch.schema().index_of(UPDATING_META_FIELD)?;
         let c = batch.remove_column(updating_idx);
         let metadata = c.as_struct();
@@ -170,11 +183,7 @@ impl UpdatingAggregatingFunc {
             Arc::new(BooleanArray::from(vec![is_retract; len])),
             metadata.column(1).clone(),
         ];
-        let metadata = Arc::new(StructArray::new(
-            updating_meta_fields(),
-            arrays,
-            None
-        ));
+        let metadata = Arc::new(StructArray::new(updating_meta_fields(), arrays, None));
 
         let mut columns = batch.columns().iter().cloned().collect_vec();
         columns.push(metadata);
@@ -276,7 +285,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
     }
 
     async fn handle_tick(&mut self, _tick: u64, ctx: &mut ArrowContext) {
-         self.flush(ctx).await.unwrap();
+        self.flush(ctx).await.unwrap();
     }
 
     async fn handle_watermark(
@@ -364,7 +373,6 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
 
         let partial_aggregation_plan =
             PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
-        
 
         // deserialize partial aggregation into execution plan with an UnboundedBatchStream source.
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
@@ -372,7 +380,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
-        
+
         let partial_schema = config
             .partial_schema
             .ok_or_else(|| anyhow!("requires partial schema"))?
@@ -384,7 +392,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
-        
+
         let finish_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
 
         let finish_execution_plan = finish_plan.try_into_physical_plan(

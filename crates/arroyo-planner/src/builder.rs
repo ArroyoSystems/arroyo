@@ -25,7 +25,9 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::runtime::Builder;
 use tokio::sync::oneshot;
 
-use crate::extension::debezium::{DebeziumUnrollingExtension, DEBEZIUM_UNROLLING_EXTENSION_NAME, TO_DEBEZIUM_EXTENSION_NAME};
+use crate::extension::debezium::{
+    DebeziumUnrollingExtension, DEBEZIUM_UNROLLING_EXTENSION_NAME, TO_DEBEZIUM_EXTENSION_NAME,
+};
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::physical::{
@@ -230,9 +232,15 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
             if arroyo_extension.transparent() {
                 match node.name() {
                     DEBEZIUM_UNROLLING_EXTENSION_NAME => {
-                        let node = node.as_any().downcast_ref::<DebeziumUnrollingExtension>().unwrap();
+                        let node = node
+                            .as_any()
+                            .downcast_ref::<DebeziumUnrollingExtension>()
+                            .unwrap();
                         let input = physical_inputs[0].clone();
-                        return Ok(Some(Arc::new(DebeziumUnrollingExec::try_new(input, node.primary_keys.clone())?)));
+                        return Ok(Some(Arc::new(DebeziumUnrollingExec::try_new(
+                            input,
+                            node.primary_keys.clone(),
+                        )?)));
                     }
                     TO_DEBEZIUM_EXTENSION_NAME => {
                         let input = physical_inputs[0].clone();

@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use arrow_schema::{DataType, Schema};
-use arroyo_rpc::{df::{ArroyoSchema, ArroyoSchemaRef}, UPDATING_META_FIELD, TIMESTAMP_FIELD, updating_meta_field};
+use arroyo_rpc::{
+    df::{ArroyoSchema, ArroyoSchemaRef},
+    updating_meta_field, TIMESTAMP_FIELD, UPDATING_META_FIELD,
+};
 use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result, TableReference};
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
@@ -73,7 +76,7 @@ impl DebeziumUnrollingExtension {
 
     pub fn try_new(input: LogicalPlan, primary_keys: Arc<Vec<String>>) -> Result<Self> {
         let input_schema = input.schema();
-        
+
         // confirm that the input schema has before, after and op columns, and before and after match
         let Some(before_index) = input_schema.index_of_column_by_name(None, "before") else {
             return plan_err!("DebeziumUnrollingExtension requires a before column");
@@ -84,7 +87,7 @@ impl DebeziumUnrollingExtension {
         let Some(op_index) = input_schema.index_of_column_by_name(None, "op") else {
             return plan_err!("DebeziumUnrollingExtension requires an op column");
         };
-        
+
         let before_type = input_schema.field(before_index).data_type();
         let after_type = input_schema.field(after_index).data_type();
         if before_type != after_type {
@@ -94,13 +97,13 @@ impl DebeziumUnrollingExtension {
                 after_type
             );
         }
-        
+
         // check that op is a string
         let op_type = input_schema.field(op_index).data_type();
         if *op_type != DataType::Utf8 {
             return plan_err!("op column must be a string, not {}", op_type);
         }
-        
+
         // create the output schema
         let DataType::Struct(fields) = before_type else {
             return plan_err!(
@@ -108,13 +111,16 @@ impl DebeziumUnrollingExtension {
                 before_type
             );
         };
-        
+
         // get the primary keys
-        let primary_key_idx = primary_keys.iter()
+        let primary_key_idx = primary_keys
+            .iter()
             .map(|pk| fields.find(pk).map(|((i, _))| i))
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| DataFusionError::Plan("primary key field not found in Debezium schema".to_string()))?;
-        
+            .ok_or_else(|| {
+                DataFusionError::Plan("primary key field not found in Debezium schema".to_string())
+            })?;
+
         // determine the qualifier from the before and after columns
         let qualifier = match (
             input_schema.qualified_field(before_index).0,
@@ -129,7 +135,7 @@ impl DebeziumUnrollingExtension {
             (None, None) => None,
             _ => return plan_err!("before and after columns must both have an alias or neither"),
         };
-        
+
         let mut fields = fields.to_vec();
         fields.push(updating_meta_field());
 
@@ -138,7 +144,7 @@ impl DebeziumUnrollingExtension {
         else {
             return plan_err!("DebeziumUnrollingExtension requires a timestamp field");
         };
-        
+
         fields.push(Arc::new(input_schema.field(input_timestamp_field).clone()));
         let arrow_schema = Schema::new(fields);
 
@@ -146,7 +152,7 @@ impl DebeziumUnrollingExtension {
             Some(qualifier) => DFSchema::try_from_qualified_schema(qualifier, &arrow_schema)?,
             None => DFSchema::try_from(arrow_schema)?,
         };
-        
+
         Ok(Self {
             input,
             schema: Arc::new(schema),

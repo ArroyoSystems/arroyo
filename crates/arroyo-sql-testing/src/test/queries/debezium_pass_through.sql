@@ -1,3 +1,4 @@
+--pk=id
 CREATE TABLE debezium_source (
     id INT PRIMARY KEY,
     customer_name TEXT,

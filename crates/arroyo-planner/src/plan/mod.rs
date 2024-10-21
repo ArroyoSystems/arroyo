@@ -1,5 +1,5 @@
 use arroyo_datastream::WindowType;
-use arroyo_rpc::{UPDATING_META_FIELD, TIMESTAMP_FIELD};
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{
     plan_err,

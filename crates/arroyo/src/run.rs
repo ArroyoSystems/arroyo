@@ -391,7 +391,7 @@ pub async fn run(args: RunArgs) {
             c.api.http_port = 0;
         }
         c.controller.rpc_port = 0;
-        
+
         if c.controller.scheduler != Scheduler::Embedded {
             c.controller.scheduler = Scheduler::Process;
         }

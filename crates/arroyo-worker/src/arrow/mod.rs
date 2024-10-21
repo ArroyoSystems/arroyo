@@ -240,7 +240,13 @@ impl StatelessPhysicalExecutor {
         self.plan.reset().expect("reset execution plan");
         self.plan
             .execute(0, self.task_context.clone())
-            .unwrap_or_else(|e| panic!("failed to compute plan: {}\n{}", e, displayable(&*self.plan).indent(false)))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to compute plan: {}\n{}",
+                    e,
+                    displayable(&*self.plan).indent(false)
+                )
+            })
     }
 
     pub async fn process_single(&mut self, batch: RecordBatch) -> RecordBatch {
