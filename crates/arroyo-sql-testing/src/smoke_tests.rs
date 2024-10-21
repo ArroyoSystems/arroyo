@@ -334,8 +334,6 @@ async fn run_pipeline_and_assert_outputs(
     )
     .await;
 
-    panic!("blah");
-    
     set_internal_parallelism(&mut graph, 2);
 
     run_and_checkpoint(
@@ -389,13 +387,13 @@ fn merge_debezium(rows: Vec<Value>) -> HashSet<String> {
         let before = r.get("before").map(|t| roundtrip(t));
         let after = r. get("after").map(|t| roundtrip(t));
         let op = r.get("op").expect("no 'op' for debezium");
-            
+
         match op.as_str().expect("op isn't string") {
             "c" => {
-                assert!(state.insert(after.expect("no after for c")), "'c' for existing row");                
+                assert!(state.insert(after.expect("no after for c")), "'c' for existing row");
             }
             "u" => {
-                assert!(state.remove(&before.expect("no before for 'u'")), "'u' for non-existent row");
+                assert!(state.remove(&before.expect("no before for 'u'")), "'u' for non-existent row ({})", r);
                 assert!(state.insert(after.expect("no after for 'u'")), "'u' overwrote existing row");
             }
             "d" => {
@@ -406,7 +404,7 @@ fn merge_debezium(rows: Vec<Value>) -> HashSet<String> {
             }
         }
     }
-    
+
     state
 }
 

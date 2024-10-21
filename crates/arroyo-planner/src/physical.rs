@@ -309,6 +309,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                         .clone(),
                     schema: schema.clone(),
                     properties: make_properties(schema),
+                    primary_keys: debezium.primary_keys.into_iter().map(|c| c as usize).collect(),
                 }))
             }
             Node::DebeziumEncode(debezium) => {
@@ -359,6 +360,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::DebeziumDecode(DebeziumDecodeNode {
                     schema: serde_json::to_string(&decode.schema).unwrap(),
+                    primary_keys: (*decode.primary_keys).into_iter().map(|c| *c as u64).collect(),
                 })),
             });
         }
@@ -707,10 +709,11 @@ pub struct DebeziumUnrollingExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
     properties: PlanProperties,
+    primary_keys: Vec<usize>,
 }
 
 impl DebeziumUnrollingExec {
-    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
+    pub fn try_new(input: Arc<dyn ExecutionPlan>, primary_keys: Vec<usize>) -> Result<Self> {
         let input_schema = input.schema();
         // confirm that the input schema has before, after and op columns, and before and after match
         let before_index = input_schema.index_of("before")?;
@@ -750,6 +753,7 @@ impl DebeziumUnrollingExec {
             input,
             schema: schema.clone(),
             properties: make_properties(schema),
+            primary_keys,
         })
     }
 }
@@ -798,6 +802,7 @@ impl ExecutionPlan for DebeziumUnrollingExec {
             input: children[0].clone(),
             schema: self.schema.clone(),
             properties: self.properties.clone(),
+            primary_keys: self.primary_keys.clone(),
         }))
     }
 
@@ -809,6 +814,7 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         Ok(Box::pin(DebeziumUnrollingStream::try_new(
             self.input.execute(partition, context)?,
             self.schema.clone(),
+            self.primary_keys.clone(),
         )?))
     }
 
@@ -824,15 +830,25 @@ struct DebeziumUnrollingStream {
     after_index: usize,
     op_index: usize,
     timestamp_index: usize,
+    primary_keys: Vec<usize>,
 }
 
 impl DebeziumUnrollingStream {
-    fn try_new(input: SendableRecordBatchStream, schema: SchemaRef) -> Result<Self> {
+    fn try_new(input: SendableRecordBatchStream, schema: SchemaRef, primary_keys: Vec<usize>) -> Result<Self> {
+        if primary_keys.is_empty() {
+            return plan_err!("there must be at least one primary key for a Debezium source");
+        }
         let input_schema = input.schema();
         let before_index = input_schema.index_of("before")?;
         let after_index = input_schema.index_of("after")?;
         let op_index = input_schema.index_of("op")?;
         let timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
+
+        let unrolled_schema = if let DataType::Struct(fields) = input_schema.field(before_index).data_type() {
+            fields
+        }  else {
+            return plan_err!("before schema is not a struct");
+        };
 
         Ok(Self {
             input,
@@ -841,6 +857,7 @@ impl DebeziumUnrollingStream {
             after_index,
             op_index,
             timestamp_index,
+            primary_keys,
         })
     }
     fn unroll_batch(&self, batch: &RecordBatch) -> Result<RecordBatch> {
@@ -864,7 +881,7 @@ impl DebeziumUnrollingStream {
         let combined_array = concat(&[before, after])?;
         let mut take_indices = UInt32Builder::with_capacity(num_rows);
         let mut is_retract_builder = BooleanBuilder::with_capacity(num_rows);
-        
+
         let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(2 * num_rows);
         for i in 0..num_rows {
             let op = op.value(i);
@@ -897,15 +914,17 @@ impl DebeziumUnrollingStream {
         }
         let take_indices = take_indices.finish();
         let unrolled_array = take(&combined_array, &take_indices, None)?;
-        
+
         let mut columns = unrolled_array.as_struct().columns().to_vec();
-        
+
         let hash = MultiHashFunction::default()
-            .invoke(&columns.iter().map(|c| ColumnarValue::Array(c.clone())).collect::<Vec<_>>())?;
-        let ColumnarValue::Array(ids) = hash else {
-            unreachable!();
-        };
-        
+            .invoke(&self.primary_keys.iter()
+                .map(|i| {
+                    ColumnarValue::Array(columns[*i].clone())
+                }).collect::<Vec<_>>())?;
+
+        let ids = hash.into_array(num_rows)?;
+
         let meta = StructArray::try_new(updating_meta_fields(), vec![Arc::new(is_retract_builder.finish()), ids], None)?;
         columns.push(Arc::new(meta));
         columns.push(Arc::new(timestamp_builder.finish()));
@@ -1018,10 +1037,10 @@ impl ExecutionPlan for ToDebeziumExec {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         if children.len() != 1 {
             return Err(DataFusionError::Internal(
-                "DebeziumUnrollingExec wrong number of children".to_string(),
+                "ToDebeziumExec wrong number of children".to_string(),
             ));
         }
-        Ok(Arc::new(DebeziumUnrollingExec::try_new(
+        Ok(Arc::new(ToDebeziumExec::try_new(
             children[0].clone(),
         )?))
     }
@@ -1084,24 +1103,24 @@ impl ToDebeziumStream {
                 .column(1)
                 .as_fixed_size_binary();
 
-            // (first idx, last idx, has create, latest time)
-            let mut id_map: HashMap<&[u8], (usize, usize, bool, i64)> = HashMap::new();
+            // (first idx, last idx, first is create, has create, latest time)
+            let mut id_map: HashMap<&[u8], (usize, usize, bool, bool, i64)> = HashMap::new();
             let mut order = vec![];
             for i in 0..batch.num_rows() {
                 let row_id = id.value(i);
                 let is_retract = is_retract.value(i);
                 let timestamp = timestamps.value(i);
-                
+
                 id_map
                     .entry(row_id)
                     .and_modify(|e| {
                         e.1 = i;
-                        e.2 |= !is_retract;
-                        e.3 = e.3.max(timestamp);
+                        e.3 |= !is_retract;
+                        e.4 = e.4.max(timestamp);
                     })
                     .or_insert_with(|| {
-                        order.push(row_id);                        
-                        (i, i, !is_retract, timestamp)
+                        order.push(row_id);
+                        (i, i, !is_retract, !is_retract, timestamp)
                     });
             }
 
@@ -1111,7 +1130,7 @@ impl ToDebeziumStream {
             let mut ts = TimestampNanosecondBuilder::with_capacity(id_map.len());
 
             for row_id in order {
-                let (first_idx, last_idx, has_create, timestamp) = id_map.get(row_id).unwrap();
+                let (first_idx, last_idx, first_is_create, has_create, timestamp) = id_map.get(row_id).unwrap();
                 if first_idx == last_idx {
                     if *has_create {
                         // Single append
@@ -1125,10 +1144,17 @@ impl ToDebeziumStream {
                         op.push("d");
                     }
                 } else {
-                    // Update
-                    before.push(Some(*first_idx));
-                    after.push(Some(*last_idx));
-                    op.push("u");
+                    if *first_is_create {
+                        // this row didn't previously exist, so we need to create it
+                        before.push(None);
+                        after.push(Some(*last_idx));
+                        op.push("c");
+                    } else {
+                        // otherwise this is an update
+                        before.push(Some(*first_idx));
+                        after.push(Some(*last_idx));
+                        op.push("u");
+                    }
                 }
                 ts.append_value(*timestamp);
             }

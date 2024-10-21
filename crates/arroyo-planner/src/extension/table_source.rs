@@ -38,6 +38,7 @@ impl TableSourceExtension {
             })
             .collect::<Vec<_>>();
         let base_schema = Arc::new(schema_from_df_fields(&physical_fields).unwrap());
+        
         let schema = if table.is_updating() {
             DebeziumUnrollingExtension::as_debezium_schema(&base_schema, Some(name.clone()))
                 .unwrap()

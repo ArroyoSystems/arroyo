@@ -157,7 +157,7 @@ impl<'a> SourceRewriter<'a> {
             }
             (
                 LogicalPlan::Extension(Extension {
-                    node: Arc::new(DebeziumUnrollingExtension::try_new(table_source_extension)?),
+                    node: Arc::new(DebeziumUnrollingExtension::try_new(table_source_extension, table.primary_keys.clone())?),
                 }),
                 None,
             )
