@@ -716,7 +716,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "datafusion",
- "datafusion-functions 40.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "datafusion-functions",
  "datafusion-functions-json",
  "datafusion-proto",
  "futures",
@@ -2792,7 +2792,7 @@ dependencies = [
  "datafusion-common-runtime",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo)",
+ "datafusion-functions",
  "datafusion-functions-aggregate",
  "datafusion-functions-array",
  "datafusion-optimizer",
@@ -2895,32 +2895,6 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "40.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a369332afd0ef5bd565f6db2139fb9f1dfdd0afa75a7f70f000b74208d76994f"
-dependencies = [
- "arrow",
- "base64 0.22.1",
- "blake2",
- "blake3",
- "chrono",
- "datafusion-common",
- "datafusion-execution",
- "datafusion-expr",
- "hashbrown 0.14.5",
- "hex",
- "itertools 0.12.1",
- "log",
- "md-5",
- "rand 0.8.5",
- "regex",
- "sha2",
- "unicode-segmentation",
- "uuid",
-]
-
-[[package]]
-name = "datafusion-functions"
-version = "40.0.0"
 source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
@@ -2973,7 +2947,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo)",
+ "datafusion-functions",
  "datafusion-functions-aggregate",
  "itertools 0.12.1",
  "log",
