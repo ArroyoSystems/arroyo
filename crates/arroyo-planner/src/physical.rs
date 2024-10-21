@@ -3,10 +3,7 @@ use arrow::{
     buffer::NullBuffer,
     compute::{concat, take},
 };
-use arrow_array::{
-    array, Array, PrimitiveArray, RecordBatch, StringArray,
-    StructArray,
-};
+use arrow_array::{array, Array, PrimitiveArray, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::common::{
     not_impl_err, plan_err, DataFusionError, Result, ScalarValue, Statistics, UnnestOptions,
@@ -370,10 +367,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::DebeziumDecode(DebeziumDecodeNode {
                     schema: serde_json::to_string(&decode.schema).unwrap(),
-                    primary_keys: (*decode.primary_keys)
-                        .iter()
-                        .map(|c| *c as u64)
-                        .collect(),
+                    primary_keys: (*decode.primary_keys).iter().map(|c| *c as u64).collect(),
                 })),
             });
         }

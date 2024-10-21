@@ -77,13 +77,7 @@ async fn run_smoketest(path: &Path) {
     });
 
     match (
-        correctness_run_codegen(
-            test_name,
-            query.clone(),
-            pk.as_deref(),
-            20,
-        )
-        .await,
+        correctness_run_codegen(test_name, query.clone(), pk.as_deref(), 20).await,
         fail,
     ) {
         (Ok(_), false) => {
