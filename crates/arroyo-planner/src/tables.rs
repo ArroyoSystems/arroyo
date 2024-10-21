@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
+use datafusion::logical_expr::expr::ScalarFunction;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -25,8 +26,7 @@ use datafusion::common::{plan_err, Column, DataFusionError};
 use datafusion::execution::context::SessionState;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
-    WriteOp,
+    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan, WriteOp
 };
 use datafusion::optimizer::common_subexpr_eliminate::CommonSubexprEliminate;
 use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery;
@@ -95,6 +95,17 @@ impl FieldSpec {
         match self {
             FieldSpec::StructField(f) => f,
             FieldSpec::VirtualField { field, .. } => field,
+        }
+    }
+    fn is_metadata_virtual(&self) -> bool {
+        match self {
+            FieldSpec::VirtualField { expression, .. } => {
+                if let Expr::ScalarFunction(ScalarFunction { func, .. }) = expression {
+                    return func.name() == "metadata";
+                }
+                false
+            }
+            _ => false,
         }
     }
 }
@@ -255,7 +266,7 @@ impl ConnectorTable {
 
         let schema_fields: Vec<SourceField> = input_to_schema_fields
             .iter()
-            .filter(|f| !f.is_virtual())
+            .filter(|f| f.is_metadata_virtual() || !f.is_virtual())
             .map(|f| {
                 let struct_field = f.field();
                 struct_field.clone().try_into().map_err(|_| {
@@ -267,6 +278,7 @@ impl ConnectorTable {
                 })
             })
             .collect::<Result<_>>()?;
+        println!("schema_fields: {:?}", schema_fields);
         let bad_data = BadData::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("Invalid bad_data: '{e}'")))?;
 
