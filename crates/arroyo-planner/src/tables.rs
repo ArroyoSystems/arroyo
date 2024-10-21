@@ -278,7 +278,6 @@ impl ConnectorTable {
                 })
             })
             .collect::<Result<_>>()?;
-        println!("schema_fields: {:?}", schema_fields);
         let bad_data = BadData::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("Invalid bad_data: '{e}'")))?;
 
