@@ -15,6 +15,7 @@ use std::{env, time::SystemTime};
 use tokio::sync::mpsc::Receiver;
 
 use crate::udfs::get_udfs;
+use arroyo_rpc::config;
 use arroyo_rpc::grpc::rpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::checkpoint_state::CheckpointState;
@@ -41,6 +42,12 @@ fn for_each_file(#[files("src/test/queries/*.sql")] path: PathBuf) {
 }
 
 async fn run_smoketest(path: &Path) {
+    config::config();
+    config::update(|c| {
+        // reduce the batch size to increase consistency
+        c.pipeline.source_batch_size = 32;
+    });
+
     // read text at path
     let test_name = path
         .file_name()
@@ -350,7 +357,11 @@ async fn run_pipeline_and_assert_outputs(
     )
     .await;
 
-    set_internal_parallelism(&mut graph, 2);
+    // debezium sources can't be arbitrarily split because they are effectively stateful
+    // and ordering matters
+    if primary_keys.is_none() {
+        set_internal_parallelism(&mut graph, 2);
+    }
 
     run_and_checkpoint(
         Arc::new(job_id.to_string()),
@@ -359,7 +370,9 @@ async fn run_pipeline_and_assert_outputs(
     )
     .await;
 
-    set_internal_parallelism(&mut graph, 3);
+    if primary_keys.is_none() {
+        set_internal_parallelism(&mut graph, 3);
+    }
 
     finish_from_checkpoint(job_id, get_program(&graph)).await;
 
