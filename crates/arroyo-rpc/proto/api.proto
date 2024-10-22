@@ -193,6 +193,7 @@ message UnnestExecNode {
 message DebeziumDecodeNode {
   // json-encoded
   string schema = 1;
+  repeated uint64 primary_keys = 2;
 }
 
 message DebeziumEncodeNode {

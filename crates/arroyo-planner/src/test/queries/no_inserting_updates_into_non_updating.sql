@@ -1,6 +1,7 @@
 CREATE table debezium_source (
+    id INT PRIMARY KEY,
     count int
-  ) WITH (
+) WITH (
     connector = 'kafka',
     bootstrap_servers = 'localhost:9092',
     type = 'source',
@@ -19,4 +20,4 @@ CREATE table sink (
 );
 
 INSERT into sink
-SELECT * FROM debezium_source
+SELECT count FROM debezium_source

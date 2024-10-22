@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
-    IS_RETRACT_FIELD,
+    UPDATING_META_FIELD,
 };
 use datafusion::common::{internal_err, plan_err, DFSchemaRef, Result, TableReference};
 
@@ -40,7 +40,7 @@ impl SinkExtension {
     ) -> Result<Self> {
         let input_is_updating = input
             .schema()
-            .has_column_with_unqualified_name(IS_RETRACT_FIELD);
+            .has_column_with_unqualified_name(UPDATING_META_FIELD);
         match &table {
             Table::ConnectorTable(connector_table) => {
                 match (input_is_updating, connector_table.is_updating()) {
