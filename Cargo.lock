@@ -337,7 +337,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "half",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "lexical-core",
  "num",
  "serde",
@@ -716,7 +716,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "datafusion",
- "datafusion-functions 40.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "datafusion-functions",
  "datafusion-functions-json",
  "datafusion-proto",
  "futures",
@@ -739,6 +739,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicase",
+ "xxhash-rust",
  "xz2",
 ]
 
@@ -2523,7 +2524,7 @@ dependencies = [
  "clap",
  "codegen_template",
  "heck 0.4.1",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "miette",
  "postgres",
  "postgres-types",
@@ -2774,7 +2775,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 [[package]]
 name = "datafusion"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "ahash",
  "arrow",
@@ -2791,7 +2792,7 @@ dependencies = [
  "datafusion-common-runtime",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo)",
+ "datafusion-functions",
  "datafusion-functions-aggregate",
  "datafusion-functions-array",
  "datafusion-optimizer",
@@ -2804,7 +2805,7 @@ dependencies = [
  "glob",
  "half",
  "hashbrown 0.14.5",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itertools 0.12.1",
  "log",
  "num_cpus",
@@ -2827,7 +2828,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "ahash",
  "arrow",
@@ -2848,7 +2849,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "tokio",
 ]
@@ -2856,7 +2857,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
  "chrono",
@@ -2876,7 +2877,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "ahash",
  "arrow",
@@ -2894,33 +2895,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "40.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a369332afd0ef5bd565f6db2139fb9f1dfdd0afa75a7f70f000b74208d76994f"
-dependencies = [
- "arrow",
- "base64 0.22.1",
- "blake2",
- "blake3",
- "chrono",
- "datafusion-common",
- "datafusion-execution",
- "datafusion-expr",
- "hashbrown 0.14.5",
- "hex",
- "itertools 0.12.1",
- "log",
- "md-5",
- "rand 0.8.5",
- "regex",
- "sha2",
- "unicode-segmentation",
- "uuid",
-]
-
-[[package]]
-name = "datafusion-functions"
-version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
  "base64 0.22.1",
@@ -2945,7 +2920,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "ahash",
  "arrow",
@@ -2962,7 +2937,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-array"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -2972,7 +2947,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 40.0.0 (git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo)",
+ "datafusion-functions",
  "datafusion-functions-aggregate",
  "itertools 0.12.1",
  "log",
@@ -2998,7 +2973,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3007,7 +2982,7 @@ dependencies = [
  "datafusion-expr",
  "datafusion-physical-expr",
  "hashbrown 0.14.5",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itertools 0.12.1",
  "log",
  "paste",
@@ -3017,7 +2992,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "ahash",
  "arrow",
@@ -3035,7 +3010,7 @@ dependencies = [
  "half",
  "hashbrown 0.14.5",
  "hex",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itertools 0.12.1",
  "log",
  "paste",
@@ -3046,7 +3021,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "ahash",
  "arrow",
@@ -3059,7 +3034,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "ahash",
  "arrow",
@@ -3079,7 +3054,7 @@ dependencies = [
  "futures",
  "half",
  "hashbrown 0.14.5",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itertools 0.12.1",
  "log",
  "once_cell",
@@ -3092,7 +3067,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
  "chrono",
@@ -3107,7 +3082,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto-common"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
  "chrono",
@@ -3119,7 +3094,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "40.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#f2792f6da858a9824bdc8202d7d14387a46e6cdc"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=40.0.0/arroyo#6851c30a55b334a3b6902b1df4dd032b9fac26bb"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3217,7 +3192,7 @@ dependencies = [
  "delta_kernel_derive",
  "either",
  "fix-hidden-lifetime-bug",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itertools 0.13.0",
  "lazy_static",
  "parquet",
@@ -3306,7 +3281,7 @@ dependencies = [
  "fix-hidden-lifetime-bug",
  "futures",
  "hashbrown 0.14.5",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itertools 0.13.0",
  "lazy_static",
  "libc",
@@ -4379,7 +4354,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.12",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -4398,7 +4373,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http 1.1.0",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -4440,6 +4415,12 @@ dependencies = [
  "ahash",
  "allocator-api2",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
 
 [[package]]
 name = "hashlink"
@@ -4656,7 +4637,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4833,12 +4814,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.2.6"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
+checksum = "707907fe3c25f5424cce2cb7e1cbcafee6bdbe735ca90ef77c29e84591e5b9da"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.0",
  "serde",
 ]
 
@@ -5943,7 +5924,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc02deea53ffe807708244e5914f6b099ad7015a207ee24317c22112e17d9c5c"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "serde",
  "serde_json",
 ]
@@ -6308,7 +6289,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
  "fixedbitset",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "serde",
  "serde_derive",
 ]
@@ -6711,7 +6692,7 @@ dependencies = [
  "getopts",
  "heck 0.5.0",
  "http 0.2.12",
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -6801,7 +6782,7 @@ checksum = "80b776a1b2dc779f5ee0641f8ade0125bc1298dd41a9a0c16d8bd57b42d222b1"
 dependencies = [
  "bytes",
  "heck 0.5.0",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -6834,7 +6815,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9554e3ab233f0a932403704f1a1d08c30d5ccd931adfdfa1e8b5a19b52c1d55a"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.61",
@@ -6896,7 +6877,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.2",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -7987,7 +7968,7 @@ version = "1.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "455182ea6142b14f93f4bc5320a2b31c1f266b66a4a5c858b013302a5d8cbfc3"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itoa",
  "ryu",
  "serde",
@@ -8115,7 +8096,7 @@ version = "0.9.34+deprecated"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "itoa",
  "ryu",
  "serde",
@@ -8924,7 +8905,7 @@ version = "0.8.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4e43f8cc456c9704c851ae29c67e17ef65d2c30017c17a9765b89c382dc8bba"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -8946,7 +8927,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "toml_datetime",
  "winnow 0.5.40",
 ]
@@ -8957,7 +8938,7 @@ version = "0.22.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c127785850e8c20836d49732ae6abfa47616e60bf9d9f57c43c250361a9db96c"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9488,7 +9469,7 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d82b1bc5417102a73e8464c686eef947bdfb99fcdfc0a4f228e81afa9526470a"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "serde",
  "serde_json",
  "utoipa-gen 3.5.0",
@@ -9500,7 +9481,7 @@ version = "4.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5afb1a60e207dca502682537fefcfd9921e71d0b83e9576060f09abc6efab23"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.6.0",
  "serde",
  "serde_json",
  "utoipa-gen 4.3.0",
@@ -10080,6 +10061,12 @@ name = "xmlparser"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a5cbf750400958819fb6178eaa83bee5cd9c29a26a40cc241df8c70fdd46984"
 
 [[package]]
 name = "xz2"

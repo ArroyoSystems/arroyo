@@ -49,6 +49,7 @@ unicase = "2.7.0"
 toml = "0.8.8"
 
 xz2 = { version = "0.1.7", features = ["static"] }
+xxhash-rust = { version = "0.8.12", features = ["xxh3", "std"] }
 
 [dev-dependencies]
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}

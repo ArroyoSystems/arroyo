@@ -8,7 +8,7 @@ use arroyo_datastream::logical::{
 };
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
-use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
+use arroyo_rpc::{updating_meta_field, TIMESTAMP_FIELD};
 use datafusion::common::{internal_err, DFSchemaRef, DataFusionError, Result, TableReference};
 use datafusion::logical_expr::{
     Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore,
@@ -272,12 +272,7 @@ impl IsRetractExtension {
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         );
-        output_fields.push(DFField::new(
-            None,
-            IS_RETRACT_FIELD,
-            DataType::Boolean,
-            false,
-        ));
+        output_fields.push((timestamp_qualifier.clone(), updating_meta_field()).into());
         let schema = Arc::new(schema_from_df_fields(&output_fields).unwrap());
         Self {
             input,
