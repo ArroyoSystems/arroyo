@@ -1,8 +1,10 @@
 use crate::float_to_json;
+use anyhow::anyhow;
 use arroyo_rpc::formats::ProtobufFormat;
 use arroyo_types::SourceError;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use integer_encoding::VarInt;
 use prost_reflect::{DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MapKey, Value};
 use serde_json::Value as JsonValue;
 
@@ -12,7 +14,9 @@ pub(crate) fn deserialize_proto(
     mut msg: &[u8],
 ) -> Result<serde_json::Value, SourceError> {
     if proto.confluent_schema_registry {
-        msg = &msg[5..];
+        skip_confluent_header(&mut msg).map_err(|e| {
+            SourceError::bad_data(format!("invalid confluent schema header: {:?}", e))
+        })?;
     }
 
     let message = proto.message_name.as_ref().expect("no message name");
@@ -84,4 +88,28 @@ fn proto_value_to_json(field: &FieldDescriptor, value: &Value) -> JsonValue {
             JsonValue::Object(map)
         }
     }
+}
+
+// see: https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html#wire-format
+fn skip_confluent_header(msg: &mut &[u8]) -> anyhow::Result<()> {
+    // skip magic byte + schema ID
+    *msg = &msg[5..];
+
+    // skip message indexes array
+    if msg[0] == 0 {
+        *msg = &msg[1..];
+    } else {
+        let count = read_varint(msg)?;
+        for _ in 0..count {
+            read_varint(msg)?;
+        }
+    }
+    Ok(())
+}
+
+fn read_varint(msg: &mut &[u8]) -> anyhow::Result<i32> {
+    let (value, bytes_read) =
+        i32::decode_var(msg).ok_or_else(|| anyhow!("could not read varint"))?;
+    *msg = &msg[bytes_read..];
+    Ok(value)
 }

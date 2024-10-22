@@ -30,3 +30,4 @@ prost-types = { workspace = true}
 base64 = "0.22.1"
 uuid = { version = "1.10.0", features = ["v4"] }
 regex = "1.10.6"
+integer-encoding = "4.0.2"
