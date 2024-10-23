@@ -502,10 +502,12 @@ impl Table {
         columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Vec<FieldSpec>> {
+        println!("columns {:?}", columns);
         let struct_field_pairs = columns
             .iter()
             .map(|column| {
                 let name = column.name.value.to_string();
+                println!("column name {:?}", name);
                 let (data_type, extension) = convert_data_type(&column.data_type)?;
                 let nullable = !column
                     .options
@@ -522,6 +524,14 @@ impl Table {
                         generation_expr, ..
                     } = &option.option
                     {
+                        // check if generation_expr is a scalar function and if it is, check if it is a metadata function
+                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function { name, .. })) = generation_expr {
+                            if name.0.iter().any(|ident| ident.value.to_lowercase() == "metadata") {
+                                println!("Detected metadata function!");
+                                // TODO: add metadata to the struct field like argument of metadata function.
+                                return None;
+                            }
+                        }
                         generation_expr.clone()
                     } else {
                         None
