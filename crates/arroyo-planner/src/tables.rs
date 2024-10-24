@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
+use datafusion::logical_expr::expr::ScalarFunction;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -52,7 +53,7 @@ use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::Query;
+use datafusion::sql::sqlparser::ast::{FunctionArg, FunctionArguments, Query};
 use datafusion::{
     optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -96,6 +97,17 @@ impl FieldSpec {
         match self {
             FieldSpec::StructField(f) => f,
             FieldSpec::VirtualField { field, .. } => field,
+        }
+    }
+    fn is_metadata_virtual(&self) -> bool {
+        match self {
+            FieldSpec::VirtualField { expression, .. } => {
+                if let Expr::ScalarFunction(ScalarFunction { func, .. }) = expression {
+                    return func.name() == "metadata";
+                }
+                false
+            }
+            _ => false,
         }
     }
 }
@@ -258,7 +270,7 @@ impl ConnectorTable {
 
         let schema_fields: Vec<SourceField> = input_to_schema_fields
             .iter()
-            .filter(|f| !f.is_virtual())
+            .filter(|f| f.is_metadata_virtual() || !f.is_virtual())
             .map(|f| {
                 let struct_field = f.field();
                 struct_field.clone().try_into().map_err(|_| {
@@ -506,21 +518,63 @@ impl Table {
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
 
-                let struct_field = ArroyoExtensionType::add_metadata(
+                let mut struct_field = ArroyoExtensionType::add_metadata(
                     extension,
                     Field::new(name, data_type, nullable),
                 );
 
-                let generating_expression = column.options.iter().find_map(|option| {
-                    if let ColumnOption::Generated {
-                        generation_expr, ..
-                    } = &option.option
-                    {
-                        generation_expr.clone()
-                    } else {
-                        None
-                    }
-                });
+                let generating_expression =
+                    column.options.iter().find_map(|option| {
+                        if let ColumnOption::Generated {
+                            generation_expr, ..
+                        } = &option.option
+                        {
+                            if let Some(sqlparser::ast::Expr::Function(
+                                sqlparser::ast::Function { name, args, .. },
+                            )) = generation_expr
+                            {
+                                if name
+                                    .0
+                                    .iter()
+                                    .any(|ident| ident.value.to_lowercase() == "metadata")
+                                {
+                                    match args {
+                                        FunctionArguments::List(arg_list) => {
+                                            match arg_list.args.first() {
+                                            Some(FunctionArg::Unnamed(
+                                                sqlparser::ast::FunctionArgExpr::Expr(
+                                                    sqlparser::ast::Expr::Value(
+                                                        sqlparser::ast::Value::SingleQuotedString(
+                                                            value,
+                                                        ),
+                                                    ),
+                                                ),
+                                            )) => {
+                                                let mut metadata: HashMap<String, String> =
+                                                    Default::default();
+                                                metadata.insert(
+                                                    "metadata_argument_".to_string(),
+                                                    value.to_string(),
+                                                );
+                                                struct_field.set_metadata(metadata);
+                                            }
+                                            _ => {
+                                                    "Unsupported argument format.".to_string();
+                                            }
+                                        }
+                                        }
+                                        _ => {
+                                            "Unsupported argument format.".to_string();
+                                        }
+                                    }
+                                    return None;
+                                }
+                            }
+                            generation_expr.clone()
+                        } else {
+                            None
+                        }
+                    });
                 Ok((struct_field, generating_expression))
             })
             .collect::<Result<Vec<_>>>()?;
