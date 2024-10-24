@@ -52,7 +52,7 @@ use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::Query;
+use datafusion::sql::sqlparser::ast::{FunctionArg, FunctionArguments, Query};
 use datafusion::{
     optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -502,19 +502,17 @@ impl Table {
         columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Vec<FieldSpec>> {
-        println!("columns {:?}", columns);
         let struct_field_pairs = columns
             .iter()
             .map(|column| {
                 let name = column.name.value.to_string();
-                println!("column name {:?}", name);
                 let (data_type, extension) = convert_data_type(&column.data_type)?;
                 let nullable = !column
                     .options
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
 
-                let struct_field = ArroyoExtensionType::add_metadata(
+                let mut struct_field = ArroyoExtensionType::add_metadata(
                     extension,
                     Field::new(name, data_type, nullable),
                 );
@@ -524,11 +522,25 @@ impl Table {
                         generation_expr, ..
                     } = &option.option
                     {
-                        // check if generation_expr is a scalar function and if it is, check if it is a metadata function
-                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function { name, .. })) = generation_expr {
+                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function { name, args, .. })) = generation_expr {
                             if name.0.iter().any(|ident| ident.value.to_lowercase() == "metadata") {
-                                println!("Detected metadata function!");
-                                // TODO: add metadata to the struct field like argument of metadata function.
+                                match args {
+                                    FunctionArguments::List(arg_list) => {
+                                        match arg_list.args.first() {
+                                            Some(FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(sqlparser::ast::Expr::Value(sqlparser::ast::Value::SingleQuotedString(value))))) => {
+                                                let mut metadata: HashMap<String, String> = Default::default();
+                                                metadata.insert("metadata_argument_".to_string(), value.to_string());
+                                                struct_field.set_metadata(metadata);
+                                            }
+                                            _ => {
+                                                DataFusionError::Plan(format!("Unsupported argument format."));
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        DataFusionError::Plan(format!("Unsupported argument format."));
+                                    }
+                                }
                                 return None;
                             }
                         }
