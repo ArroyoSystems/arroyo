@@ -559,16 +559,16 @@ impl Table {
                                                 struct_field.set_metadata(metadata);
                                             }
                                             _ => {
-                                                DataFusionError::Plan(format!(
-                                                    "Unsupported argument format."
-                                                ));
+                                                DataFusionError::Plan(
+                                                    "Unsupported argument format.".to_string()
+                                                );
                                             }
                                         }
                                         }
                                         _ => {
-                                            DataFusionError::Plan(format!(
-                                                "Unsupported argument format."
-                                            ));
+                                            DataFusionError::Plan(
+                                                "Unsupported argument format.".to_string()
+                                            );
                                         }
                                     }
                                     return None;
