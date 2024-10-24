@@ -564,7 +564,7 @@ impl Table {
                                         }
                                         }
                                         _ => {
-                                                "Unsupported argument format.".to_string();
+                                            "Unsupported argument format.".to_string();
                                         }
                                     }
                                     return None;
