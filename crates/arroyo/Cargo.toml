@@ -4,7 +4,6 @@ version = "0.13.0-dev"
 edition = "2021"
 
 [features]
-profiling = ["tikv-jemallocator/profiling"]
 python = ["arroyo-udf-python/python-enabled"]
 
 [dependencies]

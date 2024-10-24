@@ -33,7 +33,6 @@ use uuid::Uuid;
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(all(
-    feature = "profiling",
     not(target_env = "msvc"),
     not(target_os = "macos"),
     any(target_arch = "x86_64", target_arch = "aarch64")
