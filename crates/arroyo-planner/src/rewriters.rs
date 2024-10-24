@@ -13,8 +13,8 @@ use crate::{
 };
 
 use arrow_schema::DataType;
-use arroyo_rpc::IS_RETRACT_FIELD;
 use arroyo_rpc::TIMESTAMP_FIELD;
+use arroyo_rpc::UPDATING_META_FIELD;
 
 use crate::extension::AsyncUDFExtension;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
@@ -134,7 +134,7 @@ impl<'a> SourceRewriter<'a> {
         if table.is_updating() {
             expressions.push(Expr::Column(Column::new(
                 Some(qualifier.clone()),
-                IS_RETRACT_FIELD,
+                UPDATING_META_FIELD,
             )))
         }
         Ok(expressions)
@@ -157,7 +157,10 @@ impl<'a> SourceRewriter<'a> {
             }
             (
                 LogicalPlan::Extension(Extension {
-                    node: Arc::new(DebeziumUnrollingExtension::try_new(table_source_extension)?),
+                    node: Arc::new(DebeziumUnrollingExtension::try_new(
+                        table_source_extension,
+                        table.primary_keys.clone(),
+                    )?),
                 }),
                 None,
             )

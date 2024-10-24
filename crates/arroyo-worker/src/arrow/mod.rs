@@ -14,7 +14,7 @@ use datafusion::execution::runtime_env::RuntimeConfig;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::memory::MemoryStream;
-use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::{displayable, ExecutionPlan};
 use datafusion::physical_plan::{DisplayAs, PlanProperties};
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
@@ -240,7 +240,13 @@ impl StatelessPhysicalExecutor {
         self.plan.reset().expect("reset execution plan");
         self.plan
             .execute(0, self.task_context.clone())
-            .expect("successfully computed?")
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to compute plan: {}\n{}",
+                    e,
+                    displayable(&*self.plan).indent(false)
+                )
+            })
     }
 
     pub async fn process_single(&mut self, batch: RecordBatch) -> RecordBatch {

@@ -74,6 +74,7 @@ pub struct ConnectorTable {
     pub event_time_field: Option<String>,
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
+    pub primary_keys: Arc<Vec<String>>,
 
     pub inferred_fields: Option<Vec<DFField>>,
 }
@@ -206,6 +207,7 @@ impl From<Connection> for ConnectorTable {
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
+            primary_keys: Arc::new(vec![]),
             inferred_fields: None,
         }
     }
@@ -216,6 +218,7 @@ impl ConnectorTable {
         name: &str,
         connector: &str,
         mut fields: Vec<FieldSpec>,
+        primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
         connection_profile: Option<&ConnectionProfile>,
     ) -> Result<Self> {
@@ -321,6 +324,15 @@ impl ConnectorTable {
             );
         }
 
+        if table.connection_type == ConnectionType::Source
+            && table.is_updating()
+            && primary_keys.is_empty()
+        {
+            return plan_err!("Debezium source must have at least one PRIMARY KEY field");
+        }
+
+        table.primary_keys = Arc::new(primary_keys);
+
         Ok(table)
     }
 
@@ -328,7 +340,7 @@ impl ConnectorTable {
         self.fields.iter().any(|f| f.is_virtual())
     }
 
-    fn is_update(&self) -> bool {
+    pub(crate) fn is_updating(&self) -> bool {
         self.format
             .as_ref()
             .map(|f| f.is_updating())
@@ -337,7 +349,7 @@ impl ConnectorTable {
 
     fn timestamp_override(&self) -> Result<Option<Expr>> {
         if let Some(field_name) = &self.event_time_field {
-            if self.is_update() {
+            if self.is_updating() {
                 return plan_err!("can't use event_time_field with update mode.");
             }
 
@@ -394,7 +406,7 @@ impl ConnectorTable {
     }
 
     fn processing_mode(&self) -> ProcessingMode {
-        if self.is_update() {
+        if self.is_updating() {
             ProcessingMode::Update
         } else {
             ProcessingMode::Append
@@ -409,7 +421,7 @@ impl ConnectorTable {
             }
         };
 
-        if self.is_update() && self.has_virtual_fields() {
+        if self.is_updating() && self.has_virtual_fields() {
             return plan_err!("can't read from a source with virtual fields and update mode.");
         }
 
@@ -437,13 +449,6 @@ impl ConnectorTable {
             timestamp_override,
             watermark_column,
         })
-    }
-
-    pub(crate) fn is_updating(&self) -> bool {
-        matches!(
-            &self.format,
-            Some(Format::Json(JsonFormat { debezium: true, .. }))
-        )
     }
 }
 
@@ -626,6 +631,22 @@ impl Table {
             let connector = with_map.remove("connector");
             let fields = Self::schema_from_columns(columns, schema_provider)?;
 
+            let primary_keys = columns
+                .iter()
+                .filter(|c| {
+                    c.options.iter().any(|opt| {
+                        matches!(
+                            opt.option,
+                            ColumnOption::Unique {
+                                is_primary: true,
+                                ..
+                            }
+                        )
+                    })
+                })
+                .map(|c| c.name.value.clone())
+                .collect();
+
             match connector.as_deref() {
                 Some("memory") | None => {
                     if fields.iter().any(|f| f.is_virtual()) {
@@ -669,6 +690,7 @@ impl Table {
                             &name,
                             connector,
                             fields,
+                            primary_keys,
                             &mut with_map,
                             connection_profile,
                         )

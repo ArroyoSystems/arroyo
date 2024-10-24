@@ -1,22 +1,14 @@
 use arrow::{
     array::{AsArray, BooleanBuilder, TimestampNanosecondBuilder, UInt32Builder},
-    buffer::{BooleanBuffer, NullBuffer},
-    compute::{concat, kernels::zip, not, take},
+    buffer::NullBuffer,
+    compute::{concat, take},
 };
-use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream};
-use std::{
-    any::Any,
-    mem,
-    pin::Pin,
-    sync::{Arc, RwLock},
-    task::{Context, Poll},
-};
-
-use arrow_array::{array, Array, BooleanArray, RecordBatch, StringArray, StructArray};
+use arrow_array::{array, Array, PrimitiveArray, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::common::{
     not_impl_err, plan_err, DataFusionError, Result, ScalarValue, Statistics, UnnestOptions,
 };
+use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream};
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
@@ -25,20 +17,30 @@ use datafusion::{
         DisplayAs, ExecutionPlan, Partitioning,
     },
 };
+use std::collections::HashMap;
+use std::{
+    any::Any,
+    mem,
+    pin::Pin,
+    sync::{Arc, RwLock},
+    task::{Context, Poll},
+};
 
+use crate::functions::MultiHashFunction;
 use crate::register_functions;
 use crate::rewriters::UNNESTED_COL;
+use arrow_array::types::{TimestampNanosecondType, UInt64Type};
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
     arroyo_exec_node, ArroyoExecNode, DebeziumEncodeNode, MemExecNode, UnnestExecNode,
 };
 use arroyo_rpc::{
     grpc::api::{arroyo_exec_node::Node, DebeziumDecodeNode},
-    IS_RETRACT_FIELD, TIMESTAMP_FIELD,
+    updating_meta_field, updating_meta_fields, TIMESTAMP_FIELD, UPDATING_META_FIELD,
 };
 use datafusion::logical_expr::{
-    ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, Signature,
-    TypeSignature, Volatility,
+    ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, ScalarUDFImpl,
+    Signature, TypeSignature, Volatility,
 };
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::unnest::UnnestExec;
@@ -310,6 +312,11 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                         .clone(),
                     schema: schema.clone(),
                     properties: make_properties(schema),
+                    primary_keys: debezium
+                        .primary_keys
+                        .into_iter()
+                        .map(|c| c as usize)
+                        .collect(),
                 }))
             }
             Node::DebeziumEncode(debezium) => {
@@ -360,6 +367,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::DebeziumDecode(DebeziumDecodeNode {
                     schema: serde_json::to_string(&decode.schema).unwrap(),
+                    primary_keys: (*decode.primary_keys).iter().map(|c| *c as u64).collect(),
                 })),
             });
         }
@@ -708,10 +716,11 @@ pub struct DebeziumUnrollingExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
     properties: PlanProperties,
+    primary_keys: Vec<usize>,
 }
 
 impl DebeziumUnrollingExec {
-    pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
+    pub fn try_new(input: Arc<dyn ExecutionPlan>, primary_keys: Vec<usize>) -> Result<Self> {
         let input_schema = input.schema();
         // confirm that the input schema has before, after and op columns, and before and after match
         let before_index = input_schema.index_of("before")?;
@@ -739,11 +748,7 @@ impl DebeziumUnrollingExec {
             ));
         };
         let mut fields = fields.to_vec();
-        fields.push(Arc::new(arrow::datatypes::Field::new(
-            IS_RETRACT_FIELD,
-            DataType::Boolean,
-            false,
-        )));
+        fields.push(updating_meta_field());
         fields.push(Arc::new(arrow::datatypes::Field::new(
             TIMESTAMP_FIELD,
             DataType::Timestamp(TimeUnit::Nanosecond, None),
@@ -755,6 +760,7 @@ impl DebeziumUnrollingExec {
             input,
             schema: schema.clone(),
             properties: make_properties(schema),
+            primary_keys,
         })
     }
 }
@@ -803,6 +809,7 @@ impl ExecutionPlan for DebeziumUnrollingExec {
             input: children[0].clone(),
             schema: self.schema.clone(),
             properties: self.properties.clone(),
+            primary_keys: self.primary_keys.clone(),
         }))
     }
 
@@ -814,6 +821,7 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         Ok(Box::pin(DebeziumUnrollingStream::try_new(
             self.input.execute(partition, context)?,
             self.schema.clone(),
+            self.primary_keys.clone(),
         )?))
     }
 
@@ -829,10 +837,18 @@ struct DebeziumUnrollingStream {
     after_index: usize,
     op_index: usize,
     timestamp_index: usize,
+    primary_keys: Vec<usize>,
 }
 
 impl DebeziumUnrollingStream {
-    fn try_new(input: SendableRecordBatchStream, schema: SchemaRef) -> Result<Self> {
+    fn try_new(
+        input: SendableRecordBatchStream,
+        schema: SchemaRef,
+        primary_keys: Vec<usize>,
+    ) -> Result<Self> {
+        if primary_keys.is_empty() {
+            return plan_err!("there must be at least one primary key for a Debezium source");
+        }
         let input_schema = input.schema();
         let before_index = input_schema.index_of("before")?;
         let after_index = input_schema.index_of("after")?;
@@ -846,6 +862,7 @@ impl DebeziumUnrollingStream {
             after_index,
             op_index,
             timestamp_index,
+            primary_keys,
         })
     }
     fn unroll_batch(&self, batch: &RecordBatch) -> Result<RecordBatch> {
@@ -867,8 +884,9 @@ impl DebeziumUnrollingStream {
 
         let num_rows = batch.num_rows();
         let combined_array = concat(&[before, after])?;
-        let mut take_indices = UInt32Builder::with_capacity(2 * num_rows);
-        let mut is_retract_builder = BooleanBuilder::with_capacity(2 * num_rows);
+        let mut take_indices = UInt32Builder::with_capacity(num_rows);
+        let mut is_retract_builder = BooleanBuilder::with_capacity(num_rows);
+
         let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(2 * num_rows);
         for i in 0..num_rows {
             let op = op.value(i);
@@ -879,7 +897,7 @@ impl DebeziumUnrollingStream {
                     timestamp_builder.append_value(timestamp.value(i));
                 }
                 "u" => {
-                    take_indices.append_value(i as u32);
+                    take_indices.append_value((i + num_rows) as u32);
                     is_retract_builder.append_value(true);
                     timestamp_builder.append_value(timestamp.value(i));
                     take_indices.append_value((i + num_rows) as u32);
@@ -901,8 +919,25 @@ impl DebeziumUnrollingStream {
         }
         let take_indices = take_indices.finish();
         let unrolled_array = take(&combined_array, &take_indices, None)?;
+
         let mut columns = unrolled_array.as_struct().columns().to_vec();
-        columns.push(Arc::new(is_retract_builder.finish()));
+
+        let hash = MultiHashFunction::default().invoke(
+            &self
+                .primary_keys
+                .iter()
+                .map(|i| ColumnarValue::Array(columns[*i].clone()))
+                .collect::<Vec<_>>(),
+        )?;
+
+        let ids = hash.into_array(num_rows)?;
+
+        let meta = StructArray::try_new(
+            updating_meta_fields(),
+            vec![Arc::new(is_retract_builder.finish()), ids],
+            None,
+        )?;
+        columns.push(Arc::new(meta));
         columns.push(Arc::new(timestamp_builder.finish()));
         Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
     }
@@ -940,7 +975,7 @@ impl ToDebeziumExec {
             .into_iter()
             .enumerate()
             .filter_map(|(index, field)| {
-                if field.name() == IS_RETRACT_FIELD || index == timestamp_index {
+                if field.name() == UPDATING_META_FIELD || index == timestamp_index {
                     None
                 } else {
                     Some(field.clone())
@@ -1013,12 +1048,10 @@ impl ExecutionPlan for ToDebeziumExec {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         if children.len() != 1 {
             return Err(DataFusionError::Internal(
-                "DebeziumUnrollingExec wrong number of children".to_string(),
+                "ToDebeziumExec wrong number of children".to_string(),
             ));
         }
-        Ok(Arc::new(DebeziumUnrollingExec::try_new(
-            children[0].clone(),
-        )?))
+        Ok(Arc::new(ToDebeziumExec::try_new(children[0].clone())?))
     }
 
     fn execute(
@@ -1026,20 +1059,21 @@ impl ExecutionPlan for ToDebeziumExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        let is_retract_index = self.input.schema().index_of(IS_RETRACT_FIELD).ok();
+        let updating_meta_index = self.input.schema().index_of(UPDATING_META_FIELD).ok();
         let timestamp_index = self.input.schema().index_of(TIMESTAMP_FIELD)?;
         let struct_projection = (0..self.input.schema().fields().len())
             .filter(|index| {
-                is_retract_index
+                updating_meta_index
                     .map(|is_retract_index| *index != is_retract_index)
                     .unwrap_or(true)
                     && *index != timestamp_index
             })
             .collect();
+
         Ok(Box::pin(ToDebeziumStream {
             input: self.input.execute(partition, context)?,
             schema: self.schema.clone(),
-            is_retract_index,
+            updating_meta_index,
             timestamp_index,
             struct_projection,
         }))
@@ -1053,7 +1087,7 @@ impl ExecutionPlan for ToDebeziumExec {
 struct ToDebeziumStream {
     input: SendableRecordBatchStream,
     schema: SchemaRef,
-    is_retract_index: Option<usize>,
+    updating_meta_index: Option<usize>,
     timestamp_index: usize,
     struct_projection: Vec<usize>,
 }
@@ -1061,54 +1095,146 @@ struct ToDebeziumStream {
 impl ToDebeziumStream {
     fn as_debezium_batch(&mut self, batch: &RecordBatch) -> Result<RecordBatch> {
         let value_struct = batch.project(&self.struct_projection)?;
-        let timestamp_column = batch.column(self.timestamp_index).clone();
-        match self.is_retract_index {
-            Some(retract_index) => self.create_debezium(
-                value_struct,
-                timestamp_column,
-                batch
-                    .column(retract_index)
-                    .as_any()
-                    .downcast_ref::<BooleanArray>()
-                    .unwrap(),
-            ),
-            None => {
-                let is_retract_array =
-                    BooleanArray::new(BooleanBuffer::new_unset(batch.num_rows()), None);
-                self.create_debezium(value_struct, timestamp_column, &is_retract_array)
-            }
-        }
-    }
-    fn create_debezium(
-        &mut self,
-        value_struct: RecordBatch,
-        timestamp_column: Arc<dyn Array>,
-        is_retract: &BooleanArray,
-    ) -> Result<RecordBatch> {
-        let after_nullability = Some(NullBuffer::new(not(is_retract)?.values().clone()));
-        let after_array = StructArray::try_new(
-            value_struct.schema().fields().clone(),
-            value_struct.columns().to_vec(),
-            after_nullability,
-        )?;
-        let before_nullability = Some(NullBuffer::new(is_retract.values().clone()));
-        let before_array = StructArray::try_new(
-            value_struct.schema().fields().clone(),
-            value_struct.columns().to_vec(),
-            before_nullability,
-        )?;
-        let append_datum = StringArray::new_scalar("c");
-        let retract_datum = StringArray::new_scalar("d");
-        let op_array = zip::zip(is_retract, &retract_datum, &append_datum)?;
+        let timestamps = batch
+            .column(self.timestamp_index)
+            .as_primitive::<TimestampNanosecondType>();
 
-        let columns = vec![
-            Arc::new(before_array),
-            Arc::new(after_array),
-            op_array,
-            timestamp_column,
-        ];
+        let columns: Vec<Arc<dyn Array>> = if let Some(metadata_index) = self.updating_meta_index {
+            let metadata = batch
+                .column(metadata_index)
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .ok_or_else(|| {
+                    DataFusionError::Internal("Invalid type for updating_meta column".to_string())
+                })?;
+
+            let is_retract = metadata.column(0).as_boolean();
+
+            let id = metadata.column(1).as_fixed_size_binary();
+
+            // (first idx, last idx, first is create, last is create, latest time)
+            let mut id_map: HashMap<&[u8], (usize, usize, bool, bool, i64)> = HashMap::new();
+            let mut order = vec![];
+            for i in 0..batch.num_rows() {
+                let row_id = id.value(i);
+                let is_create = !is_retract.value(i);
+                let timestamp = timestamps.value(i);
+
+                id_map
+                    .entry(row_id)
+                    .and_modify(|e| {
+                        e.1 = i;
+                        e.3 = is_create;
+                        e.4 = e.4.max(timestamp);
+                    })
+                    .or_insert_with(|| {
+                        order.push(row_id);
+                        (i, i, is_create, is_create, timestamp)
+                    });
+            }
+
+            // scenarios:
+            // 1. Create -- value index is last
+            //    -- create, (retract, create)*
+            // 2. Delete -- value index is first
+            //    -- (retract,create)*,retract
+            // 3. Update -- value index is last
+            //    -- (retract,create)*
+
+            let mut before = Vec::with_capacity(id_map.len());
+            let mut after = Vec::with_capacity(id_map.len());
+            let mut op = Vec::with_capacity(id_map.len());
+            let mut ts = TimestampNanosecondBuilder::with_capacity(id_map.len());
+
+            for row_id in order {
+                let (first_idx, last_idx, first_is_create, last_is_create, timestamp) =
+                    id_map.get(row_id).unwrap();
+
+                if *first_is_create && *last_is_create {
+                    // create case
+                    // sequence: create, (retract, create)*
+                    before.push(None);
+                    after.push(Some(*last_idx));
+                    op.push("c");
+                } else if !(*first_is_create) && !(*last_is_create) {
+                    // delete case
+                    // sequence: (retract,create)*, retract
+                    before.push(Some(*first_idx));
+                    after.push(None);
+                    op.push("d");
+                } else if !(*first_is_create) && *last_is_create {
+                    // update case
+                    // sequence: (retract,create)*
+                    before.push(Some(*first_idx));
+                    after.push(Some(*last_idx));
+                    op.push("u");
+                } else {
+                    // no-op case
+                    // sequence: (create,retract)*
+                    continue;
+                }
+
+                ts.append_value(*timestamp);
+            }
+
+            let before_array = Self::create_output_array(&value_struct, &before)?;
+            let after_array = Self::create_output_array(&value_struct, &after)?;
+            let op_array = StringArray::from(op);
+
+            vec![
+                Arc::new(before_array),
+                Arc::new(after_array),
+                Arc::new(op_array),
+                Arc::new(ts.finish()),
+            ]
+        } else {
+            // Append-only
+            let after_array = StructArray::try_new(
+                value_struct.schema().fields().clone(),
+                value_struct.columns().to_vec(),
+                None,
+            )?;
+
+            let before_array = StructArray::new_null(
+                value_struct.schema().fields().clone(),
+                value_struct.num_rows(),
+            );
+
+            vec![
+                Arc::new(before_array),
+                Arc::new(after_array),
+                Arc::new(StringArray::from(vec!["c"; value_struct.num_rows()])),
+                batch.column(self.timestamp_index).clone(),
+            ]
+        };
 
         Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
+    }
+
+    fn create_output_array(
+        value_struct: &RecordBatch,
+        indices: &[Option<usize>],
+    ) -> Result<StructArray> {
+        let mut arrays: Vec<Arc<dyn Array>> = Vec::with_capacity(value_struct.num_columns());
+        for col in value_struct.columns() {
+            let new_array = arrow::compute::take(
+                col.as_ref(),
+                &indices
+                    .iter()
+                    .map(|&idx| idx.map(|i| i as u64))
+                    .collect::<PrimitiveArray<UInt64Type>>(),
+                None,
+            )?;
+            arrays.push(new_array);
+        }
+
+        Ok(StructArray::try_new(
+            value_struct.schema().fields().clone(),
+            arrays,
+            Some(NullBuffer::from(
+                indices.iter().map(|&idx| idx.is_some()).collect::<Vec<_>>(),
+            )),
+        )?)
     }
 }
 

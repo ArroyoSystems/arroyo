@@ -3,7 +3,7 @@ use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::plan::WindowDetectingVisitor;
 use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata, ArroyoSchemaProvider};
 use arroyo_datastream::WindowType;
-use arroyo_rpc::IS_RETRACT_FIELD;
+use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{
     not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue,
@@ -64,13 +64,13 @@ impl<'a> JoinRewriter<'a> {
     fn check_updating(left: &LogicalPlan, right: &LogicalPlan) -> Result<()> {
         if left
             .schema()
-            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+            .has_column_with_unqualified_name(UPDATING_META_FIELD)
         {
             return plan_err!("can't handle updating left side of join");
         }
         if right
             .schema()
-            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+            .has_column_with_unqualified_name(UPDATING_META_FIELD)
         {
             return plan_err!("can't handle updating right side of join");
         }

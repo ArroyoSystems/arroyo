@@ -14,7 +14,7 @@ use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::Result;
 use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
@@ -214,7 +214,34 @@ pub fn error_chain(e: anyhow::Error) -> String {
 }
 
 pub const TIMESTAMP_FIELD: &str = "_timestamp";
-pub const IS_RETRACT_FIELD: &str = "_is_retract";
+pub const UPDATING_META_FIELD: &str = "_updating_meta";
+
+pub fn updating_meta_fields() -> Fields {
+    static UPDATING_META_FIELDS: OnceLock<Fields> = OnceLock::new();
+
+    UPDATING_META_FIELDS
+        .get_or_init(|| {
+            Fields::from(vec![
+                Field::new("is_retract", DataType::Boolean, true),
+                Field::new("id", DataType::FixedSizeBinary(16), true),
+            ])
+        })
+        .clone()
+}
+
+pub fn updating_meta_field() -> Arc<Field> {
+    static UPDATING_META_DATATYPE: OnceLock<Arc<Field>> = OnceLock::new();
+
+    UPDATING_META_DATATYPE
+        .get_or_init(|| {
+            Arc::new(Field::new(
+                UPDATING_META_FIELD,
+                DataType::Struct(updating_meta_fields()),
+                false,
+            ))
+        })
+        .clone()
+}
 // need to handle the empty case as a row converter without sort fields emits empty Rows.
 #[derive(Debug)]
 pub enum Converter {
