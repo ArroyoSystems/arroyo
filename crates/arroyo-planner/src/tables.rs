@@ -26,7 +26,8 @@ use datafusion::common::{plan_err, Column, DataFusionError};
 use datafusion::execution::context::SessionState;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan, WriteOp
+    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
+    WriteOp,
 };
 use datafusion::optimizer::common_subexpr_eliminate::CommonSubexprEliminate;
 use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery;
@@ -527,23 +528,48 @@ impl Table {
                         generation_expr, ..
                     } = &option.option
                     {
-                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function { name, args, .. })) = generation_expr {
-                            if name.0.iter().any(|ident| ident.value.to_lowercase() == "metadata") {
+                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function {
+                            name,
+                            args,
+                            ..
+                        })) = generation_expr
+                        {
+                            if name
+                                .0
+                                .iter()
+                                .any(|ident| ident.value.to_lowercase() == "metadata")
+                            {
                                 match args {
                                     FunctionArguments::List(arg_list) => {
                                         match arg_list.args.first() {
-                                            Some(FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(sqlparser::ast::Expr::Value(sqlparser::ast::Value::SingleQuotedString(value))))) => {
-                                                let mut metadata: HashMap<String, String> = Default::default();
-                                                metadata.insert("metadata_argument_".to_string(), value.to_string());
+                                            Some(FunctionArg::Unnamed(
+                                                sqlparser::ast::FunctionArgExpr::Expr(
+                                                    sqlparser::ast::Expr::Value(
+                                                        sqlparser::ast::Value::SingleQuotedString(
+                                                            value,
+                                                        ),
+                                                    ),
+                                                ),
+                                            )) => {
+                                                let mut metadata: HashMap<String, String> =
+                                                    Default::default();
+                                                metadata.insert(
+                                                    "metadata_argument_".to_string(),
+                                                    value.to_string(),
+                                                );
                                                 struct_field.set_metadata(metadata);
                                             }
                                             _ => {
-                                                DataFusionError::Plan(format!("Unsupported argument format."));
+                                                DataFusionError::Plan(format!(
+                                                    "Unsupported argument format."
+                                                ));
                                             }
                                         }
                                     }
                                     _ => {
-                                        DataFusionError::Plan(format!("Unsupported argument format."));
+                                        DataFusionError::Plan(format!(
+                                            "Unsupported argument format."
+                                        ));
                                     }
                                 }
                                 return None;

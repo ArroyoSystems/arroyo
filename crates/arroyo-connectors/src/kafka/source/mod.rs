@@ -47,8 +47,12 @@ pub struct KafkaMetadata {
 impl KafkaMetadata {
     pub fn get(&self, key: &str) -> Option<serde_json::Value> {
         match key {
-            "offset_id" => Some(serde_json::Value::Number(serde_json::Number::from(self.offset_id))),
-            "partition" => Some(serde_json::Value::Number(serde_json::Number::from(self.partition))),
+            "offset_id" => Some(serde_json::Value::Number(serde_json::Number::from(
+                self.offset_id,
+            ))),
+            "partition" => Some(serde_json::Value::Number(serde_json::Number::from(
+                self.partition,
+            ))),
             "topic" => Some(serde_json::Value::String(self.topic_name.clone())),
             _ => None,
         }
