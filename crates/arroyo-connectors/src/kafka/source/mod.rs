@@ -205,7 +205,7 @@ impl KafkaSourceFunc {
                                     topic_name: self.topic.clone(),
                                 };
 
-                                let mut deser = serde_json::from_slice::<serde_json::Value>(&v)
+                                let mut deser = serde_json::from_slice::<serde_json::Value>(v)
                                 .map_err(|e| UserError::new("Failed to deserialize JSON", e.to_string()))?;
 
                                 if let Some(schema) = &ctx.out_schema {
