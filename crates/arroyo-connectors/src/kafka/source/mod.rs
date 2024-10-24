@@ -199,32 +199,38 @@ impl KafkaSourceFunc {
                                 let timestamp = msg.timestamp().to_millis()
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
-                                let metadata = KafkaMetadata {
-                                    offset_id: msg.offset(),
-                                    partition: msg.partition(),
-                                    topic_name: self.topic.clone(),
-                                };
 
-                                let mut deser = serde_json::from_slice::<serde_json::Value>(v)
-                                .map_err(|e| UserError::new("Failed to deserialize JSON", e.to_string()))?;
+                                if let Format::Json(_) = self.format {
+                                    let metadata = KafkaMetadata {
+                                        offset_id: msg.offset(),
+                                        partition: msg.partition(),
+                                        topic_name: self.topic.clone(),
+                                    };
 
-                                if let Some(schema) = &ctx.out_schema {
-                                    for field in schema.schema.fields() {
-                                        if let Some(metadata_key) = field.metadata().get("metadata_argument_") {
-                                            if let Some(value) = metadata.get(metadata_key) {
-                                                if let serde_json::Value::Object(ref mut map) = deser {
-                                                    map.insert(field.name().to_string(), value.clone());
+                                    let mut deser = serde_json::from_slice::<serde_json::Value>(v)
+                                    .map_err(|e| UserError::new("Failed to deserialize JSON", e.to_string()))?;
+
+                                    if let Some(schema) = &ctx.out_schema {
+                                        for field in schema.schema.fields() {
+                                            if let Some(metadata_key) = field.metadata().get("metadata_argument_") {
+                                                if let Some(value) = metadata.get(metadata_key) {
+                                                    if let serde_json::Value::Object(ref mut map) = deser {
+                                                        map.insert(field.name().to_string(), value.clone());
+                                                    }
+                                                } else {
+                                                    error!("Unsupported metadata field: {}", metadata_key);
                                                 }
-                                            } else {
-                                                error!("Unsupported metadata field: {}", metadata_key);
                                             }
                                         }
                                     }
-                                }
-                                let updated_json = serde_json::to_vec(&deser)
-                                .map_err(|e| UserError::new("Failed to serialize updated JSON", e.to_string()))?;
+                                    let updated_json = serde_json::to_vec(&deser)
+                                    .map_err(|e| UserError::new("Failed to serialize updated JSON", e.to_string()))?;
 
-                                ctx.deserialize_slice(&updated_json, from_millis(timestamp as u64)).await?;
+
+                                    ctx.deserialize_slice(&updated_json, from_millis(timestamp as u64)).await?;
+                                } else {
+                                    ctx.deserialize_slice(v, from_millis(timestamp as u64)).await?;
+                                }
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;
