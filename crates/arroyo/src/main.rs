@@ -25,6 +25,7 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 #[cfg(all(
+    feature = "profiling",
     not(target_env = "msvc"),
     not(target_os = "macos"),
     any(target_arch = "x86_64", target_arch = "aarch64")
