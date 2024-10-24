@@ -759,7 +759,7 @@ impl JobController {
                 self.cleanup_task = Some(self.start_cleanup(new_epoch));
             }
         }
-
+        
         // check on checkpointing
         if self.model.checkpoint_state.is_some() {
             self.model.finish_checkpoint_if_done(&self.db).await?;

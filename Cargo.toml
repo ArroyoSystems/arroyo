@@ -80,5 +80,7 @@ datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafu
 datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
 datafusion-functions = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '40.0.0/arroyo'}
 
+object_store = { git = 'http://github.com/ArroyoSystems/arrow-rs', branch = 'gcp_bugs' }
+
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
 cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
