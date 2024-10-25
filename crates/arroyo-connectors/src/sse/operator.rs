@@ -182,6 +182,7 @@ impl SSESourceFunc {
                                     SSE::Comment(s) => {
                                         debug!("Received comment {:?}", s);
                                     }
+                                    SSE::Connected(_) => {}
                                 }
                             }
                             Some(Err(Error::Eof)) => {
