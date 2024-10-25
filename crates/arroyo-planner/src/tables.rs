@@ -299,7 +299,14 @@ impl ConnectorTable {
         .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
 
         let connection = connector
-            .from_options(name, options, Some(&schema), connection_profile, enable_metadata, connector_metadata_columns)
+            .from_options(
+                name,
+                options,
+                Some(&schema),
+                connection_profile,
+                enable_metadata,
+                connector_metadata_columns,
+            )
             .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let mut table: ConnectorTable = connection.into();
@@ -526,24 +533,25 @@ impl Table {
                     Field::new(name, data_type, nullable),
                 );
 
-                let generating_expression =
-                    column.options.iter().find_map(|option| {
-                        if let ColumnOption::Generated {
-                            generation_expr, ..
-                        } = &option.option
+                let generating_expression = column.options.iter().find_map(|option| {
+                    if let ColumnOption::Generated {
+                        generation_expr, ..
+                    } = &option.option
+                    {
+                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function {
+                            name,
+                            args,
+                            ..
+                        })) = generation_expr
                         {
-                            if let Some(sqlparser::ast::Expr::Function(
-                                sqlparser::ast::Function { name, args, .. },
-                            )) = generation_expr
+                            if name
+                                .0
+                                .iter()
+                                .any(|ident| ident.value.to_lowercase() == "metadata")
                             {
-                                if name
-                                    .0
-                                    .iter()
-                                    .any(|ident| ident.value.to_lowercase() == "metadata")
-                                {
-                                    match args {
-                                        FunctionArguments::List(arg_list) => {
-                                            match arg_list.args.first() {
+                                match args {
+                                    FunctionArguments::List(arg_list) => {
+                                        match arg_list.args.first() {
                                             Some(FunctionArg::Unnamed(
                                                 sqlparser::ast::FunctionArgExpr::Expr(
                                                     sqlparser::ast::Expr::Value(
@@ -553,25 +561,28 @@ impl Table {
                                                     ),
                                                 ),
                                             )) => {
-                                                connector_metadata_columns.insert(column.name.value.to_string(), value.to_string());
+                                                connector_metadata_columns.insert(
+                                                    column.name.value.to_string(),
+                                                    value.to_string(),
+                                                );
                                             }
                                             _ => {
-                                                    "Unsupported argument format.".to_string();
+                                                "Unsupported argument format.".to_string();
                                             }
                                         }
-                                        }
-                                        _ => {
-                                            "Unsupported argument format.".to_string();
-                                        }
                                     }
-                                    return None;
+                                    _ => {
+                                        "Unsupported argument format.".to_string();
+                                    }
                                 }
+                                return None;
                             }
-                            generation_expr.clone()
-                        } else {
-                            None
                         }
-                    });
+                        generation_expr.clone()
+                    } else {
+                        None
+                    }
+                });
                 Ok((struct_field, generating_expression))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -648,7 +659,11 @@ impl Table {
 
             let connector = with_map.remove("connector");
             let mut connector_metadata_columns = Some(HashMap::new());
-            let fields = Self::schema_from_columns(columns, schema_provider, connector_metadata_columns.as_mut().unwrap())?;
+            let fields = Self::schema_from_columns(
+                columns,
+                schema_provider,
+                connector_metadata_columns.as_mut().unwrap(),
+            )?;
 
             let primary_keys = columns
                 .iter()
