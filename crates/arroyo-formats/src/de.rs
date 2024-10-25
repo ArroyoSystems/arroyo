@@ -83,6 +83,7 @@ pub struct ArrowDeserializer {
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    enable_metadata: Option<bool>,
     kafka_metadata_builder: Option<(Int64Builder, Int32Builder, StringBuilder)>,
     metadata_fields: Option<HashMap<String, String>>,
 }
@@ -161,6 +162,7 @@ impl ArrowDeserializer {
             proto_pool,
             buffered_count: 0,
             buffered_since: Instant::now(),
+            enable_metadata: Some(false),
             kafka_metadata_builder: None,
             metadata_fields: None,
         }
@@ -203,30 +205,32 @@ impl ArrowDeserializer {
                         let mut columns = batch.columns().to_vec();
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
 
-                        if let Some((offset_builder, partition_builder, topic_builder)) = &mut self.kafka_metadata_builder {
-                            if let Some(fields) = &self.metadata_fields {
-                                for (field_name, argument_name) in fields.iter() {
-                                    match argument_name.as_str() {
-                                        "topic" => {
-                                            if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
-                                                columns.remove(idx);
-                                                columns.insert(idx, Arc::new(topic_builder.finish()));
+                        if self.enable_metadata.unwrap_or(false) {
+                            if let Some((offset_builder, partition_builder, topic_builder)) = &mut self.kafka_metadata_builder {
+                                if let Some(fields) = &self.metadata_fields {
+                                    for (field_name, argument_name) in fields.iter() {
+                                        match argument_name.as_str() {
+                                            "topic" => {
+                                                if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                    columns.remove(idx);
+                                                    columns.insert(idx, Arc::new(topic_builder.finish()));
+                                                }
                                             }
-                                        }
-                                        "partition" => {
-                                            if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
-                                                columns.remove(idx);
-                                                columns.insert(idx, Arc::new(partition_builder.finish()));
+                                            "partition" => {
+                                                if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                    columns.remove(idx);
+                                                    columns.insert(idx, Arc::new(partition_builder.finish()));
+                                                }
                                             }
-                                        }
-                                        "offset_id" => {
-                                            if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
-                                                columns.remove(idx);
-                                                columns.insert(idx, Arc::new(offset_builder.finish()));
+                                            "offset_id" => {
+                                                if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                    columns.remove(idx);
+                                                    columns.insert(idx, Arc::new(offset_builder.finish()));
+                                                }
                                             }
-                                        }
-                                        _ => {
-                                            // Handle unexpected argument names or log a message if necessary
+                                            _ => {
+                                                // Handle unexpected argument names or log a message if necessary
+                                            }
                                         }
                                     }
                                 }
@@ -274,6 +278,7 @@ impl ArrowDeserializer {
                 self.deserialize_raw_string(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
                 if kafka_metadata.0 {
+                    self.enable_metadata = Some(true);
                     add_kafka_metadata(
                         buffer,
                         &self.schema,
@@ -288,6 +293,7 @@ impl ArrowDeserializer {
                 self.deserialize_raw_bytes(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
                 if kafka_metadata.0 {
+                    self.enable_metadata = Some(true);
                     add_kafka_metadata(
                         buffer,
                         &self.schema,
@@ -310,6 +316,7 @@ impl ArrowDeserializer {
                 };
 
                 if kafka_metadata.0 {
+                    self.enable_metadata = Some(true);
                     self.kafka_metadata_builder.get_or_insert_with(|| {
                         (
                             Int64Builder::new(),
