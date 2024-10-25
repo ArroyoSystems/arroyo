@@ -22,7 +22,7 @@ pub struct Connection {
     pub description: String,
 }
 
-#[allow(clippy::wrong_self_convention)]
+#[allow(clippy::wrong_self_convention, clippy::too_many_arguments)]
 pub trait Connector: Send {
     type ProfileT: DeserializeOwned + Serialize;
     type TableT: DeserializeOwned + Serialize;
@@ -170,6 +170,7 @@ pub trait ErasedConnector: Send {
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
+    #[allow(clippy::too_many_arguments)]
     fn from_config(
         &self,
         id: Option<i64>,

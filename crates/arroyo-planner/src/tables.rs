@@ -214,6 +214,7 @@ impl From<Connection> for ConnectorTable {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl ConnectorTable {
     fn from_options(
         name: &str,
