@@ -533,25 +533,24 @@ impl Table {
                     Field::new(name, data_type, nullable),
                 );
 
-                let generating_expression = column.options.iter().find_map(|option| {
-                    if let ColumnOption::Generated {
-                        generation_expr, ..
-                    } = &option.option
-                    {
-                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function {
-                            name,
-                            args,
-                            ..
-                        })) = generation_expr
+                let generating_expression =
+                    column.options.iter().find_map(|option| {
+                        if let ColumnOption::Generated {
+                            generation_expr, ..
+                        } = &option.option
                         {
-                            if name
-                                .0
-                                .iter()
-                                .any(|ident| ident.value.to_lowercase() == "metadata")
+                            if let Some(sqlparser::ast::Expr::Function(
+                                sqlparser::ast::Function { name, args, .. },
+                            )) = generation_expr
                             {
-                                match args {
-                                    FunctionArguments::List(arg_list) => {
-                                        match arg_list.args.first() {
+                                if name
+                                    .0
+                                    .iter()
+                                    .any(|ident| ident.value.to_lowercase() == "metadata")
+                                {
+                                    match args {
+                                        FunctionArguments::List(arg_list) => {
+                                            match arg_list.args.first() {
                                             Some(FunctionArg::Unnamed(
                                                 sqlparser::ast::FunctionArgExpr::Expr(
                                                     sqlparser::ast::Expr::Value(
@@ -570,19 +569,19 @@ impl Table {
                                                 "Unsupported argument format.".to_string();
                                             }
                                         }
+                                        }
+                                        _ => {
+                                            "Unsupported argument format.".to_string();
+                                        }
                                     }
-                                    _ => {
-                                        "Unsupported argument format.".to_string();
-                                    }
+                                    return None;
                                 }
-                                return None;
                             }
+                            generation_expr.clone()
+                        } else {
+                            None
                         }
-                        generation_expr.clone()
-                    } else {
-                        None
-                    }
-                });
+                    });
                 Ok((struct_field, generating_expression))
             })
             .collect::<Result<Vec<_>>>()?;
