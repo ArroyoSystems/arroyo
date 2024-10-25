@@ -56,12 +56,11 @@ interface RadioCardProps extends BoxProps {
 
 export const RadioCard = (props: RadioCardProps) => {
   const { radioProps, children, isDisabled, ...rest } = props;
-  const { getInputProps, getCheckboxProps, getLabelProps, state } = useRadio(radioProps);
+  const { getInputProps, getLabelProps, state } = useRadio(radioProps);
   const id = useId(undefined, 'radio-button');
 
   const styles = useStyleConfig('RadioCard', props);
   const inputProps = getInputProps();
-  const checkboxProps = getCheckboxProps();
   const labelProps = getLabelProps();
 
   const sx = isDisabled
@@ -78,7 +77,7 @@ export const RadioCard = (props: RadioCardProps) => {
   return (
     <Box as="label" cursor="pointer" {...labelProps} sx={sx}>
       <input {...inputProps} aria-labelledby={id} />
-      <Box sx={styles} {...checkboxProps} {...rest}>
+      <Box sx={styles} {...rest}>
         <Stack direction="row">
           <Box flex="1">{children}</Box>
           {state.isChecked ? (

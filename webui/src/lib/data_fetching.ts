@@ -363,7 +363,8 @@ const checkpointDetailsFetcher = () => {
 export const useCheckpointDetails = (pipelineId?: string, jobId?: string, epoch?: number) => {
   const { data, isLoading } = useSWR<schemas['OperatorCheckpointGroupCollection']>(
     checkpointDetailsKey(pipelineId, jobId, epoch),
-    checkpointDetailsFetcher()
+    checkpointDetailsFetcher(),
+    {}
   );
 
   return {
