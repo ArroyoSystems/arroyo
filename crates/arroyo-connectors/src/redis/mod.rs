@@ -227,6 +227,8 @@ impl Connector for RedisConnector {
         options: &mut HashMap<String, String>,
         s: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let connection_config = match profile {
             Some(connection_profile) => {
@@ -348,6 +350,8 @@ impl Connector for RedisConnector {
                 connector_type: sink,
             },
             s,
+            None,
+            None,
         )
     }
 
@@ -358,6 +362,8 @@ impl Connector for RedisConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let schema = schema
             .map(|s| s.to_owned())
@@ -378,6 +384,8 @@ impl Connector for RedisConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            enable_metadata: None,
+            metadata_fields: None,
         };
 
         Ok(Connection {

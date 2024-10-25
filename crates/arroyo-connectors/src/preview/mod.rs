@@ -71,6 +71,8 @@ impl Connector for PreviewConnector {
         _: &mut HashMap<String, String>,
         _: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         bail!("Preview connector cannot be created in SQL");
     }
@@ -82,6 +84,8 @@ impl Connector for PreviewConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let description = "PreviewSink".to_string();
 
@@ -96,6 +100,8 @@ impl Connector for PreviewConnector {
             format: None,
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            enable_metadata: None,
+            metadata_fields: None,
         };
 
         Ok(Connection {

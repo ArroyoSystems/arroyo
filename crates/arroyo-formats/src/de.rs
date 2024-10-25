@@ -84,6 +84,7 @@ pub struct ArrowDeserializer {
     proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
     kafka_metadata_builder: Option<(Int64Builder, Int32Builder, StringBuilder)>,
+    metadata_fields: Option<HashMap<String, String>>,
 }
 
 impl ArrowDeserializer {
@@ -161,6 +162,7 @@ impl ArrowDeserializer {
             buffered_count: 0,
             buffered_since: Instant::now(),
             kafka_metadata_builder: None,
+            metadata_fields: None,
         }
     }
 
@@ -170,11 +172,12 @@ impl ArrowDeserializer {
         msg: &[u8],
         timestamp: SystemTime,
         kafka_metadata: (bool, i64, i32, String),
+        metadata_fields: Option<HashMap<String, String>>
     ) -> Vec<SourceError> {
         match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(buffer, msg, timestamp).await,
             _ => FramingIterator::new(self.framing.clone(), msg)
-                .map(|t| self.deserialize_single(buffer, t, timestamp, kafka_metadata.clone()))
+                .map(|t| self.deserialize_single(buffer, t, timestamp, kafka_metadata.clone(), metadata_fields.clone()))
                 .filter_map(|t| t.err())
                 .collect(),
         }
@@ -200,28 +203,33 @@ impl ArrowDeserializer {
                         let mut columns = batch.columns().to_vec();
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
 
-                        if let Some((offset_builder, partition_builder, topic_builder)) =
-                            &mut self.kafka_metadata_builder
-                        {
-                            if let Some((topic_idx, _)) =
-                                self.schema.schema.column_with_name("topic")
-                            {
-                                columns.remove(topic_idx);
-                                columns.insert(topic_idx, Arc::new(topic_builder.finish()));
-                            }
-
-                            if let Some((partition_idx, _)) =
-                                self.schema.schema.column_with_name("partition")
-                            {
-                                columns.remove(partition_idx);
-                                columns.insert(partition_idx, Arc::new(partition_builder.finish()));
-                            }
-
-                            if let Some((offset_idx, _)) =
-                                self.schema.schema.column_with_name("offset")
-                            {
-                                columns.remove(offset_idx);
-                                columns.insert(offset_idx, Arc::new(offset_builder.finish()));
+                        if let Some((offset_builder, partition_builder, topic_builder)) = &mut self.kafka_metadata_builder {
+                            if let Some(fields) = &self.metadata_fields {
+                                for (field_name, argument_name) in fields.iter() {
+                                    match argument_name.as_str() {
+                                        "topic" => {
+                                            if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                columns.remove(idx);
+                                                columns.insert(idx, Arc::new(topic_builder.finish()));
+                                            }
+                                        }
+                                        "partition" => {
+                                            if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                columns.remove(idx);
+                                                columns.insert(idx, Arc::new(partition_builder.finish()));
+                                            }
+                                        }
+                                        "offset_id" => {
+                                            if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                columns.remove(idx);
+                                                columns.insert(idx, Arc::new(offset_builder.finish()));
+                                            }
+                                        }
+                                        _ => {
+                                            // Handle unexpected argument names or log a message if necessary
+                                        }
+                                    }
+                                }
                             }
                         }
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
@@ -255,7 +263,9 @@ impl ArrowDeserializer {
         msg: &[u8],
         timestamp: SystemTime,
         kafka_metadata: (bool, i64, i32, String),
+        metadata_fields: Option<HashMap<String, String>>
     ) -> Result<(), SourceError> {
+        self.metadata_fields = metadata_fields;
         match &*self.format {
             Format::RawString(_)
             | Format::Json(JsonFormat {
@@ -270,6 +280,7 @@ impl ArrowDeserializer {
                         &kafka_metadata.3,
                         kafka_metadata.2,
                         kafka_metadata.1,
+                        self.metadata_fields.clone(),
                     );
                 }
             }
@@ -283,6 +294,7 @@ impl ArrowDeserializer {
                         &kafka_metadata.3,
                         kafka_metadata.2,
                         kafka_metadata.1,
+                        self.metadata_fields.clone(),
                     );
                 }
             }
@@ -343,6 +355,7 @@ impl ArrowDeserializer {
                             &kafka_metadata.3,
                             kafka_metadata.2,
                             kafka_metadata.1,
+                            self.metadata_fields.clone(),
                         );
                     }
                     self.buffered_count += 1;
@@ -518,22 +531,33 @@ pub(crate) fn add_kafka_metadata(
     topic: &str,
     partition: i32,
     offset: i64,
+    metadata_fields: Option<HashMap<String, String>>,
 ) {
-    let (topic_idx, _) = schema
-        .schema
-        .column_with_name("topic")
-        .expect("No column named 'topic' in the schema");
-    let (partition_idx, _) = schema
-        .schema
-        .column_with_name("partition")
-        .expect("No column named 'partition' in the schema");
-    let (offset_idx, _) = schema
-        .schema
-        .column_with_name("offset")
-        .expect("No column named 'offset' in the schema");
-    add_kafka_metadata_topic(builder, topic_idx, topic);
-    add_kafka_metadata_partition(builder, partition_idx, partition);
-    add_kafka_metadata_offset(builder, offset_idx, offset);
+    if let Some(fields) = metadata_fields {
+        for (field_name, argument_name) in fields.iter() {
+            // Match each argument name and add the corresponding metadata if found
+            match argument_name.as_str() {
+                "topic" => {
+                    if let Some((idx, _)) = schema.schema.column_with_name(field_name) {
+                        add_kafka_metadata_topic(builder, idx, topic);
+                    }
+                }
+                "partition" => {
+                    if let Some((idx, _)) = schema.schema.column_with_name(field_name) {
+                        add_kafka_metadata_partition(builder, idx, partition);
+                    }
+                }
+                "offset_id" => {
+                    if let Some((idx, _)) = schema.schema.column_with_name(field_name) {
+                        add_kafka_metadata_offset(builder, idx, offset);
+                    }
+                }
+                _ => {
+                    // Handle any unexpected argument names or log a message if necessary
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -671,7 +695,8 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
                     now,
-                    (false, 0, 0, "".to_string())
+                    (false, 0, 0, "".to_string()),
+                    None
                 )
                 .await,
             vec![]
@@ -682,7 +707,8 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
                     now,
-                    (false, 0, 0, "".to_string())
+                    (false, 0, 0, "".to_string()),
+                    None
                 )
                 .await,
             vec![]
@@ -709,7 +735,8 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
                     SystemTime::now(),
-                    (false, 0, 0, "".to_string())
+                    (false, 0, 0, "".to_string()),
+                    None
                 )
                 .await,
             vec![]
@@ -720,7 +747,8 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
                     SystemTime::now(),
-                    (false, 0, 0, "".to_string())
+                    (false, 0, 0, "".to_string()),
+                    None
                 )
                 .await,
             vec![]
@@ -764,6 +792,7 @@ mod tests {
                 &[0, 1, 2, 3, 4, 5],
                 time,
                 (false, 0, 0, "".to_string()),
+                None
             )
             .await;
         assert!(result.is_empty());

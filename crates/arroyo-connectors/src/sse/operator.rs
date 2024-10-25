@@ -172,7 +172,7 @@ impl SSESourceFunc {
 
                                         if events.is_empty() || events.contains(&event.event_type) {
                                             ctx.deserialize_slice(
-                                                event.data.as_bytes(), SystemTime::now(), (false, 0, 0, "".to_string())).await?;
+                                                event.data.as_bytes(), SystemTime::now(), (false, 0, 0, "".to_string()), None).await?;
 
                                             if ctx.should_flush() {
                                                 ctx.flush_buffer().await?;

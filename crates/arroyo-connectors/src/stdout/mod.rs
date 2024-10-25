@@ -76,8 +76,18 @@ impl Connector for StdoutConnector {
         _options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
-        self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, schema)
+        self.from_config(
+            None,
+            name,
+            EmptyConfig {},
+            EmptyConfig {},
+            schema,
+            None,
+            None,
+        )
     }
 
     fn from_config(
@@ -87,6 +97,8 @@ impl Connector for StdoutConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let description = "StdoutSink".to_string();
 
@@ -107,6 +119,8 @@ impl Connector for StdoutConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            enable_metadata: None,
+            metadata_fields: None,
         };
 
         Ok(Connection {

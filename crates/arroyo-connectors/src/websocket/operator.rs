@@ -122,7 +122,7 @@ impl WebsocketSourceFunc {
         msg: &[u8],
         ctx: &mut ArrowContext,
     ) -> Result<(), UserError> {
-        ctx.deserialize_slice(msg, SystemTime::now(), (false, 0, 0, "".to_string()))
+        ctx.deserialize_slice(msg, SystemTime::now(), (false, 0, 0, "".to_string()), None)
             .await?;
 
         if ctx.should_flush() {

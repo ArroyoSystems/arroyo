@@ -101,6 +101,8 @@ impl Connector for ImpulseConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
             .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
@@ -134,6 +136,8 @@ impl Connector for ImpulseConnector {
                 message_count,
             },
             None,
+            None,
+            None,
         )
     }
 
@@ -144,6 +148,8 @@ impl Connector for ImpulseConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let description = format!(
             "{}Impulse<{} eps{}>",
@@ -166,6 +172,8 @@ impl Connector for ImpulseConnector {
             format: None,
             bad_data: None,
             framing: None,
+            enable_metadata: None,
+            metadata_fields: None,
         };
 
         Ok(Connection {

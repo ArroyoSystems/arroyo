@@ -439,6 +439,7 @@ impl KinesisSourceFunc {
                 &data,
                 from_nanos(timestamp.as_nanos() as u128),
                 (false, 0, 0, "".to_string()),
+                None,
             )
             .await?;
 

@@ -56,6 +56,7 @@ impl SingleFileSourceFunc {
                 s.as_bytes(),
                 SystemTime::now(),
                 (false, 0, 0, "".to_string()),
+                None,
             )
             .await
             .unwrap();

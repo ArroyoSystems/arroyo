@@ -191,6 +191,8 @@ pub struct OperatorConfig {
     pub bad_data: Option<BadData>,
     pub framing: Option<Framing>,
     pub rate_limit: Option<RateLimit>,
+    pub enable_metadata: Option<bool>,
+    pub metadata_fields: Option<HashMap<String, String>>,
 }
 
 impl Default for OperatorConfig {
@@ -202,6 +204,8 @@ impl Default for OperatorConfig {
             bad_data: None,
             framing: None,
             rate_limit: None,
+            enable_metadata: None,
+            metadata_fields: None,
         }
     }
 }

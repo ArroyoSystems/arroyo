@@ -161,6 +161,8 @@ impl Connector for ConfluentConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -172,7 +174,7 @@ impl Connector for ConfluentConnector {
 
         let table = KafkaConnector::table_from_options(options)?;
 
-        self.from_config(None, name, connection, table, schema)
+        self.from_config(None, name, connection, table, schema, None, None)
     }
 
     fn from_config(
@@ -182,11 +184,13 @@ impl Connector for ConfluentConnector {
         config: Self::ProfileT,
         mut table: Self::TableT,
         schema: Option<&ConnectionSchema>,
+        _enable_metadata: Option<bool>,
+        _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         table
             .client_configs
             .insert("client.id".to_string(), CLIENT_ID.to_string());
-        KafkaConnector {}.from_config(id, name, config.into(), table, schema)
+        KafkaConnector {}.from_config(id, name, config.into(), table, schema, None, None)
     }
 
     fn make_operator(

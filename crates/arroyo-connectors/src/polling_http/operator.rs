@@ -215,7 +215,7 @@ impl PollingHttpSourceFunc {
                                     continue;
                                 }
 
-                                ctx.deserialize_slice(&buf, SystemTime::now(), (false, 0, 0, "".to_string())).await?;
+                                ctx.deserialize_slice(&buf, SystemTime::now(), (false, 0, 0, "".to_string()), None).await?;
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;

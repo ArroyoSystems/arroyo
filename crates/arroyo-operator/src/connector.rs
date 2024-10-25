@@ -89,6 +89,8 @@ pub trait Connector: Send {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
     fn from_config(
@@ -98,6 +100,8 @@ pub trait Connector: Send {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
     #[allow(unused)]
@@ -162,6 +166,8 @@ pub trait ErasedConnector: Send {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
     fn from_config(
@@ -171,6 +177,8 @@ pub trait ErasedConnector: Send {
         config: &serde_json::Value,
         table: &serde_json::Value,
         schema: Option<&ConnectionSchema>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
     fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<OperatorNode>;
@@ -256,8 +264,10 @@ impl<C: Connector> ErasedConnector for C {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
-        self.from_options(name, options, schema, profile)
+        self.from_options(name, options, schema, profile, enable_metadata, metadata_fields)
     }
 
     fn from_config(
@@ -267,6 +277,8 @@ impl<C: Connector> ErasedConnector for C {
         config: &serde_json::Value,
         table: &serde_json::Value,
         schema: Option<&ConnectionSchema>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         self.from_config(
             id,
@@ -274,6 +286,8 @@ impl<C: Connector> ErasedConnector for C {
             self.parse_config(config)?,
             self.parse_table(table)?,
             schema,
+            enable_metadata,
+            metadata_fields,
         )
     }
 

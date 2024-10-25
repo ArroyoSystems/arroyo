@@ -35,6 +35,8 @@ pub struct KafkaSourceFunc {
     pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
     pub client_configs: HashMap<String, String>,
     pub messages_per_second: NonZeroU32,
+    pub enable_metadata: Option<bool>,
+    pub metadata_fields: Option<HashMap<String, String>>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -178,9 +180,9 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                let metadata_enabled = true;
-                                let kafka_metadata = (metadata_enabled, msg.offset(), msg.partition(), self.topic.clone());
-                                ctx.deserialize_slice(v, from_millis(timestamp as u64), kafka_metadata).await?;
+                                let kafka_metadata = (self.enable_metadata.unwrap_or(false), msg.offset(), msg.partition(), self.topic.clone());
+
+                                ctx.deserialize_slice(v, from_millis(timestamp as u64), kafka_metadata, self.metadata_fields.clone()).await?;
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;

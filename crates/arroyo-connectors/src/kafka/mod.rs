@@ -188,6 +188,8 @@ impl Connector for KafkaConnector {
         config: KafkaConfig,
         table: KafkaTable,
         schema: Option<&ConnectionSchema>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
@@ -214,6 +216,8 @@ impl Connector for KafkaConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            enable_metadata,
+            metadata_fields,
         };
 
         Ok(Connection {
@@ -312,6 +316,8 @@ impl Connector for KafkaConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        enable_metadata: Option<bool>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -323,7 +329,16 @@ impl Connector for KafkaConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(self, None, name, connection, table, schema)
+        Self::from_config(
+            self,
+            None,
+            name,
+            connection,
+            table,
+            schema,
+            enable_metadata,
+            metadata_fields,
+        )
     }
 
     fn make_operator(
@@ -383,6 +398,8 @@ impl Connector for KafkaConnector {
                             .unwrap_or(u32::MAX),
                     )
                     .unwrap(),
+                    enable_metadata: config.enable_metadata,
+                    metadata_fields: config.metadata_fields,
                 })))
             }
             TableType::Sink {
@@ -627,6 +644,7 @@ impl KafkaTester {
                             &msg,
                             SystemTime::now(),
                             (false, 0, 0, "".to_string()),
+                            None,
                         )
                         .await
                         .into_iter()
@@ -654,6 +672,7 @@ impl KafkaTester {
                             &msg,
                             SystemTime::now(),
                             (false, 0, 0, "".to_string()),
+                            None,
                         )
                         .await
                         .into_iter()
@@ -693,6 +712,7 @@ impl KafkaTester {
                         &msg,
                         SystemTime::now(),
                         (false, 0, 0, "".to_string()),
+                        None,
                     )
                     .await
                     .into_iter()

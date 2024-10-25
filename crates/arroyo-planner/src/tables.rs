@@ -222,6 +222,8 @@ impl ConnectorTable {
         primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
         connection_profile: Option<&ConnectionProfile>,
+        enable_metadata: Option<bool>,
+        connector_metadata_columns: Option<HashMap<String, String>>,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
         if "delta" == connector {
@@ -297,7 +299,7 @@ impl ConnectorTable {
         .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
 
         let connection = connector
-            .from_options(name, options, Some(&schema), connection_profile)
+            .from_options(name, options, Some(&schema), connection_profile, enable_metadata, connector_metadata_columns)
             .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let mut table: ConnectorTable = connection.into();
@@ -507,6 +509,7 @@ impl Table {
     fn schema_from_columns(
         columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
+        connector_metadata_columns: &mut HashMap<String, String>,
     ) -> Result<Vec<FieldSpec>> {
         let struct_field_pairs = columns
             .iter()
@@ -518,7 +521,7 @@ impl Table {
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
 
-                let mut struct_field = ArroyoExtensionType::add_metadata(
+                let struct_field = ArroyoExtensionType::add_metadata(
                     extension,
                     Field::new(name, data_type, nullable),
                 );
@@ -550,13 +553,7 @@ impl Table {
                                                     ),
                                                 ),
                                             )) => {
-                                                let mut metadata: HashMap<String, String> =
-                                                    Default::default();
-                                                metadata.insert(
-                                                    "metadata_argument_".to_string(),
-                                                    value.to_string(),
-                                                );
-                                                struct_field.set_metadata(metadata);
+                                                connector_metadata_columns.insert(column.name.value.to_string(), value.to_string());
                                             }
                                             _ => {
                                                     "Unsupported argument format.".to_string();
@@ -650,7 +647,8 @@ impl Table {
             }
 
             let connector = with_map.remove("connector");
-            let fields = Self::schema_from_columns(columns, schema_provider)?;
+            let mut connector_metadata_columns = Some(HashMap::new());
+            let fields = Self::schema_from_columns(columns, schema_provider, connector_metadata_columns.as_mut().unwrap())?;
 
             let primary_keys = columns
                 .iter()
@@ -714,6 +712,8 @@ impl Table {
                             primary_keys,
                             &mut with_map,
                             connection_profile,
+                            Some(true),
+                            connector_metadata_columns,
                         )
                         .map_err(|e| e.context(format!("Failed to create table {}", name)))?,
                     )))
