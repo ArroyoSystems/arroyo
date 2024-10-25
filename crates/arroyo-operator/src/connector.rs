@@ -267,7 +267,14 @@ impl<C: Connector> ErasedConnector for C {
         enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
-        self.from_options(name, options, schema, profile, enable_metadata, metadata_fields)
+        self.from_options(
+            name,
+            options,
+            schema,
+            profile,
+            enable_metadata,
+            metadata_fields,
+        )
     }
 
     fn from_config(

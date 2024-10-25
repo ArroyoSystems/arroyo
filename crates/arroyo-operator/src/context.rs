@@ -671,7 +671,7 @@ impl ArrowContext {
         msg: &[u8],
         time: SystemTime,
         kafka_metadata: (bool, i64, i32, String),
-        metadata_fields: Option<HashMap<String, String>>
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> Result<(), UserError> {
         let deserializer = self
             .deserializer
