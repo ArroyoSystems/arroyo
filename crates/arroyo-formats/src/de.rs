@@ -174,12 +174,20 @@ impl ArrowDeserializer {
         msg: &[u8],
         timestamp: SystemTime,
         kafka_metadata: (bool, i64, i32, String),
-        metadata_fields: Option<HashMap<String, String>>
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> Vec<SourceError> {
         match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(buffer, msg, timestamp).await,
             _ => FramingIterator::new(self.framing.clone(), msg)
-                .map(|t| self.deserialize_single(buffer, t, timestamp, kafka_metadata.clone(), metadata_fields.clone()))
+                .map(|t| {
+                    self.deserialize_single(
+                        buffer,
+                        t,
+                        timestamp,
+                        kafka_metadata.clone(),
+                        metadata_fields.clone(),
+                    )
+                })
                 .filter_map(|t| t.err())
                 .collect(),
         }
@@ -206,26 +214,43 @@ impl ArrowDeserializer {
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
 
                         if self.enable_metadata.unwrap_or(false) {
-                            if let Some((offset_builder, partition_builder, topic_builder)) = &mut self.kafka_metadata_builder {
+                            if let Some((offset_builder, partition_builder, topic_builder)) =
+                                &mut self.kafka_metadata_builder
+                            {
                                 if let Some(fields) = &self.metadata_fields {
                                     for (field_name, argument_name) in fields.iter() {
                                         match argument_name.as_str() {
                                             "topic" => {
-                                                if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                if let Some((idx, _)) =
+                                                    self.schema.schema.column_with_name(field_name)
+                                                {
                                                     columns.remove(idx);
-                                                    columns.insert(idx, Arc::new(topic_builder.finish()));
+                                                    columns.insert(
+                                                        idx,
+                                                        Arc::new(topic_builder.finish()),
+                                                    );
                                                 }
                                             }
                                             "partition" => {
-                                                if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                if let Some((idx, _)) =
+                                                    self.schema.schema.column_with_name(field_name)
+                                                {
                                                     columns.remove(idx);
-                                                    columns.insert(idx, Arc::new(partition_builder.finish()));
+                                                    columns.insert(
+                                                        idx,
+                                                        Arc::new(partition_builder.finish()),
+                                                    );
                                                 }
                                             }
                                             "offset_id" => {
-                                                if let Some((idx, _)) = self.schema.schema.column_with_name(field_name) {
+                                                if let Some((idx, _)) =
+                                                    self.schema.schema.column_with_name(field_name)
+                                                {
                                                     columns.remove(idx);
-                                                    columns.insert(idx, Arc::new(offset_builder.finish()));
+                                                    columns.insert(
+                                                        idx,
+                                                        Arc::new(offset_builder.finish()),
+                                                    );
                                                 }
                                             }
                                             _ => {
@@ -267,7 +292,7 @@ impl ArrowDeserializer {
         msg: &[u8],
         timestamp: SystemTime,
         kafka_metadata: (bool, i64, i32, String),
-        metadata_fields: Option<HashMap<String, String>>
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> Result<(), SourceError> {
         self.metadata_fields = metadata_fields;
         match &*self.format {
@@ -799,7 +824,7 @@ mod tests {
                 &[0, 1, 2, 3, 4, 5],
                 time,
                 (false, 0, 0, "".to_string()),
-                None
+                None,
             )
             .await;
         assert!(result.is_empty());
