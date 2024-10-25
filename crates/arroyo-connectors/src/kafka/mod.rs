@@ -622,7 +622,12 @@ impl KafkaTester {
                     let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(&mut builders, &msg, SystemTime::now())
+                        .deserialize_slice(
+                            &mut builders,
+                            &msg,
+                            SystemTime::now(),
+                            (false, 0, 0, "".to_string()),
+                        )
                         .await
                         .into_iter()
                         .next();
@@ -644,7 +649,12 @@ impl KafkaTester {
                     let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(&mut builders, &msg, SystemTime::now())
+                        .deserialize_slice(
+                            &mut builders,
+                            &msg,
+                            SystemTime::now(),
+                            (false, 0, 0, "".to_string()),
+                        )
                         .await
                         .into_iter()
                         .next();
@@ -678,7 +688,12 @@ impl KafkaTester {
                 let mut builders = aschema.builders();
 
                 let mut error = deserializer
-                    .deserialize_slice(&mut builders, &msg, SystemTime::now())
+                    .deserialize_slice(
+                        &mut builders,
+                        &msg,
+                        SystemTime::now(),
+                        (false, 0, 0, "".to_string()),
+                    )
                     .await
                     .into_iter()
                     .next();

@@ -281,7 +281,12 @@ mod tests {
             deserializer_with_schema(format.clone(), writer_schema);
 
         let errors = deserializer
-            .deserialize_slice(&mut builders, message, SystemTime::now())
+            .deserialize_slice(
+                &mut builders,
+                message,
+                SystemTime::now(),
+                (false, 0, 0, "".to_string()),
+            )
             .await;
         assert_eq!(errors, vec![]);
 

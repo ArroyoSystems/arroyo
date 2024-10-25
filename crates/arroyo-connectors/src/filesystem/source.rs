@@ -367,7 +367,7 @@ impl FileSystemSourceFunc {
                 line = line_reader.next() => {
                     match line.transpose()? {
                         Some(line) => {
-                            ctx.deserialize_slice(line.as_bytes(), SystemTime::now()).await?;
+                            ctx.deserialize_slice(line.as_bytes(), SystemTime::now(), (false, 0, 0, "".to_string())).await?;
                             records_read += 1;
                             if ctx.should_flush() {
                                 ctx.flush_buffer().await?;

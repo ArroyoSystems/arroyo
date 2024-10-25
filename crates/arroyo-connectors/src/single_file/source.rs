@@ -52,9 +52,13 @@ impl SingleFileSourceFunc {
                 continue;
             }
 
-            ctx.deserialize_slice(s.as_bytes(), SystemTime::now())
-                .await
-                .unwrap();
+            ctx.deserialize_slice(
+                s.as_bytes(),
+                SystemTime::now(),
+                (false, 0, 0, "".to_string()),
+            )
+            .await
+            .unwrap();
             if ctx.should_flush() {
                 ctx.flush_buffer().await.unwrap();
             }

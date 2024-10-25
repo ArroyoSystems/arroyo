@@ -1,6 +1,7 @@
 use crate::avro::de;
 use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
+use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
 use arrow_array::builder::{
     ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
@@ -82,6 +83,7 @@ pub struct ArrowDeserializer {
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    kafka_metadata_builder: Option<(Int64Builder, Int32Builder, StringBuilder)>,
 }
 
 impl ArrowDeserializer {
@@ -158,6 +160,7 @@ impl ArrowDeserializer {
             proto_pool,
             buffered_count: 0,
             buffered_since: Instant::now(),
+            kafka_metadata_builder: None,
         }
     }
 
@@ -166,11 +169,12 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
+        kafka_metadata: (bool, i64, i32, String),
     ) -> Vec<SourceError> {
         match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(buffer, msg, timestamp).await,
             _ => FramingIterator::new(self.framing.clone(), msg)
-                .map(|t| self.deserialize_single(buffer, t, timestamp))
+                .map(|t| self.deserialize_single(buffer, t, timestamp, kafka_metadata.clone()))
                 .filter_map(|t| t.err())
                 .collect(),
         }
@@ -195,6 +199,31 @@ impl ArrowDeserializer {
                     .map(|batch| {
                         let mut columns = batch.columns().to_vec();
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
+
+                        if let Some((offset_builder, partition_builder, topic_builder)) =
+                            &mut self.kafka_metadata_builder
+                        {
+                            if let Some((topic_idx, _)) =
+                                self.schema.schema.column_with_name("topic")
+                            {
+                                columns.remove(topic_idx);
+                                columns.insert(topic_idx, Arc::new(topic_builder.finish()));
+                            }
+
+                            if let Some((partition_idx, _)) =
+                                self.schema.schema.column_with_name("partition")
+                            {
+                                columns.remove(partition_idx);
+                                columns.insert(partition_idx, Arc::new(partition_builder.finish()));
+                            }
+
+                            if let Some((offset_idx, _)) =
+                                self.schema.schema.column_with_name("offset")
+                            {
+                                columns.remove(offset_idx);
+                                columns.insert(offset_idx, Arc::new(offset_builder.finish()));
+                            }
+                        }
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                     }),
             ),
@@ -225,6 +254,7 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
+        kafka_metadata: (bool, i64, i32, String),
     ) -> Result<(), SourceError> {
         match &*self.format {
             Format::RawString(_)
@@ -233,10 +263,28 @@ impl ArrowDeserializer {
             }) => {
                 self.deserialize_raw_string(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
+                if kafka_metadata.0 {
+                    add_kafka_metadata(
+                        buffer,
+                        &self.schema,
+                        &kafka_metadata.3,
+                        kafka_metadata.2,
+                        kafka_metadata.1,
+                    );
+                }
             }
             Format::RawBytes(_) => {
                 self.deserialize_raw_bytes(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
+                if kafka_metadata.0 {
+                    add_kafka_metadata(
+                        buffer,
+                        &self.schema,
+                        &kafka_metadata.3,
+                        kafka_metadata.2,
+                        kafka_metadata.1,
+                    );
+                }
             }
             Format::Json(json) => {
                 let msg = if json.confluent_schema_registry {
@@ -249,10 +297,29 @@ impl ArrowDeserializer {
                     panic!("json decoder not initialized");
                 };
 
+                if kafka_metadata.0 {
+                    self.kafka_metadata_builder.get_or_insert_with(|| {
+                        (
+                            Int64Builder::new(),
+                            Int32Builder::new(),
+                            StringBuilder::new(),
+                        )
+                    });
+                }
+
                 decoder
                     .decode(msg)
                     .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                 timestamp_builder.append_value(to_nanos(timestamp) as i64);
+                if kafka_metadata.0 {
+                    if let Some((offset_builder, partition_builder, topic_builder)) =
+                        &mut self.kafka_metadata_builder
+                    {
+                        offset_builder.append_value(kafka_metadata.1);
+                        partition_builder.append_value(kafka_metadata.2);
+                        topic_builder.append_value(kafka_metadata.3.clone());
+                    }
+                }
                 self.buffered_count += 1;
             }
             Format::Protobuf(proto) => {
@@ -269,6 +336,15 @@ impl ArrowDeserializer {
                         .decode(json.to_string().as_bytes())
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                     timestamp_builder.append_value(to_nanos(timestamp) as i64);
+                    if kafka_metadata.0 {
+                        add_kafka_metadata(
+                            buffer,
+                            &self.schema,
+                            &kafka_metadata.3,
+                            kafka_metadata.2,
+                            kafka_metadata.1,
+                        );
+                    }
                     self.buffered_count += 1;
                 }
             }
@@ -398,6 +474,66 @@ pub(crate) fn add_timestamp(
         .downcast_mut::<TimestampNanosecondBuilder>()
         .expect("_timestamp column has incorrect type")
         .append_value(to_nanos(timestamp) as i64);
+}
+
+pub(crate) fn add_kafka_metadata_partition(
+    builder: &mut [Box<dyn ArrayBuilder>],
+    idx: usize,
+    partition: i32,
+) {
+    builder[idx]
+        .as_any_mut()
+        .downcast_mut::<arrow::array::Int32Builder>()
+        .expect("kafka_metadata.partition column has incorrect type")
+        .append_value(partition);
+}
+
+pub(crate) fn add_kafka_metadata_offset(
+    builder: &mut [Box<dyn ArrayBuilder>],
+    idx: usize,
+    offset: i64,
+) {
+    builder[idx]
+        .as_any_mut()
+        .downcast_mut::<Int64Builder>()
+        .expect("kafka_metadata.offset column has incorrect type")
+        .append_value(offset);
+}
+
+pub(crate) fn add_kafka_metadata_topic(
+    builder: &mut [Box<dyn ArrayBuilder>],
+    idx: usize,
+    topic: &str,
+) {
+    builder[idx]
+        .as_any_mut()
+        .downcast_mut::<StringBuilder>()
+        .expect("kafka_metadata.topic column has incorrect type")
+        .append_value(topic)
+}
+
+pub(crate) fn add_kafka_metadata(
+    builder: &mut [Box<dyn ArrayBuilder>],
+    schema: &ArroyoSchema,
+    topic: &str,
+    partition: i32,
+    offset: i64,
+) {
+    let (topic_idx, _) = schema
+        .schema
+        .column_with_name("topic")
+        .expect("No column named 'topic' in the schema");
+    let (partition_idx, _) = schema
+        .schema
+        .column_with_name("partition")
+        .expect("No column named 'partition' in the schema");
+    let (offset_idx, _) = schema
+        .schema
+        .column_with_name("offset")
+        .expect("No column named 'offset' in the schema");
+    add_kafka_metadata_topic(builder, topic_idx, topic);
+    add_kafka_metadata_partition(builder, partition_idx, partition);
+    add_kafka_metadata_offset(builder, offset_idx, offset);
 }
 
 #[cfg(test)]
@@ -534,7 +670,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
-                    now
+                    now,
+                    (false, 0, 0, "".to_string())
                 )
                 .await,
             vec![]
@@ -544,7 +681,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
-                    now
+                    now,
+                    (false, 0, 0, "".to_string())
                 )
                 .await,
             vec![]
@@ -570,7 +708,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
-                    SystemTime::now()
+                    SystemTime::now(),
+                    (false, 0, 0, "".to_string())
                 )
                 .await,
             vec![]
@@ -580,7 +719,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
-                    SystemTime::now()
+                    SystemTime::now(),
+                    (false, 0, 0, "".to_string())
                 )
                 .await,
             vec![]
@@ -619,7 +759,12 @@ mod tests {
 
         let time = SystemTime::now();
         let result = deserializer
-            .deserialize_slice(&mut arrays, &[0, 1, 2, 3, 4, 5], time)
+            .deserialize_slice(
+                &mut arrays,
+                &[0, 1, 2, 3, 4, 5],
+                time,
+                (false, 0, 0, "".to_string()),
+            )
             .await;
         assert!(result.is_empty());
 

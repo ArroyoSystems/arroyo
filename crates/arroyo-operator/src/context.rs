@@ -670,6 +670,7 @@ impl ArrowContext {
         &mut self,
         msg: &[u8],
         time: SystemTime,
+        kafka_metadata: (bool, i64, i32, String),
     ) -> Result<(), UserError> {
         let deserializer = self
             .deserializer
@@ -688,6 +689,7 @@ impl ArrowContext {
                 &mut self.buffer.as_mut().expect("no out schema").buffer,
                 msg,
                 time,
+                kafka_metadata,
             )
             .await;
         self.collect_source_errors(errors).await?;
