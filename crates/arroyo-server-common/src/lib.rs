@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 
+mod profile;
 pub mod shutdown;
 
 use anyhow::anyhow;
@@ -13,6 +14,7 @@ use axum::Router;
 use hyper::Body;
 use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
+use profile::handle_get_profile;
 use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, TextEncoder};
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -292,6 +294,7 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
         .route("/details", get(details))
         .route("/config", get(config_route))
         .route("/debug/pprof/heap", get(handle_get_heap))
+        .route("/debug/pprof/profile", get(handle_get_profile))
         .with_state(state);
 
     let addr = SocketAddr::new(addr, port);

@@ -36,5 +36,10 @@ toml = "0.8.13"
 dirs = "5.0.1"
 uuid = { version = "1.8.0", features = ["v4"] }
 
+# profile
+flate2 = "1.0.30"
+pprof = { version = "0.13.0", features = ["flamegraph", "protobuf-codec"] }
+serde = { version = "1.0.96", features = ["derive"] }
+
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
