@@ -698,7 +698,6 @@ impl ArrowContext {
             connector_metadata.message_partition,
             connector_metadata.message_topic.clone(),
         );
-
         let metadata_fields = connector_metadata.metadata_fields;
 
         let errors = deserializer
