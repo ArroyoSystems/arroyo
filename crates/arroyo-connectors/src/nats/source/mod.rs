@@ -6,6 +6,7 @@ use super::NatsTable;
 use super::ReplayPolicy;
 use super::{get_nats_client, SourceType};
 use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::ConnectorMetadata;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::BadData;
@@ -366,8 +367,14 @@ impl NatsSourceFunc {
                                     let payload = msg.payload.as_ref();
                                     let message_info = msg.info().expect("Couldn't get message information");
                                     let timestamp = message_info.published.into() ;
-
-                                    ctx.deserialize_slice(payload, timestamp, (false, 0, 0, "".to_string()), None).await?;
+                                    let connector_metadata = ConnectorMetadata {
+                                        enable_metadata: false,
+                                        message_offset: 0,
+                                        message_partition: 0,
+                                        message_topic: "".to_string(),
+                                        metadata_fields: None,
+                                    };
+                                    ctx.deserialize_slice(payload, timestamp, connector_metadata).await?;
 
                                     debug!("---------------------------------------------->");
                                     debug!(
@@ -493,7 +500,14 @@ impl NatsSourceFunc {
                                 Some(msg) => {
                                     let payload = msg.payload.as_ref();
                                     let timestamp = SystemTime::now();
-                                    ctx.deserialize_slice(payload, timestamp, (false, 0, 0, "".to_string()), None).await?;
+                                    let connector_metadata = ConnectorMetadata {
+                                        enable_metadata: false,
+                                        message_offset: 0,
+                                        message_partition: 0,
+                                        message_topic: "".to_string(),
+                                        metadata_fields: None,
+                                    };
+                                    ctx.deserialize_slice(payload, timestamp, connector_metadata).await?;
                                     if ctx.should_flush() {
                                         ctx.flush_buffer().await?;
                                     }

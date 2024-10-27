@@ -14,7 +14,7 @@ use rumqttc::v5::{ConnectionError, Event as MqttEvent, Incoming};
 use rumqttc::Outgoing;
 
 use crate::mqtt::{create_connection, MqttConfig};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::grpc::rpc::TableConfig;
@@ -143,7 +143,14 @@ impl MqttSourceFunc {
                 event = eventloop.poll() => {
                     match event {
                         Ok(MqttEvent::Incoming(Incoming::Publish(p))) => {
-                            ctx.deserialize_slice(&p.payload, SystemTime::now(), (false, 0, 0, "".to_string()), None).await?;
+                            let connector_metadata = ConnectorMetadata {
+                                enable_metadata: false,
+                                message_offset: 0,
+                                message_partition: 0,
+                                message_topic: "".to_string(),
+                                metadata_fields: None,
+                            };
+                            ctx.deserialize_slice(&p.payload, SystemTime::now(), connector_metadata).await?;
                             rate_limiter.until_ready().await;
                         }
                         Ok(MqttEvent::Outgoing(Outgoing::Subscribe(_))) => {

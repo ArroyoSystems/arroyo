@@ -258,6 +258,14 @@ pub struct ArrowContext {
     pub table_manager: TableManager,
 }
 
+pub struct ConnectorMetadata {
+    pub enable_metadata: bool,
+    pub message_offset: i64,
+    pub message_partition: i32,
+    pub message_topic: String,
+    pub metadata_fields: Option<HashMap<String, String>>,
+}
+
 #[derive(Clone)]
 pub struct ErrorReporter {
     pub tx: Sender<ControlResp>,
@@ -670,8 +678,7 @@ impl ArrowContext {
         &mut self,
         msg: &[u8],
         time: SystemTime,
-        kafka_metadata: (bool, i64, i32, String),
-        metadata_fields: Option<HashMap<String, String>>,
+        connector_metadata: ConnectorMetadata,
     ) -> Result<(), UserError> {
         let deserializer = self
             .deserializer
@@ -684,6 +691,15 @@ impl ArrowContext {
                 .as_ref()
                 .map(|t| ContextBuffer::new(t.schema.clone()));
         }
+
+        let kafka_metadata = (
+            connector_metadata.enable_metadata,
+            connector_metadata.message_offset,
+            connector_metadata.message_partition,
+            connector_metadata.message_topic.clone(),
+        );
+
+        let metadata_fields = connector_metadata.metadata_fields;
 
         let errors = deserializer
             .deserialize_slice(

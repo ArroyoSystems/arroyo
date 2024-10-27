@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::SystemTime};
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
@@ -51,15 +51,16 @@ impl SingleFileSourceFunc {
                 i += 1;
                 continue;
             }
-
-            ctx.deserialize_slice(
-                s.as_bytes(),
-                SystemTime::now(),
-                (false, 0, 0, "".to_string()),
-                None,
-            )
-            .await
-            .unwrap();
+            let connector_metadata = ConnectorMetadata {
+                enable_metadata: false,
+                message_offset: 0,
+                message_partition: 0,
+                message_topic: "".to_string(),
+                metadata_fields: None,
+            };
+            ctx.deserialize_slice(s.as_bytes(), SystemTime::now(), connector_metadata)
+                .await
+                .unwrap();
             if ctx.should_flush() {
                 ctx.flush_buffer().await.unwrap();
             }

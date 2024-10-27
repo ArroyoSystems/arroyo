@@ -3,7 +3,7 @@ use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp};
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_types::*;
@@ -180,9 +180,15 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                let kafka_metadata = (self.enable_metadata.unwrap_or(false), msg.offset(), msg.partition(), self.topic.clone());
+                                let connector_metadata = ConnectorMetadata {
+                                    enable_metadata: self.enable_metadata.unwrap_or(false),
+                                    message_offset: msg.offset(),
+                                    message_partition: msg.partition(),
+                                    message_topic: self.topic.clone(),
+                                    metadata_fields: self.metadata_fields.clone(),
+                                };
 
-                                ctx.deserialize_slice(v, from_millis(timestamp as u64), kafka_metadata, self.metadata_fields.clone()).await?;
+                                ctx.deserialize_slice(v, from_millis(timestamp as u64), connector_metadata).await?;
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;
