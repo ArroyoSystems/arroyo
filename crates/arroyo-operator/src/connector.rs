@@ -167,7 +167,6 @@ pub trait ErasedConnector: Send {
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
-    #[allow(clippy::too_many_arguments)]
     fn from_config(
         &self,
         id: Option<i64>,
