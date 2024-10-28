@@ -326,6 +326,18 @@ impl Connector for KafkaConnector {
 
         let table = Self::table_from_options(options)?;
 
+        let allowed_metadata_udf_args = ["offset_id", "partition", "topic"];
+        if let Some(fields) = &metadata_fields {
+            for key in fields.keys() {
+                if !allowed_metadata_udf_args.contains(&key.as_str()) {
+                    return Err(anyhow!(
+                        "Invalid metadata field key for kafka connector: '{}'",
+                        key
+                    ));
+                }
+            }
+        }
+
         Self::from_config(self, None, name, connection, table, schema, metadata_fields)
     }
 
