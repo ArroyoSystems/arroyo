@@ -187,7 +187,7 @@ impl KafkaSourceFunc {
                                             "offset_id" => {
                                                 connector_metadata.insert(key, FieldValueType::Int64(msg.offset()));
                                             }
-                                            "partition_id" => {
+                                            "partition" => {
                                                 connector_metadata.insert(key, FieldValueType::Int32(msg.partition()));
                                             }
                                             "topic" => {
