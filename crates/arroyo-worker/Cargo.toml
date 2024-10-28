@@ -67,7 +67,7 @@ anyhow = "1.0.71"
 typify = "0.0.13"
 regress = "0.6.0"
 object_store = {workspace = true }
-reqwest = "0.11.20"
+reqwest = {workspace = true}
 memchr = "2.6.3"
 
 datafusion = { workspace = true }

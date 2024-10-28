@@ -1,6 +1,5 @@
 import './App.css';
 import {
-  As,
   Button,
   ButtonProps,
   Divider,
@@ -26,6 +25,7 @@ import { getLocalUdfsContextValue, LocalUdfsContext } from './udf_state';
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons';
 import { motion } from 'framer-motion';
 import useLocalStorage from 'use-local-storage';
+import { IconType } from 'react-icons';
 
 function logout() {
   // TODO: also send a request to the server to delete the session
@@ -34,7 +34,7 @@ function logout() {
 }
 
 interface NavButtonProps extends ButtonProps {
-  icon: As;
+  icon: IconType;
   label: string;
   to?: string;
   collapsed: boolean;
@@ -151,7 +151,7 @@ const Sidebar = ({
 };
 
 export type SubnavType = {
-  icon: As;
+  icon: IconType;
   label: string;
   onClick: () => void;
   selected: boolean;

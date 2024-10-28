@@ -18,11 +18,12 @@ use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{AsyncClient, Event as MqttEvent, EventLoop, Incoming, MqttOptions};
 use rumqttc::Outgoing;
+use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use rustls_native_certs::load_native_certs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
-use tokio_rustls::rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use typify::import_types;
 
 const CONFIG_SCHEMA: &str = include_str!("./profile.json");
@@ -366,30 +367,27 @@ async fn test_inner(
     }
 }
 
-fn load_certs(certificates: &str) -> anyhow::Result<Vec<Certificate>> {
+fn load_certs<'a>(certificates: &str) -> anyhow::Result<Vec<CertificateDer<'a>>> {
     let cert_bytes = std::fs::read_to_string(certificates).map_or_else(
         |_| certificates.as_bytes().to_owned(),
         |certs| certs.as_bytes().to_owned(),
     );
 
-    let certs = rustls_pemfile::certs(&mut cert_bytes.as_slice()).map_err(|err| anyhow!(err))?;
+    let certs: Result<Vec<_>, _> = rustls_pemfile::certs(&mut cert_bytes.as_slice()).collect();
 
-    Ok(certs.into_iter().map(Certificate).collect())
+    Ok(certs?)
 }
 
-fn load_private_key(certificate: &str) -> anyhow::Result<PrivateKey> {
+fn load_private_key<'a>(certificate: &str) -> anyhow::Result<PrivatePkcs8KeyDer<'a>> {
     let cert_bytes = std::fs::read_to_string(certificate).map_or_else(
         |_| certificate.as_bytes().to_owned(),
         |cert| cert.as_bytes().to_owned(),
     );
 
     let certs = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())
-        .map_err(|err| anyhow!(err))?;
-    let cert = certs
-        .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("No private key found"))?;
-    Ok(PrivateKey(cert))
+        .ok_or_else(|| anyhow!("No private key found"))??;
+    Ok(certs)
 }
 
 pub(crate) fn create_connection(
@@ -424,17 +422,15 @@ pub(crate) fn create_connection(
             let ca = ca.sub_env_vars().map_err(|e| anyhow!("{}", e))?;
             let certificates = load_certs(&ca)?;
             for cert in certificates {
-                root_cert_store.add(&cert).unwrap();
+                root_cert_store.add(cert).unwrap();
             }
         } else {
             for cert in load_native_certs().expect("could not load platform certs") {
-                root_cert_store.add(&Certificate(cert.0)).unwrap();
+                root_cert_store.add(cert).unwrap();
             }
         }
 
-        let builder = ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(root_cert_store);
+        let builder = ClientConfig::builder().with_root_certificates(root_cert_store);
 
         let tls_config = if let Some((Some(client_cert), Some(client_key))) = c
             .tls
@@ -446,7 +442,7 @@ pub(crate) fn create_connection(
             let certs = load_certs(&client_cert)?;
             let key = load_private_key(&client_key)?;
 
-            builder.with_client_auth_cert(certs, key)?
+            builder.with_client_auth_cert(certs, key.into())?
         } else {
             builder.with_no_client_auth()
         };
