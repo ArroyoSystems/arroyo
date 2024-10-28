@@ -1,9 +1,10 @@
+use arroyo_formats::de::FieldValueType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp};
 
-use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
+use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_types::*;
@@ -35,7 +36,6 @@ pub struct KafkaSourceFunc {
     pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
     pub client_configs: HashMap<String, String>,
     pub messages_per_second: NonZeroU32,
-    pub enable_metadata: Option<bool>,
     pub metadata_fields: Option<HashMap<String, String>>,
 }
 
@@ -180,15 +180,29 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                let connector_metadata = ConnectorMetadata {
-                                    enable_metadata: self.enable_metadata.unwrap_or(false),
-                                    message_offset: msg.offset(),
-                                    message_partition: msg.partition(),
-                                    message_topic: self.topic.clone(),
-                                    metadata_fields: self.metadata_fields.clone(),
+                                let connector_metadata = if self.metadata_fields.is_some() {
+                                    let mut connector_metadata = HashMap::new();
+                                    for (key, value) in self.metadata_fields.as_ref().unwrap() {
+                                        match value.as_str() {
+                                            "offset_id" => {
+                                                connector_metadata.insert(key, FieldValueType::Int64(msg.offset()));
+                                            }
+                                            "partition_id" => {
+                                                connector_metadata.insert(key, FieldValueType::Int32(msg.partition()));
+                                            }
+                                            "topic" => {
+                                                connector_metadata.insert(key, FieldValueType::String(&self.topic));
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    Some(connector_metadata)
+                                } else {
+                                    None
                                 };
 
                                 ctx.deserialize_slice(v, from_millis(timestamp as u64), connector_metadata).await?;
+
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;

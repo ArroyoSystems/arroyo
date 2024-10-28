@@ -22,7 +22,7 @@ pub struct Connection {
     pub description: String,
 }
 
-#[allow(clippy::wrong_self_convention, clippy::too_many_arguments)]
+#[allow(clippy::wrong_self_convention)]
 pub trait Connector: Send {
     type ProfileT: DeserializeOwned + Serialize;
     type TableT: DeserializeOwned + Serialize;
@@ -89,7 +89,6 @@ pub trait Connector: Send {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
@@ -100,7 +99,6 @@ pub trait Connector: Send {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
@@ -166,7 +164,6 @@ pub trait ErasedConnector: Send {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
@@ -178,7 +175,6 @@ pub trait ErasedConnector: Send {
         config: &serde_json::Value,
         table: &serde_json::Value,
         schema: Option<&ConnectionSchema>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection>;
 
@@ -265,17 +261,9 @@ impl<C: Connector> ErasedConnector for C {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
-        self.from_options(
-            name,
-            options,
-            schema,
-            profile,
-            enable_metadata,
-            metadata_fields,
-        )
+        self.from_options(name, options, schema, profile, metadata_fields)
     }
 
     fn from_config(
@@ -285,7 +273,6 @@ impl<C: Connector> ErasedConnector for C {
         config: &serde_json::Value,
         table: &serde_json::Value,
         schema: Option<&ConnectionSchema>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         self.from_config(
@@ -294,7 +281,6 @@ impl<C: Connector> ErasedConnector for C {
             self.parse_config(config)?,
             self.parse_table(table)?,
             schema,
-            enable_metadata,
             metadata_fields,
         )
     }

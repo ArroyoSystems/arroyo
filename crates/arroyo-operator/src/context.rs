@@ -2,7 +2,7 @@ use crate::{server_for_hash_array, RateLimiter};
 use arrow::array::{make_builder, Array, ArrayBuilder, PrimitiveArray, RecordBatch};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::{SchemaRef, UInt64Type};
-use arroyo_formats::de::ArrowDeserializer;
+use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_formats::should_flush;
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
@@ -256,14 +256,6 @@ pub struct ArrowContext {
     error_rate_limiter: RateLimiter,
     deserializer: Option<ArrowDeserializer>,
     pub table_manager: TableManager,
-}
-
-pub struct ConnectorMetadata {
-    pub enable_metadata: bool,
-    pub message_offset: i64,
-    pub message_partition: i32,
-    pub message_topic: String,
-    pub metadata_fields: Option<HashMap<String, String>>,
 }
 
 #[derive(Clone)]
@@ -678,7 +670,7 @@ impl ArrowContext {
         &mut self,
         msg: &[u8],
         time: SystemTime,
-        connector_metadata: ConnectorMetadata,
+        additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
     ) -> Result<(), UserError> {
         let deserializer = self
             .deserializer
@@ -692,21 +684,12 @@ impl ArrowContext {
                 .map(|t| ContextBuffer::new(t.schema.clone()));
         }
 
-        let kafka_metadata = (
-            connector_metadata.enable_metadata,
-            connector_metadata.message_offset,
-            connector_metadata.message_partition,
-            connector_metadata.message_topic.clone(),
-        );
-        let metadata_fields = connector_metadata.metadata_fields;
-
         let errors = deserializer
             .deserialize_slice(
                 &mut self.buffer.as_mut().expect("no out schema").buffer,
                 msg,
                 time,
-                kafka_metadata,
-                metadata_fields,
+                additional_fields,
             )
             .await;
         self.collect_source_errors(errors).await?;

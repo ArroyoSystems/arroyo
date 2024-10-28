@@ -188,7 +188,6 @@ impl Connector for KafkaConnector {
         config: KafkaConfig,
         table: KafkaTable,
         schema: Option<&ConnectionSchema>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
@@ -216,8 +215,7 @@ impl Connector for KafkaConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            enable_metadata,
-            metadata_fields,
+            additional_fields: metadata_fields,
         };
 
         Ok(Connection {
@@ -316,7 +314,6 @@ impl Connector for KafkaConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        enable_metadata: Option<bool>,
         metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
@@ -329,16 +326,7 @@ impl Connector for KafkaConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(
-            self,
-            None,
-            name,
-            connection,
-            table,
-            schema,
-            enable_metadata,
-            metadata_fields,
-        )
+        Self::from_config(self, None, name, connection, table, schema, metadata_fields)
     }
 
     fn make_operator(
@@ -398,8 +386,7 @@ impl Connector for KafkaConnector {
                             .unwrap_or(u32::MAX),
                     )
                     .unwrap(),
-                    enable_metadata: config.enable_metadata,
-                    metadata_fields: config.metadata_fields,
+                    metadata_fields: config.additional_fields,
                 })))
             }
             TableType::Sink {
@@ -639,13 +626,7 @@ impl KafkaTester {
                     let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(
-                            &mut builders,
-                            &msg,
-                            SystemTime::now(),
-                            (false, 0, 0, "".to_string()),
-                            None,
-                        )
+                        .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
                         .await
                         .into_iter()
                         .next();
@@ -667,13 +648,7 @@ impl KafkaTester {
                     let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(
-                            &mut builders,
-                            &msg,
-                            SystemTime::now(),
-                            (false, 0, 0, "".to_string()),
-                            None,
-                        )
+                        .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
                         .await
                         .into_iter()
                         .next();
@@ -707,13 +682,7 @@ impl KafkaTester {
                 let mut builders = aschema.builders();
 
                 let mut error = deserializer
-                    .deserialize_slice(
-                        &mut builders,
-                        &msg,
-                        SystemTime::now(),
-                        (false, 0, 0, "".to_string()),
-                        None,
-                    )
+                    .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
                     .await
                     .into_iter()
                     .next();

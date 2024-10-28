@@ -24,7 +24,6 @@ fn get_test_schema_provider() -> ArroyoSchemaProvider {
                 runtime: Some(10.0 * 1_000_000.0),
             },
             None,
-            Some(false),
             None,
         )
         .unwrap();

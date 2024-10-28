@@ -84,7 +84,6 @@ impl Connector for SingleFileConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let schema = schema
@@ -105,8 +104,7 @@ impl Connector for SingleFileConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            enable_metadata: None,
-            metadata_fields: None,
+            additional_fields: None,
         };
 
         Ok(Connection {
@@ -126,7 +124,6 @@ impl Connector for SingleFileConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let path = pull_opt("path", options)?;
@@ -152,7 +149,6 @@ impl Connector for SingleFileConnector {
                 wait_for_control,
             },
             schema,
-            None,
             None,
         )
     }

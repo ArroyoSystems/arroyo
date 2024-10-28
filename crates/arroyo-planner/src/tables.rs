@@ -223,7 +223,6 @@ impl ConnectorTable {
         primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
         connection_profile: Option<&ConnectionProfile>,
-        enable_metadata: Option<bool>,
         connector_metadata_columns: Option<HashMap<String, String>>,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
@@ -305,7 +304,6 @@ impl ConnectorTable {
                 options,
                 Some(&schema),
                 connection_profile,
-                enable_metadata,
                 connector_metadata_columns,
             )
             .map_err(|e| DataFusionError::Plan(e.to_string()))?;
@@ -534,55 +532,45 @@ impl Table {
                     Field::new(name, data_type, nullable),
                 );
 
-                let generating_expression =
-                    column.options.iter().find_map(|option| {
-                        if let ColumnOption::Generated {
-                            generation_expr, ..
-                        } = &option.option
+                let generating_expression = column.options.iter().find_map(|option| {
+                    if let ColumnOption::Generated {
+                        generation_expr, ..
+                    } = &option.option
+                    {
+                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function {
+                            name,
+                            args,
+                            ..
+                        })) = generation_expr
                         {
-                            if let Some(sqlparser::ast::Expr::Function(
-                                sqlparser::ast::Function { name, args, .. },
-                            )) = generation_expr
+                            if name
+                                .0
+                                .iter()
+                                .any(|ident| ident.value.to_lowercase() == "metadata")
                             {
-                                if name
-                                    .0
-                                    .iter()
-                                    .any(|ident| ident.value.to_lowercase() == "metadata")
-                                {
-                                    match args {
-                                        FunctionArguments::List(arg_list) => {
-                                            match arg_list.args.first() {
-                                            Some(FunctionArg::Unnamed(
-                                                sqlparser::ast::FunctionArgExpr::Expr(
-                                                    sqlparser::ast::Expr::Value(
-                                                        sqlparser::ast::Value::SingleQuotedString(
-                                                            value,
-                                                        ),
-                                                    ),
-                                                ),
-                                            )) => {
-                                                connector_metadata_columns.insert(
-                                                    column.name.value.to_string(),
-                                                    value.to_string(),
-                                                );
-                                            }
-                                            _ => {
-                                                "Unsupported argument format.".to_string();
-                                            }
-                                        }
-                                        }
-                                        _ => {
-                                            "Unsupported argument format.".to_string();
-                                        }
+                                if let FunctionArguments::List(arg_list) = args {
+                                    if let Some(FunctionArg::Unnamed(
+                                        sqlparser::ast::FunctionArgExpr::Expr(
+                                            sqlparser::ast::Expr::Value(
+                                                sqlparser::ast::Value::SingleQuotedString(value),
+                                            ),
+                                        ),
+                                    )) = arg_list.args.first()
+                                    {
+                                        connector_metadata_columns.insert(
+                                            column.name.value.to_string(),
+                                            value.to_string(),
+                                        );
+                                        return None;
                                     }
-                                    return None;
                                 }
                             }
-                            generation_expr.clone()
-                        } else {
-                            None
                         }
-                    });
+                        generation_expr.clone()
+                    } else {
+                        None
+                    }
+                });
                 Ok((struct_field, generating_expression))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -727,7 +715,6 @@ impl Table {
                             primary_keys,
                             &mut with_map,
                             connection_profile,
-                            Some(true),
                             connector_metadata_columns,
                         )
                         .map_err(|e| e.context(format!("Failed to create table {}", name)))?,

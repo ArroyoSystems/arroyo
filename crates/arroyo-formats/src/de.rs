@@ -21,6 +21,14 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
 
+#[derive(Debug, Clone)]
+pub enum FieldValueType<'a> {
+    Int64(i64),
+    Int32(i32),
+    String(&'a String),
+    // Extend with more types as needed
+}
+
 pub struct FramingIterator<'a> {
     framing: Option<Arc<Framing>>,
     buf: &'a [u8],
@@ -83,9 +91,7 @@ pub struct ArrowDeserializer {
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    enable_metadata: Option<bool>,
-    kafka_metadata_builder: Option<(Int64Builder, Int32Builder, StringBuilder)>,
-    metadata_fields: Option<HashMap<String, String>>,
+    additional_fields_builder: Option<HashMap<String, Box<dyn ArrayBuilder>>>,
 }
 
 impl ArrowDeserializer {
@@ -162,9 +168,7 @@ impl ArrowDeserializer {
             proto_pool,
             buffered_count: 0,
             buffered_since: Instant::now(),
-            enable_metadata: Some(false),
-            kafka_metadata_builder: None,
-            metadata_fields: None,
+            additional_fields_builder: None,
         }
     }
 
@@ -173,21 +177,12 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
-        kafka_metadata: (bool, i64, i32, String),
-        metadata_fields: Option<HashMap<String, String>>,
+        additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
     ) -> Vec<SourceError> {
         match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(buffer, msg, timestamp).await,
             _ => FramingIterator::new(self.framing.clone(), msg)
-                .map(|t| {
-                    self.deserialize_single(
-                        buffer,
-                        t,
-                        timestamp,
-                        kafka_metadata.clone(),
-                        metadata_fields.clone(),
-                    )
-                })
+                .map(|t| self.deserialize_single(buffer, t, timestamp, additional_fields.clone()))
                 .filter_map(|t| t.err())
                 .collect(),
         }
@@ -213,52 +208,14 @@ impl ArrowDeserializer {
                         let mut columns = batch.columns().to_vec();
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
 
-                        if self.enable_metadata.unwrap_or(false) {
-                            if let Some((offset_builder, partition_builder, topic_builder)) =
-                                &mut self.kafka_metadata_builder
+                        if self.additional_fields_builder.is_some() {
+                            for (field_name, mut builder) in
+                                self.additional_fields_builder.take().unwrap()
                             {
-                                if let Some(fields) = &self.metadata_fields {
-                                    for (field_name, argument_name) in fields.iter() {
-                                        match argument_name.as_str() {
-                                            "topic" => {
-                                                if let Some((idx, _)) =
-                                                    self.schema.schema.column_with_name(field_name)
-                                                {
-                                                    columns.remove(idx);
-                                                    columns.insert(
-                                                        idx,
-                                                        Arc::new(topic_builder.finish()),
-                                                    );
-                                                }
-                                            }
-                                            "partition" => {
-                                                if let Some((idx, _)) =
-                                                    self.schema.schema.column_with_name(field_name)
-                                                {
-                                                    columns.remove(idx);
-                                                    columns.insert(
-                                                        idx,
-                                                        Arc::new(partition_builder.finish()),
-                                                    );
-                                                }
-                                            }
-                                            "offset_id" => {
-                                                if let Some((idx, _)) =
-                                                    self.schema.schema.column_with_name(field_name)
-                                                {
-                                                    columns.remove(idx);
-                                                    columns.insert(
-                                                        idx,
-                                                        Arc::new(offset_builder.finish()),
-                                                    );
-                                                }
-                                            }
-                                            _ => {
-                                                // Handle unexpected argument names or log a message if necessary
-                                            }
-                                        }
-                                    }
-                                }
+                                let (idx, _) =
+                                    self.schema.schema.column_with_name(&field_name).unwrap();
+                                columns.remove(idx);
+                                columns.insert(idx, Arc::new(builder.as_mut().finish()));
                             }
                         }
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
@@ -291,10 +248,8 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
-        kafka_metadata: (bool, i64, i32, String),
-        metadata_fields: Option<HashMap<String, String>>,
+        additional_fields: Option<HashMap<&String, FieldValueType>>,
     ) -> Result<(), SourceError> {
-        self.metadata_fields = metadata_fields;
         match &*self.format {
             Format::RawString(_)
             | Format::Json(JsonFormat {
@@ -302,31 +257,19 @@ impl ArrowDeserializer {
             }) => {
                 self.deserialize_raw_string(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
-                if kafka_metadata.0 {
-                    self.enable_metadata = Some(true);
-                    add_kafka_metadata(
-                        buffer,
-                        &self.schema,
-                        &kafka_metadata.3,
-                        kafka_metadata.2,
-                        kafka_metadata.1,
-                        self.metadata_fields.clone(),
-                    );
+                if additional_fields.is_some() {
+                    for (k, v) in additional_fields.unwrap().iter() {
+                        add_additional_fields(buffer, &self.schema, k, v);
+                    }
                 }
             }
             Format::RawBytes(_) => {
                 self.deserialize_raw_bytes(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
-                if kafka_metadata.0 {
-                    self.enable_metadata = Some(true);
-                    add_kafka_metadata(
-                        buffer,
-                        &self.schema,
-                        &kafka_metadata.3,
-                        kafka_metadata.2,
-                        kafka_metadata.1,
-                        self.metadata_fields.clone(),
-                    );
+                if additional_fields.is_some() {
+                    for (k, v) in additional_fields.unwrap().iter() {
+                        add_additional_fields(buffer, &self.schema, k, v);
+                    }
                 }
             }
             Format::Json(json) => {
@@ -340,28 +283,61 @@ impl ArrowDeserializer {
                     panic!("json decoder not initialized");
                 };
 
-                if kafka_metadata.0 {
-                    self.enable_metadata = Some(true);
-                    self.kafka_metadata_builder.get_or_insert_with(|| {
-                        (
-                            Int64Builder::new(),
-                            Int32Builder::new(),
-                            StringBuilder::new(),
-                        )
-                    });
+                if self.additional_fields_builder.is_none() {
+                    if let Some(fields) = additional_fields.as_ref() {
+                        let mut builders = HashMap::new();
+                        for (key, value) in fields.iter() {
+                            let builder: Box<dyn ArrayBuilder> = match value {
+                                FieldValueType::Int32(_) => Box::new(Int32Builder::new()),
+                                FieldValueType::Int64(_) => Box::new(Int64Builder::new()),
+                                FieldValueType::String(_) => Box::new(StringBuilder::new()),
+                            };
+                            builders.insert(key, builder);
+                        }
+                        self.additional_fields_builder = Some(
+                            builders
+                                .into_iter()
+                                .map(|(k, v)| ((*k).clone(), v))
+                                .collect(),
+                        );
+                    }
                 }
 
                 decoder
                     .decode(msg)
                     .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                 timestamp_builder.append_value(to_nanos(timestamp) as i64);
-                if kafka_metadata.0 {
-                    if let Some((offset_builder, partition_builder, topic_builder)) =
-                        &mut self.kafka_metadata_builder
-                    {
-                        offset_builder.append_value(kafka_metadata.1);
-                        partition_builder.append_value(kafka_metadata.2);
-                        topic_builder.append_value(kafka_metadata.3.clone());
+                if let Some(additional_fields) = additional_fields {
+                    for (k, v) in additional_fields.iter() {
+                        if let Some(builder) = self
+                            .additional_fields_builder
+                            .as_mut()
+                            .and_then(|b| b.get_mut(k.to_owned()))
+                        {
+                            match v {
+                                FieldValueType::Int32(i) => {
+                                    builder
+                                        .as_any_mut()
+                                        .downcast_mut::<Int32Builder>()
+                                        .expect("additional field has incorrect type")
+                                        .append_value(*i);
+                                }
+                                FieldValueType::Int64(i) => {
+                                    builder
+                                        .as_any_mut()
+                                        .downcast_mut::<Int64Builder>()
+                                        .expect("additional field has incorrect type")
+                                        .append_value(*i);
+                                }
+                                FieldValueType::String(s) => {
+                                    builder
+                                        .as_any_mut()
+                                        .downcast_mut::<StringBuilder>()
+                                        .expect("additional field has incorrect type")
+                                        .append_value(s);
+                                }
+                            }
+                        }
                     }
                 }
                 self.buffered_count += 1;
@@ -380,15 +356,39 @@ impl ArrowDeserializer {
                         .decode(json.to_string().as_bytes())
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                     timestamp_builder.append_value(to_nanos(timestamp) as i64);
-                    if kafka_metadata.0 {
-                        add_kafka_metadata(
-                            buffer,
-                            &self.schema,
-                            &kafka_metadata.3,
-                            kafka_metadata.2,
-                            kafka_metadata.1,
-                            self.metadata_fields.clone(),
-                        );
+
+                    if self.additional_fields_builder.is_some() {
+                        for (k, v) in additional_fields.unwrap().iter() {
+                            if let Some(builder) = self
+                                .additional_fields_builder
+                                .as_mut()
+                                .and_then(|b| b.get_mut(k.to_owned()))
+                            {
+                                match v {
+                                    FieldValueType::Int32(i) => {
+                                        builder
+                                            .as_any_mut()
+                                            .downcast_mut::<Int32Builder>()
+                                            .expect("additional field has incorrect type")
+                                            .append_value(*i);
+                                    }
+                                    FieldValueType::Int64(i) => {
+                                        builder
+                                            .as_any_mut()
+                                            .downcast_mut::<Int64Builder>()
+                                            .expect("additional field has incorrect type")
+                                            .append_value(*i);
+                                    }
+                                    FieldValueType::String(s) => {
+                                        builder
+                                            .as_any_mut()
+                                            .downcast_mut::<StringBuilder>()
+                                            .expect("additional field has incorrect type")
+                                            .append_value(s);
+                                    }
+                                }
+                            }
+                        }
                     }
                     self.buffered_count += 1;
                 }
@@ -521,73 +521,37 @@ pub(crate) fn add_timestamp(
         .append_value(to_nanos(timestamp) as i64);
 }
 
-pub(crate) fn add_kafka_metadata_partition(
-    builder: &mut [Box<dyn ArrayBuilder>],
-    idx: usize,
-    partition: i32,
-) {
-    builder[idx]
-        .as_any_mut()
-        .downcast_mut::<arrow::array::Int32Builder>()
-        .expect("kafka_metadata.partition column has incorrect type")
-        .append_value(partition);
-}
-
-pub(crate) fn add_kafka_metadata_offset(
-    builder: &mut [Box<dyn ArrayBuilder>],
-    idx: usize,
-    offset: i64,
-) {
-    builder[idx]
-        .as_any_mut()
-        .downcast_mut::<Int64Builder>()
-        .expect("kafka_metadata.offset column has incorrect type")
-        .append_value(offset);
-}
-
-pub(crate) fn add_kafka_metadata_topic(
-    builder: &mut [Box<dyn ArrayBuilder>],
-    idx: usize,
-    topic: &str,
-) {
-    builder[idx]
-        .as_any_mut()
-        .downcast_mut::<StringBuilder>()
-        .expect("kafka_metadata.topic column has incorrect type")
-        .append_value(topic)
-}
-
-pub(crate) fn add_kafka_metadata(
+pub(crate) fn add_additional_fields(
     builder: &mut [Box<dyn ArrayBuilder>],
     schema: &ArroyoSchema,
-    topic: &str,
-    partition: i32,
-    offset: i64,
-    metadata_fields: Option<HashMap<String, String>>,
+    key: &str,
+    value: &FieldValueType<'_>,
 ) {
-    if let Some(fields) = metadata_fields {
-        for (field_name, argument_name) in fields.iter() {
-            // Match each argument name and add the corresponding metadata if found
-            match argument_name.as_str() {
-                "topic" => {
-                    if let Some((idx, _)) = schema.schema.column_with_name(field_name) {
-                        add_kafka_metadata_topic(builder, idx, topic);
-                    }
-                }
-                "partition" => {
-                    if let Some((idx, _)) = schema.schema.column_with_name(field_name) {
-                        add_kafka_metadata_partition(builder, idx, partition);
-                    }
-                }
-                "offset_id" => {
-                    if let Some((idx, _)) = schema.schema.column_with_name(field_name) {
-                        add_kafka_metadata_offset(builder, idx, offset);
-                    }
-                }
-                _ => {
-                    // Handle any unexpected argument names or log a message if necessary
-                }
-            }
+    let (idx, _) = schema
+        .schema
+        .column_with_name(key)
+        .expect("no 'value' column for additional fields");
+    match value {
+        FieldValueType::Int32(i) => {
+            builder[idx]
+                .as_any_mut()
+                .downcast_mut::<Int32Builder>()
+                .expect("additional field has incorrect type")
+                .append_value(*i);
+        }
+        FieldValueType::Int64(i) => {
+            builder[idx]
+                .as_any_mut()
+                .downcast_mut::<Int64Builder>()
+                .expect("additional field has incorrect type")
+                .append_value(*i);
+        }
+        FieldValueType::String(s) => {
+            builder[idx]
+                .as_any_mut()
+                .downcast_mut::<StringBuilder>()
+                .expect("additional field has incorrect type")
+                .append_value(s);
         }
     }
 }
@@ -727,8 +691,7 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
                     now,
-                    (false, 0, 0, "".to_string()),
-                    None
+                    None,
                 )
                 .await,
             vec![]
@@ -739,8 +702,7 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
                     now,
-                    (false, 0, 0, "".to_string()),
-                    None
+                    None,
                 )
                 .await,
             vec![]
@@ -767,8 +729,7 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
                     SystemTime::now(),
-                    (false, 0, 0, "".to_string()),
-                    None
+                    None,
                 )
                 .await,
             vec![]
@@ -779,8 +740,7 @@ mod tests {
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
                     SystemTime::now(),
-                    (false, 0, 0, "".to_string()),
-                    None
+                    None,
                 )
                 .await,
             vec![]
@@ -819,13 +779,7 @@ mod tests {
 
         let time = SystemTime::now();
         let result = deserializer
-            .deserialize_slice(
-                &mut arrays,
-                &[0, 1, 2, 3, 4, 5],
-                time,
-                (false, 0, 0, "".to_string()),
-                None,
-            )
+            .deserialize_slice(&mut arrays, &[0, 1, 2, 3, 4, 5], time, None)
             .await;
         assert!(result.is_empty());
 

@@ -1,4 +1,3 @@
-use arroyo_operator::context::ConnectorMetadata;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
@@ -216,15 +215,7 @@ impl PollingHttpSourceFunc {
                                     continue;
                                 }
 
-                                let connector_metadata = ConnectorMetadata {
-                                    enable_metadata: false,
-                                    message_offset: 0,
-                                    message_partition: 0,
-                                    message_topic: "".to_string(),
-                                    metadata_fields: None,
-                                };
-
-                                ctx.deserialize_slice(&buf, SystemTime::now(), connector_metadata).await?;
+                                ctx.deserialize_slice(&buf, SystemTime::now(), None).await?;
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;

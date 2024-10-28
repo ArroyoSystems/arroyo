@@ -18,7 +18,7 @@ use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 
-use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
+use arroyo_operator::context::ArrowContext;
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::select;
@@ -367,14 +367,7 @@ impl FileSystemSourceFunc {
                 line = line_reader.next() => {
                     match line.transpose()? {
                         Some(line) => {
-                            let connector_metadata = ConnectorMetadata {
-                                enable_metadata: false,
-                                message_offset: 0,
-                                message_partition: 0,
-                                message_topic: "".to_string(),
-                                metadata_fields: None,
-                            };
-                            ctx.deserialize_slice(line.as_bytes(), SystemTime::now(), connector_metadata).await?;
+                            ctx.deserialize_slice(line.as_bytes(), SystemTime::now(), None).await?;
                             records_read += 1;
                             if ctx.should_flush() {
                                 ctx.flush_buffer().await?;

@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
+use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -166,14 +166,7 @@ impl FluvioSourceFunc {
                     match message {
                         Some((_, Ok(msg))) => {
                             let timestamp = from_millis(msg.timestamp().max(0) as u64);
-                            let connector_metadata = ConnectorMetadata {
-                                enable_metadata: false,
-                                message_offset: 0,
-                                message_partition: 0,
-                                message_topic: "".to_string(),
-                                metadata_fields: None,
-                            };
-                            ctx.deserialize_slice(msg.value(), timestamp, connector_metadata).await?;
+                            ctx.deserialize_slice(msg.value(), timestamp, None).await?;
 
                             if ctx.should_flush() {
                                 ctx.flush_buffer().await?;

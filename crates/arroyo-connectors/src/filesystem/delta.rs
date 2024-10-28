@@ -77,7 +77,6 @@ impl Connector for DeltaLakeConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let TableType::Sink {
@@ -125,8 +124,7 @@ impl Connector for DeltaLakeConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            enable_metadata: None,
-            metadata_fields: None,
+            additional_fields: None,
         };
 
         Ok(Connection {
@@ -146,12 +144,11 @@ impl Connector for DeltaLakeConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
 
-        self.from_config(None, name, EmptyConfig {}, table, schema, None, None)
+        self.from_config(None, name, EmptyConfig {}, table, schema, None)
     }
 
     fn make_operator(

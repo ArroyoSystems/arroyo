@@ -142,7 +142,6 @@ impl Connector for WebhookConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let description = format!("WebhookSink<{}>", table.endpoint.sub_env_vars()?);
@@ -164,8 +163,7 @@ impl Connector for WebhookConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            enable_metadata: None,
-            metadata_fields: None,
+            additional_fields: None,
         };
 
         Ok(Connection {
@@ -185,7 +183,6 @@ impl Connector for WebhookConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
@@ -207,7 +204,7 @@ impl Connector for WebhookConnector {
         )?;
         let _ = Self::construct_test_request(&client, &table)?;
 
-        self.from_config(None, name, EmptyConfig {}, table, schema, None, None)
+        self.from_config(None, name, EmptyConfig {}, table, schema, None)
     }
 
     fn make_operator(

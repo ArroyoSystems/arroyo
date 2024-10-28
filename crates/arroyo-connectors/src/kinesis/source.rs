@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
-use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
+use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -434,19 +434,8 @@ impl KinesisSourceFunc {
         for record in records {
             let data = record.data.into_inner();
             let timestamp = record.approximate_arrival_timestamp.unwrap();
-            let connector_metadata = ConnectorMetadata {
-                enable_metadata: false,
-                message_offset: 0,
-                message_partition: 0,
-                message_topic: "".to_string(),
-                metadata_fields: None,
-            };
-            ctx.deserialize_slice(
-                &data,
-                from_nanos(timestamp.as_nanos() as u128),
-                connector_metadata,
-            )
-            .await?;
+            ctx.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128), None)
+                .await?;
 
             if ctx.should_flush() {
                 ctx.flush_buffer().await?

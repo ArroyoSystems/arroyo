@@ -83,7 +83,6 @@ impl Connector for KinesisConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let (connection_type, description) = match table.type_ {
@@ -113,8 +112,7 @@ impl Connector for KinesisConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            enable_metadata: None,
-            metadata_fields: None,
+            additional_fields: None,
         };
 
         Ok(Connection {
@@ -134,7 +132,6 @@ impl Connector for KinesisConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let typ = pull_opt("type", options)?;
@@ -172,7 +169,7 @@ impl Connector for KinesisConnector {
             aws_region: options.remove("aws_region").map(|s| s.to_string()),
         };
 
-        Self::from_config(self, None, name, EmptyConfig {}, table, schema, None, None)
+        Self::from_config(self, None, name, EmptyConfig {}, table, schema, None)
     }
 
     fn make_operator(

@@ -1,5 +1,5 @@
 use crate::sse::SseTable;
-use arroyo_operator::context::{ArrowContext, ConnectorMetadata};
+use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{OperatorNode, SourceOperator};
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -171,15 +171,8 @@ impl SSESourceFunc {
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            let connector_metadata = ConnectorMetadata {
-                                                enable_metadata: false,
-                                                message_offset: 0,
-                                                message_partition: 0,
-                                                message_topic: "".to_string(),
-                                                metadata_fields: None,
-                                            };
                                             ctx.deserialize_slice(
-                                                event.data.as_bytes(), SystemTime::now(), connector_metadata).await?;
+                                                event.data.as_bytes(), SystemTime::now(), None).await?;
 
                                             if ctx.should_flush() {
                                                 ctx.flush_buffer().await?;

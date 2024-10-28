@@ -88,7 +88,6 @@ impl Connector for FluvioConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let endpoint = options.remove("endpoint");
@@ -118,7 +117,7 @@ impl Connector for FluvioConnector {
             type_: table_type,
         };
 
-        Self::from_config(self, None, name, EmptyConfig {}, table, schema, None, None)
+        Self::from_config(self, None, name, EmptyConfig {}, table, schema, None)
     }
 
     fn from_config(
@@ -128,7 +127,6 @@ impl Connector for FluvioConnector {
         config: EmptyConfig,
         table: FluvioTable,
         schema: Option<&ConnectionSchema>,
-        _enable_metadata: Option<bool>,
         _metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
@@ -158,8 +156,7 @@ impl Connector for FluvioConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            enable_metadata: None,
-            metadata_fields: None,
+            additional_fields: None,
         };
 
         Ok(Connection {

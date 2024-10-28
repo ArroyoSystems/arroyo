@@ -87,7 +87,6 @@ impl KafkaTopicTester {
             schema_resolver: None,
             client_configs: HashMap::new(),
             messages_per_second: NonZeroU32::new(100).unwrap(),
-            enable_metadata: Some(false),
             metadata_fields: None,
         });
 
