@@ -157,7 +157,7 @@ impl Connector for MqttConnector {
         config: MqttConfig,
         table: MqttTable,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
@@ -184,7 +184,7 @@ impl Connector for MqttConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            additional_fields: None,
+            additional_fields: metadata_fields,
         };
 
         Ok(Connection {
@@ -245,7 +245,7 @@ impl Connector for MqttConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -257,7 +257,7 @@ impl Connector for MqttConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(self, None, name, connection, table, schema, None)
+        Self::from_config(self, None, name, connection, table, schema, metadata_fields)
     }
 
     fn make_operator(
@@ -285,6 +285,7 @@ impl Connector for MqttConnector {
                 )
                 .unwrap(),
                 subscribed: Arc::new(AtomicBool::new(false)),
+                metadata_fields: config.additional_fields,
             })),
             TableType::Sink { retain } => OperatorNode::from_operator(Box::new(MqttSinkFunc {
                 config: profile,

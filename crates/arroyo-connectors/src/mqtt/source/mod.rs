@@ -1,3 +1,4 @@
+use arroyo_formats::de::FieldValueType;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -33,6 +34,7 @@ pub struct MqttSourceFunc {
     pub bad_data: Option<BadData>,
     pub messages_per_second: NonZeroU32,
     pub subscribed: Arc<AtomicBool>,
+    pub metadata_fields: Option<HashMap<String, String>>,
 }
 
 #[async_trait]
@@ -65,6 +67,7 @@ impl SourceOperator for MqttSourceFunc {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl MqttSourceFunc {
     pub fn new(
         config: MqttConfig,
@@ -74,6 +77,7 @@ impl MqttSourceFunc {
         framing: Option<Framing>,
         bad_data: Option<BadData>,
         messages_per_second: u32,
+        metadata_fields: Option<HashMap<String, String>>,
     ) -> Self {
         Self {
             config,
@@ -84,6 +88,7 @@ impl MqttSourceFunc {
             bad_data,
             messages_per_second: NonZeroU32::new(messages_per_second).unwrap(),
             subscribed: Arc::new(AtomicBool::new(false)),
+            metadata_fields,
         }
     }
 
@@ -143,7 +148,20 @@ impl MqttSourceFunc {
                 event = eventloop.poll() => {
                     match event {
                         Ok(MqttEvent::Incoming(Incoming::Publish(p))) => {
-                            ctx.deserialize_slice(&p.payload, SystemTime::now(), None).await?;
+                            let topic = String::from_utf8_lossy(&p.topic).to_string();
+                            let connector_metadata: Option<HashMap<&String, FieldValueType<'_>>> =
+                            self.metadata_fields.as_ref().map(|fields| {
+                                fields.iter()
+                                    .filter_map(|(k, v)| {
+                                        if v == "topic" {
+                                            Some((k, FieldValueType::String(&topic)))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect()
+                            });
+                            ctx.deserialize_slice(&p.payload, SystemTime::now(), connector_metadata).await?;
                             rate_limiter.until_ready().await;
                         }
                         Ok(MqttEvent::Outgoing(Outgoing::Subscribe(_))) => {
