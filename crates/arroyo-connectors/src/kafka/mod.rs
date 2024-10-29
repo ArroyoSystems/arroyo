@@ -328,11 +328,11 @@ impl Connector for KafkaConnector {
 
         let allowed_metadata_udf_args = ["offset_id", "partition", "topic"];
         if let Some(fields) = &metadata_fields {
-            for key in fields.keys() {
-                if !allowed_metadata_udf_args.contains(&key.as_str()) {
+            for val in fields.values() {
+                if !allowed_metadata_udf_args.contains(&val.as_str()) {
                     return Err(anyhow!(
-                        "Invalid metadata field key for kafka connector: '{}'",
-                        key
+                        "Invalid metadata field val for kafka connector: '{}'",
+                        val
                     ));
                 }
             }

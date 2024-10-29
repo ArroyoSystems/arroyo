@@ -101,15 +101,18 @@ impl FieldSpec {
     }
     fn is_metadata_virtual(&self) -> bool {
         match self {
-            FieldSpec::VirtualField { expression, .. } => {
-                if let Expr::ScalarFunction(ScalarFunction { func, .. }) = expression {
-                    return func.name() == "metadata";
-                }
-                false
+            FieldSpec::VirtualField {
+                expression: Expr::ScalarFunction(ScalarFunction { func, args, .. }),
+                ..
+            } => {
+                func.name() == "metadata"
+                    && args.len() == 1
+                    && matches!(args.first(), Some(Expr::Literal(_)))
             }
             _ => false,
         }
     }
+    
 }
 
 impl From<Field> for FieldSpec {
