@@ -307,39 +307,11 @@ impl ArrowDeserializer {
                     .decode(msg)
                     .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                 timestamp_builder.append_value(to_nanos(timestamp) as i64);
-                if let Some(additional_fields) = additional_fields {
-                    for (k, v) in additional_fields.iter() {
-                        if let Some(builder) = self
-                            .additional_fields_builder
-                            .as_mut()
-                            .and_then(|b| b.get_mut(k.to_owned()))
-                        {
-                            match v {
-                                FieldValueType::Int32(i) => {
-                                    builder
-                                        .as_any_mut()
-                                        .downcast_mut::<Int32Builder>()
-                                        .expect("additional field has incorrect type")
-                                        .append_value(*i);
-                                }
-                                FieldValueType::Int64(i) => {
-                                    builder
-                                        .as_any_mut()
-                                        .downcast_mut::<Int64Builder>()
-                                        .expect("additional field has incorrect type")
-                                        .append_value(*i);
-                                }
-                                FieldValueType::String(s) => {
-                                    builder
-                                        .as_any_mut()
-                                        .downcast_mut::<StringBuilder>()
-                                        .expect("additional field has incorrect type")
-                                        .append_value(s);
-                                }
-                            }
-                        }
-                    }
-                }
+
+                add_additional_fields_using_builder(
+                    additional_fields,
+                    &mut self.additional_fields_builder,
+                );
                 self.buffered_count += 1;
             }
             Format::Protobuf(proto) => {
@@ -357,39 +329,11 @@ impl ArrowDeserializer {
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                     timestamp_builder.append_value(to_nanos(timestamp) as i64);
 
-                    if self.additional_fields_builder.is_some() {
-                        for (k, v) in additional_fields.unwrap().iter() {
-                            if let Some(builder) = self
-                                .additional_fields_builder
-                                .as_mut()
-                                .and_then(|b| b.get_mut(k.to_owned()))
-                            {
-                                match v {
-                                    FieldValueType::Int32(i) => {
-                                        builder
-                                            .as_any_mut()
-                                            .downcast_mut::<Int32Builder>()
-                                            .expect("additional field has incorrect type")
-                                            .append_value(*i);
-                                    }
-                                    FieldValueType::Int64(i) => {
-                                        builder
-                                            .as_any_mut()
-                                            .downcast_mut::<Int64Builder>()
-                                            .expect("additional field has incorrect type")
-                                            .append_value(*i);
-                                    }
-                                    FieldValueType::String(s) => {
-                                        builder
-                                            .as_any_mut()
-                                            .downcast_mut::<StringBuilder>()
-                                            .expect("additional field has incorrect type")
-                                            .append_value(s);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    add_additional_fields_using_builder(
+                        additional_fields,
+                        &mut self.additional_fields_builder,
+                    );
+
                     self.buffered_count += 1;
                 }
             }
@@ -552,6 +496,44 @@ pub(crate) fn add_additional_fields(
                 .downcast_mut::<StringBuilder>()
                 .expect("additional field has incorrect type")
                 .append_value(s);
+        }
+    }
+}
+
+pub(crate) fn add_additional_fields_using_builder(
+    additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
+    additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
+) {
+    if let Some(fields) = additional_fields {
+        for (k, v) in fields.iter() {
+            if let Some(builder) = additional_fields_builder
+                .as_mut()
+                .and_then(|b| b.get_mut(*k))
+            {
+                match v {
+                    FieldValueType::Int32(i) => {
+                        builder
+                            .as_any_mut()
+                            .downcast_mut::<Int32Builder>()
+                            .expect("additional field has incorrect type")
+                            .append_value(*i);
+                    }
+                    FieldValueType::Int64(i) => {
+                        builder
+                            .as_any_mut()
+                            .downcast_mut::<Int64Builder>()
+                            .expect("additional field has incorrect type")
+                            .append_value(*i);
+                    }
+                    FieldValueType::String(s) => {
+                        builder
+                            .as_any_mut()
+                            .downcast_mut::<StringBuilder>()
+                            .expect("additional field has incorrect type")
+                            .append_value(s);
+                    }
+                }
+            }
         }
     }
 }
