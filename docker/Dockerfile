@@ -47,7 +47,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p crates/arroyo-api/migrations && \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --features ${FEATURES} --profile ${PROFILE} --bin arroyo && \
+    RUSTFLAGS="--cfg tokio_unstable" CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --features ${FEATURES} --profile ${PROFILE} --bin arroyo && \
     mv target/*/arroyo /arroyo
 
 
