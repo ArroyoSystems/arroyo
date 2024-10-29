@@ -207,17 +207,11 @@ impl ArrowDeserializer {
                     .map(|batch| {
                         let mut columns = batch.columns().to_vec();
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
-
-                        if let Some(additional_fields) = self.additional_fields_builder.take() {
-                            for (field_name, mut builder) in additional_fields {
-                                if let Some((idx, _)) =
-                                    self.schema.schema.column_with_name(&field_name)
-                                {
-                                    columns[idx] = Arc::new(builder.as_mut().finish());
-                                }
-                            }
-                        }
-
+                        flush_additional_fields_builders(
+                            &mut self.additional_fields_builder,
+                            &self.schema,
+                            &mut columns,
+                        );
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                     }),
             ),
@@ -237,15 +231,11 @@ impl ArrowDeserializer {
                             kernels::filter::filter(&timestamp.finish(), &mask).unwrap();
 
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp));
-                        if let Some(additional_fields) = self.additional_fields_builder.take() {
-                            for (field_name, mut builder) in additional_fields {
-                                if let Some((idx, _)) =
-                                    self.schema.schema.column_with_name(&field_name)
-                                {
-                                    columns[idx] = Arc::new(builder.as_mut().finish());
-                                }
-                            }
-                        }
+                        flush_additional_fields_builders(
+                            &mut self.additional_fields_builder,
+                            &self.schema,
+                            &mut columns,
+                        );
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                     }),
             ),
@@ -542,6 +532,31 @@ pub(crate) fn add_additional_fields_using_builder(
                             .append_value(s);
                     }
                 }
+            }
+        }
+    }
+}
+
+pub(crate) fn flush_additional_fields_builders(
+    additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
+    schema: &ArroyoSchema,
+    columns: &mut [Arc<dyn arrow::array::Array>],
+) {
+    if let Some(additional_fields) = additional_fields_builder.take() {
+        for (field_name, mut builder) in additional_fields {
+            if let Some((idx, _)) = schema.schema.column_with_name(&field_name) {
+                let expected_type = schema.schema.fields[idx].data_type();
+                let built_column = builder.as_mut().finish();
+                let actual_type = built_column.data_type();
+                if expected_type != actual_type {
+                    panic!(
+                        "Type mismatch for column '{}': expected {:?}, got {:?}",
+                        field_name, expected_type, actual_type
+                    );
+                }
+                columns[idx] = Arc::new(built_column);
+            } else {
+                panic!("Field '{}' not found in schema", field_name);
             }
         }
     }
