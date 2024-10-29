@@ -347,7 +347,7 @@ async fn test_kafka() {
 #[tokio::test]
 async fn test_kafka_with_metadata_fields() {
     let mut kafka_topic_tester = KafkaTopicTester {
-        topic: "__arroyo-source-test".to_string(),
+        topic: "__arroyo-source-test_metadata".to_string(),
         server: "0.0.0.0:9092".to_string(),
         group_id: Some("test-consumer-group".to_string()),
     };
