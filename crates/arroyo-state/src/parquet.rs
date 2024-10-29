@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::Mutex;
 use tracing::{debug, info};
 
 pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
@@ -122,7 +121,7 @@ impl BackingStore for ParquetBackend {
             })
             .collect();
 
-        let storage_client = Mutex::new(get_storage_provider().await?);
+        let storage_client = get_storage_provider().await?;
 
         // wait for all of the futures to complete
         while let Some(result) = futures.next().await {
@@ -134,7 +133,7 @@ impl BackingStore for ParquetBackend {
                     epoch_to_remove,
                     &operator_id,
                 ));
-                storage_client.lock().await.delete_if_present(path).await?;
+                storage_client.delete_if_present(path).await?;
             }
             debug!(
                 message = "Finished cleaning operator",
@@ -146,8 +145,6 @@ impl BackingStore for ParquetBackend {
 
         for epoch_to_remove in old_min_epoch..min_epoch {
             storage_client
-                .lock()
-                .await
                 .delete_if_present(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
                 .await?;
         }
