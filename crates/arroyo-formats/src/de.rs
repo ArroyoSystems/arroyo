@@ -208,16 +208,16 @@ impl ArrowDeserializer {
                         let mut columns = batch.columns().to_vec();
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
 
-                        if self.additional_fields_builder.is_some() {
-                            for (field_name, mut builder) in
-                                self.additional_fields_builder.take().unwrap()
-                            {
-                                let (idx, _) =
-                                    self.schema.schema.column_with_name(&field_name).unwrap();
-                                columns.remove(idx);
-                                columns.insert(idx, Arc::new(builder.as_mut().finish()));
+                        if let Some(additional_fields) = self.additional_fields_builder.take() {
+                            for (field_name, mut builder) in additional_fields {
+                                if let Some((idx, _)) =
+                                    self.schema.schema.column_with_name(&field_name)
+                                {
+                                    columns[idx] = Arc::new(builder.as_mut().finish());
+                                }
                             }
                         }
+
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                     }),
             ),
