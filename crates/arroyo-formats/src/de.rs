@@ -237,6 +237,15 @@ impl ArrowDeserializer {
                             kernels::filter::filter(&timestamp.finish(), &mask).unwrap();
 
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp));
+                        if let Some(additional_fields) = self.additional_fields_builder.take() {
+                            for (field_name, mut builder) in additional_fields {
+                                if let Some((idx, _)) =
+                                    self.schema.schema.column_with_name(&field_name)
+                                {
+                                    columns[idx] = Arc::new(builder.as_mut().finish());
+                                }
+                            }
+                        }
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                     }),
             ),
@@ -474,7 +483,7 @@ pub(crate) fn add_additional_fields(
     let (idx, _) = schema
         .schema
         .column_with_name(key)
-        .expect("no 'value' column for additional fields");
+        .unwrap_or_else(|| panic!("no '{}' column for additional fields", key));
     match value {
         FieldValueType::Int32(i) => {
             builder[idx]
@@ -540,7 +549,8 @@ pub(crate) fn add_additional_fields_using_builder(
 
 #[cfg(test)]
 mod tests {
-    use crate::de::{ArrowDeserializer, FramingIterator};
+    use crate::de::{ArrowDeserializer, FieldValueType, FramingIterator};
+    use arrow::datatypes::Int32Type;
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
@@ -777,6 +787,72 @@ mod tests {
         );
         assert_eq!(
             batch.columns()[1]
+                .as_primitive::<TimestampNanosecondType>()
+                .value(0),
+            to_nanos(time) as i64
+        );
+    }
+
+    #[tokio::test]
+    async fn test_additional_fields_deserialisation() {
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("x", arrow_schema::DataType::Int64, true),
+            arrow_schema::Field::new("y", arrow_schema::DataType::Int32, true),
+            arrow_schema::Field::new("z", arrow_schema::DataType::Utf8, true),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let mut arrays: Vec<_> = schema
+            .fields
+            .iter()
+            .map(|f| make_builder(f.data_type(), 16))
+            .collect();
+
+        let arroyo_schema = ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap();
+
+        let mut deserializer = ArrowDeserializer::new(
+            Format::Json(JsonFormat {
+                confluent_schema_registry: false,
+                schema_id: None,
+                include_schema: false,
+                debezium: false,
+                unstructured: false,
+                timestamp_format: Default::default(),
+            }),
+            arroyo_schema,
+            None,
+            BadData::Drop {},
+        );
+
+        let time = SystemTime::now();
+        let mut additional_fields = std::collections::HashMap::new();
+        let binding = "y".to_string();
+        additional_fields.insert(&binding, FieldValueType::Int32(5));
+        let z_value = "hello".to_string();
+        let binding = "z".to_string();
+        additional_fields.insert(&binding, FieldValueType::String(&z_value));
+
+        let result = deserializer
+            .deserialize_slice(
+                &mut arrays,
+                json!({ "x": 5 }).to_string().as_bytes(),
+                time,
+                Some(additional_fields),
+            )
+            .await;
+        assert!(result.is_empty());
+
+        let batch = deserializer.flush_buffer().unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
+        assert_eq!(batch.columns()[1].as_primitive::<Int32Type>().value(0), 5);
+        assert_eq!(batch.columns()[2].as_string::<i32>().value(0), "hello");
+        assert_eq!(
+            batch.columns()[3]
                 .as_primitive::<TimestampNanosecondType>()
                 .value(0),
             to_nanos(time) as i64

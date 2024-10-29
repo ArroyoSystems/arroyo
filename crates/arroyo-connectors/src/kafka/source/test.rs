@@ -343,3 +343,101 @@ async fn test_kafka() {
         )
         .await;
 }
+
+#[tokio::test]
+async fn test_kafka_with_metadata_fields() {
+    let mut kafka_topic_tester = KafkaTopicTester {
+        topic: "__arroyo-source-test".to_string(),
+        server: "0.0.0.0:9092".to_string(),
+        group_id: Some("test-consumer-group".to_string()),
+    };
+
+    let mut task_info = arroyo_types::get_test_task_info();
+    task_info.job_id = format!("kafka-job-{}", random::<u64>());
+
+    kafka_topic_tester.create_topic().await;
+
+    // Prepare metadata fields
+    let metadata_fields = Some(HashMap::from([(
+        "offset".to_string(),
+        "offset_id".to_string(),
+    )]));
+
+    // Set metadata fields in KafkaSourceFunc
+    let mut kafka = KafkaSourceFunc {
+        bootstrap_servers: kafka_topic_tester.server.clone(),
+        topic: kafka_topic_tester.topic.clone(),
+        group_id: kafka_topic_tester.group_id.clone(),
+        group_id_prefix: None,
+        offset_mode: SourceOffset::Earliest,
+        format: Format::RawString(RawStringFormat {}),
+        framing: None,
+        bad_data: None,
+        schema_resolver: None,
+        client_configs: HashMap::new(),
+        messages_per_second: NonZeroU32::new(100).unwrap(),
+        metadata_fields,
+    };
+
+    let (_to_control_tx, control_rx) = channel(128);
+    let (command_tx, _from_control_rx) = channel(128);
+    let (data_tx, _recv) = batch_bounded(128);
+
+    let checkpoint_metadata = None;
+
+    let mut ctx = ArrowContext::new(
+        task_info.clone(),
+        checkpoint_metadata,
+        control_rx,
+        command_tx,
+        1,
+        vec![],
+        Some(ArroyoSchema::new_unkeyed(
+            Arc::new(Schema::new(vec![
+                Field::new(
+                    "_timestamp",
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    false,
+                ),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("offset", DataType::Int64, false),
+            ])),
+            0,
+        )),
+        None,
+        vec![vec![data_tx]],
+        kafka.tables(),
+    )
+    .await;
+
+    tokio::spawn(async move {
+        kafka.run(&mut ctx).await;
+    });
+
+    let mut reader = kafka_topic_tester
+        .get_source_with_reader(task_info.clone(), None)
+        .await;
+    let mut producer = kafka_topic_tester.get_producer();
+
+    // Send test data
+    let expected_messages: Vec<_> = (1u64..=21)
+        .map(|i| {
+            let data = TestData { i };
+            producer.send_data(data.clone());
+            serde_json::to_string(&data).unwrap()
+        })
+        .collect();
+
+    // Verify received messages
+    reader
+        .assert_next_message_record_values(expected_messages.into())
+        .await;
+
+    reader
+        .to_control_tx
+        .send(ControlMessage::Stop {
+            mode: arroyo_rpc::grpc::rpc::StopMode::Graceful,
+        })
+        .await
+        .unwrap();
+}
