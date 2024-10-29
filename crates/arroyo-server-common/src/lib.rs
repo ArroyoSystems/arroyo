@@ -62,14 +62,23 @@ pub fn init_logging(name: &str) -> Option<WorkerGuard> {
 macro_rules! register_log {
     ($e: expr, $nonblocking: expr, $filter: expr) => {{
         let layer = $e;
+
         if let Some(nonblocking) = $nonblocking {
+            let console_layer = console_subscriber::spawn();
+ 
             tracing::subscriber::set_global_default(
-                Registry::default().with(layer.with_writer(nonblocking).with_filter($filter)),
+                Registry::default()
+                   .with(console_layer)
+                   .with(layer.with_writer(nonblocking).with_filter($filter)),
             )
             .expect("Unable to set global log subscriber")
         } else {
+            let console_layer = console_subscriber::spawn();
+
             tracing::subscriber::set_global_default(
-                Registry::default().with(layer.with_writer(std::io::stderr).with_filter($filter)),
+                Registry::default()
+                   .with(console_layer)
+                   .with(layer.with_writer(std::io::stderr).with_filter($filter)),
             )
             .expect("Unable to set global log subscriber")
         }
@@ -81,9 +90,13 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
         eprintln!("Failed to initialize log tracer {:?}", e);
     }
 
+
     let filter = filter
         .add_directive("refinery_core=warn".parse().unwrap())
         .add_directive("aws_config::profile::credentials=warn".parse().unwrap());
+        // .add_directive("tokio=trace".parse().unwrap())
+        // .add_directive("runtime=trace".parse().unwrap());
+
 
     let (nonblocking, guard) = if config().logging.nonblocking {
         let (nonblocking, guard) = NonBlockingBuilder::default()
