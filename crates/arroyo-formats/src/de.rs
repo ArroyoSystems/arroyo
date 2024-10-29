@@ -257,8 +257,8 @@ impl ArrowDeserializer {
             }) => {
                 self.deserialize_raw_string(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
-                if additional_fields.is_some() {
-                    for (k, v) in additional_fields.unwrap().iter() {
+                if let Some(fields) = additional_fields {
+                    for (k, v) in fields.iter() {
                         add_additional_fields(buffer, &self.schema, k, v);
                     }
                 }
@@ -266,8 +266,8 @@ impl ArrowDeserializer {
             Format::RawBytes(_) => {
                 self.deserialize_raw_bytes(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
-                if additional_fields.is_some() {
-                    for (k, v) in additional_fields.unwrap().iter() {
+                if let Some(fields) = additional_fields {
+                    for (k, v) in fields.iter() {
                         add_additional_fields(buffer, &self.schema, k, v);
                     }
                 }
