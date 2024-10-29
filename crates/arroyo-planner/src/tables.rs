@@ -112,7 +112,6 @@ impl FieldSpec {
             _ => false,
         }
     }
-    
 }
 
 impl From<Field> for FieldSpec {
