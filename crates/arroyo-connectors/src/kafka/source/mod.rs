@@ -180,9 +180,9 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                let connector_metadata = if self.metadata_fields.is_some() {
+                                let connector_metadata = if let Some(metadata_fields) = &self.metadata_fields {
                                     let mut connector_metadata = HashMap::new();
-                                    for (key, value) in self.metadata_fields.as_ref().unwrap() {
+                                    for (key, value) in metadata_fields {
                                         match value.as_str() {
                                             "offset_id" => {
                                                 connector_metadata.insert(key, FieldValueType::Int64(msg.offset()));
@@ -200,6 +200,7 @@ impl KafkaSourceFunc {
                                 } else {
                                     None
                                 };
+
 
                                 ctx.deserialize_slice(v, from_millis(timestamp as u64), connector_metadata).await?;
 
