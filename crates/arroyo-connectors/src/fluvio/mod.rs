@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail};
+use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
@@ -88,7 +89,7 @@ impl Connector for FluvioConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let endpoint = options.remove("endpoint");
         let topic = pull_opt("topic", options)?;
@@ -127,7 +128,7 @@ impl Connector for FluvioConnector {
         config: EmptyConfig,
         table: FluvioTable,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (

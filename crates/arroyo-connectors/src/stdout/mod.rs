@@ -3,6 +3,7 @@ mod operator;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use arrow::datatypes::DataType;
 use arroyo_rpc::OperatorConfig;
 use tokio::io::BufWriter;
 
@@ -76,7 +77,7 @@ impl Connector for StdoutConnector {
         _options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, schema, None)
     }
@@ -88,7 +89,7 @@ impl Connector for StdoutConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let description = "StdoutSink".to_string();
 

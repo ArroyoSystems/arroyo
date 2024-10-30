@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail};
+use arrow::datatypes::DataType;
 use arroyo_formats::de::ArrowDeserializer;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
@@ -188,7 +189,7 @@ impl Connector for KafkaConnector {
         config: KafkaConfig,
         table: KafkaTable,
         schema: Option<&ConnectionSchema>,
-        metadata_fields: Option<HashMap<String, String>>,
+        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
@@ -207,6 +208,13 @@ impl Connector for KafkaConnector {
             .as_ref()
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Kafka connection"))?;
+
+        let metadata_fields = metadata_fields.map(|fields| {
+            fields
+                .into_iter()
+                .map(|(k, (v, _))| (k, v))
+                .collect::<HashMap<String, String>>()
+        });
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -314,7 +322,7 @@ impl Connector for KafkaConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        metadata_fields: Option<HashMap<String, String>>,
+        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -326,14 +334,32 @@ impl Connector for KafkaConnector {
 
         let table = Self::table_from_options(options)?;
 
-        let allowed_metadata_udf_args = ["offset_id", "partition", "topic"];
+        let allowed_metadata_udf_args: HashMap<&str, DataType> = [
+            ("offset_id", DataType::Int64),
+            ("partition", DataType::Int32),
+            ("topic", DataType::Utf8),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
         if let Some(fields) = &metadata_fields {
-            for val in fields.values() {
-                if !allowed_metadata_udf_args.contains(&val.as_str()) {
-                    return Err(anyhow!(
-                        "Invalid metadata field val for kafka connector: '{}'",
-                        val
-                    ));
+            for (field_name, data_type) in fields.values() {
+                match allowed_metadata_udf_args.get(field_name.as_str()) {
+                    Some(expected_type) => {
+                        if expected_type != data_type {
+                            return Err(anyhow!(
+                                "Invalid datatype for metadata field '{}': expected '{:?}', found '{:?}'",
+                                field_name, expected_type, data_type
+                            ));
+                        }
+                    }
+                    None => {
+                        return Err(anyhow!(
+                            "Invalid metadata field name for Kafka connector: '{}'",
+                            field_name
+                        ));
+                    }
                 }
             }
         }

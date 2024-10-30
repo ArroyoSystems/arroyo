@@ -1,6 +1,7 @@
 mod operator;
 
 use anyhow::{anyhow, bail};
+use arrow::datatypes::DataType;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
@@ -101,7 +102,7 @@ impl Connector for ImpulseConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
             .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
@@ -146,7 +147,7 @@ impl Connector for ImpulseConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let description = format!(
             "{}Impulse<{} eps{}>",

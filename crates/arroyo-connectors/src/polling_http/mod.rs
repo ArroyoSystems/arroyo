@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use arrow::datatypes::DataType;
 use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
 use reqwest::{Client, Request};
@@ -152,7 +153,7 @@ impl Connector for PollingHTTPConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
         let headers = options.remove("headers");
@@ -195,7 +196,7 @@ impl Connector for PollingHTTPConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let description = format!("PollingHTTPSource<{}>", table.endpoint);
 

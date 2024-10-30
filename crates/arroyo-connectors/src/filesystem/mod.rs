@@ -3,6 +3,7 @@ mod sink;
 mod source;
 
 use anyhow::{anyhow, bail, Result};
+use arrow::datatypes::DataType;
 use arroyo_storage::BackendConfig;
 use regex::Regex;
 use std::collections::HashMap;
@@ -114,7 +115,7 @@ impl Connector for FileSystemConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let (description, connection_type) = match table.table_type {
             TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source),
@@ -189,7 +190,7 @@ impl Connector for FileSystemConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, String>>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         match options.remove("type") {
             Some(t) if t == "source" => {

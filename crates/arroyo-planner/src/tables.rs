@@ -224,7 +224,7 @@ impl ConnectorTable {
         primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
         connection_profile: Option<&ConnectionProfile>,
-        connector_metadata_columns: Option<HashMap<String, String>>,
+        connector_metadata_columns: Option<HashMap<String, (String, DataType)>>,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
         if "delta" == connector {
@@ -516,7 +516,7 @@ impl Table {
     fn schema_from_columns(
         columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
-        connector_metadata_columns: &mut HashMap<String, String>,
+        connector_metadata_columns: &mut HashMap<String, (String, DataType)>,
     ) -> Result<Vec<FieldSpec>> {
         let struct_field_pairs = columns
             .iter()
@@ -527,10 +527,9 @@ impl Table {
                     .options
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
-
                 let struct_field = ArroyoExtensionType::add_metadata(
                     extension,
-                    Field::new(name, data_type, nullable),
+                    Field::new(name, data_type.clone(), nullable),
                 );
 
                 let generating_expression = column.options.iter().find_map(|option| {
@@ -560,7 +559,7 @@ impl Table {
                                     {
                                         connector_metadata_columns.insert(
                                             column.name.value.to_string(),
-                                            value.to_string(),
+                                            (value.to_string(), data_type.clone()),
                                         );
                                         return None;
                                     }
