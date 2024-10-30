@@ -158,7 +158,7 @@ impl Connector for MqttConnector {
         config: MqttConfig,
         table: MqttTable,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
+        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
@@ -178,6 +178,13 @@ impl Connector for MqttConnector {
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Mqtt connection"))?;
 
+        let metadata_fields = metadata_fields.map(|fields| {
+            fields
+                .into_iter()
+                .map(|(k, (v, _))| (k, v))
+                .collect::<HashMap<String, String>>()
+        });
+
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
@@ -185,7 +192,7 @@ impl Connector for MqttConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            additional_fields: None,
+            additional_fields: metadata_fields,
         };
 
         Ok(Connection {
@@ -246,7 +253,7 @@ impl Connector for MqttConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
+        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -258,7 +265,25 @@ impl Connector for MqttConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(self, None, name, connection, table, schema, None)
+        if let Some(fields) = &metadata_fields {
+            for (k, (v, t)) in fields {
+                if v != "topic" {
+                    return Err(anyhow!(
+                        "Invalid metadata field name for mqtt connector: {}",
+                        k
+                    ));
+                }
+                if *t != DataType::Utf8 {
+                    return Err(anyhow!(
+                        "Invalid datatype: {} for metadata field: {} for mqtt connector",
+                        k,
+                        v
+                    ));
+                }
+            }
+        }
+
+        Self::from_config(self, None, name, connection, table, schema, metadata_fields)
     }
 
     fn make_operator(
@@ -286,6 +311,7 @@ impl Connector for MqttConnector {
                 )
                 .unwrap(),
                 subscribed: Arc::new(AtomicBool::new(false)),
+                metadata_fields: config.additional_fields,
             })),
             TableType::Sink { retain } => OperatorNode::from_operator(Box::new(MqttSinkFunc {
                 config: profile,
