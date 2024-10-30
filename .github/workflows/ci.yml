@@ -104,6 +104,7 @@ jobs:
           cargo nextest run --package integ -E 'kind(test)'
       - name: Integ sqlite
         run: |
+          export RUST_LOG=debug
           killall arroyo
           df -h
           ps aux
