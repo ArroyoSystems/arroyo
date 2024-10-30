@@ -412,7 +412,9 @@ impl WorkerGrpc for WorkerServer {
         let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
             .expect("Failed to create LogicalProgram");
 
-        debug!("Starting execution for graph\n{}", to_d2(&logical));
+        if let Ok(v) = to_d2(&logical) {
+            debug!("Starting execution for graph\n{}", v);
+        }
 
         for (udf_name, dylib_config) in &logical.program_config.udf_dylibs {
             info!("Loading UDF {}", udf_name);
