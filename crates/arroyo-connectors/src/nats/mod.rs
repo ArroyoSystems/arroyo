@@ -3,6 +3,7 @@ use crate::nats::source::NatsSourceFunc;
 use crate::pull_opt;
 use anyhow::anyhow;
 use anyhow::bail;
+use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
@@ -246,6 +247,7 @@ impl Connector for NatsConnector {
         config: NatsConfig,
         table: NatsTable,
         schema: Option<&ConnectionSchema>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let stream_or_subject = match &table.connector_type {
             ConnectorType::Source { source_type, .. } => {
@@ -295,6 +297,7 @@ impl Connector for NatsConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            additional_fields: None,
         };
 
         Ok(Connection {
@@ -314,6 +317,7 @@ impl Connector for NatsConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -325,7 +329,7 @@ impl Connector for NatsConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(self, None, name, connection, table, schema)
+        Self::from_config(self, None, name, connection, table, schema, None)
     }
 
     fn make_operator(

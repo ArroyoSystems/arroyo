@@ -8,6 +8,7 @@ use crate::mqtt::sink::MqttSinkFunc;
 use crate::mqtt::source::MqttSourceFunc;
 use crate::pull_opt;
 use anyhow::{anyhow, bail};
+use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
@@ -157,6 +158,7 @@ impl Connector for MqttConnector {
         config: MqttConfig,
         table: MqttTable,
         schema: Option<&ConnectionSchema>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
@@ -183,6 +185,7 @@ impl Connector for MqttConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            additional_fields: None,
         };
 
         Ok(Connection {
@@ -243,6 +246,7 @@ impl Connector for MqttConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -254,7 +258,7 @@ impl Connector for MqttConnector {
 
         let table = Self::table_from_options(options)?;
 
-        Self::from_config(self, None, name, connection, table, schema)
+        Self::from_config(self, None, name, connection, table, schema, None)
     }
 
     fn make_operator(

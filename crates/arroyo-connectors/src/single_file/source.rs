@@ -51,8 +51,7 @@ impl SingleFileSourceFunc {
                 i += 1;
                 continue;
             }
-
-            ctx.deserialize_slice(s.as_bytes(), SystemTime::now())
+            ctx.deserialize_slice(s.as_bytes(), SystemTime::now(), None)
                 .await
                 .unwrap();
             if ctx.should_flush() {

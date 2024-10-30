@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
+use datafusion::logical_expr::expr::ScalarFunction;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -52,7 +53,7 @@ use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::Query;
+use datafusion::sql::sqlparser::ast::{FunctionArg, FunctionArguments, Query};
 use datafusion::{
     optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -96,6 +97,19 @@ impl FieldSpec {
         match self {
             FieldSpec::StructField(f) => f,
             FieldSpec::VirtualField { field, .. } => field,
+        }
+    }
+    fn is_metadata_virtual(&self) -> bool {
+        match self {
+            FieldSpec::VirtualField {
+                expression: Expr::ScalarFunction(ScalarFunction { func, args, .. }),
+                ..
+            } => {
+                func.name() == "metadata"
+                    && args.len() == 1
+                    && matches!(args.first(), Some(Expr::Literal(_)))
+            }
+            _ => false,
         }
     }
 }
@@ -210,6 +224,7 @@ impl ConnectorTable {
         primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
         connection_profile: Option<&ConnectionProfile>,
+        connector_metadata_columns: Option<HashMap<String, (String, DataType)>>,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
         if "delta" == connector {
@@ -258,7 +273,7 @@ impl ConnectorTable {
 
         let schema_fields: Vec<SourceField> = input_to_schema_fields
             .iter()
-            .filter(|f| !f.is_virtual())
+            .filter(|f| f.is_metadata_virtual() || !f.is_virtual())
             .map(|f| {
                 let struct_field = f.field();
                 struct_field.clone().try_into().map_err(|_| {
@@ -285,7 +300,13 @@ impl ConnectorTable {
         .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
 
         let connection = connector
-            .from_options(name, options, Some(&schema), connection_profile)
+            .from_options(
+                name,
+                options,
+                Some(&schema),
+                connection_profile,
+                connector_metadata_columns,
+            )
             .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let mut table: ConnectorTable = connection.into();
@@ -495,6 +516,7 @@ impl Table {
     fn schema_from_columns(
         columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
+        connector_metadata_columns: &mut HashMap<String, (String, DataType)>,
     ) -> Result<Vec<FieldSpec>> {
         let struct_field_pairs = columns
             .iter()
@@ -505,10 +527,9 @@ impl Table {
                     .options
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
-
                 let struct_field = ArroyoExtensionType::add_metadata(
                     extension,
-                    Field::new(name, data_type, nullable),
+                    Field::new(name, data_type.clone(), nullable),
                 );
 
                 let generating_expression = column.options.iter().find_map(|option| {
@@ -516,6 +537,35 @@ impl Table {
                         generation_expr, ..
                     } = &option.option
                     {
+                        if let Some(sqlparser::ast::Expr::Function(sqlparser::ast::Function {
+                            name,
+                            args,
+                            ..
+                        })) = generation_expr
+                        {
+                            if name
+                                .0
+                                .iter()
+                                .any(|ident| ident.value.to_lowercase() == "metadata")
+                            {
+                                if let FunctionArguments::List(arg_list) = args {
+                                    if let Some(FunctionArg::Unnamed(
+                                        sqlparser::ast::FunctionArgExpr::Expr(
+                                            sqlparser::ast::Expr::Value(
+                                                sqlparser::ast::Value::SingleQuotedString(value),
+                                            ),
+                                        ),
+                                    )) = arg_list.args.first()
+                                    {
+                                        connector_metadata_columns.insert(
+                                            column.name.value.to_string(),
+                                            (value.to_string(), data_type.clone()),
+                                        );
+                                        return None;
+                                    }
+                                }
+                            }
+                        }
                         generation_expr.clone()
                     } else {
                         None
@@ -596,7 +646,12 @@ impl Table {
             }
 
             let connector = with_map.remove("connector");
-            let fields = Self::schema_from_columns(columns, schema_provider)?;
+            let mut connector_metadata_columns = Some(HashMap::new());
+            let fields = Self::schema_from_columns(
+                columns,
+                schema_provider,
+                connector_metadata_columns.as_mut().unwrap(),
+            )?;
 
             let primary_keys = columns
                 .iter()
@@ -660,6 +715,7 @@ impl Table {
                             primary_keys,
                             &mut with_map,
                             connection_profile,
+                            connector_metadata_columns,
                         )
                         .map_err(|e| e.context(format!("Failed to create table {}", name)))?,
                     )))

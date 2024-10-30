@@ -1,6 +1,7 @@
 use crate::avro::de;
 use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
+use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
 use arrow_array::builder::{
     ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
@@ -19,6 +20,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
+
+#[derive(Debug, Clone)]
+pub enum FieldValueType<'a> {
+    Int64(i64),
+    Int32(i32),
+    String(&'a String),
+    // Extend with more types as needed
+}
 
 pub struct FramingIterator<'a> {
     framing: Option<Arc<Framing>>,
@@ -82,6 +91,7 @@ pub struct ArrowDeserializer {
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    additional_fields_builder: Option<HashMap<String, Box<dyn ArrayBuilder>>>,
 }
 
 impl ArrowDeserializer {
@@ -158,6 +168,7 @@ impl ArrowDeserializer {
             proto_pool,
             buffered_count: 0,
             buffered_since: Instant::now(),
+            additional_fields_builder: None,
         }
     }
 
@@ -166,11 +177,12 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
+        additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
     ) -> Vec<SourceError> {
         match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(buffer, msg, timestamp).await,
             _ => FramingIterator::new(self.framing.clone(), msg)
-                .map(|t| self.deserialize_single(buffer, t, timestamp))
+                .map(|t| self.deserialize_single(buffer, t, timestamp, additional_fields.clone()))
                 .filter_map(|t| t.err())
                 .collect(),
         }
@@ -195,6 +207,11 @@ impl ArrowDeserializer {
                     .map(|batch| {
                         let mut columns = batch.columns().to_vec();
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
+                        flush_additional_fields_builders(
+                            &mut self.additional_fields_builder,
+                            &self.schema,
+                            &mut columns,
+                        );
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                     }),
             ),
@@ -214,6 +231,11 @@ impl ArrowDeserializer {
                             kernels::filter::filter(&timestamp.finish(), &mask).unwrap();
 
                         columns.insert(self.schema.timestamp_index, Arc::new(timestamp));
+                        flush_additional_fields_builders(
+                            &mut self.additional_fields_builder,
+                            &self.schema,
+                            &mut columns,
+                        );
                         RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
                     }),
             ),
@@ -225,6 +247,7 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
+        additional_fields: Option<HashMap<&String, FieldValueType>>,
     ) -> Result<(), SourceError> {
         match &*self.format {
             Format::RawString(_)
@@ -233,10 +256,20 @@ impl ArrowDeserializer {
             }) => {
                 self.deserialize_raw_string(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
+                if let Some(fields) = additional_fields {
+                    for (k, v) in fields.iter() {
+                        add_additional_fields(buffer, &self.schema, k, v);
+                    }
+                }
             }
             Format::RawBytes(_) => {
                 self.deserialize_raw_bytes(buffer, msg);
                 add_timestamp(buffer, self.schema.timestamp_index, timestamp);
+                if let Some(fields) = additional_fields {
+                    for (k, v) in fields.iter() {
+                        add_additional_fields(buffer, &self.schema, k, v);
+                    }
+                }
             }
             Format::Json(json) => {
                 let msg = if json.confluent_schema_registry {
@@ -249,10 +282,35 @@ impl ArrowDeserializer {
                     panic!("json decoder not initialized");
                 };
 
+                if self.additional_fields_builder.is_none() {
+                    if let Some(fields) = additional_fields.as_ref() {
+                        let mut builders = HashMap::new();
+                        for (key, value) in fields.iter() {
+                            let builder: Box<dyn ArrayBuilder> = match value {
+                                FieldValueType::Int32(_) => Box::new(Int32Builder::new()),
+                                FieldValueType::Int64(_) => Box::new(Int64Builder::new()),
+                                FieldValueType::String(_) => Box::new(StringBuilder::new()),
+                            };
+                            builders.insert(key, builder);
+                        }
+                        self.additional_fields_builder = Some(
+                            builders
+                                .into_iter()
+                                .map(|(k, v)| ((*k).clone(), v))
+                                .collect(),
+                        );
+                    }
+                }
+
                 decoder
                     .decode(msg)
                     .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                 timestamp_builder.append_value(to_nanos(timestamp) as i64);
+
+                add_additional_fields_using_builder(
+                    additional_fields,
+                    &mut self.additional_fields_builder,
+                );
                 self.buffered_count += 1;
             }
             Format::Protobuf(proto) => {
@@ -269,6 +327,12 @@ impl ArrowDeserializer {
                         .decode(json.to_string().as_bytes())
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
                     timestamp_builder.append_value(to_nanos(timestamp) as i64);
+
+                    add_additional_fields_using_builder(
+                        additional_fields,
+                        &mut self.additional_fields_builder,
+                    );
+
                     self.buffered_count += 1;
                 }
             }
@@ -400,9 +464,108 @@ pub(crate) fn add_timestamp(
         .append_value(to_nanos(timestamp) as i64);
 }
 
+pub(crate) fn add_additional_fields(
+    builder: &mut [Box<dyn ArrayBuilder>],
+    schema: &ArroyoSchema,
+    key: &str,
+    value: &FieldValueType<'_>,
+) {
+    let (idx, _) = schema
+        .schema
+        .column_with_name(key)
+        .unwrap_or_else(|| panic!("no '{}' column for additional fields", key));
+    match value {
+        FieldValueType::Int32(i) => {
+            builder[idx]
+                .as_any_mut()
+                .downcast_mut::<Int32Builder>()
+                .expect("additional field has incorrect type")
+                .append_value(*i);
+        }
+        FieldValueType::Int64(i) => {
+            builder[idx]
+                .as_any_mut()
+                .downcast_mut::<Int64Builder>()
+                .expect("additional field has incorrect type")
+                .append_value(*i);
+        }
+        FieldValueType::String(s) => {
+            builder[idx]
+                .as_any_mut()
+                .downcast_mut::<StringBuilder>()
+                .expect("additional field has incorrect type")
+                .append_value(s);
+        }
+    }
+}
+
+pub(crate) fn add_additional_fields_using_builder(
+    additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
+    additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
+) {
+    if let Some(fields) = additional_fields {
+        for (k, v) in fields.iter() {
+            if let Some(builder) = additional_fields_builder
+                .as_mut()
+                .and_then(|b| b.get_mut(*k))
+            {
+                match v {
+                    FieldValueType::Int32(i) => {
+                        builder
+                            .as_any_mut()
+                            .downcast_mut::<Int32Builder>()
+                            .expect("additional field has incorrect type")
+                            .append_value(*i);
+                    }
+                    FieldValueType::Int64(i) => {
+                        builder
+                            .as_any_mut()
+                            .downcast_mut::<Int64Builder>()
+                            .expect("additional field has incorrect type")
+                            .append_value(*i);
+                    }
+                    FieldValueType::String(s) => {
+                        builder
+                            .as_any_mut()
+                            .downcast_mut::<StringBuilder>()
+                            .expect("additional field has incorrect type")
+                            .append_value(s);
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn flush_additional_fields_builders(
+    additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
+    schema: &ArroyoSchema,
+    columns: &mut [Arc<dyn arrow::array::Array>],
+) {
+    if let Some(additional_fields) = additional_fields_builder.take() {
+        for (field_name, mut builder) in additional_fields {
+            if let Some((idx, _)) = schema.schema.column_with_name(&field_name) {
+                let expected_type = schema.schema.fields[idx].data_type();
+                let built_column = builder.as_mut().finish();
+                let actual_type = built_column.data_type();
+                if expected_type != actual_type {
+                    panic!(
+                        "Type mismatch for column '{}': expected {:?}, got {:?}",
+                        field_name, expected_type, actual_type
+                    );
+                }
+                columns[idx] = Arc::new(built_column);
+            } else {
+                panic!("Field '{}' not found in schema", field_name);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::de::{ArrowDeserializer, FramingIterator};
+    use crate::de::{ArrowDeserializer, FieldValueType, FramingIterator};
+    use arrow::datatypes::Int32Type;
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
@@ -534,7 +697,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
-                    now
+                    now,
+                    None,
                 )
                 .await,
             vec![]
@@ -544,7 +708,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
-                    now
+                    now,
+                    None,
                 )
                 .await,
             vec![]
@@ -570,7 +735,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": 5 }).to_string().as_bytes(),
-                    SystemTime::now()
+                    SystemTime::now(),
+                    None,
                 )
                 .await,
             vec![]
@@ -580,7 +746,8 @@ mod tests {
                 .deserialize_slice(
                     &mut arrays[..],
                     json!({ "x": "hello" }).to_string().as_bytes(),
-                    SystemTime::now()
+                    SystemTime::now(),
+                    None,
                 )
                 .await,
             vec![]
@@ -619,7 +786,7 @@ mod tests {
 
         let time = SystemTime::now();
         let result = deserializer
-            .deserialize_slice(&mut arrays, &[0, 1, 2, 3, 4, 5], time)
+            .deserialize_slice(&mut arrays, &[0, 1, 2, 3, 4, 5], time, None)
             .await;
         assert!(result.is_empty());
 
@@ -635,6 +802,72 @@ mod tests {
         );
         assert_eq!(
             batch.columns()[1]
+                .as_primitive::<TimestampNanosecondType>()
+                .value(0),
+            to_nanos(time) as i64
+        );
+    }
+
+    #[tokio::test]
+    async fn test_additional_fields_deserialisation() {
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("x", arrow_schema::DataType::Int64, true),
+            arrow_schema::Field::new("y", arrow_schema::DataType::Int32, true),
+            arrow_schema::Field::new("z", arrow_schema::DataType::Utf8, true),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let mut arrays: Vec<_> = schema
+            .fields
+            .iter()
+            .map(|f| make_builder(f.data_type(), 16))
+            .collect();
+
+        let arroyo_schema = ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap();
+
+        let mut deserializer = ArrowDeserializer::new(
+            Format::Json(JsonFormat {
+                confluent_schema_registry: false,
+                schema_id: None,
+                include_schema: false,
+                debezium: false,
+                unstructured: false,
+                timestamp_format: Default::default(),
+            }),
+            arroyo_schema,
+            None,
+            BadData::Drop {},
+        );
+
+        let time = SystemTime::now();
+        let mut additional_fields = std::collections::HashMap::new();
+        let binding = "y".to_string();
+        additional_fields.insert(&binding, FieldValueType::Int32(5));
+        let z_value = "hello".to_string();
+        let binding = "z".to_string();
+        additional_fields.insert(&binding, FieldValueType::String(&z_value));
+
+        let result = deserializer
+            .deserialize_slice(
+                &mut arrays,
+                json!({ "x": 5 }).to_string().as_bytes(),
+                time,
+                Some(additional_fields),
+            )
+            .await;
+        assert!(result.is_empty());
+
+        let batch = deserializer.flush_buffer().unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
+        assert_eq!(batch.columns()[1].as_primitive::<Int32Type>().value(0), 5);
+        assert_eq!(batch.columns()[2].as_string::<i32>().value(0), "hello");
+        assert_eq!(
+            batch.columns()[3]
                 .as_primitive::<TimestampNanosecondType>()
                 .value(0),
             to_nanos(time) as i64

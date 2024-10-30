@@ -3,6 +3,7 @@ use crate::kafka::{
 };
 use crate::{kafka, pull_opt};
 use anyhow::anyhow;
+use arrow::datatypes::DataType;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{
@@ -161,6 +162,7 @@ impl Connector for ConfluentConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -172,7 +174,7 @@ impl Connector for ConfluentConnector {
 
         let table = KafkaConnector::table_from_options(options)?;
 
-        self.from_config(None, name, connection, table, schema)
+        self.from_config(None, name, connection, table, schema, None)
     }
 
     fn from_config(
@@ -182,11 +184,12 @@ impl Connector for ConfluentConnector {
         config: Self::ProfileT,
         mut table: Self::TableT,
         schema: Option<&ConnectionSchema>,
+        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         table
             .client_configs
             .insert("client.id".to_string(), CLIENT_ID.to_string());
-        KafkaConnector {}.from_config(id, name, config.into(), table, schema)
+        KafkaConnector {}.from_config(id, name, config.into(), table, schema, None)
     }
 
     fn make_operator(

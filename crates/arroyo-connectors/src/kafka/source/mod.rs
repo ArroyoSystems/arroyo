@@ -1,3 +1,4 @@
+use arroyo_formats::de::FieldValueType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
@@ -35,6 +36,7 @@ pub struct KafkaSourceFunc {
     pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
     pub client_configs: HashMap<String, String>,
     pub messages_per_second: NonZeroU32,
+    pub metadata_fields: Option<HashMap<String, String>>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -178,7 +180,30 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                ctx.deserialize_slice(v, from_millis(timestamp as u64)).await?;
+                                let connector_metadata = if let Some(metadata_fields) = &self.metadata_fields {
+                                    let mut connector_metadata = HashMap::new();
+                                    for (key, value) in metadata_fields {
+                                        match value.as_str() {
+                                            "offset_id" => {
+                                                connector_metadata.insert(key, FieldValueType::Int64(msg.offset()));
+                                            }
+                                            "partition" => {
+                                                connector_metadata.insert(key, FieldValueType::Int32(msg.partition()));
+                                            }
+                                            "topic" => {
+                                                connector_metadata.insert(key, FieldValueType::String(&self.topic));
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    Some(connector_metadata)
+                                } else {
+                                    None
+                                };
+
+
+                                ctx.deserialize_slice(v, from_millis(timestamp as u64), connector_metadata).await?;
+
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;

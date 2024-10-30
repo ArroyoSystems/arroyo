@@ -143,7 +143,7 @@ impl MqttSourceFunc {
                 event = eventloop.poll() => {
                     match event {
                         Ok(MqttEvent::Incoming(Incoming::Publish(p))) => {
-                            ctx.deserialize_slice(&p.payload, SystemTime::now()).await?;
+                            ctx.deserialize_slice(&p.payload, SystemTime::now(), None).await?;
                             rate_limiter.until_ready().await;
                         }
                         Ok(MqttEvent::Outgoing(Outgoing::Subscribe(_))) => {

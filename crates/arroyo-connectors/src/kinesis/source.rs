@@ -434,8 +434,7 @@ impl KinesisSourceFunc {
         for record in records {
             let data = record.data.into_inner();
             let timestamp = record.approximate_arrival_timestamp.unwrap();
-
-            ctx.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128))
+            ctx.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128), None)
                 .await?;
 
             if ctx.should_flush() {
