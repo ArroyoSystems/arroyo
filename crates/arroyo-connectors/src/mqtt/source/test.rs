@@ -125,6 +125,7 @@ impl MqttTopicTester {
             None,
             None,
             10,
+            None,
         );
 
         let (to_control_tx, control_rx) = channel(128);
