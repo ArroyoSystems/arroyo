@@ -670,7 +670,7 @@ impl ArrowContext {
         &mut self,
         msg: &[u8],
         time: SystemTime,
-        additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
+        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
     ) -> Result<(), UserError> {
         let deserializer = self
             .deserializer

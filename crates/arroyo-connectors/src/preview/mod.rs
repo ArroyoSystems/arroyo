@@ -3,7 +3,6 @@ mod operator;
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail};
-use arrow::datatypes::DataType;
 use arroyo_rpc::OperatorConfig;
 
 use arroyo_operator::connector::Connection;
@@ -72,7 +71,6 @@ impl Connector for PreviewConnector {
         _: &mut HashMap<String, String>,
         _: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         bail!("Preview connector cannot be created in SQL");
     }
@@ -84,7 +82,6 @@ impl Connector for PreviewConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let description = "PreviewSink".to_string();
 
@@ -99,7 +96,7 @@ impl Connector for PreviewConnector {
             format: None,
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            additional_fields: None,
+            metadata_fields: schema.metadata_fields(),
         };
 
         Ok(Connection {

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp};
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp, MetadataField};
 use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rumqttc::v5::mqttbytes::QoS;
@@ -34,7 +34,7 @@ pub struct MqttSourceFunc {
     pub bad_data: Option<BadData>,
     pub messages_per_second: NonZeroU32,
     pub subscribed: Arc<AtomicBool>,
-    pub metadata_fields: Option<HashMap<String, String>>,
+    pub metadata_fields: Vec<MetadataField>,
 }
 
 #[async_trait]
@@ -77,7 +77,7 @@ impl MqttSourceFunc {
         framing: Option<Framing>,
         bad_data: Option<BadData>,
         messages_per_second: u32,
-        metadata_fields: Option<HashMap<String, String>>,
+        metadata_fields: Vec<MetadataField>,
     ) -> Self {
         Self {
             config,
@@ -149,19 +149,21 @@ impl MqttSourceFunc {
                     match event {
                         Ok(MqttEvent::Incoming(Incoming::Publish(p))) => {
                             let topic = String::from_utf8_lossy(&p.topic).to_string();
-                            let connector_metadata: Option<HashMap<&String, FieldValueType<'_>>> =
-                            self.metadata_fields.as_ref().map(|fields| {
-                                fields.iter()
-                                    .filter_map(|(k, v)| {
-                                        if v == "topic" {
-                                            Some((k, FieldValueType::String(&topic)))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect()
-                            });
-                            ctx.deserialize_slice(&p.payload, SystemTime::now(), connector_metadata).await?;
+
+                            let connector_metadata = if !self.metadata_fields.is_empty() {
+                                let mut connector_metadata = HashMap::new();
+                                for mf in &self.metadata_fields {
+                                    connector_metadata.insert(&mf.field_name, match mf.key.as_str() {
+                                        "topic" => FieldValueType::String(&topic),
+                                        k => unreachable!("invalid metadata key '{}' for mqtt", k)
+                                    });
+                                }
+                                Some(connector_metadata)
+                            } else {
+                                None
+                            };
+
+                            ctx.deserialize_slice(&p.payload, SystemTime::now(), connector_metadata.as_ref()).await?;
                             rate_limiter.until_ready().await;
                         }
                         Ok(MqttEvent::Outgoing(Outgoing::Subscribe(_))) => {

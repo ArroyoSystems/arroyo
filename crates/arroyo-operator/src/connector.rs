@@ -1,10 +1,11 @@
 use crate::operator::OperatorNode;
-use anyhow::anyhow;
-use arrow::datatypes::DataType;
+use anyhow::{anyhow, bail};
+use arrow::datatypes::{DataType, Field};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
+use arroyo_types::DisplayAsSql;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
@@ -21,6 +22,11 @@ pub struct Connection {
     pub schema: ConnectionSchema,
     pub config: String,
     pub description: String,
+}
+
+pub struct MetadataDef {
+    pub name: &'static str,
+    pub data_type: DataType,
 }
 
 #[allow(clippy::wrong_self_convention)]
@@ -44,6 +50,10 @@ pub trait Connector: Send {
     }
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
+
+    fn metadata_defs(&self) -> &'static [MetadataDef] {
+        &[]
+    }
 
     fn table_type(&self, config: Self::ProfileT, table: Self::TableT) -> ConnectionType;
 
@@ -90,7 +100,6 @@ pub trait Connector: Send {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection>;
 
     fn from_config(
@@ -100,7 +109,6 @@ pub trait Connector: Send {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection>;
 
     #[allow(unused)]
@@ -117,6 +125,8 @@ pub trait ErasedConnector: Send {
     fn name(&self) -> &'static str;
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
+
+    fn metadata_defs(&self) -> &'static [MetadataDef];
 
     fn validate_config(&self, s: &serde_json::Value) -> Result<(), serde_json::Error>;
 
@@ -165,7 +175,6 @@ pub trait ErasedConnector: Send {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection>;
 
     fn from_config(
@@ -175,7 +184,6 @@ pub trait ErasedConnector: Send {
         config: &serde_json::Value,
         table: &serde_json::Value,
         schema: Option<&ConnectionSchema>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection>;
 
     fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<OperatorNode>;
@@ -188,6 +196,10 @@ impl<C: Connector> ErasedConnector for C {
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
         self.metadata()
+    }
+
+    fn metadata_defs(&self) -> &'static [MetadataDef] {
+        self.metadata_defs()
     }
 
     fn config_description(&self, s: &serde_json::Value) -> Result<String, serde_json::Error> {
@@ -261,9 +273,34 @@ impl<C: Connector> ErasedConnector for C {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
-        self.from_options(name, options, schema, profile, metadata_fields)
+        if let Some(schema) = schema {
+            for sf in schema.fields.iter() {
+                if let Some(key) = &sf.metadata_key {
+                    let field = self
+                        .metadata_defs()
+                        .iter()
+                        .find(|f| f.name == key)
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "unknown metadata field '{}' for {} connector '{}'",
+                                key,
+                                self.name(),
+                                name
+                            )
+                        })?;
+
+                    let arrow_field: Field = sf.clone().into();
+
+                    if !field.data_type.equals_datatype(arrow_field.data_type()) {
+                        bail!("incorrect data type for metadata field '{}'; expected {}, but found {}",
+                        arrow_field.name(), DisplayAsSql(&field.data_type), DisplayAsSql(arrow_field.data_type()));
+                    }
+                }
+            }
+        }
+
+        self.from_options(name, options, schema, profile)
     }
 
     fn from_config(
@@ -273,7 +310,6 @@ impl<C: Connector> ErasedConnector for C {
         config: &serde_json::Value,
         table: &serde_json::Value,
         schema: Option<&ConnectionSchema>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         self.from_config(
             id,
@@ -281,7 +317,6 @@ impl<C: Connector> ErasedConnector for C {
             self.parse_config(config)?,
             self.parse_table(table)?,
             schema,
-            metadata_fields,
         )
     }
 

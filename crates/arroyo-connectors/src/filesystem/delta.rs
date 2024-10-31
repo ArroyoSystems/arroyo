@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail};
-use arrow::datatypes::DataType;
 use arroyo_operator::connector::Connection;
 use arroyo_storage::BackendConfig;
 use std::collections::HashMap;
@@ -78,7 +77,6 @@ impl Connector for DeltaLakeConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let TableType::Sink {
             write_path,
@@ -125,7 +123,7 @@ impl Connector for DeltaLakeConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            additional_fields: None,
+            metadata_fields: schema.metadata_fields(),
         };
 
         Ok(Connection {
@@ -145,11 +143,10 @@ impl Connector for DeltaLakeConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
 
-        self.from_config(None, name, EmptyConfig {}, table, schema, None)
+        self.from_config(None, name, EmptyConfig {}, table, schema)
     }
 
     fn make_operator(
