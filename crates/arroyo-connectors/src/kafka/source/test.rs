@@ -18,7 +18,7 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
-use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
+use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp, MetadataField};
 use arroyo_types::{
     single_item_hash_map, to_micros, ArrowMessage, CheckpointBarrier, SignalMessage, TaskInfo,
 };
@@ -87,7 +87,7 @@ impl KafkaTopicTester {
             schema_resolver: None,
             client_configs: HashMap::new(),
             messages_per_second: NonZeroU32::new(100).unwrap(),
-            metadata_fields: None,
+            metadata_fields: vec![],
         });
 
         let (to_control_tx, control_rx) = channel(128);
@@ -358,10 +358,10 @@ async fn test_kafka_with_metadata_fields() {
     kafka_topic_tester.create_topic().await;
 
     // Prepare metadata fields
-    let metadata_fields = Some(HashMap::from([(
-        "offset".to_string(),
-        "offset_id".to_string(),
-    )]));
+    let metadata_fields = vec![MetadataField {
+        field_name: "offset".to_string(),
+        key: "offset_id".to_string(),
+    }];
 
     // Set metadata fields in KafkaSourceFunc
     let mut kafka = KafkaSourceFunc {

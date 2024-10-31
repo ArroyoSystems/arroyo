@@ -5,7 +5,6 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arrow::datatypes::DataType;
 use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
 use reqwest::{Client, Request};

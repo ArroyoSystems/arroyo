@@ -3,7 +3,6 @@ use crate::nats::source::NatsSourceFunc;
 use crate::pull_opt;
 use anyhow::anyhow;
 use anyhow::bail;
-use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;

@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arrow::datatypes::DataType;
 use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
 use eventsource_client::Client;

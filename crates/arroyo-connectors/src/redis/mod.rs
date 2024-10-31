@@ -1,7 +1,6 @@
 mod operator;
 
 use anyhow::{anyhow, bail};
-use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;

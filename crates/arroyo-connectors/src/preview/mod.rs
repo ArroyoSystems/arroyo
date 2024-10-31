@@ -3,7 +3,6 @@ mod operator;
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail};
-use arrow::datatypes::DataType;
 use arroyo_rpc::OperatorConfig;
 
 use arroyo_operator::connector::Connection;

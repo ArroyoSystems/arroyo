@@ -4,9 +4,8 @@ use arrow::datatypes::{DataType, Field};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::{primitive_to_sql, OperatorConfig};
+use arroyo_rpc::OperatorConfig;
 use arroyo_types::DisplayAsSql;
-use datafusion::sql::unparser::expr_to_sql;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;

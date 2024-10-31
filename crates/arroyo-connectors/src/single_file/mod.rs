@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, Result};
-use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
 use std::collections::HashMap;
 use typify::import_types;

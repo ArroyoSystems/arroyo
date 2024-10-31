@@ -4,7 +4,6 @@ use std::{collections::HashMap, time::Duration};
 
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
-use datafusion::logical_expr::expr::ScalarFunction;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -54,7 +53,7 @@ use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::{FunctionArg, FunctionArguments, Query};
+use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -62,7 +61,6 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
-use syn::Meta;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -280,8 +278,6 @@ impl ConnectorTable {
                         struct_field.data_type()
                     ))
                 })?;
-
-                println!("setting metadata field for {} {:?}", struct_field.name(), f);
 
                 if let Some(key) = f.metadata_key() {
                     sf.metadata_key = Some(key.to_string());

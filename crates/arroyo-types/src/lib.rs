@@ -480,7 +480,7 @@ impl<'a> Display for DisplayAsSql<'a> {
             }
             DataType::Utf8 | DataType::LargeUtf8 => write!(f, "TEXT"),
             DataType::List(inner) => {
-                write!(f, "{}[]", DisplayAsSql(&inner.data_type()))
+                write!(f, "{}[]", DisplayAsSql(inner.data_type()))
             }
             dt => write!(f, "{}", dt),
         }

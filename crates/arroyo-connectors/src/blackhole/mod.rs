@@ -1,6 +1,5 @@
 use crate::blackhole::operator::BlackholeSinkFunc;
 use anyhow::anyhow;
-use arrow::datatypes::DataType;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{

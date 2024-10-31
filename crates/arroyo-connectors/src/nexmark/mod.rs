@@ -3,7 +3,7 @@ mod operator;
 mod test;
 
 use anyhow::{anyhow, bail};
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::datatypes::{Field, Schema, TimeUnit};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{

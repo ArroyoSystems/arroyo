@@ -281,7 +281,6 @@ impl ConnectionSchema {
             .iter()
             .filter(|f| f.metadata_key.is_none())
             .collect();
-        println!("non metadata fields = {:?}", non_metadata_fields);
 
         match &self.format {
             Some(Format::RawString(_)) => {

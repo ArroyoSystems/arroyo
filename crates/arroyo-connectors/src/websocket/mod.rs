@@ -3,7 +3,6 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arrow::datatypes::DataType;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,

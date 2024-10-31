@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::anyhow;
-use arrow::datatypes::DataType;
 use arroyo_rpc::OperatorConfig;
 
 use arroyo_formats::ser::ArrowSerializer;

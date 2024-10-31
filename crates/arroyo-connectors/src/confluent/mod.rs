@@ -3,7 +3,6 @@ use crate::kafka::{
 };
 use crate::{kafka, pull_opt};
 use anyhow::anyhow;
-use arrow::datatypes::DataType;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{

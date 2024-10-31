@@ -3,7 +3,6 @@ mod sink;
 mod source;
 
 use anyhow::{anyhow, bail, Result};
-use arrow::datatypes::DataType;
 use arroyo_storage::BackendConfig;
 use regex::Regex;
 use std::collections::HashMap;
