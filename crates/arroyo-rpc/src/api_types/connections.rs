@@ -276,9 +276,13 @@ impl ConnectionSchema {
     }
 
     pub fn validate(self) -> anyhow::Result<Self> {
-        let non_metadata_fields: Vec<_> = self.fields.iter().filter(|f| f.metadata_key.is_none()).collect();
+        let non_metadata_fields: Vec<_> = self
+            .fields
+            .iter()
+            .filter(|f| f.metadata_key.is_none())
+            .collect();
         println!("non metadata fields = {:?}", non_metadata_fields);
-        
+
         match &self.format {
             Some(Format::RawString(_)) => {
                 if non_metadata_fields.len() != 1
@@ -310,13 +314,16 @@ impl ConnectionSchema {
         let fields: Vec<Field> = self.fields.iter().map(|f| f.clone().into()).collect();
         Arc::new(ArroyoSchema::from_fields(fields))
     }
-    
+
     pub fn metadata_fields(&self) -> Vec<MetadataField> {
-        self.fields.iter()
-            .filter_map(|f| Some(MetadataField {
-                field_name: f.field_name.clone(),
-                key: f.metadata_key.clone()? 
-            }))
+        self.fields
+            .iter()
+            .filter_map(|f| {
+                Some(MetadataField {
+                    field_name: f.field_name.clone(),
+                    key: f.metadata_key.clone()?,
+                })
+            })
             .collect()
     }
 }

@@ -8,14 +8,14 @@ use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 
 use prost::Message;
 
+use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
+use crate::tables::FieldSpec;
 use crate::{
     builder::{NamedNode, Planner},
     schema_from_df_fields,
     schemas::add_timestamp_field,
     tables::ConnectorTable,
 };
-use crate::tables::FieldSpec;
-use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
 pub(crate) const TABLE_SOURCE_NAME: &str = "TableSourceExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -31,7 +31,7 @@ impl TableSourceExtension {
             .fields
             .iter()
             .filter_map(|field| match field {
-                FieldSpec::StructField(field) | FieldSpec::MetadataField { field, ..} => {
+                FieldSpec::StructField(field) | FieldSpec::MetadataField { field, .. } => {
                     Some((Some(name.clone()), Arc::new(field.clone())).into())
                 }
                 FieldSpec::VirtualField { .. } => None,

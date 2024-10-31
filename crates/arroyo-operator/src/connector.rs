@@ -5,14 +5,14 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::{primitive_to_sql, OperatorConfig};
+use arroyo_types::DisplayAsSql;
+use datafusion::sql::unparser::expr_to_sql;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
 use std::collections::HashMap;
-use datafusion::sql::unparser::expr_to_sql;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
-use arroyo_types::DisplayAsSql;
 
 #[derive(Debug, Clone)]
 pub struct Connection {
@@ -51,7 +51,7 @@ pub trait Connector: Send {
     }
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
-    
+
     fn metadata_defs(&self) -> &'static [MetadataDef] {
         &[]
     }
@@ -278,13 +278,21 @@ impl<C: Connector> ErasedConnector for C {
         if let Some(schema) = schema {
             for sf in schema.fields.iter() {
                 if let Some(key) = &sf.metadata_key {
-                    let field = self.metadata_defs()
+                    let field = self
+                        .metadata_defs()
                         .iter()
                         .find(|f| f.name == key)
-                        .ok_or_else(|| anyhow!("unknown metadata field '{}' for {} connector '{}'", key, self.name(), name))?;
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "unknown metadata field '{}' for {} connector '{}'",
+                                key,
+                                self.name(),
+                                name
+                            )
+                        })?;
 
                     let arrow_field: Field = sf.clone().into();
-                    
+
                     if !field.data_type.equals_datatype(arrow_field.data_type()) {
                         bail!("incorrect data type for metadata field '{}'; expected {}, but found {}",
                         arrow_field.name(), DisplayAsSql(&field.data_type), DisplayAsSql(arrow_field.data_type()));
@@ -292,7 +300,7 @@ impl<C: Connector> ErasedConnector for C {
                 }
             }
         }
-        
+
         self.from_options(name, options, schema, profile)
     }
 

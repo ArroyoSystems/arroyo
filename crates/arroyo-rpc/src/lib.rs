@@ -210,7 +210,7 @@ impl Default for OperatorConfig {
             bad_data: None,
             framing: None,
             rate_limit: None,
-            metadata_fields: vec![]
+            metadata_fields: vec![],
         }
     }
 }

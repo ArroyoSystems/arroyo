@@ -500,7 +500,7 @@ pub(crate) fn add_additional_fields(
 }
 
 pub(crate) fn add_additional_fields_using_builder(
-    additional_fields: Option<&HashMap<&String , FieldValueType<'_>>>,
+    additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
     additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
 ) {
     if let Some(fields) = additional_fields {

@@ -21,6 +21,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
+use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{config::ConfigOptions, DFSchema, Result, ScalarValue};
 use datafusion::common::{plan_err, Column, DataFusionError};
 use datafusion::execution::context::SessionState;
@@ -61,7 +62,6 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
-use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use syn::Meta;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -99,7 +99,7 @@ impl FieldSpec {
     pub fn field(&self) -> &Field {
         match self {
             FieldSpec::StructField(f) => f,
-            FieldSpec::MetadataField { field, ..} => field,
+            FieldSpec::MetadataField { field, .. } => field,
             FieldSpec::VirtualField { field, .. } => field,
         }
     }
@@ -236,7 +236,7 @@ impl ConnectorTable {
                         }
                         _ => field_spec,
                     },
-                    FieldSpec::MetadataField {.. } | FieldSpec::VirtualField { .. } => {
+                    FieldSpec::MetadataField { .. } | FieldSpec::VirtualField { .. } => {
                         unreachable!("delta lake is only a sink, can't have virtual fields")
                     }
                 })
@@ -286,7 +286,7 @@ impl ConnectorTable {
                 if let Some(key) = f.metadata_key() {
                     sf.metadata_key = Some(key.to_string());
                 }
-                
+
                 Ok(sf)
             })
             .collect::<Result<_>>()?;
@@ -305,12 +305,7 @@ impl ConnectorTable {
         .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
 
         let connection = connector
-            .from_options(
-                name,
-                options,
-                Some(&schema),
-                connection_profile,
-            )
+            .from_options(name, options, Some(&schema), connection_profile)
             .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let mut table: ConnectorTable = connection.into();
@@ -520,16 +515,18 @@ struct MetadataFinder {
     depth: usize,
 }
 
-impl <'a> TreeNodeVisitor<'a> for MetadataFinder {
+impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
     type Node = Expr;
 
     fn f_down(&mut self, node: &'a Self::Node) -> Result<TreeNodeRecursion> {
         if let Expr::ScalarFunction(func) = node {
             if func.name() == "metadata" {
                 if self.depth > 0 {
-                    return plan_err!("Metadata columns must have only a single call to 'metadata'");
+                    return plan_err!(
+                        "Metadata columns must have only a single call to 'metadata'"
+                    );
                 }
-                
+
                 return if let &[arg] = &func.args.as_slice() {
                     if let Expr::Literal(ScalarValue::Utf8(Some(key))) = &arg {
                         self.key = Some(key.clone());
@@ -539,7 +536,7 @@ impl <'a> TreeNodeVisitor<'a> for MetadataFinder {
                     }
                 } else {
                     plan_err!("For metadata columns, metadata call must have a single argument")
-                }
+                };
             }
         }
         self.depth += 1;
@@ -622,9 +619,9 @@ impl Table {
                         &mut PlannerContext::default(),
                     )?;
 
-                    let mut metadata_finder = MetadataFinder::default(); 
+                    let mut metadata_finder = MetadataFinder::default();
                     df_expr.visit(&mut metadata_finder)?;
-                    
+
                     if let Some(key) = metadata_finder.key {
                         Ok(FieldSpec::MetadataField {
                             field: struct_field,
@@ -666,10 +663,7 @@ impl Table {
             }
 
             let connector = with_map.remove("connector");
-            let fields = Self::schema_from_columns(
-                columns,
-                schema_provider,
-            )?;
+            let fields = Self::schema_from_columns(columns, schema_provider)?;
 
             let primary_keys = columns
                 .iter()

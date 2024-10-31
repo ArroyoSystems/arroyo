@@ -240,14 +240,12 @@ impl Connector for MqttConnector {
     }
 
     fn metadata_defs(&self) -> &'static [MetadataDef] {
-        &[
-            MetadataDef {
-                name: "topic",
-                data_type: DataType::Utf8,
-            }
-        ]
+        &[MetadataDef {
+            name: "topic",
+            data_type: DataType::Utf8,
+        }]
     }
-    
+
     fn from_options(
         &self,
         name: &str,

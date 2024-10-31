@@ -169,7 +169,7 @@ impl KafkaSourceFunc {
 
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        
+
         loop {
             select! {
                 message = consumer.recv() => {
@@ -179,7 +179,7 @@ impl KafkaSourceFunc {
                                 let timestamp = msg.timestamp().to_millis()
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
-                                
+
                                 let topic = msg.topic();
 
                                 let connector_metadata = if !self.metadata_fields.is_empty() {

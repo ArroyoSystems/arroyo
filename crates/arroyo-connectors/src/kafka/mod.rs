@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail};
-use arrow::datatypes::{DataType};
+use arrow::datatypes::DataType;
 use arroyo_formats::de::ArrowDeserializer;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, MetadataDef};
@@ -215,7 +215,7 @@ impl Connector for KafkaConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            metadata_fields: schema.metadata_fields()
+            metadata_fields: schema.metadata_fields(),
         };
 
         Ok(Connection {
@@ -325,7 +325,7 @@ impl Connector for KafkaConnector {
             MetadataDef {
                 name: "timestamp",
                 data_type: DataType::Int64,
-            }
+            },
         ]
     }
 

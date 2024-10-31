@@ -458,7 +458,7 @@ pub struct CheckpointBarrier {
 
 pub struct DisplayAsSql<'a>(pub &'a DataType);
 
-impl <'a> Display for DisplayAsSql<'a> {
+impl<'a> Display for DisplayAsSql<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             DataType::Boolean => write!(f, "BOOLEAN"),
@@ -475,16 +475,18 @@ impl <'a> Display for DisplayAsSql<'a> {
             DataType::Time64(_) => write!(f, "TIME"),
             DataType::Duration(_) => write!(f, "INTERVAL"),
             DataType::Interval(_) => write!(f, "INTERVAL"),
-            DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => write!(f, "BYTEA"),
+            DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => {
+                write!(f, "BYTEA")
+            }
             DataType::Utf8 | DataType::LargeUtf8 => write!(f, "TEXT"),
             DataType::List(inner) => {
                 write!(f, "{}[]", DisplayAsSql(&inner.data_type()))
-            },
-            dt => write!(f, "{}", dt)
+            }
+            dt => write!(f, "{}", dt),
         }
     }
 }
-    
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Serialize)]
 pub enum DatePart {
     Year,

@@ -142,14 +142,14 @@ impl MqttSourceFunc {
         let qos = self.qos;
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        
+
         loop {
             select! {
                 event = eventloop.poll() => {
                     match event {
                         Ok(MqttEvent::Incoming(Incoming::Publish(p))) => {
                             let topic = String::from_utf8_lossy(&p.topic).to_string();
-                            
+
                             let connector_metadata = if !self.metadata_fields.is_empty() {
                                 let mut connector_metadata = HashMap::new();
                                 for mf in &self.metadata_fields {
@@ -162,7 +162,7 @@ impl MqttSourceFunc {
                             } else {
                                 None
                             };
-                            
+
                             ctx.deserialize_slice(&p.payload, SystemTime::now(), connector_metadata.as_ref()).await?;
                             rate_limiter.until_ready().await;
                         }
