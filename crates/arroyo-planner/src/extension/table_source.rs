@@ -31,10 +31,10 @@ impl TableSourceExtension {
             .fields
             .iter()
             .filter_map(|field| match field {
-                FieldSpec::StructField(field) | FieldSpec::MetadataField { field, .. } => {
+                FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
                     Some((Some(name.clone()), Arc::new(field.clone())).into())
                 }
-                FieldSpec::VirtualField { .. } => None,
+                FieldSpec::Virtual { .. } => None,
             })
             .collect::<Vec<_>>();
         let base_schema = Arc::new(schema_from_df_fields(&physical_fields).unwrap());

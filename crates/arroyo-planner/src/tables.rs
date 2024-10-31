@@ -82,29 +82,29 @@ pub struct ConnectorTable {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldSpec {
-    StructField(Field),
-    MetadataField { field: Field, key: String },
-    VirtualField { field: Field, expression: Expr },
+    Struct(Field),
+    Metadata { field: Field, key: String },
+    Virtual { field: Field, expression: Expr },
 }
 
 impl FieldSpec {
     fn is_virtual(&self) -> bool {
         match self {
-            FieldSpec::StructField(_) | FieldSpec::MetadataField { .. } => false,
-            FieldSpec::VirtualField { .. } => true,
+            FieldSpec::Struct(_) | FieldSpec::Metadata { .. } => false,
+            FieldSpec::Virtual { .. } => true,
         }
     }
     pub fn field(&self) -> &Field {
         match self {
-            FieldSpec::StructField(f) => f,
-            FieldSpec::MetadataField { field, .. } => field,
-            FieldSpec::VirtualField { field, .. } => field,
+            FieldSpec::Struct(f) => f,
+            FieldSpec::Metadata { field, .. } => field,
+            FieldSpec::Virtual { field, .. } => field,
         }
     }
 
     fn metadata_key(&self) -> Option<&str> {
         match &self {
-            FieldSpec::MetadataField { key, .. } => Some(key.as_str()),
+            FieldSpec::Metadata { key, .. } => Some(key.as_str()),
             _ => None,
         }
     }
@@ -112,7 +112,7 @@ impl FieldSpec {
 
 impl From<Field> for FieldSpec {
     fn from(value: Field) -> Self {
-        FieldSpec::StructField(value)
+        FieldSpec::Struct(value)
     }
 }
 
@@ -198,7 +198,7 @@ impl From<Connection> for ConnectorTable {
                 .schema
                 .fields
                 .iter()
-                .map(|f| FieldSpec::StructField(f.clone().into()))
+                .map(|f| FieldSpec::Struct(f.clone().into()))
                 .collect(),
             config: value.config,
             description: value.description,
@@ -226,15 +226,15 @@ impl ConnectorTable {
             fields = fields
                 .into_iter()
                 .map(|field_spec| match &field_spec {
-                    FieldSpec::StructField(struct_field) => match struct_field.data_type() {
+                    FieldSpec::Struct(struct_field) => match struct_field.data_type() {
                         DataType::Timestamp(_, None) => {
-                            FieldSpec::StructField(struct_field.clone().with_data_type(
+                            FieldSpec::Struct(struct_field.clone().with_data_type(
                                 DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
                             ))
                         }
                         _ => field_spec,
                     },
-                    FieldSpec::MetadataField { .. } | FieldSpec::VirtualField { .. } => {
+                    FieldSpec::Metadata { .. } | FieldSpec::Virtual { .. } => {
                         unreachable!("delta lake is only a sink, can't have virtual fields")
                     }
                 })
@@ -259,10 +259,9 @@ impl ConnectorTable {
             let df_struct_type =
                 DataType::Struct(fields.iter().map(|f| f.field().clone()).collect());
             let before_field_spec =
-                FieldSpec::StructField(Field::new("before", df_struct_type.clone(), true));
-            let after_field_spec =
-                FieldSpec::StructField(Field::new("after", df_struct_type, true));
-            let op_field_spec = FieldSpec::StructField(Field::new("op", DataType::Utf8, false));
+                FieldSpec::Struct(Field::new("before", df_struct_type.clone(), true));
+            let after_field_spec = FieldSpec::Struct(Field::new("after", df_struct_type, true));
+            let op_field_spec = FieldSpec::Struct(Field::new("op", DataType::Utf8, false));
             input_to_schema_fields = vec![before_field_spec, after_field_spec, op_field_spec];
         }
 
@@ -619,18 +618,18 @@ impl Table {
                     df_expr.visit(&mut metadata_finder)?;
 
                     if let Some(key) = metadata_finder.key {
-                        Ok(FieldSpec::MetadataField {
+                        Ok(FieldSpec::Metadata {
                             field: struct_field,
                             key,
                         })
                     } else {
-                        Ok(FieldSpec::VirtualField {
+                        Ok(FieldSpec::Virtual {
                             field: struct_field,
                             expression: df_expr,
                         })
                     }
                 } else {
-                    Ok(FieldSpec::StructField(struct_field))
+                    Ok(FieldSpec::Struct(struct_field))
                 }
             })
             .collect::<Result<Vec<_>>>()

@@ -49,14 +49,13 @@ impl<'a> SourceRewriter<'a> {
                 .find_map(|f| {
                     if f.field().name() == &watermark_field {
                         return match f {
-                            FieldSpec::StructField(field)
-                            | FieldSpec::MetadataField { field, .. } => {
+                            FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
                                 Some(Expr::Column(Column {
                                     relation: None,
                                     name: field.name().to_string(),
                                 }))
                             }
-                            FieldSpec::VirtualField { expression, .. } => Some(expression.clone()),
+                            FieldSpec::Virtual { expression, .. } => Some(expression.clone()),
                         };
                     }
                     None
@@ -87,13 +86,13 @@ impl<'a> SourceRewriter<'a> {
             .fields
             .iter()
             .map(|field| match field {
-                FieldSpec::StructField(field) | FieldSpec::MetadataField { field, .. } => {
+                FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
                     Expr::Column(Column {
                         relation: Some(qualifier.clone()),
                         name: field.name().to_string(),
                     })
                 }
-                FieldSpec::VirtualField { field, expression } => expression
+                FieldSpec::Virtual { field, expression } => expression
                     .clone()
                     .alias_qualified(Some(qualifier.clone()), field.name().to_string()),
             })
@@ -111,14 +110,13 @@ impl<'a> SourceRewriter<'a> {
                 .find_map(|f| {
                     if f.field().name() == &event_time_field {
                         return match f {
-                            FieldSpec::StructField(field)
-                            | FieldSpec::MetadataField { field, .. } => {
+                            FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
                                 Some(Expr::Column(Column {
                                     relation: Some(qualifier.clone()),
                                     name: field.name().to_string(),
                                 }))
                             }
-                            FieldSpec::VirtualField { expression, .. } => Some(expression.clone()),
+                            FieldSpec::Virtual { expression, .. } => Some(expression.clone()),
                         };
                     }
                     None
