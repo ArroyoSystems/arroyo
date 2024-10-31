@@ -79,9 +79,8 @@ impl Connector for BlackholeConnector {
         _options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
-        self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, schema, None)
+        self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, schema)
     }
 
     fn from_config(
@@ -91,7 +90,6 @@ impl Connector for BlackholeConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         s: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let description = "Blackhole".to_string();
 
@@ -102,7 +100,7 @@ impl Connector for BlackholeConnector {
             format: None,
             bad_data: None,
             framing: None,
-            additional_fields: None,
+            metadata_fields: vec![],
         };
 
         Ok(Connection {

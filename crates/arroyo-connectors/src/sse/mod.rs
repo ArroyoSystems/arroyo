@@ -79,7 +79,6 @@ impl Connector for SSEConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let description = format!("SSESource<{}>", table.endpoint);
 
@@ -109,7 +108,7 @@ impl Connector for SSEConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            additional_fields: None,
+            metadata_fields: schema.metadata_fields(),
         };
 
         Ok(Connection {
@@ -129,7 +128,6 @@ impl Connector for SSEConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
         let headers = options.remove("headers");
@@ -145,7 +143,6 @@ impl Connector for SSEConnector {
                 headers: headers.map(VarStr::new),
             },
             schema,
-            None,
         )
     }
 

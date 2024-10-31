@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail};
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType};
 use arroyo_formats::de::ArrowDeserializer;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::connector::Connection;
+use arroyo_operator::connector::{Connection, MetadataDef};
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, JsonFormat};
@@ -189,7 +189,6 @@ impl Connector for KafkaConnector {
         config: KafkaConfig,
         table: KafkaTable,
         schema: Option<&ConnectionSchema>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
@@ -209,13 +208,6 @@ impl Connector for KafkaConnector {
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Kafka connection"))?;
 
-        let metadata_fields = metadata_fields.map(|fields| {
-            fields
-                .into_iter()
-                .map(|(k, (v, _))| (k, v))
-                .collect::<HashMap<String, String>>()
-        });
-
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
@@ -223,7 +215,7 @@ impl Connector for KafkaConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            additional_fields: metadata_fields,
+            metadata_fields: schema.metadata_fields()
         };
 
         Ok(Connection {
@@ -316,13 +308,33 @@ impl Connector for KafkaConnector {
         }
     }
 
+    fn metadata_defs(&self) -> &'static [MetadataDef] {
+        &[
+            MetadataDef {
+                name: "offset_id",
+                data_type: DataType::Int64,
+            },
+            MetadataDef {
+                name: "partition",
+                data_type: DataType::Int32,
+            },
+            MetadataDef {
+                name: "topic",
+                data_type: DataType::Utf8,
+            },
+            MetadataDef {
+                name: "timestamp",
+                data_type: DataType::Int64,
+            }
+        ]
+    }
+
     fn from_options(
         &self,
         name: &str,
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
-        metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let connection = profile
             .map(|p| {
@@ -334,37 +346,7 @@ impl Connector for KafkaConnector {
 
         let table = Self::table_from_options(options)?;
 
-        let allowed_metadata_udf_args: HashMap<&str, DataType> = [
-            ("offset_id", DataType::Int64),
-            ("partition", DataType::Int32),
-            ("topic", DataType::Utf8),
-        ]
-        .iter()
-        .cloned()
-        .collect();
-
-        if let Some(fields) = &metadata_fields {
-            for (field_name, data_type) in fields.values() {
-                match allowed_metadata_udf_args.get(field_name.as_str()) {
-                    Some(expected_type) => {
-                        if expected_type != data_type {
-                            return Err(anyhow!(
-                                "Invalid datatype for metadata field '{}': expected '{:?}', found '{:?}'",
-                                field_name, expected_type, data_type
-                            ));
-                        }
-                    }
-                    None => {
-                        return Err(anyhow!(
-                            "Invalid metadata field name for Kafka connector: '{}'",
-                            field_name
-                        ));
-                    }
-                }
-            }
-        }
-
-        Self::from_config(self, None, name, connection, table, schema, metadata_fields)
+        Self::from_config(self, None, name, connection, table, schema)
     }
 
     fn make_operator(
@@ -424,7 +406,7 @@ impl Connector for KafkaConnector {
                             .unwrap_or(u32::MAX),
                     )
                     .unwrap(),
-                    metadata_fields: config.additional_fields,
+                    metadata_fields: config.metadata_fields,
                 })))
             }
             TableType::Sink {

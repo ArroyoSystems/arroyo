@@ -115,7 +115,6 @@ impl Connector for FileSystemConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let (description, connection_type) = match table.table_type {
             TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source),
@@ -170,7 +169,7 @@ impl Connector for FileSystemConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            additional_fields: None,
+            metadata_fields: schema.metadata_fields(),
         };
 
         Ok(Connection {
@@ -190,7 +189,6 @@ impl Connector for FileSystemConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         match options.remove("type") {
             Some(t) if t == "source" => {
@@ -214,13 +212,12 @@ impl Connector for FileSystemConnector {
                         },
                     },
                     schema,
-                    None,
                 )
             }
             Some(t) if t == "sink" => {
                 let table = file_system_sink_from_options(options, schema, CommitStyle::Direct)?;
 
-                self.from_config(None, name, EmptyConfig {}, table, schema, None)
+                self.from_config(None, name, EmptyConfig {}, table, schema)
             }
             Some(t) => bail!("unknown type: {}", t),
             None => bail!("must have type set"),

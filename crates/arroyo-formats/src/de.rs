@@ -25,7 +25,7 @@ use tokio::sync::Mutex;
 pub enum FieldValueType<'a> {
     Int64(i64),
     Int32(i32),
-    String(&'a String),
+    String(&'a str),
     // Extend with more types as needed
 }
 
@@ -177,12 +177,12 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
-        additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
+        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
     ) -> Vec<SourceError> {
         match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(buffer, msg, timestamp).await,
             _ => FramingIterator::new(self.framing.clone(), msg)
-                .map(|t| self.deserialize_single(buffer, t, timestamp, additional_fields.clone()))
+                .map(|t| self.deserialize_single(buffer, t, timestamp, additional_fields))
                 .filter_map(|t| t.err())
                 .collect(),
         }
@@ -247,7 +247,7 @@ impl ArrowDeserializer {
         buffer: &mut [Box<dyn ArrayBuilder>],
         msg: &[u8],
         timestamp: SystemTime,
-        additional_fields: Option<HashMap<&String, FieldValueType>>,
+        additional_fields: Option<&HashMap<&String, FieldValueType>>,
     ) -> Result<(), SourceError> {
         match &*self.format {
             Format::RawString(_)
@@ -500,7 +500,7 @@ pub(crate) fn add_additional_fields(
 }
 
 pub(crate) fn add_additional_fields_using_builder(
-    additional_fields: Option<HashMap<&String, FieldValueType<'_>>>,
+    additional_fields: Option<&HashMap<&String , FieldValueType<'_>>>,
     additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
 ) {
     if let Some(fields) = additional_fields {
@@ -856,7 +856,7 @@ mod tests {
                 &mut arrays,
                 json!({ "x": 5 }).to_string().as_bytes(),
                 time,
-                Some(additional_fields),
+                Some(&additional_fields),
             )
             .await;
         assert!(result.is_empty());

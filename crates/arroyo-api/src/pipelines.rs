@@ -159,7 +159,6 @@ async fn compile_sql<'a>(
                     .unwrap_or(json!({})),
                 &table.config,
                 Some(&table.schema),
-                None,
             )
             .map_err(log_and_map)?;
 

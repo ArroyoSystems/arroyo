@@ -14,7 +14,7 @@ use crate::{
     schemas::add_timestamp_field,
     tables::ConnectorTable,
 };
-
+use crate::tables::FieldSpec;
 use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
 pub(crate) const TABLE_SOURCE_NAME: &str = "TableSourceExtension";
 
@@ -31,10 +31,10 @@ impl TableSourceExtension {
             .fields
             .iter()
             .filter_map(|field| match field {
-                crate::tables::FieldSpec::StructField(field) => {
+                FieldSpec::StructField(field) | FieldSpec::MetadataField { field, ..} => {
                     Some((Some(name.clone()), Arc::new(field.clone())).into())
                 }
-                crate::tables::FieldSpec::VirtualField { .. } => None,
+                FieldSpec::VirtualField { .. } => None,
             })
             .collect::<Vec<_>>();
         let base_schema = Arc::new(schema_from_df_fields(&physical_fields).unwrap());

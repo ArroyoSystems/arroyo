@@ -158,7 +158,6 @@ impl Connector for NexmarkConnector {
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
             .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
@@ -184,7 +183,6 @@ impl Connector for NexmarkConnector {
                 runtime,
             },
             None,
-            None,
         )
     }
 
@@ -195,7 +193,6 @@ impl Connector for NexmarkConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        _metadata_fields: Option<HashMap<String, (String, DataType)>>,
     ) -> anyhow::Result<Connection> {
         let description = format!(
             "{}Nexmark<{} eps>",
@@ -214,7 +211,7 @@ impl Connector for NexmarkConnector {
             format: None,
             bad_data: None,
             framing: None,
-            additional_fields: None,
+            metadata_fields: vec![],
         };
 
         Ok(Connection {

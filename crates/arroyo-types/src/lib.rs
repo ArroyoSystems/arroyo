@@ -5,7 +5,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
@@ -456,6 +456,35 @@ pub struct CheckpointBarrier {
     pub then_stop: bool,
 }
 
+pub struct DisplayAsSql<'a>(pub &'a DataType);
+
+impl <'a> Display for DisplayAsSql<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            DataType::Boolean => write!(f, "BOOLEAN"),
+            DataType::Int8 | DataType::Int16 | DataType::Int32 => write!(f, "INT"),
+            DataType::Int64 => write!(f, "BIGINT"),
+            DataType::UInt8 | DataType::UInt16 | DataType::UInt32 => write!(f, "INT UNSIGNED"),
+            DataType::UInt64 => write!(f, "BIGINT UNSIGNED"),
+            DataType::Float16 | DataType::Float32 => write!(f, "FLOAT"),
+            DataType::Float64 => write!(f, "DOUBLE"),
+            DataType::Timestamp(_, _) => write!(f, "TIMESTAMP"),
+            DataType::Date32 => write!(f, "DATE"),
+            DataType::Date64 => write!(f, "DATETIME"),
+            DataType::Time32(_) => write!(f, "TIME"),
+            DataType::Time64(_) => write!(f, "TIME"),
+            DataType::Duration(_) => write!(f, "INTERVAL"),
+            DataType::Interval(_) => write!(f, "INTERVAL"),
+            DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => write!(f, "BYTEA"),
+            DataType::Utf8 | DataType::LargeUtf8 => write!(f, "TEXT"),
+            DataType::List(inner) => {
+                write!(f, "{}[]", DisplayAsSql(&inner.data_type()))
+            },
+            dt => write!(f, "{}", dt)
+        }
+    }
+}
+    
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Serialize)]
 pub enum DatePart {
     Year,
