@@ -626,6 +626,10 @@ pub struct LogConfig {
     #[serde(default)]
     pub format: LogFormat,
 
+    /// set min level for logger
+    #[serde(default)]
+    pub min_level: Option<String>,
+
     /// Nonblocking logging may reduce tail latency at the cost of higher memory usage
     #[serde(default)]
     pub nonblocking: bool,

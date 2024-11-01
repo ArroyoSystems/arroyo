@@ -54,9 +54,27 @@ pub fn init_logging(name: &str) -> Option<WorkerGuard> {
     init_logging_with_filter(
         name,
         EnvFilter::builder()
-            .with_default_directive(LevelFilter::INFO.into())
+            .with_default_directive(parse_level_filter().into())
             .from_env_lossy(),
     )
+}
+
+fn parse_level_filter() -> LevelFilter {
+    let level_filter = config()
+        .logging
+        .min_level
+        .clone()
+        .unwrap_or(std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or("info".to_string()));
+
+    match level_filter.to_lowercase().as_str() {
+        "all" | "trace" => LevelFilter::TRACE,
+        "debug" => LevelFilter::DEBUG,
+        "info" => LevelFilter::INFO,
+        "warn" => LevelFilter::WARN,
+        "error" => LevelFilter::ERROR,
+        "off" => LevelFilter::OFF,
+        _ => LevelFilter::INFO,
+    }
 }
 
 macro_rules! register_log {
