@@ -9,7 +9,7 @@ use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
     external::{ProcessingMode, SqlSource},
-    fields_with_qualifiers, ArroyoSchemaProvider, DFField,
+    fields_with_qualifiers, parse_sql, ArroyoSchemaProvider, DFField,
 };
 use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 use arroyo_datastream::default_sink;
@@ -51,7 +51,6 @@ use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
 use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
-use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
@@ -504,6 +503,40 @@ fn value_to_inner_string(value: &Value) -> Result<String> {
     }
 }
 
+fn plan_generating_expr(
+    expr: &sqlparser::ast::Expr,
+    name: &str,
+    schema: &DFSchema,
+    schema_provider: &ArroyoSchemaProvider,
+    session_state: &SessionState,
+) -> Result<Expr, DataFusionError> {
+    let sql = format!("SELECT {} from {}", expr, name);
+    let statement = parse_sql(&sql)
+        .expect("generating expression should be valid")
+        .into_iter()
+        .next()
+        .expect("generating expression should produce one statement");
+
+    let mut schema_provider = schema_provider.clone();
+    schema_provider.insert_table(Table::MemoryTable {
+        name: name.to_string(),
+        fields: schema.fields().to_vec(),
+        logical_plan: None,
+    });
+
+    let plan = produce_optimized_plan(&statement, &schema_provider, session_state)?;
+
+    match plan {
+        LogicalPlan::Projection(p) => Ok(p.expr.into_iter().next().unwrap()),
+        p => {
+            unreachable!(
+                "top-level plan from generating expression should be a projection, but is {:?}",
+                p
+            );
+        }
+    }
+}
+
 #[derive(Default)]
 struct MetadataFinder {
     key: Option<String>,
@@ -546,8 +579,10 @@ impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
 
 impl Table {
     fn schema_from_columns(
+        table_name: &str,
         columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
+        session_state: &SessionState,
     ) -> Result<Vec<FieldSpec>> {
         let struct_field_pairs = columns
             .iter()
@@ -600,18 +635,16 @@ impl Table {
             HashMap::new(),
         )?;
 
-        let sql_to_rel = SqlToRel::new(schema_provider);
         struct_field_pairs
             .into_iter()
             .map(|(struct_field, generating_expression)| {
                 if let Some(generating_expression) = generating_expression {
-                    // TODO: Implement automatic type coercion here, as we have elsewhere.
-                    // It is done by calling the Analyzer which inserts CAST operators where necessary.
-
-                    let df_expr = sql_to_rel.sql_to_expr(
-                        generating_expression,
+                    let df_expr = plan_generating_expr(
+                        &generating_expression,
+                        table_name,
                         &physical_schema,
-                        &mut PlannerContext::default(),
+                        schema_provider,
+                        session_state,
                     )?;
 
                     let mut metadata_finder = MetadataFinder::default();
@@ -658,7 +691,7 @@ impl Table {
             }
 
             let connector = with_map.remove("connector");
-            let fields = Self::schema_from_columns(columns, schema_provider)?;
+            let fields = Self::schema_from_columns(&name, columns, schema_provider, session_state)?;
 
             let primary_keys = columns
                 .iter()
