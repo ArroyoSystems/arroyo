@@ -30,7 +30,7 @@ use datafusion::physical_plan::functions::make_scalar_function;
 use datafusion::prelude::{create_udf, SessionConfig};
 
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
-use datafusion::sql::sqlparser::parser::Parser;
+use datafusion::sql::sqlparser::parser::{Parser, ParserError};
 use datafusion::sql::{planner::ContextProvider, sqlparser, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
@@ -637,14 +637,17 @@ fn try_handle_set_variable(
     Ok(false)
 }
 
+pub(crate) fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
+    let dialect = PostgreSqlDialect {};
+    Parser::parse_sql(&dialect, sql)
+}
+
 pub async fn parse_and_get_arrow_program(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
     // TODO: use config
     _config: SqlConfig,
 ) -> Result<CompiledSql> {
-    let dialect = PostgreSqlDialect {};
-
     let mut config = SessionConfig::new();
     config
         .options_mut()
@@ -657,7 +660,7 @@ pub async fn parse_and_get_arrow_program(
         .with_physical_optimizer_rules(vec![]);
 
     let mut inserts = vec![];
-    for statement in Parser::parse_sql(&dialect, &query)? {
+    for statement in parse_sql(&query)? {
         if try_handle_set_variable(&statement, &mut schema_provider)? {
             continue;
         }
