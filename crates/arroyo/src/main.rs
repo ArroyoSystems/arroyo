@@ -482,9 +482,11 @@ async fn visualize(query: Input, open: bool) {
         .await
         .expect("Failed while planning query");
 
+    let d2 = utils::to_d2(&compiled.program).await.unwrap();
+
     if open {
         let tmp = temp_dir().join("plan.d2");
-        tokio::fs::write(&tmp, utils::to_d2(&compiled.program).unwrap())
+        tokio::fs::write(&tmp, d2)
             .await
             .expect("Failed to write plan");
         let output = tmp.with_extension("svg");
@@ -506,6 +508,6 @@ async fn visualize(query: Input, open: bool) {
 
         let _ = open::that(format!("file://{}", output.to_string_lossy()));
     } else {
-        println!("{}", utils::to_d2(&compiled.program).unwrap());
+        println!("{}", d2);
     }
 }

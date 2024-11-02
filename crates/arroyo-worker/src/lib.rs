@@ -412,7 +412,7 @@ impl WorkerGrpc for WorkerServer {
         let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
             .expect("Failed to create LogicalProgram");
 
-        if let Ok(v) = to_d2(&logical) {
+        if let Ok(v) = to_d2(&logical).await {
             debug!("Starting execution for graph\n{}", v);
         }
 
