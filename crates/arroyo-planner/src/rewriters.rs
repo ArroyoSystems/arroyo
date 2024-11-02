@@ -536,9 +536,25 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
 
         let udf = self.provider.dylib_udfs.get(&name).unwrap().clone();
 
+        let input = if matches!(*projection.input, LogicalPlan::Projection(..)) {
+            // if our input is a projection, we need to plan it separately -- this happens
+            // for subqueries
+
+            Arc::new(LogicalPlan::Extension(Extension {
+                node: Arc::new(RemoteTableExtension {
+                    input: (*projection.input).clone(),
+                    name: TableReference::bare("subquery_projection"),
+                    schema: projection.input.schema().clone(),
+                    materialize: false,
+                }),
+            }))
+        } else {
+            projection.input
+        };
+
         Ok(Transformed::yes(LogicalPlan::Extension(Extension {
             node: Arc::new(AsyncUDFExtension {
-                input: projection.input,
+                input,
                 name,
                 udf,
                 arg_exprs: args,

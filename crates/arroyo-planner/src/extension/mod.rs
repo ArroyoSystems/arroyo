@@ -15,14 +15,8 @@ use datafusion::logical_expr::{
 };
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
-use datafusion_proto::protobuf::ProjectionNode;
 use prost::Message;
 use watermark_node::WatermarkNode;
-
-use crate::builder::{NamedNode, Planner};
-use crate::schemas::{add_timestamp_field, has_timestamp_field};
-use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
-use join::JoinExtension;
 
 use self::debezium::{DebeziumUnrollingExtension, ToDebeziumExtension};
 use self::updating_aggregate::UpdatingAggregateExtension;
@@ -31,6 +25,10 @@ use self::{
     remote_table::RemoteTableExtension, sink::SinkExtension, table_source::TableSourceExtension,
     window_fn::WindowFunctionExtension,
 };
+use crate::builder::{NamedNode, Planner};
+use crate::schemas::{add_timestamp_field, has_timestamp_field};
+use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
+use join::JoinExtension;
 
 pub(crate) mod aggregate;
 pub(crate) mod debezium;
@@ -206,12 +204,6 @@ impl ArroyoExtension for AsyncUDFExtension {
                 Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
             .collect::<Result<Vec<_>>>()?;
-
-        ProjectionNode {
-            input: None,
-            expr: vec![],
-            optional_alias: None,
-        };
 
         let config = AsyncUdfOperator {
             name: self.name.clone(),
