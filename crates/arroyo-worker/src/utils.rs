@@ -1,5 +1,4 @@
 use crate::engine::construct_operator;
-use anyhow::bail;
 use arrow_schema::Schema;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_df::physical::new_registry;
@@ -14,14 +13,18 @@ fn format_arrow_schema_fields(schema: &Schema) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
-    let registry = Arc::new(new_registry());
+pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
+    let mut registry = new_registry();
 
-    if !logical.program_config.udf_dylibs.is_empty()
-        || !logical.program_config.python_udfs.is_empty()
-    {
-        bail!("UDFs are not yet supported in the pipeline visualizer");
+    for (name, udf) in &logical.program_config.udf_dylibs {
+        registry.load_dylib(name, udf).await?;
     }
+
+    for udf in logical.program_config.python_udfs.values() {
+        registry.add_python_udf(udf).await?;
+    }
+
+    let registry = Arc::new(registry);
 
     let mut d2 = String::new();
 
