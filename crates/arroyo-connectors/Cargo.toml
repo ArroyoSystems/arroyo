@@ -37,7 +37,7 @@ anyhow = "1.0.71"
 tracing = "0.1.37"
 regress = "0.10.0"
 futures = "0.3.28"
-axum = {version = "0.6.12"}
+axum = {workspace = true}
 rand = "0.8.5"
 base64 = "0.13.1"
 bytes = "1.5.0"
@@ -80,7 +80,7 @@ uuid = { version = "1.7.0", features = ["v4"] }
 # Filesystem
 parquet = { workspace = true, features = ["async"]}
 object_store = { workspace = true }
-deltalake = { workspace = true, features = ["s3"] }
+# deltalake = { workspace = true, features = ["s3"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 
 # MQTT

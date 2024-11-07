@@ -24,10 +24,10 @@ tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 tonic-web = { workspace = true }
 prost = {workspace = true}
-prost-reflect = "0.12.0"
+prost-reflect = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
-tower = "0.5.1"
+tower = {workspace = true}
 rand = "0.8"
 rand_chacha = "0.3"
 async-trait = "0.1"
@@ -41,13 +41,13 @@ bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
 
 http = "1"
-tower-http = {version = "0.6", features = ["trace", "fs", "cors", "validate-request", "auth", "compression-zstd"]}
-axum = {version = "0.7", features = ["tokio", "macros"]}
+tower-http = { workspace = true, features = ["trace", "fs", "cors", "validate-request", "auth", "compression-zstd"]}
+axum = {workspace = true, features = ["tokio", "macros"]}
 axum-extra = "0.9"
 h2 = "0.4"
 thiserror = "1.0.40"
 utoipa = "5"
-utoipa-swagger-ui = { version = "4", features = ["axum"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

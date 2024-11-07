@@ -14,6 +14,7 @@ use arrow_array::{
     BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
 };
 use arrow_ord::{partition::partition, sort::sort_to_indices};
+use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 use arroyo_rpc::{
     df::server_for_hash_array,
     grpc::rpc::{
@@ -30,10 +31,11 @@ use arroyo_types::{
 use futures::{StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
 use parquet::{
-    arrow::{async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder},
+    arrow::{ParquetRecordBatchStreamBuilder},
     basic::{Compression, ZstdLevel},
     file::properties::WriterProperties,
 };
+use parquet::arrow::AsyncArrowWriter;
 use tokio::sync::mpsc::Sender;
 
 use crate::{

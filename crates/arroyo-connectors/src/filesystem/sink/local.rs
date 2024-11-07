@@ -20,7 +20,7 @@ use crate::filesystem::{sink::two_phase_committer::TwoPhaseCommitter, FileSettin
 use anyhow::{bail, Result};
 
 use super::{
-    add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
+    add_suffix_prefix, get_partitioner_from_file_settings, parquet::batches_by_partition,
     two_phase_committer::TwoPhaseCommitterOperator, CommitState, CommitStyle, FileNaming,
     FileSystemTable, FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
     TableType,
@@ -313,19 +313,19 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         }
         if let CommitState::DeltaLake { last_version } = self.commit_state {
             let storage_provider = Arc::new(StorageProvider::for_url("/").await?);
-            if let Some(version) = delta::commit_files_to_delta(
-                &finished_files,
-                &object_store::path::Path::parse(&self.final_dir)?,
-                &storage_provider,
-                last_version,
-                Arc::new(self.schema.as_ref().unwrap().schema_without_timestamp()),
-            )
-            .await?
-            {
-                self.commit_state = CommitState::DeltaLake {
-                    last_version: version,
-                };
-            }
+            // if let Some(version) = delta::commit_files_to_delta(
+            //     &finished_files,
+            //     &object_store::path::Path::parse(&self.final_dir)?,
+            //     &storage_provider,
+            //     last_version,
+            //     Arc::new(self.schema.as_ref().unwrap().schema_without_timestamp()),
+            // )
+            // .await?
+            // {
+            //     self.commit_state = CommitState::DeltaLake {
+            //         last_version: version,
+            //     };
+            // }
         }
         Ok(())
     }

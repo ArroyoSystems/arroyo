@@ -32,17 +32,21 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-tonic = { version = "0.12", features = ["zstd"] }
+tonic = { version = "0.13", features = ["zstd"] }
 tonic-build = { version = "0.12" }
 tonic-web = { version = "0.12" }
 tonic-reflection = { version = "0.12" }
+tower = { version = "0.5" }
+tower-http = {version = "0.6"}
+axum = { version = "0.7" }
+
 arrow = { version = "=53.2.0" }
 arrow-ord = { version = "=53.2.0" }
 arrow-array = { version = "=53.2.0" }
 arrow-schema = { version = "=53.2.0" }
 arrow-json = { version = "=53.2.0" }
-object_store = { version = "0.10" }
-parquet = { version = "=52.1.0" }
+object_store = { version = "0.11" }
+parquet = { version = "=53.2.0" }
 ahash = { version = "=0.8.7" }
 datafusion = { version = "43.0.0" }
 datafusion-common = { version = "43.0.0" }
@@ -89,7 +93,10 @@ datafusion-physical-plan = { path = "../arrow-datafusion/datafusion/physical-pla
 datafusion-proto = { path = "../arrow-datafusion/datafusion/proto" }
 datafusion-functions = { path = "../arrow-datafusion/datafusion/functions" }
 
-object_store = { git = 'http://github.com/ArroyoSystems/arrow-rs', branch = 'object_store_0.10.2/arroyo' }
+object_store = { git = 'http://github.com/ArroyoSystems/arrow-rs', branch = 'object_store_0.11.1/arroyo' }
 
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
 cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
+
+# needed until 0.13 is released to get tonic 0.5 upgrade
+tonic = { git = "https://github.com/hyperium/tonic", rev = "b80428ba7dfcc607dfaac07022c360159ee1dc79" }
