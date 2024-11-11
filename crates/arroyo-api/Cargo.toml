@@ -100,3 +100,4 @@ arroyo-types = { path = "../arroyo-types" }
 utoipa = "3"
 rusqlite = "0.31.0"
 refinery = { version = "0.8.14", features = ["rusqlite"] }
+refinery-core = { version = "0.8.14", features = ["postgres"] }
