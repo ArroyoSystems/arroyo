@@ -18,7 +18,6 @@ mod test;
 mod utils;
 
 use anyhow::bail;
-use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType};
 use arrow_schema::{Field, FieldRef, Schema};
 use arroyo_datastream::WindowType;
@@ -27,14 +26,14 @@ use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, Scala
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 
-use datafusion::prelude::{create_udf, SessionConfig};
+use datafusion::prelude::SessionConfig;
 
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::{Parser, ParserError};
 use datafusion::sql::{planner::ContextProvider, sqlparser, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
-use datafusion::logical_expr::{create_udaf, Expr, Extension, LogicalPlan, ReturnTypeFunction, ScalarUDF, ScalarUDFImpl, Signature, Volatility, WindowUDF};
+use datafusion::logical_expr::{create_udaf, Expr, Extension, LogicalPlan, ScalarUDF, ScalarUDFImpl, Signature, Volatility, WindowUDF};
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
 use logical::LogicalBatchInput;
@@ -49,7 +48,7 @@ use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig, PythonUdfConfig}
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion::common::DataFusionError;
 use std::collections::HashSet;
-use std::fmt::{write, Debug, Formatter};
+use std::fmt::{Debug, Formatter};
 
 use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
@@ -72,7 +71,6 @@ use datafusion::sql::sqlparser::ast::{OneOrManyWithParens, Statement};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use std::any::Any;
-use datafusion_functions::core::planner::CoreFunctionPlanner;
 use syn::Item;
 use tracing::{debug, info, warn};
 use unicase::UniCase;

@@ -20,7 +20,6 @@ use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{config::ConfigOptions, DFSchema, Result, ScalarValue};
 use datafusion::common::{plan_err, Column, DataFusionError};
-use datafusion::execution::context::SessionState;
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
     WriteOp,

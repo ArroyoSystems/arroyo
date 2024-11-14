@@ -39,7 +39,7 @@ use arroyo_rpc::{
     updating_meta_field, updating_meta_fields, TIMESTAMP_FIELD, UPDATING_META_FIELD,
 };
 use datafusion::logical_expr::{
-    ColumnarValue, ReturnTypeFunction, ScalarFunctionImplementation, ScalarUDF, ScalarUDFImpl,
+    ColumnarValue, ScalarUDFImpl,
     Signature, TypeSignature, Volatility,
 };
 use datafusion::physical_expr::EquivalenceProperties;
@@ -921,12 +921,13 @@ impl DebeziumUnrollingStream {
 
         let mut columns = unrolled_array.as_struct().columns().to_vec();
 
-        let hash = MultiHashFunction::default().invoke(
+        let hash = MultiHashFunction::default().invoke_batch(
             &self
                 .primary_keys
                 .iter()
                 .map(|i| ColumnarValue::Array(columns[*i].clone()))
                 .collect::<Vec<_>>(),
+            num_rows
         )?;
 
         let ids = hash.into_array(num_rows)?;

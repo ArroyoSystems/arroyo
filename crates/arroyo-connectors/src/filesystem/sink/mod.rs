@@ -35,6 +35,7 @@ use datafusion::{
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
     scalar::ScalarValue,
 };
+use datafusion::execution::SessionStateBuilder;
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
@@ -210,8 +211,8 @@ fn partition_string_for_fields_and_time(
 
 fn compile_expression(expr: &Expr, schema: ArroyoSchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
     let physical_planner = DefaultPhysicalPlanner::default();
-    let session_state =
-        SessionState::new_with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+    let session_state = SessionStateBuilder::new().build();
+    
     let plan = physical_planner.create_physical_expr(
         expr,
         &(schema.schema.as_ref().clone()).try_into()?,

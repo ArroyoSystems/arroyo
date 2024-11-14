@@ -395,7 +395,7 @@ impl OperatorConstructor for InstantJoinConstructor {
         };
         let join_exec = join_physical_plan_node.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new())?,
+            &RuntimeEnv::try_new(RuntimeConfig::new())?,
             &codec,
         )?;
 

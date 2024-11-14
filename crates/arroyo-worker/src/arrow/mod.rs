@@ -223,7 +223,7 @@ impl StatelessPhysicalExecutor {
         };
 
         let plan =
-            plan.try_into_physical_plan(registry, &RuntimeEnv::new(RuntimeConfig::new())?, &codec)?;
+            plan.try_into_physical_plan(registry, &RuntimeEnv::try_new(RuntimeConfig::new())?, &codec)?;
 
         Ok(Self {
             batch,

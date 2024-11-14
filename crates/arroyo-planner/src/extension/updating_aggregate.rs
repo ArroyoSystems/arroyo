@@ -22,7 +22,6 @@ use super::{ArroyoExtension, IsRetractExtension, NodeWithIncomingEdges};
 use crate::functions::multi_hash;
 use arroyo_rpc::config::config;
 use prost::Message;
-use crate::multifield_partial_ord;
 
 pub(crate) const UPDATING_AGGREGATE_EXTENSION_NAME: &str = "UpdatingAggregateExtension";
 
