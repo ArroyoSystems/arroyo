@@ -22,10 +22,11 @@ use super::{ArroyoExtension, IsRetractExtension, NodeWithIncomingEdges};
 use crate::functions::multi_hash;
 use arroyo_rpc::config::config;
 use prost::Message;
+use crate::multifield_partial_ord;
 
 pub(crate) const UPDATING_AGGREGATE_EXTENSION_NAME: &str = "UpdatingAggregateExtension";
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd)]
 pub(crate) struct UpdatingAggregateExtension {
     pub(crate) aggregate: LogicalPlan,
     pub(crate) key_fields: Vec<usize>,

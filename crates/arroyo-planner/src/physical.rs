@@ -27,7 +27,7 @@ use std::{
 };
 
 use crate::functions::MultiHashFunction;
-use crate::register_functions;
+use crate::{make_udf_function, register_functions};
 use crate::rewriters::UNNESTED_COL;
 use arrow_array::types::{TimestampNanosecondType, UInt64Type};
 use arroyo_operator::operator::Registry;
@@ -43,7 +43,7 @@ use datafusion::logical_expr::{
     Signature, TypeSignature, Volatility,
 };
 use datafusion::physical_expr::EquivalenceProperties;
-use datafusion::physical_plan::unnest::UnnestExec;
+use datafusion::physical_plan::unnest::{ListUnnest, UnnestExec};
 use datafusion::physical_plan::{ExecutionMode, PlanProperties};
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use futures::{
@@ -54,113 +54,109 @@ use prost::Message;
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use crate::schemas::window_arrow_struct;
 
-pub fn window_function(columns: &[ColumnarValue]) -> Result<ColumnarValue> {
-    if columns.len() != 2 {
-        return plan_err!("window function expected 2 argument, got {}", columns.len());
+#[derive(Debug)]
+pub struct WindowFunctionUdf {
+    signature: Signature,
+}
+
+impl Default for WindowFunctionUdf {
+    fn default() -> Self {
+        Self {
+            signature: Signature::new(
+                TypeSignature::Exact(vec![
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                ]),
+                Volatility::Immutable,
+            )
+        }
     }
-    // check both columns are of the correct type
-    if columns[0].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
-        return plan_err!(
+}
+
+impl ScalarUDFImpl for WindowFunctionUdf {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        "window"
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(window_arrow_struct())
+    }
+
+    fn invoke(&self, columns: &[ColumnarValue]) -> Result<ColumnarValue> {
+        if columns.len() != 2 {
+            return plan_err!("window function expected 2 argument, got {}", columns.len());
+        }
+        // check both columns are of the correct type
+        if columns[0].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
+            return plan_err!(
             "window function expected first argument to be a timestamp, got {:?}",
             columns[0].data_type()
         );
-    }
-    if columns[1].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
-        return plan_err!(
+        }
+        if columns[1].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
+            return plan_err!(
             "window function expected second argument to be a timestamp, got {:?}",
             columns[1].data_type()
         );
+        }
+        let fields = vec![
+            Arc::new(arrow::datatypes::Field::new(
+                "start",
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            )),
+            Arc::new(arrow::datatypes::Field::new(
+                "end",
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            )),
+        ]
+            .into();
+
+        match (&columns[0], &columns[1]) {
+            (ColumnarValue::Array(start), ColumnarValue::Array(end)) => {
+                Ok(ColumnarValue::Array(Arc::new(StructArray::new(
+                    fields,
+                    vec![start.clone(), end.clone()],
+                    None,
+                ))))
+            }
+            (ColumnarValue::Array(start), ColumnarValue::Scalar(end)) => {
+                let end = end.to_array_of_size(start.len())?;
+                Ok(ColumnarValue::Array(Arc::new(StructArray::new(
+                    fields,
+                    vec![start.clone(), end],
+                    None,
+                ))))
+            }
+            (ColumnarValue::Scalar(start), ColumnarValue::Array(end)) => {
+                let start = start.to_array_of_size(end.len())?;
+                Ok(ColumnarValue::Array(Arc::new(StructArray::new(
+                    fields,
+                    vec![start, end.clone()],
+                    None,
+                ))))
+            }
+            (ColumnarValue::Scalar(start), ColumnarValue::Scalar(end)) => {
+                Ok(ColumnarValue::Scalar(ScalarValue::Struct(
+                    StructArray::new(fields, vec![start.to_array()?, end.to_array()?], None).into(),
+                )))
+            }
+        }        
     }
-    let fields = vec![
-        Arc::new(arrow::datatypes::Field::new(
-            "start",
-            DataType::Timestamp(TimeUnit::Nanosecond, None),
-            false,
-        )),
-        Arc::new(arrow::datatypes::Field::new(
-            "end",
-            DataType::Timestamp(TimeUnit::Nanosecond, None),
-            false,
-        )),
-    ]
-    .into();
-
-    match (&columns[0], &columns[1]) {
-        (ColumnarValue::Array(start), ColumnarValue::Array(end)) => {
-            Ok(ColumnarValue::Array(Arc::new(StructArray::new(
-                fields,
-                vec![start.clone(), end.clone()],
-                None,
-            ))))
-        }
-        (ColumnarValue::Array(start), ColumnarValue::Scalar(end)) => {
-            let end = end.to_array_of_size(start.len())?;
-            Ok(ColumnarValue::Array(Arc::new(StructArray::new(
-                fields,
-                vec![start.clone(), end],
-                None,
-            ))))
-        }
-        (ColumnarValue::Scalar(start), ColumnarValue::Array(end)) => {
-            let start = start.to_array_of_size(end.len())?;
-            Ok(ColumnarValue::Array(Arc::new(StructArray::new(
-                fields,
-                vec![start, end.clone()],
-                None,
-            ))))
-        }
-        (ColumnarValue::Scalar(start), ColumnarValue::Scalar(end)) => {
-            Ok(ColumnarValue::Scalar(ScalarValue::Struct(
-                StructArray::new(fields, vec![start.to_array()?, end.to_array()?], None).into(),
-            )))
-        }
-    }
 }
 
-fn tumble_function_implementation() -> ScalarFunctionImplementation {
-    Arc::new(window_function)
-}
-
-fn tumble_signature() -> Signature {
-    Signature::new(
-        TypeSignature::Exact(vec![
-            DataType::Timestamp(TimeUnit::Nanosecond, None),
-            DataType::Timestamp(TimeUnit::Nanosecond, None),
-        ]),
-        Volatility::Immutable,
-    )
-}
-
-fn window_return_type() -> ReturnTypeFunction {
-    Arc::new(|_| {
-        Ok(Arc::new(DataType::Struct(
-            vec![
-                Arc::new(arrow::datatypes::Field::new(
-                    "start",
-                    DataType::Timestamp(TimeUnit::Nanosecond, None),
-                    false,
-                )),
-                Arc::new(arrow::datatypes::Field::new(
-                    "end",
-                    DataType::Timestamp(TimeUnit::Nanosecond, None),
-                    false,
-                )),
-            ]
-            .into(),
-        )))
-    })
-}
-
-pub fn window_scalar_function() -> ScalarUDF {
-    #[allow(deprecated)]
-    ScalarUDF::new(
-        "window",
-        &tumble_signature(),
-        &window_return_type(),
-        &tumble_function_implementation(),
-    )
-}
+make_udf_function!(WindowFunctionUdf, WINDOW_FUNCTION, window);
 
 #[derive(Debug)]
 pub struct ArroyoPhysicalExtensionCodec {
@@ -193,7 +189,7 @@ pub enum DecodingContext {
 
 pub fn new_registry() -> Registry {
     let mut registry = Registry::default();
-    registry.add_udf(Arc::new(window_scalar_function()));
+    registry.add_udf(window());
     register_functions(&mut registry);
     registry
 }
@@ -293,7 +289,10 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                             DataFusionError::Internal("no input for unnest node".to_string())
                         })?
                         .clone(),
-                    vec![column],
+                    vec![ListUnnest {
+                        index_in_input_schema: column,
+                        depth: 0,
+                    }],
                     vec![],
                     Arc::new(schema),
                     UnnestOptions::default(),

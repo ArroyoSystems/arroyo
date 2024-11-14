@@ -1,4 +1,4 @@
-CREATE TABLE Nexmark WITH (
+CREATE TABLE nexmark WITH (
     connector = 'nexmark',
     event_rate = '10'
 );

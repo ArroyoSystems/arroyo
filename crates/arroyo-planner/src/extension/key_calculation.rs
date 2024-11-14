@@ -11,12 +11,7 @@ use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
-use crate::{
-    builder::{NamedNode, Planner},
-    fields_with_qualifiers,
-    physical::ArroyoPhysicalExtensionCodec,
-    schema_from_df_fields_with_metadata,
-};
+use crate::{builder::{NamedNode, Planner}, fields_with_qualifiers, multifield_partial_ord, physical::ArroyoPhysicalExtensionCodec, schema_from_df_fields_with_metadata};
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
@@ -33,6 +28,8 @@ pub(crate) struct KeyCalculationExtension {
     pub(crate) keys: Vec<usize>,
     pub(crate) schema: DFSchemaRef,
 }
+
+multifield_partial_ord!(KeyCalculationExtension, name, input, keys);
 
 impl KeyCalculationExtension {
     pub fn new_named_and_trimmed(input: LogicalPlan, keys: Vec<usize>, name: String) -> Self {

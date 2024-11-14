@@ -112,7 +112,8 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         // don't need to shuffle or partition by the window.
         additional_keys.remove(index);
         let key_count = additional_keys.len();
-
+        
+        
         let new_window_func = WindowFunction {
             fun,
             args,
@@ -160,11 +161,11 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         let mut sort_expressions: Vec<_> = additional_keys
             .iter()
             .map(|partition| {
-                Expr::Sort(logical_expr::expr::Sort {
-                    expr: Box::new(partition.clone()),
+                logical_expr::expr::Sort {
+                    expr: partition.clone(),
                     asc: true,
                     nulls_first: false,
-                })
+                }
             })
             .collect();
         sort_expressions.extend(new_window_func.order_by.clone());

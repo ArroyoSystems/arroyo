@@ -28,14 +28,8 @@ use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
-use crate::physical::window_scalar_function;
-use crate::{
-    builder::{NamedNode, Planner, SplitPlanOutput},
-    fields_with_qualifiers,
-    physical::ArroyoPhysicalExtensionCodec,
-    schema_from_df_fields, schema_from_df_fields_with_metadata, DFField, WindowBehavior,
-};
-
+use crate::{builder::{NamedNode, Planner, SplitPlanOutput}, fields_with_qualifiers, multifield_partial_ord, physical::ArroyoPhysicalExtensionCodec, schema_from_df_fields, schema_from_df_fields_with_metadata, DFField, WindowBehavior};
+use crate::physical::window;
 use super::{ArroyoExtension, NodeWithIncomingEdges, TimestampAppendExtension};
 
 pub(crate) const AGGREGATE_EXTENSION_NAME: &str = "AggregateExtension";
@@ -48,6 +42,8 @@ pub(crate) struct AggregateExtension {
     pub(crate) key_fields: Vec<usize>,
     pub(crate) final_calculation: LogicalPlan,
 }
+
+multifield_partial_ord!(AggregateExtension, aggregate, key_fields, final_calculation);
 
 impl AggregateExtension {
     pub fn new(
@@ -236,7 +232,7 @@ impl AggregateExtension {
             &input_schema,
         )?;
         let binning_function_proto =
-            serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})?;
+            serialize_physical_expr(&binning_function, &DefaultPhysicalExtensionCodec {})?;
 
         let final_projection = use_final_projection
             .then(|| {
@@ -335,8 +331,9 @@ impl AggregateExtension {
         let timestamp_column =
             Column::new(timestamp_field.qualifier().cloned(), timestamp_field.name());
         aggregate_fields.insert(window_index, window_field.clone());
+        
         let window_expression = Expr::ScalarFunction(ScalarFunction {
-            func: Arc::new(window_scalar_function()),
+            func: window(),
             args: vec![
                 // copy bin_start as first argument
                 Expr::Column(timestamp_column.clone()),
@@ -394,7 +391,7 @@ impl AggregateExtension {
             .collect();
         aggregate_fields.insert(window_index, window_field.clone());
         let window_expression = Expr::ScalarFunction(ScalarFunction {
-            func: Arc::new(window_scalar_function()),
+            func: window(),
             args: vec![
                 // calculate the start of the bin
                 Expr::BinaryExpr(BinaryExpr {
@@ -550,6 +547,8 @@ struct WindowAppendExtension {
     pub(crate) window_index: usize,
     pub(crate) schema: DFSchemaRef,
 }
+
+multifield_partial_ord!(WindowAppendExtension, input, window_index);
 
 impl WindowAppendExtension {
     fn new(input: LogicalPlan, window_field: DFField, window_index: usize) -> Self {

@@ -204,7 +204,7 @@ impl<'a> Planner<'a> {
         ]);
 
         let binning_function = self.create_physical_expr(&date_bin, &input_schema)?;
-        serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})
+        serialize_physical_expr(&binning_function, &DefaultPhysicalExtensionCodec {})
     }
 }
 

@@ -12,6 +12,7 @@ use datafusion::physical_plan::DisplayAs;
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::builder::{NamedNode, Planner};
+use crate::multifield_partial_ord;
 
 pub(crate) const DEBEZIUM_UNROLLING_EXTENSION_NAME: &str = "DebeziumUnrollingExtension";
 pub(crate) const TO_DEBEZIUM_EXTENSION_NAME: &str = "ToDebeziumExtension";
@@ -23,6 +24,8 @@ pub struct DebeziumUnrollingExtension {
     pub primary_keys: Vec<usize>,
     primary_key_names: Arc<Vec<String>>,
 }
+
+multifield_partial_ord!(DebeziumUnrollingExtension, input, primary_keys, primary_key_names);
 
 impl DebeziumUnrollingExtension {
     pub(crate) fn as_debezium_schema(
@@ -216,6 +219,8 @@ pub(crate) struct ToDebeziumExtension {
     input: Arc<LogicalPlan>,
     schema: DFSchemaRef,
 }
+
+multifield_partial_ord!(ToDebeziumExtension, input);
 
 impl ToDebeziumExtension {
     pub(crate) fn try_new(input: LogicalPlan) -> Result<Self> {

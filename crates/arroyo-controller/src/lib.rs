@@ -630,7 +630,7 @@ impl ControllerServer {
     pub async fn start(self, guard: ShutdownGuard) -> anyhow::Result<u16> {
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(arroyo_rpc::grpc::API_FILE_DESCRIPTOR_SET)
-            .build()
+            .build_v1()
             .unwrap();
 
         let addr = SocketAddr::new(
@@ -655,7 +655,8 @@ impl ControllerServer {
                         .send_compressed(CompressionEncoding::Zstd)
                         .accept_compressed(CompressionEncoding::Zstd),
                 )
-                .add_service(reflection)
+                // TODO: re-enable once tonic 0.13 is released
+                //.add_service(reflection)
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         ));
 

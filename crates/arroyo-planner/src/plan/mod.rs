@@ -343,9 +343,6 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
             LogicalPlan::Sort(_) => {
                 return plan_err!("ORDER BY is not currently supported ({})", node.display());
             }
-            LogicalPlan::CrossJoin(_) => {
-                return plan_err!("CROSS JOIN is not currently supported ({})", node.display());
-            }
             LogicalPlan::Repartition(_) => {
                 return plan_err!(
                     "Repartitions are not currently supported ({})",
@@ -399,6 +396,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
             }
             LogicalPlan::Extension(_) => {}
             LogicalPlan::Distinct(_) => {}
+            LogicalPlan::Execute(_) => {}
             LogicalPlan::Prepare(_) => {
                 return plan_err!("Prepared statements are not supported ({})", node.display())
             }

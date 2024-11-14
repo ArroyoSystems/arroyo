@@ -11,10 +11,7 @@ use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
-use crate::{
-    builder::{NamedNode, Planner},
-    physical::ArroyoPhysicalExtensionCodec,
-};
+use crate::{builder::{NamedNode, Planner}, multifield_partial_ord, physical::ArroyoPhysicalExtensionCodec};
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
@@ -30,6 +27,8 @@ pub(crate) struct RemoteTableExtension {
     pub(crate) schema: DFSchemaRef,
     pub(crate) materialize: bool,
 }
+
+multifield_partial_ord!(RemoteTableExtension, input, name, materialize);
 
 impl ArroyoExtension for RemoteTableExtension {
     fn node_name(&self) -> Option<NamedNode> {

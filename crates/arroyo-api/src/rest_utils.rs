@@ -3,11 +3,13 @@ use arroyo_server_common::log_event;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Json, TypedHeader};
+use axum::{Json};
+use axum_extra::headers::Authorization;
+use axum_extra::headers::authorization::Bearer;
+use axum_extra::TypedHeader;
 use serde_json::json;
 use tracing::{error, warn};
 
-use axum::headers::authorization::{Authorization, Bearer};
 use cornucopia_async::{DatabaseSource, DbError};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;

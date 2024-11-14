@@ -8,11 +8,11 @@ use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq
 use arroyo_types::{WorkerId, JOB_ID_ENV, RUN_ID_ENV};
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
-use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
 use serde_json::json;
 use std::time::Duration;
+use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use tonic::Status;
 use tracing::{info, warn};
 

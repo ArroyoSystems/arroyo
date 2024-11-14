@@ -3,8 +3,9 @@ use axum::Json;
 use cornucopia_async::DatabaseSource;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::net::{SocketAddr, TcpListener};
+use std::net::{SocketAddr};
 use time::OffsetDateTime;
+use tokio::net::TcpListener;
 use tonic::transport::Channel;
 use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
@@ -121,10 +122,10 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
         })
 }
 
-pub fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::Result<u16> {
+pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::Result<u16> {
     let config = config();
     let addr = SocketAddr::new(config.api.bind_address, config.api.http_port);
-    let listener = TcpListener::bind(addr)?;
+    let listener = TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
 
     let app = rest::create_rest_app(database, &config.controller_endpoint()).layer(
@@ -140,7 +141,7 @@ pub fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::R
     guard.into_spawn_task(wrap_start(
         "api",
         local_addr,
-        axum::Server::from_tcp(listener)?.serve(app.into_make_service()),
+        async { axum::serve(listener, app.into_make_service()).await },
     ));
 
     Ok(local_addr.port())

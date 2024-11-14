@@ -4,8 +4,9 @@ use arrow_schema::SchemaRef;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Expr, TableType};
 use datafusion::{
-    datasource::TableProvider, execution::context::SessionState, physical_plan::ExecutionPlan,
+    datasource::TableProvider, physical_plan::ExecutionPlan,
 };
+use datafusion::catalog::Session;
 use serde::{Deserialize, Serialize};
 
 use crate::physical::ArroyoMemExec;
@@ -38,7 +39,7 @@ impl TableProvider for LogicalBatchInput {
     /// parallelized or distributed.
     async fn scan(
         &self,
-        _state: &SessionState,
+        _state: &dyn Session,
         _projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         // limit can be used to reduce the amount scanned

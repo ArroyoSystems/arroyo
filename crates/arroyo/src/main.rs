@@ -415,7 +415,7 @@ async fn start_control_plane(service: CPService) {
     shutdown.spawn_task("admin", start_admin_server(service.name()));
 
     if service == CPService::Api || service == CPService::All {
-        arroyo_api::start_server(db.clone(), shutdown.guard("api")).unwrap();
+        arroyo_api::start_server(db.clone(), shutdown.guard("api")).await.unwrap();
     }
 
     if service == CPService::Compiler || service == CPService::All {

@@ -12,6 +12,7 @@ use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use prost::Message;
 use std::fmt::Formatter;
 use std::sync::Arc;
+use crate::multifield_partial_ord;
 
 pub(crate) const WATERMARK_NODE_NAME: &str = "WatermarkNode";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -22,6 +23,8 @@ pub struct WatermarkNode {
     pub schema: DFSchemaRef,
     timestamp_index: usize,
 }
+
+multifield_partial_ord!(WatermarkNode, input, qualifier, watermark_expression, timestamp_index);
 
 impl UserDefinedLogicalNodeCore for WatermarkNode {
     fn name(&self) -> &str {
@@ -79,7 +82,7 @@ impl ArroyoExtension for WatermarkNode {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         let expression = planner.create_physical_expr(&self.watermark_expression, &self.schema)?;
-        let expression = serialize_physical_expr(expression, &DefaultPhysicalExtensionCodec {})?;
+        let expression = serialize_physical_expr(&expression, &DefaultPhysicalExtensionCodec {})?;
         let node = LogicalNode {
             operator_id: format!("watermark_{}", index),
             description: "watermark".to_string(),

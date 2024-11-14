@@ -27,6 +27,7 @@ const SERIALIZE_JSON_UNION: &str = "serialize_json_union";
 /// function named `$NAME` which returns that function named $NAME.
 ///
 /// This is used to ensure creating the list of `ScalarUDF` only happens once.
+#[macro_export]
 macro_rules! make_udf_function {
     ($UDF:ty, $GNAME:ident, $NAME:ident) => {
         /// Singleton instance of the function
@@ -55,7 +56,7 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
         .register_udf(Arc::new(create_udf(
             "get_first_json_object",
             vec![DataType::Utf8, DataType::Utf8],
-            Arc::new(DataType::Utf8),
+            DataType::Utf8,
             Volatility::Immutable,
             Arc::new(get_first_json_object),
         )))
@@ -65,11 +66,11 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
         .register_udf(Arc::new(create_udf(
             "extract_json",
             vec![DataType::Utf8, DataType::Utf8],
-            Arc::new(DataType::List(Arc::new(Field::new(
+            DataType::List(Arc::new(Field::new(
                 "item",
                 DataType::Utf8,
                 true,
-            )))),
+            ))),
             Volatility::Immutable,
             Arc::new(extract_json),
         )))
@@ -79,7 +80,7 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
         .register_udf(Arc::new(create_udf(
             "extract_json_string",
             vec![DataType::Utf8, DataType::Utf8],
-            Arc::new(DataType::Utf8),
+            DataType::Utf8,
             Volatility::Immutable,
             Arc::new(extract_json_string),
         )))
@@ -89,7 +90,7 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
         .register_udf(Arc::new(create_udf(
             SERIALIZE_JSON_UNION,
             vec![DataType::Union(union_fields(), UnionMode::Sparse)],
-            Arc::new(DataType::Utf8),
+            DataType::Utf8,
             Volatility::Immutable,
             Arc::new(serialize_json_union),
         )))
