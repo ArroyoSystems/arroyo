@@ -26,7 +26,9 @@ use datafusion::common::{
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
-use datafusion::logical_expr::{BinaryExpr, ColumnUnnestList, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest};
+use datafusion::logical_expr::{
+    BinaryExpr, ColumnUnnestList, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
+};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -422,12 +424,13 @@ impl TreeNodeRewriter for UnnestRewriter {
                 )
                 .qualified_column()],
                 input: produce_list,
-                list_type_columns: vec![
-                    (unnest_idx, ColumnUnnestList {
+                list_type_columns: vec![(
+                    unnest_idx,
+                    ColumnUnnestList {
                         output_column: Column::new_unqualified(UNNESTED_COL),
                         depth: 1,
-                    })
-                ],
+                    },
+                )],
                 struct_type_columns: vec![],
                 dependency_indices: vec![],
                 schema: Arc::new(schema_from_df_fields(&unnest_fields).unwrap()),

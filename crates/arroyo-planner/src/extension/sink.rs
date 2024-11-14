@@ -11,7 +11,11 @@ use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalN
 
 use prost::Message;
 
-use crate::{builder::{NamedNode, Planner}, multifield_partial_ord, tables::Table};
+use crate::{
+    builder::{NamedNode, Planner},
+    multifield_partial_ord,
+    tables::Table,
+};
 
 use super::{
     debezium::ToDebeziumExtension, remote_table::RemoteTableExtension, ArroyoExtension,

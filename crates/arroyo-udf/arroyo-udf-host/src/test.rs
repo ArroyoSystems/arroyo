@@ -47,15 +47,18 @@ fn test_udf() {
     let udf = test_udf_1::__local().config;
     let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
     let result = sync_udf
-        .invoke_batch(&[
-            ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
-            ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
-            ColumnarValue::Array(Arc::new(BinaryArray::from(vec![
-                b"x".as_ref(),
-                b"y".as_ref(),
-                b"z".as_ref(),
-            ]))),
-        ], 3)
+        .invoke_batch(
+            &[
+                ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
+                ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
+                ColumnarValue::Array(Arc::new(BinaryArray::from(vec![
+                    b"x".as_ref(),
+                    b"y".as_ref(),
+                    b"z".as_ref(),
+                ]))),
+            ],
+            3,
+        )
         .unwrap();
 
     let ColumnarValue::Array(a) = result else {

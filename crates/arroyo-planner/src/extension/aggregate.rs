@@ -28,9 +28,14 @@ use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
-use crate::{builder::{NamedNode, Planner, SplitPlanOutput}, fields_with_qualifiers, multifield_partial_ord, physical::ArroyoPhysicalExtensionCodec, schema_from_df_fields, schema_from_df_fields_with_metadata, DFField, WindowBehavior};
-use crate::physical::window;
 use super::{ArroyoExtension, NodeWithIncomingEdges, TimestampAppendExtension};
+use crate::physical::window;
+use crate::{
+    builder::{NamedNode, Planner, SplitPlanOutput},
+    fields_with_qualifiers, multifield_partial_ord,
+    physical::ArroyoPhysicalExtensionCodec,
+    schema_from_df_fields, schema_from_df_fields_with_metadata, DFField, WindowBehavior,
+};
 
 pub(crate) const AGGREGATE_EXTENSION_NAME: &str = "AggregateExtension";
 
@@ -331,7 +336,7 @@ impl AggregateExtension {
         let timestamp_column =
             Column::new(timestamp_field.qualifier().cloned(), timestamp_field.name());
         aggregate_fields.insert(window_index, window_field.clone());
-        
+
         let window_expression = Expr::ScalarFunction(ScalarFunction {
             func: window(),
             args: vec![

@@ -7,7 +7,10 @@ use arroyo_connectors::connector_for_type;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
-use crate::{external::{ProcessingMode, SqlSource}, fields_with_qualifiers, multifield_partial_ord, parse_sql, ArroyoSchemaProvider, DFField};
+use crate::{
+    external::{ProcessingMode, SqlSource},
+    fields_with_qualifiers, multifield_partial_ord, parse_sql, ArroyoSchemaProvider, DFField,
+};
 use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
@@ -73,8 +76,20 @@ pub struct ConnectorTable {
     pub inferred_fields: Option<Vec<DFField>>,
 }
 
-multifield_partial_ord!(ConnectorTable, id, connector, name, connection_type, config, 
-    description, format, event_time_field, watermark_field, idle_time, primary_keys);
+multifield_partial_ord!(
+    ConnectorTable,
+    id,
+    connector,
+    name,
+    connection_type,
+    config,
+    description,
+    format,
+    event_time_field,
+    watermark_field,
+    idle_time,
+    primary_keys
+);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldSpec {
@@ -667,12 +682,15 @@ impl Table {
                 let SqlOption::KeyValue { key, value } = &option else {
                     return plan_err!("Invalid with option: {:?}", option);
                 };
-                
+
                 let sqlparser::ast::Expr::Value(value) = value else {
-                    return plan_err!("Expected a string literal in with clause, but found {}", value);
+                    return plan_err!(
+                        "Expected a string literal in with clause, but found {}",
+                        value
+                    );
                 };
-                
-                with_map.insert(key.value.to_string(), value_to_inner_string(value)?);                
+
+                with_map.insert(key.value.to_string(), value_to_inner_string(value)?);
             }
 
             let connector = with_map.remove("connector");
@@ -862,10 +880,8 @@ fn infer_sink_schema(
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
 ) -> Result<()> {
-    let plan = produce_optimized_plan(
-        &Statement::Query(Box::new(source.clone())),
-        schema_provider,
-    )?;
+    let plan =
+        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)?;
     let table = schema_provider
         .get_table_mut(&table_name)
         .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;

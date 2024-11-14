@@ -114,7 +114,6 @@ macro_rules! multifield_partial_ord {
 }
     }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TimestampAppendExtension {
     pub(crate) input: LogicalPlan,
@@ -187,7 +186,17 @@ pub(crate) struct AsyncUDFExtension {
     pub(crate) final_schema: DFSchemaRef,
 }
 
-multifield_partial_ord!(AsyncUDFExtension, input, name, udf, arg_exprs, final_exprs, ordered, max_concurrency, timeout);
+multifield_partial_ord!(
+    AsyncUDFExtension,
+    input,
+    name,
+    udf,
+    arg_exprs,
+    final_exprs,
+    ordered,
+    max_concurrency,
+    timeout
+);
 
 impl ArroyoExtension for AsyncUDFExtension {
     fn node_name(&self) -> Option<NamedNode> {

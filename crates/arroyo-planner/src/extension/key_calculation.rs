@@ -11,7 +11,12 @@ use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
-use crate::{builder::{NamedNode, Planner}, fields_with_qualifiers, multifield_partial_ord, physical::ArroyoPhysicalExtensionCodec, schema_from_df_fields_with_metadata};
+use crate::{
+    builder::{NamedNode, Planner},
+    fields_with_qualifiers, multifield_partial_ord,
+    physical::ArroyoPhysicalExtensionCodec,
+    schema_from_df_fields_with_metadata,
+};
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 

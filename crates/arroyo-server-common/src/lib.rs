@@ -5,7 +5,7 @@ pub mod shutdown;
 
 use anyhow::anyhow;
 use arroyo_types::POSTHOG_KEY;
-use axum::body::{Bytes};
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -337,7 +337,6 @@ where
     type Response = S::Response;
     type Error = S::Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-    
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)

@@ -3,7 +3,7 @@ use axum::Json;
 use cornucopia_async::DatabaseSource;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
 use tonic::transport::Channel;
@@ -138,11 +138,9 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
     );
 
     info!("Starting API server on {:?}", local_addr);
-    guard.into_spawn_task(wrap_start(
-        "api",
-        local_addr,
-        async { axum::serve(listener, app.into_make_service()).await },
-    ));
+    guard.into_spawn_task(wrap_start("api", local_addr, async {
+        axum::serve(listener, app.into_make_service()).await
+    }));
 
     Ok(local_addr.port())
 }

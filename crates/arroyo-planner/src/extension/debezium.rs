@@ -25,7 +25,12 @@ pub struct DebeziumUnrollingExtension {
     primary_key_names: Arc<Vec<String>>,
 }
 
-multifield_partial_ord!(DebeziumUnrollingExtension, input, primary_keys, primary_key_names);
+multifield_partial_ord!(
+    DebeziumUnrollingExtension,
+    input,
+    primary_keys,
+    primary_key_names
+);
 
 impl DebeziumUnrollingExtension {
     pub(crate) fn as_debezium_schema(

@@ -1,5 +1,6 @@
 use crate::builder::{NamedNode, Planner};
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
+use crate::multifield_partial_ord;
 use crate::schemas::add_timestamp_field;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
@@ -12,7 +13,6 @@ use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use prost::Message;
 use std::fmt::Formatter;
 use std::sync::Arc;
-use crate::multifield_partial_ord;
 
 pub(crate) const WATERMARK_NODE_NAME: &str = "WatermarkNode";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -24,7 +24,13 @@ pub struct WatermarkNode {
     timestamp_index: usize,
 }
 
-multifield_partial_ord!(WatermarkNode, input, qualifier, watermark_expression, timestamp_index);
+multifield_partial_ord!(
+    WatermarkNode,
+    input,
+    qualifier,
+    watermark_expression,
+    timestamp_index
+);
 
 impl UserDefinedLogicalNodeCore for WatermarkNode {
     fn name(&self) -> &str {

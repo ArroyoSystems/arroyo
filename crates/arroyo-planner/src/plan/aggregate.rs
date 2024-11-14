@@ -9,11 +9,11 @@ use crate::{
 use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
+use datafusion::functions_aggregate::expr_fn::max;
 use datafusion::logical_expr;
 use datafusion::logical_expr::{Aggregate, Expr, Extension, LogicalPlan};
-use std::sync::Arc;
-use datafusion::functions_aggregate::expr_fn::max;
 use datafusion::prelude::col;
+use std::sync::Arc;
 use tracing::debug;
 
 pub struct AggregateRewriter<'a> {
@@ -80,11 +80,11 @@ impl<'a> AggregateRewriter<'a> {
         else {
             return plan_err!("no timestamp field found in schema");
         };
-        
+
         let timestamp_field: DFField = timestamp_field.into();
         let column = timestamp_field.qualified_column();
         aggr_expr.push(max(col(column.clone())));
-        
+
         let mut output_schema_fields = fields_with_qualifiers(&schema);
         output_schema_fields.push(timestamp_field.clone());
         let output_schema = Arc::new(schema_from_df_fields_with_metadata(

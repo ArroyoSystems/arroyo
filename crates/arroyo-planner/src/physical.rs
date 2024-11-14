@@ -27,8 +27,9 @@ use std::{
 };
 
 use crate::functions::MultiHashFunction;
-use crate::{make_udf_function, register_functions};
 use crate::rewriters::UNNESTED_COL;
+use crate::schemas::window_arrow_struct;
+use crate::{make_udf_function, register_functions};
 use arrow_array::types::{TimestampNanosecondType, UInt64Type};
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
@@ -39,8 +40,7 @@ use arroyo_rpc::{
     updating_meta_field, updating_meta_fields, TIMESTAMP_FIELD, UPDATING_META_FIELD,
 };
 use datafusion::logical_expr::{
-    ColumnarValue, ScalarUDFImpl,
-    Signature, TypeSignature, Volatility,
+    ColumnarValue, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::unnest::{ListUnnest, UnnestExec};
@@ -54,7 +54,6 @@ use prost::Message;
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use crate::schemas::window_arrow_struct;
 
 #[derive(Debug)]
 pub struct WindowFunctionUdf {
@@ -70,7 +69,7 @@ impl Default for WindowFunctionUdf {
                     DataType::Timestamp(TimeUnit::Nanosecond, None),
                 ]),
                 Volatility::Immutable,
-            )
+            ),
         }
     }
 }
@@ -99,15 +98,15 @@ impl ScalarUDFImpl for WindowFunctionUdf {
         // check both columns are of the correct type
         if columns[0].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
             return plan_err!(
-            "window function expected first argument to be a timestamp, got {:?}",
-            columns[0].data_type()
-        );
+                "window function expected first argument to be a timestamp, got {:?}",
+                columns[0].data_type()
+            );
         }
         if columns[1].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
             return plan_err!(
-            "window function expected second argument to be a timestamp, got {:?}",
-            columns[1].data_type()
-        );
+                "window function expected second argument to be a timestamp, got {:?}",
+                columns[1].data_type()
+            );
         }
         let fields = vec![
             Arc::new(arrow::datatypes::Field::new(
@@ -121,7 +120,7 @@ impl ScalarUDFImpl for WindowFunctionUdf {
                 false,
             )),
         ]
-            .into();
+        .into();
 
         match (&columns[0], &columns[1]) {
             (ColumnarValue::Array(start), ColumnarValue::Array(end)) => {
@@ -152,7 +151,7 @@ impl ScalarUDFImpl for WindowFunctionUdf {
                     StructArray::new(fields, vec![start.to_array()?, end.to_array()?], None).into(),
                 )))
             }
-        }        
+        }
     }
 }
 
@@ -927,7 +926,7 @@ impl DebeziumUnrollingStream {
                 .iter()
                 .map(|i| ColumnarValue::Array(columns[*i].clone()))
                 .collect::<Vec<_>>(),
-            num_rows
+            num_rows,
         )?;
 
         let ids = hash.into_array(num_rows)?;

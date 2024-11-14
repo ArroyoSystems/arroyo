@@ -1,12 +1,10 @@
 use std::{any::Any, sync::Arc};
 
 use arrow_schema::SchemaRef;
+use datafusion::catalog::Session;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Expr, TableType};
-use datafusion::{
-    datasource::TableProvider, physical_plan::ExecutionPlan,
-};
-use datafusion::catalog::Session;
+use datafusion::{datasource::TableProvider, physical_plan::ExecutionPlan};
 use serde::{Deserialize, Serialize};
 
 use crate::physical::ArroyoMemExec;

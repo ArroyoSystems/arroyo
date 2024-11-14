@@ -222,8 +222,11 @@ impl StatelessPhysicalExecutor {
             context: DecodingContext::SingleLockedBatch(batch.clone()),
         };
 
-        let plan =
-            plan.try_into_physical_plan(registry, &RuntimeEnv::try_new(RuntimeConfig::new())?, &codec)?;
+        let plan = plan.try_into_physical_plan(
+            registry,
+            &RuntimeEnv::try_new(RuntimeConfig::new())?,
+            &codec,
+        )?;
 
         Ok(Self {
             batch,

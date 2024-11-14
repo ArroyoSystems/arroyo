@@ -66,11 +66,7 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
         .register_udf(Arc::new(create_udf(
             "extract_json",
             vec![DataType::Utf8, DataType::Utf8],
-            DataType::List(Arc::new(Field::new(
-                "item",
-                DataType::Utf8,
-                true,
-            ))),
+            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
             Volatility::Immutable,
             Arc::new(extract_json),
         )))

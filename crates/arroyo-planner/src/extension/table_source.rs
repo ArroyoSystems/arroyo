@@ -10,7 +10,12 @@ use prost::Message;
 
 use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
 use crate::tables::FieldSpec;
-use crate::{builder::{NamedNode, Planner}, multifield_partial_ord, schema_from_df_fields, schemas::add_timestamp_field, tables::ConnectorTable};
+use crate::{
+    builder::{NamedNode, Planner},
+    multifield_partial_ord, schema_from_df_fields,
+    schemas::add_timestamp_field,
+    tables::ConnectorTable,
+};
 pub(crate) const TABLE_SOURCE_NAME: &str = "TableSourceExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
