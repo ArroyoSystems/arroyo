@@ -291,7 +291,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                         .clone(),
                     vec![ListUnnest {
                         index_in_input_schema: column,
-                        depth: 0,
+                        depth: 1,
                     }],
                     vec![],
                     Arc::new(schema),

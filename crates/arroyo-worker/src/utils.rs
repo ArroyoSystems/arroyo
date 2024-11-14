@@ -39,7 +39,7 @@ pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
 
         let mut label = format!("### {} ({})", operator.name(), &display.name);
         for (field, value) in display.fields {
-            label.push_str(&format!("\n- **{}**: {}", field, value));
+            label.push_str(&format!("\n## {}\n\n{}", field, value));
         }
 
         writeln!(
