@@ -8,12 +8,11 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use tracing::{error, warn};
 
-use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
+use rdkafka::producer::{DeliveryFuture, FutureRecord, Producer};
 use rdkafka::util::Timeout;
 
 use rdkafka::ClientConfig;
 
-use super::SinkCommitMode;
 use arrow::array::{Array, AsArray, RecordBatch};
 use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
@@ -25,6 +24,8 @@ use async_trait::async_trait;
 use prost::Message;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use std::time::{Duration, SystemTime};
+
+use super::{Context, FutureProducer, SinkCommitMode};
 
 #[cfg(test)]
 mod test;
@@ -40,6 +41,7 @@ pub struct KafkaSinkFunc {
     pub producer: Option<FutureProducer>,
     pub write_futures: Vec<DeliveryFuture>,
     pub client_config: HashMap<String, String>,
+    pub context: Context,
     pub serializer: ArrowSerializer,
 }
 
@@ -134,7 +136,7 @@ impl KafkaSinkFunc {
 
         match &mut self.consistency_mode {
             ConsistencyMode::AtLeastOnce => {
-                self.producer = Some(client_config.create()?);
+                self.producer = Some(client_config.create_with_context(self.context.clone())?);
             }
             ConsistencyMode::ExactlyOnce {
                 next_transaction_index,
@@ -150,7 +152,7 @@ impl KafkaSinkFunc {
                     next_transaction_index
                 );
                 client_config.set("transactional.id", transactional_id);
-                let producer: FutureProducer = client_config.create()?;
+                let producer: FutureProducer = client_config.create_with_context(self.context.clone())?;
                 producer.init_transactions(Timeout::After(Duration::from_secs(30)))?;
                 producer.begin_transaction()?;
                 *next_transaction_index += 1;

@@ -11,7 +11,7 @@ use arroyo_types::*;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
-use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
+use rdkafka::consumer::{CommitMode, Consumer};
 use rdkafka::{ClientConfig, Message as KMessage, Offset, TopicPartitionList};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -21,6 +21,8 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
+use super::{Context, SourceOffset, StreamConsumer};
+
 #[cfg(test)]
 mod test;
 
@@ -29,12 +31,13 @@ pub struct KafkaSourceFunc {
     pub bootstrap_servers: String,
     pub group_id: Option<String>,
     pub group_id_prefix: Option<String>,
-    pub offset_mode: super::SourceOffset,
+    pub offset_mode: SourceOffset,
     pub format: Format,
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
     pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
     pub client_configs: HashMap<String, String>,
+    pub context: Context,
     pub messages_per_second: NonZeroU32,
     pub metadata_fields: Vec<MetadataField>,
 }
@@ -79,7 +82,7 @@ impl KafkaSourceFunc {
             .set("enable.partition.eof", "false")
             .set("enable.auto.commit", "false")
             .set("group.id", group_id)
-            .create()?;
+            .create_with_context(self.context.clone())?;
 
         let state: Vec<_> = ctx
             .table_manager

@@ -566,6 +566,8 @@ dependencies = [
  "async-nats",
  "async-trait",
  "aws-config",
+ "aws-msk-iam-sasl-signer",
+ "aws-sdk-kafka",
  "aws-sdk-kinesis",
  "axum",
  "base64 0.13.1",
@@ -1537,6 +1539,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-msk-iam-sasl-signer"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7036b8409ffe698dfdc5ae08722999d960092aeb738026ea99c3071c94831668"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-sts",
+ "aws-sigv4",
+ "aws-types",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "aws-runtime"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1578,6 +1598,28 @@ dependencies = [
  "aws-types",
  "bytes",
  "fastrand",
+ "http 0.2.12",
+ "once_cell",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
+name = "aws-sdk-kafka"
+version = "1.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e034aa9ec5d7a865e554e8a7744b8d4655db954aa265049e8e6361ba3f5c0d2"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
  "http 0.2.12",
  "once_cell",
  "regex-lite",

@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use super::KafkaSourceFunc;
+use crate::kafka::Context;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct TestData {
@@ -86,6 +87,7 @@ impl KafkaTopicTester {
             bad_data: None,
             schema_resolver: None,
             client_configs: HashMap::new(),
+            context: Context::new(None),
             messages_per_second: NonZeroU32::new(100).unwrap(),
             metadata_fields: vec![],
         });
