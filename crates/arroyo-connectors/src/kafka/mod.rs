@@ -491,6 +491,12 @@ impl KafkaTester {
             .create_with_context(context)
             .map_err(|e| format!("invalid kafka config: {:?}", e))?;
 
+        // NOTE: this is required to trigger an oauth token refresh (when using
+        // OAUTHBEARER auth).
+        if client.poll(Duration::from_secs(0)).is_some() {
+            return Err("unexpected poll event from new consumer".to_string());
+        }
+
         tokio::task::spawn_blocking(move || {
             client
                 .fetch_metadata(None, Duration::from_secs(10))
@@ -980,6 +986,7 @@ impl ClientContext for Context {
                 });
                 handle.join().unwrap()??
             };
+
             Ok(OAuthToken {
                 token,
                 principal_name: "".to_string(),

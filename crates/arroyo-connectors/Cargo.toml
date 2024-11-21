@@ -53,7 +53,7 @@ regex = "1"
 aws-sdk-kafka = { version = "1.44" }
 aws-msk-iam-sasl-signer = "1.0.0"
 rdkafka = { version = "0.36", features = ["cmake-build", "tracing", "sasl", "ssl-vendored"] }
-rdkafka-sys = "4.5.0"
+rdkafka-sys = "4.7.0"
 sasl2-sys = { version = "0.1.6", features = ["vendored"] }
 
 # SSE

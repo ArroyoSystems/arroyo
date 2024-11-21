@@ -1,13 +1,5 @@
-use arroyo_formats::de::FieldValueType;
-use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp, MetadataField};
-
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
-use arroyo_types::*;
+use anyhow::bail;
+use futures::FutureExt;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
@@ -20,6 +12,16 @@ use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
+
+use arroyo_formats::de::FieldValueType;
+use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::grpc::rpc::TableConfig;
+use arroyo_rpc::schema_resolver::SchemaResolver;
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp, MetadataField};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
+use arroyo_types::*;
 
 use super::{Context, SourceOffset, StreamConsumer};
 
@@ -83,6 +85,12 @@ impl KafkaSourceFunc {
             .set("enable.auto.commit", "false")
             .set("group.id", group_id)
             .create_with_context(self.context.clone())?;
+
+        // NOTE: this is required to trigger an oauth token refresh (when using
+        // OAUTHBEARER auth).
+        if consumer.recv().now_or_never().is_some() {
+            bail!("unexpected recv before assignments");
+        }
 
         let state: Vec<_> = ctx
             .table_manager
