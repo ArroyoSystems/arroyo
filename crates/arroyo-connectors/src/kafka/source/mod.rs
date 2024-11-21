@@ -1,7 +1,7 @@
 use anyhow::bail;
-use futures::FutureExt;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use futures::FutureExt;
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rdkafka::consumer::{CommitMode, Consumer};
 use rdkafka::{ClientConfig, Message as KMessage, Offset, TopicPartitionList};
@@ -14,13 +14,13 @@ use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
 use arroyo_formats::de::FieldValueType;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp, MetadataField};
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_types::*;
 
 use super::{Context, SourceOffset, StreamConsumer};

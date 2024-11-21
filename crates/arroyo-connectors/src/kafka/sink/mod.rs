@@ -152,7 +152,8 @@ impl KafkaSinkFunc {
                     next_transaction_index
                 );
                 client_config.set("transactional.id", transactional_id);
-                let producer: FutureProducer = client_config.create_with_context(self.context.clone())?;
+                let producer: FutureProducer =
+                    client_config.create_with_context(self.context.clone())?;
                 producer.init_transactions(Timeout::After(Duration::from_secs(30)))?;
                 producer.begin_transaction()?;
                 *next_transaction_index += 1;
