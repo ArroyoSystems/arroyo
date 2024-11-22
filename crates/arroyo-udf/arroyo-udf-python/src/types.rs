@@ -156,7 +156,7 @@ def my_add(x: int, y: float) -> float:
             ]))),
         ];
 
-        let result = udf.invoke(&data).unwrap();
+        let result = udf.invoke_batch(&data, data.len()).unwrap();
         if let ColumnarValue::Array(a) = result {
             let a = a
                 .as_any()

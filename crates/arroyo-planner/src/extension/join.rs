@@ -15,7 +15,7 @@ use std::time::Duration;
 
 pub(crate) const JOIN_NODE_NAME: &str = "JoinNode";
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd)]
 pub struct JoinExtension {
     pub(crate) rewritten_join: LogicalPlan,
     pub(crate) is_instant: bool,

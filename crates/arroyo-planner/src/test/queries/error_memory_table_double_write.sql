@@ -14,7 +14,7 @@ CREATE TABLE cars (
     CREATE TABLE memory (
       event_type TEXT,
       location TEXT,
-      driver_id BIGINT,
+      driver_id BIGINT
     );
 
     CREATE TABLE cars_output (

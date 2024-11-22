@@ -11,7 +11,7 @@ CREATE TABLE impulse_source (
     );
 
     CREATE TABLE unnest_output (
-     counter bigint unsigned not null,
+     counter bigint unsigned not null
     ) WITH (
       connector = 'single_file',
       path = '$output_path',

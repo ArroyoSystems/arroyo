@@ -143,7 +143,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         // for each bin.
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
 
@@ -161,7 +161,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         // deserialize the finish plan to read directly from a Vec<RecordBatch> behind a RWLock.
         let finish_execution_plan = finish_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;
         let finish_projection = config
@@ -173,7 +173,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
             .map(|finish_projection| {
                 finish_projection.try_into_physical_plan(
                     registry.as_ref(),
-                    &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+                    &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
                     &final_codec,
                 )
             })

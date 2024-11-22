@@ -380,7 +380,7 @@ impl Display for AsDisplayable<'_> {
                 write!(f, "{:?}", d)
             }
             AsDisplayable::Plan(p) => {
-                write!(f, "`{}`", displayable(*p).indent(false))
+                write!(f, "```\n{}\n```", displayable(*p).indent(false))
             }
             AsDisplayable::Schema(s) => {
                 for field in s.fields() {

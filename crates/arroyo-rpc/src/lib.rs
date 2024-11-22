@@ -30,12 +30,12 @@ pub mod df;
 
 pub mod grpc {
     pub mod rpc {
-        #![allow(clippy::derive_partial_eq_without_eq)]
+        #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
         tonic::include_proto!("arroyo_rpc");
     }
 
     pub mod api {
-        #![allow(clippy::derive_partial_eq_without_eq)]
+        #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
         tonic::include_proto!("api");
     }
 

@@ -1,5 +1,5 @@
 --fail=This feature is not implemented: window in group by does not match input window
-CREATE TABLE Nexmark WITH (
+CREATE TABLE nexmark WITH (
     connector = 'nexmark',
     event_rate = '10'
 );

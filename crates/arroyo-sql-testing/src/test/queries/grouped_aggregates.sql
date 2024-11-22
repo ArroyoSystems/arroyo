@@ -14,7 +14,7 @@ CREATE TABLE impulse_source (
       max BIGINT,
       sum BIGINT,
       count BIGINT,
-      avg DOUBLE,
+      avg DOUBLE
     ) WITH (
       connector = 'single_file',
       path = '$output_path',

@@ -153,7 +153,7 @@ impl<'a> Planner<'a> {
         // need to convert to ExecutionPlan to get the partial schema.
         let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
             self.schema_provider,
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
 
@@ -204,7 +204,7 @@ impl<'a> Planner<'a> {
         ]);
 
         let binning_function = self.create_physical_expr(&date_bin, &input_schema)?;
-        serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})
+        serialize_physical_expr(&binning_function, &DefaultPhysicalExtensionCodec {})
     }
 }
 

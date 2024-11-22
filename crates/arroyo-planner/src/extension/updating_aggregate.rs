@@ -25,7 +25,7 @@ use prost::Message;
 
 pub(crate) const UPDATING_AGGREGATE_EXTENSION_NAME: &str = "UpdatingAggregateExtension";
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd)]
 pub(crate) struct UpdatingAggregateExtension {
     pub(crate) aggregate: LogicalPlan,
     pub(crate) key_fields: Vec<usize>,

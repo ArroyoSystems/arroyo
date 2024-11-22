@@ -13,6 +13,7 @@ use prost::Message;
 
 use crate::{
     builder::{NamedNode, Planner},
+    multifield_partial_ord,
     tables::Table,
 };
 
@@ -30,6 +31,8 @@ pub(crate) struct SinkExtension {
     pub(crate) schema: DFSchemaRef,
     input: Arc<LogicalPlan>,
 }
+
+multifield_partial_ord!(SinkExtension, name, input);
 
 impl SinkExtension {
     pub fn new(

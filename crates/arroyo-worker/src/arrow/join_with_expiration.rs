@@ -231,7 +231,7 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
         let join_execution_plan = join_physical_plan_node.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new())?,
+            &RuntimeEnv::try_new(RuntimeConfig::new())?,
             &codec,
         )?;
 

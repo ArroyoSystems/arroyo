@@ -12,7 +12,7 @@ use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
 use crate::tables::FieldSpec;
 use crate::{
     builder::{NamedNode, Planner},
-    schema_from_df_fields,
+    multifield_partial_ord, schema_from_df_fields,
     schemas::add_timestamp_field,
     tables::ConnectorTable,
 };
@@ -24,6 +24,8 @@ pub(crate) struct TableSourceExtension {
     pub(crate) table: ConnectorTable,
     pub(crate) schema: DFSchemaRef,
 }
+
+multifield_partial_ord!(TableSourceExtension, name, table);
 
 impl TableSourceExtension {
     pub fn new(name: TableReference, table: ConnectorTable) -> Self {
