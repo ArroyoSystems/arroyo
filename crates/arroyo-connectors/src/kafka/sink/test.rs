@@ -23,6 +23,7 @@ use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 
 use super::{ConsistencyMode, KafkaSinkFunc};
+use crate::kafka::Context;
 
 pub struct KafkaTopicTester {
     topic: String,
@@ -80,6 +81,7 @@ impl KafkaTopicTester {
             key_field: None,
             write_futures: vec![],
             client_config: HashMap::new(),
+            context: Context::new(None),
             serializer: ArrowSerializer::new(Format::Json(JsonFormat::default())),
             key_col: None,
         };
