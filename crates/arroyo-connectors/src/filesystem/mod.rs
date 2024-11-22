@@ -1,4 +1,4 @@
-// pub mod delta;
+pub mod delta;
 mod sink;
 mod source;
 

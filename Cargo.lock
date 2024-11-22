@@ -158,7 +158,7 @@ dependencies = [
  "serde_json",
  "strum 0.25.0",
  "strum_macros 0.25.3",
- "thiserror",
+ "thiserror 1.0.68",
  "typed-builder",
  "uuid",
 ]
@@ -518,7 +518,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.68",
  "time",
  "tokio",
  "tokio-postgres",
@@ -581,6 +581,7 @@ dependencies = [
  "bytes",
  "chrono",
  "datafusion",
+ "deltalake",
  "eventsource-client",
  "fluvio",
  "fluvio-future",
@@ -661,7 +662,7 @@ dependencies = [
  "serde_yaml",
  "shlex",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.68",
  "time",
  "tokio",
  "tokio-postgres",
@@ -723,7 +724,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "datafusion",
- "datafusion-functions 43.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "datafusion-functions",
  "datafusion-functions-json",
  "datafusion-functions-window",
  "datafusion-proto",
@@ -1029,7 +1030,7 @@ dependencies = [
  "once_cell",
  "rand 0.8.5",
  "regex",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1338,7 +1339,7 @@ dependencies = [
  "serde_json",
  "serde_nanos",
  "serde_repr",
- "thiserror",
+ "thiserror 1.0.68",
  "time",
  "tokio",
  "tokio-rustls 0.26.0",
@@ -1559,7 +1560,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures",
- "thiserror",
+ "thiserror 1.0.68",
  "url",
 ]
 
@@ -1586,6 +1587,29 @@ dependencies = [
  "pin-project-lite",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "aws-sdk-dynamodb"
+version = "1.54.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8efdda6a491bb4640d35b99b0a4b93f75ce7d6e3a1937c3e902d3cb23d0a179c"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.12",
+ "once_cell",
+ "regex-lite",
+ "tracing",
 ]
 
 [[package]]
@@ -1967,6 +1991,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "backon"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4fa97bb310c33c811334143cf64c5bb2b7b3c06e453db6b095d7061eff8f113"
+dependencies = [
+ "fastrand",
+ "tokio",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2246,7 +2280,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -2534,7 +2568,7 @@ dependencies = [
  "prettyplease 0.2.25",
  "rusqlite",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -2786,6 +2820,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 [[package]]
 name = "datafusion"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -2803,7 +2838,7 @@ dependencies = [
  "datafusion-common-runtime",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 43.0.0",
+ "datafusion-functions",
  "datafusion-functions-aggregate",
  "datafusion-functions-nested",
  "datafusion-functions-window",
@@ -2841,6 +2876,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow-schema",
  "async-trait",
@@ -2854,6 +2890,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -2877,6 +2914,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "log",
  "tokio",
@@ -2885,6 +2923,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "chrono",
@@ -2904,6 +2943,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -2926,6 +2966,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "datafusion-common",
@@ -2936,33 +2977,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "43.0.0"
-dependencies = [
- "arrow",
- "arrow-buffer",
- "base64 0.22.1",
- "blake2",
- "blake3",
- "chrono",
- "datafusion-common",
- "datafusion-execution",
- "datafusion-expr",
- "hashbrown 0.14.5",
- "hex",
- "itertools 0.13.0",
- "log",
- "md-5",
- "rand 0.8.5",
- "regex",
- "sha2",
- "unicode-segmentation",
- "uuid",
-]
-
-[[package]]
-name = "datafusion-functions"
-version = "43.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f52c4012648b34853e40a2c6bcaa8772f837831019b68aca384fb38436dba162"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "arrow-buffer",
@@ -2988,6 +3003,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -3007,6 +3023,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -3030,6 +3047,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-nested"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3039,7 +3057,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-execution",
  "datafusion-expr",
- "datafusion-functions 43.0.0",
+ "datafusion-functions",
  "datafusion-functions-aggregate",
  "datafusion-physical-expr-common",
  "itertools 0.13.0",
@@ -3051,6 +3069,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "datafusion-common",
  "datafusion-expr",
@@ -3064,6 +3083,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "datafusion-common",
  "datafusion-physical-expr-common",
@@ -3072,6 +3092,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3090,6 +3111,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -3116,6 +3138,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -3129,6 +3152,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-optimizer"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -3143,6 +3167,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "ahash",
  "arrow",
@@ -3176,6 +3201,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "chrono",
@@ -3190,6 +3216,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "chrono",
@@ -3201,6 +3228,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0/arroyo#319f59b143208e025d7bf952748492d847068a39"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3278,6 +3306,143 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
  "uuid",
+]
+
+[[package]]
+name = "delta_kernel"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2efadff110c892910f5b1b09a764845dd136f5dabdd802e64f2968586fbe19e6"
+dependencies = [
+ "arrow-arith",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-json",
+ "arrow-ord",
+ "arrow-schema",
+ "arrow-select",
+ "bytes",
+ "chrono",
+ "delta_kernel_derive",
+ "fix-hidden-lifetime-bug",
+ "indexmap",
+ "itertools 0.13.0",
+ "parquet",
+ "roaring",
+ "rustc_version",
+ "serde",
+ "serde_json",
+ "strum 0.26.3",
+ "thiserror 1.0.68",
+ "tracing",
+ "url",
+ "uuid",
+ "visibility",
+ "z85",
+]
+
+[[package]]
+name = "delta_kernel_derive"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49fe89c064f509a4a00c00c895af4b966e4b592e7ddf6a476eae856a9b883623"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "deltalake"
+version = "0.22.0"
+source = "git+https://github.com/delta-io/delta-rs?rev=25ce38956e25722ba7a6cbc0f5a7dba6b3361554#25ce38956e25722ba7a6cbc0f5a7dba6b3361554"
+dependencies = [
+ "deltalake-aws",
+ "deltalake-core",
+]
+
+[[package]]
+name = "deltalake-aws"
+version = "0.5.0"
+source = "git+https://github.com/delta-io/delta-rs?rev=25ce38956e25722ba7a6cbc0f5a7dba6b3361554#25ce38956e25722ba7a6cbc0f5a7dba6b3361554"
+dependencies = [
+ "async-trait",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-dynamodb",
+ "aws-sdk-sts",
+ "aws-smithy-runtime-api",
+ "backon",
+ "bytes",
+ "chrono",
+ "deltalake-core",
+ "futures",
+ "lazy_static",
+ "maplit",
+ "object_store",
+ "regex",
+ "thiserror 2.0.3",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "deltalake-core"
+version = "0.22.0"
+source = "git+https://github.com/delta-io/delta-rs?rev=25ce38956e25722ba7a6cbc0f5a7dba6b3361554#25ce38956e25722ba7a6cbc0f5a7dba6b3361554"
+dependencies = [
+ "arrow",
+ "arrow-arith",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-ipc",
+ "arrow-json",
+ "arrow-ord",
+ "arrow-row",
+ "arrow-schema",
+ "arrow-select",
+ "async-trait",
+ "bytes",
+ "cfg-if",
+ "chrono",
+ "dashmap 6.1.0",
+ "delta_kernel",
+ "either",
+ "errno",
+ "fix-hidden-lifetime-bug",
+ "futures",
+ "hashbrown 0.14.5",
+ "indexmap",
+ "itertools 0.13.0",
+ "lazy_static",
+ "libc",
+ "maplit",
+ "num-bigint",
+ "num-traits",
+ "num_cpus",
+ "object_store",
+ "once_cell",
+ "parking_lot 0.12.3",
+ "parquet",
+ "percent-encoding",
+ "pin-project-lite",
+ "rand 0.8.5",
+ "regex",
+ "roaring",
+ "serde",
+ "serde_json",
+ "sqlparser",
+ "thiserror 2.0.3",
+ "tokio",
+ "tracing",
+ "url",
+ "urlencoding",
+ "uuid",
+ "z85",
 ]
 
 [[package]]
@@ -3693,6 +3858,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "fix-hidden-lifetime-bug"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab7b4994e93dd63050356bdde7d417591d1b348523638dc1c1f539f16e338d55"
+dependencies = [
+ "fix-hidden-lifetime-bug-proc_macros",
+]
+
+[[package]]
+name = "fix-hidden-lifetime-bug-proc_macros"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8f0de9daf465d763422866d0538f07be1596e05623e120b37b4f715f5585200"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3768,7 +3953,7 @@ dependencies = [
  "semver",
  "serde",
  "siphasher 1.0.1",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "toml",
  "tracing",
@@ -3786,7 +3971,7 @@ dependencies = [
  "lz4_flex",
  "serde",
  "snap",
- "thiserror",
+ "thiserror 1.0.68",
  "zstd",
 ]
 
@@ -3811,7 +3996,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_yaml",
- "thiserror",
+ "thiserror 1.0.68",
  "toml",
  "tracing",
 ]
@@ -3835,7 +4020,7 @@ dependencies = [
  "openssl-sys",
  "pin-project",
  "socket2",
- "thiserror",
+ "thiserror 1.0.68",
  "tracing",
  "ws_stream_wasm",
 ]
@@ -3858,7 +4043,7 @@ dependencies = [
  "flv-util",
  "once_cell",
  "semver",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio-util",
  "tracing",
 ]
@@ -3888,7 +4073,7 @@ dependencies = [
  "fluvio-stream-model",
  "paste",
  "static_assertions",
- "thiserror",
+ "thiserror 1.0.68",
  "tracing",
 ]
 
@@ -3901,7 +4086,7 @@ dependencies = [
  "eyre",
  "fluvio-protocol",
  "fluvio-smartmodule-derive",
- "thiserror",
+ "thiserror 1.0.68",
  "tracing",
 ]
 
@@ -3936,7 +4121,7 @@ dependencies = [
  "once_cell",
  "pin-project",
  "semver",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "tokio-util",
  "tracing",
@@ -4007,7 +4192,7 @@ checksum = "1a5892e3a0f8f4962386137ab3a39cc82568d2c662aed8e55deb13a9c0f1a06b"
 dependencies = [
  "event-listener 5.3.1",
  "serde",
- "thiserror",
+ "thiserror 1.0.68",
  "toml",
  "tracing",
 ]
@@ -5137,7 +5322,7 @@ dependencies = [
  "jsonptr",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -5152,7 +5337,7 @@ dependencies = [
  "pest_derive",
  "regex",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -5188,7 +5373,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spki 0.6.0",
- "thiserror",
+ "thiserror 1.0.68",
  "zeroize",
 ]
 
@@ -5272,7 +5457,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "tokio-util",
  "tower",
@@ -5295,7 +5480,7 @@ dependencies = [
  "serde",
  "serde-value",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -5333,7 +5518,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "tokio-util",
  "tracing",
@@ -5569,7 +5754,7 @@ checksum = "612ed4ea9ce5acfb5d26339302528a5e1e59dfed95e9e11af3c083236ff1d15d"
 dependencies = [
  "libc",
  "neli",
- "thiserror",
+ "thiserror 1.0.68",
  "windows-sys 0.48.0",
 ]
 
@@ -5611,6 +5796,12 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
+
+[[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
 name = "mappings"
@@ -5691,7 +5882,7 @@ dependencies = [
  "supports-unicode",
  "terminal_size",
  "textwrap",
- "thiserror",
+ "thiserror 1.0.68",
  "unicode-width",
 ]
 
@@ -6435,7 +6626,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879952a81a83930934cbf1786752d6dedc3b1f29e8f8fb2ad1d0a36f377cf442"
 dependencies = [
  "memchr",
- "thiserror",
+ "thiserror 1.0.68",
  "ucd-trie",
 ]
 
@@ -6721,7 +6912,7 @@ dependencies = [
  "smallvec",
  "symbolic-demangle",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -6920,7 +7111,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.68",
  "typify 0.2.0",
  "unicode-ident",
 ]
@@ -6957,7 +7148,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "procfs",
  "protobuf",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -7240,7 +7431,7 @@ dependencies = [
  "rustc-hash",
  "rustls 0.23.16",
  "socket2",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "tracing",
 ]
@@ -7257,7 +7448,7 @@ dependencies = [
  "rustc-hash",
  "rustls 0.23.16",
  "slab",
- "thiserror",
+ "thiserror 1.0.68",
  "tinyvec",
  "tracing",
 ]
@@ -7472,7 +7663,7 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom",
  "libredox",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -7498,7 +7689,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "siphasher 1.0.1",
- "thiserror",
+ "thiserror 1.0.68",
  "time",
  "tokio",
  "tokio-postgres",
@@ -7690,6 +7881,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 
 [[package]]
+name = "roaring"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f4b84ba6e838ceb47b41de5194a60244fac43d9fe03b71dbe8c5a201081d6d1"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+]
+
+[[package]]
 name = "rsa"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7782,7 +7983,7 @@ dependencies = [
  "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.8",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "tokio-rustls 0.25.0",
  "url",
@@ -8215,7 +8416,7 @@ dependencies = [
  "serde_json",
  "serde_json_path_core",
  "serde_json_path_macros",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -8227,7 +8428,7 @@ dependencies = [
  "inventory",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -8875,7 +9076,16 @@ version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02dd99dc800bbb97186339685293e1cc5d9df1f8fae2d0aecd9ff1c77efea892"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.68",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+dependencies = [
+ "thiserror-impl 2.0.3",
 ]
 
 [[package]]
@@ -8883,6 +9093,17 @@ name = "thiserror-impl"
 version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7c61ec9a6f64d2793d8a45faba21efbe3ced62a886d44c36a009b2b519b4c7e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9406,7 +9627,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3566e8ce28cc0a3fe42519fc80e6b4c943cc4c8cef275620eb8dac2d3d4e06cf"
 dependencies = [
  "crossbeam-channel",
- "thiserror",
+ "thiserror 1.0.68",
  "time",
  "tracing-subscriber",
 ]
@@ -9518,7 +9739,7 @@ dependencies = [
  "native-tls",
  "rand 0.8.5",
  "sha1",
- "thiserror",
+ "thiserror 1.0.68",
  "utf-8",
 ]
 
@@ -9590,7 +9811,7 @@ dependencies = [
  "schemars",
  "serde_json",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.68",
  "unicode-ident",
 ]
 
@@ -9610,7 +9831,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.68",
  "unicode-ident",
 ]
 
@@ -9879,6 +10100,17 @@ name = "virtue"
 version = "0.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9dcc60c0624df774c82a0ef104151231d37da4962957d691c011c852b2473314"
+
+[[package]]
+name = "visibility"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d674d135b4a8c1d7e813e2f8d1c9a58308aee4a680323066025e53132218bd91"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
 
 [[package]]
 name = "vsimd"
@@ -10364,7 +10596,7 @@ dependencies = [
  "pharos",
  "rustc_version",
  "send_wrapper",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -10429,6 +10661,12 @@ dependencies = [
  "syn 2.0.87",
  "synstructure",
 ]
+
+[[package]]
+name = "z85"
+version = "3.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a599daf1b507819c1121f0bf87fa37eb19daac6aff3aefefd4e6e2e0f2020fc"
 
 [[package]]
 name = "zerocopy"
@@ -10513,7 +10751,7 @@ dependencies = [
  "flate2",
  "indexmap",
  "num_enum 0.7.3",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -10543,8 +10781,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "deltalake"
-version = "0.18.2"
-source = "git+https://github.com/delta-io/delta-rs?rev=e75a0b49b40f35ed361444bbea0e5720f359d732#e75a0b49b40f35ed361444bbea0e5720f359d732"

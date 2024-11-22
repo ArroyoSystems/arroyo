@@ -1,5 +1,5 @@
 use crate::confluent::ConfluentConnector;
-// use crate::filesystem::delta::DeltaLakeConnector;
+use crate::filesystem::delta::DeltaLakeConnector;
 use crate::filesystem::FileSystemConnector;
 use crate::kinesis::KinesisConnector;
 use crate::mqtt::MqttConnector;
@@ -57,7 +57,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
         Box::new(BlackholeConnector {}),
         Box::new(ConfluentConnector {}),
-        //Box::new(DeltaLakeConnector {}),
+        Box::new(DeltaLakeConnector {}),
         Box::new(FileSystemConnector {}),
         Box::new(FluvioConnector {}),
         Box::new(ImpulseConnector {}),

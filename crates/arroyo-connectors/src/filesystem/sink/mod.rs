@@ -25,10 +25,6 @@ use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::concat;
 use datafusion::{
     common::{Column, Result as DFResult},
-    execution::{
-        context::{SessionConfig, SessionState},
-        runtime_env::RuntimeEnv,
-    },
     logical_expr::{
         expr::ScalarFunction, Expr, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
     },
@@ -45,7 +41,7 @@ use uuid::Uuid;
 
 use arroyo_types::*;
 pub mod arrow;
-//mod delta;
+mod delta;
 pub mod json;
 pub mod local;
 pub mod parquet;
@@ -931,19 +927,19 @@ where
             }
         }
         if let CommitState::DeltaLake { last_version } = self.commit_state {
-            // if let Some(new_version) = delta::commit_files_to_delta(
-            //     &finished_files,
-            //     &self.path,
-            //     &self.object_store,
-            //     last_version,
-            //     Arc::new(self.schema.schema_without_timestamp()),
-            // )
-            // .await?
-            // {
-            //     self.commit_state = CommitState::DeltaLake {
-            //         last_version: new_version,
-            //     };
-            // }
+            if let Some(new_version) = delta::commit_files_to_delta(
+                &finished_files,
+                &self.path,
+                &self.object_store,
+                last_version,
+                Arc::new(self.schema.schema_without_timestamp()),
+            )
+            .await?
+            {
+                self.commit_state = CommitState::DeltaLake {
+                    last_version: new_version,
+                };
+            }
         }
         let finished_message = CheckpointData::Finished {
             max_file_index: self.max_file_index,

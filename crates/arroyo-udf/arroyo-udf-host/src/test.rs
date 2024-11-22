@@ -82,7 +82,7 @@ fn test_optional_arg() {
     data.append_option(Some(vec![4, 5]));
 
     let result = sync_udf
-        .invoke(&[ColumnarValue::Array(Arc::new(data.finish()))])
+        .invoke_batch(&[ColumnarValue::Array(Arc::new(data.finish()))], 1)
         .unwrap();
 
     let ColumnarValue::Array(a) = result else {
