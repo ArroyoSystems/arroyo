@@ -140,6 +140,7 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
 
 /// A UDF implementation that exists only at plan time, and which will be re-planned
 /// into some other form before execution
+#[allow(clippy::type_complexity)]
 struct PlaceholderUdf {
     name: String,
     signature: Signature,
