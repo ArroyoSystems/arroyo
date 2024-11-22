@@ -106,6 +106,16 @@
                     "sensitive": ["apiSecret"]
                 }
             ]
+        },
+        "connectionProperties": {
+            "type": "array",
+            "title": "Connection Properties",
+            "description": "Key-value pairs of rdkafka configuration options",
+            "examples": ["client.id=arroyo"],
+            "items": {
+                "type": "string",
+                "title": "property"
+            }
         }
     },
     "required": ["bootstrapServers", "authentication"]

@@ -84,6 +84,7 @@ impl From<ConfluentProfile> for KafkaConfig {
                 password: c.secret,
             },
             schema_registry_enum: Some(c.schema_registry.into()),
+            connection_properties: vec![],
         }
     }
 }

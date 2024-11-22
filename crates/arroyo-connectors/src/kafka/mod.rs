@@ -105,6 +105,7 @@ impl KafkaConnector {
             authentication: auth,
             bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", options)?),
             schema_registry_enum: schema_registry,
+            connection_properties: vec![],
         })
     }
 
@@ -925,6 +926,14 @@ pub fn client_configs(
             client_configs.insert("security.protocol".to_string(), "SASL_SSL".to_string());
         }
     };
+
+    for prop in connection.connection_properties.iter() {
+        if let Some((k, v)) = prop.split_once('=') {
+            client_configs.insert(k.to_string(), v.to_string());
+        } else {
+            bail!("invalid connection property: {}", prop);
+        }
+    }
 
     if let Some(table) = table {
         client_configs.extend(
