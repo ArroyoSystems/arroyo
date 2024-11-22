@@ -377,6 +377,7 @@ async fn test_kafka_with_metadata_fields() {
         bad_data: None,
         schema_resolver: None,
         client_configs: HashMap::new(),
+        context: Context::new(None),
         messages_per_second: NonZeroU32::new(100).unwrap(),
         metadata_fields,
     };
