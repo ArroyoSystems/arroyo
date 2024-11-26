@@ -19,7 +19,7 @@ use arrow_array::{
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_df::schemas::window_arrow_struct;
 use arroyo_operator::{
-    context::ArrowContext,
+    context::OperatorContext,
     operator::{ArrowOperator, OperatorConstructor, OperatorNode},
 };
 use arroyo_rpc::{
@@ -71,7 +71,7 @@ impl SessionAggregatingWindowFunc {
         result
     }
 
-    async fn advance(&mut self, ctx: &mut ArrowContext) -> Result<()> {
+    async fn advance(&mut self, ctx: &mut OperatorContext) -> Result<()> {
         let Some(watermark) = ctx.last_present_watermark() else {
             debug!("no watermark, not advancing");
             return Ok(());
@@ -294,7 +294,7 @@ impl SessionAggregatingWindowFunc {
     fn to_record_batch(
         &self,
         results: Vec<(OwnedRow, Vec<SessionWindowResult>)>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<RecordBatch> {
         debug!("first result is {:#?}", results[0]);
         let (rows, results): (Vec<_>, Vec<_>) = results
@@ -754,7 +754,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         "session_window".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let start_times_map: &mut GlobalKeyedView<usize, Option<SystemTime>> =
             ctx.table_manager.get_global_keyed_state("e").await.unwrap();
         let start_time = start_times_map
@@ -809,7 +809,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
     }
 
     // TODO: filter out late data
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         debug!("received batch {:?}", batch);
         let current_watermark = ctx.last_present_watermark();
         let batch = if let Some(watermark) = current_watermark {
@@ -857,13 +857,13 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         self.advance(ctx).await.unwrap();
         Some(watermark)
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager

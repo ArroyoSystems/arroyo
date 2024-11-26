@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -48,7 +48,7 @@ impl SourceOperator for FluvioSourceFunc {
         global_table_config("f", "fluvio source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -56,7 +56,7 @@ impl SourceOperator for FluvioSourceFunc {
         );
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(e) => {
@@ -71,7 +71,7 @@ impl SourceOperator for FluvioSourceFunc {
 impl FluvioSourceFunc {
     async fn get_consumer(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>>>> {
         info!("Creating Fluvio consumer for {:?}", self.endpoint);
 
@@ -141,7 +141,7 @@ impl FluvioSourceFunc {
         Ok(streams)
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         let mut streams = self
             .get_consumer(ctx)
             .await

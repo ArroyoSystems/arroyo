@@ -3,7 +3,7 @@ use super::NatsTable;
 use super::{get_nats_client, SinkType};
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlMessage;
@@ -39,7 +39,7 @@ impl ArrowOperator for NatsSinkFunc {
         HashMap::new()
     }
 
-    async fn on_start(&mut self, _ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, _ctx: &mut OperatorContext) {
         match get_nats_client(&self.connection).await {
             Ok(client) => {
                 self.publisher = Some(client);
@@ -50,7 +50,7 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut OperatorContext) {
         if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, &commit_data, ctx).await;
         } else {
@@ -58,7 +58,7 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext) {
         // TODO: Implement checkpointing of in-progress data to avoid depending on
         // the downstream NATS availability to flush and checkpoint.
         let publisher = self
@@ -74,7 +74,7 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         let SinkType::Subject(s) = &self.sink_type;
         let nats_subject = async_nats::Subject::from(s.clone());
         for msg in self.serializer.serialize(&batch) {

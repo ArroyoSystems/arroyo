@@ -13,7 +13,7 @@ use tracing::warn;
 
 use crate::webhook::MAX_INFLIGHT;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlResp;
@@ -37,7 +37,7 @@ impl ArrowOperator for WebhookSinkFunc {
         global_table_config("s", "webhook sink state")
     }
 
-    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut OperatorContext) {
         for body in self.serializer.serialize(&record) {
             let permit = self
                 .semaphore
@@ -113,7 +113,7 @@ impl ArrowOperator for WebhookSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext) {
         // wait to acquire all of the permits (effectively blocking until all inflight requests are done)
         let _permits = self.semaphore.acquire_many(MAX_INFLIGHT).await.unwrap();
 

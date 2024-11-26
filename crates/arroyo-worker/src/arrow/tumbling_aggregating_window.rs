@@ -3,7 +3,7 @@ use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::SchemaRef;
 use arroyo_df::schemas::add_timestamp_field_arrow;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
 };
@@ -230,7 +230,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -246,7 +246,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -312,7 +312,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         if let Some(watermark) = ctx.last_present_watermark() {
             let bin = self.bin_start(watermark);
@@ -399,7 +399,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }))
     }
 
-    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, _: &mut ArrowContext) {
+    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, _: &mut OperatorContext) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
@@ -420,7 +420,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {

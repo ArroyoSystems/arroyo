@@ -4,7 +4,7 @@ use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
 use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_df::ASYNC_RESULT_FIELD;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
 };
@@ -147,7 +147,7 @@ impl ArrowOperator for AsyncUdfOperator {
         global_table_config("a", "AsyncMapOperator state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         info!("Starting async UDF with timeout {:?}", self.timeout);
         self.input_row_converter = RowConverter::new(
             ctx.in_schemas[0]
@@ -290,7 +290,7 @@ impl ArrowOperator for AsyncUdfOperator {
         Some(Duration::from_millis(50))
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext) {
         let arg_batch: Vec<_> = self
             .input_exprs
             .iter()
@@ -325,7 +325,7 @@ impl ArrowOperator for AsyncUdfOperator {
         }
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut ArrowContext) {
+    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext) {
         let Some((ids, results)) = self
             .udf
             .drain_results()
@@ -374,13 +374,13 @@ impl ArrowOperator for AsyncUdfOperator {
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        _ctx: &mut ArrowContext,
+        _ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         self.watermarks.push_back((self.next_id, watermark));
         None
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext) {
         let gs = ctx.table_manager.get_global_keyed_state("a").await.unwrap();
 
         let state = AsyncUdfState {
@@ -400,7 +400,7 @@ impl ArrowOperator for AsyncUdfOperator {
         gs.insert(ctx.task_info.task_index, state).await;
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext) {
         if let Some(SignalMessage::EndOfData) = final_message {
             while !self.inputs.is_empty() && !self.outputs.is_empty() {
                 self.handle_tick(0, ctx).await;
@@ -411,7 +411,7 @@ impl ArrowOperator for AsyncUdfOperator {
 }
 
 impl AsyncUdfOperator {
-    async fn flush_output(&mut self, ctx: &mut ArrowContext) {
+    async fn flush_output(&mut self, ctx: &mut OperatorContext) {
         // check if we can emit any records -- these are ones received before our most recent
         // watermark -- once all records from before a watermark have been processed, we can
         // remove and emit the watermark

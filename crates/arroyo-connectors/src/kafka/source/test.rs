@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::kafka::SourceOffset;
-use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver};
+use arroyo_operator::context::{batch_bounded, OperatorContext, BatchReceiver};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
@@ -105,7 +105,7 @@ impl KafkaTopicTester {
             operator_ids: vec![task_info.operator_id.clone()],
         });
 
-        let mut ctx = ArrowContext::new(
+        let mut ctx = OperatorContext::new(
             task_info,
             checkpoint_metadata,
             control_rx,
@@ -388,7 +388,7 @@ async fn test_kafka_with_metadata_fields() {
 
     let checkpoint_metadata = None;
 
-    let mut ctx = ArrowContext::new(
+    let mut ctx = OperatorContext::new(
         task_info.clone(),
         checkpoint_metadata,
         control_rx,

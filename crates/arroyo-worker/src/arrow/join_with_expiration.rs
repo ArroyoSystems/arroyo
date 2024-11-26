@@ -2,7 +2,7 @@ use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
 };
@@ -41,7 +41,7 @@ impl JoinWithExpiration {
     async fn process_left(
         &mut self,
         record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<()> {
         let left_table = ctx
             .table_manager
@@ -79,7 +79,7 @@ impl JoinWithExpiration {
     async fn process_right(
         &mut self,
         right_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<()> {
         let right_table = ctx
             .table_manager
@@ -118,7 +118,7 @@ impl JoinWithExpiration {
         &mut self,
         left: RecordBatch,
         right: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         {
             self.right_passer.write().unwrap().replace(right);
@@ -162,7 +162,7 @@ impl ArrowOperator for JoinWithExpiration {
         }
     }
 
-    async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut OperatorContext) {
         unreachable!();
     }
     async fn process_batch_index(
@@ -170,7 +170,7 @@ impl ArrowOperator for JoinWithExpiration {
         index: usize,
         total_inputs: usize,
         record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         match index / (total_inputs / 2) {
             0 => self

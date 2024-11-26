@@ -34,7 +34,7 @@ pub struct TableManager {
     epoch: u32,
     min_epoch: u32,
     // ordered by table, then epoch.
-    tables: HashMap<String, Arc<Box<dyn ErasedTable>>>,
+    tables: HashMap<String, Arc<dyn ErasedTable>>,
     writer: BackendWriter,
     task_info: TaskInfoRef,
     storage: StorageProviderRef,
@@ -54,7 +54,7 @@ pub struct BackendFlusher {
     control_tx: Sender<ControlResp>,
     finish_tx: Option<oneshot::Sender<()>>,
     task_info: TaskInfoRef,
-    tables: HashMap<String, Arc<Box<dyn ErasedTable>>>,
+    tables: HashMap<String, Arc<dyn ErasedTable>>,
     table_configs: HashMap<String, TableConfig>,
     table_checkpointers: HashMap<String, Box<dyn ErasedCheckpointer>>,
     current_epoch: u32,
@@ -195,7 +195,7 @@ impl BackendWriter {
         task_info: TaskInfoRef,
         control_tx: Sender<ControlResp>,
         table_configs: HashMap<String, TableConfig>,
-        tables: HashMap<String, Arc<Box<dyn ErasedTable>>>,
+        tables: HashMap<String, Arc<dyn ErasedTable>>,
         storage: StorageProviderRef,
         current_epoch: u32,
         last_epoch_checkpoints: HashMap<String, TableSubtaskCheckpointMetadata>,
@@ -242,23 +242,23 @@ impl TableManager {
                 let erased_table = match table_config.table_type() {
                     TableEnum::MissingTableType => bail!("should have table type"),
                     TableEnum::GlobalKeyValue => {
-                        Box::new(<GlobalKeyedTable as ErasedTable>::from_config(
+                        Arc::new(<GlobalKeyedTable as ErasedTable>::from_config(
                             table_config.clone(),
                             task_info.clone(),
                             storage.clone(),
                             table_restore_from,
-                        )?) as Box<dyn ErasedTable>
+                        )?) as Arc<dyn ErasedTable>
                     }
                     TableEnum::ExpiringKeyedTimeTable => {
-                        Box::new(<ExpiringTimeKeyTable as ErasedTable>::from_config(
+                        Arc::new(<ExpiringTimeKeyTable as ErasedTable>::from_config(
                             table_config.clone(),
                             task_info.clone(),
                             storage.clone(),
                             table_restore_from,
-                        )?) as Box<dyn ErasedTable>
+                        )?) as Arc<dyn ErasedTable>
                     }
                 };
-                Ok((table_name.to_string(), Arc::new(erased_table)))
+                Ok((table_name.to_string(), erased_table))
             })
             .collect::<Result<HashMap<_, _>>>()?;
 
@@ -330,13 +330,13 @@ impl TableManager {
         }
     }
 
-    pub async fn load_compacted(&mut self, compacted: CompactionResult) -> Result<()> {
+    pub async fn load_compacted(&mut self, compacted: &CompactionResult) -> Result<()> {
         if compacted.operator_id != self.task_info.operator_id {
             bail!("shouldn't be loading compaction for other operator");
         }
         self.writer
             .sender
-            .send(StateMessage::Compaction(compacted.compacted_tables))
+            .send(StateMessage::Compaction(compacted.compacted_tables.clone()))
             .await?;
         Ok(())
     }

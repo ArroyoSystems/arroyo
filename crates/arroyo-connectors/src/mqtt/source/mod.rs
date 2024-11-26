@@ -15,7 +15,7 @@ use rumqttc::v5::{ConnectionError, Event as MqttEvent, Incoming};
 use rumqttc::Outgoing;
 
 use crate::mqtt::{create_connection, MqttConfig};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::grpc::rpc::TableConfig;
@@ -47,7 +47,7 @@ impl SourceOperator for MqttSourceFunc {
         arroyo_state::global_table_config("m", "mqtt source state")
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(e) => {
@@ -96,7 +96,7 @@ impl MqttSourceFunc {
         self.subscribed.clone()
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),

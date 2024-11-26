@@ -14,7 +14,7 @@ use arrow_array::cast::AsArray;
 use arrow_schema::SchemaRef;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::{
-    context::ArrowContext,
+    context::OperatorContext,
     operator::{
         ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode,
         Registry,
@@ -57,7 +57,7 @@ pub struct UpdatingAggregatingFunc {
 }
 
 impl UpdatingAggregatingFunc {
-    async fn flush(&mut self, ctx: &mut ArrowContext) -> Result<()> {
+    async fn flush(&mut self, ctx: &mut OperatorContext) -> Result<()> {
         if self.sender.is_none() {
             return Ok(());
         }
@@ -242,14 +242,14 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext) {
         if self.sender.is_none() {
             self.init_exec();
         }
         self.sender.as_ref().unwrap().send(batch).unwrap();
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
         self.flush(ctx).await.unwrap();
     }
 
@@ -283,14 +283,14 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         Some(self.flush_interval)
     }
 
-    async fn handle_tick(&mut self, _tick: u64, ctx: &mut ArrowContext) {
+    async fn handle_tick(&mut self, _tick: u64, ctx: &mut OperatorContext) {
         self.flush(ctx).await.unwrap();
     }
 
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         let last_watermark = ctx.last_present_watermark();
         let partial_table = ctx
@@ -331,17 +331,17 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         }))
     }
 
-    async fn handle_future_result(&mut self, _result: Box<dyn Any + Send>, _: &mut ArrowContext) {
+    async fn handle_future_result(&mut self, _result: Box<dyn Any + Send>, _: &mut OperatorContext) {
         //unreachable!("should not have future result")
     }
 
-    async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut OperatorContext) {
         if let Some(SignalMessage::EndOfData) = final_mesage {
             self.flush(ctx).await.unwrap();
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         // fetch the tables so they are ready to be queried.
         ctx.table_manager
             .get_last_key_value_table("f", ctx.last_present_watermark())

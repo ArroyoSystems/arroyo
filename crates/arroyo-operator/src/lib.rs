@@ -12,7 +12,7 @@ use arrow::compute::kernels::numeric::{div, rem};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef};
 use bincode::{Decode, Encode};
 
-use crate::context::ArrowContext;
+use crate::context::OperatorContext;
 use crate::operator::Registry;
 use operator::{OperatorConstructor, OperatorNode};
 use tokio_stream::Stream;
@@ -151,7 +151,7 @@ impl<T: OperatorConstructor> ErasedConstructor for T {
 
 pub fn get_timestamp_col<'a>(
     batch: &'a RecordBatch,
-    ctx: &mut ArrowContext,
+    ctx: &mut OperatorContext,
 ) -> &'a PrimitiveArray<TimestampNanosecondType> {
     batch
         .column(ctx.out_schema.as_ref().unwrap().timestamp_index)

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use arroyo_operator::{context::ArrowContext, operator::ArrowOperator};
+use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
 use arroyo_rpc::{
     grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
     CheckpointEvent, ControlMessage,
@@ -43,7 +43,7 @@ pub trait TwoPhaseCommitter: Send + 'static {
     fn name(&self) -> String;
     async fn init(
         &mut self,
-        task_info: &mut ArrowContext,
+        task_info: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()>;
     async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()>;
@@ -83,7 +83,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
         &mut self,
         epoch: u32,
         mut commit_data: HashMap<String, HashMap<u32, Vec<u8>>>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         info!("received commit message");
         let pre_commits = match self.committer.commit_strategy() {
@@ -152,7 +152,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         tables
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let tracking_key_state: &mut GlobalKeyedView<usize, TPC::DataRecovery> = ctx
             .table_manager
             .get_global_keyed_state("r")
@@ -176,14 +176,14 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext) {
         self.committer
             .insert_batch(batch)
             .await
             .expect("record inserted");
     }
 
-    async fn on_close(&mut self, _final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, _final_mesage: &Option<SignalMessage>, ctx: &mut OperatorContext) {
         if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, commit_data, ctx).await;
         } else {
@@ -195,7 +195,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         &mut self,
         epoch: u32,
         commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         self.handle_commit(epoch, commit_data.clone(), ctx).await;
     }
@@ -203,7 +203,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
     async fn handle_checkpoint(
         &mut self,
         checkpoint_barrier: arroyo_types::CheckpointBarrier,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         let (recovery_data, pre_commits) = self
             .committer

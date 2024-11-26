@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::create_dir_all, path::Path, sync::Arc, time::SystemTime};
 
 use arrow::record_batch::RecordBatch;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     formats::Format,
@@ -215,7 +215,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
 
     async fn init(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()> {
         let mut max_file_index = 0;

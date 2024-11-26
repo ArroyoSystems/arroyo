@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::mqtt::MqttConfig;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::ControlResp;
@@ -46,7 +46,7 @@ impl ArrowOperator for MqttSinkFunc {
     fn name(&self) -> String {
         format!("mqtt-producer-{}", self.topic)
     }
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let mut attempts = 0;
         while attempts < 20 {
             match super::create_connection(&self.config, ctx.task_info.task_index) {
@@ -91,7 +91,7 @@ impl ArrowOperator for MqttSinkFunc {
         panic!("Failed to establish connection to mqtt after 20 retries");
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         for v in self.serializer.serialize(&batch) {
             match self
                 .client

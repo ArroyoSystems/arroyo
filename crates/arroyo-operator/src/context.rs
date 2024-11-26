@@ -23,10 +23,12 @@ use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
+use async_trait::async_trait;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
 use tracing::warn;
+use crate::operator::ArrowOperator;
 
 pub type QueueItem = ArrowMessage;
 
@@ -242,19 +244,21 @@ impl ContextBuffer {
     }
 }
 
-pub struct ArrowContext {
-    pub task_info: Arc<TaskInfo>,
-    pub control_rx: Receiver<ControlMessage>,
-    pub control_tx: Sender<ControlResp>,
+pub struct SourceContext {
+    pub out_schema: ArroyoSchema,
     pub error_reporter: ErrorReporter,
-    pub watermarks: WatermarkHolder,
-    pub in_schemas: Vec<ArroyoSchema>,
-    pub out_schema: Option<ArroyoSchema>,
-    pub collector: ArrowCollector,
     buffer: Option<ContextBuffer>,
     buffered_error: Option<UserError>,
     error_rate_limiter: RateLimiter,
     deserializer: Option<ArrowDeserializer>,
+}
+
+pub struct OperatorContext {
+    pub task_info: Arc<TaskInfo>,
+    pub control_tx: Sender<ControlResp>,
+    pub watermarks: WatermarkHolder,
+    pub in_schemas: Vec<ArroyoSchema>,
+    pub out_schema: Option<ArroyoSchema>,
     pub table_manager: TableManager,
 }
 
@@ -277,6 +281,43 @@ impl ErrorReporter {
             .unwrap();
     }
 }
+
+#[async_trait]
+pub trait Collector {
+    async fn collect(&mut self, batch: RecordBatch);
+    async fn broadcast(&mut self, message: ArrowMessage);
+}
+
+pub struct ChainCollector {
+    messages: Vec<RecordBatch>,
+}
+
+impl ChainCollector {
+    pub fn new() -> Self {
+        Self { messages: vec![] }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &RecordBatch> {
+        self.messages.iter()
+    }
+    
+    pub fn clear(&mut self) {
+        self.messages.clear();
+    }
+}
+
+#[async_trait]
+impl Collector for ChainCollector {
+    async fn collect(&mut self, batch: RecordBatch) {
+        self.messages.push(batch);
+    }
+    
+    async fn broadcast(&mut self, message: ArrowMessage) {
+        todo!()
+    }
+}
+
+
 
 #[derive(Clone)]
 pub struct ArrowCollector {
@@ -345,8 +386,9 @@ fn repartition<'a>(
     }
 }
 
-impl ArrowCollector {
-    pub async fn collect(&mut self, record: RecordBatch) {
+#[async_trait]
+impl Collector for ArrowCollector {
+    async fn collect(&mut self, record: RecordBatch) {
         TaskCounters::MessagesSent
             .for_task(&self.task_info, |c| c.inc_by(record.num_rows() as u64));
         TaskCounters::BatchesSent.for_task(&self.task_info, |c| c.inc());
@@ -402,7 +444,7 @@ impl ArrowCollector {
         }
     }
 
-    pub async fn broadcast(&mut self, message: ArrowMessage) {
+    async fn broadcast(&mut self, message: ArrowMessage) {
         for out_node in &self.out_qs {
             for q in out_node {
                 q.send(message.clone()).await.unwrap_or_else(|e| {
@@ -416,12 +458,11 @@ impl ArrowCollector {
     }
 }
 
-impl ArrowContext {
+impl OperatorContext {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         task_info: TaskInfo,
         restore_from: Option<CheckpointMetadata>,
-        control_rx: Receiver<ControlMessage>,
         control_tx: Sender<ControlResp>,
         input_partitions: usize,
         in_schemas: Vec<ArroyoSchema>,
@@ -494,8 +535,7 @@ impl ArrowContext {
                 .expect("should be able to create TableManager");
 
         Self {
-            task_info: task_info.clone(),
-            control_rx,
+            task_info: task_info.clone(), 
             control_tx: control_tx.clone(),
             watermarks: WatermarkHolder::new(vec![
                 watermark.map(Watermark::EventTime);
@@ -503,7 +543,7 @@ impl ArrowContext {
             ]),
             in_schemas,
             out_schema: out_schema.clone(),
-            collector: ArrowCollector {
+            collector: Box::new(ArrowCollector {
                 task_info: task_info.clone(),
                 out_qs,
                 tx_queue_rem_gauges,
@@ -511,7 +551,7 @@ impl ArrowContext {
                 tx_queue_bytes_gauges,
                 out_schema: out_schema.clone(),
                 projection,
-            },
+            }),
             error_reporter: ErrorReporter {
                 tx: control_tx,
                 task_info,
@@ -624,7 +664,7 @@ impl ArrowContext {
             .unwrap();
     }
 
-    pub async fn load_compacted(&mut self, compaction: CompactionResult) {
+    pub async fn load_compacted(&mut self, compaction: &CompactionResult) {
         //TODO: support compaction in the table manager
         self.table_manager
             .load_compacted(compaction)

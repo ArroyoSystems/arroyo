@@ -11,7 +11,7 @@ use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
 use std::time::{Duration, SystemTime};
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
@@ -74,7 +74,7 @@ impl ImpulseSourceFunc {
         }
     }
 
-    fn batch_size(&self, ctx: &mut ArrowContext) -> usize {
+    fn batch_size(&self, ctx: &mut OperatorContext) -> usize {
         let duration_micros = self.delay(ctx).as_micros();
         if duration_micros == 0 {
             return 8192;
@@ -83,7 +83,7 @@ impl ImpulseSourceFunc {
         batch_size.clamp(1, 8192) as usize
     }
 
-    fn delay(&self, ctx: &mut ArrowContext) -> Duration {
+    fn delay(&self, ctx: &mut OperatorContext) -> Duration {
         match self.spec {
             ImpulseSpec::Delay(d) => d,
             ImpulseSpec::EventsPerSecond(eps) => {
@@ -92,7 +92,7 @@ impl ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         let delay = self.delay(ctx);
         info!(
             "Starting impulse source with start {} delay {:?} and limit {}",
@@ -250,7 +250,7 @@ impl SourceOperator for ImpulseSourceFunc {
         arroyo_state::global_table_config("i", "impulse source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let s = ctx
             .table_manager
             .get_global_keyed_state("i")
@@ -262,7 +262,7 @@ impl SourceOperator for ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         self.run(ctx).await
     }
 }

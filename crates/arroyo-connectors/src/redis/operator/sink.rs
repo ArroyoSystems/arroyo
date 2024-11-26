@@ -1,7 +1,7 @@
 use crate::redis::{ListOperation, RedisClient, RedisTable, TableType, Target};
 use arrow::array::{AsArray, RecordBatch};
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::{ArrowContext, ErrorReporter};
+use arroyo_operator::context::{OperatorContext, ErrorReporter};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
@@ -228,7 +228,7 @@ impl ArrowOperator for RedisSinkFunc {
         "RedisSink".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         match &self.table.connector_type {
             TableType::Target(Target::ListTable {
                 list_key_column: Some(key),
@@ -321,7 +321,7 @@ impl ArrowOperator for RedisSinkFunc {
         panic!("Failed to establish connection to redis after 20 retries");
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext) {
         for (i, value) in self.serializer.serialize(&batch).enumerate() {
             match &self.table.connector_type {
                 TableType::Target(target) => match &target {
@@ -360,7 +360,7 @@ impl ArrowOperator for RedisSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, checkpoint: CheckpointBarrier, _ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, checkpoint: CheckpointBarrier, _ctx: &mut OperatorContext) {
         self.tx
             .send(RedisCmd::Flush(checkpoint.epoch))
             .await

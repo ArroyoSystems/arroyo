@@ -15,7 +15,7 @@ use ::arrow::{
     util::display::{ArrayFormatter, FormatOptions},
 };
 use anyhow::{bail, Result};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, OperatorConfig, TIMESTAMP_FIELD};
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
@@ -1550,7 +1550,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
 
     async fn init(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()> {
         self.start(Arc::new(ctx.in_schemas.first().unwrap().clone()))?;

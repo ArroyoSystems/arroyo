@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::SystemTime};
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
@@ -26,7 +26,7 @@ pub struct SingleFileSourceFunc {
 }
 
 impl SingleFileSourceFunc {
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         if ctx.task_info.task_index != 0 {
             return SourceFinishType::Final;
         }
@@ -81,7 +81,7 @@ impl SingleFileSourceFunc {
     async fn handle_control(
         &mut self,
         msg: Option<ControlMessage>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Option<SourceFinishType> {
         match msg {
             Some(ControlMessage::Checkpoint(c)) => {
@@ -127,7 +127,7 @@ impl SourceOperator for SingleFileSourceFunc {
         arroyo_state::global_table_config("f", "file_source")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let s: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> = ctx
             .table_manager
             .get_global_keyed_state("f")
@@ -138,7 +138,7 @@ impl SourceOperator for SingleFileSourceFunc {
             self.lines_read = *state;
         }
     }
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         self.run(ctx).await
     }
 }

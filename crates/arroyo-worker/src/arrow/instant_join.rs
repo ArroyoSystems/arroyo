@@ -3,7 +3,7 @@ use anyhow::Result;
 use arrow::compute::{max, min, partition, sort_to_indices, take};
 use arrow_array::{RecordBatch, TimestampNanosecondArray};
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{
     ArrowOperator, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
 };
@@ -110,7 +110,7 @@ impl InstantJoin {
         &mut self,
         side: Side,
         batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<()> {
         let table = ctx
             .table_manager
@@ -171,7 +171,7 @@ impl InstantJoin {
     async fn process_left(
         &mut self,
         record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<()> {
         self.process_side(Side::Left, record_batch, ctx).await
     }
@@ -179,7 +179,7 @@ impl InstantJoin {
     async fn process_right(
         &mut self,
         right_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<()> {
         self.process_side(Side::Right, right_batch, ctx).await
     }
@@ -200,7 +200,7 @@ impl ArrowOperator for InstantJoin {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         let left_table = ctx
             .table_manager
@@ -232,7 +232,7 @@ impl ArrowOperator for InstantJoin {
         }
     }
 
-    async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut OperatorContext) {
         unreachable!();
     }
     async fn process_batch_index(
@@ -240,7 +240,7 @@ impl ArrowOperator for InstantJoin {
         index: usize,
         total_inputs: usize,
         record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         match index / (total_inputs / 2) {
             0 => self
@@ -257,7 +257,7 @@ impl ArrowOperator for InstantJoin {
     async fn handle_watermark(
         &mut self,
         int_watermark: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         let Some(watermark) = ctx.last_present_watermark() else {
             return Some(int_watermark);
@@ -290,7 +290,7 @@ impl ArrowOperator for InstantJoin {
         Some(int_watermark)
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("left", watermark)
@@ -346,7 +346,7 @@ impl ArrowOperator for InstantJoin {
         }))
     }
 
-    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut ArrowContext) {
+    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut OperatorContext) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
