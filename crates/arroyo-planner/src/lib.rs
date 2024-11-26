@@ -22,6 +22,8 @@ use arrow::datatypes::{self, DataType};
 use arrow_schema::{Field, FieldRef, Schema};
 use arroyo_datastream::WindowType;
 
+use builder::NamedNode;
+use datafusion::common::tree_node::TreeNode;
 use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
@@ -33,13 +35,15 @@ use datafusion::sql::{planner::ContextProvider, sqlparser, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    create_udaf, Expr, Extension, LogicalPlan, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
-    WindowUDF,
+    create_udaf, Expr, Extension, LogicalPlan, ScalarUDF, ScalarUDFImpl, Signature,
+    UserDefinedLogicalNode, Volatility, WindowUDF,
 };
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
+use extension::ArroyoExtension;
 use logical::LogicalBatchInput;
 
+use rewriters::SinkInputRewriter;
 use schemas::window_arrow_struct;
 use tables::{Insert, Table};
 
@@ -633,6 +637,45 @@ pub fn rewrite_plan(
     Ok(rewritten_plan.data)
 }
 
+fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<LogicalPlan>> {
+    let mut sink_inputs = HashMap::<NamedNode, Vec<LogicalPlan>>::new();
+    for extension in extensions.iter() {
+        if let LogicalPlan::Extension(extension) = extension {
+            if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
+                if let Some(named_node) = sink_node.node_name() {
+                    let inputs = sink_node
+                        .inputs()
+                        .into_iter()
+                        .cloned()
+                        .collect::<Vec<LogicalPlan>>();
+                    sink_inputs.entry(named_node).or_default().extend(inputs);
+                }
+            }
+        }
+    }
+    sink_inputs
+}
+
+/// rewrite_sinks will rewrite sink's inputs and remove duplicated sinks
+/// Collect inputs of [`SinkExtension`], it's help to merge [`SinkExtension`] with same table.
+/// Each `SinkExtension` can get itself inputs (is merged previously) by named_node,
+/// input [`SinkExtension`]'s named node which get by `named_node()` to get inputs.
+fn rewrite_sinks(extensions: Vec<LogicalPlan>) -> Result<Vec<LogicalPlan>> {
+    let mut sink_inputs = build_sink_inputs(&extensions);
+    let mut new_extensions = vec![];
+    for extension in extensions {
+        let mut is_rewrited = false;
+        let result = extension.rewrite(&mut SinkInputRewriter::new(
+            &mut sink_inputs,
+            &mut is_rewrited,
+        ))?;
+        if !(is_rewrited) {
+            new_extensions.push(result.data);
+        }
+    }
+    Ok(new_extensions)
+}
+
 fn try_handle_set_variable(
     statement: &Statement,
     schema_provider: &mut ArroyoSchemaProvider,
@@ -798,6 +841,10 @@ pub async fn parse_and_get_arrow_program(
             node: Arc::new(sink?),
         }));
     }
+
+    // rewrite sink's inputs, and remove duplicated sink
+    let extensions = rewrite_sinks(extensions)?;
+
     let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider, &session_state);
     for extension in extensions {
         plan_to_graph_visitor.add_plan(extension)?;
