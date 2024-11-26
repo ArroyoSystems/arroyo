@@ -5,7 +5,7 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     UPDATING_META_FIELD,
 };
-use datafusion::common::{internal_err, plan_err, DFSchemaRef, Result, TableReference};
+use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
 
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 
@@ -29,10 +29,10 @@ pub(crate) struct SinkExtension {
     pub(crate) name: TableReference,
     pub(crate) table: Table,
     pub(crate) schema: DFSchemaRef,
-    input: Arc<LogicalPlan>,
+    inputs: Arc<Vec<LogicalPlan>>,
 }
 
-multifield_partial_ord!(SinkExtension, name, input);
+multifield_partial_ord!(SinkExtension, name, inputs);
 
 impl SinkExtension {
     pub fn new(
@@ -76,11 +76,12 @@ impl SinkExtension {
         }
         Self::add_remote_if_necessary(&schema, &mut input);
 
+        let inputs = Arc::new(vec![(*input).clone()]);
         Ok(Self {
             name,
             table,
             schema,
-            input,
+            inputs,
         })
     }
 
@@ -112,7 +113,7 @@ impl UserDefinedLogicalNodeCore for SinkExtension {
     }
 
     fn inputs(&self) -> Vec<&LogicalPlan> {
-        vec![&self.input]
+        self.inputs.iter().collect()
     }
 
     fn schema(&self) -> &DFSchemaRef {
@@ -128,22 +129,21 @@ impl UserDefinedLogicalNodeCore for SinkExtension {
     }
 
     fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
-        if inputs.len() != 1 {
-            return internal_err!("input size inconsistent");
-        }
-
         Ok(Self {
             name: self.name.clone(),
             table: self.table.clone(),
             schema: self.schema.clone(),
-            input: Arc::new(inputs[0].clone()),
+            inputs: Arc::new(inputs),
         })
     }
 }
 
 impl ArroyoExtension for SinkExtension {
     fn node_name(&self) -> Option<NamedNode> {
-        None
+        match &self.table {
+            Table::PreviewSink { .. } => None,
+            _ => Some(NamedNode::Sink(self.name.clone())),
+        }
     }
 
     fn plan_node(
@@ -152,12 +152,6 @@ impl ArroyoExtension for SinkExtension {
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
-        if input_schemas.len() != 1 {
-            return plan_err!("sink should have exactly one input");
-        }
-        // should have exactly one input
-        let input_schema = input_schemas[0].clone();
-
         let operator_config = (self
             .table
             .connector_op()
@@ -170,16 +164,18 @@ impl ArroyoExtension for SinkExtension {
             parallelism: 1,
             operator_config,
         };
-        let edge = LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone());
-        Ok(NodeWithIncomingEdges {
-            node,
-            edges: vec![edge],
-        })
+        let edges = input_schemas
+            .into_iter()
+            .map(|input_schema| {
+                LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone())
+            })
+            .collect();
+        Ok(NodeWithIncomingEdges { node, edges })
     }
 
     fn output_schema(&self) -> ArroyoSchema {
         // this is kinda fake?
-        ArroyoSchema::from_schema_keys(Arc::new(self.input.schema().as_ref().into()), vec![])
+        ArroyoSchema::from_schema_keys(Arc::new(self.inputs[0].schema().as_ref().into()), vec![])
             .unwrap()
     }
 }

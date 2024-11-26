@@ -1,0 +1,78 @@
+{"timestamp": "2023-09-18T14:28:56", "driver_id": 100, "event_type": "pickup", "location": "Treasure Island"}
+{"timestamp": "2023-09-18T14:49:46", "driver_id": 100, "event_type": "pickup", "location": "Chinatown"}
+{"timestamp": "2023-09-18T15:30:11", "driver_id": 100, "event_type": "pickup", "location": "Parkside"}
+{"timestamp": "2023-09-18T16:14:44", "driver_id": 100, "event_type": "pickup", "location": "Portola"}
+{"timestamp": "2023-09-18T16:49:39", "driver_id": 100, "event_type": "pickup", "location": "Portola"}
+{"timestamp": "2023-09-18T17:41:24", "driver_id": 100, "event_type": "pickup", "location": "Potrero Hill"}
+{"timestamp": "2023-09-18T18:07:14", "driver_id": 100, "event_type": "pickup", "location": "Noe Valley"}
+{"timestamp": "2023-09-18T18:43:30", "driver_id": 100, "event_type": "pickup", "location": "Fillmore"}
+{"timestamp": "2023-09-18T19:16:04", "driver_id": 100, "event_type": "pickup", "location": "Nob Hill"}
+{"timestamp": "2023-09-18T19:44:47", "driver_id": 100, "event_type": "pickup", "location": "Potrero Hill"}
+{"timestamp": "2023-09-18T20:21:16", "driver_id": 100, "event_type": "pickup", "location": "Yerba Buena"}
+{"timestamp": "2023-09-18T21:09:21", "driver_id": 100, "event_type": "pickup", "location": "Ingleside"}
+{"timestamp": "2023-09-18T21:55:11", "driver_id": 100, "event_type": "pickup", "location": "Noe Valley"}
+{"timestamp": "2023-09-18T22:32:54", "driver_id": 100, "event_type": "pickup", "location": "Potrero Hill"}
+{"timestamp": "2023-09-18T23:16:13", "driver_id": 100, "event_type": "pickup", "location": "SOMA"}
+{"timestamp": "2023-09-19T00:02:29", "driver_id": 100, "event_type": "pickup", "location": "Treasure Island"}
+{"timestamp": "2023-09-19T00:50:37", "driver_id": 100, "event_type": "pickup", "location": "Chinatown"}
+{"timestamp": "2023-09-19T01:10:47", "driver_id": 100, "event_type": "pickup", "location": "Japantown"}
+{"timestamp": "2023-09-19T02:12:39", "driver_id": 100, "event_type": "pickup", "location": "Treasure Island"}
+{"timestamp": "2023-09-19T02:41:42", "driver_id": 100, "event_type": "pickup", "location": "Tenderloin"}
+{"timestamp": "2023-09-19T03:24:47", "driver_id": 100, "event_type": "pickup", "location": "Asbury Heights"}
+{"timestamp": "2023-09-19T03:36:12", "driver_id": 100, "event_type": "pickup", "location": "Parkside"}
+{"timestamp": "2023-09-19T03:53:34", "driver_id": 100, "event_type": "pickup", "location": "Treasure Island"}
+{"timestamp": "2023-09-19T04:41:47", "driver_id": 100, "event_type": "pickup", "location": "Russian Hill"}
+{"timestamp": "2023-09-19T05:46:00", "driver_id": 100, "event_type": "pickup", "location": "Dogpatch"}
+{"timestamp": "2023-09-19T06:47:18", "driver_id": 100, "event_type": "pickup", "location": "Chinatown"}
+{"timestamp": "2023-09-19T07:44:33", "driver_id": 100, "event_type": "pickup", "location": "Richmond"}
+{"timestamp": "2023-09-19T08:49:31", "driver_id": 100, "event_type": "pickup", "location": "Tenderloin"}
+{"timestamp": "2023-09-19T09:27:13", "driver_id": 100, "event_type": "pickup", "location": "SOMA"}
+{"timestamp": "2023-09-19T09:46:19", "driver_id": 100, "event_type": "pickup", "location": "SOMA"}
+{"timestamp": "2023-09-19T10:27:22", "driver_id": 100, "event_type": "pickup", "location": "Mission"}
+{"timestamp": "2023-09-19T10:59:30", "driver_id": 100, "event_type": "pickup", "location": "Asbury Heights"}
+{"timestamp": "2023-09-19T11:24:27", "driver_id": 100, "event_type": "pickup", "location": "Dogpatch"}
+{"timestamp": "2023-09-19T11:53:56", "driver_id": 100, "event_type": "pickup", "location": "Sunset"}
+{"timestamp": "2023-09-19T12:28:58", "driver_id": 100, "event_type": "pickup", "location": "Ingleside"}
+{"timestamp": "2023-09-19T13:03:59", "driver_id": 100, "event_type": "pickup", "location": "Yerba Buena"}
+{"timestamp": "2023-09-19T14:07:16", "driver_id": 100, "event_type": "pickup", "location": "Treasure Island"}
+{"timestamp": "2023-09-18T14:36:19", "driver_id": 101, "event_type": "dropoff", "location": "Pacific Heights"}
+{"timestamp": "2023-09-18T14:56:01", "driver_id": 101, "event_type": "dropoff", "location": "Japantown"}
+{"timestamp": "2023-09-18T15:46:32", "driver_id": 101, "event_type": "dropoff", "location": "Yerba Buena"}
+{"timestamp": "2023-09-18T16:06:24", "driver_id": 101, "event_type": "dropoff", "location": "Richmond"}
+{"timestamp": "2023-09-18T17:14:04", "driver_id": 101, "event_type": "dropoff", "location": "Bayview"}
+{"timestamp": "2023-09-18T17:59:08", "driver_id": 101, "event_type": "dropoff", "location": "Treasure Island"}
+{"timestamp": "2023-09-18T18:24:20", "driver_id": 101, "event_type": "dropoff", "location": "Civic Center"}
+{"timestamp": "2023-09-18T18:47:15", "driver_id": 101, "event_type": "dropoff", "location": "Fillmore"}
+{"timestamp": "2023-09-18T19:36:34", "driver_id": 101, "event_type": "dropoff", "location": "Mission"}
+{"timestamp": "2023-09-18T20:33:46", "driver_id": 101, "event_type": "dropoff", "location": "Pacific Heights"}
+{"timestamp": "2023-09-18T20:46:17", "driver_id": 101, "event_type": "dropoff", "location": "Civic Center"}
+{"timestamp": "2023-09-18T21:14:45", "driver_id": 101, "event_type": "dropoff", "location": "Dogpatch"}
+{"timestamp": "2023-09-18T22:15:49", "driver_id": 101, "event_type": "dropoff", "location": "Mission"}
+{"timestamp": "2023-09-18T22:39:11", "driver_id": 101, "event_type": "dropoff", "location": "Chinatown"}
+{"timestamp": "2023-09-18T23:35:49", "driver_id": 101, "event_type": "dropoff", "location": "SOMA"}
+{"timestamp": "2023-09-18T23:49:59", "driver_id": 101, "event_type": "dropoff", "location": "Mission"}
+{"timestamp": "2023-09-19T00:20:59", "driver_id": 101, "event_type": "dropoff", "location": "Yerba Buena"}
+{"timestamp": "2023-09-19T00:59:00", "driver_id": 101, "event_type": "dropoff", "location": "Civic Center"}
+{"timestamp": "2023-09-19T01:49:47", "driver_id": 101, "event_type": "dropoff", "location": "Portola"}
+{"timestamp": "2023-09-19T02:05:42", "driver_id": 101, "event_type": "dropoff", "location": "Civic Center"}
+{"timestamp": "2023-09-19T02:39:47", "driver_id": 101, "event_type": "dropoff", "location": "Civic Center"}
+{"timestamp": "2023-09-19T02:56:49", "driver_id": 101, "event_type": "dropoff", "location": "Pacific Heights"}
+{"timestamp": "2023-09-19T03:38:08", "driver_id": 101, "event_type": "dropoff", "location": "Mission"}
+{"timestamp": "2023-09-19T04:38:17", "driver_id": 101, "event_type": "dropoff", "location": "Japantown"}
+{"timestamp": "2023-09-19T04:58:07", "driver_id": 101, "event_type": "dropoff", "location": "Treasure Island"}
+{"timestamp": "2023-09-19T05:42:13", "driver_id": 101, "event_type": "dropoff", "location": "Yerba Buena"}
+{"timestamp": "2023-09-19T06:18:40", "driver_id": 101, "event_type": "dropoff", "location": "Japantown"}
+{"timestamp": "2023-09-19T06:46:19", "driver_id": 101, "event_type": "dropoff", "location": "Pacific Heights"}
+{"timestamp": "2023-09-19T07:01:08", "driver_id": 101, "event_type": "dropoff", "location": "Japantown"}
+{"timestamp": "2023-09-19T07:53:38", "driver_id": 101, "event_type": "dropoff", "location": "Bayview"}
+{"timestamp": "2023-09-19T08:12:35", "driver_id": 101, "event_type": "dropoff", "location": "Nob Hill"}
+{"timestamp": "2023-09-19T09:17:21", "driver_id": 101, "event_type": "dropoff", "location": "Mission"}
+{"timestamp": "2023-09-19T09:31:35", "driver_id": 101, "event_type": "dropoff", "location": "Mission"}
+{"timestamp": "2023-09-19T10:16:05", "driver_id": 101, "event_type": "dropoff", "location": "Nob Hill"}
+{"timestamp": "2023-09-19T10:52:37", "driver_id": 101, "event_type": "dropoff", "location": "Portola"}
+{"timestamp": "2023-09-19T11:23:49", "driver_id": 101, "event_type": "dropoff", "location": "Treasure Island"}
+{"timestamp": "2023-09-19T12:14:29", "driver_id": 101, "event_type": "dropoff", "location": "Japantown"}
+{"timestamp": "2023-09-19T12:35:29", "driver_id": 101, "event_type": "dropoff", "location": "Pacific Heights"}
+{"timestamp": "2023-09-19T13:08:40", "driver_id": 101, "event_type": "dropoff", "location": "Fillmore"}
+{"timestamp": "2023-09-19T13:29:18", "driver_id": 101, "event_type": "dropoff", "location": "Tenderloin"}
+{"timestamp": "2023-09-19T14:18:26", "driver_id": 101, "event_type": "dropoff", "location": "Potrero Hill"}
