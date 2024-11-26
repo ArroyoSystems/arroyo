@@ -3,7 +3,7 @@ use arrow::array::{
     Int64Builder, RecordBatch, StringBuilder, StructBuilder, TimestampNanosecondBuilder,
 };
 use arroyo_formats::should_flush;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
@@ -210,7 +210,7 @@ impl SourceOperator for NexmarkSourceFunc {
         arroyo_state::global_table_config("s", "nexmark source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         // load state
         self.state = Some({
             let ss = ctx
@@ -242,7 +242,7 @@ impl SourceOperator for NexmarkSourceFunc {
         });
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         let state = self.state.as_ref().unwrap().clone();
 
         let mut generator = NexmarkGenerator::from_config(&state.config, state.event_count as u64);

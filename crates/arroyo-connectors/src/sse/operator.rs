@@ -1,5 +1,5 @@
 use crate::sse::SseTable;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{OperatorNode, SourceOperator};
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -67,7 +67,7 @@ impl SourceOperator for SSESourceFunc {
         arroyo_state::global_table_config("e", "sse source state")
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -92,7 +92,7 @@ impl SourceOperator for SSESourceFunc {
 impl SSESourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -132,7 +132,7 @@ impl SSESourceFunc {
         None
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),

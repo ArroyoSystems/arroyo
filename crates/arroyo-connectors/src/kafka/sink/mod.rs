@@ -16,7 +16,7 @@ use rdkafka::ClientConfig;
 use arrow::array::{Array, AsArray, RecordBatch};
 use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{ArrowOperator, AsDisplayable, DisplayableOperator};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
@@ -163,7 +163,7 @@ impl KafkaSinkFunc {
         Ok(())
     }
 
-    async fn flush(&mut self, ctx: &mut ArrowContext) {
+    async fn flush(&mut self, ctx: &mut OperatorContext) {
         self.producer
             .as_ref()
             .unwrap()
@@ -188,7 +188,7 @@ impl KafkaSinkFunc {
         ts: Option<i64>,
         k: Option<Vec<u8>>,
         v: Vec<u8>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         let mut rec = {
             let mut rec = FutureRecord::<Vec<u8>, Vec<u8>>::to(&self.topic);
@@ -271,7 +271,7 @@ impl ArrowOperator for KafkaSinkFunc {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         self.set_timestamp_col(&ctx.in_schemas[0]);
         self.set_key_col(&ctx.in_schemas[0]);
 
@@ -279,7 +279,7 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("Producer creation failed");
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         let values = self.serializer.serialize(&batch);
         let timestamps = batch
             .column(
@@ -306,7 +306,7 @@ impl ArrowOperator for KafkaSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext) {
         self.flush(ctx).await;
         if let ConsistencyMode::ExactlyOnce {
             next_transaction_index,
@@ -330,7 +330,7 @@ impl ArrowOperator for KafkaSinkFunc {
         &mut self,
         epoch: u32,
         _commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         let ConsistencyMode::ExactlyOnce {
             next_transaction_index: _,
@@ -371,7 +371,7 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("sent commit event");
     }
 
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut OperatorContext) {
         self.flush(ctx).await;
         if !self.is_committing() {
             return;

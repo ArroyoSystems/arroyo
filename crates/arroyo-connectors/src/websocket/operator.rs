@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -44,7 +44,7 @@ impl SourceOperator for WebsocketSourceFunc {
         global_table_config("e", "websocket source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -62,7 +62,7 @@ impl SourceOperator for WebsocketSourceFunc {
         );
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(e) => {
@@ -77,7 +77,7 @@ impl SourceOperator for WebsocketSourceFunc {
 impl WebsocketSourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -120,7 +120,7 @@ impl WebsocketSourceFunc {
     async fn handle_message(
         &mut self,
         msg: &[u8],
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<(), UserError> {
         ctx.deserialize_slice(msg, SystemTime::now(), None).await?;
 
@@ -131,7 +131,7 @@ impl WebsocketSourceFunc {
         Ok(())
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         let uri = match Uri::from_str(&self.url.to_string()) {
             Ok(uri) => uri,
             Err(e) => {

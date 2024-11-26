@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -164,7 +164,7 @@ impl SourceOperator for KinesisSourceFunc {
         global_table_config("k", "kinesis source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -172,7 +172,7 @@ impl SourceOperator for KinesisSourceFunc {
         );
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(UserError { name, details, .. }) => {
@@ -189,7 +189,7 @@ impl KinesisSourceFunc {
     /// It returns a future for each shard to fetch the next shard iterator id.
     async fn init_shards(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> anyhow::Result<Vec<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let mut futures = Vec::new();
         let s: &mut GlobalKeyedView<String, ShardState> = ctx
@@ -223,7 +223,7 @@ impl KinesisSourceFunc {
         &mut self,
         shard_id: String,
         async_result: AsyncResult,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
         match async_result {
             AsyncResult::ShardIteratorIdUpdate(new_shard_iterator) => {
@@ -304,7 +304,7 @@ impl KinesisSourceFunc {
         &mut self,
         shard_id: String,
         get_records: GetRecordsOutput,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
         let last_sequence_number = get_records
             .records()
@@ -351,7 +351,7 @@ impl KinesisSourceFunc {
     /// * A `FuturesUnordered` tha contains futures for reading off of shards.
     /// * An interval that periodically polls for new shards, initializing their futures.
     /// * Polling off of the control queue, to perform checkpointing and stop the operator.
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         self.init_client().await;
         let starting_futures = self
             .init_shards(ctx)
@@ -428,7 +428,7 @@ impl KinesisSourceFunc {
     async fn process_records(
         &mut self,
         get_records_output: GetRecordsOutput,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<Option<String>, UserError> {
         let records = get_records_output.records;
         for record in records {
@@ -446,7 +446,7 @@ impl KinesisSourceFunc {
 
     async fn sync_shards(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Result<Vec<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let mut futures = Vec::new();
         for shard in self.get_splits().await? {

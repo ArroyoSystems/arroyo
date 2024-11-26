@@ -5,7 +5,7 @@ use super::NatsState;
 use super::NatsTable;
 use super::ReplayPolicy;
 use super::{get_nats_client, SourceType};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::BadData;
@@ -58,7 +58,7 @@ impl SourceOperator for NatsSourceFunc {
         arroyo_state::global_table_config("n", "NATS source state")
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(res) => res,
             Err(err) => {
@@ -173,7 +173,7 @@ impl NatsSourceFunc {
         &mut self,
         stream: &async_nats::jetstream::stream::Stream,
         sequence_number: u64,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> consumer::Consumer<consumer::pull::Config> {
         match sequence_number {
             1 => info!(
@@ -308,7 +308,7 @@ impl NatsSourceFunc {
         consumer
     }
 
-    async fn get_start_sequence_number(&self, ctx: &mut ArrowContext) -> anyhow::Result<u64> {
+    async fn get_start_sequence_number(&self, ctx: &mut OperatorContext) -> anyhow::Result<u64> {
         let state: Vec<_> = ctx
             .table_manager
             .get_global_keyed_state::<String, NatsState>("n")
@@ -329,7 +329,7 @@ impl NatsSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),

@@ -23,11 +23,9 @@ use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use arroyo_datastream::logical::{
-    LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
-};
+use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorChain, OperatorName};
 use arroyo_df::physical::new_registry;
-use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver, BatchSender};
+use arroyo_operator::context::{batch_bounded, OperatorContext, BatchReceiver, BatchSender, WatermarkHolder};
 use arroyo_operator::operator::OperatorNode;
 use arroyo_operator::operator::Registry;
 use arroyo_operator::ErasedConstructor;
@@ -54,18 +52,17 @@ pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
 }
 
 pub struct SubtaskNode {
-    pub id: String,
+    pub node_id: u32,
     pub subtask_idx: usize,
     pub parallelism: usize,
     pub in_schemas: Vec<ArroyoSchema>,
     pub out_schema: Option<ArroyoSchema>,
-    pub projection: Option<Vec<usize>>,
     pub node: OperatorNode,
 }
 
 impl Debug for SubtaskNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-{}-{}", self.node.name(), self.id, self.subtask_idx)
+        write!(f, "{}-{}-{}", self.node.name(), self.chain_id, self.subtask_idx)
     }
 }
 
@@ -186,8 +183,8 @@ impl Program {
             .node_weights()
             .flat_map(|weight| {
                 (0..weight.parallelism).map(|index| TaskAssignment {
-                    operator_id: weight.operator_id.clone(),
-                    operator_subtask: index as u64,
+                    node_id: weight.node_id,
+                    subtask_idx: index as u32,
                     worker_id: 0,
                     worker_addr: "".into(),
                 })
@@ -213,7 +210,7 @@ impl Program {
 
         let mut parallelism_map = HashMap::new();
         for task in assignments {
-            *(parallelism_map.entry(&task.operator_id).or_insert(0usize)) += 1;
+            *(parallelism_map.entry(&task.node_id).or_insert(0usize)) += 1;
         }
 
         for idx in logical.node_indices() {
@@ -234,23 +231,21 @@ impl Program {
                 .unwrap_or_default();
 
             let node = logical.node_weight(idx).unwrap();
-            let parallelism = *parallelism_map.get(&node.operator_id).unwrap_or_else(|| {
-                warn!("no assignments for operator {}", node.operator_id);
+            let parallelism = *parallelism_map.get(&node.node_id).unwrap_or_else(|| {
+                warn!("no assignments for node {}", node.node_id);
                 &node.parallelism
             });
             for i in 0..parallelism {
                 physical.add_node(SubtaskOrQueueNode::SubtaskNode(SubtaskNode {
-                    id: node.operator_id.clone(),
+                    node_id: node.node_id,
                     subtask_idx: i,
                     parallelism,
                     in_schemas: in_schemas.clone(),
                     out_schema: out_schema.clone(),
                     node: construct_operator(
-                        node.operator_name,
-                        node.operator_config.clone(),
+                        node.operator_chain,
                         registry.clone(),
                     ),
-                    projection: projection.clone(),
                 }));
             }
         }
@@ -714,15 +709,13 @@ impl Engine {
         let tables = node.node.tables();
         let in_qs: Vec<_> = in_qs_map.into_values().flatten().collect();
 
-        let ctx = ArrowContext::new(
+        let ctx = OperatorContext::new(
             task_info,
             checkpoint_metadata.clone(),
-            control_rx,
             control_tx.clone(),
             in_qs.len(),
             node.in_schemas,
             node.out_schema,
-            node.projection,
             out_qs_map
                 .into_values()
                 .map(|v| v.into_values().collect())
@@ -733,7 +726,7 @@ impl Engine {
 
         let operator = Box::new(node.node);
         let join_task = tokio::spawn(async move {
-            operator.start(ctx, in_qs, ready).await;
+            operator.start(control_rx, ctx, in_qs, ready).await;
         });
 
         let send_copy = control_tx.clone();
@@ -752,9 +745,45 @@ impl Engine {
     }
 }
 
+pub fn construct_node(
+    chain: OperatorChain,
+    task_info: TaskInfo,
+    registry: Arc<Registry>
+) -> OperatorNode {
+    if chain.is_source() {
+        let (head, _) = chain.iter().next().unwrap();
+        construct_operator(head.operator_name, &mut head.operator_config[..], registry)
+    } else {
+        let mut head = None;
+        let mut cur = &mut None;
+        for (node, edge) in chain.iter() {
+            let OperatorNode::Operator(op ) = construct_operator(node.operator_name, &mut node.operator_config[..], registry.clone()) else {
+                unreachable!("sources must be the first node in a chain");
+            };
+
+
+            let ctx = OperatorContext {
+                control_tx: (),
+                watermarks: WatermarkHolder::new(),
+                in_schemas: vec![],
+                out_schema: Some(edge.clone()),
+                table_manager: (),
+            };
+
+
+            if cur.is_none() {
+                head = Some(op);
+                cur = &mut head;
+            } else {
+                cur.as_mut().unwrap().next = Some((ctx, op.operator));
+            }
+        }
+    }
+}
+
 pub fn construct_operator(
     operator: OperatorName,
-    config: Vec<u8>,
+    config: &mut [u8],
     registry: Arc<Registry>,
 ) -> OperatorNode {
     let ctor: Box<dyn ErasedConstructor> = match operator {
@@ -770,7 +799,7 @@ pub fn construct_operator(
         OperatorName::InstantJoin => Box::new(InstantJoinConstructor),
         OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
-            let op: api::ConnectorOp = prost::Message::decode(&mut config.as_slice()).unwrap();
+            let op: api::ConnectorOp = prost::Message::decode(config).unwrap();
             return connectors()
                 .get(op.connector.as_str())
                 .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))

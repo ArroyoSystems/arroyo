@@ -14,7 +14,7 @@ use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
 use arroyo_formats::de::FieldValueType;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -51,7 +51,7 @@ pub struct KafkaState {
 }
 
 impl KafkaSourceFunc {
-    async fn get_consumer(&mut self, ctx: &mut ArrowContext) -> anyhow::Result<StreamConsumer> {
+    async fn get_consumer(&mut self, ctx: &mut OperatorContext) -> anyhow::Result<StreamConsumer> {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
 
@@ -145,7 +145,7 @@ impl KafkaSourceFunc {
         Ok(consumer)
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         let consumer = self
             .get_consumer(ctx)
             .await
@@ -286,7 +286,7 @@ impl KafkaSourceFunc {
 
 #[async_trait]
 impl SourceOperator for KafkaSourceFunc {
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(e) => {

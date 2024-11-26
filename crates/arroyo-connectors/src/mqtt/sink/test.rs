@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::mqtt::{create_connection, MqttConfig, Tls};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::{
@@ -80,7 +80,7 @@ impl MqttTopicTester {
 
         let task_info = get_test_task_info();
 
-        let mut ctx = ArrowContext::new(
+        let mut ctx = OperatorContext::new(
             task_info,
             None,
             control_rx,
@@ -102,7 +102,7 @@ impl MqttTopicTester {
 
 struct MqttSinkWithWrites {
     sink: MqttSinkFunc,
-    ctx: ArrowContext,
+    ctx: OperatorContext,
 }
 
 #[tokio::test]

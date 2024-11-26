@@ -2,7 +2,7 @@ use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
 };
@@ -71,7 +71,7 @@ impl ArrowOperator for ValueExecutionOperator {
         }
     }
 
-    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut OperatorContext) {
         let mut records = self.executor.process_batch(record_batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
@@ -196,7 +196,7 @@ impl ArrowOperator for KeyExecutionOperator {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         let mut records = self.executor.process_batch(batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
