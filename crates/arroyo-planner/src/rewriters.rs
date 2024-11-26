@@ -29,7 +29,8 @@ use datafusion::common::{
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    BinaryExpr, ColumnUnnestList, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest, UserDefinedLogicalNode,
+    BinaryExpr, ColumnUnnestList, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
+    UserDefinedLogicalNode,
 };
 use std::collections::HashMap;
 use std::collections::HashSet;
