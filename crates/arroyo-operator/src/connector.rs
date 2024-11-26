@@ -1,9 +1,11 @@
 use crate::operator::OperatorNode;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
+use arrow::datatypes::{DataType, Field};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
+use arroyo_types::DisplayAsSql;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
@@ -20,6 +22,11 @@ pub struct Connection {
     pub schema: ConnectionSchema,
     pub config: String,
     pub description: String,
+}
+
+pub struct MetadataDef {
+    pub name: &'static str,
+    pub data_type: DataType,
 }
 
 #[allow(clippy::wrong_self_convention)]
@@ -43,6 +50,10 @@ pub trait Connector: Send {
     }
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
+
+    fn metadata_defs(&self) -> &'static [MetadataDef] {
+        &[]
+    }
 
     fn table_type(&self, config: Self::ProfileT, table: Self::TableT) -> ConnectionType;
 
@@ -115,6 +126,8 @@ pub trait ErasedConnector: Send {
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
 
+    fn metadata_defs(&self) -> &'static [MetadataDef];
+
     fn validate_config(&self, s: &serde_json::Value) -> Result<(), serde_json::Error>;
 
     fn validate_table(&self, s: &serde_json::Value) -> Result<(), serde_json::Error>;
@@ -183,6 +196,10 @@ impl<C: Connector> ErasedConnector for C {
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
         self.metadata()
+    }
+
+    fn metadata_defs(&self) -> &'static [MetadataDef] {
+        self.metadata_defs()
     }
 
     fn config_description(&self, s: &serde_json::Value) -> Result<String, serde_json::Error> {
@@ -257,6 +274,32 @@ impl<C: Connector> ErasedConnector for C {
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
+        if let Some(schema) = schema {
+            for sf in schema.fields.iter() {
+                if let Some(key) = &sf.metadata_key {
+                    let field = self
+                        .metadata_defs()
+                        .iter()
+                        .find(|f| f.name == key)
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "unknown metadata field '{}' for {} connector '{}'",
+                                key,
+                                self.name(),
+                                name
+                            )
+                        })?;
+
+                    let arrow_field: Field = sf.clone().into();
+
+                    if !field.data_type.equals_datatype(arrow_field.data_type()) {
+                        bail!("incorrect data type for metadata field '{}'; expected {}, but found {}",
+                        arrow_field.name(), DisplayAsSql(&field.data_type), DisplayAsSql(arrow_field.data_type()));
+                    }
+                }
+            }
+        }
+
         self.from_options(name, options, schema, profile)
     }
 

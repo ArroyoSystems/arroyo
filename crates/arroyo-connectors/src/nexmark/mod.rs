@@ -211,6 +211,7 @@ impl Connector for NexmarkConnector {
             format: None,
             bad_data: None,
             framing: None,
+            metadata_fields: vec![],
         };
 
         Ok(Connection {

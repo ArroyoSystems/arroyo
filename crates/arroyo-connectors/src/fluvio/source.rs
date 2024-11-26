@@ -166,7 +166,7 @@ impl FluvioSourceFunc {
                     match message {
                         Some((_, Ok(msg))) => {
                             let timestamp = from_millis(msg.timestamp().max(0) as u64);
-                            ctx.deserialize_slice(msg.value(), timestamp).await?;
+                            ctx.deserialize_slice(msg.value(), timestamp, None).await?;
 
                             if ctx.should_flush() {
                                 ctx.flush_buffer().await?;

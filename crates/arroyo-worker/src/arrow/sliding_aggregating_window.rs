@@ -479,7 +479,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
 
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
 
@@ -494,14 +494,14 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         };
         let finish_execution_plan = finish_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;
 
         let final_projection = PhysicalPlanNode::decode(&mut config.final_projection.as_slice())?;
         let final_projection = final_projection.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;
 

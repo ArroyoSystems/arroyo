@@ -15,8 +15,8 @@ use crate::{
 };
 
 use arrow_schema::DataType;
-use arroyo_rpc::IS_RETRACT_FIELD;
 use arroyo_rpc::TIMESTAMP_FIELD;
+use arroyo_rpc::UPDATING_META_FIELD;
 
 use crate::extension::AsyncUDFExtension;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
@@ -29,7 +29,7 @@ use datafusion::common::{
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    BinaryExpr, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest, UserDefinedLogicalNode,
+    BinaryExpr, ColumnUnnestList, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest, UserDefinedLogicalNode,
 };
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -52,11 +52,13 @@ impl<'a> SourceRewriter<'a> {
                 .find_map(|f| {
                     if f.field().name() == &watermark_field {
                         return match f {
-                            FieldSpec::StructField(f) => Some(Expr::Column(Column {
-                                relation: None,
-                                name: f.name().to_string(),
-                            })),
-                            FieldSpec::VirtualField { expression, .. } => Some(expression.clone()),
+                            FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
+                                Some(Expr::Column(Column {
+                                    relation: None,
+                                    name: field.name().to_string(),
+                                }))
+                            }
+                            FieldSpec::Virtual { expression, .. } => Some(expression.clone()),
                         };
                     }
                     None
@@ -87,11 +89,13 @@ impl<'a> SourceRewriter<'a> {
             .fields
             .iter()
             .map(|field| match field {
-                FieldSpec::StructField(f) => Expr::Column(Column {
-                    relation: Some(qualifier.clone()),
-                    name: f.name().to_string(),
-                }),
-                FieldSpec::VirtualField { field, expression } => expression
+                FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
+                    Expr::Column(Column {
+                        relation: Some(qualifier.clone()),
+                        name: field.name().to_string(),
+                    })
+                }
+                FieldSpec::Virtual { field, expression } => expression
                     .clone()
                     .alias_qualified(Some(qualifier.clone()), field.name().to_string()),
             })
@@ -109,11 +113,13 @@ impl<'a> SourceRewriter<'a> {
                 .find_map(|f| {
                     if f.field().name() == &event_time_field {
                         return match f {
-                            FieldSpec::StructField(f) => Some(Expr::Column(Column {
-                                relation: Some(qualifier.clone()),
-                                name: f.name().to_string(),
-                            })),
-                            FieldSpec::VirtualField { expression, .. } => Some(expression.clone()),
+                            FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
+                                Some(Expr::Column(Column {
+                                    relation: Some(qualifier.clone()),
+                                    name: field.name().to_string(),
+                                }))
+                            }
+                            FieldSpec::Virtual { expression, .. } => Some(expression.clone()),
                         };
                     }
                     None
@@ -137,7 +143,7 @@ impl<'a> SourceRewriter<'a> {
         if table.is_updating() {
             expressions.push(Expr::Column(Column::new(
                 Some(qualifier.clone()),
-                IS_RETRACT_FIELD,
+                UPDATING_META_FIELD,
             )))
         }
         Ok(expressions)
@@ -160,7 +166,10 @@ impl<'a> SourceRewriter<'a> {
             }
             (
                 LogicalPlan::Extension(Extension {
-                    node: Arc::new(DebeziumUnrollingExtension::try_new(table_source_extension)?),
+                    node: Arc::new(DebeziumUnrollingExtension::try_new(
+                        table_source_extension,
+                        table.primary_keys.clone(),
+                    )?),
                 }),
                 None,
             )
@@ -418,7 +427,13 @@ impl TreeNodeRewriter for UnnestRewriter {
                 )
                 .qualified_column()],
                 input: produce_list,
-                list_type_columns: vec![],
+                list_type_columns: vec![(
+                    unnest_idx,
+                    ColumnUnnestList {
+                        output_column: Column::new_unqualified(UNNESTED_COL),
+                        depth: 1,
+                    },
+                )],
                 struct_type_columns: vec![],
                 dependency_indices: vec![],
                 schema: Arc::new(schema_from_df_fields(&unnest_fields).unwrap()),
@@ -530,9 +545,25 @@ impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
 
         let udf = self.provider.dylib_udfs.get(&name).unwrap().clone();
 
+        let input = if matches!(*projection.input, LogicalPlan::Projection(..)) {
+            // if our input is a projection, we need to plan it separately -- this happens
+            // for subqueries
+
+            Arc::new(LogicalPlan::Extension(Extension {
+                node: Arc::new(RemoteTableExtension {
+                    input: (*projection.input).clone(),
+                    name: TableReference::bare("subquery_projection"),
+                    schema: projection.input.schema().clone(),
+                    materialize: false,
+                }),
+            }))
+        } else {
+            projection.input
+        };
+
         Ok(Transformed::yes(LogicalPlan::Extension(Extension {
             node: Arc::new(AsyncUDFExtension {
-                input: projection.input,
+                input,
                 name,
                 udf,
                 arg_exprs: args,

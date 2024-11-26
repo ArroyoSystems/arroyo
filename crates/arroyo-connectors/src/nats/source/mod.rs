@@ -366,8 +366,7 @@ impl NatsSourceFunc {
                                     let payload = msg.payload.as_ref();
                                     let message_info = msg.info().expect("Couldn't get message information");
                                     let timestamp = message_info.published.into() ;
-
-                                    ctx.deserialize_slice(payload, timestamp).await?;
+                                    ctx.deserialize_slice(payload, timestamp, None).await?;
 
                                     debug!("---------------------------------------------->");
                                     debug!(
@@ -493,7 +492,7 @@ impl NatsSourceFunc {
                                 Some(msg) => {
                                     let payload = msg.payload.as_ref();
                                     let timestamp = SystemTime::now();
-                                    ctx.deserialize_slice(payload, timestamp).await?;
+                                    ctx.deserialize_slice(payload, timestamp, None).await?;
                                     if ctx.should_flush() {
                                         ctx.flush_buffer().await?;
                                     }

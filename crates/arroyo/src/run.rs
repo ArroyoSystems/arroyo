@@ -391,7 +391,10 @@ pub async fn run(args: RunArgs) {
             c.api.http_port = 0;
         }
         c.controller.rpc_port = 0;
-        c.controller.scheduler = Scheduler::Process;
+
+        if c.controller.scheduler != Scheduler::Embedded {
+            c.controller.scheduler = Scheduler::Process;
+        }
 
         c.pipeline.default_sink = DefaultSink::Stdout;
     });
@@ -411,7 +414,9 @@ pub async fn run(args: RunArgs) {
 
     config::update(|c| c.controller.rpc_port = controller_port);
 
-    let http_port = arroyo_api::start_server(db.clone(), shutdown.guard("api")).unwrap();
+    let http_port = arroyo_api::start_server(db.clone(), shutdown.guard("api"))
+        .await
+        .unwrap();
 
     let client = Arc::new(Client::new_with_client(
         &format!("http://localhost:{http_port}/api",),

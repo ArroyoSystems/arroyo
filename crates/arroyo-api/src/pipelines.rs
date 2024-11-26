@@ -423,8 +423,8 @@ pub(crate) async fn create_pipeline_int<'a>(
             "job_id": job_id,
             "parallelism": parallelism,
             "has_udfs": udfs.first().map(|e| !e.definition.trim().is_empty()).unwrap_or(false),
-            "rust_udfs": udfs.iter().find(|e| e.language == UdfLanguage::Rust),
-            "python_udfs": udfs.iter().find(|e| e.language == UdfLanguage::Python),
+            "rust_udfs": udfs.iter().any(|e| e.language == UdfLanguage::Rust),
+            "python_udfs": udfs.iter().any(|e| e.language == UdfLanguage::Python),
             // TODO: program features
             "features": compiled.program.features(),
         }),

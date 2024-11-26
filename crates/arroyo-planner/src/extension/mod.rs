@@ -8,21 +8,15 @@ use arroyo_datastream::logical::{
 };
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
-use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
+use arroyo_rpc::{updating_meta_field, TIMESTAMP_FIELD};
 use datafusion::common::{internal_err, DFSchemaRef, DataFusionError, Result, TableReference};
 use datafusion::logical_expr::{
     Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore,
 };
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
-use datafusion_proto::protobuf::ProjectionNode;
 use prost::Message;
 use watermark_node::WatermarkNode;
-
-use crate::builder::{NamedNode, Planner};
-use crate::schemas::{add_timestamp_field, has_timestamp_field};
-use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
-use join::JoinExtension;
 
 use self::debezium::{DebeziumUnrollingExtension, ToDebeziumExtension};
 use self::updating_aggregate::UpdatingAggregateExtension;
@@ -31,6 +25,10 @@ use self::{
     remote_table::RemoteTableExtension, sink::SinkExtension, table_source::TableSourceExtension,
     window_fn::WindowFunctionExtension,
 };
+use crate::builder::{NamedNode, Planner};
+use crate::schemas::{add_timestamp_field, has_timestamp_field};
+use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
+use join::JoinExtension;
 
 pub(crate) mod aggregate;
 pub(crate) mod debezium;
@@ -99,6 +97,23 @@ impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtensio
     }
 }
 
+#[macro_export]
+macro_rules! multifield_partial_ord {
+    ($ty:ty, $($field:tt), *) => {
+        impl PartialOrd for $ty {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                $(
+                    let cmp = self.$field.partial_cmp(&other.$field)?;
+                    if cmp != std::cmp::Ordering::Equal {
+                        return Some(cmp);
+                    }
+                )*
+                Some(std::cmp::Ordering::Equal)
+            }
+        }
+}
+    }
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TimestampAppendExtension {
     pub(crate) input: LogicalPlan,
@@ -119,6 +134,8 @@ impl TimestampAppendExtension {
         }
     }
 }
+
+multifield_partial_ord!(TimestampAppendExtension, input, qualifier);
 
 impl UserDefinedLogicalNodeCore for TimestampAppendExtension {
     fn name(&self) -> &str {
@@ -169,6 +186,18 @@ pub(crate) struct AsyncUDFExtension {
     pub(crate) final_schema: DFSchemaRef,
 }
 
+multifield_partial_ord!(
+    AsyncUDFExtension,
+    input,
+    name,
+    udf,
+    arg_exprs,
+    final_exprs,
+    ordered,
+    max_concurrency,
+    timeout
+);
+
 impl ArroyoExtension for AsyncUDFExtension {
     fn node_name(&self) -> Option<NamedNode> {
         None
@@ -185,7 +214,7 @@ impl ArroyoExtension for AsyncUDFExtension {
             .iter()
             .map(|e| {
                 let p = planner.create_physical_expr(e, self.input.schema())?;
-                Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
+                Ok(serialize_physical_expr(&p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -203,15 +232,9 @@ impl ArroyoExtension for AsyncUDFExtension {
             .iter()
             .map(|e| {
                 let p = planner.create_physical_expr(e, &post_udf_schema)?;
-                Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
+                Ok(serialize_physical_expr(&p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
             .collect::<Result<Vec<_>>>()?;
-
-        ProjectionNode {
-            input: None,
-            expr: vec![],
-            optional_alias: None,
-        };
 
         let config = AsyncUdfOperator {
             name: self.name.clone(),
@@ -261,6 +284,8 @@ pub(crate) struct IsRetractExtension {
     pub(crate) timestamp_qualifier: Option<TableReference>,
 }
 
+multifield_partial_ord!(IsRetractExtension, input, timestamp_qualifier);
+
 impl IsRetractExtension {
     pub(crate) fn new(input: LogicalPlan, timestamp_qualifier: Option<TableReference>) -> Self {
         let mut output_fields = fields_with_qualifiers(input.schema());
@@ -272,12 +297,7 @@ impl IsRetractExtension {
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         );
-        output_fields.push(DFField::new(
-            None,
-            IS_RETRACT_FIELD,
-            DataType::Boolean,
-            false,
-        ));
+        output_fields.push((timestamp_qualifier.clone(), updating_meta_field()).into());
         let schema = Arc::new(schema_from_df_fields(&output_fields).unwrap());
         Self {
             input,

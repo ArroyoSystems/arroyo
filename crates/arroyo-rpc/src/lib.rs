@@ -14,7 +14,7 @@ use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::Result;
 use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
@@ -30,12 +30,12 @@ pub mod df;
 
 pub mod grpc {
     pub mod rpc {
-        #![allow(clippy::derive_partial_eq_without_eq)]
+        #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
         tonic::include_proto!("arroyo_rpc");
     }
 
     pub mod api {
-        #![allow(clippy::derive_partial_eq_without_eq)]
+        #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
         tonic::include_proto!("api");
     }
 
@@ -184,6 +184,12 @@ pub struct RateLimit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MetadataField {
+    pub field_name: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OperatorConfig {
     pub connection: Value,
     pub table: Value,
@@ -191,6 +197,8 @@ pub struct OperatorConfig {
     pub bad_data: Option<BadData>,
     pub framing: Option<Framing>,
     pub rate_limit: Option<RateLimit>,
+    #[serde(default)]
+    pub metadata_fields: Vec<MetadataField>,
 }
 
 impl Default for OperatorConfig {
@@ -202,6 +210,7 @@ impl Default for OperatorConfig {
             bad_data: None,
             framing: None,
             rate_limit: None,
+            metadata_fields: vec![],
         }
     }
 }
@@ -214,7 +223,34 @@ pub fn error_chain(e: anyhow::Error) -> String {
 }
 
 pub const TIMESTAMP_FIELD: &str = "_timestamp";
-pub const IS_RETRACT_FIELD: &str = "_is_retract";
+pub const UPDATING_META_FIELD: &str = "_updating_meta";
+
+pub fn updating_meta_fields() -> Fields {
+    static UPDATING_META_FIELDS: OnceLock<Fields> = OnceLock::new();
+
+    UPDATING_META_FIELDS
+        .get_or_init(|| {
+            Fields::from(vec![
+                Field::new("is_retract", DataType::Boolean, true),
+                Field::new("id", DataType::FixedSizeBinary(16), true),
+            ])
+        })
+        .clone()
+}
+
+pub fn updating_meta_field() -> Arc<Field> {
+    static UPDATING_META_DATATYPE: OnceLock<Arc<Field>> = OnceLock::new();
+
+    UPDATING_META_DATATYPE
+        .get_or_init(|| {
+            Arc::new(Field::new(
+                UPDATING_META_FIELD,
+                DataType::Struct(updating_meta_fields()),
+                false,
+            ))
+        })
+        .clone()
+}
 // need to handle the empty case as a row converter without sort fields emits empty Rows.
 #[derive(Debug)]
 pub enum Converter {

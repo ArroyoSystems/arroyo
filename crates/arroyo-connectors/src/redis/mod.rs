@@ -378,6 +378,7 @@ impl Connector for RedisConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            metadata_fields: vec![],
         };
 
         Ok(Connection {

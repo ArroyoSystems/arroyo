@@ -10,7 +10,7 @@ use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::retry;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
-use aws_config::{from_env, Region};
+use aws_config::{BehaviorVersion, Region};
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::types::PutRecordsRequestEntry;
 use aws_sdk_kinesis::Client as KinesisClient;
@@ -33,7 +33,7 @@ impl ArrowOperator for KinesisSinkFunc {
     }
 
     async fn on_start(&mut self, _ctx: &mut ArrowContext) {
-        let mut loader = from_env();
+        let mut loader = aws_config::defaults(BehaviorVersion::v2024_03_28());
         if let Some(region) = &self.aws_region {
             loader = loader.region(Region::new(region.clone()));
         }

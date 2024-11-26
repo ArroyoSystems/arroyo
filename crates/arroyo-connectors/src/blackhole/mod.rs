@@ -99,6 +99,7 @@ impl Connector for BlackholeConnector {
             format: None,
             bad_data: None,
             framing: None,
+            metadata_fields: vec![],
         };
 
         Ok(Connection {

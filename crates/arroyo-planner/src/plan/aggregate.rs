@@ -6,12 +6,13 @@ use crate::{
     fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, ArroyoSchemaProvider,
     DFField, WindowBehavior,
 };
-use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
+use datafusion::functions_aggregate::expr_fn::max;
 use datafusion::logical_expr;
-use datafusion::logical_expr::expr::AggregateFunction;
-use datafusion::logical_expr::{aggregate_function, Aggregate, Expr, Extension, LogicalPlan};
+use datafusion::logical_expr::{Aggregate, Expr, Extension, LogicalPlan};
+use datafusion::prelude::col;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -30,7 +31,7 @@ impl<'a> AggregateRewriter<'a> {
     ) -> Result<Transformed<LogicalPlan>> {
         if input
             .schema()
-            .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+            .has_column_with_unqualified_name(UPDATING_META_FIELD)
         {
             return plan_err!("can't currently nest updating aggregates");
         }
@@ -79,16 +80,11 @@ impl<'a> AggregateRewriter<'a> {
         else {
             return plan_err!("no timestamp field found in schema");
         };
+
         let timestamp_field: DFField = timestamp_field.into();
         let column = timestamp_field.qualified_column();
-        aggr_expr.push(Expr::AggregateFunction(AggregateFunction::new(
-            aggregate_function::AggregateFunction::Max,
-            vec![Expr::Column(column.clone())],
-            false,
-            None,
-            None,
-            None,
-        )));
+        aggr_expr.push(max(col(column.clone())));
+
         let mut output_schema_fields = fields_with_qualifiers(&schema);
         output_schema_fields.push(timestamp_field.clone());
         let output_schema = Arc::new(schema_from_df_fields_with_metadata(
@@ -115,7 +111,7 @@ impl<'a> AggregateRewriter<'a> {
             (0..key_count).collect(),
             column.relation,
             schema_provider.planning_options.ttl,
-        );
+        )?;
         let final_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(updating_aggregate_extension),
         });

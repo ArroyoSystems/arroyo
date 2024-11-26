@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
-    IS_RETRACT_FIELD,
+    UPDATING_META_FIELD,
 };
 use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
 
@@ -13,6 +13,7 @@ use prost::Message;
 
 use crate::{
     builder::{NamedNode, Planner},
+    multifield_partial_ord,
     tables::Table,
 };
 
@@ -31,6 +32,8 @@ pub(crate) struct SinkExtension {
     inputs: Arc<Vec<LogicalPlan>>,
 }
 
+multifield_partial_ord!(SinkExtension, name, input);
+
 impl SinkExtension {
     pub fn new(
         name: TableReference,
@@ -40,7 +43,7 @@ impl SinkExtension {
     ) -> Result<Self> {
         let input_is_updating = input
             .schema()
-            .has_column_with_unqualified_name(IS_RETRACT_FIELD);
+            .has_column_with_unqualified_name(UPDATING_META_FIELD);
         match &table {
             Table::ConnectorTable(connector_table) => {
                 match (input_is_updating, connector_table.is_updating()) {

@@ -1,5 +1,5 @@
 use crate::formats::{BadData, Format, Framing};
-use crate::primitive_to_sql;
+use crate::{primitive_to_sql, MetadataField};
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ pub struct ConnectionProfilePost {
     pub config: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Hash, PartialOrd)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionType {
     Source,
@@ -120,6 +120,8 @@ pub struct SourceField {
     pub field_name: String,
     pub field_type: SourceFieldType,
     pub nullable: bool,
+    #[serde(default)]
+    pub metadata_key: Option<String>,
 }
 
 impl From<SourceField> for Field {
@@ -220,6 +222,7 @@ impl TryFrom<Field> for SourceField {
                 sql_name,
             },
             nullable: f.is_nullable(),
+            metadata_key: None,
         })
     }
 }
@@ -273,22 +276,28 @@ impl ConnectionSchema {
     }
 
     pub fn validate(self) -> anyhow::Result<Self> {
+        let non_metadata_fields: Vec<_> = self
+            .fields
+            .iter()
+            .filter(|f| f.metadata_key.is_none())
+            .collect();
+
         match &self.format {
             Some(Format::RawString(_)) => {
-                if self.fields.len() != 1
-                    || self.fields.first().unwrap().field_type.r#type
+                if non_metadata_fields.len() != 1
+                    || non_metadata_fields.first().unwrap().field_type.r#type
                         != FieldType::Primitive(PrimitiveType::String)
-                    || self.fields.first().unwrap().field_name != "value"
+                    || non_metadata_fields.first().unwrap().field_name != "value"
                 {
                     bail!("raw_string format requires a schema with a single field called `value` of type TEXT");
                 }
             }
             Some(Format::Json(json_format)) => {
                 if json_format.unstructured
-                    && (self.fields.len() != 1
-                        || self.fields.first().unwrap().field_type.r#type
+                    && (non_metadata_fields.len() != 1
+                        || non_metadata_fields.first().unwrap().field_type.r#type
                             != FieldType::Primitive(PrimitiveType::Json)
-                        || self.fields.first().unwrap().field_name != "value")
+                        || non_metadata_fields.first().unwrap().field_name != "value")
                 {
                     bail!("json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON");
                 }
@@ -303,6 +312,18 @@ impl ConnectionSchema {
     pub fn arroyo_schema(&self) -> ArroyoSchemaRef {
         let fields: Vec<Field> = self.fields.iter().map(|f| f.clone().into()).collect();
         Arc::new(ArroyoSchema::from_fields(fields))
+    }
+
+    pub fn metadata_fields(&self) -> Vec<MetadataField> {
+        self.fields
+            .iter()
+            .filter_map(|f| {
+                Some(MetadataField {
+                    field_name: f.field_name.clone(),
+                    key: f.metadata_key.clone()?,
+                })
+            })
+            .collect()
     }
 }
 

@@ -125,7 +125,7 @@ impl ArrowOperator for AsyncUdfOperator {
                     "input_exprs",
                     self.input_exprs
                         .iter()
-                        .map(|e| format!("{}", e))
+                        .map(|e| format!("{:?}", e))
                         .collect::<Vec<_>>()
                         .join(", ")
                         .into(),
@@ -134,7 +134,7 @@ impl ArrowOperator for AsyncUdfOperator {
                     "final_exprs",
                     self.final_exprs
                         .iter()
-                        .map(|e| format!("{}", e))
+                        .map(|e| format!("{:?}", e))
                         .collect::<Vec<_>>()
                         .join(", ")
                         .into(),

@@ -26,11 +26,13 @@ use arroyo_storage::StorageProviderRef;
 use arroyo_types::{
     from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfoRef,
 };
+use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 
 use futures::{StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
+use parquet::arrow::AsyncArrowWriter;
 use parquet::{
-    arrow::{async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder},
+    arrow::ParquetRecordBatchStreamBuilder,
     basic::{Compression, ZstdLevel},
     file::properties::WriterProperties,
 };

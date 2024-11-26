@@ -8,14 +8,14 @@ use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 
 use prost::Message;
 
+use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
+use crate::tables::FieldSpec;
 use crate::{
     builder::{NamedNode, Planner},
-    schema_from_df_fields,
+    multifield_partial_ord, schema_from_df_fields,
     schemas::add_timestamp_field,
     tables::ConnectorTable,
 };
-
-use super::{ArroyoExtension, DebeziumUnrollingExtension, NodeWithIncomingEdges};
 pub(crate) const TABLE_SOURCE_NAME: &str = "TableSourceExtension";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -25,19 +25,22 @@ pub(crate) struct TableSourceExtension {
     pub(crate) schema: DFSchemaRef,
 }
 
+multifield_partial_ord!(TableSourceExtension, name, table);
+
 impl TableSourceExtension {
     pub fn new(name: TableReference, table: ConnectorTable) -> Self {
         let physical_fields = table
             .fields
             .iter()
             .filter_map(|field| match field {
-                crate::tables::FieldSpec::StructField(field) => {
+                FieldSpec::Struct(field) | FieldSpec::Metadata { field, .. } => {
                     Some((Some(name.clone()), Arc::new(field.clone())).into())
                 }
-                crate::tables::FieldSpec::VirtualField { .. } => None,
+                FieldSpec::Virtual { .. } => None,
             })
             .collect::<Vec<_>>();
         let base_schema = Arc::new(schema_from_df_fields(&physical_fields).unwrap());
+
         let schema = if table.is_updating() {
             DebeziumUnrollingExtension::as_debezium_schema(&base_schema, Some(name.clone()))
                 .unwrap()

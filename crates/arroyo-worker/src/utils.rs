@@ -13,20 +13,21 @@ fn format_arrow_schema_fields(schema: &Schema) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn to_d2(logical: &LogicalProgram) -> String {
-    let registry = Arc::new(new_registry());
-    assert!(
-        logical.program_config.udf_dylibs.is_empty(),
-        "UDFs not supported"
-    );
-    assert!(
-        logical.program_config.python_udfs.is_empty(),
-        "UDFs not supported"
-    );
+pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
+    let mut registry = new_registry();
+
+    for (name, udf) in &logical.program_config.udf_dylibs {
+        registry.load_dylib(name, udf).await?;
+    }
+
+    for udf in logical.program_config.python_udfs.values() {
+        registry.add_python_udf(udf).await?;
+    }
+
+    let registry = Arc::new(registry);
 
     let mut d2 = String::new();
 
-    // Nodes
     for idx in logical.graph.node_indices() {
         let node = logical.graph.node_weight(idx).unwrap();
         let operator = construct_operator(
@@ -36,10 +37,9 @@ pub fn to_d2(logical: &LogicalProgram) -> String {
         );
         let display = operator.display();
 
-        // Create a Markdown-formatted label with operator details
         let mut label = format!("### {} ({})", operator.name(), &display.name);
         for (field, value) in display.fields {
-            label.push_str(&format!("\n- **{}**: {}", field, value));
+            label.push_str(&format!("\n## {}\n\n{}", field, value));
         }
 
         writeln!(
@@ -56,37 +56,30 @@ pub fn to_d2(logical: &LogicalProgram) -> String {
         .unwrap();
     }
 
-    // Edges and Schema Nodes
     for idx in logical.graph.edge_indices() {
         let edge = logical.graph.edge_weight(idx).unwrap();
         let (from, to) = logical.graph.edge_endpoints(idx).unwrap();
 
-        // Edge label (could be empty or minimal)
         let edge_label = format!("{}", edge.edge_type);
 
-        // Create a schema node using sql_table shape
         let schema_node_name = format!("schema_{}", idx.index());
         let schema_fields = format_arrow_schema_fields(&edge.schema.schema);
 
-        // Begin schema node definition
         writeln!(&mut d2, "{}: {{", schema_node_name).unwrap();
         writeln!(&mut d2, "  shape: sql_table").unwrap();
 
-        // Add fields to the schema node
         for (field_name, field_type) in schema_fields {
             writeln!(
                 &mut d2,
-                "  \"{}\": \"{}\"", // Field definition
+                "  \"{}\": \"{}\"",
                 field_name.replace("\"", "\\\""),
                 field_type.replace("\"", "\\\"")
             )
             .unwrap();
         }
 
-        // End schema node definition
         writeln!(&mut d2, "}}").unwrap();
 
-        // Connect source operator to schema node
         writeln!(
             &mut d2,
             "{} -> {}: \"{}\"",
@@ -96,9 +89,8 @@ pub fn to_d2(logical: &LogicalProgram) -> String {
         )
         .unwrap();
 
-        // Connect schema node to destination operator
         writeln!(&mut d2, "{} -> {}", schema_node_name, to.index()).unwrap();
     }
 
-    d2
+    Ok(d2)
 }

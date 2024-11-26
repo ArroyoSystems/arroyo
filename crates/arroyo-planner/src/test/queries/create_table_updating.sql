@@ -5,7 +5,7 @@ CREATE TABLE nexmark (
     channel text,
     url  text,
     datetime timestamp,
-    extra text,
+    extra text
 ) WITH (
     connector = 'filesystem',
     format = 'parquet', 

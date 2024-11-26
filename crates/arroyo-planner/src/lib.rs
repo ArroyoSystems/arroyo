@@ -3,7 +3,7 @@
 pub mod builder;
 pub(crate) mod extension;
 pub mod external;
-mod json;
+mod functions;
 pub mod logical;
 pub mod physical;
 mod plan;
@@ -15,9 +15,9 @@ pub mod udafs;
 
 #[cfg(test)]
 mod test;
+mod utils;
 
 use anyhow::bail;
-use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType};
 use arrow_schema::{Field, FieldRef, Schema};
 use arroyo_datastream::WindowType;
@@ -27,17 +27,15 @@ use datafusion::common::tree_node::TreeNode;
 use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
-use datafusion::physical_plan::functions::make_scalar_function;
-
-use datafusion::prelude::{create_udf, SessionConfig};
+use datafusion::prelude::SessionConfig;
 
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
-use datafusion::sql::sqlparser::parser::Parser;
+use datafusion::sql::sqlparser::parser::{Parser, ParserError};
 use datafusion::sql::{planner::ContextProvider, sqlparser, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    create_udaf, Expr, Extension, LogicalPlan, ReturnTypeFunction, ScalarUDF, Signature,
+    create_udaf, Expr, Extension, LogicalPlan, ScalarUDF, ScalarUDFImpl, Signature,
     UserDefinedLogicalNode, Volatility, WindowUDF,
 };
 
@@ -55,9 +53,9 @@ use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig, PythonUdfConfig}
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion::common::DataFusionError;
 use std::collections::HashSet;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
-use crate::json::{is_json_union, register_json_functions, serialize_outgoing_json};
+use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{
     SinkInputRewriter, SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter,
 };
@@ -71,14 +69,13 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
 use arroyo_udf_python::PythonUDF;
-use datafusion::execution::context::SessionState;
-use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::execution::FunctionRegistry;
+use datafusion::execution::{FunctionRegistry, SessionStateBuilder, SessionStateDefaults};
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::optimizer::Analyzer;
 use datafusion::sql::sqlparser::ast::{OneOrManyWithParens, Statement};
+use std::any::Any;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::Item;
@@ -113,6 +110,7 @@ pub struct ArroyoSchemaProvider {
     tables: HashMap<UniCase<String>, Table>,
     pub functions: HashMap<String, Arc<ScalarUDF>>,
     pub aggregate_functions: HashMap<String, Arc<AggregateUDF>>,
+    pub window_functions: HashMap<String, Arc<WindowUDF>>,
     pub connections: HashMap<String, Connection>,
     profiles: HashMap<String, ConnectionProfile>,
     pub udf_defs: HashMap<String, UdfDef>,
@@ -125,85 +123,130 @@ pub struct ArroyoSchemaProvider {
 }
 
 pub fn register_functions(registry: &mut dyn FunctionRegistry) {
-    datafusion_functions::register_all(registry).unwrap();
-    datafusion::functions_array::register_all(registry).unwrap();
-    datafusion::functions_aggregate::register_all(registry).unwrap();
     datafusion_functions_json::register_all(registry).unwrap();
-    register_json_functions(registry);
+    functions::register_all(registry);
+
+    for p in SessionStateDefaults::default_scalar_functions() {
+        registry.register_udf(p).unwrap();
+    }
+
+    for p in SessionStateDefaults::default_aggregate_functions() {
+        registry.register_udaf(p).unwrap();
+    }
+
+    for p in SessionStateDefaults::default_window_functions() {
+        registry.register_udwf(p).unwrap();
+    }
+
+    for p in SessionStateDefaults::default_expr_planners() {
+        registry.register_expr_planner(p).unwrap();
+    }
+}
+
+/// A UDF implementation that exists only at plan time, and which will be re-planned
+/// into some other form before execution
+#[allow(clippy::type_complexity)]
+struct PlaceholderUdf {
+    name: String,
+    signature: Signature,
+    return_type: Arc<dyn Fn(&[DataType]) -> Result<DataType> + Send + Sync + 'static>,
+}
+
+impl Debug for PlaceholderUdf {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PlaceholderUDF<{}>", self.name)
+    }
+}
+
+impl ScalarUDFImpl for PlaceholderUdf {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, args: &[DataType]) -> Result<DataType> {
+        (self.return_type)(args)
+    }
+}
+
+impl PlaceholderUdf {
+    pub fn with_return(
+        name: impl Into<String>,
+        args: Vec<DataType>,
+        ret: DataType,
+    ) -> Arc<ScalarUDF> {
+        Arc::new(ScalarUDF::new_from_impl(PlaceholderUdf {
+            name: name.into(),
+            signature: Signature::exact(args, Volatility::Volatile),
+            return_type: Arc::new(move |_| Ok(ret.clone())),
+        }))
+    }
 }
 
 impl ArroyoSchemaProvider {
     pub fn new() -> Self {
-        let mut functions = HashMap::new();
+        let mut registry = Self {
+            ..Default::default()
+        };
 
-        let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
-
-        let window_return_type = Arc::new(window_arrow_struct());
-        functions.insert(
-            "hop".to_string(),
-            Arc::new(create_udf(
+        registry
+            .register_udf(PlaceholderUdf::with_return(
                 "hop",
                 vec![
                     DataType::Interval(datatypes::IntervalUnit::MonthDayNano),
                     DataType::Interval(datatypes::IntervalUnit::MonthDayNano),
                 ],
-                window_return_type.clone(),
-                Volatility::Volatile,
-                #[allow(deprecated)]
-                make_scalar_function(fn_impl),
-            )),
-        );
-        functions.insert(
-            "tumble".to_string(),
-            Arc::new(create_udf(
+                window_arrow_struct(),
+            ))
+            .unwrap();
+
+        registry
+            .register_udf(PlaceholderUdf::with_return(
                 "tumble",
                 vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
-                window_return_type.clone(),
-                Volatility::Volatile,
-                #[allow(deprecated)]
-                make_scalar_function(fn_impl),
-            )),
-        );
-        functions.insert(
-            "session".to_string(),
-            Arc::new(create_udf(
+                window_arrow_struct(),
+            ))
+            .unwrap();
+
+        registry
+            .register_udf(PlaceholderUdf::with_return(
                 "session",
                 vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
-                window_return_type,
-                Volatility::Volatile,
-                #[allow(deprecated)]
-                make_scalar_function(fn_impl),
-            )),
-        );
-        functions.insert(
-            "unnest".to_string(),
-            Arc::new({
-                let return_type: ReturnTypeFunction = Arc::new(move |args| {
+                window_arrow_struct(),
+            ))
+            .unwrap();
+
+        registry
+            .register_udf(Arc::new(ScalarUDF::new_from_impl(PlaceholderUdf {
+                name: "unnest".to_string(),
+                signature: Signature::any(1, Volatility::Volatile),
+                return_type: Arc::new(|args| {
                     match args.first().ok_or_else(|| {
                         DataFusionError::Plan("unnest takes one argument".to_string())
                     })? {
-                        DataType::List(t) => Ok(Arc::new(t.data_type().clone())),
+                        DataType::List(t) => Ok(t.data_type().clone()),
                         _ => Err(DataFusionError::Plan(
                             "unnest may only be called on arrays".to_string(),
                         )),
                     }
-                });
-                #[allow(deprecated)]
-                ScalarUDF::new(
-                    "unnest",
-                    // This is marked volatile so that DF doesn't try to optimize constants
-                    &Signature::any(1, Volatility::Volatile),
-                    &return_type,
-                    #[allow(deprecated)]
-                    &make_scalar_function(fn_impl),
-                )
-            }),
-        );
+                }),
+            })))
+            .unwrap();
 
-        let mut registry = Self {
-            functions,
-            ..Default::default()
-        };
+        registry
+            .register_udf(PlaceholderUdf::with_return(
+                "metadata",
+                vec![DataType::Utf8],
+                DataType::Utf8,
+            ))
+            .unwrap();
 
         register_functions(&mut registry);
 
@@ -243,7 +286,6 @@ impl ArroyoSchemaProvider {
                 parsed.udf.name
             );
         }
-        let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
         self.dylib_udfs.insert(
             parsed.udf.name.clone(),
@@ -288,24 +330,17 @@ impl ArroyoSchemaProvider {
                 )
                 .is_some()
         } else {
-            self.functions
-                .insert(
-                    parsed.udf.name.clone(),
-                    Arc::new(create_udf(
-                        &parsed.udf.name,
-                        parsed
-                            .udf
-                            .args
-                            .iter()
-                            .map(|t| t.data_type.clone())
-                            .collect(),
-                        Arc::new(parsed.udf.ret_type.data_type.clone()),
-                        Volatility::Volatile,
-                        #[allow(deprecated)]
-                        make_scalar_function(fn_impl),
-                    )),
-                )
-                .is_some()
+            self.register_udf(PlaceholderUdf::with_return(
+                &parsed.udf.name,
+                parsed
+                    .udf
+                    .args
+                    .iter()
+                    .map(|t| t.data_type.clone())
+                    .collect(),
+                parsed.udf.ret_type.data_type.clone(),
+            ))?
+            .is_some()
         };
 
         if replaced {
@@ -395,8 +430,8 @@ impl ContextProvider for ArroyoSchemaProvider {
         &self.config_options
     }
 
-    fn get_window_meta(&self, _name: &str) -> Option<Arc<WindowUDF>> {
-        None
+    fn get_window_meta(&self, name: &str) -> Option<Arc<WindowUDF>> {
+        self.window_functions.get(name).cloned()
     }
 
     fn udf_names(&self) -> Vec<String> {
@@ -408,7 +443,11 @@ impl ContextProvider for ArroyoSchemaProvider {
     }
 
     fn udwf_names(&self) -> Vec<String> {
-        vec![]
+        self.window_functions.keys().cloned().collect()
+    }
+
+    fn get_expr_planners(&self) -> &[Arc<dyn ExprPlanner>] {
+        &self.expr_planners
     }
 }
 
@@ -434,7 +473,11 @@ impl FunctionRegistry for ArroyoSchemaProvider {
     }
 
     fn udwf(&self, name: &str) -> Result<Arc<WindowUDF>> {
-        plan_err!("No UDWF with name {name}")
+        if let Some(f) = self.window_functions.get(name) {
+            Ok(Arc::clone(f))
+        } else {
+            plan_err!("No UDAF with name {name}")
+        }
     }
 
     fn register_function_rewrite(
@@ -455,8 +498,8 @@ impl FunctionRegistry for ArroyoSchemaProvider {
             .insert(udaf.name().to_string(), udaf))
     }
 
-    fn register_udwf(&mut self, _udaf: Arc<WindowUDF>) -> Result<Option<Arc<WindowUDF>>> {
-        plan_err!("custom window functions not supported")
+    fn register_udwf(&mut self, udwf: Arc<WindowUDF>) -> Result<Option<Arc<WindowUDF>>> {
+        Ok(self.window_functions.insert(udwf.name().to_string(), udwf))
     }
 
     fn register_expr_planner(&mut self, expr_planner: Arc<dyn ExprPlanner>) -> Result<()> {
@@ -681,14 +724,17 @@ fn try_handle_set_variable(
     Ok(false)
 }
 
+pub(crate) fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
+    let dialect = PostgreSqlDialect {};
+    Parser::parse_sql(&dialect, sql)
+}
+
 pub async fn parse_and_get_arrow_program(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
     // TODO: use config
     _config: SqlConfig,
 ) -> Result<CompiledSql> {
-    let dialect = PostgreSqlDialect {};
-
     let mut config = SessionConfig::new();
     config
         .options_mut()
@@ -697,24 +743,24 @@ pub async fn parse_and_get_arrow_program(
     config.options_mut().optimizer.repartition_aggregations = false;
     config.options_mut().optimizer.repartition_windows = false;
     config.options_mut().optimizer.repartition_sorts = false;
-    let session_state = SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
-        .with_physical_optimizer_rules(vec![]);
+    let session_state = SessionStateBuilder::new()
+        .with_config(config)
+        .with_default_features()
+        .with_physical_optimizer_rules(vec![])
+        .build();
 
     let mut inserts = vec![];
-    for statement in Parser::parse_sql(&dialect, &query)? {
+    for statement in parse_sql(&query)? {
         if try_handle_set_variable(&statement, &mut schema_provider)? {
             continue;
         }
 
-        if let Some(table) =
-            Table::try_from_statement(&statement, &schema_provider, &session_state)?
-        {
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
             schema_provider.insert_table(table);
         } else {
             inserts.push(Insert::try_from_statement(
                 &statement,
                 &mut schema_provider,
-                &session_state,
             )?);
         };
     }

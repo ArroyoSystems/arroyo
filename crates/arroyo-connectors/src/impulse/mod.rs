@@ -166,6 +166,7 @@ impl Connector for ImpulseConnector {
             format: None,
             bad_data: None,
             framing: None,
+            metadata_fields: vec![],
         };
 
         Ok(Connection {

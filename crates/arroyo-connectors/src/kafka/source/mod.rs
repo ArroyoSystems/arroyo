@@ -1,16 +1,9 @@
-use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp};
-
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
-use arroyo_types::*;
+use anyhow::bail;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use futures::FutureExt;
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
-use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
+use rdkafka::consumer::{CommitMode, Consumer};
 use rdkafka::{ClientConfig, Message as KMessage, Offset, TopicPartitionList};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -20,6 +13,18 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
+use arroyo_formats::de::FieldValueType;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
+use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::grpc::rpc::TableConfig;
+use arroyo_rpc::schema_resolver::SchemaResolver;
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp, MetadataField};
+use arroyo_types::*;
+
+use super::{Context, SourceOffset, StreamConsumer};
+
 #[cfg(test)]
 mod test;
 
@@ -28,13 +33,15 @@ pub struct KafkaSourceFunc {
     pub bootstrap_servers: String,
     pub group_id: Option<String>,
     pub group_id_prefix: Option<String>,
-    pub offset_mode: super::SourceOffset,
+    pub offset_mode: SourceOffset,
     pub format: Format,
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
     pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
     pub client_configs: HashMap<String, String>,
+    pub context: Context,
     pub messages_per_second: NonZeroU32,
+    pub metadata_fields: Vec<MetadataField>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -77,7 +84,13 @@ impl KafkaSourceFunc {
             .set("enable.partition.eof", "false")
             .set("enable.auto.commit", "false")
             .set("group.id", group_id)
-            .create()?;
+            .create_with_context(self.context.clone())?;
+
+        // NOTE: this is required to trigger an oauth token refresh (when using
+        // OAUTHBEARER auth).
+        if consumer.recv().now_or_never().is_some() {
+            bail!("unexpected recv before assignments");
+        }
 
         let state: Vec<_> = ctx
             .table_manager
@@ -178,7 +191,26 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                ctx.deserialize_slice(v, from_millis(timestamp as u64)).await?;
+                                let topic = msg.topic();
+
+                                let connector_metadata = if !self.metadata_fields.is_empty() {
+                                    let mut connector_metadata = HashMap::new();
+                                    for f in &self.metadata_fields {
+                                        connector_metadata.insert(&f.field_name, match f.key.as_str() {
+                                            "offset_id" => FieldValueType::Int64(msg.offset()),
+                                            "partition" => FieldValueType::Int32(msg.partition()),
+                                            "topic" => FieldValueType::String(topic),
+                                            "timestamp" => FieldValueType::Int64(timestamp),
+                                            k => unreachable!("Invalid metadata key '{}'", k),
+                                        });
+                                    }
+                                    Some(connector_metadata)
+                                } else {
+                                    None
+                                };
+
+                                ctx.deserialize_slice(v, from_millis(timestamp.max(0) as u64), connector_metadata.as_ref()).await?;
+
 
                                 if ctx.should_flush() {
                                     ctx.flush_buffer().await?;

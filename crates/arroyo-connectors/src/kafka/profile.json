@@ -6,9 +6,7 @@
             "type": "string",
             "title": "Bootstrap Servers",
             "description": "Comma-separated list of Kafka servers to connect to",
-            "examples": [
-                "broker-1:9092,broker-2:9092"
-            ],
+            "examples": ["broker-1:9092,broker-2:9092"],
             "pattern": "^(([\\w\\.\\-]+:\\d+),)*([\\w\\.\\-]+:\\d+)$"
         },
         "authentication": {
@@ -17,8 +15,7 @@
                 {
                     "type": "object",
                     "title": "None",
-                    "properties": {
-                    },
+                    "properties": {},
                     "additionalProperties": false
                 },
                 {
@@ -30,9 +27,7 @@
                         "username",
                         "password"
                     ],
-                    "sensitive": [
-                        "password"
-                    ],
+                    "sensitive": ["password"],
                     "properties": {
                         "protocol": {
                             "type": "string",
@@ -54,6 +49,18 @@
                         }
                     },
                     "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "AWS_MSK_IAM",
+                    "required": ["region"],
+                    "properties": {
+                        "region": {
+                            "type": "string",
+                            "description": "The AWS region to connect to"
+                        }
+                    },
+                    "additionalProperties": false
                 }
             ]
         },
@@ -64,8 +71,7 @@
                 {
                     "type": "object",
                     "title": "None",
-                    "properties": {
-                    },
+                    "properties": {},
                     "additionalProperties": false
                 },
                 {
@@ -76,9 +82,7 @@
                             "title": "Endpoint",
                             "type": "string",
                             "description": "The endpoint for your Confluent Schema Registry",
-                            "examples": [
-                                "http://localhost:8081"
-                            ],
+                            "examples": ["http://localhost:8081"],
                             "format": "uri"
                         },
                         "apiKey": {
@@ -86,9 +90,7 @@
                             "type": "string",
                             "description": "The API key for your Confluent Schema Registry",
                             "format": "var-str",
-                            "examples": [
-                                "ABCDEFGHIJK01234"
-                            ]
+                            "examples": ["ABCDEFGHIJK01234"]
                         },
                         "apiSecret": {
                             "title": "API Secret",
@@ -100,19 +102,11 @@
                             "format": "var-str"
                         }
                     },
-                    "required": [
-                        "endpoint"
-                    ],
-                    "sensitive": [
-                        "apiSecret"
-                    ]
+                    "required": ["endpoint"],
+                    "sensitive": ["apiSecret"]
                 }
             ]
         }
     },
-    "required": [
-        "bootstrapServers",
-        "authentication"
-    ]
+    "required": ["bootstrapServers", "authentication"]
 }
-

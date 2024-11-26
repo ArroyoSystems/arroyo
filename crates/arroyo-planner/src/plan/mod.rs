@@ -1,5 +1,5 @@
 use arroyo_datastream::WindowType;
-use arroyo_rpc::{IS_RETRACT_FIELD, TIMESTAMP_FIELD};
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{
     plan_err,
@@ -284,15 +284,15 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
                 if projection
                     .input
                     .schema()
-                    .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+                    .has_column_with_unqualified_name(UPDATING_META_FIELD)
                     && !projection
                         .schema
-                        .has_column_with_unqualified_name(IS_RETRACT_FIELD)
+                        .has_column_with_unqualified_name(UPDATING_META_FIELD)
                 {
                     let field: DFField = projection
                         .input
                         .schema()
-                        .qualified_field_with_unqualified_name(IS_RETRACT_FIELD)?
+                        .qualified_field_with_unqualified_name(UPDATING_META_FIELD)?
                         .into();
                     let mut output_fields = fields_with_qualifiers(&projection.schema);
                     output_fields.push(field.clone());
@@ -342,9 +342,6 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
             }
             LogicalPlan::Sort(_) => {
                 return plan_err!("ORDER BY is not currently supported ({})", node.display());
-            }
-            LogicalPlan::CrossJoin(_) => {
-                return plan_err!("CROSS JOIN is not currently supported ({})", node.display());
             }
             LogicalPlan::Repartition(_) => {
                 return plan_err!(
@@ -399,6 +396,7 @@ impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
             }
             LogicalPlan::Extension(_) => {}
             LogicalPlan::Distinct(_) => {}
+            LogicalPlan::Execute(_) => {}
             LogicalPlan::Prepare(_) => {
                 return plan_err!("Prepared statements are not supported ({})", node.display())
             }

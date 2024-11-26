@@ -1,5 +1,6 @@
 use crate::builder::{NamedNode, Planner};
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
+use crate::multifield_partial_ord;
 use crate::schemas::add_timestamp_field;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
@@ -22,6 +23,14 @@ pub struct WatermarkNode {
     pub schema: DFSchemaRef,
     timestamp_index: usize,
 }
+
+multifield_partial_ord!(
+    WatermarkNode,
+    input,
+    qualifier,
+    watermark_expression,
+    timestamp_index
+);
 
 impl UserDefinedLogicalNodeCore for WatermarkNode {
     fn name(&self) -> &str {
@@ -79,7 +88,7 @@ impl ArroyoExtension for WatermarkNode {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         let expression = planner.create_physical_expr(&self.watermark_expression, &self.schema)?;
-        let expression = serialize_physical_expr(expression, &DefaultPhysicalExtensionCodec {})?;
+        let expression = serialize_physical_expr(&expression, &DefaultPhysicalExtensionCodec {})?;
         let node = LogicalNode {
             operator_id: format!("watermark_{}", index),
             description: "watermark".to_string(),

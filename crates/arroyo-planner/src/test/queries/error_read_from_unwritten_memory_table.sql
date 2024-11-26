@@ -2,7 +2,7 @@
     CREATE TABLE memory (
       event_type TEXT,
       location TEXT,
-      driver_id BIGINT,
+      driver_id BIGINT
     );
 
     SELECT * FROM memory;

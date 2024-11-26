@@ -17,6 +17,7 @@ arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 datafusion = { workspace = true }
 datafusion-proto = { workspace = true }
 datafusion-functions = { workspace = true }
+datafusion-functions-window = { workspace = true }
 datafusion-functions-json = { workspace = true }
 
 prost = {workspace = true}
@@ -41,17 +42,18 @@ syn = {version = "2", features = ["full", "parsing", "extra-traits"]}
 tracing = "0.1.37"
 tracing-subscriber = "0.3"
 
-serde_json_path = "0.6.3"
+serde_json_path = "0.7"
 apache-avro = "0.16.0"
 prettyplease = "0.2.4"
 unicase = "2.7.0"
 toml = "0.8.8"
 
 xz2 = { version = "0.1.7", features = ["static"] }
+xxhash-rust = { version = "0.8.12", features = ["xxh3", "std"] }
 
 [dev-dependencies]
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}
-rstest = { version = "0.18.2" }
+rstest = { version = "0.23" }
 
 [build-dependencies]
 glob = "0.3.1"

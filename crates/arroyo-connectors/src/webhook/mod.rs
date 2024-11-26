@@ -162,6 +162,7 @@ impl Connector for WebhookConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
+            metadata_fields: schema.metadata_fields(),
         };
 
         Ok(Connection {

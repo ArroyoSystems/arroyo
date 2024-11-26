@@ -138,6 +138,7 @@ pub(crate) fn source_field(name: &str, field_type: FieldType) -> SourceField {
             r#type: field_type,
         },
         nullable: false,
+        metadata_key: None,
     }
 }
 

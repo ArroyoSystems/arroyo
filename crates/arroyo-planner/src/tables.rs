@@ -9,7 +9,7 @@ use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
     external::{ProcessingMode, SqlSource},
-    fields_with_qualifiers, ArroyoSchemaProvider, DFField,
+    fields_with_qualifiers, multifield_partial_ord, parse_sql, ArroyoSchemaProvider, DFField,
 };
 use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
 use arroyo_datastream::default_sink;
@@ -20,10 +20,9 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
-use datafusion::common::{config::ConfigOptions, DFSchema, Result};
+use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
+use datafusion::common::{config::ConfigOptions, DFSchema, Result, ScalarValue};
 use datafusion::common::{plan_err, Column, DataFusionError};
-use datafusion::execution::context::SessionState;
-use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
     WriteOp,
@@ -45,14 +44,12 @@ use datafusion::optimizer::propagate_empty_relation::PropagateEmptyRelation;
 use datafusion::optimizer::push_down_filter::PushDownFilter;
 use datafusion::optimizer::push_down_limit::PushDownLimit;
 use datafusion::optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggregate;
-use datafusion::optimizer::rewrite_disjunctive_predicate::RewriteDisjunctivePredicate;
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
 use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
-use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::Query;
+use datafusion::sql::sqlparser::ast::{CreateTable, Query, SqlOption};
 use datafusion::{
     optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -74,50 +71,67 @@ pub struct ConnectorTable {
     pub event_time_field: Option<String>,
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
+    pub primary_keys: Arc<Vec<String>>,
 
     pub inferred_fields: Option<Vec<DFField>>,
 }
 
+multifield_partial_ord!(
+    ConnectorTable,
+    id,
+    connector,
+    name,
+    connection_type,
+    config,
+    description,
+    format,
+    event_time_field,
+    watermark_field,
+    idle_time,
+    primary_keys
+);
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldSpec {
-    StructField(Field),
-    VirtualField { field: Field, expression: Expr },
+    Struct(Field),
+    Metadata { field: Field, key: String },
+    Virtual { field: Field, expression: Expr },
 }
 
 impl FieldSpec {
     fn is_virtual(&self) -> bool {
         match self {
-            FieldSpec::StructField(_) => false,
-            FieldSpec::VirtualField { .. } => true,
+            FieldSpec::Struct(_) | FieldSpec::Metadata { .. } => false,
+            FieldSpec::Virtual { .. } => true,
         }
     }
     pub fn field(&self) -> &Field {
         match self {
-            FieldSpec::StructField(f) => f,
-            FieldSpec::VirtualField { field, .. } => field,
+            FieldSpec::Struct(f) => f,
+            FieldSpec::Metadata { field, .. } => field,
+            FieldSpec::Virtual { field, .. } => field,
+        }
+    }
+
+    fn metadata_key(&self) -> Option<&str> {
+        match &self {
+            FieldSpec::Metadata { key, .. } => Some(key.as_str()),
+            _ => None,
         }
     }
 }
 
 impl From<Field> for FieldSpec {
     fn from(value: Field) -> Self {
-        FieldSpec::StructField(value)
+        FieldSpec::Struct(value)
     }
 }
 
 fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
-    session_state: &SessionState,
 ) -> Result<LogicalPlan> {
-    let mut sql_to_rel = SqlToRel::new(schema_provider);
-
-    for planner in session_state.expr_planners() {
-        sql_to_rel = sql_to_rel.with_user_defined_planner(planner);
-    }
-    for planner in schema_provider.expr_planners() {
-        sql_to_rel = sql_to_rel.with_user_defined_planner(planner);
-    }
+    let sql_to_rel = SqlToRel::new(schema_provider);
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
@@ -136,11 +150,6 @@ fn produce_optimized_plan(
         Arc::new(DecorrelatePredicateSubquery::new()),
         Arc::new(ScalarSubqueryToJoin::new()),
         Arc::new(ExtractEquijoinPredicate::new()),
-        // simplify expressions does not simplify expressions in subqueries, so we
-        // run it again after running the optimizations that potentially converted
-        // subqueries to joins
-        Arc::new(SimplifyExpressions::new()),
-        Arc::new(RewriteDisjunctivePredicate::new()),
         Arc::new(EliminateDuplicatedExpr::new()),
         Arc::new(EliminateFilter::new()),
         Arc::new(EliminateCrossJoin::new()),
@@ -187,7 +196,7 @@ impl From<Connection> for ConnectorTable {
                 .schema
                 .fields
                 .iter()
-                .map(|f| FieldSpec::StructField(f.clone().into()))
+                .map(|f| FieldSpec::Struct(f.clone().into()))
                 .collect(),
             config: value.config,
             description: value.description,
@@ -195,6 +204,7 @@ impl From<Connection> for ConnectorTable {
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
+            primary_keys: Arc::new(vec![]),
             inferred_fields: None,
         }
     }
@@ -205,6 +215,7 @@ impl ConnectorTable {
         name: &str,
         connector: &str,
         mut fields: Vec<FieldSpec>,
+        primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
         connection_profile: Option<&ConnectionProfile>,
     ) -> Result<Self> {
@@ -213,15 +224,15 @@ impl ConnectorTable {
             fields = fields
                 .into_iter()
                 .map(|field_spec| match &field_spec {
-                    FieldSpec::StructField(struct_field) => match struct_field.data_type() {
+                    FieldSpec::Struct(struct_field) => match struct_field.data_type() {
                         DataType::Timestamp(_, None) => {
-                            FieldSpec::StructField(struct_field.clone().with_data_type(
+                            FieldSpec::Struct(struct_field.clone().with_data_type(
                                 DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
                             ))
                         }
                         _ => field_spec,
                     },
-                    FieldSpec::VirtualField { .. } => {
+                    FieldSpec::Metadata { .. } | FieldSpec::Virtual { .. } => {
                         unreachable!("delta lake is only a sink, can't have virtual fields")
                     }
                 })
@@ -246,10 +257,9 @@ impl ConnectorTable {
             let df_struct_type =
                 DataType::Struct(fields.iter().map(|f| f.field().clone()).collect());
             let before_field_spec =
-                FieldSpec::StructField(Field::new("before", df_struct_type.clone(), true));
-            let after_field_spec =
-                FieldSpec::StructField(Field::new("after", df_struct_type, true));
-            let op_field_spec = FieldSpec::StructField(Field::new("op", DataType::Utf8, false));
+                FieldSpec::Struct(Field::new("before", df_struct_type.clone(), true));
+            let after_field_spec = FieldSpec::Struct(Field::new("after", df_struct_type, true));
+            let op_field_spec = FieldSpec::Struct(Field::new("op", DataType::Utf8, false));
             input_to_schema_fields = vec![before_field_spec, after_field_spec, op_field_spec];
         }
 
@@ -258,13 +268,19 @@ impl ConnectorTable {
             .filter(|f| !f.is_virtual())
             .map(|f| {
                 let struct_field = f.field();
-                struct_field.clone().try_into().map_err(|_| {
+                let mut sf: SourceField = struct_field.clone().try_into().map_err(|_| {
                     DataFusionError::Plan(format!(
                         "field '{}' has a type '{:?}' that cannot be used in a connection table",
                         struct_field.name(),
                         struct_field.data_type()
                     ))
-                })
+                })?;
+
+                if let Some(key) = f.metadata_key() {
+                    sf.metadata_key = Some(key.to_string());
+                }
+
+                Ok(sf)
             })
             .collect::<Result<_>>()?;
         let bad_data = BadData::from_opts(options)
@@ -310,6 +326,15 @@ impl ConnectorTable {
             );
         }
 
+        if table.connection_type == ConnectionType::Source
+            && table.is_updating()
+            && primary_keys.is_empty()
+        {
+            return plan_err!("Debezium source must have at least one PRIMARY KEY field");
+        }
+
+        table.primary_keys = Arc::new(primary_keys);
+
         Ok(table)
     }
 
@@ -317,7 +342,7 @@ impl ConnectorTable {
         self.fields.iter().any(|f| f.is_virtual())
     }
 
-    fn is_update(&self) -> bool {
+    pub(crate) fn is_updating(&self) -> bool {
         self.format
             .as_ref()
             .map(|f| f.is_updating())
@@ -326,7 +351,7 @@ impl ConnectorTable {
 
     fn timestamp_override(&self) -> Result<Option<Expr>> {
         if let Some(field_name) = &self.event_time_field {
-            if self.is_update() {
+            if self.is_updating() {
                 return plan_err!("can't use event_time_field with update mode.");
             }
 
@@ -383,7 +408,7 @@ impl ConnectorTable {
     }
 
     fn processing_mode(&self) -> ProcessingMode {
-        if self.is_update() {
+        if self.is_updating() {
             ProcessingMode::Update
         } else {
             ProcessingMode::Append
@@ -398,7 +423,7 @@ impl ConnectorTable {
             }
         };
 
-        if self.is_update() && self.has_virtual_fields() {
+        if self.is_updating() && self.has_virtual_fields() {
             return plan_err!("can't read from a source with virtual fields and update mode.");
         }
 
@@ -410,10 +435,8 @@ impl ConnectorTable {
             struct_def: self
                 .fields
                 .iter()
-                .filter_map(|field| match field {
-                    FieldSpec::StructField(struct_field) => Some(Arc::new(struct_field.clone())),
-                    FieldSpec::VirtualField { .. } => None,
-                })
+                .filter(|f| !f.is_virtual())
+                .map(|f| Arc::new(f.field().clone()))
                 .collect(),
             config: self.connector_op(),
             processing_mode: self.processing_mode(),
@@ -426,13 +449,6 @@ impl ConnectorTable {
             timestamp_override,
             watermark_column,
         })
-    }
-
-    pub(crate) fn is_updating(&self) -> bool {
-        matches!(
-            &self.format,
-            Some(Format::Json(JsonFormat { debezium: true, .. }))
-        )
     }
 }
 
@@ -464,7 +480,7 @@ pub enum Table {
 
 fn value_to_inner_string(value: &Value) -> Result<String> {
     match value {
-        Value::SingleQuotedString(s) => Ok(s.to_string()),
+        Value::SingleQuotedString(s) | Value::UnicodeStringLiteral(s) => Ok(s.to_string()),
         Value::DollarQuotedString(s) => Ok(s.to_string()),
         Value::Number(_, _) | Value::Boolean(_) => Ok(value.to_string()),
         Value::DoubleQuotedString(_)
@@ -486,8 +502,82 @@ fn value_to_inner_string(value: &Value) -> Result<String> {
     }
 }
 
+fn plan_generating_expr(
+    expr: &sqlparser::ast::Expr,
+    name: &str,
+    schema: &DFSchema,
+    schema_provider: &ArroyoSchemaProvider,
+) -> Result<Expr, DataFusionError> {
+    let sql = format!("SELECT {} from {}", expr, name);
+    let statement = parse_sql(&sql)
+        .expect("generating expression should be valid")
+        .into_iter()
+        .next()
+        .expect("generating expression should produce one statement");
+
+    let mut schema_provider = schema_provider.clone();
+    schema_provider.insert_table(Table::MemoryTable {
+        name: name.to_string(),
+        fields: schema.fields().to_vec(),
+        logical_plan: None,
+    });
+
+    let plan = produce_optimized_plan(&statement, &schema_provider)?;
+
+    match plan {
+        LogicalPlan::Projection(p) => Ok(p.expr.into_iter().next().unwrap()),
+        p => {
+            unreachable!(
+                "top-level plan from generating expression should be a projection, but is {:?}",
+                p
+            );
+        }
+    }
+}
+
+#[derive(Default)]
+struct MetadataFinder {
+    key: Option<String>,
+    depth: usize,
+}
+
+impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
+    type Node = Expr;
+
+    fn f_down(&mut self, node: &'a Self::Node) -> Result<TreeNodeRecursion> {
+        if let Expr::ScalarFunction(func) = node {
+            if func.name() == "metadata" {
+                if self.depth > 0 {
+                    return plan_err!(
+                        "Metadata columns must have only a single call to 'metadata'"
+                    );
+                }
+
+                return if let &[arg] = &func.args.as_slice() {
+                    if let Expr::Literal(ScalarValue::Utf8(Some(key))) = &arg {
+                        self.key = Some(key.clone());
+                        Ok(TreeNodeRecursion::Stop)
+                    } else {
+                        plan_err!("For metadata columns, metadata call must have a literal string argument")
+                    }
+                } else {
+                    plan_err!("For metadata columns, metadata call must have a single argument")
+                };
+            }
+        }
+        self.depth += 1;
+        Ok(TreeNodeRecursion::Continue)
+    }
+
+    fn f_up(&mut self, _node: &'a Self::Node) -> Result<TreeNodeRecursion> {
+        self.depth -= 1;
+        Ok(TreeNodeRecursion::Continue)
+    }
+}
+
 impl Table {
     fn schema_from_columns(
+        table_name: &str,
         columns: &[ColumnDef],
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Vec<FieldSpec>> {
@@ -500,10 +590,9 @@ impl Table {
                     .options
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
-
                 let struct_field = ArroyoExtensionType::add_metadata(
                     extension,
-                    Field::new(name, data_type, nullable),
+                    Field::new(name, data_type.clone(), nullable),
                 );
 
                 let generating_expression = column.options.iter().find_map(|option| {
@@ -543,26 +632,33 @@ impl Table {
             HashMap::new(),
         )?;
 
-        let sql_to_rel = SqlToRel::new(schema_provider);
         struct_field_pairs
             .into_iter()
             .map(|(struct_field, generating_expression)| {
                 if let Some(generating_expression) = generating_expression {
-                    // TODO: Implement automatic type coercion here, as we have elsewhere.
-                    // It is done by calling the Analyzer which inserts CAST operators where necessary.
-
-                    let df_expr = sql_to_rel.sql_to_expr(
-                        generating_expression,
+                    let df_expr = plan_generating_expr(
+                        &generating_expression,
+                        table_name,
                         &physical_schema,
-                        &mut PlannerContext::default(),
+                        schema_provider,
                     )?;
 
-                    Ok(FieldSpec::VirtualField {
-                        field: struct_field,
-                        expression: df_expr,
-                    })
+                    let mut metadata_finder = MetadataFinder::default();
+                    df_expr.visit(&mut metadata_finder)?;
+
+                    if let Some(key) = metadata_finder.key {
+                        Ok(FieldSpec::Metadata {
+                            field: struct_field,
+                            key,
+                        })
+                    } else {
+                        Ok(FieldSpec::Virtual {
+                            field: struct_field,
+                            expression: df_expr,
+                        })
+                    }
                 } else {
-                    Ok(FieldSpec::StructField(struct_field))
+                    Ok(FieldSpec::Struct(struct_field))
                 }
             })
             .collect::<Result<Vec<_>>>()
@@ -571,27 +667,50 @@ impl Table {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &ArroyoSchemaProvider,
-        session_state: &SessionState,
     ) -> Result<Option<Self>> {
-        if let Statement::CreateTable {
+        if let Statement::CreateTable(CreateTable {
             name,
             columns,
             with_options,
             query: None,
             ..
-        } = statement
+        }) = statement
         {
             let name: String = name.to_string();
             let mut with_map = HashMap::new();
             for option in with_options {
-                let sqlparser::ast::Expr::Value(value) = &option.value else {
-                    return plan_err!("Expected a value, found {:?}", option.value);
+                let SqlOption::KeyValue { key, value } = &option else {
+                    return plan_err!("Invalid with option: {:?}", option);
                 };
-                with_map.insert(option.name.value.to_string(), value_to_inner_string(value)?);
+
+                let sqlparser::ast::Expr::Value(value) = value else {
+                    return plan_err!(
+                        "Expected a string literal in with clause, but found {}",
+                        value
+                    );
+                };
+
+                with_map.insert(key.value.to_string(), value_to_inner_string(value)?);
             }
 
             let connector = with_map.remove("connector");
-            let fields = Self::schema_from_columns(columns, schema_provider)?;
+            let fields = Self::schema_from_columns(&name, columns, schema_provider)?;
+
+            let primary_keys = columns
+                .iter()
+                .filter(|c| {
+                    c.options.iter().any(|opt| {
+                        matches!(
+                            opt.option,
+                            ColumnOption::Unique {
+                                is_primary: true,
+                                ..
+                            }
+                        )
+                    })
+                })
+                .map(|c| c.name.value.clone())
+                .collect();
 
             match connector.as_deref() {
                 Some("memory") | None => {
@@ -636,6 +755,7 @@ impl Table {
                             &name,
                             connector,
                             fields,
+                            primary_keys,
                             &mut with_map,
                             connection_profile,
                         )
@@ -644,7 +764,7 @@ impl Table {
                 }
             }
         } else {
-            match &produce_optimized_plan(statement, schema_provider, session_state) {
+            match &produce_optimized_plan(statement, schema_provider) {
                 // views and memory tables are the same now.
                 Ok(LogicalPlan::Ddl(DdlStatement::CreateView(CreateView {
                     name, input, ..
@@ -759,13 +879,9 @@ fn infer_sink_schema(
     source: &Query,
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
-    session_state: &SessionState,
 ) -> Result<()> {
-    let plan = produce_optimized_plan(
-        &Statement::Query(Box::new(source.clone())),
-        schema_provider,
-        session_state,
-    )?;
+    let plan =
+        produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)?;
     let table = schema_provider
         .get_table_mut(&table_name)
         .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;
@@ -779,23 +895,21 @@ impl Insert {
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &mut ArroyoSchemaProvider,
-        session_state: &SessionState,
     ) -> Result<Insert> {
         if let Statement::Insert(insert) = statement {
             infer_sink_schema(
                 insert.source.as_ref().unwrap(),
                 insert.table_name.to_string(),
                 schema_provider,
-                session_state,
             )?;
         }
 
-        let logical_plan = produce_optimized_plan(statement, schema_provider, session_state)?;
+        let logical_plan = produce_optimized_plan(statement, schema_provider)?;
 
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {
                 table_name,
-                op: WriteOp::InsertInto,
+                op: WriteOp::Insert(_),
                 input,
                 ..
             }) => {

@@ -21,13 +21,10 @@ use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
+use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::concat;
 use datafusion::{
     common::{Column, Result as DFResult},
-    execution::{
-        context::{SessionConfig, SessionState},
-        runtime_env::RuntimeEnv,
-    },
     logical_expr::{
         expr::ScalarFunction, Expr, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
     },
@@ -210,8 +207,8 @@ fn partition_string_for_fields_and_time(
 
 fn compile_expression(expr: &Expr, schema: ArroyoSchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
     let physical_planner = DefaultPhysicalPlanner::default();
-    let session_state =
-        SessionState::new_with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+    let session_state = SessionStateBuilder::new().build();
+
     let plan = physical_planner.create_physical_expr(
         expr,
         &(schema.schema.as_ref().clone()).try_into()?,

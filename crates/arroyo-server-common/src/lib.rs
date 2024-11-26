@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 
+mod profile;
 pub mod shutdown;
 
 use anyhow::anyhow;
@@ -10,9 +11,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
-use hyper::Body;
 use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
+use profile::handle_get_profile;
 use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, TextEncoder};
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -21,9 +22,10 @@ use std::fs;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tonic::body::BoxBody;
+use tokio::net::TcpListener;
 use tonic::transport::Server;
 use tower::layer::util::Stack;
 use tower::{Layer, Service};
@@ -292,12 +294,13 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
         .route("/details", get(details))
         .route("/config", get(config_route))
         .route("/debug/pprof/heap", get(handle_get_heap))
+        .route("/debug/pprof/profile", get(handle_get_profile))
         .with_state(state);
 
     let addr = SocketAddr::new(addr, port);
+    let listener = TcpListener::bind(addr).await?;
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    axum::serve(listener, app.into_make_service())
         .await
         .map_err(|e| anyhow!("Failed to start admin HTTP server: {}", e))
 }
@@ -323,20 +326,23 @@ pub struct GrpcErrorLogMiddleware<S> {
     inner: S,
 }
 
-impl<S> Service<hyper::Request<Body>> for GrpcErrorLogMiddleware<S>
+type BoxFuture<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
+impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for GrpcErrorLogMiddleware<S>
 where
-    S: Service<hyper::Request<Body>, Response = hyper::Response<BoxBody>> + Clone + Send + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
+    ReqBody: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
+    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
         let clone = self.inner.clone();
         let path = req.uri().clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);

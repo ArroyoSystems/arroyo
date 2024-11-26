@@ -17,7 +17,7 @@ use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::{from_nanos, UserError};
 use async_trait::async_trait;
-use aws_config::{from_env, Region};
+use aws_config::{BehaviorVersion, Region};
 use aws_sdk_kinesis::error::SdkError;
 use aws_sdk_kinesis::operation::get_records::GetRecordsOutput;
 use aws_sdk_kinesis::operation::get_shard_iterator::builders::GetShardIteratorFluentBuilder;
@@ -337,7 +337,7 @@ impl KinesisSourceFunc {
     }
 
     async fn init_client(&mut self) {
-        let mut loader = from_env();
+        let mut loader = aws_config::defaults(BehaviorVersion::v2024_03_28());
         if let Some(region) = &self.aws_region {
             loader = loader.region(Region::new(region.clone()));
         }
@@ -434,8 +434,7 @@ impl KinesisSourceFunc {
         for record in records {
             let data = record.data.into_inner();
             let timestamp = record.approximate_arrival_timestamp.unwrap();
-
-            ctx.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128))
+            ctx.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128), None)
                 .await?;
 
             if ctx.should_flush() {
