@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use arrow::compute::{max, min};
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::rpc::TableConfig;
@@ -123,7 +123,7 @@ impl ArrowOperator for WindowFunctionOperator {
     fn name(&self) -> String {
         "WindowFunction".to_string()
     }
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -137,7 +137,7 @@ impl ArrowOperator for WindowFunctionOperator {
             }
         }
     }
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         let current_watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -157,7 +157,7 @@ impl ArrowOperator for WindowFunctionOperator {
     async fn handle_watermark(
         &mut self,
         watermark_message: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         let Some(watermark) = ctx.last_present_watermark() else {
             return Some(watermark_message);
@@ -186,7 +186,7 @@ impl ArrowOperator for WindowFunctionOperator {
         Some(watermark_message)
     }
 
-    async fn handle_checkpoint(&mut self, _cb: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _cb: CheckpointBarrier, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("input", watermark)

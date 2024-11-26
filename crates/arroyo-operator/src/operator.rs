@@ -1,4 +1,4 @@
-use crate::context::{ArrowContext, BatchReceiver};
+use crate::context::{OperatorContext, BatchReceiver, ChainCollector, Collector};
 use crate::inq_reader::InQReader;
 use crate::udfs::{ArroyoUdaf, UdafArg};
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
@@ -36,9 +36,12 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use futures::stream::FuturesUnordered;
+use serde_json::de::Read;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Barrier;
+use tokio::sync::mpsc::Receiver;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace, warn, Instrument};
 
@@ -53,7 +56,7 @@ pub trait OperatorConstructor: Send {
 
 pub enum OperatorNode {
     Source(Box<dyn SourceOperator + Send>),
-    Operator(Box<dyn ArrowOperator + Send>),
+    Operator(ChainedOperator),
 }
 
 // TODO: this is required currently because the FileSystemSink code isn't sync
@@ -65,13 +68,18 @@ impl OperatorNode {
     }
 
     pub fn from_operator(operator: Box<dyn ArrowOperator + Send>) -> Self {
-        OperatorNode::Operator(operator)
+        OperatorNode::Operator(vec![operator])
     }
 
     pub fn name(&self) -> String {
         match self {
             OperatorNode::Source(s) => s.name(),
-            OperatorNode::Operator(s) => s.name(),
+            OperatorNode::Operator(s) => {
+                    format!("[{}]", s.iter()
+                            .map(|o| o.name())
+                            .collect::<Vec<_>>()
+                            .join(" -> "))                
+            }
         }
     }
 
@@ -81,20 +89,24 @@ impl OperatorNode {
                 name: self.name().into(),
                 fields: vec![],
             },
-            OperatorNode::Operator(op) => op.display(),
+            OperatorNode::Operator(op) => {
+                todo!()
+            },
         }
     }
 
     pub fn tables(&self) -> HashMap<String, TableConfig> {
         match self {
             OperatorNode::Source(s) => s.tables(),
-            OperatorNode::Operator(s) => s.tables(),
+            OperatorNode::Operator(s) => {
+                todo!()
+            },
         }
     }
 
     async fn run_behavior(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         in_qs: &mut [BatchReceiver],
         ready: Arc<Barrier>,
     ) -> Option<SignalMessage> {
@@ -129,7 +141,8 @@ impl OperatorNode {
 
     pub async fn start(
         mut self: Box<Self>,
-        mut ctx: ArrowContext,
+        control_rx: Receiver<ControlMessage>,
+        mut ctx: OperatorContext,
         mut in_qs: Vec<BatchReceiver>,
         ready: Arc<Barrier>,
     ) {
@@ -159,7 +172,7 @@ impl OperatorNode {
     }
 }
 
-async fn run_checkpoint(checkpoint_barrier: CheckpointBarrier, ctx: &mut ArrowContext) -> bool {
+async fn run_checkpoint(checkpoint_barrier: CheckpointBarrier, ctx: &mut OperatorContext) -> bool {
     let watermark = ctx.watermarks.last_present_watermark();
 
     ctx.table_manager
@@ -186,17 +199,17 @@ pub trait SourceOperator: Send + 'static {
     }
 
     #[allow(unused_variables)]
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {}
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {}
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType;
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType;
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, ctx: &mut ArrowContext) {}
+    async fn on_close(&mut self, ctx: &mut OperatorContext) {}
 
     async fn start_checkpoint(
         &mut self,
         checkpoint_barrier: CheckpointBarrier,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> bool {
         ctx.send_checkpoint_event(
             checkpoint_barrier,
@@ -208,9 +221,191 @@ pub trait SourceOperator: Send + 'static {
     }
 }
 
+
+pub struct ChainedCollector<'a, 'b> {
+    cur: &'a mut ChainedOperator,
+    final_collector: &'b mut dyn Collector,
+    index: usize,
+    in_partitions: usize,
+}
+
+#[async_trait]
+impl <'a, 'b> Collector for ChainedCollector<'a, 'b> {
+    async fn collect(&mut self, batch: RecordBatch) {
+        let next_collector = if let Some(next) = &mut self.cur.next {
+            &mut ChainedCollector {
+                cur: next,
+                final_collector: self.final_collector,
+                index: self.index,
+                in_partitions: self.in_partitions,
+            }
+        } else {
+            self.final_collector
+        };
+        
+        self.cur.operator.process_batch_index(self.index, self.in_partitions, batch, &self.cur.context, next_collector).await;
+    }
+
+    async fn broadcast(&mut self, message: ArrowMessage) {
+        todo!()
+    }
+}
+
+struct ChainedOperator {
+    pub operator:  Box<dyn ArrowOperator + Send>,
+    pub context: OperatorContext,
+    pub next: Option<Box<ChainedOperator>>,
+}
+
+impl ChainedOperator {
+    pub fn new(operator: Box<dyn ArrowOperator + Send>, context: OperatorContext) -> Self {
+        Self {
+            operator,
+            context,
+            next: None
+        }
+    }
+}
+
+struct ChainIteratorMut<'a> {
+    current: Option<&'a mut ChainedOperator>,
+}
+
+impl<'a> Iterator for ChainIteratorMut<'a> {
+    type Item = &'a mut ChainedOperator;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(current) = self.current.take() {
+            let next = current.next.as_deref_mut();
+            self.current = next;
+            Some(current)
+        } else {
+            None
+        }
+    }
+}
+
+struct ChainIterator<'a> {
+    current: Option<&'a ChainedOperator>,
+}
+
+impl<'a> Iterator for ChainIterator<'a> {
+    type Item = &'a ChainedOperator;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(current) = self.current.take() {
+            let next = current.next.as_deref();
+            self.current = next;
+            Some(current)
+        } else {
+            None
+        }
+    }
+}
+
+
+impl ChainedOperator {
+    async fn handle_watermark(&mut self, watermark: Watermark) {
+        self.operator.handle_watermark_int(watermark, &mut self.context).await;
+
+        if let Some(next) = &mut self.next {
+            Box::pin(next.handle_watermark(watermark)).await;
+        }
+    }
+
+    async fn handle_controller_message(&mut self, control_message: &ControlMessage) {
+        for op in self.iter_mut() {
+            op.operator.handle_controller_message(control_message, &mut op.context).await;
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> ChainIteratorMut {
+        ChainIteratorMut { current: Some(self) }
+    }
+    
+    pub fn iter(&self) -> ChainIterator {
+        ChainIterator { current: Some(self) }
+    }
+    
+    fn name(&self) -> String {
+        self.iter()
+            .map(|op| op.operator.name())
+            .collect::<Vec<String>>()
+            .join(" -> ")
+    }
+
+    fn tick_interval(&self) -> Option<Duration> {
+        self.iter()
+            .filter_map(|op| op.operator.tick_interval())
+            .min()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        todo!()
+    }
+
+    async fn on_start(&mut self) {
+        for op in self.iter_mut() {
+            op.operator.on_start(&mut op.context).await;
+        }
+    }
+
+    async fn process_batch_index(&mut self, index: usize, in_partitions: usize, batch: RecordBatch, final_collector: &mut dyn Collector) {
+        let collector = if let Some(next) = &mut self.next {
+            &mut ChainedCollector { 
+                cur: next,
+                index,
+                in_partitions,
+                final_collector,
+            }
+        } else {
+            final_collector
+        };
+
+        self.operator.process_batch_index(index, in_partitions, batch, &self.context, collector).await;        
+    }
+
+    fn future_to_poll(&mut self) -> Option<Pin<Box<dyn Future<Output=Box<dyn Any + Send>> + Send>>> {
+        let futures = self.iter_mut()
+            .filter_map(|op| op.future_to_poll())
+            .collect::<Vec<_>>();
+
+        match futures.len() {
+            0 => None,
+            1 => futures.into_iter().next(),
+            _ => Some(Box::pin(async move {
+                let mut futures = FuturesUnordered::from_iter(futures.into_iter());
+                futures.next().await.into()
+            })),
+        }
+    }
+
+    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut OperatorContext) {
+        todo!()
+    }
+
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier) {
+        todo!()
+    }
+
+    async fn handle_commit(&mut self, epoch: u32, commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>, ctx: &mut OperatorContext) {
+        todo!()
+    }
+
+    async fn handle_tick(&mut self, tick: u64) {
+        for op in self.iter_mut() {
+            op.operator.handle_tick(tick, &mut op.context).await;
+        }
+    }
+
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext) {
+        todo!()
+    }
+}
+
 async fn operator_run_behavior(
-    this: &mut Box<dyn ArrowOperator + Send>,
-    ctx: &mut ArrowContext,
+    this: &mut ChainedOperator,
+    ctx: &mut OperatorContext,
     in_qs: &mut [BatchReceiver],
     ready: Arc<Barrier>,
 ) -> Option<SignalMessage> {
@@ -400,7 +595,7 @@ pub struct DisplayableOperator<'a> {
 
 #[async_trait::async_trait]
 pub trait ArrowOperator: Send + 'static {
-    async fn handle_watermark_int(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
+    async fn handle_watermark_int(&mut self, watermark: Watermark, ctx: &mut OperatorContext) {
         // process timers
         tracing::trace!(
             "handling watermark {:?} for {}-{}",
@@ -425,8 +620,8 @@ pub trait ArrowOperator: Send + 'static {
 
     async fn handle_controller_message(
         &mut self,
-        control_message: ControlMessage,
-        ctx: &mut ArrowContext,
+        control_message: &ControlMessage,
+        ctx: &mut OperatorContext,
     ) {
         match control_message {
             ControlMessage::Checkpoint(_) => {
@@ -436,7 +631,7 @@ pub trait ArrowOperator: Send + 'static {
                 error!("shouldn't receive stop")
             }
             ControlMessage::Commit { epoch, commit_data } => {
-                self.handle_commit(epoch, &commit_data, ctx).await;
+                self.handle_commit(*epoch, &commit_data, ctx).await;
             }
             ControlMessage::LoadCompacted { compacted } => {
                 ctx.load_compacted(compacted).await;
@@ -452,7 +647,7 @@ pub trait ArrowOperator: Send + 'static {
         counter: &mut CheckpointCounter,
         closed: &mut HashSet<usize>,
         in_partitions: usize,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> ControlOutcome {
         match message {
             SignalMessage::Barrier(t) => {
@@ -553,19 +748,20 @@ pub trait ArrowOperator: Send + 'static {
     }
 
     #[allow(unused_variables)]
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {}
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {}
 
     async fn process_batch_index(
         &mut self,
         _index: usize,
         _in_partitions: usize,
         batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &OperatorContext,
+        collector: &mut dyn Collector,
     ) {
-        self.process_batch(batch, ctx).await
+        self.process_batch(batch, ctx, collector).await
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext);
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &OperatorContext, collector: &mut dyn Collector);
 
     #[allow(clippy::type_complexity)]
     fn future_to_poll(
@@ -575,37 +771,37 @@ pub trait ArrowOperator: Send + 'static {
     }
 
     #[allow(unused_variables)]
-    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut ArrowContext) {}
+    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut OperatorContext) {}
 
     #[allow(unused_variables)]
-    async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}
+    async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut OperatorContext) {}
 
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        _ctx: &mut ArrowContext,
+        _ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         Some(watermark)
     }
 
     #[allow(unused_variables)]
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext) {}
 
     #[allow(unused_variables)]
     async fn handle_commit(
         &mut self,
         epoch: u32,
         commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         warn!("default handling of commit with epoch {:?}", epoch);
     }
 
     #[allow(unused_variables)]
-    async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {}
+    async fn handle_tick(&mut self, tick: u64, ctx: &OperatorContext, collector: &mut dyn Collector) {}
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext) {}
 }
 
 #[derive(Default)]

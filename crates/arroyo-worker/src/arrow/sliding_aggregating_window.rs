@@ -3,7 +3,7 @@ use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::SchemaRef;
 use arroyo_operator::{
-    context::ArrowContext,
+    context::OperatorContext,
     operator::{ArrowOperator, OperatorConstructor, OperatorNode},
 };
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
@@ -113,7 +113,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn advance(&mut self, ctx: &mut ArrowContext) -> Result<()> {
+    async fn advance(&mut self, ctx: &mut OperatorContext) -> Result<()> {
         let bin_start = match self.state {
             SlidingWindowState::NoData => unreachable!(),
             SlidingWindowState::OnlyBufferedData { earliest_bin_time } => earliest_bin_time,
@@ -554,7 +554,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -596,7 +596,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
     }
 
     // TODO: filter out late data
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -671,7 +671,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) -> Option<Watermark> {
         let last_watermark = ctx.last_present_watermark()?;
 
@@ -682,7 +682,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         Some(watermark)
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {

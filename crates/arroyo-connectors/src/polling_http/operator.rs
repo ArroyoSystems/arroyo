@@ -14,7 +14,7 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 
 use crate::polling_http::EmitBehavior;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -52,7 +52,7 @@ impl SourceOperator for PollingHttpSourceFunc {
         arroyo_state::global_table_config("s", "polling http source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let s: &mut GlobalKeyedView<(), PollingHttpSourceState> = ctx
             .table_manager
             .get_global_keyed_state("s")
@@ -64,7 +64,7 @@ impl SourceOperator for PollingHttpSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(e) => {
@@ -79,7 +79,7 @@ impl SourceOperator for PollingHttpSourceFunc {
 impl PollingHttpSourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -194,7 +194,7 @@ impl PollingHttpSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),

@@ -8,7 +8,7 @@ use arrow::array::{RecordBatch, UInt32Array};
 use arrow::datatypes::Field;
 use arrow::datatypes::{DataType, Schema, SchemaRef};
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
@@ -91,7 +91,7 @@ impl KafkaTopicTester {
 
         let task_info = get_test_task_info();
 
-        let mut ctx = ArrowContext::new(
+        let mut ctx = OperatorContext::new(
             task_info,
             None,
             control_rx,
@@ -138,7 +138,7 @@ async fn get_data(consumer: &mut StreamConsumer) -> String {
 
 struct KafkaSinkWithWrites {
     sink: KafkaSinkFunc,
-    ctx: ArrowContext,
+    ctx: OperatorContext,
 }
 
 #[tokio::test]

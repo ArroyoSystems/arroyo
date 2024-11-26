@@ -18,7 +18,7 @@ use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::select;
@@ -60,7 +60,7 @@ impl SourceOperator for FileSystemSourceFunc {
         "FileSystem".to_string()
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(s) => s,
             Err(e) => {
@@ -83,7 +83,7 @@ impl FileSystemSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
         let (storage_provider, regex_pattern) = match &self.table {
             TableType::Source {
                 path,
@@ -274,7 +274,7 @@ impl FileSystemSourceFunc {
 
     async fn read_file(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         storage_provider: &StorageProvider,
         obj_key: &String,
     ) -> Result<Option<SourceFinishType>, UserError> {
@@ -323,7 +323,7 @@ impl FileSystemSourceFunc {
 
     async fn read_parquet_file(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         mut record_batch_stream: impl Stream<Item = Result<RecordBatch, UserError>> + Unpin + Send,
         obj_key: &String,
         mut records_read: usize,
@@ -357,7 +357,7 @@ impl FileSystemSourceFunc {
 
     async fn read_line_file(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         mut line_reader: impl Stream<Item = Result<String, UserError>> + Unpin + Send,
         obj_key: &String,
         mut records_read: usize,
@@ -395,7 +395,7 @@ impl FileSystemSourceFunc {
 
     async fn process_control_message(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
         control_message: ControlMessage,
     ) -> Option<SourceFinishType> {
         match control_message {

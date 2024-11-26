@@ -319,8 +319,8 @@ message ArroyoSchema {
 // Worker
 
 message TaskAssignment {
-  string operator_id = 1;
-  uint64 operator_subtask = 2;
+  uint32 node_id = 1;
+  uint32 subtask_idx = 2;
   uint64 worker_id = 4;
   string worker_addr = 5;
 }

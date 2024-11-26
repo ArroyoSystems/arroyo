@@ -3,7 +3,7 @@ use arrow::json::writer::JsonArray;
 use arrow::json::{Writer, WriterBuilder};
 use std::collections::HashMap;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
@@ -31,7 +31,7 @@ impl ArrowOperator for PreviewSink {
         )
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let table = ctx.table_manager.get_global_keyed_state("s").await.unwrap();
 
         self.row = *table.get(&ctx.task_info.task_index).unwrap_or(&0);
@@ -43,7 +43,7 @@ impl ArrowOperator for PreviewSink {
         );
     }
 
-    async fn process_batch(&mut self, mut batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, mut batch: RecordBatch, ctx: &mut OperatorContext) {
         let ts = ctx.in_schemas[0].timestamp_index;
         let timestamps: Vec<_> = batch
             .column(ts)
@@ -85,7 +85,7 @@ impl ArrowOperator for PreviewSink {
         self.row += batch.num_rows();
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext) {
         let table = ctx
             .table_manager
             .get_global_keyed_state::<usize, usize>("s")
@@ -95,7 +95,7 @@ impl ArrowOperator for PreviewSink {
         table.insert(ctx.task_info.task_index, self.row).await;
     }
 
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut OperatorContext) {
         self.client
             .as_mut()
             .unwrap()

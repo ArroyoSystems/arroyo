@@ -1,6 +1,6 @@
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::get_timestamp_col;
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
@@ -113,7 +113,7 @@ impl ArrowOperator for WatermarkGenerator {
         Some(Duration::from_secs(1))
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let gs = ctx
             .table_manager
             .get_global_keyed_state("s")
@@ -131,7 +131,7 @@ impl ArrowOperator for WatermarkGenerator {
         self.state_cache = state;
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext) {
         if let Some(SignalMessage::EndOfData) = final_message {
             // send final watermark on close
             ctx.collector
@@ -144,7 +144,7 @@ impl ArrowOperator for WatermarkGenerator {
         }
     }
 
-    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut OperatorContext) {
         ctx.collector.collect(record.clone()).await;
         self.last_event = SystemTime::now();
 
@@ -191,7 +191,7 @@ impl ArrowOperator for WatermarkGenerator {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext) {
         let gs = ctx
             .table_manager
             .get_global_keyed_state("s")
@@ -201,7 +201,7 @@ impl ArrowOperator for WatermarkGenerator {
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut ArrowContext) {
+    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext) {
         if let Some(idle_time) = self.idle_time {
             if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
                 info!(

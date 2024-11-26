@@ -153,12 +153,37 @@ impl LogicalEdge {
     }
 }
 
-#[derive(Clone)]
-pub struct LogicalNode {
+#[derive(Clone, Debug)]
+pub struct ChainedLogicalOperator {
     pub operator_id: String,
-    pub description: String,
     pub operator_name: OperatorName,
     pub operator_config: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OperatorChain {
+    operators: Vec<ChainedLogicalOperator>,
+    edges: Vec<ArroyoSchema>,
+}
+
+impl OperatorChain {
+    pub fn iter(&self) -> impl Iterator<Item = (&ChainedLogicalOperator, &ArroyoSchema)> {
+        self.operators
+            .iter()
+            .zip(self.edges.iter())
+            .map(|(op, schema)| (op, schema))
+    }
+    
+    pub fn is_source(&self) -> bool {
+        self.operators[0].operator_name == OperatorName::ConnectorSource
+    }
+}
+
+#[derive(Clone)]
+pub struct LogicalNode {
+    pub node_id: u32,
+    pub description: String,
+    pub operator_chain: OperatorChain,
     pub parallelism: usize,
 }
 
@@ -170,7 +195,9 @@ impl Display for LogicalNode {
 
 impl Debug for LogicalNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.operator_id)
+        write!(f, "{}", self.operator_chain.operators.iter().map(|op| op.operator_id)
+            .collect::<Vec<_>>()
+            .join(" -> "))
     }
 }
 

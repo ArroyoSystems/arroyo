@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use arroyo_formats::ser::ArrowSerializer;
 use tracing::info;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_types::CheckpointBarrier;
 
@@ -32,7 +32,7 @@ impl ArrowOperator for FluvioSinkFunc {
         format!("fluvio-sink-{}", self.topic)
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         match self.get_producer().await {
             Ok(producer) => {
                 self.producer = Some(producer);
@@ -48,7 +48,7 @@ impl ArrowOperator for FluvioSinkFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext) {
         let values = self.serializer.serialize(&batch);
         for v in values {
             self.producer
@@ -60,7 +60,7 @@ impl ArrowOperator for FluvioSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut OperatorContext) {
         self.producer.as_mut().unwrap().flush().await.unwrap();
     }
 }
