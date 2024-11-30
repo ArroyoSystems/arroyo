@@ -80,6 +80,8 @@ use std::{collections::HashMap, sync::Arc};
 use syn::Item;
 use tracing::{debug, info, warn};
 use unicase::UniCase;
+use arroyo_datastream::optimizers::ChainingOptimizer;
+use arroyo_rpc::config::config;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 pub const ASYNC_RESULT_FIELD: &str = "__async_result";
@@ -851,13 +853,17 @@ pub async fn parse_and_get_arrow_program(
     }
     let graph = plan_to_graph_visitor.into_graph();
 
-    let program = LogicalProgram::new(
+    let mut program = LogicalProgram::new(
         graph,
         ProgramConfig {
             udf_dylibs: schema_provider.dylib_udfs.clone(),
             python_udfs: schema_provider.python_udfs.clone(),
         },
     );
+    
+    if arroyo_rpc::config::config().pipeline.enable_chaining {
+        program.optimize(&ChainingOptimizer{});
+    }
 
     Ok(CompiledSql {
         program,
