@@ -4,10 +4,8 @@ use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
 use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_df::ASYNC_RESULT_FIELD;
-use arroyo_operator::context::OperatorContext;
-use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
-};
+use arroyo_operator::context::{Collector, OperatorContext};
+use arroyo_operator::operator::{ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry};
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
@@ -64,7 +62,7 @@ impl OperatorConstructor for AsyncUdfConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let udf_config: DylibUdfConfig = config
             .udf
             .clone()
@@ -83,7 +81,7 @@ impl OperatorConstructor for AsyncUdfConstructor {
             )
         })?;
 
-        Ok(OperatorNode::from_operator(Box::new(AsyncUdfOperator {
+        Ok(ConstructedOperator::from_operator(Box::new(AsyncUdfOperator {
             name: config.name.clone(),
             udf: (&*udf).try_into()?,
             ordered,
@@ -234,7 +232,7 @@ impl ArrowOperator for AsyncUdfOperator {
         gs.get_all()
             .iter()
             .filter(|(task_index, _)| {
-                **task_index % ctx.task_info.parallelism == ctx.task_info.task_index
+                **task_index % ctx.task_info.parallelism as usize == ctx.task_info.task_index as usize
             })
             .for_each(|(_, state)| {
                 for (k, v) in &state.inputs {
@@ -290,7 +288,7 @@ impl ArrowOperator for AsyncUdfOperator {
         Some(Duration::from_millis(50))
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext, _: &mut dyn Collector) {
         let arg_batch: Vec<_> = self
             .input_exprs
             .iter()
@@ -325,7 +323,7 @@ impl ArrowOperator for AsyncUdfOperator {
         }
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext) {
+    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         let Some((ids, results)) = self
             .udf
             .drain_results()
@@ -368,19 +366,20 @@ impl ArrowOperator for AsyncUdfOperator {
             self.inputs.remove(id);
         }
 
-        self.flush_output(ctx).await;
+        self.flush_output(ctx, collector).await;
     }
 
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        _ctx: &mut OperatorContext,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Option<Watermark> {
         self.watermarks.push_back((self.next_id, watermark));
         None
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         let gs = ctx.table_manager.get_global_keyed_state("a").await.unwrap();
 
         let state = AsyncUdfState {
@@ -400,10 +399,10 @@ impl ArrowOperator for AsyncUdfOperator {
         gs.insert(ctx.task_info.task_index, state).await;
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         if let Some(SignalMessage::EndOfData) = final_message {
             while !self.inputs.is_empty() && !self.outputs.is_empty() {
-                self.handle_tick(0, ctx).await;
+                self.handle_tick(0, ctx, collector).await;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
@@ -411,7 +410,7 @@ impl ArrowOperator for AsyncUdfOperator {
 }
 
 impl AsyncUdfOperator {
-    async fn flush_output(&mut self, ctx: &mut OperatorContext) {
+    async fn flush_output(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         // check if we can emit any records -- these are ones received before our most recent
         // watermark -- once all records from before a watermark have been processed, we can
         // remove and emit the watermark
@@ -451,7 +450,7 @@ impl AsyncUdfOperator {
             let batch = RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), cols)
                 .expect("failed to construct record batch");
 
-            ctx.collect(batch).await;
+            collector.collect(batch).await;
 
             let Some(watermark) = watermark else {
                 break;
@@ -461,7 +460,7 @@ impl AsyncUdfOperator {
 
             if watermark_id <= oldest_unprocessed {
                 // we've processed everything before this watermark, we can emit and drop it
-                ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
+                collector.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
                     .await;
             } else {
                 // we still have messages preceding this watermark to work on

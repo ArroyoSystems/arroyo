@@ -17,7 +17,7 @@ use crate::EmptyConfig;
 
 use crate::stdout::operator::StdoutSink;
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::formats::{Format, JsonFormat};
 
 pub struct StdoutConnector {}
@@ -126,11 +126,11 @@ impl Connector for StdoutConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         c: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let format = c
             .format
             .unwrap_or_else(|| Format::Json(JsonFormat::default()));
-        Ok(OperatorNode::from_operator(Box::new(StdoutSink {
+        Ok(ConstructedOperator::from_operator(Box::new(StdoutSink {
             stdout: BufWriter::new(tokio::io::stdout()),
             serializer: ArrowSerializer::new(format),
         })))

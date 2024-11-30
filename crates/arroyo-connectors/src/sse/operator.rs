@@ -1,6 +1,6 @@
 use crate::sse::SseTable;
-use arroyo_operator::context::OperatorContext;
-use arroyo_operator::operator::{OperatorNode, SourceOperator};
+use arroyo_operator::context::{OperatorContext, SourceContext};
+use arroyo_operator::operator::{ConstructedOperator, SourceOperator};
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
@@ -33,13 +33,16 @@ pub struct SSESourceFunc {
 }
 
 impl SSESourceFunc {
-    pub fn new_operator(table: SseTable, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    pub fn new_operator(
+        table: SseTable,
+        config: OperatorConfig,
+    ) -> anyhow::Result<ConstructedOperator> {
         let headers = table
             .headers
             .as_ref()
             .map(|s| s.sub_env_vars().expect("Failed to substitute env vars"));
 
-        Ok(OperatorNode::from_source(Box::new(SSESourceFunc {
+        Ok(ConstructedOperator::from_source(Box::new(SSESourceFunc {
             url: table.endpoint,
             headers: string_to_map(&headers.unwrap_or("".to_string()), ':')
                 .expect("Invalid header map")
@@ -67,7 +70,7 @@ impl SourceOperator for SSESourceFunc {
         arroyo_state::global_table_config("e", "sse source state")
     }
 
-    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut SourceContext) -> SourceFinishType {
         let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -92,7 +95,7 @@ impl SourceOperator for SSESourceFunc {
 impl SSESourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut OperatorContext,
+        ctx: &mut SourceContext,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -132,7 +135,7 @@ impl SSESourceFunc {
         None
     }
 
-    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut SourceContext) -> Result<SourceFinishType, UserError> {
         ctx.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -196,13 +199,10 @@ impl SSESourceFunc {
                                 last_eof = Instant::now();
                             }
                             Some(Err(e)) => {
-                                ctx.control_tx.send(
-                                    ControlResp::Error {
-                                        operator_id: ctx.task_info.operator_id.clone(),
-                                        task_index: ctx.task_info.task_index,
-                                        message: "Error while reading from EventSource".to_string(),
-                                        details: format!("{:?}", e)}
-                                ).await.unwrap();
+                                ctx.report_user_error(UserError::new(
+                                    "Error while reading from EventSource",
+                                    format!("{:?}", e)
+                                )).await;
                                 panic!("Error while reading from EventSource: {:?}", e);
                             }
                             None => {

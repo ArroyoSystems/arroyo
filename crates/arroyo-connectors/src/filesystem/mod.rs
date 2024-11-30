@@ -21,7 +21,7 @@ use crate::{pull_opt, pull_option_to_i64, EmptyConfig};
 
 use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 use self::sink::{
     JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
@@ -228,10 +228,10 @@ impl Connector for FileSystemConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> Result<OperatorNode> {
+    ) -> Result<ConstructedOperator> {
         match &table.table_type {
             TableType::Source { .. } => {
-                Ok(OperatorNode::from_source(Box::new(FileSystemSourceFunc {
+                Ok(ConstructedOperator::from_source(Box::new(FileSystemSourceFunc {
                     table: table.table_type.clone(),
                     format: config
                         .format
@@ -250,21 +250,21 @@ impl Connector for FileSystemConnector {
                 let backend_config = BackendConfig::parse_url(write_path, true)?;
                 match (format_settings, backend_config.is_local()) {
                     (Some(FormatSettings::Parquet { .. }), true) => {
-                        Ok(OperatorNode::from_operator(Box::new(
+                        Ok(ConstructedOperator::from_operator(Box::new(
                             LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
                         )))
                     }
                     (Some(FormatSettings::Parquet { .. }), false) => {
-                        Ok(OperatorNode::from_operator(Box::new(
+                        Ok(ConstructedOperator::from_operator(Box::new(
                             ParquetFileSystemSink::new(table, config),
                         )))
                     }
                     (Some(FormatSettings::Json { .. }), true) => {
-                        Ok(OperatorNode::from_operator(Box::new(
+                        Ok(ConstructedOperator::from_operator(Box::new(
                             LocalJsonFileSystemSink::new(write_path.to_string(), table, config),
                         )))
                     }
-                    (Some(FormatSettings::Json { .. }), false) => Ok(OperatorNode::from_operator(
+                    (Some(FormatSettings::Json { .. }), false) => Ok(ConstructedOperator::from_operator(
                         Box::new(JsonFileSystemSink::new(table, config)),
                     )),
                     (None, _) => bail!("have to have some format settings"),

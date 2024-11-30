@@ -4,7 +4,7 @@ use crate::kafka::{
 use crate::{kafka, pull_opt};
 use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -195,7 +195,7 @@ impl Connector for ConfluentConnector {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         KafkaConnector {}.make_operator(profile.into(), table, config)
     }
 }

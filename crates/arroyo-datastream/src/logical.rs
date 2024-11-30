@@ -1,11 +1,15 @@
 use datafusion_proto::protobuf::ArrowType;
+use itertools::Itertools;
 
 use anyhow::anyhow;
 use arrow_schema::DataType;
 use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc::api::{ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType};
+use arroyo_rpc::grpc::api::{
+    ArrowProgram, ArrowProgramConfig, ChainedOperator, ConnectorOp, EdgeType,
+};
+use datafusion_proto::generated::datafusion;
 use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
@@ -18,6 +22,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hasher;
+use std::str::FromStr;
 use std::sync::Arc;
 use strum::{Display, EnumString};
 
@@ -87,14 +92,17 @@ impl TryFrom<LogicalProgram> for PipelineGraph {
             .graph
             .node_weights()
             .map(|node| Ok(PipelineNode {
-                node_id: node.operator_id.to_string(),
-                operator: match node.operator_name {
-                    OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
-                        ConnectorOp::decode(&node.operator_config[..])
-                            .map_err(|_| anyhow!("invalid graph: could not decode connector configuration for {}", node.operator_id))?
+                node_id: node.node_id,
+                operator: match node.operator_chain.operators.first() {
+                    Some(ChainedLogicalOperator { operator_name: OperatorName::ConnectorSource | OperatorName::ConnectorSink, operator_config, .. }) => {
+                        ConnectorOp::decode(&operator_config[..])
+                            .map_err(|_| anyhow!("invalid graph: could not decode connector configuration for {}", node.node_id))?
                             .connector
                     }
-                    op => op.to_string(),
+                    Some(op) if node.operator_chain.operators.len() == 1 => {
+                        op.operator_id.to_string()
+                    }
+                    _ => "chained_op".to_string(),
                 },
                 description: node.description.clone(),
                 parallelism: node.parallelism as u32,
@@ -108,8 +116,8 @@ impl TryFrom<LogicalProgram> for PipelineGraph {
                 let src = value.graph.node_weight(edge.source()).unwrap();
                 let target = value.graph.node_weight(edge.target()).unwrap();
                 PipelineEdge {
-                    src_id: src.operator_id.to_string(),
-                    dest_id: target.operator_id.to_string(),
+                    src_id: src.node_id,
+                    dest_id: target.node_id,
                     key_type: "()".to_string(),
                     value_type: "()".to_string(),
                     edge_type: format!("{:?}", edge.weight().edge_type),
@@ -167,13 +175,14 @@ pub struct OperatorChain {
 }
 
 impl OperatorChain {
-    pub fn iter(&self) -> impl Iterator<Item = (&ChainedLogicalOperator, &ArroyoSchema)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&ChainedLogicalOperator, Option<&ArroyoSchema>)> {
         self.operators
             .iter()
-            .zip(self.edges.iter())
-            .map(|(op, schema)| (op, schema))
+            .zip_longest(self.edges.iter())
+            .map(|e| e.left_and_right())
+            .map(|(l, r)| (l.unwrap(), r))
     }
-    
+
     pub fn is_source(&self) -> bool {
         self.operators[0].operator_name == OperatorName::ConnectorSource
     }
@@ -187,6 +196,31 @@ pub struct LogicalNode {
     pub parallelism: usize,
 }
 
+impl LogicalNode {
+    pub fn single(
+        id: u32,
+        operator_id: String,
+        name: OperatorName,
+        config: Vec<u8>,
+        description: String,
+        parallelism: usize,
+    ) -> Self {
+        Self {
+            node_id: id,
+            description,
+            operator_chain: OperatorChain {
+                operators: vec![ChainedLogicalOperator {
+                    operator_id,
+                    operator_name: name,
+                    operator_config: config,
+                }],
+                edges: vec![],
+            },
+            parallelism,
+        }
+    }
+}
+
 impl Display for LogicalNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.description)
@@ -195,9 +229,16 @@ impl Display for LogicalNode {
 
 impl Debug for LogicalNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.operator_chain.operators.iter().map(|op| op.operator_id)
-            .collect::<Vec<_>>()
-            .join(" -> "))
+        write!(
+            f,
+            "{}",
+            self.operator_chain
+                .operators
+                .iter()
+                .map(|op| op.operator_id.clone())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        )
     }
 }
 
@@ -230,14 +271,14 @@ pub struct ProgramConfig {
 pub struct LogicalProgram {
     pub graph: LogicalGraph,
     pub program_config: ProgramConfig,
-    pub operator_indices: HashMap<String, u32>,
+    pub operator_indices: HashMap<u32, u32>,
 }
 
 impl LogicalProgram {
     pub fn new(graph: LogicalGraph, program_config: ProgramConfig) -> Self {
         let operator_indices = graph
             .node_indices()
-            .map(|idx| (graph[idx].operator_id.clone(), idx.index() as u32))
+            .map(|idx| (graph[idx].node_id, idx.index() as u32))
             .collect();
 
         Self {
@@ -247,9 +288,9 @@ impl LogicalProgram {
         }
     }
 
-    pub fn update_parallelism(&mut self, overrides: &HashMap<String, usize>) {
+    pub fn update_parallelism(&mut self, overrides: &HashMap<u32, usize>) {
         for node in self.graph.node_weights_mut() {
-            if let Some(p) = overrides.get(&node.operator_id) {
+            if let Some(p) = overrides.get(&node.node_id) {
                 node.parallelism = *p;
             }
         }
@@ -264,11 +305,11 @@ impl LogicalProgram {
         self.graph.node_weights().map(|nw| nw.parallelism).sum()
     }
 
-    pub fn sources(&self) -> HashSet<&str> {
+    pub fn sources(&self) -> HashSet<u32> {
         // TODO: this can be memoized
         self.graph
             .externals(Direction::Incoming)
-            .map(|t| self.graph.node_weight(t).unwrap().operator_id.as_str())
+            .map(|t| self.graph.node_weight(t).unwrap().node_id)
             .collect()
     }
 
@@ -288,14 +329,14 @@ impl LogicalProgram {
             .collect()
     }
 
-    pub fn operator_index(&self, name: &str) -> Option<u32> {
-        self.operator_indices.get(name).cloned()
+    pub fn operator_index(&self, id: u32) -> Option<u32> {
+        self.operator_indices.get(&id).cloned()
     }
 
-    pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
+    pub fn tasks_per_operator(&self) -> HashMap<u32, usize> {
         let mut tasks_per_operator = HashMap::new();
         for node in self.graph.node_weights() {
-            tasks_per_operator.insert(node.operator_id.clone(), node.parallelism);
+            tasks_per_operator.insert(node.node_id, node.parallelism);
         }
         tasks_per_operator
     }
@@ -303,35 +344,41 @@ impl LogicalProgram {
     pub fn features(&self) -> HashSet<String> {
         let mut s = HashSet::new();
 
-        for t in self.graph.node_weights() {
-            let feature = match &t.operator_name {
-                OperatorName::AsyncUdf => "async-udf".to_string(),
-                OperatorName::ExpressionWatermark
-                | OperatorName::ArrowValue
-                | OperatorName::ArrowKey => continue,
-                OperatorName::Join => "join-with-expiration".to_string(),
-                OperatorName::InstantJoin => "windowed-join".to_string(),
-                OperatorName::WindowFunction => "sql-window-function".to_string(),
-                OperatorName::TumblingWindowAggregate => {
-                    "sql-tumbling-window-aggregate".to_string()
-                }
-                OperatorName::SlidingWindowAggregate => "sql-sliding-window-aggregate".to_string(),
-                OperatorName::SessionWindowAggregate => "sql-session-window-aggregate".to_string(),
-                OperatorName::UpdatingAggregate => "sql-updating-aggregate".to_string(),
-                OperatorName::ConnectorSource => {
-                    let Ok(connector_op) = ConnectorOp::decode(&t.operator_config[..]) else {
-                        continue;
-                    };
-                    format!("{}-source", connector_op.connector)
-                }
-                OperatorName::ConnectorSink => {
-                    let Ok(connector_op) = ConnectorOp::decode(&t.operator_config[..]) else {
-                        continue;
-                    };
-                    format!("{}-sink", connector_op.connector)
-                }
-            };
-            s.insert(feature);
+        for n in self.graph.node_weights() {
+            for t in &n.operator_chain.operators {
+                let feature = match &t.operator_name {
+                    OperatorName::AsyncUdf => "async-udf".to_string(),
+                    OperatorName::ExpressionWatermark
+                    | OperatorName::ArrowValue
+                    | OperatorName::ArrowKey => continue,
+                    OperatorName::Join => "join-with-expiration".to_string(),
+                    OperatorName::InstantJoin => "windowed-join".to_string(),
+                    OperatorName::WindowFunction => "sql-window-function".to_string(),
+                    OperatorName::TumblingWindowAggregate => {
+                        "sql-tumbling-window-aggregate".to_string()
+                    }
+                    OperatorName::SlidingWindowAggregate => {
+                        "sql-sliding-window-aggregate".to_string()
+                    }
+                    OperatorName::SessionWindowAggregate => {
+                        "sql-session-window-aggregate".to_string()
+                    }
+                    OperatorName::UpdatingAggregate => "sql-updating-aggregate".to_string(),
+                    OperatorName::ConnectorSource => {
+                        let Ok(connector_op) = ConnectorOp::decode(&t.operator_config[..]) else {
+                            continue;
+                        };
+                        format!("{}-source", connector_op.connector)
+                    }
+                    OperatorName::ConnectorSink => {
+                        let Ok(connector_op) = ConnectorOp::decode(&t.operator_config[..]) else {
+                            continue;
+                        };
+                        format!("{}-sink", connector_op.connector)
+                    }
+                };
+                s.insert(feature);
+            }
         }
 
         s
@@ -350,10 +397,26 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
             id_map.insert(
                 node.node_index,
                 graph.add_node(LogicalNode {
-                    operator_id: node.node_id,
+                    node_id: node.node_id,
                     description: node.description,
-                    operator_name: OperatorName::try_from(node.operator_name.as_str())?,
-                    operator_config: node.operator_config,
+                    operator_chain: OperatorChain {
+                        operators: node
+                            .operators
+                            .into_iter()
+                            .map(|op| {
+                                Ok(ChainedLogicalOperator {
+                                    operator_id: op.operator_id,
+                                    operator_name: OperatorName::from_str(&op.operator_name)?,
+                                    operator_config: op.operator_config,
+                                })
+                            })
+                            .collect::<anyhow::Result<Vec<_>>>()?,
+                        edges: node
+                            .edges
+                            .into_iter()
+                            .map(|e| Ok(e.try_into()?))
+                            .collect::<anyhow::Result<Vec<_>>>()?,
+                    },
                     parallelism: node.parallelism as usize,
                 }),
             );
@@ -524,11 +587,25 @@ impl From<LogicalProgram> for ArrowProgram {
                 let node = graph.node_weight(idx).unwrap();
                 api::ArrowNode {
                     node_index: idx.index() as i32,
-                    node_id: node.operator_id.clone(),
+                    node_id: node.node_id,
                     parallelism: node.parallelism as u32,
                     description: node.description.clone(),
-                    operator_name: node.operator_name.to_string(),
-                    operator_config: node.operator_config.clone(),
+                    operators: node
+                        .operator_chain
+                        .operators
+                        .iter()
+                        .map(|op| api::ChainedOperator {
+                            operator_id: op.operator_id.clone(),
+                            operator_name: op.operator_name.to_string(),
+                            operator_config: op.operator_config.clone(),
+                        })
+                        .collect(),
+                    edges: node
+                        .operator_chain
+                        .edges
+                        .iter()
+                        .map(|edge| edge.clone().into())
+                        .collect(),
                 }
             })
             .collect();

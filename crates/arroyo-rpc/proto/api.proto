@@ -243,7 +243,6 @@ message OperatorCheckpointDetail {
 }
 
 
-
 message DylibUdfConfig {
   string dylib_path = 1;
   repeated bytes arg_types = 2;
@@ -279,13 +278,19 @@ message ArroyoSchema {
   bool has_keys = 4;
 }
 
+message ChainedOperator {
+  string operator_id = 1;
+  string operator_name = 2;
+  bytes operator_config = 3; 
+}
+
 message ArrowNode {
   int32 node_index = 1;
-  string node_id = 2;
+  uint32 node_id = 2;
   uint32 parallelism = 3;
   string description = 4;
-  string operator_name = 5;
-  bytes operator_config = 6;
+  repeated ChainedOperator operators = 5;
+  repeated ArroyoSchema edges = 6;
 }
 
 message ArrowEdge {

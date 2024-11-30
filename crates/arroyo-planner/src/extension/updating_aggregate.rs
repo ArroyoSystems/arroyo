@@ -241,13 +241,14 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             ttl_micros: self.ttl.as_micros() as u64,
         };
 
-        let node = LogicalNode {
-            operator_id: format!("updating_aggregate_{}", index),
-            description: "UpdatingAggregate".to_string(),
-            operator_name: OperatorName::UpdatingAggregate,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        };
+        let node = LogicalNode::single(
+            index as u32,
+            format!("updating_aggregate_{}", index),
+            OperatorName::UpdatingAggregate,
+            config.encode_to_vec(),
+            "UpdatingAggregate".to_string(),
+            1,
+        );
 
         let edge = LogicalEdge::project_all(LogicalEdgeType::Shuffle, (*input_schema).clone());
 

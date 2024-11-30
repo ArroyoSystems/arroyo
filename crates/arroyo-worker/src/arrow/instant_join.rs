@@ -3,9 +3,9 @@ use anyhow::Result;
 use arrow::compute::{max, min, partition, sort_to_indices, take};
 use arrow_array::{RecordBatch, TimestampNanosecondArray};
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
-    ArrowOperator, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+    ArrowOperator, DisplayableOperator, OperatorConstructor, ConstructedOperator, Registry,
 };
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
@@ -232,15 +232,17 @@ impl ArrowOperator for InstantJoin {
         }
     }
 
-    async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, _: RecordBatch, _: &mut OperatorContext, _: &mut dyn Collector) {
         unreachable!();
     }
+    
     async fn process_batch_index(
         &mut self,
         index: usize,
         total_inputs: usize,
         record_batch: RecordBatch,
         ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
     ) {
         match index / (total_inputs / 2) {
             0 => self
@@ -256,11 +258,12 @@ impl ArrowOperator for InstantJoin {
     }
     async fn handle_watermark(
         &mut self,
-        int_watermark: Watermark,
+        watermark: Watermark,
         ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Option<Watermark> {
         let Some(watermark) = ctx.last_present_watermark() else {
-            return Some(int_watermark);
+            return Some(watermark);
         };
         let futures_to_drain = {
             let mut futures_to_drain = vec![];
@@ -278,7 +281,7 @@ impl ArrowOperator for InstantJoin {
             while let (_time, Some((batch, new_exec))) = future.await {
                 match batch {
                     Ok(batch) => {
-                        ctx.collect(batch).await;
+                        collector.collect(batch).await;
                     }
                     Err(err) => {
                         panic!("error in future: {:?}", err);
@@ -287,10 +290,10 @@ impl ArrowOperator for InstantJoin {
                 future = new_exec;
             }
         }
-        Some(int_watermark)
+        Some(Watermark::EventTime(watermark))
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("left", watermark)
@@ -346,7 +349,7 @@ impl ArrowOperator for InstantJoin {
         }))
     }
 
-    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut OperatorContext) {
+    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, _: &mut OperatorContext, collector: &mut dyn Collector) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
@@ -356,7 +359,7 @@ impl ArrowOperator for InstantJoin {
                 Some((batch, future)) => match self.execs.get_mut(&bin) {
                     Some(exec) => {
                         exec.active_exec = future.clone();
-                        ctx.collect(batch.expect("should compute batch in future"))
+                        collector.collect(batch.expect("should compute batch in future"))
                             .await;
                         self.futures.lock().await.push(future);
                     }
@@ -376,7 +379,7 @@ impl OperatorConstructor for InstantJoinConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
 
         let left_input_schema: Arc<ArroyoSchema> =
@@ -399,7 +402,7 @@ impl OperatorConstructor for InstantJoinConstructor {
             &codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(InstantJoin {
+        Ok(ConstructedOperator::from_operator(Box::new(InstantJoin {
             left_input_schema,
             right_input_schema,
             execs: BTreeMap::new(),
