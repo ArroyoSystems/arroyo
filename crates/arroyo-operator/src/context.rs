@@ -249,63 +249,36 @@ impl ContextBuffer {
 pub struct SourceContext {
     pub out_schema: ArroyoSchema,
     pub error_reporter: ErrorReporter,
-    buffer: ContextBuffer,
-    buffered_error: Option<UserError>,
-    error_rate_limiter: RateLimiter,
-    deserializer: Option<ArrowDeserializer>,
     pub control_tx: Sender<ControlResp>,
     pub control_rx: Receiver<ControlMessage>,
     pub chain_info: Arc<ChainInfo>,
     pub task_info: Arc<TaskInfo>,
     pub table_manager: TableManager,
     pub watermarks: WatermarkHolder,
-    pub(crate) collector: ArrowCollector,
 }
 
-impl SourceContext {
-    pub async fn new(
-        out_schema: ArroyoSchema,
-        control_tx: Sender<ControlResp>,
-        control_rx: Receiver<ControlMessage>,
-        chain_info: Arc<ChainInfo>,
-        task_info: Arc<TaskInfo>,
-        tables: HashMap<String, TableConfig>,
-        restore_from: Option<&CheckpointMetadata>,
-        out_qs: Vec<Vec<BatchSender>>,
-    ) -> Self {
-        let (table_manager, watermark) =
-            TableManager::load(task_info.clone(), tables, control_tx.clone(), restore_from)
-                .await
-                .expect("should be able to create TableManager");
 
+impl SourceContext {
+    pub fn from_operator(
+        ctx: OperatorContext,
+        chain_info: Arc<ChainInfo>,
+        control_rx: Receiver<ControlMessage>, 
+    ) -> Self {
         Self {
-            out_schema: out_schema.clone(),
+            out_schema: ctx.out_schema.expect("sources must have downstream nodes"),
             error_reporter: ErrorReporter {
-                tx: control_tx.clone(),
-                task_info: task_info.clone(),
+                tx: ctx.control_tx.clone(),
+                task_info: ctx.task_info.clone(),
             },
-            collector: ArrowCollector::new(chain_info.clone(), Some(out_schema.clone()), out_qs),
-            buffer: ContextBuffer::new(out_schema.schema),
-            buffered_error: None,
-            error_rate_limiter: RateLimiter::new(),
-            deserializer: None,
-            control_tx,
-            control_rx,
+            control_tx: ctx.control_tx,
+            control_rx,            
             chain_info,
-            task_info,
-            table_manager,
-            watermarks: WatermarkHolder::new(vec![watermark.map(Watermark::EventTime); 1]),
+            task_info: ctx.task_info,
+            table_manager: ctx.table_manager,
+            watermarks: ctx.watermarks,
         }
     }
 
-    pub fn should_flush(&self) -> bool {
-        self.buffer.should_flush()
-            || self
-                .deserializer
-                .as_ref()
-                .map(|d| d.should_flush())
-                .unwrap_or(false)
-    }
 
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         //TODO: support compaction in the table manager
@@ -324,6 +297,7 @@ impl SourceContext {
             .send(ControlResp::Error {
                 node_id: self.task_info.node_id,
                 task_index: self.task_info.task_index as usize,
+                operator_id: self.task_info.operator_id.clone(),
                 message: error.name,
                 details: error.details,
             })
@@ -331,6 +305,61 @@ impl SourceContext {
             .unwrap();
     }
 
+}
+
+pub struct SourceCollector {
+    deserializer: Option<ArrowDeserializer>,
+    buffer: ContextBuffer,
+    buffered_error: Option<UserError>,
+    error_rate_limiter: RateLimiter,
+    pub out_schema: ArroyoSchema,
+    pub(crate) collector: ArrowCollector,
+    control_tx: Sender<ControlResp>,
+    chain_info: Arc<ChainInfo>,
+    task_info: Arc<TaskInfo>,
+}
+
+impl SourceCollector {
+    pub fn new(
+        out_schema: ArroyoSchema,
+        collector: ArrowCollector,
+        control_tx: Sender<ControlResp>,
+        chain_info: &Arc<ChainInfo>,
+        task_info: &Arc<TaskInfo>,
+    ) -> Self {
+        Self {
+            buffer: ContextBuffer::new(out_schema.schema.clone()),            
+            out_schema,
+            collector,
+            control_tx,
+            chain_info: chain_info.clone(),
+            task_info: task_info.clone(),
+            deserializer: None,
+            buffered_error: None,
+            error_rate_limiter: RateLimiter::new(),
+        }
+    }
+
+    pub async fn collect(&mut self, record: RecordBatch) {
+        self.collector.collect(record).await;
+    }
+
+    pub fn initialize_deserializer_with_resolver(
+        &mut self,
+        format: Format,
+        framing: Option<Framing>,
+        bad_data: Option<BadData>,
+        schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    ) {
+        self.deserializer = Some(ArrowDeserializer::with_schema_resolver(
+            format,
+            framing,
+            self.out_schema.clone(),
+            bad_data.unwrap_or_default(),
+            schema_resolver,
+        ));
+    }
+    
     pub fn initialize_deserializer(
         &mut self,
         format: Format,
@@ -349,22 +378,15 @@ impl SourceContext {
         ));
     }
 
-    pub fn initialize_deserializer_with_resolver(
-        &mut self,
-        format: Format,
-        framing: Option<Framing>,
-        bad_data: Option<BadData>,
-        schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    ) {
-        self.deserializer = Some(ArrowDeserializer::with_schema_resolver(
-            format,
-            framing,
-            self.out_schema.clone(),
-            bad_data.unwrap_or_default(),
-            schema_resolver,
-        ));
+    pub fn should_flush(&self) -> bool {
+        self.buffer.should_flush()
+            || self
+            .deserializer
+            .as_ref()
+            .map(|d| d.should_flush())
+            .unwrap_or(false)
     }
-
+    
     pub async fn deserialize_slice(
         &mut self,
         msg: &[u8],
@@ -383,6 +405,7 @@ impl SourceContext {
 
         Ok(())
     }
+    
 
     /// Handling errors and rate limiting error reporting.
     /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
@@ -402,6 +425,7 @@ impl SourceContext {
                                 self.control_tx
                                     .send(ControlResp::Error {
                                         node_id: self.task_info.node_id,
+                                        operator_id: self.task_info.operator_id.clone(),
                                         task_index: self.task_info.task_index as usize,
                                         message: "Dropping invalid data".to_string(),
                                         details,
@@ -423,7 +447,7 @@ impl SourceContext {
         }
 
         Ok(())
-    }
+    }    
 
     pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
         if self.buffer.size() > 0 {
@@ -450,22 +474,20 @@ impl SourceContext {
 
         Ok(())
     }
-
-    pub async fn collect(&mut self, record: RecordBatch) {
-        self.collector.collect(record).await;
-    }
-
+    
     pub async fn broadcast(&mut self, message: ArrowMessage) {
         if let Err(e) = self.flush_buffer().await {
             self.buffered_error.replace(e);
         }
         self.collector.broadcast(message).await;
     }
+
+    
 }
 
 pub async fn send_checkpoint_event(
     tx: &Sender<ControlResp>,
-    chain_info: &ChainInfo,
+    info: &TaskInfo,
     barrier: CheckpointBarrier,
     event_type: TaskCheckpointEventType,
 ) {
@@ -473,8 +495,9 @@ pub async fn send_checkpoint_event(
     // which then sends a TaskCheckpointEventReq to the controller.
     tx.send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
         checkpoint_epoch: barrier.epoch,
-        node_id: chain_info.node_id,
-        subtask_index: chain_info.task_index,
+        node_id: info.node_id,
+        operator_id: info.operator_id.clone(), 
+        subtask_index: info.task_index,
         time: SystemTime::now(),
         event_type,
     }))
@@ -489,6 +512,7 @@ pub struct OperatorContext {
     pub in_schemas: Vec<ArroyoSchema>,
     pub out_schema: Option<ArroyoSchema>,
     pub table_manager: TableManager,
+    pub error_reporter: ErrorReporter,
 }
 
 #[derive(Clone)]
@@ -502,6 +526,7 @@ impl ErrorReporter {
         self.tx
             .send(ControlResp::Error {
                 node_id: self.task_info.node_id,
+                operator_id: self.task_info.operator_id.clone(),
                 task_index: self.task_info.task_index as usize,
                 message: message.into(),
                 details: details.into(),
@@ -745,6 +770,10 @@ impl OperatorContext {
             in_schemas,
             out_schema: out_schema.clone(),
             table_manager,
+            error_reporter: ErrorReporter {
+                tx: control_tx,
+                task_info,
+            }
         }
     }
 

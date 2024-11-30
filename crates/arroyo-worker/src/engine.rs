@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::error::Error;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::{Arc, RwLock};
@@ -10,6 +11,7 @@ use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use petgraph::data::DataMap;
 use tracing::{info, warn};
 
 use crate::arrow::async_udf::AsyncUdfConstructor;
@@ -36,13 +38,14 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{range_for_server, Key, TaskInfo, WorkerId};
+use arroyo_types::{range_for_server, ChainInfo, Key, TaskInfo, WorkerId};
 use arroyo_udf_host::LocalUdf;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::EdgeRef;
+use petgraph::visit::{EdgeRef, NodeRef};
 use petgraph::Direction;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
+use tracing::log::kv::ToKey;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -167,10 +170,12 @@ impl Program {
         self.graph.read().unwrap().node_count()
     }
 
-    pub fn local_from_logical(
-        name: String,
+    pub async fn local_from_logical(
+        job_id: String,
         logical: &DiGraph<LogicalNode, LogicalEdge>,
         udfs: &[LocalUdf],
+        restore_from: Option<&CheckpointMetadata>,
+        control_tx: Sender<ControlResp>,
     ) -> Self {
         let assignments = logical
             .node_weights()
@@ -188,15 +193,17 @@ impl Program {
         for udf in udfs {
             registry.add_local_udf(udf);
         }
-        Self::from_logical(name, logical, &assignments, registry)
+        Self::from_logical("local".to_string(), &job_id, logical, &assignments, registry, restore_from, control_tx).await
     }
 
-    pub fn from_logical(
+    pub async fn from_logical(
         name: String,
         job_id: &str,
         logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
         registry: Registry,
+        restore_from: Option<&CheckpointMetadata>,
+        control_tx: Sender<ControlResp>,
     ) -> Program {
         let mut physical = DiGraph::new();
 
@@ -218,12 +225,11 @@ impl Program {
                 .map(|edge| edge.weight().schema.clone())
                 .next();
 
-            let projection = logical
-                .edges_directed(idx, Direction::Outgoing)
-                .map(|edge| edge.weight().projection.clone())
-                .next()
-                .unwrap_or_default();
-
+            let input_partitions = logical
+                .neighbors_directed(idx, Direction::Incoming)
+                .map(|n| logical.node_weight(n).unwrap().parallelism as u32)
+                .sum();
+            
             let node = logical.node_weight(idx).unwrap();
             let parallelism = *parallelism_map.get(&node.node_id).unwrap_or_else(|| {
                 warn!("no assignments for node {}", node.node_id);
@@ -237,15 +243,18 @@ impl Program {
                     in_schemas: in_schemas.clone(),
                     out_schema: out_schema.clone(),
                     node: construct_node(
-                        node.operator_chain,
+                        node.operator_chain.clone(),
                         job_id,
                         node.node_id,
                         i as u32,
                         parallelism as u32,
-                        
-                        logical
+                        input_partitions,
+                        in_schemas.clone(),
+                        out_schema.clone(),
+                        restore_from,
+                        control_tx.clone(),
                         registry.clone(),
-                    ),
+                    ).await,
                 }));
             }
         }
@@ -260,12 +269,12 @@ impl Program {
 
             let from_nodes: Vec<_> = physical
                 .node_indices()
-                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_in_node.operator_id)
+                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_in_node.node_id)
                 .collect();
             assert_ne!(from_nodes.len(), 0, "failed to find from nodes");
             let to_nodes: Vec<_> = physical
                 .node_indices()
-                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_out_node.operator_id)
+                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_out_node.node_id)
                 .collect();
             assert_ne!(from_nodes.len(), 0, "failed to find to nodes");
 
@@ -333,7 +342,7 @@ pub struct Engine {
     run_id: String,
     job_id: String,
     network_manager: NetworkManager,
-    assignments: HashMap<(String, usize), TaskAssignment>,
+    assignments: HashMap<(u32, usize), TaskAssignment>,
 }
 
 pub struct StreamConfig {
@@ -342,7 +351,7 @@ pub struct StreamConfig {
 
 pub struct RunningEngine {
     program: Program,
-    assignments: HashMap<(String, usize), TaskAssignment>,
+    assignments: HashMap<(u32, usize), TaskAssignment>,
     worker_id: WorkerId,
 }
 
@@ -354,7 +363,7 @@ impl RunningEngine {
             .filter(|idx| {
                 let w = graph.node_weight(*idx).unwrap();
                 self.assignments
-                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
                     == self.worker_id.0
@@ -370,7 +379,7 @@ impl RunningEngine {
             .filter(|idx| {
                 let w = graph.node_weight(*idx).unwrap();
                 self.assignments
-                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
                     == self.worker_id.0
@@ -379,7 +388,7 @@ impl RunningEngine {
             .collect()
     }
 
-    pub fn operator_controls(&self) -> HashMap<String, Vec<Sender<ControlMessage>>> {
+    pub fn operator_controls(&self) -> HashMap<u32, Vec<Sender<ControlMessage>>> {
         let mut controls = HashMap::new();
         let graph = self.program.graph.read().unwrap();
 
@@ -388,7 +397,7 @@ impl RunningEngine {
             .filter(|idx| {
                 let w = graph.node_weight(*idx).unwrap();
                 self.assignments
-                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
                     == self.worker_id.0
@@ -397,11 +406,11 @@ impl RunningEngine {
                 let w = graph.node_weight(idx).unwrap();
                 let assignment = self
                     .assignments
-                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .get(&(w.id(), w.subtask_idx()))
                     .unwrap();
                 let tx = graph.node_weight(idx).unwrap().as_queue().tx.clone();
                 controls
-                    .entry(assignment.operator_id.clone())
+                    .entry(assignment.node_id)
                     .or_insert(vec![])
                     .push(tx);
             });
@@ -421,7 +430,7 @@ impl Engine {
     ) -> Self {
         let assignments = assignments
             .into_iter()
-            .map(|a| ((a.operator_id.to_string(), a.operator_subtask as usize), a))
+            .map(|a| ((a.node_id, a.subtask_idx as usize), a))
             .collect();
 
         Self {
@@ -450,10 +459,10 @@ impl Engine {
             .node_weights()
             .map(|n| {
                 (
-                    (n.id().to_string(), n.subtask_idx()),
+                    (n.id(), n.subtask_idx()),
                     TaskAssignment {
-                        operator_id: n.id().to_string(),
-                        operator_subtask: n.subtask_idx() as u64,
+                        node_id: n.id(),
+                        subtask_idx: n.subtask_idx() as u32,
                         worker_id: worker_id.0,
                         worker_addr: "locahost:0".to_string(),
                     },
@@ -471,25 +480,11 @@ impl Engine {
         }
     }
 
-    pub async fn start(mut self, config: StreamConfig) -> (RunningEngine, Receiver<ControlResp>) {
+    pub async fn start(mut self, control_tx: Sender<ControlResp>) -> RunningEngine {
         info!("Starting job {}", self.job_id);
 
-        let checkpoint_metadata = if let Some(epoch) = config.restore_epoch {
-            info!("Restoring checkpoint {} for job {}", epoch, self.job_id);
-            Some(
-                StateBackend::load_checkpoint_metadata(&self.job_id, epoch)
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!("failed to load checkpoint metadata for epoch {}", epoch)
-                    }),
-            )
-        } else {
-            None
-        };
-
         let node_indexes: Vec<_> = self.program.graph.read().unwrap().node_indices().collect();
-
-        let (control_tx, control_rx) = channel(128);
+        
         let worker_id = self.worker_id;
 
         let mut senders = Senders::new();
@@ -500,7 +495,6 @@ impl Engine {
 
             for idx in node_indexes {
                 futures.push(self.schedule_node(
-                    &checkpoint_metadata,
                     &control_tx,
                     idx,
                     ready.clone(),
@@ -519,19 +513,15 @@ impl Engine {
             n.tx = None;
         }
 
-        (
-            RunningEngine {
-                program: self.program,
-                assignments: self.assignments,
-                worker_id,
-            },
-            control_rx,
-        )
+        RunningEngine {
+            program: self.program,
+            assignments: self.assignments,
+            worker_id,
+        }
     }
 
     async fn schedule_node(
         &self,
-        checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
         idx: NodeIndex,
         ready: Arc<Barrier>,
@@ -547,12 +537,12 @@ impl Engine {
 
         let assignment = &self
             .assignments
-            .get(&(node.id.clone().to_string(), node.subtask_idx))
+            .get(&(node.node_id, node.subtask_idx))
             .cloned()
             .unwrap_or_else(|| {
                 panic!(
                     "Could not find assignment for node {}-{}",
-                    node.id.clone(),
+                    node.node_id,
                     node.subtask_idx
                 )
             });
@@ -561,7 +551,6 @@ impl Engine {
 
         if assignment.worker_id == self.worker_id.0 {
             self.run_locally(
-                checkpoint_metadata,
                 control_tx,
                 idx,
                 node,
@@ -573,7 +562,7 @@ impl Engine {
             self.connect_to_remote_task(
                 &mut senders,
                 idx,
-                node.id.clone(),
+                node.node_id,
                 node.subtask_idx,
                 assignment,
             )
@@ -587,7 +576,7 @@ impl Engine {
         &self,
         senders: &mut Senders,
         idx: NodeIndex,
-        node_id: String,
+        node_id: u32,
         node_subtask_idx: usize,
         assignment: &TaskAssignment,
     ) {
@@ -651,7 +640,6 @@ impl Engine {
 
     pub async fn run_locally(
         &self,
-        checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
         idx: NodeIndex,
         node: SubtaskNode,
@@ -662,86 +650,88 @@ impl Engine {
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
             self.worker_id,
             node.node.name(),
-            node.id,
+            node.node_id,
             node.subtask_idx,
             node.subtask_idx + 1,
             node.parallelism
         );
 
-        let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<BatchReceiver>> = BTreeMap::new();
-        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, BatchSender>> = BTreeMap::new();
-        let task_info = {
-            let mut graph = self.program.graph.write().unwrap();
-            for edge in graph.edge_indices() {
-                if graph.edge_endpoints(edge).unwrap().1 == idx {
-                    let weight = graph.edge_weight_mut(edge).unwrap();
-                    in_qs_map
-                        .entry((weight.edge, weight.in_logical_idx))
-                        .or_default()
-                        .push(weight.rx.take().unwrap());
-                }
-            }
-
-            for edge in graph.edges_directed(idx, Direction::Outgoing) {
-                // is the target of this edge local or remote?
-                let _local = {
-                    let target = graph.node_weight(edge.target()).unwrap();
-                    self.assignments
-                        .get(&(target.id().to_string(), target.subtask_idx()))
-                        .unwrap()
-                        .worker_id
-                        == self.worker_id.0
-                };
-
-                let tx = edge.weight().tx.as_ref().unwrap().clone();
-                out_qs_map
-                    .entry(edge.weight().out_logical_idx)
-                    .or_default()
-                    .insert(edge.weight().edge_idx, tx);
-            }
-
-            graph.node_weight(idx).unwrap().as_queue().task_info.clone()
-        };
-
-        let operator_id = task_info.operator_id.clone();
-        let task_index = task_info.task_index;
-
-        let tables = node.node.tables();
-        let in_qs: Vec<_> = in_qs_map.into_values().flatten().collect();
-
-        let ctx = OperatorContext::new(
-            task_info,
-            checkpoint_metadata.clone(),
-            control_tx.clone(),
-            in_qs.len(),
-            node.in_schemas,
-            node.out_schema,
-            out_qs_map
-                .into_values()
-                .map(|v| v.into_values().collect())
-                .collect(),
-            tables,
-        )
-        .await;
-
-        let operator = Box::new(node.node);
-        let join_task = tokio::spawn(async move {
-            operator.start(control_rx, ctx, in_qs, ready).await;
-        });
-
-        let send_copy = control_tx.clone();
-        tokio::spawn(async move {
-            if let Err(error) = join_task.await {
-                send_copy
-                    .send(ControlResp::TaskFailed {
-                        operator_id,
-                        task_index,
-                        error: error.to_string(),
-                    })
-                    .await
-                    .ok();
-            };
-        });
+        todo!("local");
+        
+        // let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<BatchReceiver>> = BTreeMap::new();
+        // let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, BatchSender>> = BTreeMap::new();
+        // let task_info = {
+        //     let mut graph = self.program.graph.write().unwrap();
+        //     for edge in graph.edge_indices() {
+        //         if graph.edge_endpoints(edge).unwrap().1 == idx {
+        //             let weight = graph.edge_weight_mut(edge).unwrap();
+        //             in_qs_map
+        //                 .entry((weight.edge, weight.in_logical_idx))
+        //                 .or_default()
+        //                 .push(weight.rx.take().unwrap());
+        //         }
+        //     }
+        // 
+        //     for edge in graph.edges_directed(idx, Direction::Outgoing) {
+        //         // is the target of this edge local or remote?
+        //         let _local = {
+        //             let target = graph.node_weight(edge.target()).unwrap();
+        //             self.assignments
+        //                 .get(&(target.id(), target.subtask_idx()))
+        //                 .unwrap()
+        //                 .worker_id
+        //                 == self.worker_id.0
+        //         };
+        // 
+        //         let tx = edge.weight().tx.as_ref().unwrap().clone();
+        //         out_qs_map
+        //             .entry(edge.weight().out_logical_idx)
+        //             .or_default()
+        //             .insert(edge.weight().edge_idx, tx);
+        //     }
+        // 
+        //     graph.node_weight(idx).unwrap().as_queue().task_info.clone()
+        // };
+        // 
+        // let operator_id = task_info.operator_id.clone();
+        // let task_index = task_info.task_index;
+        // 
+        // let tables = node.node.tables();
+        // let in_qs: Vec<_> = in_qs_map.into_values().flatten().collect();
+        // 
+        // let ctx = OperatorContext::new(
+        //     task_info,
+        //     checkpoint_metadata.as_ref(),
+        //     control_tx.clone(),
+        //     in_qs.len(),
+        //     node.in_schemas,
+        //     node.out_schema,
+        //     out_qs_map
+        //         .into_values()
+        //         .map(|v| v.into_values().collect())
+        //         .collect(),
+        //     tables,
+        // )
+        // .await;
+        // 
+        // let operator = Box::new(node.node);
+        // let join_task = tokio::spawn(async move {
+        //     operator.start(control_rx, ctx, in_qs, ready).await;
+        // });
+        // 
+        // let send_copy = control_tx.clone();
+        // tokio::spawn(async move {
+        //     if let Err(error) = join_task.await {
+        //         send_copy
+        //             .send(ControlResp::TaskFailed {
+        //                 operator_id,
+        //                 task_index,
+        //                 error: error.to_string(),
+        //             })
+        //             .await
+        //             .ok();
+        //     };
+        // });
     }
 }
 
@@ -760,24 +750,50 @@ pub async fn construct_node(
 ) -> OperatorNode {
     if chain.is_source() {
         let (head, _) = chain.iter().next().unwrap();
-        let ConstructedOperator::Source(operator) = construct_operator(head.operator_name, &mut head.operator_config[..], registry) else {
+        let ConstructedOperator::Source(operator) = construct_operator(head.operator_name, &head.operator_config, registry) else {
             unreachable!();
         };
-        
+
+        let chain_info = Arc::new(ChainInfo {
+            job_id: job_id.to_string(),
+            node_id,
+            description: operator.name().to_string(),
+            task_index: subtask_idx,
+        });
+
+        let task_info = Arc::new(TaskInfo {
+            job_id: job_id.to_string(),
+            node_id,
+            operator_name: head.operator_name.to_string(),
+            operator_id: head.operator_id.clone(),
+            task_index: subtask_idx,
+            parallelism,
+            key_range: range_for_server(subtask_idx as usize, parallelism as usize),
+        });
+
         OperatorNode::Source(SourceNode {
+            context: OperatorContext::new(
+                task_info,
+                restore_from,
+                control_tx,
+                1,
+                vec![],
+                out_schema,
+                operator.tables(),
+            ).await,
             operator,
-            context: todo!(),
         })
     } else {
         let mut head = None;
-        let mut cur = &mut None;
+        let mut cur: &mut Option<ChainedOperator> = &mut None;
+        let mut input_partitions = input_partitions as usize;
         for (node, edge) in chain.iter() {
-            let ConstructedOperator::Operator(op ) = construct_operator(node.operator_name, &mut node.operator_config[..], registry.clone()) else {
+            let ConstructedOperator::Operator(op ) = construct_operator(node.operator_name, &node.operator_config, registry.clone()) else {
                 unreachable!("sources must be the first node in a chain");
             };
 
             let ctx = OperatorContext::new(
-                TaskInfo {
+                Arc::new(TaskInfo {
                     job_id: job_id.to_string(),
                     node_id,
                     operator_name: node.operator_name.to_string(),
@@ -785,12 +801,12 @@ pub async fn construct_node(
                     task_index: subtask_idx,
                     parallelism,
                     key_range: range_for_server(subtask_idx as usize, parallelism as usize),
-                },
+                }),
                 restore_from,
                 control_tx.clone(),
-                if head.is_none() { input_partitions as usize } else { 1 },
+                input_partitions,
                 if let Some(cur) = cur { 
-                    cur.context.out_schemas.clone().unwrap() 
+                    vec![cur.context.out_schema.clone().unwrap()] 
                 } else {
                     in_schemas.clone()
                 },
@@ -801,16 +817,19 @@ pub async fn construct_node(
             if cur.is_none() {
                 head = Some(ChainedOperator::new(op, ctx));
                 cur = &mut head;
+                input_partitions = 1;
             } else {
-                cur.as_mut().unwrap().next = Some(op);
+                cur.as_mut().unwrap().next = Some(Box::new(ChainedOperator::new(op, ctx)));
             }
         }
+        
+        OperatorNode::Chained(head.unwrap())
     }
 }
 
 pub fn construct_operator(
     operator: OperatorName,
-    config: &mut [u8],
+    config: &[u8],
     registry: Arc<Registry>,
 ) -> ConstructedOperator {
     let ctor: Box<dyn ErasedConstructor> = match operator {

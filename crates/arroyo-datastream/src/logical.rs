@@ -183,8 +183,20 @@ impl OperatorChain {
             .map(|(l, r)| (l.unwrap(), r))
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&mut ChainedLogicalOperator, Option<&mut ArroyoSchema>)> { 
+        self.operators
+            .iter_mut()
+            .zip_longest(self.edges.iter_mut())
+            .map(|e| e.left_and_right())
+            .map(|(l, r)| (l.unwrap(), r))
+    }
+    
     pub fn is_source(&self) -> bool {
         self.operators[0].operator_name == OperatorName::ConnectorSource
+    }
+    
+    pub fn is_sink(&self) -> bool {
+        self.operators[0].operator_name == OperatorName::ConnectorSink
     }
 }
 
@@ -333,14 +345,24 @@ impl LogicalProgram {
         self.operator_indices.get(&id).cloned()
     }
 
-    pub fn tasks_per_operator(&self) -> HashMap<u32, usize> {
+    pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
         let mut tasks_per_operator = HashMap::new();
         for node in self.graph.node_weights() {
-            tasks_per_operator.insert(node.node_id, node.parallelism);
+            for op in &node.operator_chain.operators {
+                tasks_per_operator.insert(op.operator_id.clone(), node.parallelism);                
+            }
         }
         tasks_per_operator
     }
 
+    pub fn tasks_per_node(&self) -> HashMap<u32, usize> {
+        let mut tasks_per_node = HashMap::new();
+        for node in self.graph.node_weights() {
+            tasks_per_node.insert(node.node_id, node.parallelism);
+        }
+        tasks_per_node
+    }
+    
     pub fn features(&self) -> HashSet<String> {
         let mut s = HashSet::new();
 
