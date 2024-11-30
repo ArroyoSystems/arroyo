@@ -122,11 +122,11 @@ impl LocalRunner {
             while let Some(control_message) = control_rx.recv().await {
                 debug!("received {:?}", control_message);
                 if let ControlResp::TaskFinished {
-                    operator_id,
+                    node_id,
                     task_index,
                 } = control_message
                 {
-                    finished_nodes.insert((operator_id, task_index));
+                    finished_nodes.insert((node_id, task_index));
                     if finished_nodes.len() == total_nodes {
                         return;
                     }

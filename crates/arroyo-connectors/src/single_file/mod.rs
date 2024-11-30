@@ -15,7 +15,7 @@ use crate::{pull_opt, EmptyConfig};
 use crate::single_file::sink::SingleFileSink;
 use crate::single_file::source::SingleFileSourceFunc;
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
@@ -155,9 +155,9 @@ impl Connector for SingleFileConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> Result<OperatorNode> {
+    ) -> Result<ConstructedOperator> {
         match table.table_type {
-            TableType::Source => Ok(OperatorNode::from_source(Box::new(SingleFileSourceFunc {
+            TableType::Source => Ok(ConstructedOperator::from_source(Box::new(SingleFileSourceFunc {
                 input_file: table.path,
                 lines_read: 0,
                 format: config
@@ -167,7 +167,7 @@ impl Connector for SingleFileConnector {
                 bad_data: config.bad_data,
                 wait_for_control: table.wait_for_control.unwrap_or(true),
             }))),
-            TableType::Sink => Ok(OperatorNode::from_operator(Box::new(SingleFileSink {
+            TableType::Sink => Ok(ConstructedOperator::from_operator(Box::new(SingleFileSink {
                 output_path: table.path,
                 file: None,
                 serializer: ArrowSerializer::new(

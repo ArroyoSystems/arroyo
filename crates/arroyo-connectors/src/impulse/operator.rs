@@ -11,7 +11,7 @@ use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
 use std::time::{Duration, SystemTime};
 
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{OperatorContext, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
@@ -74,7 +74,7 @@ impl ImpulseSourceFunc {
         }
     }
 
-    fn batch_size(&self, ctx: &mut OperatorContext) -> usize {
+    fn batch_size(&self, ctx: &mut SourceContext) -> usize {
         let duration_micros = self.delay(ctx).as_micros();
         if duration_micros == 0 {
             return 8192;
@@ -83,7 +83,7 @@ impl ImpulseSourceFunc {
         batch_size.clamp(1, 8192) as usize
     }
 
-    fn delay(&self, ctx: &mut OperatorContext) -> Duration {
+    fn delay(&self, ctx: &mut SourceContext) -> Duration {
         match self.spec {
             ImpulseSpec::Delay(d) => d,
             ImpulseSpec::EventsPerSecond(eps) => {
@@ -92,7 +92,7 @@ impl ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut SourceContext) -> SourceFinishType {
         let delay = self.delay(ctx);
         info!(
             "Starting impulse source with start {} delay {:?} and limit {}",
@@ -116,7 +116,7 @@ impl ImpulseSourceFunc {
 
         let start_time = SystemTime::now() - delay * self.state.counter as u32;
 
-        let schema = ctx.out_schema.as_ref().unwrap().schema.clone();
+        let schema = ctx.out_schema.schema.clone();
 
         let batch_size = self.batch_size(ctx);
 
@@ -203,7 +203,7 @@ impl ImpulseSourceFunc {
                     unreachable!("sources shouldn't receive commit messages");
                 }
                 Ok(ControlMessage::LoadCompacted { compacted }) => {
-                    ctx.load_compacted(compacted).await;
+                    ctx.table_manager.load_compacted(&compacted).await.unwrap();
                 }
                 Ok(ControlMessage::NoOp) => {}
                 Err(_) => {
@@ -250,7 +250,7 @@ impl SourceOperator for ImpulseSourceFunc {
         arroyo_state::global_table_config("i", "impulse source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) {
         let s = ctx
             .table_manager
             .get_global_keyed_state("i")
@@ -262,7 +262,7 @@ impl SourceOperator for ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut SourceContext) -> SourceFinishType {
         self.run(ctx).await
     }
 }

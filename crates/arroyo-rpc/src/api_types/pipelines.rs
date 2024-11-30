@@ -77,7 +77,7 @@ pub struct PipelineGraph {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineNode {
-    pub node_id: String,
+    pub node_id: u32,
     pub operator: String,
     pub description: String,
     pub parallelism: u32,
@@ -86,8 +86,8 @@ pub struct PipelineNode {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineEdge {
-    pub src_id: String,
-    pub dest_id: String,
+    pub src_id: u32,
+    pub dest_id: u32,
     pub key_type: String,
     pub value_type: String,
     pub edge_type: String,

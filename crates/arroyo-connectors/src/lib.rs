@@ -1,14 +1,3 @@
-use crate::confluent::ConfluentConnector;
-use crate::filesystem::delta::DeltaLakeConnector;
-use crate::filesystem::FileSystemConnector;
-use crate::kinesis::KinesisConnector;
-use crate::mqtt::MqttConnector;
-use crate::polling_http::PollingHTTPConnector;
-use crate::preview::PreviewConnector;
-use crate::redis::RedisConnector;
-use crate::single_file::SingleFileConnector;
-use crate::stdout::StdoutConnector;
-use crate::webhook::WebhookConnector;
 use anyhow::{anyhow, bail, Context};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
@@ -17,66 +6,54 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::var_str::VarStr;
 use arroyo_types::string_to_map;
-use blackhole::BlackholeConnector;
-use fluvio::FluvioConnector;
-use impulse::ImpulseConnector;
-use nats::NatsConnector;
-use nexmark::NexmarkConnector;
-use rabbitmq::RabbitmqConnector;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sse::SSEConnector;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
-use websocket::WebsocketConnector;
-
-use self::kafka::KafkaConnector;
 
 pub mod blackhole;
-pub mod confluent;
-pub mod filesystem;
-pub mod fluvio;
+// pub mod confluent;
+// pub mod filesystem;
+// pub mod fluvio;
 pub mod impulse;
-pub mod kafka;
-pub mod kinesis;
-pub mod mqtt;
-pub mod nats;
-pub mod nexmark;
-pub mod polling_http;
+// pub mod kafka;
+// pub mod kinesis;
+// pub mod mqtt;
+// pub mod nats;
+// pub mod nexmark;
+// pub mod polling_http;
 pub mod preview;
-pub mod rabbitmq;
-pub mod redis;
-pub mod single_file;
+// pub mod redis;
+// pub mod single_file;
 pub mod sse;
 pub mod stdout;
-pub mod webhook;
-pub mod websocket;
+// pub mod webhook;
+// pub mod websocket;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
-        Box::new(BlackholeConnector {}),
-        Box::new(ConfluentConnector {}),
-        Box::new(DeltaLakeConnector {}),
-        Box::new(FileSystemConnector {}),
-        Box::new(FluvioConnector {}),
-        Box::new(ImpulseConnector {}),
-        Box::new(KafkaConnector {}),
-        Box::new(KinesisConnector {}),
-        Box::new(MqttConnector {}),
-        Box::new(NatsConnector {}),
-        Box::new(NexmarkConnector {}),
-        Box::new(PollingHTTPConnector {}),
-        Box::new(PreviewConnector {}),
-        Box::new(RabbitmqConnector {}),
-        Box::new(RedisConnector {}),
-        Box::new(SingleFileConnector {}),
-        Box::new(SSEConnector {}),
-        Box::new(StdoutConnector {}),
-        Box::new(WebhookConnector {}),
-        Box::new(WebsocketConnector {}),
+        Box::new(blackhole::BlackholeConnector {}),
+        // Box::new(confluent::ConfluentConnector {}),
+        // Box::new(filesystem::delta::DeltaLakeConnector {}),
+        // Box::new(filesystem::FileSystemConnector {}),
+        // Box::new(fluvio::FluvioConnector {}),
+        Box::new(impulse::ImpulseConnector {}),
+        // Box::new(kafka::KafkaConnector {}),
+        // Box::new(kinesis::KinesisConnector {}),
+        // Box::new(mqtt::MqttConnector {}),
+        // Box::new(nats::NatsConnector {}),
+        // Box::new(nexmark::NexmarkConnector {}),
+        // Box::new(polling_http::PollingHTTPConnector {}),
+        Box::new(preview::PreviewConnector {}),
+        // Box::new(redis::RedisConnector {}),
+        // Box::new(single_file::SingleFileConnector {}),
+        Box::new(sse::SSEConnector {}),
+        Box::new(stdout::StdoutConnector {}),
+        // Box::new(webhook::WebhookConnector {}),
+        // Box::new(websocket::WebsocketConnector {}),
     ];
 
     connectors.into_iter().map(|c| (c.name(), c)).collect()

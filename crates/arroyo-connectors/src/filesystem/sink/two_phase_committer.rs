@@ -13,6 +13,7 @@ use prost::Message;
 use std::fmt::Debug;
 use std::{collections::HashMap, time::SystemTime};
 use tracing::{info, warn};
+use arroyo_operator::context::Collector;
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {
     committer: TPC,
@@ -183,7 +184,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
             .expect("record inserted");
     }
 
-    async fn on_close(&mut self, _final_mesage: &Option<SignalMessage>, ctx: &mut OperatorContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, commit_data, ctx).await;
         } else {

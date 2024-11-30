@@ -8,14 +8,18 @@ use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointMetadata, OperatorCheckpointMetadata, TableConfig, TaskCheckpointEventType,
+};
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
-    from_micros, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo, UserError, Watermark,
+    from_micros, ArrowMessage, ChainInfo, CheckpointBarrier, SourceError, TaskInfo, UserError,
+    Watermark,
 };
+use async_trait::async_trait;
 use datafusion::common::hash_utils;
 use rand::Rng;
 use std::collections::HashMap;
@@ -23,12 +27,10 @@ use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
-use async_trait::async_trait;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
 use tracing::warn;
-use crate::operator::ArrowOperator;
 
 pub type QueueItem = ArrowMessage;
 
@@ -235,10 +237,10 @@ impl ContextBuffer {
         should_flush(self.size(), self.created)
     }
 
-    pub fn finish(self) -> RecordBatch {
+    pub fn finish(&mut self) -> RecordBatch {
         RecordBatch::try_new(
-            self.schema,
-            self.buffer.into_iter().map(|mut a| a.finish()).collect(),
+            self.schema.clone(),
+            self.buffer.iter_mut().map(|a| a.finish()).collect(),
         )
         .unwrap()
     }
@@ -247,10 +249,237 @@ impl ContextBuffer {
 pub struct SourceContext {
     pub out_schema: ArroyoSchema,
     pub error_reporter: ErrorReporter,
-    buffer: Option<ContextBuffer>,
+    buffer: ContextBuffer,
     buffered_error: Option<UserError>,
     error_rate_limiter: RateLimiter,
     deserializer: Option<ArrowDeserializer>,
+    pub control_tx: Sender<ControlResp>,
+    pub control_rx: Receiver<ControlMessage>,
+    pub chain_info: Arc<ChainInfo>,
+    pub task_info: Arc<TaskInfo>,
+    pub table_manager: TableManager,
+    pub watermarks: WatermarkHolder,
+    pub(crate) collector: ArrowCollector,
+}
+
+impl SourceContext {
+    pub async fn new(
+        out_schema: ArroyoSchema,
+        control_tx: Sender<ControlResp>,
+        control_rx: Receiver<ControlMessage>,
+        chain_info: Arc<ChainInfo>,
+        task_info: Arc<TaskInfo>,
+        tables: HashMap<String, TableConfig>,
+        restore_from: Option<&CheckpointMetadata>,
+        out_qs: Vec<Vec<BatchSender>>,
+    ) -> Self {
+        let (table_manager, watermark) =
+            TableManager::load(task_info.clone(), tables, control_tx.clone(), restore_from)
+                .await
+                .expect("should be able to create TableManager");
+
+        Self {
+            out_schema: out_schema.clone(),
+            error_reporter: ErrorReporter {
+                tx: control_tx.clone(),
+                task_info: task_info.clone(),
+            },
+            collector: ArrowCollector::new(chain_info.clone(), Some(out_schema.clone()), out_qs),
+            buffer: ContextBuffer::new(out_schema.schema),
+            buffered_error: None,
+            error_rate_limiter: RateLimiter::new(),
+            deserializer: None,
+            control_tx,
+            control_rx,
+            chain_info,
+            task_info,
+            table_manager,
+            watermarks: WatermarkHolder::new(vec![watermark.map(Watermark::EventTime); 1]),
+        }
+    }
+
+    pub fn should_flush(&self) -> bool {
+        self.buffer.should_flush()
+            || self
+                .deserializer
+                .as_ref()
+                .map(|d| d.should_flush())
+                .unwrap_or(false)
+    }
+
+    pub async fn load_compacted(&mut self, compaction: CompactionResult) {
+        //TODO: support compaction in the table manager
+        self.table_manager
+            .load_compacted(&compaction)
+            .await
+            .expect("should be able to load compacted");
+    }
+
+    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
+        self.error_reporter.report_error(message, details).await;
+    }
+
+    pub async fn report_user_error(&mut self, error: UserError) {
+        self.control_tx
+            .send(ControlResp::Error {
+                node_id: self.task_info.node_id,
+                task_index: self.task_info.task_index as usize,
+                message: error.name,
+                details: error.details,
+            })
+            .await
+            .unwrap();
+    }
+
+    pub fn initialize_deserializer(
+        &mut self,
+        format: Format,
+        framing: Option<Framing>,
+        bad_data: Option<BadData>,
+    ) {
+        if self.deserializer.is_some() {
+            panic!("Deserialize already initialized");
+        }
+
+        self.deserializer = Some(ArrowDeserializer::new(
+            format,
+            self.out_schema.clone(),
+            framing,
+            bad_data.unwrap_or_default(),
+        ));
+    }
+
+    pub fn initialize_deserializer_with_resolver(
+        &mut self,
+        format: Format,
+        framing: Option<Framing>,
+        bad_data: Option<BadData>,
+        schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    ) {
+        self.deserializer = Some(ArrowDeserializer::with_schema_resolver(
+            format,
+            framing,
+            self.out_schema.clone(),
+            bad_data.unwrap_or_default(),
+            schema_resolver,
+        ));
+    }
+
+    pub async fn deserialize_slice(
+        &mut self,
+        msg: &[u8],
+        time: SystemTime,
+        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
+    ) -> Result<(), UserError> {
+        let deserializer = self
+            .deserializer
+            .as_mut()
+            .expect("deserializer not initialized!");
+
+        let errors = deserializer
+            .deserialize_slice(&mut self.buffer.buffer, msg, time, additional_fields)
+            .await;
+        self.collect_source_errors(errors).await?;
+
+        Ok(())
+    }
+
+    /// Handling errors and rate limiting error reporting.
+    /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
+    async fn collect_source_errors(&mut self, errors: Vec<SourceError>) -> Result<(), UserError> {
+        let bad_data = self
+            .deserializer
+            .as_ref()
+            .expect("deserializer not initialized")
+            .bad_data();
+        for error in errors {
+            match error {
+                SourceError::BadData { details } => match bad_data {
+                    BadData::Drop {} => {
+                        self.error_rate_limiter
+                            .rate_limit(|| async {
+                                warn!("Dropping invalid data: {}", details.clone());
+                                self.control_tx
+                                    .send(ControlResp::Error {
+                                        node_id: self.task_info.node_id,
+                                        task_index: self.task_info.task_index as usize,
+                                        message: "Dropping invalid data".to_string(),
+                                        details,
+                                    })
+                                    .await
+                                    .unwrap();
+                            })
+                            .await;
+                        TaskCounters::DeserializationErrors.for_task(&self.chain_info, |c| c.inc())
+                    }
+                    BadData::Fail {} => {
+                        return Err(UserError::new("Deserialization error", details));
+                    }
+                },
+                SourceError::Other { name, details } => {
+                    return Err(UserError::new(name, details));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
+        if self.buffer.size() > 0 {
+            let batch = self.buffer.finish();
+            self.collector.collect(batch).await;
+        }
+
+        if let Some(deserializer) = self.deserializer.as_mut() {
+            if let Some(buffer) = deserializer.flush_buffer() {
+                match buffer {
+                    Ok(batch) => {
+                        self.collector.collect(batch).await;
+                    }
+                    Err(e) => {
+                        self.collect_source_errors(vec![e]).await?;
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = self.buffered_error.take() {
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    pub async fn collect(&mut self, record: RecordBatch) {
+        self.collector.collect(record).await;
+    }
+
+    pub async fn broadcast(&mut self, message: ArrowMessage) {
+        if let Err(e) = self.flush_buffer().await {
+            self.buffered_error.replace(e);
+        }
+        self.collector.broadcast(message).await;
+    }
+}
+
+pub async fn send_checkpoint_event(
+    tx: &Sender<ControlResp>,
+    chain_info: &ChainInfo,
+    barrier: CheckpointBarrier,
+    event_type: TaskCheckpointEventType,
+) {
+    // These messages are received by the engine control thread,
+    // which then sends a TaskCheckpointEventReq to the controller.
+    tx.send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
+        checkpoint_epoch: barrier.epoch,
+        node_id: chain_info.node_id,
+        subtask_index: chain_info.task_index,
+        time: SystemTime::now(),
+        event_type,
+    }))
+    .await
+    .unwrap();
 }
 
 pub struct OperatorContext {
@@ -272,8 +501,8 @@ impl ErrorReporter {
     pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
         self.tx
             .send(ControlResp::Error {
-                operator_id: self.task_info.operator_id.clone(),
-                task_index: self.task_info.task_index,
+                node_id: self.task_info.node_id,
+                task_index: self.task_info.task_index as usize,
                 message: message.into(),
                 details: details.into(),
             })
@@ -283,7 +512,7 @@ impl ErrorReporter {
 }
 
 #[async_trait]
-pub trait Collector {
+pub trait Collector: Send {
     async fn collect(&mut self, batch: RecordBatch);
     async fn broadcast(&mut self, message: ArrowMessage);
 }
@@ -300,7 +529,7 @@ impl ChainCollector {
     pub fn iter(&self) -> impl Iterator<Item = &RecordBatch> {
         self.messages.iter()
     }
-    
+
     pub fn clear(&mut self) {
         self.messages.clear();
     }
@@ -311,19 +540,16 @@ impl Collector for ChainCollector {
     async fn collect(&mut self, batch: RecordBatch) {
         self.messages.push(batch);
     }
-    
+
     async fn broadcast(&mut self, message: ArrowMessage) {
         todo!()
     }
 }
 
-
-
 #[derive(Clone)]
 pub struct ArrowCollector {
-    task_info: Arc<TaskInfo>,
+    pub chain_info: Arc<ChainInfo>,
     out_schema: Option<ArroyoSchema>,
-    projection: Option<Vec<usize>>,
     out_qs: Vec<Vec<BatchSender>>,
     tx_queue_rem_gauges: QueueGauges,
     tx_queue_size_gauges: QueueGauges,
@@ -390,33 +616,22 @@ fn repartition<'a>(
 impl Collector for ArrowCollector {
     async fn collect(&mut self, record: RecordBatch) {
         TaskCounters::MessagesSent
-            .for_task(&self.task_info, |c| c.inc_by(record.num_rows() as u64));
-        TaskCounters::BatchesSent.for_task(&self.task_info, |c| c.inc());
-        TaskCounters::BytesSent.for_task(&self.task_info, |c| {
+            .for_task(&self.chain_info, |c| c.inc_by(record.num_rows() as u64));
+        TaskCounters::BatchesSent.for_task(&self.chain_info, |c| c.inc());
+        TaskCounters::BytesSent.for_task(&self.chain_info, |c| {
             c.inc_by(record.get_array_memory_size() as u64)
         });
 
         let out_schema = self
             .out_schema
             .as_ref()
-            .unwrap_or_else(|| panic!("No out-schema in {}!", self.task_info.operator_name));
-
-        let record = if let Some(projection) = &self.projection {
-            record.project(projection).unwrap_or_else(|e| {
-                panic!(
-                    "failed to project for operator {}: {}",
-                    self.task_info.operator_id, e
-                )
-            })
-        } else {
-            record
-        };
+            .unwrap_or_else(|| panic!("No out-schema in {}!", self.chain_info));
 
         let record = RecordBatch::try_new(out_schema.schema.clone(), record.columns().to_vec())
             .unwrap_or_else(|e| {
                 panic!(
                     "Data does not match expected schema for {}: {:?}. expected schema:\n{:#?}\n, actual schema:\n{:#?}",
-                    self.task_info.operator_id, e, out_schema.schema, record.schema()
+                    self.chain_info, e, out_schema.schema, record.schema()
                 );
             });
 
@@ -450,7 +665,7 @@ impl Collector for ArrowCollector {
                 q.send(message.clone()).await.unwrap_or_else(|e| {
                     panic!(
                         "failed to broadcast message <{:?}> for operator {}: {}",
-                        message, self.task_info.operator_id, e
+                        message, self.chain_info, e
                     )
                 });
             }
@@ -458,49 +673,16 @@ impl Collector for ArrowCollector {
     }
 }
 
-impl OperatorContext {
-    #[allow(clippy::too_many_arguments)]
-    pub async fn new(
-        task_info: TaskInfo,
-        restore_from: Option<CheckpointMetadata>,
-        control_tx: Sender<ControlResp>,
-        input_partitions: usize,
-        in_schemas: Vec<ArroyoSchema>,
+impl ArrowCollector {
+    pub fn new(
+        chain_info: Arc<ChainInfo>,
         out_schema: Option<ArroyoSchema>,
-        projection: Option<Vec<usize>>,
         out_qs: Vec<Vec<BatchSender>>,
-        tables: HashMap<String, TableConfig>,
     ) -> Self {
-        let (watermark, metadata) = if let Some(metadata) = restore_from {
-            let (watermark, operator_metadata) = {
-                let metadata = StateBackend::load_operator_metadata(
-                    &task_info.job_id,
-                    &task_info.operator_id,
-                    metadata.epoch,
-                )
-                .await
-                .expect("lookup should succeed")
-                .expect("require metadata");
-                (
-                    metadata
-                        .operator_metadata
-                        .as_ref()
-                        .unwrap()
-                        .min_watermark
-                        .map(from_micros),
-                    metadata,
-                )
-            };
-
-            (watermark, Some(operator_metadata))
-        } else {
-            (None, None)
-        };
-
         let tx_queue_size_gauges = register_queue_gauge(
             "arroyo_worker_tx_queue_size",
             "Size of a tx queue",
-            &task_info,
+            &chain_info,
             &out_qs,
             config().worker.queue_size as i64,
         );
@@ -508,7 +690,7 @@ impl OperatorContext {
         let tx_queue_rem_gauges = register_queue_gauge(
             "arroyo_worker_tx_queue_rem",
             "Remaining space in a tx queue",
-            &task_info,
+            &chain_info,
             &out_qs,
             config().worker.queue_size as i64,
         );
@@ -516,26 +698,45 @@ impl OperatorContext {
         let tx_queue_bytes_gauges = register_queue_gauge(
             "arroyo_worker_tx_bytes",
             "Number of bytes queued in a tx queue",
-            &task_info,
+            &chain_info,
             &out_qs,
             0,
         );
 
-        let task_info = Arc::new(task_info);
-
         // initialize counters so that tasks that never produce data still report 0
         for m in TaskCounters::variants() {
-            // just initialize it
-            m.for_task(&task_info, |_| {});
+            m.for_task(&chain_info, |_| {});
         }
 
-        let table_manager =
-            TableManager::new(task_info.clone(), tables, control_tx.clone(), metadata)
+        Self {
+            chain_info,
+            out_schema,
+            out_qs,
+            tx_queue_rem_gauges,
+            tx_queue_size_gauges,
+            tx_queue_bytes_gauges,
+        }
+    }
+}
+
+impl OperatorContext {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
+        task_info: Arc<TaskInfo>,
+        restore_from: Option<&CheckpointMetadata>,
+        control_tx: Sender<ControlResp>,
+        input_partitions: usize,
+        in_schemas: Vec<ArroyoSchema>,
+        out_schema: Option<ArroyoSchema>,
+        tables: HashMap<String, TableConfig>,
+    ) -> Self {
+        let (table_manager, watermark) =
+            TableManager::load(task_info.clone(), tables, control_tx.clone(), restore_from)
                 .await
                 .expect("should be able to create TableManager");
 
         Self {
-            task_info: task_info.clone(), 
+            task_info: task_info.clone(),
             control_tx: control_tx.clone(),
             watermarks: WatermarkHolder::new(vec![
                 watermark.map(Watermark::EventTime);
@@ -543,23 +744,6 @@ impl OperatorContext {
             ]),
             in_schemas,
             out_schema: out_schema.clone(),
-            collector: Box::new(ArrowCollector {
-                task_info: task_info.clone(),
-                out_qs,
-                tx_queue_rem_gauges,
-                tx_queue_size_gauges,
-                tx_queue_bytes_gauges,
-                out_schema: out_schema.clone(),
-                projection,
-            }),
-            error_reporter: ErrorReporter {
-                tx: control_tx,
-                task_info,
-            },
-            buffer: None,
-            error_rate_limiter: RateLimiter::new(),
-            deserializer: None,
-            buffered_error: None,
             table_manager,
         }
     }
@@ -572,210 +756,12 @@ impl OperatorContext {
         self.watermarks.last_present_watermark()
     }
 
-    pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
-        if self.buffer.is_none() {
-            return Ok(());
-        }
-
-        if self.buffer.as_ref().unwrap().size() > 0 {
-            let buffer = self.buffer.take().unwrap();
-            let batch = buffer.finish();
-            self.collector.collect(batch).await;
-            self.buffer = Some(ContextBuffer::new(
-                self.out_schema.as_ref().map(|t| t.schema.clone()).unwrap(),
-            ));
-        }
-
-        if let Some(deserializer) = self.deserializer.as_mut() {
-            if let Some(buffer) = deserializer.flush_buffer() {
-                match buffer {
-                    Ok(batch) => {
-                        self.collector.collect(batch).await;
-                    }
-                    Err(e) => {
-                        self.collect_source_errors(vec![e]).await?;
-                    }
-                }
-            }
-        }
-
-        if let Some(error) = self.buffered_error.take() {
-            return Err(error);
-        }
-
-        Ok(())
-    }
-
-    pub async fn collect(&mut self, record: RecordBatch) {
-        self.collector.collect(record).await;
-    }
-
-    pub fn should_flush(&self) -> bool {
-        self.buffer
-            .as_ref()
-            .map(|b| b.should_flush())
-            .unwrap_or(false)
-            || self
-                .deserializer
-                .as_ref()
-                .map(|d| d.should_flush())
-                .unwrap_or(false)
-    }
-
-    pub async fn broadcast(&mut self, message: ArrowMessage) {
-        if let Err(e) = self.flush_buffer().await {
-            self.buffered_error.replace(e);
-        }
-        self.collector.broadcast(message).await;
-    }
-
-    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
-        self.error_reporter.report_error(message, details).await;
-    }
-
-    pub async fn report_user_error(&mut self, error: UserError) {
-        self.control_tx
-            .send(ControlResp::Error {
-                operator_id: self.task_info.operator_id.clone(),
-                task_index: self.task_info.task_index,
-                message: error.name,
-                details: error.details,
-            })
-            .await
-            .unwrap();
-    }
-
-    pub async fn send_checkpoint_event(
-        &mut self,
-        barrier: CheckpointBarrier,
-        event_type: TaskCheckpointEventType,
-    ) {
-        // These messages are received by the engine control thread,
-        // which then sends a TaskCheckpointEventReq to the controller.
-        self.control_tx
-            .send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
-                checkpoint_epoch: barrier.epoch,
-                operator_id: self.task_info.operator_id.clone(),
-                subtask_index: self.task_info.task_index as u32,
-                time: SystemTime::now(),
-                event_type,
-            }))
-            .await
-            .unwrap();
-    }
-
     pub async fn load_compacted(&mut self, compaction: &CompactionResult) {
         //TODO: support compaction in the table manager
         self.table_manager
             .load_compacted(compaction)
             .await
             .expect("should be able to load compacted");
-    }
-
-    pub fn initialize_deserializer(
-        &mut self,
-        format: Format,
-        framing: Option<Framing>,
-        bad_data: Option<BadData>,
-    ) {
-        if self.deserializer.is_some() {
-            panic!("Deserialize already initialized");
-        }
-
-        self.deserializer = Some(ArrowDeserializer::new(
-            format,
-            self.out_schema.as_ref().expect("no out schema").clone(),
-            framing,
-            bad_data.unwrap_or_default(),
-        ));
-    }
-
-    pub fn initialize_deserializer_with_resolver(
-        &mut self,
-        format: Format,
-        framing: Option<Framing>,
-        bad_data: Option<BadData>,
-        schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    ) {
-        self.deserializer = Some(ArrowDeserializer::with_schema_resolver(
-            format,
-            framing,
-            self.out_schema.as_ref().expect("no out schema").clone(),
-            bad_data.unwrap_or_default(),
-            schema_resolver,
-        ));
-    }
-
-    pub async fn deserialize_slice(
-        &mut self,
-        msg: &[u8],
-        time: SystemTime,
-        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
-    ) -> Result<(), UserError> {
-        let deserializer = self
-            .deserializer
-            .as_mut()
-            .expect("deserializer not initialized!");
-
-        if self.buffer.is_none() {
-            self.buffer = self
-                .out_schema
-                .as_ref()
-                .map(|t| ContextBuffer::new(t.schema.clone()));
-        }
-
-        let errors = deserializer
-            .deserialize_slice(
-                &mut self.buffer.as_mut().expect("no out schema").buffer,
-                msg,
-                time,
-                additional_fields,
-            )
-            .await;
-        self.collect_source_errors(errors).await?;
-
-        Ok(())
-    }
-
-    /// Handling errors and rate limiting error reporting.
-    /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
-    async fn collect_source_errors(&mut self, errors: Vec<SourceError>) -> Result<(), UserError> {
-        let bad_data = self
-            .deserializer
-            .as_ref()
-            .expect("deserializer not initialized")
-            .bad_data();
-        for error in errors {
-            match error {
-                SourceError::BadData { details } => match bad_data {
-                    BadData::Drop {} => {
-                        self.error_rate_limiter
-                            .rate_limit(|| async {
-                                warn!("Dropping invalid data: {}", details.clone());
-                                self.control_tx
-                                    .send(ControlResp::Error {
-                                        operator_id: self.task_info.operator_id.clone(),
-                                        task_index: self.task_info.task_index,
-                                        message: "Dropping invalid data".to_string(),
-                                        details,
-                                    })
-                                    .await
-                                    .unwrap();
-                            })
-                            .await;
-                        TaskCounters::DeserializationErrors.for_task(&self.task_info, |c| c.inc())
-                    }
-                    BadData::Fail {} => {
-                        return Err(UserError::new("Deserialization error", details));
-                    }
-                },
-                SourceError::Other { name, details } => {
-                    return Err(UserError::new(name, details));
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 

@@ -641,7 +641,7 @@ impl ExpiringTimeKeyTableCheckpointer {
             &parent.task_info.job_id,
             &parent.task_info.operator_id,
             &parent.table_name,
-            parent.task_info.task_index,
+            parent.task_info.task_index as usize,
             epoch,
             false,
         );

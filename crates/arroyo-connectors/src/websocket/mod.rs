@@ -23,7 +23,7 @@ use crate::{header_map, pull_opt, EmptyConfig};
 
 use crate::websocket::operator::{WebsocketSourceFunc, WebsocketSourceState};
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 mod operator;
 
@@ -313,7 +313,7 @@ impl Connector for WebsocketConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         // Include subscription_message for backwards compatibility
         let mut subscription_messages = vec![];
         if let Some(message) = table.subscription_message {
@@ -331,7 +331,7 @@ impl Connector for WebsocketConnector {
             .map(|(k, v)| ((&k).into(), (&v).into()))
             .collect();
 
-        Ok(OperatorNode::from_source(Box::new(WebsocketSourceFunc {
+        Ok(ConstructedOperator::from_source(Box::new(WebsocketSourceFunc {
             url: table.endpoint,
             headers,
             subscription_messages,

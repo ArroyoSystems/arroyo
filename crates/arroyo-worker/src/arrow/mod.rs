@@ -2,9 +2,9 @@ use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, ConstructedOperator, Registry,
 };
 use arroyo_rpc::grpc::api;
 use datafusion::common::DataFusionError;
@@ -47,9 +47,9 @@ impl OperatorConstructor for ValueExecutionConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let executor = StatelessPhysicalExecutor::new(&config.physical_plan, &registry)?;
-        Ok(OperatorNode::from_operator(Box::new(
+        Ok(ConstructedOperator::from_operator(Box::new(
             ValueExecutionOperator {
                 name: config.name,
                 executor,
@@ -71,11 +71,11 @@ impl ArrowOperator for ValueExecutionOperator {
         }
     }
 
-    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         let mut records = self.executor.process_batch(record_batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
-            ctx.collect(batch).await;
+            collector.collect(batch).await;
         }
     }
 }
@@ -163,10 +163,10 @@ impl OperatorConstructor for KeyExecutionConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let executor = StatelessPhysicalExecutor::new(&config.physical_plan, &registry)?;
 
-        Ok(OperatorNode::from_operator(Box::new(
+        Ok(ConstructedOperator::from_operator(Box::new(
             KeyExecutionOperator {
                 name: config.name,
                 executor,
@@ -196,13 +196,13 @@ impl ArrowOperator for KeyExecutionOperator {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext, collector: &mut dyn Collector) {
         let mut records = self.executor.process_batch(batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
             //TODO: sort by the key
             //info!("batch {:?}", batch);
-            ctx.collect(batch).await;
+            collector.collect(batch).await;
         }
     }
 }

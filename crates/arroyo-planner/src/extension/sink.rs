@@ -163,13 +163,14 @@ impl ArroyoExtension for SinkExtension {
             .connector_op()
             .map_err(|e| e.context("connector op"))?)
         .encode_to_vec();
-        let node = LogicalNode {
-            operator_id: format!("sink_{}_{}", self.name, index),
-            description: self.table.connector_op().unwrap().description.clone(),
-            operator_name: OperatorName::ConnectorSink,
-            parallelism: 1,
+        let node = LogicalNode::single(
+            index as u32,
+            format!("sink_{}_{}", self.name, index),
+            OperatorName::ConnectorSink,
             operator_config,
-        };
+            self.table.connector_op().unwrap().description.clone(),
+            1,
+        );
         let edge = LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone());
         Ok(NodeWithIncomingEdges {
             node,
