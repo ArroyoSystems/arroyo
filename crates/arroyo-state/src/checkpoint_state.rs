@@ -37,9 +37,9 @@ pub struct CheckpointState {
     operators: usize,
     operators_checkpointed: usize,
     operator_state: HashMap<String, OperatorState>,
-    subtasks_to_commit: HashSet<(String, u32)>,
+    subtasks_to_commit: HashSet<(u32, u32)>,
     // map of operator_id -> table_name -> subtask_index -> Data
-    commit_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
+    commit_data: HashMap<u32, HashMap<String, HashMap<u32, Vec<u8>>>>,
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
@@ -317,10 +317,10 @@ impl CheckpointState {
                 } {
                     for i in 0..operator_state.subtasks_checkpointed {
                         self.subtasks_to_commit
-                            .insert((c.operator_id.clone(), i as u32));
+                            .insert((c.node_id, i as u32));
                     }
                     self.commit_data
-                        .entry(c.operator_id.clone())
+                        .entry(c.node_id)
                         .or_default()
                         .insert(table.clone(), committing_data);
                 }

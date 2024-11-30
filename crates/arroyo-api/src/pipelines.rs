@@ -8,7 +8,9 @@ use http::StatusCode;
 
 use petgraph::{Direction, EdgeDirection};
 use std::collections::HashMap;
-
+use std::num::ParseIntError;
+use std::str::FromStr;
+use std::string::ParseError;
 use petgraph::visit::NodeRef;
 use std::time::{Duration, SystemTime};
 
@@ -268,17 +270,19 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
         let schema = edge.weight().schema.schema.clone();
 
         let node = compiled_sql.program.graph.node_weight_mut(idx).unwrap();
-        if node.operator_name == OperatorName::ConnectorSink {
-            let mut op = ConnectorOp::decode(&node.operator_config[..]).map_err(|_| {
-                anyhow!(
+        for (node, _) in node.operator_chain.iter_mut() {
+            if node.operator_name == OperatorName::ConnectorSink {
+                let mut op = ConnectorOp::decode(&node.operator_config[..]).map_err(|_| {
+                    anyhow!(
                     "failed to decode configuration for connector node {:?}",
                     node
                 )
-            })?;
+                })?;
 
-            try_register_confluent_schema(&mut op, &schema).await?;
+                try_register_confluent_schema(&mut op, &schema).await?;
 
-            node.operator_config = op.encode_to_vec();
+                node.operator_config = op.encode_to_vec();
+            }
         }
     }
 
@@ -324,28 +328,28 @@ pub(crate) async fn create_pipeline_int<'a>(
         let g = &mut compiled.program.graph;
         for idx in g.node_indices() {
             let should_replace = {
-                let node = g.node_weight(idx).unwrap();
-                node.operator_name == OperatorName::ConnectorSink
-                    && node.operator_config != default_sink().encode_to_vec()
+                let node = &g.node_weight(idx).unwrap().operator_chain;
+                node.is_sink() && node.iter().next().unwrap().0.operator_config != default_sink().encode_to_vec()
             };
             if should_replace {
                 if enable_sinks {
-                    let new_idx = g.add_node(LogicalNode {
-                        operator_id: format!("{}_1", g.node_weight(idx).unwrap().operator_id),
-                        description: "Preview sink".to_string(),
-                        operator_name: OperatorName::ConnectorSink,
-                        operator_config: default_sink().encode_to_vec(),
-                        parallelism: 1,
-                    });
-                    let edges: Vec<_> = g
-                        .edges_directed(idx, Direction::Incoming)
-                        .map(|e| (e.source(), e.weight().clone()))
-                        .collect();
-                    for (source, weight) in edges {
-                        g.add_edge(source, new_idx, weight);
-                    }
+                    todo!("enable sinks")                    
+                    // let new_idx = g.add_node(LogicalNode {
+                    //     operator_id: format!("{}_1", g.node_weight(idx).unwrap().operator_id),
+                    //     description: "Preview sink".to_string(),
+                    //     operator_name: OperatorName::ConnectorSink,
+                    //     operator_config: default_sink().encode_to_vec(),
+                    //     parallelism: 1,
+                    // });
+                    // let edges: Vec<_> = g
+                    //     .edges_directed(idx, Direction::Incoming)
+                    //     .map(|e| (e.source(), e.weight().clone()))
+                    //     .collect();
+                    // for (source, weight) in edges {
+                    //     g.add_edge(source, new_idx, weight);
+                    // }
                 } else {
-                    g.node_weight_mut(idx).unwrap().operator_config =
+                    g.node_weight_mut(idx).unwrap().operator_chain.iter_mut().next().unwrap().0.operator_config =
                         default_sink().encode_to_vec();
                 }
             }
@@ -452,8 +456,9 @@ impl TryInto<Pipeline> for DbPipeline {
                 .as_object()
                 .unwrap()
                 .into_iter()
-                .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
-                .collect(),
+                .map(|(k, v)| Ok((u32::from_str(k)?, v.as_u64().unwrap() as usize)))
+                .collect::<Result<HashMap<_, _>, ParseIntError>>()
+                .map_err(|e| bad_request(format!("invalid node_id: {}", e)))?,
         );
 
         let stop = match self.stop {
@@ -682,10 +687,10 @@ pub async fn patch_pipeline(
             .ok_or_else(|| not_found("Job"))?;
 
         let program = ArrowProgram::decode(&res.program[..]).map_err(log_and_map)?;
-        let map: HashMap<String, u32> = program
+        let map: HashMap<_, _> = program
             .nodes
             .into_iter()
-            .map(|node| (node.node_id, parallelism as u32))
+            .map(|node| (node.node_id.to_string(), parallelism as u32))
             .collect();
 
         Some(serde_json::to_value(map).map_err(log_and_map)?)

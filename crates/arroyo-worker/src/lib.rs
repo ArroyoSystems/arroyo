@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
@@ -44,6 +44,7 @@ use arroyo_df::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
+use arroyo_state::{BackingStore, StateBackend};
 
 pub mod arrow;
 
@@ -93,7 +94,7 @@ impl Debug for LogicalNode {
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
     sinks: Vec<Sender<ControlMessage>>,
-    operator_controls: HashMap<String, Vec<Sender<ControlMessage>>>, // operator_id -> vec of control tx
+    operator_controls: HashMap<u32, Vec<Sender<ControlMessage>>>, // operator_id -> vec of control tx
     shutdown_guard: ShutdownGuard,
 }
 
@@ -110,10 +111,11 @@ impl LocalRunner {
         let name = format!("{}-0", self.program.name);
         let total_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name);
-        let (_running_engine, mut control_rx) = engine
-            .start(StreamConfig {
-                restore_epoch: None,
-            })
+        
+        let (control_tx, mut control_rx) = channel(128);
+        
+        let _running_engine = engine
+            .start(control_tx)
             .await;
 
         let mut finished_nodes = HashSet::new();
@@ -295,6 +297,7 @@ impl WorkerServer {
                                         worker_id: worker_id.0,
                                         time: to_micros(c.time),
                                         job_id: job_id.clone(),
+                                        node_id: c.node_id,
                                         operator_id: c.operator_id,
                                         subtask_index: c.subtask_index,
                                         epoch: c.checkpoint_epoch,
@@ -308,6 +311,7 @@ impl WorkerServer {
                                         worker_id: worker_id.0,
                                         time: c.subtask_metadata.finish_time,
                                         job_id: job_id.clone(),
+                                        node_id: c.node_id,
                                         operator_id: c.operator_id,
                                         epoch: c.checkpoint_epoch,
                                         needs_commit: false,
@@ -315,34 +319,35 @@ impl WorkerServer {
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::TaskFinished { operator_id, task_index }) => {
-                                info!(message = "Task finished", operator_id, task_index);
+                            Some(ControlResp::TaskFinished { node_id, task_index }) => {
+                                info!(message = "Task finished", node_id, task_index);
                                 controller.task_finished(Request::new(
                                     TaskFinishedReq {
                                         worker_id: worker_id.0,
                                         job_id: job_id.clone(),
                                         time: to_micros(SystemTime::now()),
-                                        operator_id: operator_id.to_string(),
+                                        node_id,
                                         operator_subtask: task_index as u64,
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::TaskFailed { operator_id, task_index, error }) => {
+                            Some(ControlResp::TaskFailed { node_id, task_index, error }) => {
                                 controller.task_failed(Request::new(
                                     TaskFailedReq {
                                         worker_id: worker_id.0,
                                         job_id: job_id.clone(),
                                         time: to_micros(SystemTime::now()),
-                                        operator_id: operator_id.to_string(),
+                                        node_id,
                                         operator_subtask: task_index as u64,
                                         error,
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::Error { operator_id, task_index, message, details}) => {
+                            Some(ControlResp::Error { node_id, operator_id, task_index, message, details}) => {
                                 controller.worker_error(Request::new(
                                     WorkerErrorReq {
                                         job_id: job_id.clone(),
+                                        node_id,
                                         operator_id,
                                         task_index: task_index as u32,
                                         message,
@@ -350,13 +355,13 @@ impl WorkerServer {
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::TaskStarted {operator_id, task_index, start_time}) => {
+                            Some(ControlResp::TaskStarted {node_id, task_index, start_time}) => {
                                 controller.task_started(Request::new(
                                     TaskStartedReq {
                                         worker_id: worker_id.0,
                                         job_id: job_id.clone(),
                                         time: to_micros(start_time),
-                                        operator_id: operator_id.to_string(),
+                                        node_id,
                                         operator_subtask: task_index as u64,
                                     }
                                 )).await.err()
@@ -441,11 +446,27 @@ impl WorkerGrpc for WorkerServer {
             })?;
         }
 
-        let (engine, control_rx) = {
+        let (control_tx, control_rx) = channel(128);
+        
+        let engine = {
             let network = { self.network.lock().unwrap().take().unwrap() };
 
+            let checkpoint_metadata = if let Some(epoch) = req.restore_epoch {
+                info!("Restoring checkpoint {} for job {}", epoch, self.job_id);
+                Some(
+                    StateBackend::load_checkpoint_metadata(&self.job_id, epoch)
+                        .await
+                        .unwrap_or_else(|_| {
+                            panic!("failed to load checkpoint metadata for epoch {}", epoch)
+                        }),
+                )
+            } else {
+                None
+            };
+
             let program =
-                Program::from_logical(self.name.to_string(), &logical.graph, &req.tasks, registry);
+                Program::from_logical(self.name.to_string(), &self.job_id, &logical.graph, &req.tasks, registry, checkpoint_metadata.as_ref(), control_tx.clone())
+                    .await;
 
             let engine = Engine::new(
                 program,
@@ -456,9 +477,7 @@ impl WorkerGrpc for WorkerServer {
                 req.tasks,
             );
             engine
-                .start(StreamConfig {
-                    restore_epoch: req.restore_epoch,
-                })
+                .start(control_tx)
                 .await
         };
 
@@ -550,8 +569,8 @@ impl WorkerGrpc for WorkerServer {
                 ));
             };
             let mut sender_commit_map_pairs = vec![];
-            for (operator_id, commit_operator) in req.committing_data {
-                let nodes = state.operator_controls.get(&operator_id).unwrap().clone();
+            for (node_id, commit_operator) in req.committing_data {
+                let nodes = state.operator_controls.get(&node_id).unwrap().clone();
                 let commit_map: HashMap<_, _> = commit_operator
                     .committing_data
                     .into_iter()
@@ -584,7 +603,7 @@ impl WorkerGrpc for WorkerServer {
         let nodes = {
             let state = self.state.lock().unwrap();
             let s = state.as_ref().unwrap();
-            s.operator_controls.get(&req.operator_id).unwrap().clone()
+            s.operator_controls.get(&req.node_id).unwrap().clone()
         };
 
         let compacted: CompactionResult = req.into();

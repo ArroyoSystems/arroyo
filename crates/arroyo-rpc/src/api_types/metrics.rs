@@ -41,6 +41,6 @@ pub struct MetricGroup {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OperatorMetricGroup {
-    pub operator_id: String,
+    pub node_id: u32,
     pub metric_groups: Vec<MetricGroup>,
 }
