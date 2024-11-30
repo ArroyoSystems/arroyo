@@ -139,15 +139,15 @@ impl JobMetrics {
         metric_groups
             .into_iter()
             .map(|(op_id, metrics)| {
-                let operator_id = self
+                let node_id = self
                     .program
                     .graph
                     .node_weight(NodeIndex::new(op_id as usize))
                     .unwrap()
-                    .operator_id
+                    .node_id
                     .clone();
                 OperatorMetricGroup {
-                    operator_id,
+                    node_id,
                     metric_groups: metrics
                         .into_iter()
                         .map(|(name, subtasks)| MetricGroup {

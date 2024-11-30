@@ -14,13 +14,13 @@ use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
 use arroyo_formats::de::FieldValueType;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp, MetadataField};
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
 use arroyo_types::*;
 
 use super::{Context, SourceOffset, StreamConsumer};
@@ -51,7 +51,7 @@ pub struct KafkaState {
 }
 
 impl KafkaSourceFunc {
-    async fn get_consumer(&mut self, ctx: &mut OperatorContext) -> anyhow::Result<StreamConsumer> {
+    async fn get_consumer(&mut self, ctx: &mut SourceContext) -> anyhow::Result<StreamConsumer> {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
 
@@ -113,7 +113,7 @@ impl KafkaSourceFunc {
             partitions
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| i % ctx.task_info.parallelism == ctx.task_info.task_index)
+                .filter(|(i, _)| i % ctx.task_info.parallelism as usize == ctx.task_info.task_index as usize)
                 .map(|(_, p)| {
                     let offset = state
                         .get(&p.id())
@@ -145,7 +145,7 @@ impl KafkaSourceFunc {
         Ok(consumer)
     }
 
-    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
         let consumer = self
             .get_consumer(ctx)
             .await
@@ -157,21 +157,21 @@ impl KafkaSourceFunc {
         if consumer.assignment().unwrap().count() == 0 {
             warn!("Kafka Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
                 ctx.task_info.operator_id, ctx.task_info.task_index);
-            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+            collector.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                 Watermark::Idle,
             )))
             .await;
         }
 
         if let Some(schema_resolver) = &self.schema_resolver {
-            ctx.initialize_deserializer_with_resolver(
+            collector.initialize_deserializer_with_resolver(
                 self.format.clone(),
                 self.framing.clone(),
                 self.bad_data.clone(),
                 schema_resolver.clone(),
             );
         } else {
-            ctx.initialize_deserializer(
+            collector.initialize_deserializer(
                 self.format.clone(),
                 self.framing.clone(),
                 self.bad_data.clone(),
@@ -209,11 +209,10 @@ impl KafkaSourceFunc {
                                     None
                                 };
 
-                                ctx.deserialize_slice(v, from_millis(timestamp.max(0) as u64), connector_metadata.as_ref()).await?;
+                                collector.deserialize_slice(v, from_millis(timestamp.max(0) as u64), connector_metadata.as_ref()).await?;
 
-
-                                if ctx.should_flush() {
-                                    ctx.flush_buffer().await?;
+                                if collector.should_flush() {
+                                    collector.flush_buffer().await?;
                                 }
 
                                 offsets.insert(msg.partition(), msg.offset());
@@ -226,8 +225,8 @@ impl KafkaSourceFunc {
                     }
                 }
                 _ = flush_ticker.tick() => {
-                    if ctx.should_flush() {
-                        ctx.flush_buffer().await?;
+                    if collector.should_flush() {
+                        collector.flush_buffer().await?;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
@@ -251,7 +250,7 @@ impl KafkaSourceFunc {
                                 // fails. The actual offset is stored in state.
                                 warn!("Failed to commit offset to Kafka {:?}", e);
                             }
-                            if self.start_checkpoint(c, ctx).await {
+                            if self.start_checkpoint(c, ctx, collector).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },
@@ -286,19 +285,11 @@ impl KafkaSourceFunc {
 
 #[async_trait]
 impl SourceOperator for KafkaSourceFunc {
-    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
-                ctx.control_tx
-                    .send(ControlResp::Error {
-                        operator_id: ctx.task_info.operator_id.clone(),
-                        task_index: ctx.task_info.task_index,
-                        message: e.name.clone(),
-                        details: e.details.clone(),
-                    })
-                    .await
-                    .unwrap();
+                ctx.report_user_error(e.clone()).await;
 
                 panic!("{}: {}", e.name, e.details);
             }

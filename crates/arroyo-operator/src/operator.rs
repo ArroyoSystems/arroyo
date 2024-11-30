@@ -1,7 +1,4 @@
-use crate::context::{
-    send_checkpoint_event, ArrowCollector, BatchReceiver, BatchSender, ChainCollector, Collector,
-    OperatorContext, SourceContext, WatermarkHolder,
-};
+use crate::context::{send_checkpoint_event, ArrowCollector, BatchReceiver, BatchSender, ChainCollector, Collector, OperatorContext, SourceCollector, SourceContext, WatermarkHolder};
 use crate::inq_reader::InQReader;
 use crate::udfs::{ArroyoUdaf, UdafArg};
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
@@ -62,7 +59,7 @@ pub trait OperatorConstructor: Send {
 
 pub struct SourceNode {
     pub operator: Box<dyn SourceOperator + Send>,
-    pub context: SourceContext,
+    pub context: OperatorContext,
 }
 
 pub enum ConstructedOperator {
@@ -133,41 +130,59 @@ impl OperatorNode {
     }
 
     async fn run_behavior(
-        &mut self,
+        mut self,
+        chain_info: &Arc<ChainInfo>,
         control_tx: Sender<ControlResp>,
         control_rx: Receiver<ControlMessage>,
         in_qs: &mut [BatchReceiver],
         ready: Arc<Barrier>,
-        collector: &mut ArrowCollector,
-    ) -> Option<SignalMessage> {
+        mut collector: ArrowCollector,
+    ) {
         match self {
-            OperatorNode::Source(s) => {
-                s.operator.on_start(&mut s.context).await;
+            OperatorNode::Source(mut s) => {
+                let mut source_context = SourceContext::from_operator(s.context, chain_info.clone(), control_rx);                
+                
+                let mut collector = SourceCollector::new(source_context.out_schema.clone(), 
+                collector,
+                control_tx.clone(),
+                &source_context.chain_info,
+                &source_context.task_info);
+                
+                s.operator.on_start(&mut source_context).await;
 
                 ready.wait().await;
                 info!(
                     "Running source {}-{}",
-                    s.context.task_info.operator_name, s.context.task_info.operator_name
+                    source_context.task_info.operator_name, source_context.task_info.operator_name
                 );
 
-                s.context
+                source_context
                     .control_tx
                     .send(ControlResp::TaskStarted {
-                        node_id: s.context.task_info.node_id,
-                        task_index: s.context.task_info.task_index as usize,
+                        node_id: source_context.task_info.node_id,
+                        task_index: source_context.task_info.task_index as usize,
                         start_time: SystemTime::now(),
                     })
                     .await
                     .unwrap();
 
-                let result = s.operator.run(&mut s.context).await;
+                let result = s.operator.run(&mut source_context, &mut collector).await;
 
-                s.operator.on_close(&mut s.context).await;
-
-                result.into()
+                s.operator.on_close(&mut source_context, &mut collector).await;
+                
+                if let Some(final_message) = result.into() {
+                    collector
+                        .broadcast(ArrowMessage::Signal(final_message))
+                        .await;
+                }
             }
-            OperatorNode::Chained(o) => {
-                operator_run_behavior(o, in_qs, control_tx, control_rx, collector, ready).await
+            OperatorNode::Chained(mut o) => {
+                let result = operator_run_behavior(&mut o, in_qs, control_tx, control_rx, &mut collector, ready).await;
+                if let Some(final_message) = result.into() {
+                    collector
+                        .broadcast(ArrowMessage::Signal(final_message))
+                        .await;
+                }
             }
         }
     }
@@ -209,29 +224,24 @@ impl OperatorNode {
             task_index: self.task_index(),
         });
 
-        let mut collector = ArrowCollector::new(chain_info.clone(), out_schema, out_qs);
+        let collector = ArrowCollector::new(chain_info.clone(), out_schema, out_qs);
 
-        let final_message = self
+        self
             .run_behavior(
+                &chain_info,
                 control_tx.clone(),
                 control_rx,
                 &mut in_qs,
                 ready,
-                &mut collector,
+                collector,
             )
             .await;
-
-        if let Some(final_message) = final_message {
-            collector
-                .broadcast(ArrowMessage::Signal(final_message))
-                .await;
-        }
-
+        
         info!(
-            "Task finished {}-{} ({}",
-            self.node_id(),
-            self.task_index(),
-            self.name(),
+            "Task finished {}-{} ({})",
+            chain_info.node_id,
+            chain_info.task_index,
+            chain_info.description
         );
 
         control_tx
@@ -246,7 +256,7 @@ impl OperatorNode {
 
 async fn run_checkpoint(
     checkpoint_barrier: CheckpointBarrier,
-    chain_info: &ChainInfo,
+    task_info: &TaskInfo,
     watermark: Option<SystemTime>,
     table_manager: &mut TableManager,
     collector: &mut dyn Collector,
@@ -258,7 +268,7 @@ async fn run_checkpoint(
 
     send_checkpoint_event(
         control_tx,
-        chain_info,
+        task_info,
         checkpoint_barrier,
         TaskCheckpointEventType::FinishedSync,
     )
@@ -284,19 +294,20 @@ pub trait SourceOperator: Send + 'static {
     #[allow(unused_variables)]
     async fn on_start(&mut self, ctx: &mut SourceContext) {}
 
-    async fn run(&mut self, ctx: &mut SourceContext) -> SourceFinishType;
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType;
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, ctx: &mut SourceContext) {}
+    async fn on_close(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) {}
 
     async fn start_checkpoint(
         &mut self,
         checkpoint_barrier: CheckpointBarrier,
         ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
     ) -> bool {
         send_checkpoint_event(
             &ctx.control_tx,
-            &ctx.chain_info,
+            &ctx.task_info,
             checkpoint_barrier,
             TaskCheckpointEventType::StartedCheckpointing,
         )
@@ -304,10 +315,10 @@ pub trait SourceOperator: Send + 'static {
 
         run_checkpoint(
             checkpoint_barrier,
-            &ctx.chain_info,
+            &ctx.task_info,
             ctx.watermarks.last_present_watermark(),
             &mut ctx.table_manager,
-            &mut ctx.collector,
+            &mut collector.collector,
             &ctx.control_tx,
         )
         .await
@@ -519,6 +530,7 @@ impl ChainedOperator {
                         .send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
                             checkpoint_epoch: t.epoch,
                             node_id: chain_info.node_id,
+                            operator_id: self.context.task_info.operator_id.clone(),
                             subtask_index: chain_info.task_index,
                             time: SystemTime::now(),
                             event_type: TaskCheckpointEventType::StartedAlignment,
@@ -532,7 +544,7 @@ impl ChainedOperator {
 
                     send_checkpoint_event(
                         control_tx,
-                        chain_info,
+                        &self.context.task_info,
                         *t,
                         TaskCheckpointEventType::StartedCheckpointing,
                     )
@@ -542,7 +554,7 @@ impl ChainedOperator {
 
                     send_checkpoint_event(
                         control_tx,
-                        chain_info,
+                        &self.context.task_info,
                         *t,
                         TaskCheckpointEventType::FinishedOperatorSetup,
                     )
@@ -559,7 +571,7 @@ impl ChainedOperator {
                         .last_present_watermark();
                     if run_checkpoint(
                         *t,
-                        chain_info,
+                        &self.context.task_info,
                         last_watermark,
                         &mut self.context.table_manager,
                         collector,

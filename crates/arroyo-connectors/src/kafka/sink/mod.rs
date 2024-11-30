@@ -279,7 +279,7 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("Producer creation failed");
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         let values = self.serializer.serialize(&batch);
         let timestamps = batch
             .column(
@@ -306,7 +306,7 @@ impl ArrowOperator for KafkaSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         self.flush(ctx).await;
         if let ConsistencyMode::ExactlyOnce {
             next_transaction_index,
@@ -360,6 +360,7 @@ impl ArrowOperator for KafkaSinkFunc {
         }
         let checkpoint_event = ControlResp::CheckpointEvent(CheckpointEvent {
             checkpoint_epoch: epoch,
+            node_id: ctx.task_info.node_id,
             operator_id: ctx.task_info.operator_id.clone(),
             subtask_index: ctx.task_info.task_index as u32,
             time: SystemTime::now(),
@@ -371,15 +372,16 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("sent commit event");
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         self.flush(ctx).await;
         if !self.is_committing() {
             return;
         }
-        if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
-            self.handle_commit(epoch, &commit_data, ctx).await;
-        } else {
-            warn!("no commit message received, not committing")
-        }
+        // if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
+        //     self.handle_commit(epoch, &commit_data, ctx).await;
+        // } else {
+        //     warn!("no commit message received, not committing")
+        // }
+        todo!("committing")
     }
 }

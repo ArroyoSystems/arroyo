@@ -11,7 +11,7 @@ use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
 use std::time::{Duration, SystemTime};
 
-use arroyo_operator::context::{OperatorContext, SourceContext};
+use arroyo_operator::context::{OperatorContext, SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
@@ -92,7 +92,7 @@ impl ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
         let delay = self.delay(ctx);
         info!(
             "Starting impulse source with start {} delay {:?} and limit {}",
@@ -138,7 +138,7 @@ impl ImpulseSourceFunc {
                 let counter_column = counter_builder.finish();
                 let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
                 let timestamp_column = timestamp_builder.finish();
-                ctx.collect(
+                collector.collect(
                     RecordBatch::try_new(
                         schema.clone(),
                         vec![
@@ -163,7 +163,7 @@ impl ImpulseSourceFunc {
                         let counter_column = counter_builder.finish();
                         let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
                         let timestamp_column = timestamp_builder.finish();
-                        ctx.collect(
+                        collector.collect(
                             RecordBatch::try_new(
                                 schema.clone(),
                                 vec![
@@ -183,7 +183,7 @@ impl ImpulseSourceFunc {
                         .unwrap()
                         .insert(ctx.task_info.task_index, self.state)
                         .await;
-                    if self.start_checkpoint(c, ctx).await {
+                    if self.start_checkpoint(c, ctx, collector).await {
                         return SourceFinishType::Immediate;
                     }
                 }
@@ -222,7 +222,7 @@ impl ImpulseSourceFunc {
             let counter_column = counter_builder.finish();
             let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
             let timestamp_column = timestamp_builder.finish();
-            ctx.collect(
+            collector.collect(
                 RecordBatch::try_new(
                     schema.clone(),
                     vec![
@@ -262,7 +262,7 @@ impl SourceOperator for ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext) -> SourceFinishType {
-        self.run(ctx).await
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+        self.run(ctx, collector).await
     }
 }

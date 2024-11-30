@@ -158,7 +158,7 @@ impl ParquetBackend {
     /// Called after a checkpoint is committed
     pub async fn compact_operator(
         job_id: Arc<String>,
-        operator_id: String,
+        operator_id: &str,
         epoch: u32,
     ) -> Result<HashMap<String, TableCheckpointMetadata>> {
         let min_files_to_compact = config().pipeline.compaction.checkpoints_to_compact as usize;

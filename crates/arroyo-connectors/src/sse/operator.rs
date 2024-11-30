@@ -1,5 +1,5 @@
 use crate::sse::SseTable;
-use arroyo_operator::context::{OperatorContext, SourceContext};
+use arroyo_operator::context::{OperatorContext, SourceCollector, SourceContext};
 use arroyo_operator::operator::{ConstructedOperator, SourceOperator};
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -70,7 +70,7 @@ impl SourceOperator for SSESourceFunc {
         arroyo_state::global_table_config("e", "sse source state")
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
         let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -81,7 +81,7 @@ impl SourceOperator for SSESourceFunc {
             self.state = state.clone();
         }
 
-        match self.run_int(ctx).await {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
@@ -96,6 +96,7 @@ impl SSESourceFunc {
     async fn our_handle_control_message(
         &mut self,
         ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -108,7 +109,7 @@ impl SSESourceFunc {
                     .expect("should be able to get SSE state");
                 s.insert((), self.state.clone()).await;
 
-                if self.start_checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx, collector).await {
                     return Some(SourceFinishType::Immediate);
                 }
             }
@@ -135,8 +136,8 @@ impl SSESourceFunc {
         None
     }
 
-    async fn run_int(&mut self, ctx: &mut SourceContext) -> Result<SourceFinishType, UserError> {
-        ctx.initialize_deserializer(
+    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
@@ -174,11 +175,11 @@ impl SSESourceFunc {
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            ctx.deserialize_slice(
+                                            collector.deserialize_slice(
                                                 event.data.as_bytes(), SystemTime::now(), None).await?;
 
-                                            if ctx.should_flush() {
-                                                ctx.flush_buffer().await?;
+                                            if collector.should_flush() {
+                                                collector.flush_buffer().await?;
                                             }
                                         }
                                     }
@@ -212,27 +213,27 @@ impl SSESourceFunc {
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
+                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await {
                             return Ok(r);
                         }
                     }
                     _ = flush_ticker.tick() => {
-                        if ctx.should_flush() {
-                            ctx.flush_buffer().await?;
+                        if collector.should_flush() {
+                            collector.flush_buffer().await?;
                         }
                     }
                 }
             }
         } else {
             // otherwise set idle and just process control messages
-            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+            collector.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                 Watermark::Idle,
             )))
             .await;
 
             loop {
                 let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, msg).await {
+                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {
                     return Ok(r);
                 }
             }

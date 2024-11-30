@@ -90,8 +90,8 @@ pub struct RunningJobModel {
     min_epoch: u32,
     last_checkpoint: Instant,
     workers: HashMap<WorkerId, WorkerStatus>,
-    tasks: HashMap<(String, u32), TaskStatus>,
-    operator_parallelism: HashMap<String, usize>,
+    tasks: HashMap<(u32, u32), TaskStatus>,
+    operator_parallelism: HashMap<u32, usize>,
     metrics: JobMetrics,
     metric_update_task: Option<JoinHandle<()>>,
     last_updated_metrics: Instant,
@@ -189,7 +189,7 @@ impl RunningJobModel {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
                                 {
                                     committing_state
-                                        .subtask_committed(c.operator_id.clone(), c.subtask_index);
+                                        .subtask_committed(c.node_id, c.subtask_index);
                                     self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())
@@ -233,28 +233,28 @@ impl RunningJobModel {
             RunningMessage::TaskFinished {
                 worker_id: _,
                 time: _,
-                operator_id,
+                node_id,
                 subtask_index,
             } => {
-                let key = (operator_id, subtask_index);
+                let key = (node_id, subtask_index);
                 if let Some(status) = self.tasks.get_mut(&key) {
                     status.state = TaskState::Finished;
                 } else {
                     warn!(
                         message = "Received task finished for unknown task",
                         job_id = *self.job_id,
-                        operator_id = key.0,
+                        node_id = key.0,
                         subtask_index
                     );
                 }
             }
             RunningMessage::TaskFailed {
-                operator_id,
+                node_id,
                 subtask_index,
                 reason,
                 ..
             } => {
-                let key = (operator_id, subtask_index);
+                let key = (node_id, subtask_index);
                 if let Some(status) = self.tasks.get_mut(&key) {
                     status.state = TaskState::Failed(reason);
                 } else {
@@ -382,27 +382,30 @@ impl RunningJobModel {
 
         let mut worker_clients: Vec<WorkerGrpcClient<Channel>> =
             self.workers.values().map(|w| w.connect.clone()).collect();
-        for operator_id in self.operator_parallelism.keys() {
-            let compacted_tables = ParquetBackend::compact_operator(
-                // compact the operator's state and notify the workers to load the new files
-                self.job_id.clone(),
-                operator_id.clone(),
-                self.epoch,
-            )
-            .await?;
+        for node in self.program.graph.node_weights() {
+            for (op, _) in node.operator_chain.iter() {
+                let compacted_tables = ParquetBackend::compact_operator(
+                    // compact the operator's state and notify the workers to load the new files
+                    self.job_id.clone(),
+                    &op.operator_id,
+                    self.epoch,
+                ).await?;
 
-            if compacted_tables.is_empty() {
-                continue;
-            }
+                if compacted_tables.is_empty() {
+                    continue;
+                }
 
-            // TODO: these should be put on separate tokio tasks.
-            for worker_client in &mut worker_clients {
-                worker_client
-                    .load_compacted_data(LoadCompactedDataReq {
-                        operator_id: operator_id.clone(),
-                        compacted_metadata: compacted_tables.clone(),
-                    })
-                    .await?;
+                // TODO: these should be put on separate tokio tasks.
+                for worker_client in &mut worker_clients {
+                    worker_client
+                        .load_compacted_data(LoadCompactedDataReq {
+                            node_id: node.node_id,
+                            operator_id: op.operator_id.clone(),
+                            compacted_metadata: compacted_tables.clone(),
+                        })
+                        .await?;
+                }
+                
             }
         }
 
@@ -526,7 +529,7 @@ impl RunningJobModel {
         let source_tasks = self.program.sources();
 
         self.tasks.iter().any(|((operator, _), t)| {
-            source_tasks.contains(operator.as_str()) && t.state == TaskState::Finished
+            source_tasks.contains(operator) && t.state == TaskState::Finished
         })
     }
 
@@ -605,7 +608,7 @@ impl JobController {
                     .flat_map(|node| {
                         (0..node.parallelism).map(|idx| {
                             (
-                                (node.operator_id.clone(), idx as u32),
+                                (node.node_id, idx as u32),
                                 TaskStatus {
                                     state: TaskState::Running,
                                 },
@@ -613,7 +616,7 @@ impl JobController {
                         })
                     })
                     .collect(),
-                operator_parallelism: program.tasks_per_operator(),
+                operator_parallelism: program.tasks_per_node(),
                 metrics,
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
@@ -684,7 +687,7 @@ impl JobController {
                             let subtask_idx =
                                 u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
                             let operator_idx =
-                                program.operator_index(find_label(&m.label, "operator_id")?)?;
+                                program.operator_index(u32::from_str(find_label(&m.label, "node_id")?).ok()?)?;
                             let value = m
                                 .counter
                                 .map(|c| c.value)
@@ -861,8 +864,8 @@ impl JobController {
         }
     }
 
-    pub fn operator_parallelism(&self, op: &str) -> Option<usize> {
-        self.model.operator_parallelism.get(op).cloned()
+    pub fn operator_parallelism(&self, node_id: u32) -> Option<usize> {
+        self.model.operator_parallelism.get(&node_id).cloned()
     }
 
     fn start_cleanup(&mut self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {

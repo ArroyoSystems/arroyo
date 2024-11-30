@@ -177,6 +177,7 @@ impl BackendFlusher {
             .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
                 checkpoint_epoch: cp.epoch,
                 node_id: self.task_info.node_id,
+                operator_id: self.task_info.operator_id.clone(),
                 subtask_metadata,
             }))
             .await?;

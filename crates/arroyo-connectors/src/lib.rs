@@ -15,11 +15,11 @@ use tokio::sync::mpsc::Sender;
 use tracing::warn;
 
 pub mod blackhole;
-// pub mod confluent;
+pub mod confluent;
 // pub mod filesystem;
 // pub mod fluvio;
 pub mod impulse;
-// pub mod kafka;
+pub mod kafka;
 // pub mod kinesis;
 // pub mod mqtt;
 // pub mod nats;
@@ -36,12 +36,12 @@ pub mod stdout;
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
         Box::new(blackhole::BlackholeConnector {}),
-        // Box::new(confluent::ConfluentConnector {}),
+        Box::new(confluent::ConfluentConnector {}),
         // Box::new(filesystem::delta::DeltaLakeConnector {}),
         // Box::new(filesystem::FileSystemConnector {}),
         // Box::new(fluvio::FluvioConnector {}),
         Box::new(impulse::ImpulseConnector {}),
-        // Box::new(kafka::KafkaConnector {}),
+        Box::new(kafka::KafkaConnector {}),
         // Box::new(kinesis::KinesisConnector {}),
         // Box::new(mqtt::MqttConnector {}),
         // Box::new(nats::NatsConnector {}),
