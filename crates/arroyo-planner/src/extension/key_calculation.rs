@@ -97,13 +97,14 @@ impl ArroyoExtension for KeyCalculationExtension {
             physical_plan: physical_plan_node.encode_to_vec(),
             key_fields: self.keys.iter().map(|k: &usize| *k as u64).collect(),
         };
-        let node = LogicalNode {
-            operator_id: format!("key_{}", index),
-            operator_name: OperatorName::ArrowKey,
-            operator_config: config.encode_to_vec(),
-            description: format!("ArrowKey<{}>", config.name),
-            parallelism: 1,
-        };
+        let node = LogicalNode::single(
+            index as u32,
+            format!("key_{}", index),
+            OperatorName::ArrowKey,
+            config.encode_to_vec(),
+            format!("ArrowKey<{}>", config.name),
+            1,
+        );
         let edge = LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone());
         Ok(NodeWithIncomingEdges {
             node,

@@ -101,13 +101,14 @@ impl ArroyoExtension for TableSourceExtension {
             return plan_err!("TableSourceExtension should not have inputs");
         }
         let sql_source = self.table.as_sql_source()?;
-        let node = LogicalNode {
-            operator_id: format!("source_{}_{}", self.name, index),
-            description: sql_source.source.config.description.clone(),
-            operator_name: OperatorName::ConnectorSource,
-            operator_config: sql_source.source.config.encode_to_vec(),
-            parallelism: 1,
-        };
+        let node = LogicalNode::single(
+            index as u32,
+            format!("source_{}_{}", self.name, index),
+            OperatorName::ConnectorSource,
+            sql_source.source.config.encode_to_vec(),
+            sql_source.source.config.description.clone(),
+            1,
+        );
         Ok(NodeWithIncomingEdges {
             node,
             edges: vec![],

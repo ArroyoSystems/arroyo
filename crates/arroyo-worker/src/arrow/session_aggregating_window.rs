@@ -20,7 +20,7 @@ use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_df::schemas::window_arrow_struct;
 use arroyo_operator::{
     context::OperatorContext,
-    operator::{ArrowOperator, OperatorConstructor, OperatorNode},
+    operator::{ArrowOperator, OperatorConstructor, ConstructedOperator},
 };
 use arroyo_rpc::{
     grpc::{api, rpc::TableConfig},
@@ -45,7 +45,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::{debug, warn};
-
+use arroyo_operator::context::Collector;
 // TODO: advance futures outside of method calls.
 
 pub struct SessionAggregatingWindowFunc {
@@ -71,7 +71,7 @@ impl SessionAggregatingWindowFunc {
         result
     }
 
-    async fn advance(&mut self, ctx: &mut OperatorContext) -> Result<()> {
+    async fn advance(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) -> Result<()> {
         let Some(watermark) = ctx.last_present_watermark() else {
             debug!("no watermark, not advancing");
             return Ok(());
@@ -85,7 +85,7 @@ impl SessionAggregatingWindowFunc {
                 .to_record_batch(results, ctx)
                 .context("should convert to record batch")?;
             debug!("emitting session batch of size {}", result_batch.num_rows());
-            ctx.collect(result_batch).await;
+            collector.collect(result_batch).await;
         }
 
         Ok(())
@@ -684,7 +684,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let window_field = Arc::new(Field::new(
             config.window_field_name,
             window_arrow_struct(),
@@ -735,7 +735,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
             receiver,
         };
 
-        Ok(OperatorNode::from_operator(Box::new(
+        Ok(ConstructedOperator::from_operator(Box::new(
             SessionAggregatingWindowFunc {
                 config: Arc::new(config),
                 keys_by_next_watermark_action: BTreeMap::new(),
@@ -809,7 +809,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
     }
 
     // TODO: filter out late data
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         debug!("received batch {:?}", batch);
         let current_watermark = ctx.last_present_watermark();
         let batch = if let Some(watermark) = current_watermark {
@@ -858,12 +858,13 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         &mut self,
         watermark: Watermark,
         ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Option<Watermark> {
-        self.advance(ctx).await.unwrap();
+        self.advance(ctx, collector).await.unwrap();
         Some(watermark)
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager

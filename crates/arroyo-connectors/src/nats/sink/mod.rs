@@ -3,7 +3,7 @@ use super::NatsTable;
 use super::{get_nats_client, SinkType};
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlMessage;
@@ -50,7 +50,7 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut OperatorContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, &commit_data, ctx).await;
         } else {

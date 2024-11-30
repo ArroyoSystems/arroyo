@@ -11,7 +11,7 @@ use anyhow::{anyhow, bail};
 use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector, MetadataDef};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -271,10 +271,10 @@ impl Connector for MqttConnector {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let qos = table.qos();
         Ok(match table.type_ {
-            TableType::Source {} => OperatorNode::from_source(Box::new(MqttSourceFunc {
+            TableType::Source {} => ConstructedOperator::from_source(Box::new(MqttSourceFunc {
                 config: profile,
                 topic: table.topic,
                 qos,
@@ -293,7 +293,7 @@ impl Connector for MqttConnector {
                 subscribed: Arc::new(AtomicBool::new(false)),
                 metadata_fields: config.metadata_fields,
             })),
-            TableType::Sink { retain } => OperatorNode::from_operator(Box::new(MqttSinkFunc {
+            TableType::Sink { retain } => ConstructedOperator::from_operator(Box::new(MqttSinkFunc {
                 config: profile,
                 qos,
                 topic: table.topic,

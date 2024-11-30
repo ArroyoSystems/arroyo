@@ -6,22 +6,24 @@ use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::CompactionResult;
 use arroyo_rpc::{
     grpc::rpc::{
-        OperatorCheckpointMetadata, SubtaskCheckpointMetadata, TableConfig, TableEnum,
-        TableSubtaskCheckpointMetadata,
+        SubtaskCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata,
     },
     CheckpointCompleted, ControlResp,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{to_micros, CheckpointBarrier, Data, Key, TaskInfoRef};
+use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, TaskInfoRef};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
 };
 
-use tracing::{debug, error, info, warn};
-
-use crate::{get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, StateMessage};
+use crate::{
+    get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, BackingStore, StateBackend,
+    StateMessage,
+};
 use crate::{CheckpointMessage, TableData};
+use arroyo_rpc::grpc::rpc::CheckpointMetadata;
+use tracing::{debug, error, info, warn};
 
 use super::expiring_time_key_map::{
     ExpiringTimeKeyTable, ExpiringTimeKeyView, KeyTimeView, LastKeyValueView,
@@ -75,8 +77,8 @@ impl BackendFlusher {
                         error!("Failed to flush state file: {:?}", err);
                         self.control_tx
                             .send(ControlResp::TaskFailed {
-                                operator_id: self.task_info.operator_id.clone(),
-                                task_index: self.task_info.task_index,
+                                node_id: self.task_info.node_id,
+                                task_index: self.task_info.task_index as usize,
                                 error: err.to_string(),
                             })
                             .await
@@ -174,7 +176,7 @@ impl BackendFlusher {
         self.control_tx
             .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
                 checkpoint_epoch: cp.epoch,
-                operator_id: self.task_info.operator_id.clone(),
+                node_id: self.task_info.node_id,
                 subtask_metadata,
             }))
             .await?;
@@ -225,12 +227,38 @@ impl BackendWriter {
 }
 
 impl TableManager {
-    pub async fn new(
-        task_info: TaskInfoRef,
+    pub async fn load(
+        task_info: Arc<TaskInfo>,
         table_configs: HashMap<String, TableConfig>,
         tx: Sender<ControlResp>,
-        checkpoint_metadata: Option<OperatorCheckpointMetadata>,
-    ) -> Result<Self> {
+        restore_from: Option<&CheckpointMetadata>,
+    ) -> Result<(Self, Option<SystemTime>)> {
+        let (watermark, checkpoint_metadata) = if let Some(metadata) = restore_from {
+            let (watermark, operator_metadata) = {
+                let metadata = StateBackend::load_operator_metadata(
+                    &task_info.job_id,
+                    &task_info.operator_id,
+                    metadata.epoch,
+                )
+                .await
+                .expect("lookup should succeed")
+                .expect("require metadata");
+                (
+                    metadata
+                        .operator_metadata
+                        .as_ref()
+                        .unwrap()
+                        .min_watermark
+                        .map(from_micros),
+                    metadata,
+                )
+            };
+
+            (watermark, Some(operator_metadata))
+        } else {
+            (None, None)
+        };
+
         let storage = get_storage_provider().await?;
 
         let tables = table_configs
@@ -299,15 +327,18 @@ impl TableManager {
             epoch,
             last_epoch_checkpoints,
         );
-        Ok(Self {
-            epoch,
-            min_epoch,
-            tables,
-            writer,
-            task_info,
-            storage: Arc::clone(storage),
-            caches: HashMap::new(),
-        })
+        Ok((
+            Self {
+                epoch,
+                min_epoch,
+                tables,
+                writer,
+                task_info,
+                storage: Arc::clone(storage),
+                caches: HashMap::new(),
+            },
+            watermark,
+        ))
     }
 
     pub async fn checkpoint(&mut self, barrier: CheckpointBarrier, watermark: Option<SystemTime>) {

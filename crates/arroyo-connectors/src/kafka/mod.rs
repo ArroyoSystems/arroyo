@@ -41,7 +41,7 @@ use crate::{pull_opt, send, ConnectionType};
 use crate::kafka::sink::KafkaSinkFunc;
 use crate::kafka::source::KafkaSourceFunc;
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 mod sink;
 mod source;
@@ -364,7 +364,7 @@ impl Connector for KafkaConnector {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         match &table.type_ {
             TableType::Source {
                 group_id,
@@ -398,7 +398,7 @@ impl Connector for KafkaConnector {
                         None
                     };
 
-                Ok(OperatorNode::from_source(Box::new(KafkaSourceFunc {
+                Ok(ConstructedOperator::from_source(Box::new(KafkaSourceFunc {
                     topic: table.topic,
                     bootstrap_servers: profile.bootstrap_servers.to_string(),
                     group_id: group_id.clone(),
@@ -424,7 +424,7 @@ impl Connector for KafkaConnector {
                 commit_mode,
                 key_field,
                 timestamp_field,
-            } => Ok(OperatorNode::from_operator(Box::new(KafkaSinkFunc {
+            } => Ok(ConstructedOperator::from_operator(Box::new(KafkaSinkFunc {
                 bootstrap_servers: profile.bootstrap_servers.to_string(),
                 producer: None,
                 consistency_mode: (*commit_mode).into(),

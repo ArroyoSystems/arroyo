@@ -12,7 +12,7 @@ use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
 use arroyo_operator::connector::Connection;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -150,7 +150,7 @@ impl Connector for SSEConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         SSESourceFunc::new_operator(table, config)
     }
 }

@@ -7,8 +7,8 @@ use anyhow::{anyhow, Result};
 use arrow::compute::{max, min};
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::context::OperatorContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
+use arroyo_operator::context::{Collector, OperatorContext};
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, ConstructedOperator, Registry};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};
@@ -137,7 +137,7 @@ impl ArrowOperator for WindowFunctionOperator {
             }
         }
     }
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         let current_watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -156,11 +156,12 @@ impl ArrowOperator for WindowFunctionOperator {
 
     async fn handle_watermark(
         &mut self,
-        watermark_message: Watermark,
+        watermark: Watermark,
         ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Option<Watermark> {
         let Some(watermark) = ctx.last_present_watermark() else {
-            return Some(watermark_message);
+            return Some(watermark);
         };
         loop {
             let finished = {
@@ -180,13 +181,13 @@ impl ArrowOperator for WindowFunctionOperator {
             while let (_timestamp, Some((batch, new_exec))) = active_exec.await {
                 active_exec = new_exec;
                 let batch = batch.expect("batch should be computable");
-                ctx.collect(batch).await;
+                collector.collect(batch).await;
             }
         }
-        Some(watermark_message)
+        Some(Watermark::EventTime(watermark))
     }
 
-    async fn handle_checkpoint(&mut self, _cb: CheckpointBarrier, ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("input", watermark)
@@ -220,7 +221,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let window_exec = PhysicalPlanNode::decode(&mut config.window_function_plan.as_slice())?;
         let input_schema = Arc::new(ArroyoSchema::try_from(
             config
@@ -239,7 +240,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
         let input_schema_unkeyed = Arc::new(ArroyoSchema::from_schema_unkeyed(
             input_schema.schema.clone(),
         )?);
-        Ok(OperatorNode::from_operator(Box::new(
+        Ok(ConstructedOperator::from_operator(Box::new(
             WindowFunctionOperator {
                 input_schema,
                 input_schema_unkeyed,

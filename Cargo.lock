@@ -689,6 +689,7 @@ dependencies = [
  "datafusion-proto",
  "dyn-clone",
  "hex",
+ "itertools 0.13.0",
  "petgraph",
  "proc-macro2",
  "prost 0.13.3",

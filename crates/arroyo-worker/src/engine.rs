@@ -25,8 +25,8 @@ use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorChain, OperatorName};
 use arroyo_df::physical::new_registry;
-use arroyo_operator::context::{batch_bounded, OperatorContext, BatchReceiver, BatchSender, WatermarkHolder};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::context::{batch_bounded, OperatorContext, BatchReceiver, BatchSender, WatermarkHolder, SourceContext};
+use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNode, SourceNode};
 use arroyo_operator::operator::Registry;
 use arroyo_operator::ErasedConstructor;
 use arroyo_rpc::config::config;
@@ -62,12 +62,12 @@ pub struct SubtaskNode {
 
 impl Debug for SubtaskNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-{}-{}", self.node.name(), self.chain_id, self.subtask_idx)
+        write!(f, "{}-{}-{}", self.node.name(), self.node_id, self.subtask_idx)
     }
 }
 
 pub struct QueueNode {
-    task_info: TaskInfo,
+    task_info: Arc<TaskInfo>,
     tx: Sender<ControlMessage>,
 }
 
@@ -112,16 +112,9 @@ impl SubtaskOrQueueNode {
         let (mut qn, rx) = match self {
             SubtaskOrQueueNode::SubtaskNode(sn) => {
                 let (tx, rx) = channel(16);
-
+                
                 let n = SubtaskOrQueueNode::QueueNode(QueueNode {
-                    task_info: TaskInfo {
-                        job_id,
-                        operator_name: sn.node.name(),
-                        operator_id: sn.id.clone(),
-                        task_index: sn.subtask_idx,
-                        parallelism: sn.parallelism,
-                        key_range: range_for_server(sn.subtask_idx, sn.parallelism),
-                    },
+                    task_info: sn.node.task_info().clone(),
                     tx,
                 });
 
@@ -135,17 +128,17 @@ impl SubtaskOrQueueNode {
         (qn.unwrap_subtask(), rx)
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> u32 {
         match self {
-            SubtaskOrQueueNode::SubtaskNode(n) => &n.id,
-            SubtaskOrQueueNode::QueueNode(n) => &n.task_info.operator_id,
+            SubtaskOrQueueNode::SubtaskNode(n) => n.node_id,
+            SubtaskOrQueueNode::QueueNode(n) => n.task_info.node_id,
         }
     }
 
     pub fn subtask_idx(&self) -> usize {
         match self {
             SubtaskOrQueueNode::SubtaskNode(n) => n.subtask_idx,
-            SubtaskOrQueueNode::QueueNode(n) => n.task_info.task_index,
+            SubtaskOrQueueNode::QueueNode(n) => n.task_info.task_index as usize,
         }
     }
 
@@ -200,6 +193,7 @@ impl Program {
 
     pub fn from_logical(
         name: String,
+        job_id: &str,
         logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
         registry: Registry,
@@ -242,8 +236,14 @@ impl Program {
                     parallelism,
                     in_schemas: in_schemas.clone(),
                     out_schema: out_schema.clone(),
-                    node: construct_operator(
+                    node: construct_node(
                         node.operator_chain,
+                        job_id,
+                        node.node_id,
+                        i as u32,
+                        parallelism as u32,
+                        
+                        logical
                         registry.clone(),
                     ),
                 }));
@@ -745,37 +745,64 @@ impl Engine {
     }
 }
 
-pub fn construct_node(
+pub async fn construct_node(
     chain: OperatorChain,
-    task_info: TaskInfo,
+    job_id: &str,
+    node_id: u32,
+    subtask_idx: u32,
+    parallelism: u32,
+    input_partitions: u32,
+    in_schemas: Vec<ArroyoSchema>,
+    out_schema: Option<ArroyoSchema>,
+    restore_from: Option<&CheckpointMetadata>,
+    control_tx: Sender<ControlResp>,
     registry: Arc<Registry>
 ) -> OperatorNode {
     if chain.is_source() {
         let (head, _) = chain.iter().next().unwrap();
-        construct_operator(head.operator_name, &mut head.operator_config[..], registry)
+        let ConstructedOperator::Source(operator) = construct_operator(head.operator_name, &mut head.operator_config[..], registry) else {
+            unreachable!();
+        };
+        
+        OperatorNode::Source(SourceNode {
+            operator,
+            context: todo!(),
+        })
     } else {
         let mut head = None;
         let mut cur = &mut None;
         for (node, edge) in chain.iter() {
-            let OperatorNode::Operator(op ) = construct_operator(node.operator_name, &mut node.operator_config[..], registry.clone()) else {
+            let ConstructedOperator::Operator(op ) = construct_operator(node.operator_name, &mut node.operator_config[..], registry.clone()) else {
                 unreachable!("sources must be the first node in a chain");
             };
 
-
-            let ctx = OperatorContext {
-                control_tx: (),
-                watermarks: WatermarkHolder::new(),
-                in_schemas: vec![],
-                out_schema: Some(edge.clone()),
-                table_manager: (),
-            };
-
+            let ctx = OperatorContext::new(
+                TaskInfo {
+                    job_id: job_id.to_string(),
+                    node_id,
+                    operator_name: node.operator_name.to_string(),
+                    operator_id: node.operator_id.clone(),
+                    task_index: subtask_idx,
+                    parallelism,
+                    key_range: range_for_server(subtask_idx as usize, parallelism as usize),
+                },
+                restore_from,
+                control_tx.clone(),
+                if head.is_none() { input_partitions as usize } else { 1 },
+                if let Some(cur) = cur { 
+                    cur.context.out_schemas.clone().unwrap() 
+                } else {
+                    in_schemas.clone()
+                },
+                edge.cloned().or(out_schema.clone()),
+                op.tables(),
+            ).await;
 
             if cur.is_none() {
-                head = Some(op);
+                head = Some(ChainedOperator::new(op, ctx));
                 cur = &mut head;
             } else {
-                cur.as_mut().unwrap().next = Some((ctx, op.operator));
+                cur.as_mut().unwrap().next = Some(op);
             }
         }
     }
@@ -785,7 +812,7 @@ pub fn construct_operator(
     operator: OperatorName,
     config: &mut [u8],
     registry: Arc<Registry>,
-) -> OperatorNode {
+) -> ConstructedOperator {
     let ctor: Box<dyn ErasedConstructor> = match operator {
         OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
         OperatorName::ArrowKey => Box::new(KeyExecutionConstructor),

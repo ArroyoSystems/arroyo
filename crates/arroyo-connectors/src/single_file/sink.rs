@@ -8,7 +8,7 @@ use arroyo_types::{CheckpointBarrier, SignalMessage};
 
 use async_trait::async_trait;
 
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use tokio::{
     fs::{self, File, OpenOptions},
@@ -72,7 +72,7 @@ impl ArrowOperator for SingleFileSink {
         self.file = Some(file);
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, _ctx: &mut OperatorContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         if let Some(SignalMessage::EndOfData) = final_message {
             self.file.as_mut().unwrap().flush().await.unwrap();
         }

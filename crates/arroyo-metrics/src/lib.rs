@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use arroyo_types::{
-    TaskInfo, BATCHES_RECV, BATCHES_SENT, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS,
-    MESSAGES_RECV, MESSAGES_SENT,
+    ChainInfo, TaskInfo, BATCHES_RECV, BATCHES_SENT, BYTES_RECV, BYTES_SENT,
+    DESERIALIZATION_ERRORS, MESSAGES_RECV, MESSAGES_SENT,
 };
 use lazy_static::lazy_static;
 use prometheus::{
@@ -12,13 +12,13 @@ use prometheus::{
 };
 
 pub fn gauge_for_task(
-    task_info: &TaskInfo,
+    chain_info: &ChainInfo,
     name: &'static str,
     help: &'static str,
     mut labels: HashMap<String, String>,
 ) -> Option<IntGauge> {
     let mut opts = Opts::new(name, help);
-    labels.extend(task_info.metric_label_map());
+    labels.extend(chain_info.metric_label_map());
 
     opts.const_labels = labels;
 
@@ -26,13 +26,13 @@ pub fn gauge_for_task(
 }
 
 pub fn histogram_for_task(
-    task_info: &TaskInfo,
+    chain_info: &ChainInfo,
     name: &'static str,
     help: &'static str,
     mut labels: HashMap<String, String>,
     buckets: Vec<f64>,
 ) -> Option<Histogram> {
-    labels.extend(task_info.metric_label_map());
+    labels.extend(chain_info.metric_label_map());
     let opts = HistogramOpts::new(name, help)
         .const_labels(labels)
         .buckets(buckets);
@@ -128,25 +128,25 @@ impl TaskCounters {
         }
     }
 
-    pub fn for_task<F>(&self, task_info: &Arc<TaskInfo>, f: F)
+    pub fn for_task<F>(&self, chain_info: &Arc<ChainInfo>, f: F)
     where
         F: Fn(&IntCounter),
     {
-        static CACHE: OnceLock<Arc<RwLock<HashMap<(TaskCounters, Arc<TaskInfo>), IntCounter>>>> =
+        static CACHE: OnceLock<Arc<RwLock<HashMap<(TaskCounters, Arc<ChainInfo>), IntCounter>>>> =
             OnceLock::new();
         let cache = CACHE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())));
 
         {
-            if let Some(counter) = cache.read().unwrap().get(&(*self, task_info.clone())) {
+            if let Some(counter) = cache.read().unwrap().get(&(*self, chain_info.clone())) {
                 f(counter);
                 return;
             }
         }
 
         let counter = self.metric().with_label_values(&[
-            &task_info.operator_id,
-            &task_info.task_index.to_string(),
-            &task_info.operator_name,
+            &chain_info.node_id.to_string(),
+            &chain_info.task_index.to_string(),
+            &chain_info.description.to_string(),
         ]);
 
         f(&counter);
@@ -154,7 +154,7 @@ impl TaskCounters {
         cache
             .write()
             .unwrap()
-            .insert((*self, task_info.clone()), counter);
+            .insert((*self, chain_info.clone()), counter);
     }
 }
 
@@ -163,7 +163,7 @@ pub type QueueGauges = Vec<Vec<Option<IntGauge>>>;
 pub fn register_queue_gauge<T>(
     name: &'static str,
     help: &'static str,
-    task_info: &TaskInfo,
+    chain_info: &ChainInfo,
     out_qs: &[Vec<T>],
     initial: i64,
 ) -> QueueGauges {
@@ -175,7 +175,7 @@ pub fn register_queue_gauge<T>(
                 .enumerate()
                 .map(|(j, _)| {
                     let mut g = gauge_for_task(
-                        task_info,
+                        chain_info,
                         name,
                         help,
                         labels! {

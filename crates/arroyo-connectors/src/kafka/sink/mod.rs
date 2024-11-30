@@ -16,7 +16,7 @@ use rdkafka::ClientConfig;
 use arrow::array::{Array, AsArray, RecordBatch};
 use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{ArrowOperator, AsDisplayable, DisplayableOperator};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
@@ -371,7 +371,7 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("sent commit event");
     }
 
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut OperatorContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         self.flush(ctx).await;
         if !self.is_committing() {
             return;

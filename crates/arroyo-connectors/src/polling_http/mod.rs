@@ -21,7 +21,7 @@ use crate::{construct_http_client, pull_opt, pull_option_to_i64, EmptyConfig};
 
 use crate::polling_http::operator::{PollingHttpSourceFunc, PollingHttpSourceState};
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const DEFAULT_POLLING_INTERVAL: Duration = Duration::from_secs(1);
@@ -241,7 +241,7 @@ impl Connector for PollingHTTPConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let headers = string_to_map(
             &table
                 .headers
@@ -262,7 +262,7 @@ impl Connector for PollingHTTPConnector {
         })
         .collect();
 
-        Ok(OperatorNode::from_source(Box::new(PollingHttpSourceFunc {
+        Ok(ConstructedOperator::from_source(Box::new(PollingHttpSourceFunc {
             state: PollingHttpSourceState::default(),
             client: reqwest::ClientBuilder::new()
                 .default_headers(headers)

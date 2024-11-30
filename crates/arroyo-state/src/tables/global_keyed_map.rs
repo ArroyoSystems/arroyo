@@ -288,7 +288,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
             &self.task_info.job_id,
             &self.task_info.operator_id,
             &self.table_name,
-            self.task_info.task_index,
+            self.task_info.task_index as usize,
             self.epoch,
             false,
         );

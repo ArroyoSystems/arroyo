@@ -1,9 +1,9 @@
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::get_timestamp_col;
 use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, ConstructedOperator, Registry,
 };
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
@@ -68,7 +68,7 @@ impl OperatorConstructor for WatermarkGeneratorConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let expression = PhysicalExprNode::decode(&mut config.expression.as_slice())?;
         let expression = parse_physical_expr(
@@ -78,7 +78,7 @@ impl OperatorConstructor for WatermarkGeneratorConstructor {
             &DefaultPhysicalExtensionCodec {},
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(
+        Ok(ConstructedOperator::from_operator(Box::new(
             WatermarkGenerator::expression(
                 Duration::from_micros(config.period_micros),
                 config.idle_time_micros.map(Duration::from_micros),
@@ -131,10 +131,10 @@ impl ArrowOperator for WatermarkGenerator {
         self.state_cache = state;
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         if let Some(SignalMessage::EndOfData) = final_message {
             // send final watermark on close
-            ctx.collector
+            collector
                 .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                     // this is in the year 2554, far enough out be close to inifinity,
                     // but can still be formatted.
@@ -144,8 +144,8 @@ impl ArrowOperator for WatermarkGenerator {
         }
     }
 
-    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut OperatorContext) {
-        ctx.collector.collect(record.clone()).await;
+    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+        collector.collect(record.clone()).await;
         self.last_event = SystemTime::now();
 
         let timestamp_column = get_timestamp_col(&record, ctx);
@@ -181,7 +181,7 @@ impl ArrowOperator for WatermarkGenerator {
                 ctx.task_info.task_index,
                 to_millis(watermark)
             );
-            ctx.collector
+            collector
                 .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                     Watermark::EventTime(watermark),
                 )))
@@ -191,7 +191,7 @@ impl ArrowOperator for WatermarkGenerator {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         let gs = ctx
             .table_manager
             .get_global_keyed_state("s")
@@ -201,14 +201,14 @@ impl ArrowOperator for WatermarkGenerator {
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext) {
+    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
         if let Some(idle_time) = self.idle_time {
             if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
                 info!(
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
                 );
-                ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                collector.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                     Watermark::Idle,
                 )))
                 .await;

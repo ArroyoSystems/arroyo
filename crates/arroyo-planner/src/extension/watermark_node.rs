@@ -89,19 +89,21 @@ impl ArroyoExtension for WatermarkNode {
     ) -> Result<NodeWithIncomingEdges> {
         let expression = planner.create_physical_expr(&self.watermark_expression, &self.schema)?;
         let expression = serialize_physical_expr(&expression, &DefaultPhysicalExtensionCodec {})?;
-        let node = LogicalNode {
-            operator_id: format!("watermark_{}", index),
-            description: "watermark".to_string(),
-            operator_name: OperatorName::ExpressionWatermark,
-            parallelism: 1,
-            operator_config: ExpressionWatermarkConfig {
+        let node = LogicalNode::single(
+            index as u32,
+            format!("watermark_{}", index),
+            OperatorName::ExpressionWatermark,
+            ExpressionWatermarkConfig {
                 period_micros: 1_000_000,
                 idle_time_micros: None,
                 expression: expression.encode_to_vec(),
                 input_schema: Some(self.arroyo_schema().into()),
             }
             .encode_to_vec(),
-        };
+            "watermark".to_string(),
+            1,
+        );
+
         let incoming_edge =
             LogicalEdge::project_all(LogicalEdgeType::Forward, input_schemas[0].as_ref().clone());
         Ok(NodeWithIncomingEdges {

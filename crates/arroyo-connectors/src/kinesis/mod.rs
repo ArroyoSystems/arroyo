@@ -13,7 +13,7 @@ use crate::{pull_opt, pull_option_to_i64, ConnectionSchema, ConnectionType, Empt
 use crate::kinesis::sink::{FlushConfig, KinesisSinkFunc};
 use crate::kinesis::source::KinesisSourceFunc;
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./kinesis.svg");
@@ -175,10 +175,10 @@ impl Connector for KinesisConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> Result<OperatorNode> {
+    ) -> Result<ConstructedOperator> {
         match table.type_ {
             TableType::Source { offset } => {
-                Ok(OperatorNode::from_source(Box::new(KinesisSourceFunc {
+                Ok(ConstructedOperator::from_source(Box::new(KinesisSourceFunc {
                     stream_name: table.stream_name,
                     kinesis_client: None,
                     aws_region: table.aws_region,
@@ -201,7 +201,7 @@ impl Connector for KinesisConnector {
                     batch_max_buffer_size,
                     records_per_batch,
                 );
-                Ok(OperatorNode::from_operator(Box::new(KinesisSinkFunc {
+                Ok(ConstructedOperator::from_operator(Box::new(KinesisSinkFunc {
                     client: None,
                     in_progress_batch: None,
                     aws_region: table.aws_region,

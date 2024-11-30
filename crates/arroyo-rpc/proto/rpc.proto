@@ -49,7 +49,7 @@ message TaskCheckpointEventReq {
   uint64 worker_id = 1;
   uint64 time = 2;
   string job_id = 3;
-  string operator_id = 4;
+  uint32 node_id = 4;
   uint32 subtask_index = 5;
   uint32 epoch = 6;
   TaskCheckpointEventType event_type = 7;
@@ -62,7 +62,7 @@ message TaskCheckpointCompletedReq {
   uint64 worker_id = 1;
   uint64 time = 2;
   string job_id = 3;
-  string operator_id = 4;
+  uint32 node_id = 4;
   uint32 epoch = 5;
   SubtaskCheckpointMetadata metadata = 6;
   bool needs_commit = 7;
@@ -75,7 +75,7 @@ message TaskFinishedReq {
   uint64 worker_id = 1;
   uint64 time = 2;
   string job_id = 3;
-  string operator_id = 4;
+  uint32 node_id = 4;
   uint64 operator_subtask = 5;
 }
 
@@ -86,7 +86,7 @@ message TaskFailedReq {
   uint64 worker_id = 1;
   uint64 time = 2;
   string job_id = 3;
-  string operator_id = 4;
+  uint32 node_id = 4;
   uint64 operator_subtask = 5;
   string error = 6;
 }
@@ -99,7 +99,7 @@ message TaskStartedReq {
   uint64 worker_id = 1;
   uint64 time = 2;
   string job_id = 3;
-  string operator_id = 4;
+  uint32 node_id = 4;
   uint64 operator_subtask = 5;
 }
 

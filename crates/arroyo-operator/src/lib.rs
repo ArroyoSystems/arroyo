@@ -13,7 +13,7 @@ use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInf
 use bincode::{Decode, Encode};
 
 use crate::context::OperatorContext;
-use crate::operator::Registry;
+use crate::operator::{ConstructedOperator, Registry};
 use operator::{OperatorConstructor, OperatorNode};
 use tokio_stream::Stream;
 
@@ -132,20 +132,20 @@ pub struct ArrowTimerValue {
 }
 
 pub trait ErasedConstructor: Send {
-    fn with_config(&self, config: Vec<u8>, registry: Arc<Registry>)
-        -> anyhow::Result<OperatorNode>;
+    fn with_config(
+        &self,
+        config: &[u8],
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<ConstructedOperator>;
 }
 
 impl<T: OperatorConstructor> ErasedConstructor for T {
     fn with_config(
         &self,
-        config: Vec<u8>,
+        config: &[u8],
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
-        self.with_config(
-            prost::Message::decode(&mut config.as_slice()).unwrap(),
-            registry,
-        )
+    ) -> anyhow::Result<ConstructedOperator> {
+        self.with_config(prost::Message::decode(config).unwrap(), registry)
     }
 }
 

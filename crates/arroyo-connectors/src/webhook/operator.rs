@@ -86,6 +86,7 @@ impl ArrowOperator for WebhookSinkFunc {
                                         e.to_string()
                                     };
 
+
                                     control_tx
                                         .send(ControlResp::Error {
                                             operator_id: operator_id.clone(),

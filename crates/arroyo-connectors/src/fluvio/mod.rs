@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use fluvio::Offset;
@@ -173,10 +173,10 @@ impl Connector for FluvioConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         match table.type_ {
             TableType::Source { offset } => {
-                Ok(OperatorNode::from_source(Box::new(FluvioSourceFunc {
+                Ok(ConstructedOperator::from_source(Box::new(FluvioSourceFunc {
                     topic: table.topic,
                     endpoint: table.endpoint.clone(),
                     offset_mode: offset,
@@ -187,7 +187,7 @@ impl Connector for FluvioConnector {
                     bad_data: config.bad_data,
                 })))
             }
-            TableType::Sink { .. } => Ok(OperatorNode::from_operator(Box::new(FluvioSinkFunc {
+            TableType::Sink { .. } => Ok(ConstructedOperator::from_operator(Box::new(FluvioSinkFunc {
                 topic: table.topic,
                 endpoint: table.endpoint,
                 producer: None,
