@@ -7,9 +7,8 @@ use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{
-    ArrowProgram, ArrowProgramConfig, ChainedOperator, ConnectorOp, EdgeType,
+    ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
 };
-use datafusion_proto::generated::datafusion;
 use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
@@ -25,6 +24,7 @@ use std::hash::Hasher;
 use std::str::FromStr;
 use std::sync::Arc;
 use strum::{Display, EnumString};
+use crate::optimizers::Optimizer;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
 pub enum OperatorName {
@@ -136,19 +136,16 @@ impl TryFrom<LogicalProgram> for PipelineGraph {
 pub struct LogicalEdge {
     pub edge_type: LogicalEdgeType,
     pub schema: ArroyoSchema,
-    pub projection: Option<Vec<usize>>,
 }
 
 impl LogicalEdge {
     pub fn new(
         edge_type: LogicalEdgeType,
         schema: ArroyoSchema,
-        projection: Option<Vec<usize>>,
     ) -> Self {
         LogicalEdge {
             edge_type,
             schema,
-            projection,
         }
     }
 
@@ -156,7 +153,6 @@ impl LogicalEdge {
         LogicalEdge {
             edge_type,
             schema,
-            projection: None,
         }
     }
 }
@@ -170,8 +166,8 @@ pub struct ChainedLogicalOperator {
 
 #[derive(Clone, Debug)]
 pub struct OperatorChain {
-    operators: Vec<ChainedLogicalOperator>,
-    edges: Vec<ArroyoSchema>,
+    pub(crate) operators: Vec<ChainedLogicalOperator>,
+    pub(crate) edges: Vec<ArroyoSchema>,
 }
 
 impl OperatorChain {
@@ -283,21 +279,18 @@ pub struct ProgramConfig {
 pub struct LogicalProgram {
     pub graph: LogicalGraph,
     pub program_config: ProgramConfig,
-    pub operator_indices: HashMap<u32, u32>,
 }
 
 impl LogicalProgram {
     pub fn new(graph: LogicalGraph, program_config: ProgramConfig) -> Self {
-        let operator_indices = graph
-            .node_indices()
-            .map(|idx| (graph[idx].node_id, idx.index() as u32))
-            .collect();
-
         Self {
             graph,
             program_config,
-            operator_indices,
         }
+    }
+    
+    pub fn optimize(&mut self, optimizer: &dyn Optimizer) {
+        optimizer.optimize(&mut self.graph);
     }
 
     pub fn update_parallelism(&mut self, overrides: &HashMap<u32, usize>) {
@@ -339,10 +332,6 @@ impl LogicalProgram {
             .map(char::from)
             .map(|c| c.to_ascii_lowercase())
             .collect()
-    }
-
-    pub fn operator_index(&self, id: u32) -> Option<u32> {
-        self.operator_indices.get(&id).cloned()
     }
 
     pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
@@ -455,11 +444,6 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
                 LogicalEdge {
                     edge_type: edge.edge_type().into(),
                     schema: schema.clone().try_into()?,
-                    projection: if edge.projection.is_empty() {
-                        None
-                    } else {
-                        Some(edge.projection.iter().map(|p| *p as usize).collect())
-                    },
                 },
             );
         }
@@ -644,11 +628,6 @@ impl From<LogicalProgram> for ArrowProgram {
                     target: target.index() as i32,
                     schema: Some(edge.schema.clone().into()),
                     edge_type: edge_type as i32,
-                    projection: edge
-                        .projection
-                        .as_ref()
-                        .map(|p| p.iter().map(|v| *v as u32).collect())
-                        .unwrap_or_default(),
                 }
             })
             .collect();
