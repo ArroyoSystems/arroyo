@@ -5,7 +5,6 @@ use arroyo_rpc::{api_types::connections::TestSourceMessage, OperatorConfig};
 use rabbitmq_stream_client::types::OffsetSpecification;
 use rabbitmq_stream_client::{Environment, TlsConfiguration};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
 use typify::import_types;
 
 use crate::rabbitmq_stream::source::RabbitmqStreamSourceFunc;
@@ -262,15 +261,15 @@ impl SourceOffset {
     }
 }
 
-impl Into<TlsConfiguration> for TlsConfig {
-    fn into(self) -> TlsConfiguration {
+impl From<TlsConfig> for TlsConfiguration {
+    fn from(val: TlsConfig) -> Self {
         let mut config = TlsConfiguration::default();
-        config.enable(self.enabled.unwrap_or(false));
-        config.trust_certificates(self.trust_certificates.unwrap_or(false));
-        config.add_root_certificates_path(self.root_certificates_path.unwrap_or(String::from("")));
+        config.enable(val.enabled.unwrap_or(false));
+        config.trust_certificates(val.trust_certificates.unwrap_or(false));
+        config.add_root_certificates_path(val.root_certificates_path.unwrap_or(String::from("")));
         config.add_client_certificates_keys(
-            self.client_certificates_path.unwrap_or(String::from("")),
-            self.client_keys_path.unwrap_or(String::from("")),
+            val.client_certificates_path.unwrap_or(String::from("")),
+            val.client_keys_path.clone().unwrap_or(String::from("")),
         );
         config
     }
