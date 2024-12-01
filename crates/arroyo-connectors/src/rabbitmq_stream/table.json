@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "title": "RabbitmqStreamTable",
+  "properties": {
+    "stream": {
+      "title": "Stream",
+      "type": "string",
+      "description": "The RabbitMQ stream to use for this table"
+    },
+    "type": {
+      "type": "object",
+      "title": "Table Type",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "Source",
+          "properties": {
+            "offset": {
+              "type": "string",
+              "description": "The offset to start reading from",
+              "enum": ["first", "last", "next"]
+            }
+          },
+          "required": ["offset"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "Sink",
+          "properties": {},
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": ["stream", "type"]
+}

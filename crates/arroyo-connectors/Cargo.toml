@@ -65,6 +65,9 @@ tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 # Webhook
 reqwest = { workspace = true, features = ["stream"] }
 
+# RabbitMQ Stream
+rabbitmq-stream-client = "0.7"
+
 # Redis
 redis = { version = "0.27", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
 
