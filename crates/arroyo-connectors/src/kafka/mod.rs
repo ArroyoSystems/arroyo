@@ -934,7 +934,10 @@ pub fn client_configs(
     if let Some(table) = table {
         for (k, v) in table.client_configs.iter() {
             if connection.connection_properties.contains_key(k) {
-                warn!("rdkafka config key {} defined in both connection and table config", k);
+                warn!(
+                    "rdkafka config key {:?} defined in both connection and table config",
+                    k
+                );
             }
 
             client_configs.insert(k.to_string(), v.to_string());
