@@ -105,7 +105,7 @@ impl KafkaConnector {
             authentication: auth,
             bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", options)?),
             schema_registry_enum: schema_registry,
-            connection_properties: vec![],
+            connection_properties: HashMap::new(),
         })
     }
 
@@ -927,21 +927,18 @@ pub fn client_configs(
         }
     };
 
-    for prop in connection.connection_properties.iter() {
-        if let Some((k, v)) = prop.split_once('=') {
-            client_configs.insert(k.to_string(), v.to_string());
-        } else {
-            bail!("invalid connection property: {}", prop);
-        }
+    for (k, v) in connection.connection_properties.iter() {
+        client_configs.insert(k.to_string(), v.to_string());
     }
 
     if let Some(table) = table {
-        client_configs.extend(
-            table
-                .client_configs
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string())),
-        );
+        for (k, v) in table.client_configs.iter() {
+            if connection.connection_properties.contains_key(k) {
+                warn!("rdkafka config key {} defined in both connection and table config", k);
+            }
+
+            client_configs.insert(k.to_string(), v.to_string());
+        }
     }
 
     Ok(client_configs)

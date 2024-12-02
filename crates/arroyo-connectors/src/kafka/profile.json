@@ -108,13 +108,15 @@
             ]
         },
         "connectionProperties": {
-            "type": "array",
+            "type": "object",
             "title": "Connection Properties",
             "description": "Key-value pairs of rdkafka configuration options",
-            "examples": ["client.id=arroyo"],
             "items": {
                 "type": "string",
                 "title": "property"
+            },
+            "additionalProperties": {
+                "type": "string"
             }
         }
     },
