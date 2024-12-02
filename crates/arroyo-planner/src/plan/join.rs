@@ -21,7 +21,7 @@ pub(crate) struct JoinRewriter<'a> {
     pub schema_provider: &'a ArroyoSchemaProvider,
 }
 
-impl<'a> JoinRewriter<'a> {
+impl JoinRewriter<'_> {
     fn check_join_windowing(join: &Join) -> Result<bool> {
         let left_window = WindowDetectingVisitor::get_window(&join.left)?;
         let right_window = WindowDetectingVisitor::get_window(&join.right)?;
@@ -189,7 +189,7 @@ impl<'a> JoinRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for JoinRewriter<'a> {
+impl TreeNodeRewriter for JoinRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {

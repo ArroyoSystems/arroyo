@@ -47,6 +47,7 @@ pub struct GlobalKeyedTable {
 }
 
 impl GlobalKeyedTable {
+    #[allow(clippy::type_complexity)]
     fn get_key_value_iterator<'a>(
         &self,
         record_batch: &'a RecordBatch,

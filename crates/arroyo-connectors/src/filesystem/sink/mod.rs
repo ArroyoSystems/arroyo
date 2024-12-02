@@ -1238,7 +1238,7 @@ impl MultipartManager {
             }
         };
         if self.all_uploads_finished() {
-            return FileCheckpointData::MultiPartWriterUploadCompleted {
+            FileCheckpointData::MultiPartWriterUploadCompleted {
                 multi_part_upload_id: multipart_id.clone(),
                 completed_parts: self
                     .pushed_parts
@@ -1250,7 +1250,7 @@ impl MultipartManager {
                         }
                     })
                     .collect(),
-            };
+            }
         } else {
             let in_flight_parts = self
                 .pushed_parts

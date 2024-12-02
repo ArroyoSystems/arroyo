@@ -40,7 +40,7 @@ pub struct SourceRewriter<'a> {
     pub(crate) schema_provider: &'a ArroyoSchemaProvider,
 }
 
-impl<'a> SourceRewriter<'a> {
+impl SourceRewriter<'_> {
     fn watermark_expression(table: &ConnectorTable) -> DFResult<Expr> {
         let expr = match table.watermark_field.clone() {
             Some(watermark_field) => table
@@ -253,7 +253,7 @@ impl<'a> SourceRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
+impl TreeNodeRewriter for SourceRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
@@ -502,7 +502,7 @@ impl<'a> AsyncUdfRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
+impl TreeNodeRewriter for AsyncUdfRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
@@ -588,7 +588,7 @@ impl<'a> SourceMetadataVisitor<'a> {
     }
 }
 
-impl<'a> SourceMetadataVisitor<'a> {
+impl SourceMetadataVisitor<'_> {
     fn get_connection_id(&self, node: &LogicalPlan) -> Option<i64> {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return None;
@@ -614,7 +614,7 @@ impl<'a> SourceMetadataVisitor<'a> {
     }
 }
 
-impl<'a> TreeNodeVisitor<'_> for SourceMetadataVisitor<'a> {
+impl TreeNodeVisitor<'_> for SourceMetadataVisitor<'_> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
