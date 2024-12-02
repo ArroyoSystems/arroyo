@@ -258,7 +258,7 @@ pub struct ArroyoRewriter<'a> {
     pub(crate) schema_provider: &'a ArroyoSchemaProvider,
 }
 
-impl<'a> TreeNodeRewriter for ArroyoRewriter<'a> {
+impl TreeNodeRewriter for ArroyoRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, mut node: Self::Node) -> Result<Transformed<Self::Node>> {

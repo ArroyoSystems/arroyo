@@ -20,7 +20,7 @@ pub struct AggregateRewriter<'a> {
     pub schema_provider: &'a ArroyoSchemaProvider,
 }
 
-impl<'a> AggregateRewriter<'a> {
+impl AggregateRewriter<'_> {
     pub fn rewrite_non_windowed_aggregate(
         input: Arc<LogicalPlan>,
         mut key_fields: Vec<DFField>,
@@ -119,7 +119,7 @@ impl<'a> AggregateRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for AggregateRewriter<'a> {
+impl TreeNodeRewriter for AggregateRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {

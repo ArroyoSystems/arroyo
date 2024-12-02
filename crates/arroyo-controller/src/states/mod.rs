@@ -365,7 +365,7 @@ pub struct JobContext<'a> {
     metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 }
 
-impl<'a> JobContext<'a> {
+impl JobContext<'_> {
     pub fn handle(&mut self, msg: JobMessage) -> Result<(), StateError> {
         if !matches!(
             msg,

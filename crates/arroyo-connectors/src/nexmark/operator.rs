@@ -457,7 +457,7 @@ impl GeneratorConfig {
                 (1_000_000_000.0 / (nexmark_config.first_event_rate)
                     * (nexmark_config.num_event_generators as f64)) as u64,
             ),
-            _step_length_second: (nexmark_config.rate_period_seconds + 2 - 1) / 2,
+            _step_length_second: nexmark_config.rate_period_seconds.div_ceil(2),
             base_time,
             first_event_id,
             max_events: nexmark_config.get_max_events(max_events),
