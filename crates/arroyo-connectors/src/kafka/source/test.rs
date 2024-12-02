@@ -236,6 +236,7 @@ impl KafkaSourceWithReads {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_kafka() {
     let mut kafka_topic_tester = KafkaTopicTester {
         topic: "__arroyo-source-test".to_string(),

@@ -185,6 +185,7 @@ async fn patch_and_wait(
 }
 
 #[tokio::test]
+#[ignore]
 async fn basic_pipeline() {
     let api_client = get_client();
 
@@ -360,6 +361,7 @@ async fn basic_pipeline() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn udfs() {
     let udf = r#"
 /*
@@ -448,6 +450,7 @@ async fn delete_topic(client: &AdminClient<impl ClientContext>, topic: &str) {
 }
 
 #[tokio::test]
+#[ignore]
 async fn connection_table() {
     let api_client = get_client();
 

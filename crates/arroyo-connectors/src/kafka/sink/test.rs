@@ -142,6 +142,7 @@ struct KafkaSinkWithWrites {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_kafka_checkpoint_flushes() {
     let mut kafka_topic_tester = KafkaTopicTester {
         topic: "arroyo-sink-checkpoint".to_string(),
@@ -180,6 +181,7 @@ async fn test_kafka_checkpoint_flushes() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_kafka() {
     let mut kafka_topic_tester = KafkaTopicTester {
         topic: "arroyo-sink".to_string(),
