@@ -570,7 +570,9 @@ impl ControllerServer {
                             .as_object()
                             .unwrap()
                             .into_iter()
-                            .filter_map(|(k, v)| Some((u32::from_str(k).ok()?, v.as_u64()? as usize)))
+                            .filter_map(|(k, v)| {
+                                Some((u32::from_str(k).ok()?, v.as_u64()? as usize))
+                            })
                             .collect(),
                         restart_nonce: p.config_restart_nonce,
                         restart_mode: p.restart_mode,

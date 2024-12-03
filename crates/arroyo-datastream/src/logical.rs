@@ -1,14 +1,13 @@
 use datafusion_proto::protobuf::ArrowType;
 use itertools::Itertools;
 
+use crate::optimizers::Optimizer;
 use anyhow::anyhow;
 use arrow_schema::DataType;
 use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc::api::{
-    ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType,
-};
+use arroyo_rpc::grpc::api::{ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType};
 use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
@@ -24,7 +23,6 @@ use std::hash::Hasher;
 use std::str::FromStr;
 use std::sync::Arc;
 use strum::{Display, EnumString};
-use crate::optimizers::Optimizer;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
 pub enum OperatorName {
@@ -139,21 +137,12 @@ pub struct LogicalEdge {
 }
 
 impl LogicalEdge {
-    pub fn new(
-        edge_type: LogicalEdgeType,
-        schema: ArroyoSchema,
-    ) -> Self {
-        LogicalEdge {
-            edge_type,
-            schema,
-        }
+    pub fn new(edge_type: LogicalEdgeType, schema: ArroyoSchema) -> Self {
+        LogicalEdge { edge_type, schema }
     }
 
     pub fn project_all(edge_type: LogicalEdgeType, schema: ArroyoSchema) -> Self {
-        LogicalEdge {
-            edge_type,
-            schema,
-        }
+        LogicalEdge { edge_type, schema }
     }
 }
 
@@ -179,18 +168,28 @@ impl OperatorChain {
             .map(|(l, r)| (l.unwrap(), r))
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&mut ChainedLogicalOperator, Option<&mut ArroyoSchema>)> { 
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&mut ChainedLogicalOperator, Option<&mut ArroyoSchema>)> {
         self.operators
             .iter_mut()
             .zip_longest(self.edges.iter_mut())
             .map(|e| e.left_and_right())
             .map(|(l, r)| (l.unwrap(), r))
     }
-    
+
+    pub fn first(&self) -> &ChainedLogicalOperator {
+        &self.operators[0]
+    }
+
+    pub fn len(&self) -> usize {
+        self.operators.len()
+    }
+
     pub fn is_source(&self) -> bool {
         self.operators[0].operator_name == OperatorName::ConnectorSource
     }
-    
+
     pub fn is_sink(&self) -> bool {
         self.operators[0].operator_name == OperatorName::ConnectorSink
     }
@@ -288,7 +287,7 @@ impl LogicalProgram {
             program_config,
         }
     }
-    
+
     pub fn optimize(&mut self, optimizer: &dyn Optimizer) {
         optimizer.optimize(&mut self.graph);
     }
@@ -338,7 +337,7 @@ impl LogicalProgram {
         let mut tasks_per_operator = HashMap::new();
         for node in self.graph.node_weights() {
             for op in &node.operator_chain.operators {
-                tasks_per_operator.insert(op.operator_id.clone(), node.parallelism);                
+                tasks_per_operator.insert(op.operator_id.clone(), node.parallelism);
             }
         }
         tasks_per_operator
@@ -351,7 +350,7 @@ impl LogicalProgram {
         }
         tasks_per_node
     }
-    
+
     pub fn features(&self) -> HashSet<String> {
         let mut s = HashSet::new();
 

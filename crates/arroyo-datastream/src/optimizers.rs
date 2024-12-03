@@ -1,123 +1,107 @@
-use std::collections::HashSet;
-use petgraph::prelude::*;
 use crate::logical::{LogicalEdgeType, LogicalGraph};
+use petgraph::data::DataMapMut;
+use petgraph::prelude::*;
+use petgraph::visit::NodeRef;
+use std::collections::HashSet;
+use std::mem;
 
 pub trait Optimizer {
-    fn optimize(&self, plan: &mut LogicalGraph);
+    fn optimize_once(&self, plan: &mut LogicalGraph) -> bool;
+
+    fn optimize(&self, plan: &mut LogicalGraph) {
+        loop {
+            if !self.optimize_once(plan) {
+                break;
+            }
+        }
+    }
 }
 
-pub struct ChainingOptimizer {
-}
+pub struct ChainingOptimizer {}
 
+fn remove_in_place<N, E>(graph: &mut DiGraph<N, E>, node: NodeIndex) {
+    let incoming = graph.edges_directed(node, Incoming).next().unwrap();
+
+    let parent = incoming.source().id();
+    let incoming = incoming.id();
+    graph.remove_edge(incoming);
+
+    let outgoing: Vec<_> = graph
+        .edges_directed(node, Outgoing)
+        .map(|e| (e.id(), e.target().id()))
+        .collect();
+
+    for (edge, target) in outgoing {
+        let weight = graph.remove_edge(edge).unwrap();
+        graph.add_edge(parent, target, weight);
+    }
+
+    graph.remove_node(node);
+}
 
 impl Optimizer for ChainingOptimizer {
-    fn optimize(&self, plan: &mut LogicalGraph) {
+    fn optimize_once(&self, plan: &mut LogicalGraph) -> bool {
         let node_indices: Vec<NodeIndex> = plan.node_indices().collect();
-        let mut removed_nodes = HashSet::new();
 
         for &node_idx in &node_indices {
-            if removed_nodes.contains(&node_idx) {
+            let cur = plan.node_weight(node_idx).unwrap();
+
+            // sources can't be chained
+            if cur.operator_chain.is_source() {
                 continue;
             }
 
-            let mut current_node = match plan.node_weight(node_idx) {
-                Some(node) => node.clone(),
-                None => continue,
-            };
+            let mut successors = plan.edges_directed(node_idx, Outgoing).collect::<Vec<_>>();
 
-            // sources and sinks can't be chained
-            if current_node.operator_chain.is_source() || current_node.operator_chain.is_sink() {
+            if successors.len() != 1 {
                 continue;
             }
 
-            let mut chain = vec![node_idx];
-            let mut next_node_idx = node_idx;
+            let edge = successors.remove(0);
+            let edge_type = edge.weight().edge_type;
 
-            loop {
-                let mut successors = plan
-                    .edges_directed(next_node_idx, Outgoing)
-                    .collect::<Vec<_>>();
-                
-                if successors.len() != 1 {
-                    break;
-                }
-
-                let edge = successors.remove(0);
-                let edge_type = edge.weight().edge_type;
-                
-                if edge_type != LogicalEdgeType::Forward {
-                    break;
-                }
-
-                let successor_idx = edge.target();
-
-                if removed_nodes.contains(&successor_idx) {
-                    break;
-                }
-
-                let successor_node = match plan.node_weight(successor_idx) {
-                    Some(node) => node.clone(),
-                    None => break,
-                };
-
-                // skip if parallelism doesn't match or successor is a sink
-                if current_node.parallelism != successor_node.parallelism || successor_node.operator_chain.is_sink()
-                {
-                    break;
-                }
-
-                // skip successors with multiple predecessors
-                if plan.edges_directed(successor_idx, Incoming).count() > 1 {
-                    break;
-                }
-
-                chain.push(successor_idx);
-                next_node_idx = successor_idx;
+            if edge_type != LogicalEdgeType::Forward {
+                continue;
             }
 
-            if chain.len() > 1 {
-                for i in 1..chain.len() {
-                    let node_to_merge_idx = chain[i];
-                    let node_to_merge = plan.node_weight(node_to_merge_idx).unwrap().clone();
+            let successor_idx = edge.target();
 
-                    current_node.description = format!(
-                        "{} -> {}",
-                        current_node.description, node_to_merge.description
-                    );
+            let successor_node = plan.node_weight(successor_idx).unwrap();
 
-                    current_node
-                        .operator_chain
-                        .operators
-                        .extend(node_to_merge.operator_chain.operators.clone());
-
-                    if let Some(edge_idx) = plan.find_edge(chain[i - 1], node_to_merge_idx) {
-                        let edge = plan.edge_weight(edge_idx).unwrap();
-                        current_node
-                            .operator_chain
-                            .edges
-                            .push(edge.schema.clone());
-                    }
-
-                    removed_nodes.insert(node_to_merge_idx);
-                }
-
-                plan[node_idx] = current_node;
-
-                let last_node_idx = *chain.last().unwrap();
-                let outgoing_edges: Vec<_> = plan
-                    .edges_directed(last_node_idx, petgraph::Outgoing)
-                    .map(|e| (e.id(), e.target(), e.weight().clone()))
-                    .collect();
-
-                for (edge_id, target_idx, edge_weight) in outgoing_edges {
-                    plan.remove_edge(edge_id);
-                    plan.add_edge(node_idx, target_idx, edge_weight);
-                }
+            // skip if parallelism doesn't match or successor is a sink
+            if cur.parallelism != successor_node.parallelism
+                || successor_node.operator_chain.is_sink()
+            {
+                continue;
             }
+
+            // skip successors with multiple predecessors
+            if plan.edges_directed(successor_idx, Incoming).count() > 1 {
+                continue;
+            }
+
+            // construct the new node
+            let mut new_cur = cur.clone();
+
+            new_cur.description = format!("{} -> {}", cur.description, successor_node.description);
+
+            new_cur
+                .operator_chain
+                .operators
+                .extend(successor_node.operator_chain.operators.clone());
+
+            new_cur
+                .operator_chain
+                .edges
+                .push(edge.weight().schema.clone());
+
+            mem::swap(&mut new_cur, plan.node_weight_mut(node_idx).unwrap());
+
+            // remove the old successor
+            remove_in_place(plan, successor_idx);
+            return true;
         }
 
-        for node_idx in removed_nodes {
-            plan.remove_node(node_idx);
-        }
+        false
     }
 }

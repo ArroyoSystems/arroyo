@@ -111,12 +111,10 @@ impl LocalRunner {
         let name = format!("{}-0", self.program.name);
         let total_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name);
-        
+
         let (control_tx, mut control_rx) = channel(128);
-        
-        let _running_engine = engine
-            .start(control_tx)
-            .await;
+
+        let _running_engine = engine.start(control_tx).await;
 
         let mut finished_nodes = HashSet::new();
 
@@ -447,7 +445,7 @@ impl WorkerGrpc for WorkerServer {
         }
 
         let (control_tx, control_rx) = channel(128);
-        
+
         let engine = {
             let network = { self.network.lock().unwrap().take().unwrap() };
 
@@ -464,9 +462,16 @@ impl WorkerGrpc for WorkerServer {
                 None
             };
 
-            let program =
-                Program::from_logical(self.name.to_string(), &self.job_id, &logical.graph, &req.tasks, registry, checkpoint_metadata.as_ref(), control_tx.clone())
-                    .await;
+            let program = Program::from_logical(
+                self.name.to_string(),
+                &self.job_id,
+                &logical.graph,
+                &req.tasks,
+                registry,
+                checkpoint_metadata.as_ref(),
+                control_tx.clone(),
+            )
+            .await;
 
             let engine = Engine::new(
                 program,
@@ -476,9 +481,7 @@ impl WorkerGrpc for WorkerServer {
                 network,
                 req.tasks,
             );
-            engine
-                .start(control_tx)
-                .await
+            engine.start(control_tx).await
         };
 
         self.shutdown_guard

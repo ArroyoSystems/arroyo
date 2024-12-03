@@ -710,7 +710,16 @@ impl Engine {
         let join_task = {
             let control_tx = control_tx.clone();
             tokio::spawn(async move {
-                operator.start(control_tx.clone(), control_rx, in_qs, out_qs, node.out_schema, ready).await;
+                operator
+                    .start(
+                        control_tx.clone(),
+                        control_rx,
+                        in_qs,
+                        out_qs,
+                        node.out_schema,
+                        ready,
+                    )
+                    .await;
             })
         };
 
@@ -783,7 +792,7 @@ pub async fn construct_node(
         })
     } else {
         let mut head = None;
-        let mut cur: &mut Option<ChainedOperator> = &mut None;
+        let mut cur: Option<&mut ChainedOperator> = None;
         let mut input_partitions = input_partitions as usize;
         for (node, edge) in chain.iter() {
             let ConstructedOperator::Operator(op) =
@@ -805,7 +814,7 @@ pub async fn construct_node(
                 restore_from,
                 control_tx.clone(),
                 input_partitions,
-                if let Some(cur) = cur {
+                if let Some(cur) = &mut cur {
                     vec![cur.context.out_schema.clone().unwrap()]
                 } else {
                     in_schemas.clone()
@@ -817,10 +826,11 @@ pub async fn construct_node(
 
             if cur.is_none() {
                 head = Some(ChainedOperator::new(op, ctx));
-                cur = &mut head;
+                cur = head.as_mut();
                 input_partitions = 1;
             } else {
                 cur.as_mut().unwrap().next = Some(Box::new(ChainedOperator::new(op, ctx)));
+                cur = Some(cur.unwrap().next.as_mut().unwrap().as_mut());
             }
         }
 

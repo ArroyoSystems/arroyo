@@ -7,7 +7,7 @@ use arroyo_rpc::grpc::rpc::{
     OperatorMetadata, TableEnum,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{to_micros, Data, Key, TaskInfoRef};
+use arroyo_types::{to_micros, Data, Key, TaskInfo};
 use bincode::config;
 
 use once_cell::sync::Lazy;
@@ -41,7 +41,7 @@ static GLOBAL_KEY_VALUE_SCHEMA: Lazy<Arc<Schema>> = Lazy::new(|| {
 #[derive(Debug, Clone)]
 pub struct GlobalKeyedTable {
     table_name: String,
-    pub task_info: TaskInfoRef,
+    pub task_info: Arc<TaskInfo>,
     storage_provider: StorageProviderRef,
     pub files: Vec<String>,
 }
@@ -125,7 +125,7 @@ impl Table for GlobalKeyedTable {
 
     fn from_config(
         config: Self::ConfigMessage,
-        task_info: TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
     ) -> anyhow::Result<Self> {
@@ -184,7 +184,7 @@ impl Table for GlobalKeyedTable {
         TableEnum::GlobalKeyValue
     }
 
-    fn task_info(&self) -> TaskInfoRef {
+    fn task_info(&self) -> Arc<TaskInfo> {
         self.task_info.clone()
     }
 
@@ -227,7 +227,7 @@ impl Table for GlobalKeyedTable {
 pub struct GlobalKeyedCheckpointer {
     table_name: String,
     epoch: u32,
-    task_info: TaskInfoRef,
+    task_info: Arc<TaskInfo>,
     storage_provider: StorageProviderRef,
     latest_values: BTreeMap<Vec<u8>, Vec<u8>>,
     commit_data: Option<Vec<u8>>,

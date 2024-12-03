@@ -4,7 +4,8 @@ use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, ConstructedOperator, Registry,
+    ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
+    Registry,
 };
 use arroyo_rpc::grpc::api;
 use datafusion::common::DataFusionError;
@@ -71,7 +72,12 @@ impl ArrowOperator for ValueExecutionOperator {
         }
     }
 
-    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        record_batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let mut records = self.executor.process_batch(record_batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
@@ -196,7 +202,12 @@ impl ArrowOperator for KeyExecutionOperator {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let mut records = self.executor.process_batch(batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");

@@ -8,7 +8,9 @@ use arrow::compute::{max, min};
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::{Collector, OperatorContext};
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, ConstructedOperator, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, ConstructedOperator, OperatorConstructor, Registry,
+};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};
@@ -137,7 +139,12 @@ impl ArrowOperator for WindowFunctionOperator {
             }
         }
     }
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let current_watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -187,7 +194,12 @@ impl ArrowOperator for WindowFunctionOperator {
         Some(Watermark::EventTime(watermark))
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        b: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("input", watermark)

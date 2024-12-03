@@ -92,7 +92,11 @@ impl ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         let delay = self.delay(ctx);
         info!(
             "Starting impulse source with start {} delay {:?} and limit {}",
@@ -138,18 +142,19 @@ impl ImpulseSourceFunc {
                 let counter_column = counter_builder.finish();
                 let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
                 let timestamp_column = timestamp_builder.finish();
-                collector.collect(
-                    RecordBatch::try_new(
-                        schema.clone(),
-                        vec![
-                            Arc::new(counter_column),
-                            Arc::new(task_index_column),
-                            Arc::new(timestamp_column),
-                        ],
+                collector
+                    .collect(
+                        RecordBatch::try_new(
+                            schema.clone(),
+                            vec![
+                                Arc::new(counter_column),
+                                Arc::new(task_index_column),
+                                Arc::new(timestamp_column),
+                            ],
+                        )
+                        .unwrap(),
                     )
-                    .unwrap(),
-                )
-                .await;
+                    .await;
                 items = 0;
             }
 
@@ -163,18 +168,19 @@ impl ImpulseSourceFunc {
                         let counter_column = counter_builder.finish();
                         let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
                         let timestamp_column = timestamp_builder.finish();
-                        collector.collect(
-                            RecordBatch::try_new(
-                                schema.clone(),
-                                vec![
-                                    Arc::new(counter_column),
-                                    Arc::new(task_index_column),
-                                    Arc::new(timestamp_column),
-                                ],
+                        collector
+                            .collect(
+                                RecordBatch::try_new(
+                                    schema.clone(),
+                                    vec![
+                                        Arc::new(counter_column),
+                                        Arc::new(task_index_column),
+                                        Arc::new(timestamp_column),
+                                    ],
+                                )
+                                .unwrap(),
                             )
-                            .unwrap(),
-                        )
-                        .await;
+                            .await;
                         items = 0;
                     }
                     ctx.table_manager
@@ -222,18 +228,19 @@ impl ImpulseSourceFunc {
             let counter_column = counter_builder.finish();
             let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
             let timestamp_column = timestamp_builder.finish();
-            collector.collect(
-                RecordBatch::try_new(
-                    schema.clone(),
-                    vec![
-                        Arc::new(counter_column),
-                        Arc::new(task_index_column),
-                        Arc::new(timestamp_column),
-                    ],
+            collector
+                .collect(
+                    RecordBatch::try_new(
+                        schema.clone(),
+                        vec![
+                            Arc::new(counter_column),
+                            Arc::new(task_index_column),
+                            Arc::new(timestamp_column),
+                        ],
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-            )
-            .await;
+                .await;
         }
 
         SourceFinishType::Final
@@ -262,7 +269,11 @@ impl SourceOperator for ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         self.run(ctx, collector).await
     }
 }

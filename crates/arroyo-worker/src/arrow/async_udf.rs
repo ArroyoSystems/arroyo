@@ -5,7 +5,10 @@ use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_df::ASYNC_RESULT_FIELD;
 use arroyo_operator::context::{Collector, OperatorContext};
-use arroyo_operator::operator::{ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
+    Registry,
+};
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
@@ -81,24 +84,26 @@ impl OperatorConstructor for AsyncUdfConstructor {
             )
         })?;
 
-        Ok(ConstructedOperator::from_operator(Box::new(AsyncUdfOperator {
-            name: config.name.clone(),
-            udf: (&*udf).try_into()?,
-            ordered,
-            allowed_in_flight: config.max_concurrency,
-            timeout: Duration::from_micros(config.timeout_micros),
-            config,
-            registry,
-            input_exprs: vec![],
-            final_exprs: vec![],
-            next_id: 0,
-            inputs: BTreeMap::new(),
-            outputs: BTreeMap::new(),
-            watermarks: VecDeque::new(),
-            input_row_converter: RowConverter::new(vec![]).unwrap(),
-            output_row_converter: RowConverter::new(vec![]).unwrap(),
-            input_schema: None,
-        })))
+        Ok(ConstructedOperator::from_operator(Box::new(
+            AsyncUdfOperator {
+                name: config.name.clone(),
+                udf: (&*udf).try_into()?,
+                ordered,
+                allowed_in_flight: config.max_concurrency,
+                timeout: Duration::from_micros(config.timeout_micros),
+                config,
+                registry,
+                input_exprs: vec![],
+                final_exprs: vec![],
+                next_id: 0,
+                inputs: BTreeMap::new(),
+                outputs: BTreeMap::new(),
+                watermarks: VecDeque::new(),
+                input_row_converter: RowConverter::new(vec![]).unwrap(),
+                output_row_converter: RowConverter::new(vec![]).unwrap(),
+                input_schema: None,
+            },
+        )))
     }
 }
 
@@ -232,7 +237,8 @@ impl ArrowOperator for AsyncUdfOperator {
         gs.get_all()
             .iter()
             .filter(|(task_index, _)| {
-                **task_index % ctx.task_info.parallelism as usize == ctx.task_info.task_index as usize
+                **task_index % ctx.task_info.parallelism as usize
+                    == ctx.task_info.task_index as usize
             })
             .for_each(|(_, state)| {
                 for (k, v) in &state.inputs {
@@ -288,7 +294,12 @@ impl ArrowOperator for AsyncUdfOperator {
         Some(Duration::from_millis(50))
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let arg_batch: Vec<_> = self
             .input_exprs
             .iter()
@@ -323,7 +334,12 @@ impl ArrowOperator for AsyncUdfOperator {
         }
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_tick(
+        &mut self,
+        _: u64,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let Some((ids, results)) = self
             .udf
             .drain_results()
@@ -379,7 +395,12 @@ impl ArrowOperator for AsyncUdfOperator {
         None
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        b: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let gs = ctx.table_manager.get_global_keyed_state("a").await.unwrap();
 
         let state = AsyncUdfState {
@@ -399,7 +420,12 @@ impl ArrowOperator for AsyncUdfOperator {
         gs.insert(ctx.task_info.task_index, state).await;
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn on_close(
+        &mut self,
+        final_message: &Option<SignalMessage>,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         if let Some(SignalMessage::EndOfData) = final_message {
             while !self.inputs.is_empty() && !self.outputs.is_empty() {
                 self.handle_tick(0, ctx, collector).await;
@@ -460,7 +486,8 @@ impl AsyncUdfOperator {
 
             if watermark_id <= oldest_unprocessed {
                 // we've processed everything before this watermark, we can emit and drop it
-                collector.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
+                collector
+                    .broadcast(SignalMessage::Watermark(watermark))
                     .await;
             } else {
                 // we still have messages preceding this watermark to work on

@@ -426,7 +426,7 @@ pub struct PipelineConfig {
     /// Default sink, for when none is specified
     #[serde(default)]
     pub default_sink: DefaultSink,
-    
+
     /// Whether to enable operator chaining
     pub enable_chaining: bool,
 

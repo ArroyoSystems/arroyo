@@ -5,7 +5,8 @@ use arrow_schema::SchemaRef;
 use arroyo_df::schemas::add_timestamp_field_arrow;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, ConstructedOperator, Registry,
+    ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
+    Registry,
 };
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
@@ -31,6 +32,7 @@ use datafusion::execution::{
     SendableRecordBatchStream,
 };
 use datafusion::physical_expr::PhysicalExpr;
+use datafusion::prelude::col;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
     physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
@@ -38,7 +40,6 @@ use datafusion_proto::{
 };
 use prost::Message;
 use std::time::Duration;
-use datafusion::prelude::col;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
@@ -247,7 +248,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -401,7 +407,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }))
     }
 
-    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_future_result(
+        &mut self,
+        result: Box<dyn Any + Send>,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
@@ -422,7 +433,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        b: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {

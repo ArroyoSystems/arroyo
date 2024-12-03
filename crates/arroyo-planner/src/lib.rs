@@ -62,7 +62,9 @@ use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewrit
 use crate::udafs::EmptyUdaf;
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
+use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_udf_host::parse::{inner_type, UdfDef};
@@ -80,8 +82,6 @@ use std::{collections::HashMap, sync::Arc};
 use syn::Item;
 use tracing::{debug, info, warn};
 use unicase::UniCase;
-use arroyo_datastream::optimizers::ChainingOptimizer;
-use arroyo_rpc::config::config;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 pub const ASYNC_RESULT_FIELD: &str = "__async_result";
@@ -860,9 +860,9 @@ pub async fn parse_and_get_arrow_program(
             python_udfs: schema_provider.python_udfs.clone(),
         },
     );
-    
+
     if arroyo_rpc::config::config().pipeline.enable_chaining {
-        program.optimize(&ChainingOptimizer{});
+        program.optimize(&ChainingOptimizer {});
     }
 
     Ok(CompiledSql {

@@ -372,9 +372,6 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     fn schema(&self) -> SchemaRef;
 }
 
-/// A reference-counted reference to a [TaskInfo].
-pub type TaskInfoRef = Arc<TaskInfo>;
-
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
 pub struct TaskInfo {
     pub job_id: String,

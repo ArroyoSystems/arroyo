@@ -11,7 +11,7 @@ use arroyo_rpc::{
     CheckpointCompleted, ControlResp,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, TaskInfoRef};
+use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
@@ -38,7 +38,7 @@ pub struct TableManager {
     // ordered by table, then epoch.
     tables: HashMap<String, Arc<dyn ErasedTable>>,
     writer: BackendWriter,
-    task_info: TaskInfoRef,
+    task_info: Arc<TaskInfo>,
     storage: StorageProviderRef,
     caches: HashMap<String, Box<dyn Any + Send>>,
 }
@@ -55,7 +55,7 @@ pub struct BackendFlusher {
     storage: StorageProviderRef,
     control_tx: Sender<ControlResp>,
     finish_tx: Option<oneshot::Sender<()>>,
-    task_info: TaskInfoRef,
+    task_info: Arc<TaskInfo>,
     tables: HashMap<String, Arc<dyn ErasedTable>>,
     table_configs: HashMap<String, TableConfig>,
     table_checkpointers: HashMap<String, Box<dyn ErasedCheckpointer>>,
@@ -195,7 +195,7 @@ impl BackendFlusher {
 
 impl BackendWriter {
     fn new(
-        task_info: TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         control_tx: Sender<ControlResp>,
         table_configs: HashMap<String, TableConfig>,
         tables: HashMap<String, Arc<dyn ErasedTable>>,

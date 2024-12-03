@@ -92,7 +92,7 @@ impl From<LoadCompactedDataReq> for CompactionResult {
 pub struct CheckpointCompleted {
     pub checkpoint_epoch: u32,
     pub node_id: u32,
-    pub operator_id: String,    
+    pub operator_id: String,
     pub subtask_metadata: SubtaskCheckpointMetadata,
 }
 
