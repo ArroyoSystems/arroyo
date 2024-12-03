@@ -316,8 +316,7 @@ impl CheckpointState {
                     }
                 } {
                     for i in 0..operator_state.subtasks_checkpointed {
-                        self.subtasks_to_commit
-                            .insert((c.node_id, i as u32));
+                        self.subtasks_to_commit.insert((c.node_id, i as u32));
                     }
                     self.commit_data
                         .entry(c.node_id)

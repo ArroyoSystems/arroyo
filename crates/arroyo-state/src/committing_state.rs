@@ -26,8 +26,7 @@ impl CommittingState {
     }
 
     pub fn subtask_committed(&mut self, node_id: u32, subtask_index: u32) {
-        self.subtasks_to_commit
-            .remove(&(node_id, subtask_index));
+        self.subtasks_to_commit.remove(&(node_id, subtask_index));
     }
 
     pub fn done(&self) -> bool {

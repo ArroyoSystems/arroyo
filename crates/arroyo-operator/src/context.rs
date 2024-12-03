@@ -16,8 +16,8 @@ use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
-    from_micros, ArrowMessage, ChainInfo, CheckpointBarrier, SourceError, TaskInfo, UserError,
-    Watermark,
+    from_micros, ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo,
+    UserError, Watermark,
 };
 use async_trait::async_trait;
 use datafusion::common::hash_utils;
@@ -257,12 +257,11 @@ pub struct SourceContext {
     pub watermarks: WatermarkHolder,
 }
 
-
 impl SourceContext {
     pub fn from_operator(
         ctx: OperatorContext,
         chain_info: Arc<ChainInfo>,
-        control_rx: Receiver<ControlMessage>, 
+        control_rx: Receiver<ControlMessage>,
     ) -> Self {
         Self {
             out_schema: ctx.out_schema.expect("sources must have downstream nodes"),
@@ -271,14 +270,13 @@ impl SourceContext {
                 task_info: ctx.task_info.clone(),
             },
             control_tx: ctx.control_tx,
-            control_rx,            
+            control_rx,
             chain_info,
             task_info: ctx.task_info,
             table_manager: ctx.table_manager,
             watermarks: ctx.watermarks,
         }
     }
-
 
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         //TODO: support compaction in the table manager
@@ -304,7 +302,6 @@ impl SourceContext {
             .await
             .unwrap();
     }
-
 }
 
 pub struct SourceCollector {
@@ -328,7 +325,7 @@ impl SourceCollector {
         task_info: &Arc<TaskInfo>,
     ) -> Self {
         Self {
-            buffer: ContextBuffer::new(out_schema.schema.clone()),            
+            buffer: ContextBuffer::new(out_schema.schema.clone()),
             out_schema,
             collector,
             control_tx,
@@ -359,7 +356,7 @@ impl SourceCollector {
             schema_resolver,
         ));
     }
-    
+
     pub fn initialize_deserializer(
         &mut self,
         format: Format,
@@ -381,12 +378,12 @@ impl SourceCollector {
     pub fn should_flush(&self) -> bool {
         self.buffer.should_flush()
             || self
-            .deserializer
-            .as_ref()
-            .map(|d| d.should_flush())
-            .unwrap_or(false)
+                .deserializer
+                .as_ref()
+                .map(|d| d.should_flush())
+                .unwrap_or(false)
     }
-    
+
     pub async fn deserialize_slice(
         &mut self,
         msg: &[u8],
@@ -405,7 +402,6 @@ impl SourceCollector {
 
         Ok(())
     }
-    
 
     /// Handling errors and rate limiting error reporting.
     /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
@@ -447,7 +443,7 @@ impl SourceCollector {
         }
 
         Ok(())
-    }    
+    }
 
     pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
         if self.buffer.size() > 0 {
@@ -474,15 +470,13 @@ impl SourceCollector {
 
         Ok(())
     }
-    
-    pub async fn broadcast(&mut self, message: ArrowMessage) {
+
+    pub async fn broadcast(&mut self, message: SignalMessage) {
         if let Err(e) = self.flush_buffer().await {
             self.buffered_error.replace(e);
         }
         self.collector.broadcast(message).await;
     }
-
-    
 }
 
 pub async fn send_checkpoint_event(
@@ -496,7 +490,7 @@ pub async fn send_checkpoint_event(
     tx.send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
         checkpoint_epoch: barrier.epoch,
         node_id: info.node_id,
-        operator_id: info.operator_id.clone(), 
+        operator_id: info.operator_id.clone(),
         subtask_index: info.task_index,
         time: SystemTime::now(),
         event_type,
@@ -539,36 +533,7 @@ impl ErrorReporter {
 #[async_trait]
 pub trait Collector: Send {
     async fn collect(&mut self, batch: RecordBatch);
-    async fn broadcast(&mut self, message: ArrowMessage);
-}
-
-pub struct ChainCollector {
-    messages: Vec<RecordBatch>,
-}
-
-impl ChainCollector {
-    pub fn new() -> Self {
-        Self { messages: vec![] }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &RecordBatch> {
-        self.messages.iter()
-    }
-
-    pub fn clear(&mut self) {
-        self.messages.clear();
-    }
-}
-
-#[async_trait]
-impl Collector for ChainCollector {
-    async fn collect(&mut self, batch: RecordBatch) {
-        self.messages.push(batch);
-    }
-
-    async fn broadcast(&mut self, message: ArrowMessage) {
-        todo!()
-    }
+    async fn broadcast(&mut self, message: SignalMessage);
 }
 
 #[derive(Clone)]
@@ -684,15 +649,17 @@ impl Collector for ArrowCollector {
         }
     }
 
-    async fn broadcast(&mut self, message: ArrowMessage) {
+    async fn broadcast(&mut self, message: SignalMessage) {
         for out_node in &self.out_qs {
             for q in out_node {
-                q.send(message.clone()).await.unwrap_or_else(|e| {
-                    panic!(
-                        "failed to broadcast message <{:?}> for operator {}: {}",
-                        message, self.chain_info, e
-                    )
-                });
+                q.send(ArrowMessage::Signal(message.clone()))
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "failed to broadcast message <{:?}> for operator {}: {}",
+                            message, self.chain_info, e
+                        )
+                    });
             }
         }
     }
@@ -773,7 +740,7 @@ impl OperatorContext {
             error_reporter: ErrorReporter {
                 tx: control_tx,
                 task_info,
-            }
+            },
         }
     }
 

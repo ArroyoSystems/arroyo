@@ -24,7 +24,7 @@ use arroyo_rpc::{
 };
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{
-    from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfoRef,
+    from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfo,
 };
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 
@@ -50,7 +50,7 @@ use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpoint
 #[derive(Debug, Clone)]
 pub struct ExpiringTimeKeyTable {
     table_name: String,
-    task_info: TaskInfoRef,
+    task_info: Arc<TaskInfo>,
     schema: SchemaWithHashAndOperation,
     retention: Duration,
     storage_provider: StorageProviderRef,
@@ -258,7 +258,7 @@ impl Table for ExpiringTimeKeyTable {
 
     fn from_config(
         config: Self::ConfigMessage,
-        task_info: arroyo_types::TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         storage_provider: arroyo_storage::StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
     ) -> anyhow::Result<Self> {
@@ -353,7 +353,7 @@ impl Table for ExpiringTimeKeyTable {
         TableEnum::ExpiringKeyedTimeTable
     }
 
-    fn task_info(&self) -> TaskInfoRef {
+    fn task_info(&self) -> Arc<TaskInfo> {
         self.task_info.clone()
     }
 

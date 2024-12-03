@@ -6,12 +6,12 @@ use axum::{debug_handler, Json};
 use axum_extra::extract::WithRejection;
 use http::StatusCode;
 
+use petgraph::visit::NodeRef;
 use petgraph::{Direction, EdgeDirection};
 use std::collections::HashMap;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::string::ParseError;
-use petgraph::visit::NodeRef;
 use std::time::{Duration, SystemTime};
 
 use crate::{compiler_service, connection_profiles, jobs, types};
@@ -274,9 +274,9 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
             if node.operator_name == OperatorName::ConnectorSink {
                 let mut op = ConnectorOp::decode(&node.operator_config[..]).map_err(|_| {
                     anyhow!(
-                    "failed to decode configuration for connector node {:?}",
-                    node
-                )
+                        "failed to decode configuration for connector node {:?}",
+                        node
+                    )
                 })?;
 
                 try_register_confluent_schema(&mut op, &schema).await?;
@@ -329,11 +329,13 @@ pub(crate) async fn create_pipeline_int<'a>(
         for idx in g.node_indices() {
             let should_replace = {
                 let node = &g.node_weight(idx).unwrap().operator_chain;
-                node.is_sink() && node.iter().next().unwrap().0.operator_config != default_sink().encode_to_vec()
+                node.is_sink()
+                    && node.iter().next().unwrap().0.operator_config
+                        != default_sink().encode_to_vec()
             };
             if should_replace {
                 if enable_sinks {
-                    todo!("enable sinks")                    
+                    todo!("enable sinks")
                     // let new_idx = g.add_node(LogicalNode {
                     //     operator_id: format!("{}_1", g.node_weight(idx).unwrap().operator_id),
                     //     description: "Preview sink".to_string(),
@@ -349,8 +351,14 @@ pub(crate) async fn create_pipeline_int<'a>(
                     //     g.add_edge(source, new_idx, weight);
                     // }
                 } else {
-                    g.node_weight_mut(idx).unwrap().operator_chain.iter_mut().next().unwrap().0.operator_config =
-                        default_sink().encode_to_vec();
+                    g.node_weight_mut(idx)
+                        .unwrap()
+                        .operator_chain
+                        .iter_mut()
+                        .next()
+                        .unwrap()
+                        .0
+                        .operator_config = default_sink().encode_to_vec();
                 }
             }
         }

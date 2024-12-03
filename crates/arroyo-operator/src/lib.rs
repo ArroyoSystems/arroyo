@@ -9,7 +9,7 @@ use crate::inq_reader::InQReader;
 use arrow::array::types::{TimestampNanosecondType, UInt64Type};
 use arrow::array::{Array, PrimitiveArray, RecordBatch, UInt64Array};
 use arrow::compute::kernels::numeric::{div, rem};
-use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfo};
 use bincode::{Decode, Encode};
 
 use crate::context::OperatorContext;
@@ -113,7 +113,7 @@ impl CheckpointCounter {
 
 #[allow(unused)]
 pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
-    pub task_info: TaskInfoRef,
+    pub task_info: Arc<TaskInfo>,
     pub name: String,
     pub counter: CheckpointCounter,
     pub closed: HashSet<usize>,

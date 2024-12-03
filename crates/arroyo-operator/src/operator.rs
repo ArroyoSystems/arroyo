@@ -1,4 +1,7 @@
-use crate::context::{send_checkpoint_event, ArrowCollector, BatchReceiver, BatchSender, ChainCollector, Collector, OperatorContext, SourceCollector, SourceContext, WatermarkHolder};
+use crate::context::{
+    send_checkpoint_event, ArrowCollector, BatchReceiver, BatchSender, Collector, OperatorContext,
+    SourceCollector, SourceContext, WatermarkHolder,
+};
 use crate::inq_reader::InQReader;
 use crate::udfs::{ArroyoUdaf, UdafArg};
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
@@ -31,6 +34,7 @@ use datafusion::physical_plan::{displayable, ExecutionPlan};
 use dlopen2::wrapper::Container;
 use futures::future::OptionFuture;
 use futures::stream::FuturesUnordered;
+use futures::FutureExt;
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -40,6 +44,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
@@ -74,6 +79,23 @@ impl ConstructedOperator {
 
     pub fn from_operator(operator: Box<dyn ArrowOperator + Send>) -> Self {
         Self::Operator(operator)
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            Self::Source(s) => s.name(),
+            Self::Operator(s) => s.name(),
+        }
+    }
+
+    pub fn display(&self) -> DisplayableOperator {
+        match self {
+            Self::Source(_) => DisplayableOperator {
+                name: self.name().into(),
+                fields: vec![],
+            },
+            Self::Operator(op) => op.display(),
+        }
     }
 }
 
@@ -140,14 +162,17 @@ impl OperatorNode {
     ) {
         match self {
             OperatorNode::Source(mut s) => {
-                let mut source_context = SourceContext::from_operator(s.context, chain_info.clone(), control_rx);                
-                
-                let mut collector = SourceCollector::new(source_context.out_schema.clone(), 
-                collector,
-                control_tx.clone(),
-                &source_context.chain_info,
-                &source_context.task_info);
-                
+                let mut source_context =
+                    SourceContext::from_operator(s.context, chain_info.clone(), control_rx);
+
+                let mut collector = SourceCollector::new(
+                    source_context.out_schema.clone(),
+                    collector,
+                    control_tx.clone(),
+                    &source_context.chain_info,
+                    &source_context.task_info,
+                );
+
                 s.operator.on_start(&mut source_context).await;
 
                 ready.wait().await;
@@ -168,20 +193,26 @@ impl OperatorNode {
 
                 let result = s.operator.run(&mut source_context, &mut collector).await;
 
-                s.operator.on_close(&mut source_context, &mut collector).await;
-                
+                s.operator
+                    .on_close(&mut source_context, &mut collector)
+                    .await;
+
                 if let Some(final_message) = result.into() {
-                    collector
-                        .broadcast(ArrowMessage::Signal(final_message))
-                        .await;
+                    collector.broadcast(final_message).await;
                 }
             }
             OperatorNode::Chained(mut o) => {
-                let result = operator_run_behavior(&mut o, in_qs, control_tx, control_rx, &mut collector, ready).await;
+                let result = operator_run_behavior(
+                    &mut o,
+                    in_qs,
+                    control_tx,
+                    control_rx,
+                    &mut collector,
+                    ready,
+                )
+                .await;
                 if let Some(final_message) = result.into() {
-                    collector
-                        .broadcast(ArrowMessage::Signal(final_message))
-                        .await;
+                    collector.broadcast(final_message).await;
                 }
             }
         }
@@ -226,22 +257,19 @@ impl OperatorNode {
 
         let collector = ArrowCollector::new(chain_info.clone(), out_schema, out_qs);
 
-        self
-            .run_behavior(
-                &chain_info,
-                control_tx.clone(),
-                control_rx,
-                &mut in_qs,
-                ready,
-                collector,
-            )
-            .await;
-        
+        self.run_behavior(
+            &chain_info,
+            control_tx.clone(),
+            control_rx,
+            &mut in_qs,
+            ready,
+            collector,
+        )
+        .await;
+
         info!(
             "Task finished {}-{} ({})",
-            chain_info.node_id,
-            chain_info.task_index,
-            chain_info.description
+            chain_info.node_id, chain_info.task_index, chain_info.description
         );
 
         control_tx
@@ -275,9 +303,7 @@ async fn run_checkpoint(
     .await;
 
     collector
-        .broadcast(ArrowMessage::Signal(SignalMessage::Barrier(
-            checkpoint_barrier,
-        )))
+        .broadcast(SignalMessage::Barrier(checkpoint_barrier))
         .await;
 
     checkpoint_barrier.then_stop
@@ -294,7 +320,11 @@ pub trait SourceOperator: Send + 'static {
     #[allow(unused_variables)]
     async fn on_start(&mut self, ctx: &mut SourceContext) {}
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType;
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType;
 
     #[allow(unused_variables)]
     async fn on_close(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) {}
@@ -323,6 +353,34 @@ pub trait SourceOperator: Send + 'static {
         )
         .await
     }
+}
+
+macro_rules! call_and_recurse {
+    ($self:expr, $final_collector:expr, $name:ident, $arg:expr) => {
+        match &mut $self.next {
+            Some(next) => {
+                let mut collector = ChainedCollector {
+                    cur: next,
+                    index: 0,
+                    in_partitions: 1,
+                    final_collector: $final_collector,
+                };
+
+                $self
+                    .operator
+                    .$name($arg, &mut $self.context, &mut collector)
+                    .await;
+
+                Box::pin(next.$name($arg, $final_collector)).await;
+            }
+            None => {
+                $self
+                    .operator
+                    .$name($arg, &mut $self.context, $final_collector)
+                    .await;
+            }
+        }
+    };
 }
 
 pub struct ChainedCollector<'a, 'b> {
@@ -372,8 +430,17 @@ where
         };
     }
 
-    async fn broadcast(&mut self, message: ArrowMessage) {
-        todo!()
+    async fn broadcast(&mut self, message: SignalMessage) {
+        match message {
+            SignalMessage::Watermark(w) => {
+                self.cur
+                    .handle_watermark(w, self.index, self.final_collector)
+                    .await;
+            }
+            m => {
+                todo!("Unsupported signal message: {:?}", m);
+            }
+        }
     }
 }
 
@@ -393,7 +460,7 @@ impl ChainedOperator {
     }
 }
 
-struct ChainIteratorMut<'a> {
+pub struct ChainIteratorMut<'a> {
     current: Option<&'a mut ChainedOperator>,
 }
 
@@ -411,7 +478,7 @@ impl<'a> Iterator for ChainIteratorMut<'a> {
     }
 }
 
-struct ChainIterator<'a> {
+pub struct ChainIterator<'a> {
     current: Option<&'a ChainedOperator>,
 }
 
@@ -425,6 +492,22 @@ impl<'a> Iterator for ChainIterator<'a> {
             Some((current.operator.as_ref(), &current.context))
         } else {
             None
+        }
+    }
+}
+
+struct IndexedFuture {
+    f: Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>,
+    i: usize,
+}
+
+impl Future for IndexedFuture {
+    type Output = (usize, Box<dyn Any + Send>);
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.f.as_mut().poll(cx) {
+            Poll::Ready(r) => Poll::Ready((self.i, r)),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -459,10 +542,6 @@ impl ChainedOperator {
         self.iter().filter_map(|(op, _)| op.tick_interval()).min()
     }
 
-    fn display(&self) -> DisplayableOperator {
-        todo!()
-    }
-
     async fn on_start(&mut self) {
         for (op, ctx) in self.iter_mut() {
             op.on_start(ctx).await;
@@ -490,15 +569,22 @@ impl ChainedOperator {
 
     fn future_to_poll(
         &mut self,
-    ) -> Option<Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>> {
+    ) -> Option<Pin<Box<dyn Future<Output = (usize, Box<dyn Any + Send + Send>)> + Send>>> {
         let futures = self
             .iter_mut()
-            .filter_map(|(op, _)| op.future_to_poll())
+            .enumerate()
+            .filter_map(|(i, (op, _))| {
+                Some(IndexedFuture {
+                    f: op.future_to_poll()?,
+                    i,
+                })
+            })
             .collect::<Vec<_>>();
 
+        let task = self.context.task_info.clone();
         match futures.len() {
             0 => None,
-            1 => futures.into_iter().next(),
+            1 => Some(Box::pin(futures.into_iter().next().unwrap())),
             _ => {
                 Some(Box::pin(async move {
                     let mut futures = FuturesUnordered::from_iter(futures.into_iter());
@@ -550,7 +636,7 @@ impl ChainedOperator {
                     )
                     .await;
 
-                    self.handle_checkpoint(*t).await;
+                    self.handle_checkpoint(*t, collector).await;
 
                     send_checkpoint_event(
                         control_tx,
@@ -655,7 +741,7 @@ impl ChainedOperator {
                     .await;
                 if let Some(watermark) = watermark {
                     final_collector
-                        .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
+                        .broadcast(SignalMessage::Watermark(watermark))
                         .await;
                 }
             }
@@ -664,14 +750,44 @@ impl ChainedOperator {
 
     async fn handle_future_result(
         &mut self,
+        op_index: usize,
         result: Box<dyn Any + Send>,
-        ctx: &mut OperatorContext,
+        final_collector: &mut dyn Collector,
     ) {
-        todo!()
+        let mut op = self;
+        for _ in 0..op_index {
+            op = op
+                .next
+                .as_mut()
+                .expect("Future produced from operator index larger than chain size");
+        }
+
+        match &mut op.next {
+            None => {
+                op.operator
+                    .handle_future_result(result, &mut op.context, final_collector)
+                    .await;
+            }
+            Some(next) => {
+                let mut collector = ChainedCollector {
+                    cur: next,
+                    final_collector,
+                    index: 0,
+                    in_partitions: 1,
+                };
+                op.operator
+                    .handle_future_result(result, &mut op.context, &mut collector)
+                    .await;
+            }
+        }
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier) {
-        todo!()
+    async fn handle_checkpoint(
+        &mut self,
+        b: CheckpointBarrier,
+        final_collector: &mut dyn Collector,
+    ) {
+        call_and_recurse!(self, final_collector, handle_checkpoint, b)
     }
 
     async fn handle_commit(
@@ -683,8 +799,8 @@ impl ChainedOperator {
         todo!()
     }
 
-    async fn handle_tick(&mut self, tick: u64) {
-        todo!()
+    async fn handle_tick(&mut self, tick: u64, final_collector: &mut dyn Collector) {
+        call_and_recurse!(self, final_collector, handle_tick, tick)
     }
 
     async fn on_close(
@@ -748,7 +864,7 @@ async fn operator_run_behavior(
     for (i, q) in in_qs.iter_mut().enumerate() {
         let stream = async_stream::stream! {
           while let Some(item) = q.recv().await {
-            yield(i,item);
+            yield(i, item);
           }
         };
         sel.push(Box::pin(stream));
@@ -759,6 +875,7 @@ async fn operator_run_behavior(
     let mut ticks = 0u64;
     let mut interval =
         tokio::time::interval(this.tick_interval().unwrap_or(Duration::from_secs(60)));
+
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
@@ -827,12 +944,11 @@ async fn operator_run_behavior(
                 }
             }
             Some(val) = operator_future => {
-                todo!()
+                this.handle_future_result(val.0, val.1, collector).await;
             }
             _ = interval.tick() => {
-                //todo!()
-                // this.handle_tick(ticks, ctx).await;
-                // ticks += 1;
+                this.handle_tick(ticks, collector).await;
+                ticks += 1;
             }
         }
     }
