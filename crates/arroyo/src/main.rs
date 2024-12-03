@@ -372,6 +372,19 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
         config().database.postgres
     );
 
+    // make compatible with lower version PG (i.g. 12.16) which not support function
+    // gen_random_uuid by default.
+    client
+        .batch_execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "Failed to create extension pgcrypto on {:?}: {:?}",
+                config().database.postgres,
+                e
+            )
+        })?;
+
     let report = migrations::migrations::runner()
         .run_async(&mut client)
         .await
