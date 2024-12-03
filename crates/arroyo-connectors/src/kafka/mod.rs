@@ -398,48 +398,52 @@ impl Connector for KafkaConnector {
                         None
                     };
 
-                Ok(ConstructedOperator::from_source(Box::new(KafkaSourceFunc {
-                    topic: table.topic,
-                    bootstrap_servers: profile.bootstrap_servers.to_string(),
-                    group_id: group_id.clone(),
-                    group_id_prefix: group_id_prefix.clone(),
-                    offset_mode: *offset,
-                    format: config.format.expect("Format must be set for Kafka source"),
-                    framing: config.framing,
-                    schema_resolver,
-                    bad_data: config.bad_data,
-                    client_configs,
-                    context: Context::new(Some(profile.clone())),
-                    messages_per_second: NonZeroU32::new(
-                        config
-                            .rate_limit
-                            .map(|l| l.messages_per_second)
-                            .unwrap_or(u32::MAX),
-                    )
-                    .unwrap(),
-                    metadata_fields: config.metadata_fields,
-                })))
+                Ok(ConstructedOperator::from_source(Box::new(
+                    KafkaSourceFunc {
+                        topic: table.topic,
+                        bootstrap_servers: profile.bootstrap_servers.to_string(),
+                        group_id: group_id.clone(),
+                        group_id_prefix: group_id_prefix.clone(),
+                        offset_mode: *offset,
+                        format: config.format.expect("Format must be set for Kafka source"),
+                        framing: config.framing,
+                        schema_resolver,
+                        bad_data: config.bad_data,
+                        client_configs,
+                        context: Context::new(Some(profile.clone())),
+                        messages_per_second: NonZeroU32::new(
+                            config
+                                .rate_limit
+                                .map(|l| l.messages_per_second)
+                                .unwrap_or(u32::MAX),
+                        )
+                        .unwrap(),
+                        metadata_fields: config.metadata_fields,
+                    },
+                )))
             }
             TableType::Sink {
                 commit_mode,
                 key_field,
                 timestamp_field,
-            } => Ok(ConstructedOperator::from_operator(Box::new(KafkaSinkFunc {
-                bootstrap_servers: profile.bootstrap_servers.to_string(),
-                producer: None,
-                consistency_mode: (*commit_mode).into(),
-                timestamp_field: timestamp_field.clone(),
-                timestamp_col: None,
-                key_field: key_field.clone(),
-                key_col: None,
-                write_futures: vec![],
-                client_config: client_configs(&profile, Some(table.clone()))?,
-                context: Context::new(Some(profile.clone())),
-                topic: table.topic,
-                serializer: ArrowSerializer::new(
-                    config.format.expect("Format must be defined for KafkaSink"),
-                ),
-            }))),
+            } => Ok(ConstructedOperator::from_operator(Box::new(
+                KafkaSinkFunc {
+                    bootstrap_servers: profile.bootstrap_servers.to_string(),
+                    producer: None,
+                    consistency_mode: (*commit_mode).into(),
+                    timestamp_field: timestamp_field.clone(),
+                    timestamp_col: None,
+                    key_field: key_field.clone(),
+                    key_col: None,
+                    write_futures: vec![],
+                    client_config: client_configs(&profile, Some(table.clone()))?,
+                    context: Context::new(Some(profile.clone())),
+                    topic: table.topic,
+                    serializer: ArrowSerializer::new(
+                        config.format.expect("Format must be defined for KafkaSink"),
+                    ),
+                },
+            ))),
         }
     }
 }

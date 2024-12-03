@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::kafka::SourceOffset;
-use arroyo_operator::context::{batch_bounded, OperatorContext, BatchReceiver};
+use arroyo_operator::context::{batch_bounded, BatchReceiver, OperatorContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};

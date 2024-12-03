@@ -5,7 +5,7 @@ use arrow_array::{RecordBatch, TimestampNanosecondArray};
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
-    ArrowOperator, DisplayableOperator, OperatorConstructor, ConstructedOperator, Registry,
+    ArrowOperator, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry,
 };
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
@@ -232,10 +232,15 @@ impl ArrowOperator for InstantJoin {
         }
     }
 
-    async fn process_batch(&mut self, _: RecordBatch, _: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        _: RecordBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         unreachable!();
     }
-    
+
     async fn process_batch_index(
         &mut self,
         index: usize,
@@ -293,7 +298,12 @@ impl ArrowOperator for InstantJoin {
         Some(Watermark::EventTime(watermark))
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        b: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("left", watermark)
@@ -349,7 +359,12 @@ impl ArrowOperator for InstantJoin {
         }))
     }
 
-    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, _: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_future_result(
+        &mut self,
+        result: Box<dyn Any + Send>,
+        _: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
@@ -359,7 +374,8 @@ impl ArrowOperator for InstantJoin {
                 Some((batch, future)) => match self.execs.get_mut(&bin) {
                     Some(exec) => {
                         exec.active_exec = future.clone();
-                        collector.collect(batch.expect("should compute batch in future"))
+                        collector
+                            .collect(batch.expect("should compute batch in future"))
                             .await;
                         self.futures.lock().await.push(future);
                     }

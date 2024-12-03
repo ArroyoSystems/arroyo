@@ -70,7 +70,11 @@ impl SourceOperator for SSESourceFunc {
         arroyo_state::global_table_config("e", "sse source state")
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -136,7 +140,11 @@ impl SSESourceFunc {
         None
     }
 
-    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -226,10 +234,9 @@ impl SSESourceFunc {
             }
         } else {
             // otherwise set idle and just process control messages
-            collector.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
-                Watermark::Idle,
-            )))
-            .await;
+            collector
+                .broadcast(SignalMessage::Watermark(Watermark::Idle))
+                .await;
 
             loop {
                 let msg = ctx.control_rx.recv().await;

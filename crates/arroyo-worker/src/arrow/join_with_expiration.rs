@@ -4,7 +4,8 @@ use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, ConstructedOperator, Registry,
+    ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
+    Registry,
 };
 use arroyo_rpc::{
     df::ArroyoSchema,
@@ -14,6 +15,7 @@ use arroyo_state::timestamp_table_config;
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::physical_plan::ExecutionPlan;
+use datafusion::prelude::col;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use prost::Message;
@@ -23,7 +25,6 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use datafusion::prelude::col;
 use tracing::warn;
 
 pub struct JoinWithExpiration {
@@ -121,7 +122,7 @@ impl JoinWithExpiration {
         &mut self,
         left: RecordBatch,
         right: RecordBatch,
-        collector: &mut dyn Collector
+        collector: &mut dyn Collector,
     ) {
         {
             self.right_passer.write().unwrap().replace(right);
@@ -165,7 +166,12 @@ impl ArrowOperator for JoinWithExpiration {
         }
     }
 
-    async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        _record_batch: RecordBatch,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         unreachable!();
     }
     async fn process_batch_index(
@@ -174,7 +180,7 @@ impl ArrowOperator for JoinWithExpiration {
         total_inputs: usize,
         record_batch: RecordBatch,
         ctx: &mut OperatorContext,
-        collector: &mut dyn Collector
+        collector: &mut dyn Collector,
     ) {
         match index / (total_inputs / 2) {
             0 => self
@@ -255,16 +261,18 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
             ttl = Duration::from_secs(24 * 60 * 60);
         }
 
-        Ok(ConstructedOperator::from_operator(Box::new(JoinWithExpiration {
-            left_expiration: ttl,
-            right_expiration: ttl,
-            left_input_schema,
-            right_input_schema,
-            left_schema,
-            right_schema,
-            left_passer,
-            right_passer,
-            join_execution_plan,
-        })))
+        Ok(ConstructedOperator::from_operator(Box::new(
+            JoinWithExpiration {
+                left_expiration: ttl,
+                right_expiration: ttl,
+                left_input_schema,
+                right_input_schema,
+                left_schema,
+                right_schema,
+                left_passer,
+                right_passer,
+                join_execution_plan,
+            },
+        )))
     }
 }

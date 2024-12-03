@@ -188,8 +188,7 @@ impl RunningJobModel {
                             CheckpointingOrCommittingState::Committing(committing_state) => {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
                                 {
-                                    committing_state
-                                        .subtask_committed(c.node_id, c.subtask_index);
+                                    committing_state.subtask_committed(c.node_id, c.subtask_index);
                                     self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())
@@ -389,7 +388,8 @@ impl RunningJobModel {
                     self.job_id.clone(),
                     &op.operator_id,
                     self.epoch,
-                ).await?;
+                )
+                .await?;
 
                 if compacted_tables.is_empty() {
                     continue;
@@ -405,7 +405,6 @@ impl RunningJobModel {
                         })
                         .await?;
                 }
-                
             }
         }
 
@@ -656,11 +655,13 @@ impl JobController {
             .map(|(id, w)| (*id, w.connect.clone()))
             .collect();
         let program = self.model.program.clone();
-        let operator_indices: Arc<HashMap<_, _>> = Arc::new(program.graph
-            .node_indices()
-            .map(|idx| (program.graph[idx].node_id, idx.index() as u32))
-            .collect());
-        
+        let operator_indices: Arc<HashMap<_, _>> = Arc::new(
+            program
+                .graph
+                .node_indices()
+                .map(|idx| (program.graph[idx].node_id, idx.index() as u32))
+                .collect(),
+        );
 
         self.model.metric_update_task = Some(tokio::spawn(async move {
             let mut metrics: HashMap<(u32, u32), HashMap<MetricName, u64>> = HashMap::new();
@@ -691,8 +692,8 @@ impl JobController {
                         values.into_iter().filter_map(move |m| {
                             let subtask_idx =
                                 u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
-                            let operator_idx =
-                                *operator_indices.get(&u32::from_str(find_label(&m.label, "node_id")?).ok()?)?;
+                            let operator_idx = *operator_indices
+                                .get(&u32::from_str(find_label(&m.label, "node_id")?).ok()?)?;
                             let value = m
                                 .counter
                                 .map(|c| c.value)

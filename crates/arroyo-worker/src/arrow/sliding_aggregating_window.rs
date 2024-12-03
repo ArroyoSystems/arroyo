@@ -4,7 +4,7 @@ use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordB
 use arrow_schema::SchemaRef;
 use arroyo_operator::{
     context::OperatorContext,
-    operator::{ArrowOperator, OperatorConstructor, ConstructedOperator},
+    operator::{ArrowOperator, ConstructedOperator, OperatorConstructor},
 };
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
@@ -21,7 +21,9 @@ use std::{
 
 use futures::stream::FuturesUnordered;
 
+use super::sync::streams::KeyedCloneableStreamFuture;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::context::Collector;
 use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion::execution::{
@@ -39,8 +41,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::info;
-use arroyo_operator::context::Collector;
-use super::sync::streams::KeyedCloneableStreamFuture;
 
 pub struct SlidingAggregatingWindowFunc<K: Copy> {
     slide: Duration,
@@ -113,7 +113,11 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn advance(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) -> Result<()> {
+    async fn advance(
+        &mut self,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) -> Result<()> {
         let bin_start = match self.state {
             SlidingWindowState::NoData => unreachable!(),
             SlidingWindowState::OnlyBufferedData { earliest_bin_time } => earliest_bin_time,
@@ -596,7 +600,12 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
     }
 
     // TODO: filter out late data
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -683,7 +692,12 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         Some(watermark)
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        b: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {

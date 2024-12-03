@@ -13,11 +13,12 @@ use arrow_array::{Array, BooleanArray, RecordBatch, StructArray};
 use arrow_array::cast::AsArray;
 use arrow_schema::SchemaRef;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::context::Collector;
 use arroyo_operator::{
     context::OperatorContext,
     operator::{
-        ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, ConstructedOperator,
-        Registry,
+        ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator,
+        OperatorConstructor, Registry,
     },
 };
 use arroyo_rpc::df::ArroyoSchemaRef;
@@ -25,6 +26,7 @@ use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_rpc::{updating_meta_fields, UPDATING_META_FIELD};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
+use datafusion::common::utils::coerced_fixed_size_list_to_list;
 use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -35,11 +37,9 @@ use futures::{lock::Mutex, Future};
 use itertools::Itertools;
 use prost::Message;
 use std::time::Duration;
-use datafusion::common::utils::coerced_fixed_size_list_to_list;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::log::warn;
-use arroyo_operator::context::Collector;
 
 pub struct UpdatingAggregatingFunc {
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
@@ -59,7 +59,11 @@ pub struct UpdatingAggregatingFunc {
 }
 
 impl UpdatingAggregatingFunc {
-    async fn flush(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) -> Result<()> {
+    async fn flush(
+        &mut self,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) -> Result<()> {
         if self.sender.is_none() {
             return Ok(());
         }
@@ -160,11 +164,12 @@ impl UpdatingAggregatingFunc {
         }
 
         if !batches_to_write.is_empty() {
-            collector.collect(concat_batches(
-                &batches_to_write[0].schema(),
-                batches_to_write.iter(),
-            )?)
-            .await;
+            collector
+                .collect(concat_batches(
+                    &batches_to_write[0].schema(),
+                    batches_to_write.iter(),
+                )?)
+                .await;
         }
 
         Ok(())
@@ -244,14 +249,24 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         if self.sender.is_none() {
             self.init_exec();
         }
         self.sender.as_ref().unwrap().send(batch).unwrap();
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        b: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         self.flush(ctx, collector).await.unwrap();
     }
 
@@ -285,7 +300,12 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         Some(self.flush_interval)
     }
 
-    async fn handle_tick(&mut self, _tick: u64, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn handle_tick(
+        &mut self,
+        _tick: u64,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         self.flush(ctx, collector).await.unwrap();
     }
 
@@ -334,7 +354,12 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         }))
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn on_close(
+        &mut self,
+        final_message: &Option<SignalMessage>,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
         if let Some(SignalMessage::EndOfData) = final_message {
             self.flush(ctx, collector).await.unwrap();
         }
