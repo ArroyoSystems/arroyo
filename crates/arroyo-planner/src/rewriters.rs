@@ -706,7 +706,7 @@ impl<'a> SinkInputRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for SinkInputRewriter<'a> {
+impl TreeNodeRewriter for SinkInputRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
