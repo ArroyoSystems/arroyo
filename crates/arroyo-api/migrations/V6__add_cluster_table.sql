@@ -1,4 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE cluster_info (
     id UUID PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
