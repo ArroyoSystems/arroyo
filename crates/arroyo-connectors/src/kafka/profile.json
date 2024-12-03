@@ -106,6 +106,18 @@
                     "sensitive": ["apiSecret"]
                 }
             ]
+        },
+        "connectionProperties": {
+            "type": "object",
+            "title": "Connection Properties",
+            "description": "Key-value pairs of rdkafka configuration options",
+            "items": {
+                "type": "string",
+                "title": "property"
+            },
+            "additionalProperties": {
+                "type": "string"
+            }
         }
     },
     "required": ["bootstrapServers", "authentication"]
