@@ -263,7 +263,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
     }
 }
 
-impl<'a> PlanToGraphVisitor<'a> {
+impl PlanToGraphVisitor<'_> {
     fn add_index_to_traversal(&mut self, index: NodeIndex) {
         if let Some(last) = self.traversal.last_mut() {
             last.push(index);
@@ -327,7 +327,7 @@ impl<'a> PlanToGraphVisitor<'a> {
     }
 }
 
-impl<'a> TreeNodeVisitor<'_> for PlanToGraphVisitor<'a> {
+impl TreeNodeVisitor<'_> for PlanToGraphVisitor<'_> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {

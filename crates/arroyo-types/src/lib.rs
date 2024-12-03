@@ -458,7 +458,7 @@ pub struct CheckpointBarrier {
 
 pub struct DisplayAsSql<'a>(pub &'a DataType);
 
-impl<'a> Display for DisplayAsSql<'a> {
+impl Display for DisplayAsSql<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             DataType::Boolean => write!(f, "BOOLEAN"),

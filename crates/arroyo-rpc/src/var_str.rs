@@ -21,7 +21,7 @@ impl Serialize for VarStr {
 
 struct VarStrVisitor;
 
-impl<'de> Visitor<'de> for VarStrVisitor {
+impl Visitor<'_> for VarStrVisitor {
     type Value = VarStr;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
