@@ -64,6 +64,7 @@ pub enum ControlOutcome {
     Stop,
     StopAndSendStop,
     Finish,
+    StopAfterCommit,
 }
 
 #[derive(Debug)]

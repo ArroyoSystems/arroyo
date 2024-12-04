@@ -151,8 +151,18 @@ impl OperatorNode {
         }
     }
 
+    pub fn operator_ids(&self) -> Vec<String> {
+        match self {
+            OperatorNode::Source(s) => vec![s.context.task_info.operator_id.clone()],
+            OperatorNode::Chained(s) => s
+                .iter()
+                .map(|(_, ctx)| ctx.task_info.operator_id.clone())
+                .collect(),
+        }
+    }
+
     async fn run_behavior(
-        mut self,
+        self,
         chain_info: &Arc<ChainInfo>,
         control_tx: Sender<ControlResp>,
         control_rx: Receiver<ControlMessage>,
@@ -287,9 +297,8 @@ async fn run_checkpoint(
     task_info: &TaskInfo,
     watermark: Option<SystemTime>,
     table_manager: &mut TableManager,
-    collector: &mut dyn Collector,
     control_tx: &Sender<ControlResp>,
-) -> bool {
+) {
     table_manager
         .checkpoint(checkpoint_barrier, watermark)
         .await;
@@ -301,12 +310,6 @@ async fn run_checkpoint(
         TaskCheckpointEventType::FinishedSync,
     )
     .await;
-
-    collector
-        .broadcast(SignalMessage::Barrier(checkpoint_barrier))
-        .await;
-
-    checkpoint_barrier.then_stop
 }
 
 #[async_trait]
@@ -348,10 +351,15 @@ pub trait SourceOperator: Send + 'static {
             &ctx.task_info,
             ctx.watermarks.last_present_watermark(),
             &mut ctx.table_manager,
-            &mut collector.collector,
             &ctx.control_tx,
         )
-        .await
+        .await;
+
+        collector
+            .broadcast(SignalMessage::Barrier(checkpoint_barrier))
+            .await;
+
+        checkpoint_barrier.then_stop
     }
 }
 
@@ -383,9 +391,35 @@ macro_rules! call_and_recurse {
     };
 }
 
+macro_rules! call_with_collector {
+    ($self:expr, $final_collector:expr, $name:ident, $arg:expr) => {
+        match &mut $self.next {
+            Some(next) => {
+                let mut collector = ChainedCollector {
+                    cur: next,
+                    index: 0,
+                    in_partitions: 1,
+                    final_collector: $final_collector,
+                };
+
+                $self
+                    .operator
+                    .$name($arg, &mut $self.context, &mut collector)
+                    .await;
+            }
+            None => {
+                $self
+                    .operator
+                    .$name($arg, &mut $self.context, $final_collector)
+                    .await;
+            }
+        }
+    };
+}
+
 pub struct ChainedCollector<'a, 'b> {
     cur: &'a mut ChainedOperator,
-    final_collector: &'b mut dyn Collector,
+    final_collector: &'b mut ArrowCollector,
     index: usize,
     in_partitions: usize,
 }
@@ -430,17 +464,10 @@ where
         };
     }
 
-    async fn broadcast(&mut self, message: SignalMessage) {
-        match message {
-            SignalMessage::Watermark(w) => {
-                self.cur
-                    .handle_watermark(w, self.index, self.final_collector)
-                    .await;
-            }
-            m => {
-                todo!("Unsupported signal message: {:?}", m);
-            }
-        }
+    async fn broadcast_watermark(&mut self, watermark: Watermark) {
+        self.cur
+            .handle_watermark(watermark, self.index, self.final_collector)
+            .await;
     }
 }
 
@@ -513,10 +540,30 @@ impl Future for IndexedFuture {
 }
 
 impl ChainedOperator {
-    async fn handle_controller_message(&mut self, control_message: &ControlMessage) {
+    async fn handle_controller_message(
+        &mut self,
+        control_message: &ControlMessage,
+        shutdown_after_commit: bool,
+    ) -> bool {
         for (op, ctx) in self.iter_mut() {
-            op.handle_controller_message(control_message, ctx).await;
+            match control_message {
+                ControlMessage::Checkpoint(_) => {
+                    error!("shouldn't receive checkpoint")
+                }
+                ControlMessage::Stop { .. } => {
+                    error!("shouldn't receive stop")
+                }
+                ControlMessage::Commit { epoch, commit_data } => {
+                    op.handle_commit(*epoch, &commit_data, ctx).await;
+                    return shutdown_after_commit;
+                }
+                ControlMessage::LoadCompacted { compacted } => {
+                    ctx.load_compacted(compacted).await;
+                }
+                ControlMessage::NoOp => {}
+            }
         }
+        false
     }
 
     pub fn iter(&self) -> ChainIterator {
@@ -553,7 +600,7 @@ impl ChainedOperator {
         index: usize,
         in_partitions: usize,
         batch: RecordBatch,
-        final_collector: &'b mut dyn Collector,
+        final_collector: &'b mut ArrowCollector,
     ) where
         'a: 'b,
     {
@@ -605,7 +652,7 @@ impl ChainedOperator {
         in_partitions: usize,
         control_tx: &Sender<ControlResp>,
         chain_info: &ChainInfo,
-        collector: &mut dyn Collector,
+        collector: &mut ArrowCollector,
     ) -> ControlOutcome {
         match message {
             SignalMessage::Barrier(t) => {
@@ -628,44 +675,18 @@ impl ChainedOperator {
                 if counter.mark(idx, t) {
                     debug!("Checkpointing {chain_info}");
 
-                    send_checkpoint_event(
-                        control_tx,
-                        &self.context.task_info,
-                        *t,
-                        TaskCheckpointEventType::StartedCheckpointing,
-                    )
-                    .await;
+                    self.run_checkpoint(t, control_tx, collector).await;
 
-                    self.handle_checkpoint(*t, collector).await;
+                    collector.broadcast(SignalMessage::Barrier(*t)).await;
 
-                    send_checkpoint_event(
-                        control_tx,
-                        &self.context.task_info,
-                        *t,
-                        TaskCheckpointEventType::FinishedOperatorSetup,
-                    )
-                    .await;
-
-                    // we want the watermark from the last op in the chain, as that will be the smallest
-                    // and this is used to determine whether when we can drop the checkpoint file
-                    let last_watermark = self
-                        .iter()
-                        .last()
-                        .unwrap()
-                        .1
-                        .watermarks
-                        .last_present_watermark();
-                    if run_checkpoint(
-                        *t,
-                        &self.context.task_info,
-                        last_watermark,
-                        &mut self.context.table_manager,
-                        collector,
-                        control_tx,
-                    )
-                    .await
-                    {
-                        return ControlOutcome::Stop;
+                    if t.then_stop {
+                        // if this is a committing operator, we need to wait for the commit message
+                        // before shutting down; otherwise we just stop
+                        return if self.operator.is_committing() {
+                            ControlOutcome::StopAfterCommit
+                        } else {
+                            return ControlOutcome::Stop;
+                        };
                     }
                 }
             }
@@ -694,7 +715,7 @@ impl ChainedOperator {
         &mut self,
         watermark: Watermark,
         index: usize,
-        final_collector: &mut dyn Collector,
+        final_collector: &mut ArrowCollector,
     ) {
         trace!(
             "handling watermark {:?} for {}",
@@ -752,7 +773,7 @@ impl ChainedOperator {
         &mut self,
         op_index: usize,
         result: Box<dyn Any + Send>,
-        final_collector: &mut dyn Collector,
+        final_collector: &mut ArrowCollector,
     ) {
         let mut op = self;
         for _ in 0..op_index {
@@ -782,31 +803,69 @@ impl ChainedOperator {
         }
     }
 
-    async fn handle_checkpoint(
+    async fn run_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
-        final_collector: &mut dyn Collector,
+        t: &CheckpointBarrier,
+        control_tx: &Sender<ControlResp>,
+        final_collector: &mut ArrowCollector,
     ) {
-        call_and_recurse!(self, final_collector, handle_checkpoint, b)
+        send_checkpoint_event(
+            control_tx,
+            &self.context.task_info,
+            *t,
+            TaskCheckpointEventType::StartedCheckpointing,
+        )
+        .await;
+
+        call_with_collector!(self, final_collector, handle_checkpoint, *t);
+
+        send_checkpoint_event(
+            control_tx,
+            &self.context.task_info,
+            *t,
+            TaskCheckpointEventType::FinishedOperatorSetup,
+        )
+        .await;
+
+        let last_watermark = self.context.watermarks.last_present_watermark();
+
+        run_checkpoint(
+            *t,
+            &self.context.task_info,
+            last_watermark,
+            &mut self.context.table_manager,
+            control_tx,
+        )
+        .await;
+
+        if let Some(next) = &mut self.next {
+            Box::pin(next.run_checkpoint(t, control_tx, final_collector)).await;
+        }
     }
 
     async fn handle_commit(
         &mut self,
         epoch: u32,
         commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
-        ctx: &mut OperatorContext,
     ) {
-        todo!()
+        assert_eq!(
+            self.iter().count(),
+            1,
+            "commits can only be applied to sinks"
+        );
+        self.operator
+            .handle_commit(epoch, commit_data, &mut self.context)
+            .await;
     }
 
-    async fn handle_tick(&mut self, tick: u64, final_collector: &mut dyn Collector) {
+    async fn handle_tick(&mut self, tick: u64, final_collector: &mut ArrowCollector) {
         call_and_recurse!(self, final_collector, handle_tick, tick)
     }
 
     async fn on_close(
         &mut self,
         final_message: &Option<SignalMessage>,
-        final_collector: &mut dyn Collector,
+        final_collector: &mut ArrowCollector,
     ) {
         match &mut self.next {
             Some(next) => {
@@ -878,11 +937,15 @@ async fn operator_run_behavior(
 
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    let mut shutdown_after_commit = false;
+
     loop {
         let operator_future: OptionFuture<_> = this.future_to_poll().into();
         tokio::select! {
             Some(control_message) = control_rx.recv() => {
-                this.handle_controller_message(&control_message).await;
+                if this.handle_controller_message(&control_message, shutdown_after_commit).await {
+                    break;
+                }
             }
 
             p = sel.next() => {
@@ -914,6 +977,9 @@ async fn operator_run_behavior(
                                         // a final checkpoint
                                         break;
                                     }
+                                    ControlOutcome::StopAfterCommit => {
+                                        shutdown_after_commit = true;
+                                    }
                                     ControlOutcome::Finish => {
                                         final_message = Some(SignalMessage::EndOfData);
                                         break;
@@ -939,7 +1005,9 @@ async fn operator_run_behavior(
                     }
                     None => {
                         info!("[{}] Stream completed", chain_info);
-                        break;
+                        if !shutdown_after_commit {
+                            break;
+                        }
                     }
                 }
             }
@@ -1025,32 +1093,14 @@ pub struct DisplayableOperator<'a> {
 
 #[async_trait::async_trait]
 pub trait ArrowOperator: Send + 'static {
-    async fn handle_controller_message(
-        &mut self,
-        control_message: &ControlMessage,
-        ctx: &mut OperatorContext,
-    ) {
-        match control_message {
-            ControlMessage::Checkpoint(_) => {
-                error!("shouldn't receive checkpoint")
-            }
-            ControlMessage::Stop { .. } => {
-                error!("shouldn't receive stop")
-            }
-            ControlMessage::Commit { epoch, commit_data } => {
-                self.handle_commit(*epoch, &commit_data, ctx).await;
-            }
-            ControlMessage::LoadCompacted { compacted } => {
-                ctx.load_compacted(compacted).await;
-            }
-            ControlMessage::NoOp => {}
-        }
-    }
-
     fn name(&self) -> String;
 
     fn tables(&self) -> HashMap<String, TableConfig> {
         HashMap::new()
+    }
+
+    fn is_committing(&self) -> bool {
+        false
     }
 
     fn tick_interval(&self) -> Option<Duration> {
