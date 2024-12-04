@@ -763,6 +763,10 @@ impl OperatorContext {
             .await
             .expect("should be able to load compacted");
     }
+
+    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
+        self.error_reporter.report_error(message, details).await;
+    }
 }
 
 #[cfg(test)]
