@@ -634,7 +634,7 @@ impl WorkerGrpc for WorkerServer {
             }
         }
 
-        return Ok(Response::new(LoadCompactedDataRes {}));
+        Ok(Response::new(LoadCompactedDataRes {}))
     }
 
     async fn stop_execution(

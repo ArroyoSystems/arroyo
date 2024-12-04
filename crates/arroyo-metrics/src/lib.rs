@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use arroyo_types::{
-    ChainInfo, TaskInfo, BATCHES_RECV, BATCHES_SENT, BYTES_RECV, BYTES_SENT,
-    DESERIALIZATION_ERRORS, MESSAGES_RECV, MESSAGES_SENT,
+    ChainInfo, BATCHES_RECV, BATCHES_SENT, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS,
+    MESSAGES_RECV, MESSAGES_SENT,
 };
 use lazy_static::lazy_static;
 use prometheus::{
@@ -42,7 +42,7 @@ pub fn histogram_for_task(
 
 lazy_static! {
     pub static ref TASK_METRIC_LABELS: Vec<&'static str> =
-        vec!["operator_id", "subtask_idx", "operator_name"];
+        vec!["node_id", "subtask_idx", "operator_name"];
     pub static ref MESSAGE_RECV_COUNTER: IntCounterVec = register_int_counter_vec!(
         MESSAGES_RECV,
         "Count of messages received by this subtask",
