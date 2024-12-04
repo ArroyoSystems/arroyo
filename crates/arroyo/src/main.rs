@@ -372,6 +372,19 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
         config().database.postgres
     );
 
+    // make compatible with lower version PG (i.g. 12.16) which not support function
+    // gen_random_uuid by default.
+    client
+        .batch_execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "Failed to create extension pgcrypto on {:?}: {:?}",
+                config().database.postgres,
+                e
+            )
+        })?;
+
     let report = migrations::migrations::runner()
         .run_async(&mut client)
         .await
@@ -415,7 +428,9 @@ async fn start_control_plane(service: CPService) {
     shutdown.spawn_task("admin", start_admin_server(service.name()));
 
     if service == CPService::Api || service == CPService::All {
-        arroyo_api::start_server(db.clone(), shutdown.guard("api")).unwrap();
+        arroyo_api::start_server(db.clone(), shutdown.guard("api"))
+            .await
+            .unwrap();
     }
 
     if service == CPService::Compiler || service == CPService::All {

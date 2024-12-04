@@ -24,10 +24,10 @@ tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 tonic-web = { workspace = true }
 prost = {workspace = true}
-prost-reflect = "0.12.0"
+prost-reflect = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
-tower = "0.4"
+tower = {workspace = true}
 rand = "0.8"
 rand_chacha = "0.3"
 async-trait = "0.1"
@@ -40,14 +40,14 @@ arrow-schema = {workspace = true, features = ["serde"]}
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
 
-http = "0.2"
-tower-http = {version = "0.4", features = ["trace", "fs", "cors", "validate-request", "auth", "compression-zstd"]}
-axum = {version = "0.6.20", features = ["headers", "tokio", "macros"]}
-axum-extra = "0.7.4"
-h2 = "0.3.26"
+http = "1"
+tower-http = { workspace = true, features = ["trace", "fs", "cors", "validate-request", "auth", "compression-zstd"]}
+axum = {workspace = true, features = ["tokio", "macros"]}
+axum-extra = { version = "0.9", features = ["typed-header"] }
+h2 = "0.4"
 thiserror = "1.0.40"
-utoipa = "4"
-utoipa-swagger-ui = { version = "4", features = ["axum"] }
+utoipa = { workspace = true }
+utoipa-swagger-ui = { version = "7", features = ["axum"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -63,7 +63,6 @@ typify = "0.0.13"
 schemars = "0.8"
 
 # metric querying
-prometheus-http-query = "0.6.5"
 reqwest = {workspace = true}
 base64 = '0.21'
 
@@ -87,16 +86,16 @@ time = "0.3"
 cornucopia_async = { workspace = true, features = ["with-serde_json-1"]}
 jwt-simple = "0.11.4"
 uuid = "1.3.3"
-regress = "0.6.0"
+regress = "0.10"
 apache-avro = "0.16.0"
 toml = "0.8"
-rust-embed = { version = "6.8.1", features = ["axum"] }
+rust-embed = { version = "8", features = ["axum"] }
 mime_guess = "2.0.4"
 
 [build-dependencies]
 cornucopia = { workspace = true }
 postgres = "0.19.5"
 arroyo-types = { path = "../arroyo-types" }
-utoipa = "3"
+utoipa = { workspace = true }
 rusqlite = "0.31.0"
 refinery = { version = "0.8.14", features = ["rusqlite"] }

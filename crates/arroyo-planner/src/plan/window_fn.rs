@@ -159,12 +159,10 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
 
         let mut sort_expressions: Vec<_> = additional_keys
             .iter()
-            .map(|partition| {
-                Expr::Sort(logical_expr::expr::Sort {
-                    expr: Box::new(partition.clone()),
-                    asc: true,
-                    nulls_first: false,
-                })
+            .map(|partition| logical_expr::expr::Sort {
+                expr: partition.clone(),
+                asc: true,
+                nulls_first: false,
             })
             .collect();
         sort_expressions.extend(new_window_func.order_by.clone());

@@ -13,6 +13,7 @@ use prost::Message;
 
 use crate::{
     builder::{NamedNode, Planner},
+    multifield_partial_ord,
     physical::ArroyoPhysicalExtensionCodec,
 };
 
@@ -30,6 +31,8 @@ pub(crate) struct RemoteTableExtension {
     pub(crate) schema: DFSchemaRef,
     pub(crate) materialize: bool,
 }
+
+multifield_partial_ord!(RemoteTableExtension, input, name, materialize);
 
 impl ArroyoExtension for RemoteTableExtension {
     fn node_name(&self) -> Option<NamedNode> {

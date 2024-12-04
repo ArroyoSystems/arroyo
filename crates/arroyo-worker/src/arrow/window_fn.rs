@@ -233,7 +233,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
         };
         let window_exec = window_exec.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::new(RuntimeConfig::new())?,
+            &RuntimeEnv::try_new(RuntimeConfig::new())?,
             &codec,
         )?;
         let input_schema_unkeyed = Arc::new(ArroyoSchema::from_schema_unkeyed(

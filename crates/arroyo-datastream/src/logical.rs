@@ -176,7 +176,7 @@ impl Debug for LogicalNode {
 
 pub type LogicalGraph = DiGraph<LogicalNode, LogicalEdge>;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
 pub struct DylibUdfConfig {
     pub dylib_path: String,
     pub arg_types: Vec<DataType>,

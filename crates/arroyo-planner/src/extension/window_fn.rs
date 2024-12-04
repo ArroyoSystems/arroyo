@@ -15,7 +15,7 @@ use super::{ArroyoExtension, NodeWithIncomingEdges};
 
 pub(crate) const WINDOW_FUNCTION_EXTENSION_NAME: &str = "WindowFunctionExtension";
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd)]
 pub(crate) struct WindowFunctionExtension {
     window_plan: LogicalPlan,
     key_fields: Vec<usize>,
@@ -83,7 +83,7 @@ impl ArroyoExtension for WindowFunctionExtension {
             &input_df_schema,
         )?;
         let binning_function_proto =
-            serialize_physical_expr(binning_function, &DefaultPhysicalExtensionCodec {})?;
+            serialize_physical_expr(&binning_function, &DefaultPhysicalExtensionCodec {})?;
 
         let window_plan = planner.sync_plan(&self.window_plan)?;
         let codec = ArroyoPhysicalExtensionCodec::default();

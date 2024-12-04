@@ -97,6 +97,23 @@ impl<'a> TryFrom<&'a Arc<dyn UserDefinedLogicalNode>> for &'a dyn ArroyoExtensio
     }
 }
 
+#[macro_export]
+macro_rules! multifield_partial_ord {
+    ($ty:ty, $($field:tt), *) => {
+        impl PartialOrd for $ty {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                $(
+                    let cmp = self.$field.partial_cmp(&other.$field)?;
+                    if cmp != std::cmp::Ordering::Equal {
+                        return Some(cmp);
+                    }
+                )*
+                Some(std::cmp::Ordering::Equal)
+            }
+        }
+}
+    }
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TimestampAppendExtension {
     pub(crate) input: LogicalPlan,
@@ -117,6 +134,8 @@ impl TimestampAppendExtension {
         }
     }
 }
+
+multifield_partial_ord!(TimestampAppendExtension, input, qualifier);
 
 impl UserDefinedLogicalNodeCore for TimestampAppendExtension {
     fn name(&self) -> &str {
@@ -167,6 +186,18 @@ pub(crate) struct AsyncUDFExtension {
     pub(crate) final_schema: DFSchemaRef,
 }
 
+multifield_partial_ord!(
+    AsyncUDFExtension,
+    input,
+    name,
+    udf,
+    arg_exprs,
+    final_exprs,
+    ordered,
+    max_concurrency,
+    timeout
+);
+
 impl ArroyoExtension for AsyncUDFExtension {
     fn node_name(&self) -> Option<NamedNode> {
         None
@@ -183,7 +214,7 @@ impl ArroyoExtension for AsyncUDFExtension {
             .iter()
             .map(|e| {
                 let p = planner.create_physical_expr(e, self.input.schema())?;
-                Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
+                Ok(serialize_physical_expr(&p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -201,7 +232,7 @@ impl ArroyoExtension for AsyncUDFExtension {
             .iter()
             .map(|e| {
                 let p = planner.create_physical_expr(e, &post_udf_schema)?;
-                Ok(serialize_physical_expr(p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
+                Ok(serialize_physical_expr(&p, &DefaultPhysicalExtensionCodec {})?.encode_to_vec())
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -252,6 +283,8 @@ pub(crate) struct IsRetractExtension {
     pub(crate) schema: DFSchemaRef,
     pub(crate) timestamp_qualifier: Option<TableReference>,
 }
+
+multifield_partial_ord!(IsRetractExtension, input, timestamp_qualifier);
 
 impl IsRetractExtension {
     pub(crate) fn new(input: LogicalPlan, timestamp_qualifier: Option<TableReference>) -> Self {

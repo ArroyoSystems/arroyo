@@ -47,15 +47,18 @@ fn test_udf() {
     let udf = test_udf_1::__local().config;
     let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
     let result = sync_udf
-        .invoke(&[
-            ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
-            ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
-            ColumnarValue::Array(Arc::new(BinaryArray::from(vec![
-                b"x".as_ref(),
-                b"y".as_ref(),
-                b"z".as_ref(),
-            ]))),
-        ])
+        .invoke_batch(
+            &[
+                ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
+                ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
+                ColumnarValue::Array(Arc::new(BinaryArray::from(vec![
+                    b"x".as_ref(),
+                    b"y".as_ref(),
+                    b"z".as_ref(),
+                ]))),
+            ],
+            3,
+        )
         .unwrap();
 
     let ColumnarValue::Array(a) = result else {
@@ -79,7 +82,7 @@ fn test_optional_arg() {
     data.append_option(Some(vec![4, 5]));
 
     let result = sync_udf
-        .invoke(&[ColumnarValue::Array(Arc::new(data.finish()))])
+        .invoke_batch(&[ColumnarValue::Array(Arc::new(data.finish()))], 1)
         .unwrap();
 
     let ColumnarValue::Array(a) = result else {

@@ -27,7 +27,7 @@ use datafusion::common::{
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    BinaryExpr, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
+    BinaryExpr, ColumnUnnestList, Expr, Extension, LogicalPlan, Projection, TableScan, Unnest,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -40,7 +40,7 @@ pub struct SourceRewriter<'a> {
     pub(crate) schema_provider: &'a ArroyoSchemaProvider,
 }
 
-impl<'a> SourceRewriter<'a> {
+impl SourceRewriter<'_> {
     fn watermark_expression(table: &ConnectorTable) -> DFResult<Expr> {
         let expr = match table.watermark_field.clone() {
             Some(watermark_field) => table
@@ -253,7 +253,7 @@ impl<'a> SourceRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for SourceRewriter<'a> {
+impl TreeNodeRewriter for SourceRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
@@ -424,7 +424,13 @@ impl TreeNodeRewriter for UnnestRewriter {
                 )
                 .qualified_column()],
                 input: produce_list,
-                list_type_columns: vec![],
+                list_type_columns: vec![(
+                    unnest_idx,
+                    ColumnUnnestList {
+                        output_column: Column::new_unqualified(UNNESTED_COL),
+                        depth: 1,
+                    },
+                )],
                 struct_type_columns: vec![],
                 dependency_indices: vec![],
                 schema: Arc::new(schema_from_df_fields(&unnest_fields).unwrap()),
@@ -496,7 +502,7 @@ impl<'a> AsyncUdfRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for AsyncUdfRewriter<'a> {
+impl TreeNodeRewriter for AsyncUdfRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
@@ -582,7 +588,7 @@ impl<'a> SourceMetadataVisitor<'a> {
     }
 }
 
-impl<'a> SourceMetadataVisitor<'a> {
+impl SourceMetadataVisitor<'_> {
     fn get_connection_id(&self, node: &LogicalPlan) -> Option<i64> {
         let LogicalPlan::Extension(Extension { node }) = node else {
             return None;
@@ -608,7 +614,7 @@ impl<'a> SourceMetadataVisitor<'a> {
     }
 }
 
-impl<'a> TreeNodeVisitor<'_> for SourceMetadataVisitor<'a> {
+impl TreeNodeVisitor<'_> for SourceMetadataVisitor<'_> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {

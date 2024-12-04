@@ -37,7 +37,7 @@ anyhow = "1.0.71"
 tracing = "0.1.37"
 regress = "0.10.0"
 futures = "0.3.28"
-axum = {version = "0.6.12"}
+axum = {workspace = true}
 rand = "0.8.5"
 base64 = "0.13.1"
 bytes = "1.5.0"
@@ -50,8 +50,10 @@ regex = "1"
 ##########################
 
 # Kafka
-rdkafka = { version = "0.36", features = ["cmake-build", "tracing", "sasl", "ssl-vendored"] }
-rdkafka-sys = "4.5.0"
+aws-sdk-kafka = { version = "1.44" }
+aws-msk-iam-sasl-signer = "1.0.0"
+rdkafka = { version = "0.36", features = ["cmake-build", "tracing", "sasl", "ssl-vendored", "zstd"] }
+rdkafka-sys = "4.7.0"
 sasl2-sys = { version = "0.1.6", features = ["vendored"] }
 
 # SSE
