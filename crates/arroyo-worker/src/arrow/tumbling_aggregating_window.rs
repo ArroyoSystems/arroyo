@@ -416,9 +416,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
-                None => {
-                    debug!("future for {} was finished elsewhere", print_time(bin));
-                }
+                None => {}
                 Some((batch, future)) => match self.execs.get_mut(&bin) {
                     Some(exec) => {
                         exec.finished_batches

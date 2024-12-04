@@ -33,14 +33,25 @@ use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{debug, error, info, warn};
 
-use self::checkpointer::CheckpointingOrCommittingState;
-
-mod checkpointer;
 pub mod job_metrics;
 
 const CHECKPOINTS_TO_KEEP: u32 = 4;
 const CHECKPOINT_ROWS_TO_KEEP: u32 = 100;
 const COMPACT_EVERY: u32 = 2;
+
+pub enum CheckpointingOrCommittingState {
+    Checkpointing(CheckpointState),
+    Committing(CommittingState),
+}
+
+impl CheckpointingOrCommittingState {
+    pub(crate) fn done(&self) -> bool {
+        match self {
+            CheckpointingOrCommittingState::Checkpointing(checkpointing) => checkpointing.done(),
+            CheckpointingOrCommittingState::Committing(committing) => committing.done(),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkerState {
@@ -188,7 +199,8 @@ impl RunningJobModel {
                             CheckpointingOrCommittingState::Committing(committing_state) => {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
                                 {
-                                    committing_state.subtask_committed(c.node_id, c.subtask_index);
+                                    committing_state
+                                        .subtask_committed(c.operator_id.clone(), c.subtask_index);
                                     self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())
@@ -452,6 +464,7 @@ impl RunningJobModel {
                             DbCheckpointState::committing,
                         )
                         .await?;
+
                         let committing_data = committing_state.committing_data();
                         self.checkpoint_state =
                             Some(CheckpointingOrCommittingState::Committing(committing_state));

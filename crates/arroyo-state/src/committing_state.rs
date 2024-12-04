@@ -4,15 +4,15 @@ use arroyo_rpc::grpc::rpc::{OperatorCommitData, TableCommitData};
 
 pub struct CommittingState {
     checkpoint_id: String,
-    subtasks_to_commit: HashSet<(u32, u32)>,
-    committing_data: HashMap<u32, HashMap<String, HashMap<u32, Vec<u8>>>>,
+    subtasks_to_commit: HashSet<(String, u32)>,
+    committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
 }
 
 impl CommittingState {
     pub fn new(
         checkpoint_id: String,
-        subtasks_to_commit: HashSet<(u32, u32)>,
-        committing_data: HashMap<u32, HashMap<String, HashMap<u32, Vec<u8>>>>,
+        subtasks_to_commit: HashSet<(String, u32)>,
+        committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
     ) -> Self {
         Self {
             checkpoint_id,
@@ -25,19 +25,20 @@ impl CommittingState {
         &self.checkpoint_id
     }
 
-    pub fn subtask_committed(&mut self, node_id: u32, subtask_index: u32) {
-        self.subtasks_to_commit.remove(&(node_id, subtask_index));
+    pub fn subtask_committed(&mut self, operator_id: String, subtask_index: u32) {
+        self.subtasks_to_commit
+            .remove(&(operator_id, subtask_index));
     }
 
     pub fn done(&self) -> bool {
         self.subtasks_to_commit.is_empty()
     }
 
-    pub fn committing_data(&self) -> HashMap<u32, OperatorCommitData> {
+    pub fn committing_data(&self) -> HashMap<String, OperatorCommitData> {
         let operators_to_commit: HashSet<_> = self
             .subtasks_to_commit
             .iter()
-            .map(|(node_id, _subtask_id)| *node_id)
+            .map(|(operator_id, _subtask_id)| operator_id.clone())
             .collect();
 
         operators_to_commit

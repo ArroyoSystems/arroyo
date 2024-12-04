@@ -533,7 +533,7 @@ impl ErrorReporter {
 #[async_trait]
 pub trait Collector: Send {
     async fn collect(&mut self, batch: RecordBatch);
-    async fn broadcast(&mut self, message: SignalMessage);
+    async fn broadcast_watermark(&mut self, watermark: Watermark);
 }
 
 #[derive(Clone)]
@@ -649,19 +649,8 @@ impl Collector for ArrowCollector {
         }
     }
 
-    async fn broadcast(&mut self, message: SignalMessage) {
-        for out_node in &self.out_qs {
-            for q in out_node {
-                q.send(ArrowMessage::Signal(message.clone()))
-                    .await
-                    .unwrap_or_else(|e| {
-                        panic!(
-                            "failed to broadcast message <{:?}> for operator {}: {}",
-                            message, self.chain_info, e
-                        )
-                    });
-            }
-        }
+    async fn broadcast_watermark(&mut self, watermark: Watermark) {
+        self.broadcast(SignalMessage::Watermark(watermark)).await;
     }
 }
 
@@ -707,6 +696,21 @@ impl ArrowCollector {
             tx_queue_rem_gauges,
             tx_queue_size_gauges,
             tx_queue_bytes_gauges,
+        }
+    }
+
+    pub async fn broadcast(&mut self, message: SignalMessage) {
+        for out_node in &self.out_qs {
+            for q in out_node {
+                q.send(ArrowMessage::Signal(message.clone()))
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "failed to broadcast message <{:?}> for operator {}: {}",
+                            message, self.chain_info, e
+                        )
+                    });
+            }
         }
     }
 }
