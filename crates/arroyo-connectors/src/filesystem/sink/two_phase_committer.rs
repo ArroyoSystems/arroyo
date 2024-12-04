@@ -3,16 +3,16 @@ use arrow::record_batch::RecordBatch;
 use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
 use arroyo_rpc::{
     grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
-    CheckpointEvent, ControlMessage,
+    CheckpointEvent,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{Data, SignalMessage, TaskInfo, Watermark};
+use arroyo_types::{Data, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config;
 use prost::Message;
 use std::fmt::Debug;
 use std::{collections::HashMap, time::SystemTime};
-use tracing::{info, warn};
+use tracing::{info};
 use arroyo_operator::context::Collector;
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {
@@ -108,13 +108,16 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
             .commit(&ctx.task_info, pre_commits)
             .await
             .expect("committer committed");
+
         let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
             checkpoint_epoch: epoch,
+            node_id: ctx.task_info.node_id,
             operator_id: ctx.task_info.operator_id.clone(),
             subtask_index: ctx.task_info.task_index as u32,
             time: SystemTime::now(),
             event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
         });
+
         ctx.control_tx
             .send(checkpoint_event)
             .await
@@ -181,7 +184,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
         self.committer
             .insert_batch(batch)
             .await
@@ -201,6 +204,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         &mut self,
         checkpoint_barrier: arroyo_types::CheckpointBarrier,
         ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
     ) {
         let (recovery_data, pre_commits) = self
             .committer
@@ -221,7 +225,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
             .await
             .expect("should be able to get table");
         recovery_data_state
-            .insert(ctx.task_info.task_index, recovery_data)
+            .insert(ctx.task_info.task_index as usize, recovery_data)
             .await;
         self.pre_commits.clear();
         if pre_commits.is_empty() {

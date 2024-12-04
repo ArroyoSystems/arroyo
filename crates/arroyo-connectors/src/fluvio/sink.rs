@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use arroyo_formats::ser::ArrowSerializer;
 use tracing::info;
 
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_types::CheckpointBarrier;
 
@@ -38,7 +38,7 @@ impl ArrowOperator for FluvioSinkFunc {
                 self.producer = Some(producer);
             }
             Err(e) => {
-                ctx.report_error(
+                ctx.error_reporter.report_error(
                     "Failed to construct Fluvio producer".to_string(),
                     e.to_string(),
                 )
@@ -48,7 +48,7 @@ impl ArrowOperator for FluvioSinkFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext, _: &mut dyn Collector) {
         let values = self.serializer.serialize(&batch);
         for v in values {
             self.producer
@@ -60,7 +60,7 @@ impl ArrowOperator for FluvioSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut OperatorContext, _: &mut dyn Collector) {
         self.producer.as_mut().unwrap().flush().await.unwrap();
     }
 }

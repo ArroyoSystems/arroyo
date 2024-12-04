@@ -16,44 +16,44 @@ use tracing::warn;
 
 pub mod blackhole;
 pub mod confluent;
-// pub mod filesystem;
-// pub mod fluvio;
+pub mod filesystem;
+pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
-// pub mod kinesis;
-// pub mod mqtt;
-// pub mod nats;
-// pub mod nexmark;
-// pub mod polling_http;
+pub mod kinesis;
+pub mod mqtt;
+pub mod nats;
+pub mod nexmark;
+pub mod polling_http;
 pub mod preview;
-// pub mod redis;
-// pub mod single_file;
+pub mod redis;
+pub mod single_file;
 pub mod sse;
 pub mod stdout;
-// pub mod webhook;
-// pub mod websocket;
+pub mod webhook;
+pub mod websocket;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
         Box::new(blackhole::BlackholeConnector {}),
         Box::new(confluent::ConfluentConnector {}),
-        // Box::new(filesystem::delta::DeltaLakeConnector {}),
-        // Box::new(filesystem::FileSystemConnector {}),
-        // Box::new(fluvio::FluvioConnector {}),
+        Box::new(filesystem::delta::DeltaLakeConnector {}),
+        Box::new(filesystem::FileSystemConnector {}),
+        Box::new(fluvio::FluvioConnector {}),
         Box::new(impulse::ImpulseConnector {}),
         Box::new(kafka::KafkaConnector {}),
-        // Box::new(kinesis::KinesisConnector {}),
-        // Box::new(mqtt::MqttConnector {}),
-        // Box::new(nats::NatsConnector {}),
-        // Box::new(nexmark::NexmarkConnector {}),
-        // Box::new(polling_http::PollingHTTPConnector {}),
+        Box::new(kinesis::KinesisConnector {}),
+        Box::new(mqtt::MqttConnector {}),
+        Box::new(nats::NatsConnector {}),
+        Box::new(nexmark::NexmarkConnector {}),
+        Box::new(polling_http::PollingHTTPConnector {}),
         Box::new(preview::PreviewConnector {}),
-        // Box::new(redis::RedisConnector {}),
-        // Box::new(single_file::SingleFileConnector {}),
+        Box::new(redis::RedisConnector {}),
+        Box::new(single_file::SingleFileConnector {}),
         Box::new(sse::SSEConnector {}),
         Box::new(stdout::StdoutConnector {}),
-        // Box::new(webhook::WebhookConnector {}),
-        // Box::new(websocket::WebsocketConnector {}),
+        Box::new(webhook::WebhookConnector {}),
+        Box::new(websocket::WebsocketConnector {}),
     ];
 
     connectors.into_iter().map(|c| (c.name(), c)).collect()
