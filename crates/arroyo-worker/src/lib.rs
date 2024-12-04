@@ -94,7 +94,8 @@ impl Debug for LogicalNode {
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
     sinks: Vec<Sender<ControlMessage>>,
-    operator_controls: HashMap<u32, Vec<Sender<ControlMessage>>>, // operator_id -> vec of control tx
+    operator_to_node: HashMap<String, u32>,
+    operator_controls: HashMap<u32, Vec<Sender<ControlMessage>>>, // node_id -> vec of control tx
     shutdown_guard: ShutdownGuard,
 }
 
@@ -491,11 +492,13 @@ impl WorkerGrpc for WorkerServer {
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
         let operator_controls = engine.operator_controls();
+        let operator_to_node = engine.operator_to_node();
 
         let mut state = self.state.lock().unwrap();
         *state = Some(EngineState {
             sources,
             sinks,
+            operator_to_node,
             operator_controls,
             shutdown_guard: self.shutdown_guard.child("engine-state"),
         });
@@ -564,6 +567,7 @@ impl WorkerGrpc for WorkerServer {
     async fn commit(&self, request: Request<CommitReq>) -> Result<Response<CommitResp>, Status> {
         let req = request.into_inner();
         debug!("received commit request {:?}", req);
+
         let sender_commit_map_pairs = {
             let state_mutex = self.state.lock().unwrap();
             let Some(state) = state_mutex.as_ref() else {
@@ -571,9 +575,13 @@ impl WorkerGrpc for WorkerServer {
                     "Worker has not yet started execution",
                 ));
             };
+
             let mut sender_commit_map_pairs = vec![];
-            for (node_id, commit_operator) in req.committing_data {
-                let nodes = state.operator_controls.get(&node_id).unwrap().clone();
+            for (operator_id, commit_operator) in req.committing_data {
+                let node_id = state.operator_to_node.get(&operator_id).unwrap_or_else(|| {
+                    panic!("Could not find node for operator id {}", operator_id)
+                });
+                let nodes = state.operator_controls.get(node_id).unwrap().clone();
                 let commit_map: HashMap<_, _> = commit_operator
                     .committing_data
                     .into_iter()
@@ -583,6 +591,7 @@ impl WorkerGrpc for WorkerServer {
             }
             sender_commit_map_pairs
         };
+
         for (senders, commit_map) in sender_commit_map_pairs {
             for sender in senders {
                 sender

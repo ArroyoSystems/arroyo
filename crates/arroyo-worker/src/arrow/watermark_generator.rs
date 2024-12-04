@@ -135,17 +135,17 @@ impl ArrowOperator for WatermarkGenerator {
     async fn on_close(
         &mut self,
         final_message: &Option<SignalMessage>,
-        ctx: &mut OperatorContext,
+        _: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) {
         if let Some(SignalMessage::EndOfData) = final_message {
             // send final watermark on close
             collector
-                .broadcast(SignalMessage::Watermark(
+                .broadcast_watermark(
                     // this is in the year 2554, far enough out be close to inifinity,
                     // but can still be formatted.
                     Watermark::EventTime(from_nanos(u64::MAX as u128)),
-                ))
+                )
                 .await;
         }
     }
@@ -193,7 +193,7 @@ impl ArrowOperator for WatermarkGenerator {
                 to_millis(watermark)
             );
             collector
-                .broadcast(SignalMessage::Watermark(Watermark::EventTime(watermark)))
+                .broadcast_watermark(Watermark::EventTime(watermark))
                 .await;
             self.state_cache.last_watermark_emitted_at = max_timestamp;
             self.idle = false;
@@ -202,7 +202,7 @@ impl ArrowOperator for WatermarkGenerator {
 
     async fn handle_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
+        _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) {
@@ -217,7 +217,7 @@ impl ArrowOperator for WatermarkGenerator {
 
     async fn handle_tick(
         &mut self,
-        t: u64,
+        _: u64,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) {
@@ -227,9 +227,7 @@ impl ArrowOperator for WatermarkGenerator {
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
                 );
-                collector
-                    .broadcast(SignalMessage::Watermark(Watermark::Idle))
-                    .await;
+                collector.broadcast_watermark(Watermark::Idle).await;
                 self.idle = true;
             }
         }

@@ -81,6 +81,7 @@ impl Debug for SubtaskNode {
 
 pub struct QueueNode {
     task_info: Arc<TaskInfo>,
+    operator_ids: Vec<String>,
     tx: Sender<ControlMessage>,
 }
 
@@ -128,6 +129,7 @@ impl SubtaskOrQueueNode {
 
                 let n = SubtaskOrQueueNode::QueueNode(QueueNode {
                     task_info: sn.node.task_info().clone(),
+                    operator_ids: sn.node.operator_ids(),
                     tx,
                 });
 
@@ -433,6 +435,17 @@ impl RunningEngine {
             });
 
         controls
+    }
+
+    pub fn operator_to_node(&self) -> HashMap<String, u32> {
+        let program = self.program.graph.read().unwrap();
+        let mut result = HashMap::new();
+        for n in program.node_weights() {
+            for id in &n.as_queue().operator_ids {
+                result.insert(id.clone(), n.as_queue().task_info.node_id);
+            }
+        }
+        result
     }
 }
 

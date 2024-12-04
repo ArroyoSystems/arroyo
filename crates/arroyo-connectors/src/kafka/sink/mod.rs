@@ -75,10 +75,6 @@ impl From<SinkCommitMode> for ConsistencyMode {
 }
 
 impl KafkaSinkFunc {
-    fn is_committing(&self) -> bool {
-        matches!(self.consistency_mode, ConsistencyMode::ExactlyOnce { .. })
-    }
-
     fn set_timestamp_col(&mut self, schema: &ArroyoSchema) {
         if let Some(f) = &self.timestamp_field {
             if let Ok(f) = schema.schema.field_with_name(f) {
@@ -271,6 +267,10 @@ impl ArrowOperator for KafkaSinkFunc {
         }
     }
 
+    fn is_committing(&self) -> bool {
+        matches!(self.consistency_mode, ConsistencyMode::ExactlyOnce { .. })
+    }
+
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         self.set_timestamp_col(&ctx.in_schemas[0]);
         self.set_key_col(&ctx.in_schemas[0]);
@@ -352,8 +352,10 @@ impl ArrowOperator for KafkaSinkFunc {
         };
 
         let Some(committing_producer) = producer_to_complete.take() else {
-            unimplemented!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
+            error!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
+            return;
         };
+
         let mut commits_attempted = 0;
         loop {
             if committing_producer
@@ -384,19 +386,10 @@ impl ArrowOperator for KafkaSinkFunc {
 
     async fn on_close(
         &mut self,
-        final_message: &Option<SignalMessage>,
+        _: &Option<SignalMessage>,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) {
         self.flush(ctx).await;
-        if !self.is_committing() {
-            return;
-        }
-        // if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
-        //     self.handle_commit(epoch, &commit_data, ctx).await;
-        // } else {
-        //     warn!("no commit message received, not committing")
-        // }
-        todo!("committing")
     }
 }

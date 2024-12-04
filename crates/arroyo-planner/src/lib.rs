@@ -64,7 +64,6 @@ use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
-use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_udf_host::parse::{inner_type, UdfDef};
@@ -861,7 +860,7 @@ pub async fn parse_and_get_arrow_program(
         },
     );
 
-    if arroyo_rpc::config::config().pipeline.enable_chaining {
+    if arroyo_rpc::config::config().pipeline.chaining.enabled {
         program.optimize(&ChainingOptimizer {});
     }
 

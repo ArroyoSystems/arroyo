@@ -486,9 +486,7 @@ impl AsyncUdfOperator {
 
             if watermark_id <= oldest_unprocessed {
                 // we've processed everything before this watermark, we can emit and drop it
-                collector
-                    .broadcast(SignalMessage::Watermark(watermark))
-                    .await;
+                collector.broadcast_watermark(watermark).await;
             } else {
                 // we still have messages preceding this watermark to work on
                 self.watermarks.push_front((watermark_id, watermark));

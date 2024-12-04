@@ -427,10 +427,16 @@ pub struct PipelineConfig {
     #[serde(default)]
     pub default_sink: DefaultSink,
 
-    /// Whether to enable operator chaining
-    pub enable_chaining: bool,
+    pub chaining: ChainingConfig,
 
     pub compaction: CompactionConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ChainingConfig {
+    /// Whether to enable operator chaining
+    pub enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone)]

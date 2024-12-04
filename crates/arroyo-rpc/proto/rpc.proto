@@ -352,7 +352,7 @@ message CheckpointResp {
 
 message CommitReq {
   uint32 epoch = 1;
-  map<uint32, OperatorCommitData> committing_data = 2;
+  map<string, OperatorCommitData> committing_data = 2;
 }
 
 message CommitResp {

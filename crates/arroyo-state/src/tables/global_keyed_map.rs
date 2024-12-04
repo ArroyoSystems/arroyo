@@ -194,12 +194,13 @@ impl Table for GlobalKeyedTable {
     ) -> Result<std::collections::HashSet<String>> {
         Ok(checkpoint.files.into_iter().collect())
     }
+
     fn committing_data(
         config: Self::ConfigMessage,
         table_metadata: Self::TableCheckpointMessage,
     ) -> Option<HashMap<u32, Vec<u8>>> {
         if config.uses_two_phase_commit {
-            Some(table_metadata.commit_data_by_subtask.clone())
+            Some(table_metadata.commit_data_by_subtask)
         } else {
             None
         }
