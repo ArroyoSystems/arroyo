@@ -114,8 +114,8 @@ importers:
         specifier: ^0.6.2
         version: 0.6.2
       openapi-typescript:
-        specifier: ^6.7.6
-        version: 6.7.6
+        specifier: '=6.2.8'
+        version: 6.2.8
       prop-types:
         specifier: ^15.8.1
         version: 15.8.1
@@ -2830,8 +2830,8 @@ packages:
   openapi-fetch@0.6.2:
     resolution: {integrity: sha512-Faj29Kzh7oCbt1bz6vAGNKtRJlV/GolOQTx87eYUnfCK7eVXdN9jQVojroc7tcJ5OQgyhbeOqD7LS/8UtGBnMQ==}
 
-  openapi-typescript@6.7.6:
-    resolution: {integrity: sha512-c/hfooPx+RBIOPM09GSxABOZhYPblDoyaGhqBkD/59vtpN21jEuWKDlM0KYTvqJVlSYjKs0tBcIdeXKChlSPtw==}
+  openapi-typescript@6.2.8:
+    resolution: {integrity: sha512-yA+y5MHiu6cjmtsGfNLavzVuvGCKzjL3H+exgHDPK6bnp6ZVFibtAiafenNSRDWL0x+7Sw/VPv5SbaqiPLW46w==}
     hasBin: true
 
   optionator@0.9.4:
@@ -6712,7 +6712,7 @@ snapshots:
 
   openapi-fetch@0.6.2: {}
 
-  openapi-typescript@6.7.6:
+  openapi-typescript@6.2.8:
     dependencies:
       ansi-colors: 4.1.3
       fast-glob: 3.3.2

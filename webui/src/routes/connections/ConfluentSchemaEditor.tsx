@@ -22,6 +22,7 @@ export function ConfluentSchemaEditor({
 }) {
   let formatEl = null;
 
+  // @ts-ignore
   if (state.schema!.format!.protobuf !== undefined) {
     formatEl = (
       <Box maxW={'lg'}>

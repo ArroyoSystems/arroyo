@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "format": "npx prettier --write src/ && npx eslint --fix --ext .js,.jsx,.ts,.tsx src",
     "check": "npx prettier --check src/ && npx eslint --ext .js,.jsx,.ts,.tsx src",
-    "openapi": "cargo build --package arroyo-openapi  && npx openapi-typescript $(pwd)/../target/api-spec.json --output $(pwd)/src/gen/api-types.ts"
+    "openapi": "cargo build --package arroyo-openapi  && pnpm exec openapi-typescript $(pwd)/../target/api-spec.json --output $(pwd)/src/gen/api-types.ts"
   },
   "dependencies": {
     "@babel/core": "^7.26.0",
@@ -47,7 +47,7 @@
     "monaco-editor": "^0.34.1",
     "monaco-sql-languages": "^0.9.5",
     "openapi-fetch": "^0.6.2",
-    "openapi-typescript": "^6.7.6",
+    "openapi-typescript": "=6.2.8",
     "prop-types": "^15.8.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

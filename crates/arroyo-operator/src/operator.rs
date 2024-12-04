@@ -545,24 +545,40 @@ impl ChainedOperator {
         control_message: &ControlMessage,
         shutdown_after_commit: bool,
     ) -> bool {
-        for (op, ctx) in self.iter_mut() {
-            match control_message {
-                ControlMessage::Checkpoint(_) => {
-                    error!("shouldn't receive checkpoint")
-                }
-                ControlMessage::Stop { .. } => {
-                    error!("shouldn't receive stop")
-                }
-                ControlMessage::Commit { epoch, commit_data } => {
-                    op.handle_commit(*epoch, &commit_data, ctx).await;
-                    return shutdown_after_commit;
-                }
-                ControlMessage::LoadCompacted { compacted } => {
-                    ctx.load_compacted(compacted).await;
-                }
-                ControlMessage::NoOp => {}
+        match control_message {
+            ControlMessage::Checkpoint(_) => {
+                error!("shouldn't receive checkpoint")
             }
+            ControlMessage::Stop { .. } => {
+                error!("shouldn't receive stop")
+            }
+            ControlMessage::Commit { epoch, commit_data } => {
+                assert!(
+                    self.next.is_none(),
+                    "can only commit sinks, which cannot be chained"
+                );
+                self.operator
+                    .handle_commit(*epoch, &commit_data, &mut self.context)
+                    .await;
+                return shutdown_after_commit;
+            }
+            ControlMessage::LoadCompacted { compacted } => {
+                self.iter_mut()
+                    .find(|(_, ctx)| ctx.task_info.operator_id == compacted.operator_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "could not load compacted data for unknown operator '{}'",
+                            compacted.operator_id
+                        )
+                    })
+                    .1
+                    .load_compacted(compacted)
+                    .await;
+            }
+            ControlMessage::NoOp => {}
         }
+
+        for (op, ctx) in self.iter_mut() {}
         false
     }
 
