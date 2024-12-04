@@ -53,7 +53,7 @@ import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { useNavbar } from '../../App';
 
 export function PipelineDetails() {
-  const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
+  const [activeOperator, setActiveOperator] = useState<number | undefined>(undefined);
   const {
     isOpen: configModalOpen,
     onOpen: onConfigModalOpen,
@@ -103,9 +103,9 @@ export function PipelineDetails() {
   }
 
   let operatorDetail = undefined;
-  if (activeOperator) {
+  if (activeOperator != undefined) {
     operatorDetail = (
-      <OperatorDetail pipelineId={pipeline.id} jobId={job.id} operatorId={activeOperator} />
+      <OperatorDetail pipelineId={pipeline.id} jobId={job.id} nodeId={activeOperator} />
     );
   }
 
