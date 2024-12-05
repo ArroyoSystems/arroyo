@@ -7,26 +7,26 @@ use rabbitmq_stream_client::{Environment, TlsConfiguration};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::rabbitmq_stream::source::RabbitmqStreamSourceFunc;
+use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
 use crate::{pull_opt, ConnectionType};
 
 mod source;
 
-pub struct RabbitmqStreamConnector {}
+pub struct RabbitmqConnector {}
 
 const CONFIG_SCHEMA: &str = include_str!("./profile.json");
 const TABLE_SCHEMA: &str = include_str!("./table.json");
-const ICON: &str = include_str!("./rabbitmq_stream.svg");
+const ICON: &str = include_str!("./rabbitmq.svg");
 
-import_types!(schema = "src/rabbitmq_stream/profile.json");
-import_types!(schema = "src/rabbitmq_stream/table.json");
+import_types!(schema = "src/rabbitmq/profile.json");
+import_types!(schema = "src/rabbitmq/table.json");
 
-impl Connector for RabbitmqStreamConnector {
+impl Connector for RabbitmqConnector {
     type ProfileT = RabbitmqStreamConfig;
     type TableT = RabbitmqStreamTable;
 
     fn name(&self) -> &'static str {
-        "rabbitmq_stream"
+        "rabbitmq"
     }
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
