@@ -108,7 +108,7 @@ impl Connector for RabbitmqConnector {
                         client_keys_path: options.remove("tls_config.client_keys_path"),
                     });
 
-                let load_balancer_mode = options.remove("json.unstructured").map(|t| t == "true");
+                let load_balancer_mode = options.remove("load_balancer_mode").map(|t| t == "true");
 
                 RabbitmqStreamConfig {
                     host,
