@@ -146,7 +146,7 @@ impl RabbitmqStreamSourceFunc {
                                .await
                                .expect("should be able to get rabbitmq stream state");
                             s.insert(self.stream.clone(), RabbitmqStreamState {
-                                offset: offset
+                                offset
                             }).await;
 
                             if self.start_checkpoint(c, ctx).await {
