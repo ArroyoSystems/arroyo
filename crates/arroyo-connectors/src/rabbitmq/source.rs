@@ -145,7 +145,9 @@ impl RabbitmqStreamSourceFunc {
                             let s = ctx.table_manager.get_global_keyed_state("s")
                                .await
                                .expect("should be able to get rabbitmq stream state");
-                            s.insert(self.stream.clone(), offset).await;
+                            s.insert(self.stream.clone(), RabbitmqStreamState {
+                                offset: offset
+                            }).await;
 
                             if self.start_checkpoint(c, ctx).await {
                                 return Ok(SourceFinishType::Immediate);
