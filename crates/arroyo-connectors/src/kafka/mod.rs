@@ -28,7 +28,6 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::runtime::Handle;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
@@ -985,16 +984,17 @@ impl ClientContext for Context {
             self.config.as_ref().map(|c| &c.authentication)
         {
             let region = Region::new(region.clone());
-            let rt = Handle::current();
 
-            let (token, expiration_time_ms) = {
-                let handle = thread::spawn(move || {
-                    rt.block_on(async {
+            let (token, expiration_time_ms) = thread::spawn(move || {
+                tokio::runtime::Runtime::new()?
+                    .block_on(async {
                         timeout(Duration::from_secs(10), generate_auth_token(region.clone())).await
                     })
-                });
-                handle.join().unwrap()??
-            };
+                    .map_err(|e| anyhow!("timed out generating MSK oauth token {:?}", e))?
+                    .map_err(|e| anyhow!("signing error {:?}", e))
+            })
+            .join()
+            .map_err(|e| anyhow!("failed to join thread {:?}", e))??;
 
             Ok(OAuthToken {
                 token,
