@@ -22,6 +22,7 @@ use fluvio::FluvioConnector;
 use impulse::ImpulseConnector;
 use nats::NatsConnector;
 use nexmark::NexmarkConnector;
+use rabbitmq::RabbitmqConnector;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,7 @@ pub mod nats;
 pub mod nexmark;
 pub mod polling_http;
 pub mod preview;
+pub mod rabbitmq;
 pub mod redis;
 pub mod single_file;
 pub mod sse;
@@ -68,6 +70,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(NexmarkConnector {}),
         Box::new(PollingHTTPConnector {}),
         Box::new(PreviewConnector {}),
+        Box::new(RabbitmqConnector {}),
         Box::new(RedisConnector {}),
         Box::new(SingleFileConnector {}),
         Box::new(SSEConnector {}),

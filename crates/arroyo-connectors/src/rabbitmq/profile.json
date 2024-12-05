@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "title": "RabbitmqStreamConfig",
+  "properties": {
+    "host": {
+      "title": "Host",
+      "type": "string",
+      "description": "The RabbitMQ stream host to connect to; leave blank to use default (localhost)"
+    },
+    "username": {
+      "title": "Username",
+      "type": "string",
+      "description": "The RabbitMQ username to connect to; leave blank to use default (guest)"
+    },
+    "password": {
+      "title": "Password",
+      "type": "string",
+      "description": "The RabbitMQ password to connect to; leave blank to use default (guest)"
+    },
+    "virtual_host": {
+      "title": "Virtual Host",
+      "type": "string",
+      "description": "The RabbitMQ virtual host to connect to; leave blank to use default (/)"
+    },
+    "port": {
+      "title": "Port",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535,
+      "description": "The RabbitMQ port to connect to; leave blank to use default (5552)"
+    },
+    "tls_config": {
+      "title": "TLS config",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable TLS"
+        },
+        "trust_certificates": {
+          "type": "boolean",
+          "description": "Trust certificate"
+        },
+        "root_certificates_path": {
+          "type": "string",
+          "description": "Root certificates path"
+        },
+        "client_certificates_path": {
+          "type": "string",
+          "description": "Client certificates path"
+        },
+        "client_keys_path": {
+          "type": "string",
+          "description": "Client keys path"
+        }
+      },
+      "additionalProperties": false
+    },
+    "load_balancer_mode": {
+      "title": "Load balancer mode",
+      "type": "boolean",
+      "description": "Enable load balancer mode"
+    }
+  },
+  "sensitive": ["password"]
+}
