@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use arroyo_operator::{context::ArrowContext, operator::SourceOperator, SourceFinishType};
+use arroyo_operator::{context::SourceCollector, operator::SourceOperator, SourceFinishType};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
@@ -14,7 +14,7 @@ use rabbitmq_stream_client::Consumer;
 use tokio::{select, time::MissedTickBehavior};
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
-
+use arroyo_operator::context::SourceContext;
 use super::{RabbitmqStreamConfig, SourceOffset};
 
 pub struct RabbitmqStreamSourceFunc {
@@ -41,16 +41,8 @@ impl SourceOperator for RabbitmqStreamSourceFunc {
         arroyo_state::global_table_config("s", "rabbitmq stream source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        ctx.initialize_deserializer(
-            self.format.clone(),
-            self.framing.clone(),
-            self.bad_data.clone(),
-        );
-    }
-
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
@@ -62,7 +54,7 @@ impl SourceOperator for RabbitmqStreamSourceFunc {
 }
 
 impl RabbitmqStreamSourceFunc {
-    async fn get_consumer(&mut self, ctx: &mut ArrowContext) -> anyhow::Result<Consumer> {
+    async fn get_consumer(&mut self, ctx: &mut SourceContext) -> anyhow::Result<Consumer> {
         info!(
             "Creating rabbitmq stream consumer for {}",
             self.config.host.clone().unwrap_or("localhost".to_string())
@@ -91,7 +83,7 @@ impl RabbitmqStreamSourceFunc {
         Ok(consumer)
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
         let mut consumer = self.get_consumer(ctx).await.map_err(|e| {
             UserError::new(
                 "Could not create RabbitMQ Stream consumer",
@@ -113,11 +105,11 @@ impl RabbitmqStreamSourceFunc {
 
                             if let Some(data) = message.data() {
                                 let timestamp = SystemTime::now();
-                                ctx.deserialize_slice(data, timestamp, None).await?;
+                                collector.deserialize_slice(data, timestamp, None).await?;
                             }
 
-                            if ctx.should_flush() {
-                                ctx.flush_buffer().await?;
+                            if collector.should_flush() {
+                                collector.flush_buffer().await?;
                             }
 
                             offset = delivery.offset();
@@ -132,8 +124,8 @@ impl RabbitmqStreamSourceFunc {
 
                 },
                 _ = flush_ticker.tick() => {
-                    if ctx.should_flush() {
-                        ctx.flush_buffer().await?;
+                    if collector.should_flush() {
+                        collector.flush_buffer().await?;
                     }
                 },
                 control_message = ctx.control_rx.recv() => {
@@ -149,7 +141,7 @@ impl RabbitmqStreamSourceFunc {
                                 offset
                             }).await;
 
-                            if self.start_checkpoint(c, ctx).await {
+                            if self.start_checkpoint(c, ctx, collector).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },

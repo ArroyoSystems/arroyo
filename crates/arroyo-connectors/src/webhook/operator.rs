@@ -13,7 +13,7 @@ use tracing::warn;
 
 use crate::webhook::MAX_INFLIGHT;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlResp;
@@ -37,7 +37,7 @@ impl ArrowOperator for WebhookSinkFunc {
         global_table_config("s", "webhook sink state")
     }
 
-    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         for body in self.serializer.serialize(&record) {
             let permit = self
                 .semaphore
@@ -55,7 +55,8 @@ impl ArrowOperator for WebhookSinkFunc {
 
             // these are just used for (potential) error reporting and we don't need to clone them
             let operator_id = ctx.task_info.operator_id.clone();
-            let task_index = ctx.task_info.task_index;
+            let task_index = ctx.task_info.task_index as usize;
+            let node_id = ctx.task_info.node_id;
 
             tokio::task::spawn(async move {
                 // move the permit into the task
@@ -89,6 +90,7 @@ impl ArrowOperator for WebhookSinkFunc {
 
                                     control_tx
                                         .send(ControlResp::Error {
+                                            node_id,
                                             operator_id: operator_id.clone(),
                                             task_index,
                                             message: format!("webhook failed (retry {})", retries),
@@ -114,7 +116,7 @@ impl ArrowOperator for WebhookSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
         // wait to acquire all of the permits (effectively blocking until all inflight requests are done)
         let _permits = self.semaphore.acquire_many(MAX_INFLIGHT).await.unwrap();
 

@@ -14,7 +14,7 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 
 use crate::polling_http::EmitBehavior;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -52,7 +52,7 @@ impl SourceOperator for PollingHttpSourceFunc {
         arroyo_state::global_table_config("s", "polling http source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) {
         let s: &mut GlobalKeyedView<(), PollingHttpSourceState> = ctx
             .table_manager
             .get_global_keyed_state("s")
@@ -64,8 +64,8 @@ impl SourceOperator for PollingHttpSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
@@ -79,7 +79,8 @@ impl SourceOperator for PollingHttpSourceFunc {
 impl PollingHttpSourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut OperatorContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -93,7 +94,7 @@ impl PollingHttpSourceFunc {
                     .expect("should be able to get http state");
                 s.insert((), state).await;
 
-                if self.start_checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx, collector).await {
                     return Some(SourceFinishType::Immediate);
                 }
             }
@@ -194,8 +195,8 @@ impl PollingHttpSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
-        ctx.initialize_deserializer(
+    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
@@ -215,10 +216,10 @@ impl PollingHttpSourceFunc {
                                     continue;
                                 }
 
-                                ctx.deserialize_slice(&buf, SystemTime::now(), None).await?;
+                                collector.deserialize_slice(&buf, SystemTime::now(), None).await?;
 
-                                if ctx.should_flush() {
-                                    ctx.flush_buffer().await?;
+                                if collector.should_flush() {
+                                    collector.flush_buffer().await?;
                                 }
 
                                 self.state.last_message = Some(buf);
@@ -229,7 +230,7 @@ impl PollingHttpSourceFunc {
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
+                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await {
                             return Ok(r);
                         }
                     }
@@ -237,13 +238,13 @@ impl PollingHttpSourceFunc {
             }
         } else {
             // otherwise set idle and just process control messages
-            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+            collector.broadcast(SignalMessage::Watermark(
                 Watermark::Idle,
-            )))
+            ))
             .await;
             loop {
                 let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, msg).await {
+                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {
                     return Ok(r);
                 }
             }

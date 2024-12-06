@@ -255,7 +255,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 })
             }
         }
-        self.subtask_id = ctx.task_info.task_index;
+        self.subtask_id = ctx.task_info.task_index as usize;
         self.finished_files = recovered_files;
         self.next_file_index = max_file_index;
         Ok(())

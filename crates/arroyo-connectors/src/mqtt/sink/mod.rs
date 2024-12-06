@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::mqtt::MqttConfig;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::ControlResp;
@@ -49,7 +49,7 @@ impl ArrowOperator for MqttSinkFunc {
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let mut attempts = 0;
         while attempts < 20 {
-            match super::create_connection(&self.config, ctx.task_info.task_index) {
+            match super::create_connection(&self.config, ctx.task_info.task_index as usize) {
                 Ok((client, mut eventloop)) => {
                     self.client = Some(client);
                     let stopped = self.stopped.clone();
@@ -91,7 +91,7 @@ impl ArrowOperator for MqttSinkFunc {
         panic!("Failed to establish connection to mqtt after 20 retries");
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         for v in self.serializer.serialize(&batch) {
             match self
                 .client
@@ -102,16 +102,7 @@ impl ArrowOperator for MqttSinkFunc {
             {
                 Ok(_) => (),
                 Err(e) => {
-                    ctx.control_tx
-                        .send(ControlResp::Error {
-                            operator_id: ctx.task_info.operator_id.clone(),
-                            task_index: ctx.task_info.task_index,
-                            message: "Could not write to mqtt".to_string(),
-                            details: format!("{:?}", e),
-                        })
-                        .await
-                        .unwrap();
-
+                    ctx.report_error("Could not write to mqtt", format!("{:?}", e)).await;
                     panic!("Could not write to mqtt: {:?}", e);
                 }
             }

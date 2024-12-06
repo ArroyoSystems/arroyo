@@ -1570,7 +1570,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
             .unwrap()
             .send(FileSystemMessages::Init {
                 max_file_index,
-                subtask_id: ctx.task_info.task_index,
+                subtask_id: ctx.task_info.task_index as usize,
                 recovered_files,
             })
             .await?;
@@ -1641,7 +1641,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
             .as_ref()
             .unwrap()
             .send(FileSystemMessages::Checkpoint {
-                subtask_id: task_info.task_index,
+                subtask_id: task_info.task_index as usize,
                 watermark,
                 then_stop: stopping,
             })

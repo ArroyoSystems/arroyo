@@ -50,15 +50,7 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
-        if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
-            self.handle_commit(epoch, &commit_data, ctx).await;
-        } else {
-            warn!("No commit message received, not committing")
-        }
-    }
-
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
         // TODO: Implement checkpointing of in-progress data to avoid depending on
         // the downstream NATS availability to flush and checkpoint.
         let publisher = self
@@ -74,7 +66,7 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         let SinkType::Subject(s) = &self.sink_type;
         let nats_subject = async_nats::Subject::from(s.clone());
         for msg in self.serializer.serialize(&batch) {
@@ -86,15 +78,8 @@ impl ArrowOperator for NatsSinkFunc {
             match publisher.publish(nats_subject.clone(), msg.into()).await {
                 Ok(_) => {}
                 Err(e) => {
-                    ctx.control_tx
-                        .send(ControlResp::Error {
-                            operator_id: ctx.task_info.operator_id.clone(),
-                            task_index: ctx.task_info.task_index,
-                            message: e.to_string(),
-                            details: e.to_string(),
-                        })
-                        .await
-                        .expect("Something went wrong, data will never be received.");
+                    ctx.report_error(e.to_string(), format!("{:?}", e))
+                        .await;
                     panic!("Panicked while processing element: {}", e);
                 }
             }

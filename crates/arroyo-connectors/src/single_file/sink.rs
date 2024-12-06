@@ -31,7 +31,7 @@ impl ArrowOperator for SingleFileSink {
         arroyo_state::global_table_config("f", "file_sink")
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
         let values = self.serializer.serialize(&batch);
         let file = self.file.as_mut().unwrap();
         for value in values {
@@ -72,13 +72,13 @@ impl ArrowOperator for SingleFileSink {
         self.file = Some(file);
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         if let Some(SignalMessage::EndOfData) = final_message {
             self.file.as_mut().unwrap().flush().await.unwrap();
         }
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext) {
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         self.file.as_mut().unwrap().flush().await.unwrap();
         let state = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
         state

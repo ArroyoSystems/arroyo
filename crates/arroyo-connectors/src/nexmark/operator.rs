@@ -3,7 +3,7 @@ use arrow::array::{
     Int64Builder, RecordBatch, StringBuilder, StructBuilder, TimestampNanosecondBuilder,
 };
 use arroyo_formats::should_flush;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
@@ -210,7 +210,7 @@ impl SourceOperator for NexmarkSourceFunc {
         arroyo_state::global_table_config("s", "nexmark source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) {
         // load state
         self.state = Some({
             let ss = ctx
@@ -219,12 +219,12 @@ impl SourceOperator for NexmarkSourceFunc {
                 .await
                 .expect("should be able to read state");
             let saved_states = ss.get_all().len();
-            if saved_states != ctx.task_info.parallelism {
+            if saved_states != ctx.task_info.parallelism as usize {
                 let config = GeneratorConfig::new(
                     NexmarkConfig::new(
                         self.first_event_rate,
                         self.num_events,
-                        ctx.task_info.parallelism,
+                        ctx.task_info.parallelism as usize,
                     ),
                     SystemTime::now(),
                     1,
@@ -233,16 +233,16 @@ impl SourceOperator for NexmarkSourceFunc {
                 );
                 let splits = config.split(ctx.task_info.parallelism as u64);
                 NexmarkSourceState {
-                    config: splits[ctx.task_info.task_index].clone(),
+                    config: splits[ctx.task_info.task_index as usize].clone(),
                     event_count: 0,
                 }
             } else {
-                ss.get(&ctx.task_info.task_index).unwrap().clone()
+                ss.get(&(ctx.task_info.task_index as usize)).unwrap().clone()
             }
         });
     }
 
-    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
         let state = self.state.as_ref().unwrap().clone();
 
         let mut generator = NexmarkGenerator::from_config(&state.config, state.event_count as u64);
@@ -271,9 +271,9 @@ impl SourceOperator for NexmarkSourceFunc {
             timestamp_builder.append_value(to_nanos(next_event.event_timetamp) as i64);
 
             if should_flush(records, flush_time) {
-                ctx.collect(
+                collector.collect(
                     RecordBatch::try_new(
-                        ctx.out_schema.as_ref().unwrap().schema.clone(),
+                        ctx.out_schema.schema.clone(),
                         vec![
                             Arc::new(person_builder.finish()),
                             Arc::new(auction_builder.finish()),
@@ -298,7 +298,7 @@ impl SourceOperator for NexmarkSourceFunc {
                             .await
                             .expect("should be able to get nexmark state")
                             .insert(
-                                ctx.task_info.task_index,
+                                ctx.task_info.task_index as usize,
                                 NexmarkSourceState {
                                     config: state.config.clone(),
                                     event_count: generator.events_count_so_far as usize,
@@ -306,7 +306,7 @@ impl SourceOperator for NexmarkSourceFunc {
                             )
                             .await;
                         debug!("starting checkpointing {}", ctx.task_info.task_index);
-                        if self.start_checkpoint(c, ctx).await {
+                        if self.start_checkpoint(c, ctx, collector).await {
                             return SourceFinishType::Immediate;
                         }
                     }

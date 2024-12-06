@@ -7,15 +7,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, ControlResp, MetadataField};
-use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
+use arroyo_types::{SignalMessage, UserError, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{ConnectionError, Event as MqttEvent, Incoming};
 use rumqttc::Outgoing;
 
 use crate::mqtt::{create_connection, MqttConfig};
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::grpc::rpc::TableConfig;
@@ -47,19 +47,11 @@ impl SourceOperator for MqttSourceFunc {
         arroyo_state::global_table_config("m", "mqtt source state")
     }
 
-    async fn run(&mut self, ctx: &mut OperatorContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
-                ctx.control_tx
-                    .send(ControlResp::Error {
-                        operator_id: ctx.task_info.operator_id.clone(),
-                        task_index: ctx.task_info.task_index,
-                        message: e.name.clone(),
-                        details: e.details.clone(),
-                    })
-                    .await
-                    .unwrap();
+                ctx.report_error(&e.name, &e.details).await;
 
                 panic!("{}: {}", e.name, e.details);
             }
@@ -96,8 +88,8 @@ impl MqttSourceFunc {
         self.subscribed.clone()
     }
 
-    async fn run_int(&mut self, ctx: &mut OperatorContext) -> Result<SourceFinishType, UserError> {
-        ctx.initialize_deserializer(
+    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
@@ -109,14 +101,14 @@ impl MqttSourceFunc {
                 ctx.task_info.operator_id,
                 ctx.task_info.task_index
             );
-            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+            collector.broadcast(SignalMessage::Watermark(
                 Watermark::Idle,
-            )))
+            ))
             .await;
         }
 
         let (client, mut eventloop) =
-            match create_connection(&self.config, ctx.task_info.task_index) {
+            match create_connection(&self.config, ctx.task_info.task_index as usize) {
                 Ok(c) => c,
                 Err(e) => {
                     return Err(UserError {
@@ -163,7 +155,7 @@ impl MqttSourceFunc {
                                 None
                             };
 
-                            ctx.deserialize_slice(&p.payload, SystemTime::now(), connector_metadata.as_ref()).await?;
+                            collector.deserialize_slice(&p.payload, SystemTime::now(), connector_metadata.as_ref()).await?;
                             rate_limiter.until_ready().await;
                         }
                         Ok(MqttEvent::Outgoing(Outgoing::Subscribe(_))) => {
@@ -190,15 +182,15 @@ impl MqttSourceFunc {
                     }
                 }
                 _ = flush_ticker.tick() => {
-                    if ctx.should_flush() {
-                        ctx.flush_buffer().await?;
+                    if collector.should_flush() {
+                        collector.flush_buffer().await?;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
                     match control_message {
                         Some(ControlMessage::Checkpoint(c)) => {
                             tracing::debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            if self.start_checkpoint(c, ctx).await {
+                            if self.start_checkpoint(c, ctx, collector).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },
