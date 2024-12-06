@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::borrow::Cow;
 
 use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
-use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
+use arroyo_rpc::{CheckpointEvent, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -374,7 +374,7 @@ impl ArrowOperator for KafkaSinkFunc {
             checkpoint_epoch: epoch,
             node_id: ctx.task_info.node_id,
             operator_id: ctx.task_info.operator_id.clone(),
-            subtask_index: ctx.task_info.task_index as u32,
+            subtask_index: ctx.task_info.task_index,
             time: SystemTime::now(),
             event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
         });

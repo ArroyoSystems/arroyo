@@ -164,7 +164,7 @@ impl ParquetBackend {
         let min_files_to_compact = config().pipeline.compaction.checkpoints_to_compact as usize;
 
         let operator_checkpoint_metadata =
-            Self::load_operator_metadata(&job_id, &operator_id, epoch)
+            Self::load_operator_metadata(&job_id, operator_id, epoch)
                 .await?
                 .expect("expect operator metadata to still be present");
         let storage_provider = get_storage_provider().await?;

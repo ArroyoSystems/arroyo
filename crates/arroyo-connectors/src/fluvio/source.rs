@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use arroyo_operator::context::{ArrowCollector, OperatorContext, SourceCollector, SourceContext};
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};

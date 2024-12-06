@@ -13,15 +13,13 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::kafka::SourceOffset;
-use arroyo_operator::context::{batch_bounded, BatchReceiver, OperatorContext};
+use arroyo_operator::context::{batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp, MetadataField};
-use arroyo_types::{
-    single_item_hash_map, to_micros, ArrowMessage, CheckpointBarrier, SignalMessage, TaskInfo,
-};
+use arroyo_types::{single_item_hash_map, to_micros, ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
@@ -105,32 +103,44 @@ impl KafkaTopicTester {
             operator_ids: vec![task_info.operator_id.clone()],
         });
 
-        let mut ctx = OperatorContext::new(
-            task_info,
-            checkpoint_metadata,
-            control_rx,
-            command_tx,
+        let out_schema = Some(ArroyoSchema::new_unkeyed(
+            Arc::new(Schema::new(vec![
+                Field::new(
+                    "_timestamp",
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    false,
+                ),
+                Field::new("value", DataType::Utf8, false),
+            ])),
+            0,
+        ));
+        
+        let task_info = Arc::new(task_info);
+        
+        let ctx = OperatorContext::new(
+            task_info.clone(),
+            checkpoint_metadata.as_ref(),
+            command_tx.clone(),
             1,
             vec![],
-            Some(ArroyoSchema::new_unkeyed(
-                Arc::new(Schema::new(vec![
-                    Field::new(
-                        "_timestamp",
-                        DataType::Timestamp(TimeUnit::Nanosecond, None),
-                        false,
-                    ),
-                    Field::new("value", DataType::Utf8, false),
-                ])),
-                0,
-            )),
-            None,
-            vec![vec![data_tx]],
+            out_schema,
             kafka.tables(),
         )
         .await;
+        
+        let chain_info = Arc::new(ChainInfo {
+            job_id: ctx.task_info.job_id.clone(),
+            node_id: ctx.task_info.node_id,
+            description: "kafka source".to_string(),
+            task_index: ctx.task_info.task_index,
+        });
+        
+        let mut ctx = SourceContext::from_operator(ctx, chain_info.clone(), control_rx);
+        let arrow_collector = ArrowCollector::new(chain_info.clone(), Some(ctx.out_schema.clone()), vec![vec![data_tx]]);
+        let mut collector = SourceCollector::new(ctx.out_schema.clone(), arrow_collector, command_tx, &chain_info, &task_info);
 
         tokio::spawn(async move {
-            kafka.run(&mut ctx).await;
+            kafka.run(&mut ctx, &mut collector).await;
         });
         KafkaSourceWithReads {
             to_control_tx,
@@ -356,6 +366,7 @@ async fn test_kafka_with_metadata_fields() {
 
     let mut task_info = arroyo_types::get_test_task_info();
     task_info.job_id = format!("kafka-job-{}", random::<u64>());
+    let task_info = Arc::new(task_info);
 
     kafka_topic_tester.create_topic().await;
 
@@ -390,9 +401,8 @@ async fn test_kafka_with_metadata_fields() {
 
     let mut ctx = OperatorContext::new(
         task_info.clone(),
-        checkpoint_metadata,
-        control_rx,
-        command_tx,
+        checkpoint_metadata.as_ref(),
+        command_tx.clone(),
         1,
         vec![],
         Some(ArroyoSchema::new_unkeyed(
@@ -407,18 +417,28 @@ async fn test_kafka_with_metadata_fields() {
             ])),
             0,
         )),
-        None,
-        vec![vec![data_tx]],
         kafka.tables(),
-    )
-    .await;
+    ).await;
+
+    let chain_info = Arc::new(ChainInfo {
+        job_id: ctx.task_info.job_id.clone(),
+        node_id: ctx.task_info.node_id,
+        description: "kafka source".to_string(),
+        task_index: ctx.task_info.task_index,
+    });
+    
+
+    let mut ctx = SourceContext::from_operator(ctx, chain_info.clone(), control_rx);
+    let arrow_collector = ArrowCollector::new(chain_info.clone(), Some(ctx.out_schema.clone()), vec![vec![data_tx]]);
+    let mut collector = SourceCollector::new(ctx.out_schema.clone(), arrow_collector, command_tx, &chain_info, &task_info);
+    
 
     tokio::spawn(async move {
-        kafka.run(&mut ctx).await;
+        kafka.run(&mut ctx, &mut collector).await;
     });
 
     let mut reader = kafka_topic_tester
-        .get_source_with_reader(task_info.clone(), None)
+        .get_source_with_reader((*task_info).clone(), None)
         .await;
     let mut producer = kafka_topic_tester.get_producer();
 

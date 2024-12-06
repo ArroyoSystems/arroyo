@@ -165,7 +165,7 @@ impl BackendFlusher {
 
         // send controller the subtask metadata
         let subtask_metadata = SubtaskCheckpointMetadata {
-            subtask_index: self.task_info.task_index as u32,
+            subtask_index: self.task_info.task_index,
             start_time: to_micros(cp.time),
             finish_time: to_micros(SystemTime::now()),
             watermark: cp.watermark.map(to_micros),

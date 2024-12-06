@@ -303,7 +303,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         let subtask_metadata = self.subtask_metadata_from_table(table_metadata)?;
         Ok(
             subtask_metadata.map(|metadata| TableSubtaskCheckpointMetadata {
-                subtask_index: self.task_info().task_index as u32,
+                subtask_index: self.task_info().task_index,
                 table_type: T::table_type().into(),
                 data: metadata.encode_to_vec(),
             }),
@@ -325,7 +325,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         let result =
             self.apply_compacted_checkpoint(epoch, compacted_checkpoint, subtask_metadata)?;
         Ok(TableSubtaskCheckpointMetadata {
-            subtask_index: self.task_info().task_index as u32,
+            subtask_index: self.task_info().task_index,
             table_type: T::table_type().into(),
             data: result.encode_to_vec(),
         })

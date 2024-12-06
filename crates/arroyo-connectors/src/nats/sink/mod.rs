@@ -6,12 +6,9 @@ use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::ControlMessage;
-use arroyo_rpc::ControlResp;
 use arroyo_types::*;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use tracing::warn;
 
 pub struct NatsSinkFunc {
     pub sink_type: SinkType,

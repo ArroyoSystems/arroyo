@@ -7,8 +7,9 @@ use std::time::{Duration, SystemTime};
 use arrow::array::{RecordBatch, UInt32Array};
 use arrow::datatypes::Field;
 use arrow::datatypes::{DataType, Schema, SchemaRef};
+use async_trait::async_trait;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::OperatorContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
@@ -24,6 +25,7 @@ use tokio::sync::mpsc::channel;
 
 use super::{ConsistencyMode, KafkaSinkFunc};
 use crate::kafka::Context;
+use crate::test::DummyCollector;
 
 pub struct KafkaTopicTester {
     topic: String,
@@ -86,21 +88,17 @@ impl KafkaTopicTester {
             key_col: None,
         };
 
-        let (_, control_rx) = channel(128);
         let (command_tx, _) = channel(128);
 
-        let task_info = get_test_task_info();
+        let task_info = Arc::new(get_test_task_info());
 
         let mut ctx = OperatorContext::new(
             task_info,
             None,
-            control_rx,
             command_tx,
             1,
             vec![ArroyoSchema::new_unkeyed(schema(), 0)],
             None,
-            None,
-            vec![vec![]],
             HashMap::new(),
         )
         .await;
@@ -158,7 +156,7 @@ async fn test_kafka_checkpoint_flushes() {
 
         sink_with_writes
             .sink
-            .process_batch(batch, &mut sink_with_writes.ctx)
+            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector{})
             .await;
     }
     let barrier = CheckpointBarrier {
@@ -169,7 +167,7 @@ async fn test_kafka_checkpoint_flushes() {
     };
     sink_with_writes
         .sink
-        .handle_checkpoint(barrier, &mut sink_with_writes.ctx)
+        .handle_checkpoint(barrier, &mut sink_with_writes.ctx, &mut DummyCollector{})
         .await;
 
     for message in 1u32..200 {
@@ -196,7 +194,7 @@ async fn test_kafka() {
 
         sink_with_writes
             .sink
-            .process_batch(batch, &mut sink_with_writes.ctx)
+            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector{})
             .await;
         sink_with_writes
             .sink

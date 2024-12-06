@@ -175,6 +175,7 @@ impl SubtaskOrQueueNode {
 pub struct Program {
     pub name: String,
     pub graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
+    pub control_tx: Sender<ControlResp>,
 }
 
 impl Program {
@@ -344,6 +345,7 @@ impl Program {
         Program {
             name,
             graph: Arc::new(RwLock::new(physical)),
+            control_tx,
         }
     }
 
@@ -510,7 +512,7 @@ impl Engine {
         }
     }
 
-    pub async fn start(mut self, control_tx: Sender<ControlResp>) -> RunningEngine {
+    pub async fn start(mut self) -> RunningEngine {
         info!("Starting job {}", self.job_id);
 
         let node_indexes: Vec<_> = self.program.graph.read().unwrap().node_indices().collect();
@@ -524,7 +526,7 @@ impl Engine {
             let mut futures = FuturesUnordered::new();
 
             for idx in node_indexes {
-                futures.push(self.schedule_node(&control_tx, idx, ready.clone()));
+                futures.push(self.schedule_node(&self.program.control_tx, idx, ready.clone()));
             }
 
             while let Some(result) = futures.next().await {

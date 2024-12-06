@@ -160,3 +160,26 @@ pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
     )
     .expect("Invalid header map")
 }
+
+#[cfg(test)]
+mod test {
+    use arrow::array::RecordBatch;
+    use async_trait::async_trait;
+    use arroyo_operator::context::Collector;
+    use arroyo_types::Watermark;
+
+    pub struct DummyCollector {
+    }
+
+    #[async_trait]
+    impl Collector for DummyCollector {
+        async fn collect(&mut self, batch: RecordBatch) {
+            unreachable!()
+        }
+
+        async fn broadcast_watermark(&mut self, watermark: Watermark) {
+            unreachable!()
+        }
+    }
+
+}

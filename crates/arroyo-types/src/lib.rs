@@ -8,7 +8,6 @@ use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]

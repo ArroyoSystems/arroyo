@@ -11,7 +11,7 @@ use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
 use std::time::{Duration, SystemTime};
 
-use arroyo_operator::context::{OperatorContext, SourceCollector, SourceContext};
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
