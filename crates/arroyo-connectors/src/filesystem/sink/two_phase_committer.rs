@@ -113,7 +113,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
             checkpoint_epoch: epoch,
             node_id: ctx.task_info.node_id,
             operator_id: ctx.task_info.operator_id.clone(),
-            subtask_index: ctx.task_info.task_index as u32,
+            subtask_index: ctx.task_info.task_index,
             time: SystemTime::now(),
             event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
         });

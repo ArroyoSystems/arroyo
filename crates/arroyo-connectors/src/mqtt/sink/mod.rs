@@ -9,7 +9,6 @@ use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::ControlResp;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::AsyncClient;
 use rumqttc::v5::ConnectionError;

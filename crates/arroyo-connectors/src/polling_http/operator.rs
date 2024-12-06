@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use arroyo_rpc::ControlMessage;
-use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_types::{SignalMessage, UserError, Watermark};
 
 use tokio::select;
 use tokio::time::MissedTickBehavior;

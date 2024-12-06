@@ -2,7 +2,6 @@ use crate::logical::{LogicalEdgeType, LogicalGraph};
 use petgraph::data::DataMapMut;
 use petgraph::prelude::*;
 use petgraph::visit::NodeRef;
-use std::collections::HashSet;
 use std::mem;
 
 pub trait Optimizer {

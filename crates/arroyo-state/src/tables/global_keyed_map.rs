@@ -299,7 +299,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         let _finish_time = to_micros(SystemTime::now());
         Ok(Some((
             GlobalKeyedTableSubtaskCheckpointMetadata {
-                subtask_index: self.task_info.task_index as u32,
+                subtask_index: self.task_info.task_index,
                 commit_data: self.commit_data,
                 file: Some(path),
             },
@@ -312,7 +312,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
     }
 
     fn subtask_index(&self) -> u32 {
-        self.task_info.task_index as u32
+        self.task_info.task_index
     }
 }
 

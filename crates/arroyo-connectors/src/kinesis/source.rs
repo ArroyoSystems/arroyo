@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
-use arroyo_operator::context::{OperatorContext, SourceCollector, SourceContext};
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};

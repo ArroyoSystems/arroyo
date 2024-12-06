@@ -388,8 +388,8 @@ impl ArrowOperator for AsyncUdfOperator {
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut OperatorContext,
+         _: &mut dyn Collector,
     ) -> Option<Watermark> {
         self.watermarks.push_back((self.next_id, watermark));
         None
@@ -397,9 +397,9 @@ impl ArrowOperator for AsyncUdfOperator {
 
     async fn handle_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
+        _: CheckpointBarrier,
         ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut dyn Collector,
     ) {
         let gs = ctx.table_manager.get_global_keyed_state("a").await.unwrap();
 

@@ -19,7 +19,7 @@ use rumqttc::{
 };
 use serde::Deserialize;
 use tokio::sync::mpsc::channel;
-
+use crate::test::DummyCollector;
 use super::MqttSinkFunc;
 
 fn schema() -> SchemaRef {
@@ -75,24 +75,20 @@ impl MqttTopicTester {
             Format::Json(JsonFormat::default()),
         );
 
-        let (_, control_rx) = channel(128);
         let (command_tx, _) = channel(128);
 
-        let task_info = get_test_task_info();
-
+        let task_info = Arc::new(get_test_task_info());
+        
         let mut ctx = OperatorContext::new(
             task_info,
             None,
-            control_rx,
             command_tx,
             1,
             vec![ArroyoSchema::new_unkeyed(schema(), 0)],
             None,
-            None,
-            vec![vec![]],
             HashMap::new(),
         )
-        .await;
+            .await;
 
         mqtt.on_start(&mut ctx).await;
 
@@ -145,7 +141,7 @@ async fn test_mqtt() {
 
         sink_with_writes
             .sink
-            .process_batch(batch, &mut sink_with_writes.ctx)
+            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector{})
             .await;
     }
 

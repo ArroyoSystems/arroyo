@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::{api_types::connections::TestSourceMessage, OperatorConfig};
 use rabbitmq_stream_client::types::OffsetSpecification;
 use rabbitmq_stream_client::{Environment, TlsConfiguration};
@@ -205,9 +205,9 @@ impl Connector for RabbitmqConnector {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: arroyo_rpc::OperatorConfig,
-    ) -> anyhow::Result<arroyo_operator::operator::OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         match table.type_ {
-            TableType::Source { offset } => Ok(OperatorNode::from_source(Box::new(
+            TableType::Source { offset } => Ok(ConstructedOperator::from_source(Box::new(
                 RabbitmqStreamSourceFunc {
                     config: profile,
                     stream: table.stream,

@@ -72,7 +72,7 @@ impl ArrowOperator for SingleFileSink {
         self.file = Some(file);
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, _: &mut OperatorContext, _: &mut dyn Collector) {
         if let Some(SignalMessage::EndOfData) = final_message {
             self.file.as_mut().unwrap().flush().await.unwrap();
         }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use arroyo_operator::context::{Collector, SourceCollector, SourceContext};
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -11,7 +11,7 @@ use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_types::{SignalMessage, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use tokio::select;

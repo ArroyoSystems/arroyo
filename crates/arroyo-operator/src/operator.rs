@@ -1,6 +1,6 @@
 use crate::context::{
     send_checkpoint_event, ArrowCollector, BatchReceiver, BatchSender, Collector, OperatorContext,
-    SourceCollector, SourceContext, WatermarkHolder,
+    SourceCollector, SourceContext,
 };
 use crate::inq_reader::InQReader;
 use crate::udfs::{ArroyoUdaf, UdafArg};
@@ -130,18 +130,6 @@ impl OperatorNode {
         }
     }
 
-    pub fn display(&self) -> DisplayableOperator {
-        match self {
-            OperatorNode::Source(_) => DisplayableOperator {
-                name: self.name().into(),
-                fields: vec![],
-            },
-            OperatorNode::Chained(op) => {
-                todo!()
-            }
-        }
-    }
-
     pub fn tables(&self) -> HashMap<String, TableConfig> {
         match self {
             OperatorNode::Source(s) => s.operator.tables(),
@@ -221,7 +209,7 @@ impl OperatorNode {
                     ready,
                 )
                 .await;
-                if let Some(final_message) = result.into() {
+                if let Some(final_message) = result {
                     collector.broadcast(final_message).await;
                 }
             }
@@ -243,7 +231,7 @@ impl OperatorNode {
     }
 
     pub async fn start(
-        mut self: Box<Self>,
+        self: Box<Self>,
         control_tx: Sender<ControlResp>,
         control_rx: Receiver<ControlMessage>,
         mut in_qs: Vec<BatchReceiver>,
@@ -361,34 +349,6 @@ pub trait SourceOperator: Send + 'static {
 
         checkpoint_barrier.then_stop
     }
-}
-
-macro_rules! call_and_recurse {
-    ($self:expr, $final_collector:expr, $name:ident, $arg:expr) => {
-        match &mut $self.next {
-            Some(next) => {
-                let mut collector = ChainedCollector {
-                    cur: next,
-                    index: 0,
-                    in_partitions: 1,
-                    final_collector: $final_collector,
-                };
-
-                $self
-                    .operator
-                    .$name($arg, &mut $self.context, &mut collector)
-                    .await;
-
-                Box::pin(next.$name($arg, $final_collector)).await;
-            }
-            None => {
-                $self
-                    .operator
-                    .$name($arg, &mut $self.context, $final_collector)
-                    .await;
-            }
-        }
-    };
 }
 
 macro_rules! call_with_collector {
@@ -558,7 +518,7 @@ impl ChainedOperator {
                     "can only commit sinks, which cannot be chained"
                 );
                 self.operator
-                    .handle_commit(*epoch, &commit_data, &mut self.context)
+                    .handle_commit(*epoch, commit_data, &mut self.context)
                     .await;
                 return shutdown_after_commit;
             }
@@ -578,7 +538,6 @@ impl ChainedOperator {
             ControlMessage::NoOp => {}
         }
 
-        for (op, ctx) in self.iter_mut() {}
         false
     }
 
@@ -644,13 +603,12 @@ impl ChainedOperator {
             })
             .collect::<Vec<_>>();
 
-        let task = self.context.task_info.clone();
         match futures.len() {
             0 => None,
             1 => Some(Box::pin(futures.into_iter().next().unwrap())),
             _ => {
                 Some(Box::pin(async move {
-                    let mut futures = FuturesUnordered::from_iter(futures.into_iter());
+                    let mut futures = FuturesUnordered::from_iter(futures);
                     // we've guaranteed that the future unordered has at least one element so this
                     // will never unwrap
                     futures.next().await.unwrap()
@@ -859,23 +817,26 @@ impl ChainedOperator {
         }
     }
 
-    async fn handle_commit(
-        &mut self,
-        epoch: u32,
-        commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
-    ) {
-        assert_eq!(
-            self.iter().count(),
-            1,
-            "commits can only be applied to sinks"
-        );
-        self.operator
-            .handle_commit(epoch, commit_data, &mut self.context)
-            .await;
-    }
-
     async fn handle_tick(&mut self, tick: u64, final_collector: &mut ArrowCollector) {
-        call_and_recurse!(self, final_collector, handle_tick, tick)
+        match &mut self.next {
+            Some(next) => {
+                let mut collector = ChainedCollector {
+                    cur: next,
+                    index: 0,
+                    in_partitions: 1,
+                    final_collector,
+                };
+                self.operator
+                    .handle_tick(tick, &mut self.context, &mut collector)
+                    .await;
+                Box::pin(next.handle_tick(tick, final_collector)).await;
+            }
+            None => {
+                self.operator
+                    .handle_tick(tick, &mut self.context, final_collector)
+                    .await;
+            }
+        }
     }
 
     async fn on_close(
@@ -974,9 +935,9 @@ async fn operator_run_behavior(
 
                         match message {
                             ArrowMessage::Data(record) => {
-                                TaskCounters::BatchesReceived.for_task(&chain_info, |c| c.inc());
-                                TaskCounters::MessagesReceived.for_task(&chain_info, |c| c.inc_by(record.num_rows() as u64));
-                                TaskCounters::BytesReceived.for_task(&chain_info, |c| c.inc_by(record.get_array_memory_size() as u64));
+                                TaskCounters::BatchesReceived.for_task(chain_info, |c| c.inc());
+                                TaskCounters::MessagesReceived.for_task(chain_info, |c| c.inc_by(record.num_rows() as u64));
+                                TaskCounters::BytesReceived.for_task(chain_info, |c| c.inc_by(record.get_array_memory_size() as u64));
                                 this.process_batch_index(idx, in_partitions, record, collector)
                                     .instrument(tracing::trace_span!("handle_fn",
                                         name,
@@ -986,7 +947,7 @@ async fn operator_run_behavior(
                             }
                             ArrowMessage::Signal(signal) => {
                                 match this.handle_control_message(idx,&signal, &mut counter, &mut closed, in_partitions,
-                                    &control_tx, &chain_info, collector).await {
+                                    &control_tx, chain_info, collector).await {
                                     ControlOutcome::Continue => {}
                                     ControlOutcome::Stop => {
                                         // just stop; the stop will have already been broadcast for example by

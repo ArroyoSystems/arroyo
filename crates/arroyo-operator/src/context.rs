@@ -9,14 +9,14 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{
-    CheckpointMetadata, OperatorCheckpointMetadata, TableConfig, TaskCheckpointEventType,
+    CheckpointMetadata, TableConfig, TaskCheckpointEventType,
 };
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
-use arroyo_state::{BackingStore, StateBackend};
+use arroyo_state::BackingStore;
 use arroyo_types::{
-    from_micros, ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo,
+    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo,
     UserError, Watermark,
 };
 use async_trait::async_trait;
@@ -836,6 +836,7 @@ mod tests {
 
         let task_info = Arc::new(TaskInfo {
             job_id: "test-job".to_string(),
+            node_id: 1,
             operator_name: "test-operator".to_string(),
             operator_id: "test-operator-1".to_string(),
             task_index: 0,
@@ -843,12 +844,19 @@ mod tests {
             key_range: 0..=1,
         });
 
+        let chain_info = Arc::new(ChainInfo {
+            job_id: "test-job".to_string(),
+            node_id: 1,
+            description: "test-operator".to_string(),
+            task_index: 0,
+        });
+        
         let out_qs = vec![vec![tx1, tx2]];
 
         let tx_queue_size_gauges = register_queue_gauge(
             "arroyo_worker_tx_queue_size",
             "Size of a tx queue",
-            &task_info,
+            &chain_info,
             &out_qs,
             0,
         );
@@ -856,7 +864,7 @@ mod tests {
         let tx_queue_rem_gauges = register_queue_gauge(
             "arroyo_worker_tx_queue_rem",
             "Remaining space in a tx queue",
-            &task_info,
+            &chain_info,
             &out_qs,
             0,
         );
@@ -864,15 +872,14 @@ mod tests {
         let tx_queue_bytes_gauges = register_queue_gauge(
             "arroyo_worker_tx_bytes",
             "Number of bytes queued in a tx queue",
-            &task_info,
+            &chain_info,
             &out_qs,
             0,
         );
 
         let mut collector = ArrowCollector {
-            task_info,
+            chain_info,
             out_schema: Some(ArroyoSchema::new_keyed(schema, 1, vec![0])),
-            projection: None,
             out_qs,
             tx_queue_rem_gauges,
             tx_queue_size_gauges,

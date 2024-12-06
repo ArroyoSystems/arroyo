@@ -32,9 +32,9 @@ impl ArrowOperator for StdoutSink {
 
     async fn on_close(
         &mut self,
-        final_message: &Option<SignalMessage>,
-        ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &Option<SignalMessage>,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
     ) {
         self.stdout.flush().await.unwrap();
     }

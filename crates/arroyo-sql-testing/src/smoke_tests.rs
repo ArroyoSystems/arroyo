@@ -12,11 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, time::SystemTime};
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::udfs::get_udfs;
 use arroyo_rpc::config;
-use arroyo_rpc::grpc::rpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
+use arroyo_rpc::grpc::rpc::{CheckpointMetadata, StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_types::{to_micros, CheckpointBarrier};
@@ -151,6 +151,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
                     worker_id: 1,
                     time: to_micros(c.time),
                     job_id: (*ctx.job_id).clone(),
+                    node_id: c.node_id,
                     operator_id: c.operator_id,
                     subtask_index: c.subtask_index,
                     epoch: c.checkpoint_epoch,
@@ -163,6 +164,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
                     worker_id: 1,
                     time: c.subtask_metadata.finish_time,
                     job_id: (*ctx.job_id).clone(),
+                    node_id: c.node_id,
                     operator_id: c.operator_id,
                     epoch: c.checkpoint_epoch,
                     needs_commit: false,
@@ -185,12 +187,14 @@ async fn compact(
     tasks_per_operator: HashMap<String, usize>,
     epoch: u32,
 ) {
+    let operator_to_node = running_engine.operator_to_node();
     let operator_controls = running_engine.operator_controls();
     for (operator, _) in tasks_per_operator {
         if let Ok(compacted) =
-            ParquetBackend::compact_operator(job_id.clone(), operator.clone(), epoch).await
+            ParquetBackend::compact_operator(job_id.clone(), &operator, epoch).await
         {
-            let operator_controls = operator_controls.get(&operator).unwrap();
+            let node_id = operator_to_node.get(&operator).unwrap();
+            let operator_controls = operator_controls.get(node_id).unwrap();
             for s in operator_controls {
                 s.send(ControlMessage::LoadCompacted {
                     compacted: CompactionResult {
@@ -229,26 +233,28 @@ fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, paralle
     let watermark_nodes: HashSet<_> = graph
         .node_indices()
         .filter(|index| {
-            let operator_name = graph.node_weight(*index).unwrap().operator_name;
-            matches!(operator_name, OperatorName::ExpressionWatermark)
+            graph.node_weight(*index).unwrap().operator_chain
+                .iter()
+                .any(|(c, _)| c.operator_name == OperatorName::ExpressionWatermark)
         })
         .collect();
     let indices: Vec<_> = graph
         .node_indices()
-        .filter(
-            |index| match graph.node_weight(*index).unwrap().operator_name {
-                OperatorName::ExpressionWatermark
-                | OperatorName::ConnectorSource
-                | OperatorName::ConnectorSink => false,
-                _ => {
-                    for watermark_node in watermark_nodes.iter() {
-                        if has_path_connecting(&graph.clone(), *watermark_node, *index, None) {
-                            return true;
+        .filter(|index| graph.node_weight(*index).unwrap().operator_chain.iter()
+            .any(|(c, _)|
+                match c.operator_name {
+                    OperatorName::ExpressionWatermark
+                    | OperatorName::ConnectorSource
+                    | OperatorName::ConnectorSink => false,
+                    _ => {
+                        for watermark_node in watermark_nodes.iter() {
+                            if has_path_connecting(&graph.clone(), *watermark_node, *index, None) {
+                                return true;
+                            }
                         }
+                        false
                     }
-                    false
-                }
-            },
+                })
         )
         .collect();
     for node in indices {
@@ -262,7 +268,9 @@ fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, paralle
             }
         }
         for node in graph.node_indices() {
-            if graph.node_weight(node).unwrap().operator_name == OperatorName::ExpressionWatermark {
+            if graph.node_weight(node).unwrap().operator_chain
+                .iter()
+                .any(|(c, _)| c.operator_name == OperatorName::ExpressionWatermark) {
                 for edge in graph.edges_directed(node, Direction::Outgoing) {
                     edges_to_make_shuffle.push(edge.id());
                 }
@@ -274,13 +282,11 @@ fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, paralle
     }
 }
 
-async fn run_and_checkpoint(job_id: Arc<String>, program: Program, checkpoint_interval: i32) {
+async fn run_and_checkpoint(job_id: Arc<String>, program: Program, control_rx: &mut Receiver<ControlResp>, checkpoint_interval: i32) {
     let tasks_per_operator = program.tasks_per_operator();
     let engine = Engine::for_local(program, job_id.to_string());
-    let (running_engine, mut control_rx) = engine
-        .start(StreamConfig {
-            restore_epoch: None,
-        })
+    let running_engine = engine
+        .start()
         .await;
     info!("Smoke test checkpointing enabled");
     env::set_var(
@@ -291,7 +297,7 @@ async fn run_and_checkpoint(job_id: Arc<String>, program: Program, checkpoint_in
     let ctx = &mut SmokeTestContext {
         job_id: job_id.clone(),
         engine: &running_engine,
-        control_rx: &mut control_rx,
+        control_rx,
         tasks_per_operator: tasks_per_operator.clone(),
     };
 
@@ -316,44 +322,43 @@ async fn run_and_checkpoint(job_id: Arc<String>, program: Program, checkpoint_in
             .await
             .unwrap();
     }
-    run_until_finished(&running_engine, &mut control_rx).await;
+    run_until_finished(&running_engine, control_rx).await;
 }
 
-async fn finish_from_checkpoint(job_id: &str, program: Program) {
+async fn finish_from_checkpoint(job_id: &str, program: Program, control_rx: &mut Receiver<ControlResp>) {
     let engine = Engine::for_local(program, job_id.to_string());
-    let (running_engine, mut control_rx) = engine
-        .start(StreamConfig {
-            restore_epoch: Some(3),
-        })
+    let running_engine = engine
+        .start()
         .await;
 
     info!("Restored engine, running until finished");
-    run_until_finished(&running_engine, &mut control_rx).await;
+    run_until_finished(&running_engine, control_rx).await;
 }
 
 async fn run_pipeline_and_assert_outputs(
     job_id: &str,
     mut graph: LogicalGraph,
+    restore_from: Option<CheckpointMetadata>,
     checkpoint_interval: i32,
     output_location: String,
     golden_output_location: String,
     udfs: &[LocalUdf],
     primary_keys: Option<&[&str]>,
 ) {
+    let (control_tx, mut control_rx) = channel(16);
+    
     // remove output_location before running the pipeline
     if std::path::Path::new(&output_location).exists() {
         std::fs::remove_file(&output_location).unwrap();
     }
 
-    let get_program =
-        |graph: &LogicalGraph| Program::local_from_logical(job_id.to_string(), graph, udfs);
-
     run_completely(
         job_id,
-        get_program(&graph),
+        Program::local_from_logical(job_id.to_string(), &graph, udfs, restore_from.as_ref(), control_tx.clone()).await,
         output_location.clone(),
         golden_output_location.clone(),
         primary_keys,
+        &mut control_rx,
     )
     .await;
 
@@ -365,7 +370,8 @@ async fn run_pipeline_and_assert_outputs(
 
     run_and_checkpoint(
         Arc::new(job_id.to_string()),
-        get_program(&graph),
+        Program::local_from_logical(job_id.to_string(), &graph, udfs, restore_from.as_ref(), control_tx.clone()).await,
+        &mut control_rx,
         checkpoint_interval,
     )
     .await;
@@ -374,7 +380,7 @@ async fn run_pipeline_and_assert_outputs(
         set_internal_parallelism(&mut graph, 3);
     }
 
-    finish_from_checkpoint(job_id, get_program(&graph)).await;
+    finish_from_checkpoint(job_id, Program::local_from_logical(job_id.to_string(), &graph, udfs, restore_from.as_ref(), control_tx).await, &mut control_rx).await;
 
     check_output_files(
         "resuming from checkpointing",
@@ -391,15 +397,14 @@ async fn run_completely(
     output_location: String,
     golden_output_location: String,
     primary_keys: Option<&[&str]>,
+    control_rx: &mut Receiver<ControlResp>,
 ) {
     let engine = Engine::for_local(program, job_id.to_string());
-    let (running_engine, mut control_rx) = engine
-        .start(StreamConfig {
-            restore_epoch: None,
-        })
+    let running_engine = engine
+        .start()
         .await;
 
-    run_until_finished(&running_engine, &mut control_rx).await;
+    run_until_finished(&running_engine, control_rx).await;
 
     check_output_files(
         "initial run",
@@ -625,6 +630,7 @@ pub async fn correctness_run_codegen(
     run_pipeline_and_assert_outputs(
         &test_name,
         logical_program.graph,
+        None,
         checkpoint_interval,
         physical_output,
         golden_output_location,

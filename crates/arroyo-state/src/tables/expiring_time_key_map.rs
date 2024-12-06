@@ -343,7 +343,7 @@ impl Table for ExpiringTimeKeyTable {
         table_metadata: Self::TableCheckpointMessage,
     ) -> anyhow::Result<Option<Self::TableSubtaskCheckpointMetadata>> {
         Ok(Some(ExpiringKeyedTimeSubtaskCheckpointMetadata {
-            subtask_index: self.task_info.task_index as u32,
+            subtask_index: self.task_info.task_index,
             watermark: None,
             files: table_metadata.files,
         }))
@@ -736,7 +736,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
         } else {
             Ok(Some((
                 ExpiringKeyedTimeSubtaskCheckpointMetadata {
-                    subtask_index: self.parent.task_info.task_index as u32,
+                    subtask_index: self.parent.task_info.task_index,
                     watermark: checkpoint.watermark.map(to_micros),
                     files,
                 },
@@ -750,7 +750,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
     }
 
     fn subtask_index(&self) -> u32 {
-        self.parent.task_info.task_index as u32
+        self.parent.task_info.task_index
     }
 }
 

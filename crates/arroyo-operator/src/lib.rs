@@ -14,7 +14,7 @@ use bincode::{Decode, Encode};
 
 use crate::context::OperatorContext;
 use crate::operator::{ConstructedOperator, Registry};
-use operator::{OperatorConstructor, OperatorNode};
+use operator::OperatorConstructor;
 use tokio_stream::Stream;
 
 pub mod connector;

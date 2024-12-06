@@ -101,26 +101,25 @@ struct EngineState {
 
 pub struct LocalRunner {
     program: Program,
+    control_rx: Receiver<ControlResp>,
 }
 
 impl LocalRunner {
-    pub fn new(program: Program) -> Self {
-        Self { program }
+    pub fn new(program: Program, control_rx: Receiver<ControlResp>) -> Self {
+        Self { program, control_rx }
     }
 
-    pub async fn run(self) {
+    pub async fn run(mut self) {
         let name = format!("{}-0", self.program.name);
         let total_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name);
 
-        let (control_tx, mut control_rx) = channel(128);
-
-        let _running_engine = engine.start(control_tx).await;
+        let _running_engine = engine.start().await;
 
         let mut finished_nodes = HashSet::new();
 
         loop {
-            while let Some(control_message) = control_rx.recv().await {
+            while let Some(control_message) = self.control_rx.recv().await {
                 debug!("received {:?}", control_message);
                 if let ControlResp::TaskFinished {
                     node_id,
@@ -482,7 +481,7 @@ impl WorkerGrpc for WorkerServer {
                 network,
                 req.tasks,
             );
-            engine.start(control_tx).await
+            engine.start().await
         };
 
         self.shutdown_guard
