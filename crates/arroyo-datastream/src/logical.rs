@@ -186,6 +186,10 @@ impl OperatorChain {
         self.operators.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.operators.is_empty()
+    }
+
     pub fn is_source(&self) -> bool {
         self.operators[0].operator_name == OperatorName::ConnectorSource
     }

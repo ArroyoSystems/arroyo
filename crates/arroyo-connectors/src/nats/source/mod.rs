@@ -5,7 +5,7 @@ use super::NatsState;
 use super::NatsTable;
 use super::ReplayPolicy;
 use super::{get_nats_client, SourceType};
-use arroyo_operator::context::{SourceContext, SourceCollector};
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::BadData;
@@ -57,7 +57,11 @@ impl SourceOperator for NatsSourceFunc {
         arroyo_state::global_table_config("n", "NATS source state")
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         match self.run_int(ctx, collector).await {
             Ok(res) => res,
             Err(err) => {
@@ -320,7 +324,11 @@ impl NatsSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),

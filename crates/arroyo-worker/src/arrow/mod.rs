@@ -75,7 +75,7 @@ impl ArrowOperator for ValueExecutionOperator {
     async fn process_batch(
         &mut self,
         record_batch: RecordBatch,
-        ctx: &mut OperatorContext,
+        _: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) {
         let mut records = self.executor.process_batch(record_batch).await;

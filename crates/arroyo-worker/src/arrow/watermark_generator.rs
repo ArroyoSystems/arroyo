@@ -10,9 +10,7 @@ use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
-use arroyo_types::{
-    from_nanos, to_millis, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
-};
+use arroyo_types::{from_nanos, to_millis, CheckpointBarrier, SignalMessage, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::physical_expr::PhysicalExpr;

@@ -125,6 +125,7 @@ impl ArrowOperator for WindowFunctionOperator {
     fn name(&self) -> String {
         "WindowFunction".to_string()
     }
+
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         let table = ctx
@@ -139,11 +140,12 @@ impl ArrowOperator for WindowFunctionOperator {
             }
         }
     }
+
     async fn process_batch(
         &mut self,
         batch: RecordBatch,
         ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut dyn Collector,
     ) {
         let current_watermark = ctx.last_present_watermark();
         let table = ctx
@@ -196,9 +198,9 @@ impl ArrowOperator for WindowFunctionOperator {
 
     async fn handle_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
+        _: CheckpointBarrier,
         ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut dyn Collector,
     ) {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager

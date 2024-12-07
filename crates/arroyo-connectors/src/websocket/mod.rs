@@ -331,16 +331,18 @@ impl Connector for WebsocketConnector {
             .map(|(k, v)| ((&k).into(), (&v).into()))
             .collect();
 
-        Ok(ConstructedOperator::from_source(Box::new(WebsocketSourceFunc {
-            url: table.endpoint,
-            headers,
-            subscription_messages,
-            format: config
-                .format
-                .ok_or_else(|| anyhow!("format required for websocket source"))?,
-            framing: config.framing,
-            bad_data: config.bad_data,
-            state: WebsocketSourceState::default(),
-        })))
+        Ok(ConstructedOperator::from_source(Box::new(
+            WebsocketSourceFunc {
+                url: table.endpoint,
+                headers,
+                subscription_messages,
+                format: config
+                    .format
+                    .ok_or_else(|| anyhow!("format required for websocket source"))?,
+                framing: config.framing,
+                bad_data: config.bad_data,
+                state: WebsocketSourceState::default(),
+            },
+        )))
     }
 }

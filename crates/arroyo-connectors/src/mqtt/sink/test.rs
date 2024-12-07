@@ -2,7 +2,9 @@ use arrow::array::{RecordBatch, StringArray};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::MqttSinkFunc;
 use crate::mqtt::{create_connection, MqttConfig, Tls};
+use crate::test::DummyCollector;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
@@ -19,8 +21,6 @@ use rumqttc::{
 };
 use serde::Deserialize;
 use tokio::sync::mpsc::channel;
-use crate::test::DummyCollector;
-use super::MqttSinkFunc;
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new(vec![Field::new(
@@ -78,7 +78,7 @@ impl MqttTopicTester {
         let (command_tx, _) = channel(128);
 
         let task_info = Arc::new(get_test_task_info());
-        
+
         let mut ctx = OperatorContext::new(
             task_info,
             None,
@@ -88,7 +88,7 @@ impl MqttTopicTester {
             None,
             HashMap::new(),
         )
-            .await;
+        .await;
 
         mqtt.on_start(&mut ctx).await;
 
@@ -141,7 +141,7 @@ async fn test_mqtt() {
 
         sink_with_writes
             .sink
-            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector{})
+            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector {})
             .await;
     }
 

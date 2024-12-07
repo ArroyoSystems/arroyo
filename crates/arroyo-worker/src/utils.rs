@@ -3,7 +3,6 @@ use arrow_schema::Schema;
 use arroyo_datastream::logical::{ChainedLogicalOperator, LogicalEdgeType, LogicalProgram};
 use arroyo_df::physical::new_registry;
 use arroyo_operator::operator::Registry;
-use arroyo_rpc::grpc::api::EdgeType;
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -48,7 +47,7 @@ fn write_edge(
     let edge_label = format!("{}", edge_type);
 
     let schema_node_name = format!("schema_{}", edge_idx);
-    let schema_fields = format_arrow_schema_fields(&schema);
+    let schema_fields = format_arrow_schema_fields(schema);
 
     writeln!(d2, "{}: {{", schema_node_name).unwrap();
     writeln!(d2, "  shape: sql_table").unwrap();

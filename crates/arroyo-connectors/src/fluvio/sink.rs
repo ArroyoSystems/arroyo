@@ -38,17 +38,23 @@ impl ArrowOperator for FluvioSinkFunc {
                 self.producer = Some(producer);
             }
             Err(e) => {
-                ctx.error_reporter.report_error(
-                    "Failed to construct Fluvio producer".to_string(),
-                    e.to_string(),
-                )
-                .await;
+                ctx.error_reporter
+                    .report_error(
+                        "Failed to construct Fluvio producer".to_string(),
+                        e.to_string(),
+                    )
+                    .await;
                 panic!("Failed to construct Fluvio producer: {:?}", e);
             }
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let values = self.serializer.serialize(&batch);
         for v in values {
             self.producer
@@ -60,7 +66,12 @@ impl ArrowOperator for FluvioSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         self.producer.as_mut().unwrap().flush().await.unwrap();
     }
 }

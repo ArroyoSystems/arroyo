@@ -237,12 +237,18 @@ impl SourceOperator for NexmarkSourceFunc {
                     event_count: 0,
                 }
             } else {
-                ss.get(&(ctx.task_info.task_index as usize)).unwrap().clone()
+                ss.get(&(ctx.task_info.task_index as usize))
+                    .unwrap()
+                    .clone()
             }
         });
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         let state = self.state.as_ref().unwrap().clone();
 
         let mut generator = NexmarkGenerator::from_config(&state.config, state.event_count as u64);
@@ -271,19 +277,20 @@ impl SourceOperator for NexmarkSourceFunc {
             timestamp_builder.append_value(to_nanos(next_event.event_timetamp) as i64);
 
             if should_flush(records, flush_time) {
-                collector.collect(
-                    RecordBatch::try_new(
-                        ctx.out_schema.schema.clone(),
-                        vec![
-                            Arc::new(person_builder.finish()),
-                            Arc::new(auction_builder.finish()),
-                            Arc::new(bid_builder.finish()),
-                            Arc::new(timestamp_builder.finish()),
-                        ],
+                collector
+                    .collect(
+                        RecordBatch::try_new(
+                            ctx.out_schema.schema.clone(),
+                            vec![
+                                Arc::new(person_builder.finish()),
+                                Arc::new(auction_builder.finish()),
+                                Arc::new(bid_builder.finish()),
+                                Arc::new(timestamp_builder.finish()),
+                            ],
+                        )
+                        .unwrap(),
                     )
-                    .unwrap(),
-                )
-                .await;
+                    .await;
                 records = 0;
                 flush_time = Instant::now();
             }

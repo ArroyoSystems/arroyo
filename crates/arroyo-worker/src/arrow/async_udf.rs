@@ -12,7 +12,7 @@ use arroyo_operator::operator::{
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
-use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
+use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::AsyncUdfDylib;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -389,7 +389,7 @@ impl ArrowOperator for AsyncUdfOperator {
         &mut self,
         watermark: Watermark,
         _: &mut OperatorContext,
-         _: &mut dyn Collector,
+        _: &mut dyn Collector,
     ) -> Option<Watermark> {
         self.watermarks.push_back((self.next_id, watermark));
         None

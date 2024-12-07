@@ -262,31 +262,33 @@ impl Connector for PollingHTTPConnector {
         })
         .collect();
 
-        Ok(ConstructedOperator::from_source(Box::new(PollingHttpSourceFunc {
-            state: PollingHttpSourceState::default(),
-            client: reqwest::ClientBuilder::new()
-                .default_headers(headers)
-                .timeout(Duration::from_secs(5))
-                .build()
-                .expect("could not construct http client"),
-            endpoint: url::Url::from_str(&table.endpoint).expect("invalid endpoint"),
-            method: match table.method {
-                None | Some(Method::Get) => reqwest::Method::GET,
-                Some(Method::Post) => reqwest::Method::POST,
-                Some(Method::Put) => reqwest::Method::PUT,
-                Some(Method::Patch) => reqwest::Method::PATCH,
+        Ok(ConstructedOperator::from_source(Box::new(
+            PollingHttpSourceFunc {
+                state: PollingHttpSourceState::default(),
+                client: reqwest::ClientBuilder::new()
+                    .default_headers(headers)
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .expect("could not construct http client"),
+                endpoint: url::Url::from_str(&table.endpoint).expect("invalid endpoint"),
+                method: match table.method {
+                    None | Some(Method::Get) => reqwest::Method::GET,
+                    Some(Method::Post) => reqwest::Method::POST,
+                    Some(Method::Put) => reqwest::Method::PUT,
+                    Some(Method::Patch) => reqwest::Method::PATCH,
+                },
+                body: table.body.map(|b| b.into()),
+                polling_interval: table
+                    .poll_interval_ms
+                    .map(|d| Duration::from_millis(d as u64))
+                    .unwrap_or(DEFAULT_POLLING_INTERVAL),
+                emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
+                format: config
+                    .format
+                    .expect("PollingHTTP source must have a format"),
+                framing: config.framing,
+                bad_data: config.bad_data,
             },
-            body: table.body.map(|b| b.into()),
-            polling_interval: table
-                .poll_interval_ms
-                .map(|d| Duration::from_millis(d as u64))
-                .unwrap_or(DEFAULT_POLLING_INTERVAL),
-            emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
-            format: config
-                .format
-                .expect("PollingHTTP source must have a format"),
-            framing: config.framing,
-            bad_data: config.bad_data,
-        })))
+        )))
     }
 }

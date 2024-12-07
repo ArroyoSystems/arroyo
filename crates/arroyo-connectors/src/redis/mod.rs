@@ -403,17 +403,19 @@ impl Connector for RedisConnector {
         let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
         let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);
 
-        Ok(ConstructedOperator::from_operator(Box::new(RedisSinkFunc {
-            serializer: ArrowSerializer::new(
-                config.format.expect("redis table must have a format"),
-            ),
-            table,
-            client,
-            cmd_q: Some((cmd_tx, cmd_rx)),
-            tx,
-            rx,
-            key_index: None,
-            hash_index: None,
-        })))
+        Ok(ConstructedOperator::from_operator(Box::new(
+            RedisSinkFunc {
+                serializer: ArrowSerializer::new(
+                    config.format.expect("redis table must have a format"),
+                ),
+                table,
+                client,
+                cmd_q: Some((cmd_tx, cmd_rx)),
+                tx,
+                rx,
+                key_index: None,
+                hash_index: None,
+            },
+        )))
     }
 }

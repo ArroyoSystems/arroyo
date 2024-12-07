@@ -64,7 +64,11 @@ impl SourceOperator for PollingHttpSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
@@ -195,7 +199,11 @@ impl PollingHttpSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -238,10 +246,9 @@ impl PollingHttpSourceFunc {
             }
         } else {
             // otherwise set idle and just process control messages
-            collector.broadcast(SignalMessage::Watermark(
-                Watermark::Idle,
-            ))
-            .await;
+            collector
+                .broadcast(SignalMessage::Watermark(Watermark::Idle))
+                .await;
             loop {
                 let msg = ctx.control_rx.recv().await;
                 if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {

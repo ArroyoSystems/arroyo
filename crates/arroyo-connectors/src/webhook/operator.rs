@@ -37,7 +37,12 @@ impl ArrowOperator for WebhookSinkFunc {
         global_table_config("s", "webhook sink state")
     }
 
-    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        record: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         for body in self.serializer.serialize(&record) {
             let permit = self
                 .semaphore
@@ -87,7 +92,6 @@ impl ArrowOperator for WebhookSinkFunc {
                                         e.to_string()
                                     };
 
-
                                     control_tx
                                         .send(ControlResp::Error {
                                             node_id,
@@ -116,7 +120,12 @@ impl ArrowOperator for WebhookSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         // wait to acquire all of the permits (effectively blocking until all inflight requests are done)
         let _permits = self.semaphore.acquire_many(MAX_INFLIGHT).await.unwrap();
 

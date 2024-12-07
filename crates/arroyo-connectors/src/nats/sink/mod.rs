@@ -47,7 +47,12 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         // TODO: Implement checkpointing of in-progress data to avoid depending on
         // the downstream NATS availability to flush and checkpoint.
         let publisher = self
@@ -63,7 +68,12 @@ impl ArrowOperator for NatsSinkFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let SinkType::Subject(s) = &self.sink_type;
         let nats_subject = async_nats::Subject::from(s.clone());
         for msg in self.serializer.serialize(&batch) {
@@ -75,8 +85,7 @@ impl ArrowOperator for NatsSinkFunc {
             match publisher.publish(nats_subject.clone(), msg.into()).await {
                 Ok(_) => {}
                 Err(e) => {
-                    ctx.report_error(e.to_string(), format!("{:?}", e))
-                        .await;
+                    ctx.report_error(e.to_string(), format!("{:?}", e)).await;
                     panic!("Panicked while processing element: {}", e);
                 }
             }

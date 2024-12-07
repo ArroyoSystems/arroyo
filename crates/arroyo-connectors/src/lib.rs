@@ -164,22 +164,20 @@ pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
 #[cfg(test)]
 mod test {
     use arrow::array::RecordBatch;
-    use async_trait::async_trait;
     use arroyo_operator::context::Collector;
     use arroyo_types::Watermark;
+    use async_trait::async_trait;
 
-    pub struct DummyCollector {
-    }
+    pub struct DummyCollector {}
 
     #[async_trait]
     impl Collector for DummyCollector {
-        async fn collect(&mut self, batch: RecordBatch) {
+        async fn collect(&mut self, _: RecordBatch) {
             unreachable!()
         }
 
-        async fn broadcast_watermark(&mut self, watermark: Watermark) {
+        async fn broadcast_watermark(&mut self, _: Watermark) {
             unreachable!()
         }
     }
-
 }

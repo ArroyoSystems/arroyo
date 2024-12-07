@@ -694,9 +694,9 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
 
     async fn handle_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
+        _: CheckpointBarrier,
         ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut dyn Collector,
     ) {
         let watermark = ctx
             .watermark()

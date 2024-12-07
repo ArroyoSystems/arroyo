@@ -1,7 +1,7 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
-use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
+use crate::engine::{Engine, Program, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
 
@@ -38,7 +38,6 @@ pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 
-use crate::utils::to_d2;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_df::physical::new_registry;
 use arroyo_rpc::config::config;
@@ -106,7 +105,10 @@ pub struct LocalRunner {
 
 impl LocalRunner {
     pub fn new(program: Program, control_rx: Receiver<ControlResp>) -> Self {
-        Self { program, control_rx }
+        Self {
+            program,
+            control_rx,
+        }
     }
 
     pub async fn run(mut self) {

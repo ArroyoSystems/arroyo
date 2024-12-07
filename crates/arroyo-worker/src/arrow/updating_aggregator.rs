@@ -26,7 +26,6 @@ use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_rpc::{updating_meta_fields, UPDATING_META_FIELD};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
-use datafusion::common::utils::coerced_fixed_size_list_to_list;
 use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -263,7 +262,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
 
     async fn handle_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
+        _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) {

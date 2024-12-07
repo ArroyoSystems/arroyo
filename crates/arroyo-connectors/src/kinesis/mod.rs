@@ -177,8 +177,8 @@ impl Connector for KinesisConnector {
         config: OperatorConfig,
     ) -> Result<ConstructedOperator> {
         match table.type_ {
-            TableType::Source { offset } => {
-                Ok(ConstructedOperator::from_source(Box::new(KinesisSourceFunc {
+            TableType::Source { offset } => Ok(ConstructedOperator::from_source(Box::new(
+                KinesisSourceFunc {
                     stream_name: table.stream_name,
                     kinesis_client: None,
                     aws_region: table.aws_region,
@@ -189,8 +189,8 @@ impl Connector for KinesisConnector {
                         .ok_or_else(|| anyhow!("format required for kinesis source"))?,
                     framing: config.framing,
                     bad_data: config.bad_data,
-                })))
-            }
+                },
+            ))),
             TableType::Sink {
                 batch_flush_interval_millis,
                 batch_max_buffer_size,
@@ -201,18 +201,20 @@ impl Connector for KinesisConnector {
                     batch_max_buffer_size,
                     records_per_batch,
                 );
-                Ok(ConstructedOperator::from_operator(Box::new(KinesisSinkFunc {
-                    client: None,
-                    in_progress_batch: None,
-                    aws_region: table.aws_region,
-                    name: table.stream_name,
-                    serializer: ArrowSerializer::new(
-                        config
-                            .format
-                            .ok_or_else(|| anyhow!("Format must be defined for KinesisSink"))?,
-                    ),
-                    flush_config,
-                })))
+                Ok(ConstructedOperator::from_operator(Box::new(
+                    KinesisSinkFunc {
+                        client: None,
+                        in_progress_batch: None,
+                        aws_region: table.aws_region,
+                        name: table.stream_name,
+                        serializer: ArrowSerializer::new(
+                            config
+                                .format
+                                .ok_or_else(|| anyhow!("Format must be defined for KinesisSink"))?,
+                        ),
+                        flush_config,
+                    },
+                )))
             }
         }
     }

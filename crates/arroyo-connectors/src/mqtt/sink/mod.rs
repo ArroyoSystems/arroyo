@@ -90,7 +90,12 @@ impl ArrowOperator for MqttSinkFunc {
         panic!("Failed to establish connection to mqtt after 20 retries");
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         for v in self.serializer.serialize(&batch) {
             match self
                 .client
@@ -101,7 +106,8 @@ impl ArrowOperator for MqttSinkFunc {
             {
                 Ok(_) => (),
                 Err(e) => {
-                    ctx.report_error("Could not write to mqtt", format!("{:?}", e)).await;
+                    ctx.report_error("Could not write to mqtt", format!("{:?}", e))
+                        .await;
                     panic!("Could not write to mqtt: {:?}", e);
                 }
             }

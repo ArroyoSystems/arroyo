@@ -293,19 +293,21 @@ impl Connector for MqttConnector {
                 subscribed: Arc::new(AtomicBool::new(false)),
                 metadata_fields: config.metadata_fields,
             })),
-            TableType::Sink { retain } => ConstructedOperator::from_operator(Box::new(MqttSinkFunc {
-                config: profile,
-                qos,
-                topic: table.topic,
-                retain,
-                serializer: ArrowSerializer::new(
-                    config
-                        .format
-                        .ok_or_else(|| anyhow!("format is required for mqtt sink"))?,
-                ),
-                stopped: Arc::new(AtomicBool::new(false)),
-                client: None,
-            })),
+            TableType::Sink { retain } => {
+                ConstructedOperator::from_operator(Box::new(MqttSinkFunc {
+                    config: profile,
+                    qos,
+                    topic: table.topic,
+                    retain,
+                    serializer: ArrowSerializer::new(
+                        config
+                            .format
+                            .ok_or_else(|| anyhow!("format is required for mqtt sink"))?,
+                    ),
+                    stopped: Arc::new(AtomicBool::new(false)),
+                    client: None,
+                }))
+            }
         })
     }
 }

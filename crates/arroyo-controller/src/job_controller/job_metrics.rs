@@ -139,8 +139,7 @@ impl JobMetrics {
                     .graph
                     .node_weight(NodeIndex::new(op_id as usize))
                     .unwrap()
-                    .node_id
-                    .clone();
+                    .node_id;
                 OperatorMetricGroup {
                     node_id,
                     metric_groups: metrics
