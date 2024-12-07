@@ -7,9 +7,8 @@ use std::time::{Duration, SystemTime};
 use arrow::array::{RecordBatch, UInt32Array};
 use arrow::datatypes::Field;
 use arrow::datatypes::{DataType, Schema, SchemaRef};
-use async_trait::async_trait;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::{Collector, OperatorContext};
+use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
@@ -156,7 +155,7 @@ async fn test_kafka_checkpoint_flushes() {
 
         sink_with_writes
             .sink
-            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector{})
+            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector {})
             .await;
     }
     let barrier = CheckpointBarrier {
@@ -167,7 +166,7 @@ async fn test_kafka_checkpoint_flushes() {
     };
     sink_with_writes
         .sink
-        .handle_checkpoint(barrier, &mut sink_with_writes.ctx, &mut DummyCollector{})
+        .handle_checkpoint(barrier, &mut sink_with_writes.ctx, &mut DummyCollector {})
         .await;
 
     for message in 1u32..200 {
@@ -194,7 +193,7 @@ async fn test_kafka() {
 
         sink_with_writes
             .sink
-            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector{})
+            .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector {})
             .await;
         sink_with_writes
             .sink

@@ -230,8 +230,8 @@ impl Connector for FileSystemConnector {
         config: OperatorConfig,
     ) -> Result<ConstructedOperator> {
         match &table.table_type {
-            TableType::Source { .. } => {
-                Ok(ConstructedOperator::from_source(Box::new(FileSystemSourceFunc {
+            TableType::Source { .. } => Ok(ConstructedOperator::from_source(Box::new(
+                FileSystemSourceFunc {
                     table: table.table_type.clone(),
                     format: config
                         .format
@@ -239,8 +239,8 @@ impl Connector for FileSystemConnector {
                     framing: config.framing.clone(),
                     bad_data: config.bad_data.clone(),
                     file_states: HashMap::new(),
-                })))
-            }
+                },
+            ))),
             TableType::Sink {
                 file_settings: _,
                 format_settings,
@@ -264,9 +264,11 @@ impl Connector for FileSystemConnector {
                             LocalJsonFileSystemSink::new(write_path.to_string(), table, config),
                         )))
                     }
-                    (Some(FormatSettings::Json { .. }), false) => Ok(ConstructedOperator::from_operator(
-                        Box::new(JsonFileSystemSink::new(table, config)),
-                    )),
+                    (Some(FormatSettings::Json { .. }), false) => {
+                        Ok(ConstructedOperator::from_operator(Box::new(
+                            JsonFileSystemSink::new(table, config),
+                        )))
+                    }
                     (None, _) => bail!("have to have some format settings"),
                 }
             }

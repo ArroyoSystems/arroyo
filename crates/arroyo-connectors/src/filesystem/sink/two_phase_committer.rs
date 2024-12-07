@@ -1,5 +1,6 @@
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
+use arroyo_operator::context::Collector;
 use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
 use arroyo_rpc::{
     grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
@@ -12,8 +13,7 @@ use bincode::config;
 use prost::Message;
 use std::fmt::Debug;
 use std::{collections::HashMap, time::SystemTime};
-use tracing::{info};
-use arroyo_operator::context::Collector;
+use tracing::info;
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {
     committer: TPC,
@@ -155,7 +155,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         );
         tables
     }
-    
+
     fn is_committing(&self) -> bool {
         true
     }
@@ -184,7 +184,12 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         self.committer
             .insert_batch(batch)
             .await

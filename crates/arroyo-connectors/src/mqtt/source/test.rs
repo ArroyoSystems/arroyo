@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use crate::mqtt::{create_connection, MqttConfig, Tls};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-use arroyo_operator::context::{batch_bounded, OperatorContext, BatchReceiver, SourceContext, ArrowCollector, SourceCollector};
+use arroyo_operator::context::{
+    batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext,
+};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
@@ -133,7 +135,7 @@ impl MqttTopicTester {
         let (command_tx, from_control_rx) = channel(128);
         let (data_tx, recv) = batch_bounded(128);
 
-        let mut ctx = OperatorContext::new(
+        let ctx = OperatorContext::new(
             task_info.clone(),
             None.as_ref(),
             command_tx.clone(),
@@ -151,7 +153,8 @@ impl MqttTopicTester {
                 0,
             )),
             mqtt.tables(),
-        ).await;
+        )
+        .await;
 
         let chain_info = Arc::new(ChainInfo {
             job_id: ctx.task_info.job_id.clone(),
@@ -160,11 +163,19 @@ impl MqttTopicTester {
             task_index: ctx.task_info.task_index,
         });
 
-
         let mut ctx = SourceContext::from_operator(ctx, chain_info.clone(), control_rx);
-        let arrow_collector = ArrowCollector::new(chain_info.clone(), Some(ctx.out_schema.clone()), vec![vec![data_tx]]);
-        let mut collector = SourceCollector::new(ctx.out_schema.clone(), arrow_collector, command_tx, &chain_info, &task_info);
-
+        let arrow_collector = ArrowCollector::new(
+            chain_info.clone(),
+            Some(ctx.out_schema.clone()),
+            vec![vec![data_tx]],
+        );
+        let mut collector = SourceCollector::new(
+            ctx.out_schema.clone(),
+            arrow_collector,
+            command_tx,
+            &chain_info,
+            &task_info,
+        );
 
         let subscribed = mqtt.subscribed();
         tokio::spawn(async move {

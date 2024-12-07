@@ -11,7 +11,6 @@ use petgraph::{Direction, EdgeDirection};
 use std::collections::HashMap;
 use std::num::ParseIntError;
 use std::str::FromStr;
-use std::string::ParseError;
 use std::time::{Duration, SystemTime};
 
 use crate::{compiler_service, connection_profiles, jobs, types};
@@ -25,7 +24,7 @@ use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollec
 use arroyo_rpc::grpc::api::{ArrowProgram, ConnectorOp};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
-use arroyo_datastream::logical::{LogicalNode, LogicalProgram, OperatorName};
+use arroyo_datastream::logical::{LogicalProgram, OperatorName};
 use arroyo_df::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::formats::Format;
@@ -55,7 +54,6 @@ use crate::{connection_tables, to_micros};
 use arroyo_rpc::config::config;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
-use petgraph::prelude::EdgeRef;
 
 async fn compile_sql<'a>(
     query: String,

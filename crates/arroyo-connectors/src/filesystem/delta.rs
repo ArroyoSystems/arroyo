@@ -183,9 +183,11 @@ impl Connector for DeltaLakeConnector {
                     LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
                 )))
             }
-            (Some(FormatSettings::Parquet { .. }), false) => Ok(ConstructedOperator::from_operator(
-                Box::new(ParquetFileSystemSink::new(table, config)),
-            )),
+            (Some(FormatSettings::Parquet { .. }), false) => {
+                Ok(ConstructedOperator::from_operator(Box::new(
+                    ParquetFileSystemSink::new(table, config),
+                )))
+            }
             _ => bail!("Delta Lake sink only supports Parquet format"),
         }
     }

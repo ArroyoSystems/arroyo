@@ -44,7 +44,12 @@ impl ArrowOperator for KinesisSinkFunc {
         self.in_progress_batch = Some(BatchRecordPreparer::new(client, self.name.clone()));
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         for v in self.serializer.serialize(&batch) {
             self.in_progress_batch
                 .as_mut()
@@ -56,7 +61,12 @@ impl ArrowOperator for KinesisSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         retry!(
             self.in_progress_batch.as_mut().unwrap().flush().await,
             30,

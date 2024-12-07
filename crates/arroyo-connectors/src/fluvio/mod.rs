@@ -175,8 +175,8 @@ impl Connector for FluvioConnector {
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
         match table.type_ {
-            TableType::Source { offset } => {
-                Ok(ConstructedOperator::from_source(Box::new(FluvioSourceFunc {
+            TableType::Source { offset } => Ok(ConstructedOperator::from_source(Box::new(
+                FluvioSourceFunc {
                     topic: table.topic,
                     endpoint: table.endpoint.clone(),
                     offset_mode: offset,
@@ -185,18 +185,20 @@ impl Connector for FluvioConnector {
                         .ok_or_else(|| anyhow!("format required for fluvio source"))?,
                     framing: config.framing,
                     bad_data: config.bad_data,
-                })))
-            }
-            TableType::Sink { .. } => Ok(ConstructedOperator::from_operator(Box::new(FluvioSinkFunc {
-                topic: table.topic,
-                endpoint: table.endpoint,
-                producer: None,
-                serializer: ArrowSerializer::new(
-                    config
-                        .format
-                        .ok_or_else(|| anyhow!("format required for fluvio sink"))?,
-                ),
-            }))),
+                },
+            ))),
+            TableType::Sink { .. } => Ok(ConstructedOperator::from_operator(Box::new(
+                FluvioSinkFunc {
+                    topic: table.topic,
+                    endpoint: table.endpoint,
+                    producer: None,
+                    serializer: ArrowSerializer::new(
+                        config
+                            .format
+                            .ok_or_else(|| anyhow!("format required for fluvio sink"))?,
+                    ),
+                },
+            ))),
         }
     }
 }

@@ -60,7 +60,11 @@ impl SourceOperator for FileSystemSourceFunc {
         "FileSystem".to_string()
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         match self.run_int(ctx, collector).await {
             Ok(s) => s,
             Err(e) => {
@@ -83,7 +87,11 @@ impl FileSystemSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         let (storage_provider, regex_pattern) = match &self.table {
             TableType::Source {
                 path,
@@ -164,7 +172,10 @@ impl FileSystemSourceFunc {
                 continue;
             }
 
-            if let Some(finish_type) = self.read_file(ctx, collector, &storage_provider, &obj_key).await? {
+            if let Some(finish_type) = self
+                .read_file(ctx, collector, &storage_provider, &obj_key)
+                .await?
+            {
                 return Ok(finish_type);
             }
         }
@@ -399,7 +410,7 @@ impl FileSystemSourceFunc {
     async fn process_control_message(
         &mut self,
         ctx: &mut SourceContext,
-        collector: &mut SourceCollector,        
+        collector: &mut SourceCollector,
         control_message: ControlMessage,
     ) -> Option<SourceFinishType> {
         match control_message {

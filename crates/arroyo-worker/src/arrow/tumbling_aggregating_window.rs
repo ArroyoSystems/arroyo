@@ -32,7 +32,6 @@ use datafusion::execution::{
     SendableRecordBatchStream,
 };
 use datafusion::physical_expr::PhysicalExpr;
-use datafusion::prelude::col;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
     physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
@@ -42,7 +41,7 @@ use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use super::sync::streams::KeyedCloneableStreamFuture;
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
@@ -410,32 +409,29 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
     async fn handle_future_result(
         &mut self,
         result: Box<dyn Any + Send>,
-        ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
     ) {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
-        if let Some((bin, batch_option)) = *data {
-            match batch_option {
-                None => {}
-                Some((batch, future)) => match self.execs.get_mut(&bin) {
-                    Some(exec) => {
-                        exec.finished_batches
-                            .push(batch.expect("should've been able to compute a batch"));
-                        self.futures.lock().await.push(future);
-                    }
-                    None => unreachable!(
-                        "FuturesUnordered returned a batch, but we can't find the exec"
-                    ),
-                },
+        if let Some((bin, Some((batch, future)))) = *data {
+            match self.execs.get_mut(&bin) {
+                Some(exec) => {
+                    exec.finished_batches
+                        .push(batch.expect("should've been able to compute a batch"));
+                    self.futures.lock().await.push(future);
+                }
+                None => {
+                    unreachable!("FuturesUnordered returned a batch, but we can't find the exec")
+                }
             }
         }
     }
 
     async fn handle_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
+        _: CheckpointBarrier,
         ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut dyn Collector,
     ) {
         let watermark = ctx
             .watermark()

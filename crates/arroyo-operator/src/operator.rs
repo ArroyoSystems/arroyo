@@ -34,7 +34,6 @@ use datafusion::physical_plan::{displayable, ExecutionPlan};
 use dlopen2::wrapper::Container;
 use futures::future::OptionFuture;
 use futures::stream::FuturesUnordered;
-use futures::FutureExt;
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -127,15 +126,6 @@ impl OperatorNode {
         match self {
             OperatorNode::Source(s) => &s.context.task_info,
             OperatorNode::Chained(s) => &s.context.task_info,
-        }
-    }
-
-    pub fn tables(&self) -> HashMap<String, TableConfig> {
-        match self {
-            OperatorNode::Source(s) => s.operator.tables(),
-            OperatorNode::Chained(s) => {
-                todo!()
-            }
         }
     }
 
@@ -589,6 +579,7 @@ impl ChainedOperator {
         collector.collect(batch).await;
     }
 
+    #[allow(clippy::type_complexity)]
     fn future_to_poll(
         &mut self,
     ) -> Option<Pin<Box<dyn Future<Output = (usize, Box<dyn Any + Send + Send>)> + Send>>> {
@@ -617,6 +608,7 @@ impl ChainedOperator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_control_message(
         &mut self,
         idx: usize,

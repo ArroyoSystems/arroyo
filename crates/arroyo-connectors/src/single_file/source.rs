@@ -30,7 +30,7 @@ impl SingleFileSourceFunc {
         &mut self,
         msg: Option<ControlMessage>,
         ctx: &mut SourceContext,
-        collector: &mut SourceCollector
+        collector: &mut SourceCollector,
     ) -> Option<SourceFinishType> {
         match msg {
             Some(ControlMessage::Checkpoint(c)) => {
@@ -88,7 +88,11 @@ impl SourceOperator for SingleFileSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         if ctx.task_info.task_index != 0 {
             return SourceFinishType::Final;
         }
@@ -113,7 +117,8 @@ impl SourceOperator for SingleFileSourceFunc {
                 i += 1;
                 continue;
             }
-            collector.deserialize_slice(s.as_bytes(), SystemTime::now(), None)
+            collector
+                .deserialize_slice(s.as_bytes(), SystemTime::now(), None)
                 .await
                 .unwrap();
             if collector.should_flush() {
@@ -125,7 +130,8 @@ impl SourceOperator for SingleFileSourceFunc {
 
             // wait for a control message after each line
             let return_type = if self.wait_for_control {
-                self.handle_control(ctx.control_rx.recv().await, ctx, collector).await
+                self.handle_control(ctx.control_rx.recv().await, ctx, collector)
+                    .await
             } else {
                 self.handle_control(ctx.control_rx.try_recv().ok(), ctx, collector)
                     .await

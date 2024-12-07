@@ -47,7 +47,11 @@ impl SourceOperator for MqttSourceFunc {
         arroyo_state::global_table_config("m", "mqtt source state")
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
@@ -88,7 +92,11 @@ impl MqttSourceFunc {
         self.subscribed.clone()
     }
 
-    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -101,10 +109,9 @@ impl MqttSourceFunc {
                 ctx.task_info.operator_id,
                 ctx.task_info.task_index
             );
-            collector.broadcast(SignalMessage::Watermark(
-                Watermark::Idle,
-            ))
-            .await;
+            collector
+                .broadcast(SignalMessage::Watermark(Watermark::Idle))
+                .await;
         }
 
         let (client, mut eventloop) =

@@ -875,9 +875,9 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
 
     async fn handle_checkpoint(
         &mut self,
-        b: CheckpointBarrier,
+        _: CheckpointBarrier,
         ctx: &mut OperatorContext,
-        collector: &mut dyn Collector,
+        _: &mut dyn Collector,
     ) {
         let watermark = ctx.last_present_watermark();
         let table = ctx

@@ -164,7 +164,11 @@ impl SourceOperator for KinesisSourceFunc {
         global_table_config("k", "kinesis source state")
     }
 
-    async fn run(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -229,7 +233,8 @@ impl KinesisSourceFunc {
                     .await
             }
             AsyncResult::GetRecords(get_records) => {
-                self.handle_get_records(shard_id, get_records, collector).await
+                self.handle_get_records(shard_id, get_records, collector)
+                    .await
             }
             AsyncResult::NeedNewIterator => self.handle_need_new_iterator(shard_id).await,
         }
@@ -349,7 +354,11 @@ impl KinesisSourceFunc {
     /// * A `FuturesUnordered` tha contains futures for reading off of shards.
     /// * An interval that periodically polls for new shards, initializing their futures.
     /// * Polling off of the control queue, to perform checkpointing and stop the operator.
-    async fn run_int(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         self.init_client().await;
         let starting_futures = self
             .init_shards(ctx)
@@ -432,7 +441,8 @@ impl KinesisSourceFunc {
         for record in records {
             let data = record.data.into_inner();
             let timestamp = record.approximate_arrival_timestamp.unwrap();
-            collector.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128), None)
+            collector
+                .deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128), None)
                 .await?;
 
             if collector.should_flush() {

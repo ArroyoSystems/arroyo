@@ -229,8 +229,14 @@ async fn basic_pipeline() {
     assert!(valid.graph.is_some());
 
     let (pipeline_id, job_id, _) = start_and_monitor(test_id, &query, &[], 10).await.unwrap();
-    
-    let sink_id = valid.graph.as_ref().unwrap().nodes.iter().find(|n| n.description.contains("sink"))
+
+    let sink_id = valid
+        .graph
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| n.description.contains("sink"))
         .unwrap()
         .node_id;
 

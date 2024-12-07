@@ -1,19 +1,3 @@
-use std::collections::{BTreeMap, HashMap};
-use std::error::Error;
-use std::fmt::{Debug, Formatter};
-use std::mem;
-use std::sync::{Arc, RwLock};
-
-use std::time::SystemTime;
-
-use arroyo_connectors::connectors;
-use arroyo_rpc::df::ArroyoSchema;
-use bincode::{Decode, Encode};
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
-use petgraph::data::DataMap;
-use tracing::{info, warn};
-
 use crate::arrow::async_udf::AsyncUdfConstructor;
 use crate::arrow::instant_join::InstantJoinConstructor;
 use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
@@ -25,31 +9,38 @@ use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
+use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorChain, OperatorName,
 };
 use arroyo_df::physical::new_registry;
-use arroyo_operator::context::{
-    batch_bounded, BatchReceiver, BatchSender, OperatorContext, SourceContext, WatermarkHolder,
-};
+use arroyo_operator::context::{batch_bounded, BatchReceiver, BatchSender, OperatorContext};
 use arroyo_operator::operator::Registry;
 use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNode, SourceNode};
 use arroyo_operator::ErasedConstructor;
 use arroyo_rpc::config::config;
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::{
     api,
     rpc::{CheckpointMetadata, TaskAssignment},
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{range_for_server, ChainInfo, Key, TaskInfo, WorkerId};
+use arroyo_types::{range_for_server, Key, TaskInfo, WorkerId};
 use arroyo_udf_host::LocalUdf;
+use bincode::{Decode, Encode};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{EdgeRef, NodeRef};
+use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::sync::{Arc, RwLock};
+use std::time::SystemTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
-use tracing::log::kv::ToKey;
+use tracing::{info, warn};
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -122,7 +113,7 @@ impl Debug for PhysicalGraphEdge {
 }
 
 impl SubtaskOrQueueNode {
-    pub fn take_subtask(&mut self, job_id: String) -> (SubtaskNode, Receiver<ControlMessage>) {
+    pub fn take_subtask(&mut self) -> (SubtaskNode, Receiver<ControlMessage>) {
         let (mut qn, rx) = match self {
             SubtaskOrQueueNode::SubtaskNode(sn) => {
                 let (tx, rx) = channel(16);
@@ -561,7 +552,7 @@ impl Engine {
             .unwrap()
             .node_weight_mut(idx)
             .unwrap()
-            .take_subtask(self.job_id.clone());
+            .take_subtask();
 
         let assignment = &self
             .assignments
@@ -754,6 +745,7 @@ impl Engine {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn construct_node(
     chain: OperatorChain,
     job_id: &str,
@@ -774,13 +766,6 @@ pub async fn construct_node(
         else {
             unreachable!();
         };
-
-        let chain_info = Arc::new(ChainInfo {
-            job_id: job_id.to_string(),
-            node_id,
-            description: operator.name().to_string(),
-            task_index: subtask_idx,
-        });
 
         let task_info = Arc::new(TaskInfo {
             job_id: job_id.to_string(),

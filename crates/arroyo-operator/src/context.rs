@@ -8,16 +8,13 @@ use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::rpc::{
-    CheckpointMetadata, TableConfig, TaskCheckpointEventType,
-};
+use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
-use arroyo_state::BackingStore;
 use arroyo_types::{
-    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo,
-    UserError, Watermark,
+    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo, UserError,
+    Watermark,
 };
 use async_trait::async_trait;
 use datafusion::common::hash_utils;
@@ -834,23 +831,13 @@ mod tests {
 
         let record = RecordBatch::try_new(schema.clone(), columns).unwrap();
 
-        let task_info = Arc::new(TaskInfo {
-            job_id: "test-job".to_string(),
-            node_id: 1,
-            operator_name: "test-operator".to_string(),
-            operator_id: "test-operator-1".to_string(),
-            task_index: 0,
-            parallelism: 1,
-            key_range: 0..=1,
-        });
-
         let chain_info = Arc::new(ChainInfo {
             job_id: "test-job".to_string(),
             node_id: 1,
             description: "test-operator".to_string(),
             task_index: 0,
         });
-        
+
         let out_qs = vec![vec![tx1, tx2]];
 
         let tx_queue_size_gauges = register_queue_gauge(
