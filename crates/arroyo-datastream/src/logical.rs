@@ -160,6 +160,13 @@ pub struct OperatorChain {
 }
 
 impl OperatorChain {
+    pub fn new(operator: ChainedLogicalOperator) -> Self {
+        Self {
+            operators: vec![operator],
+            edges: vec![],
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&ChainedLogicalOperator, Option<&ArroyoSchema>)> {
         self.operators
             .iter()
@@ -242,13 +249,14 @@ impl Debug for LogicalNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}",
+            "{}[{}]",
             self.operator_chain
                 .operators
                 .iter()
                 .map(|op| op.operator_id.clone())
                 .collect::<Vec<_>>()
-                .join(" -> ")
+                .join(" -> "),
+            self.parallelism
         )
     }
 }

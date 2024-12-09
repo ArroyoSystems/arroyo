@@ -25,14 +25,15 @@ use arroyo_rpc::grpc::{
     rpc::{CheckpointMetadata, TaskAssignment},
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{range_for_server, Key, TaskInfo, WorkerId};
 use arroyo_udf_host::LocalUdf;
 use bincode::{Decode, Encode};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::EdgeRef;
-use petgraph::Direction;
+use petgraph::visit::{EdgeRef, IntoEdgesDirected, NodeRef};
+use petgraph::{dot, Direction};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::mem;
@@ -40,7 +41,7 @@ use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -166,7 +167,7 @@ impl SubtaskOrQueueNode {
 pub struct Program {
     pub name: String,
     pub graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
-    pub control_tx: Sender<ControlResp>,
+    pub control_tx: Option<Sender<ControlResp>>,
 }
 
 impl Program {
@@ -178,7 +179,7 @@ impl Program {
         job_id: String,
         logical: &DiGraph<LogicalNode, LogicalEdge>,
         udfs: &[LocalUdf],
-        restore_from: Option<&CheckpointMetadata>,
+        restore_epoch: Option<u32>,
         control_tx: Sender<ControlResp>,
     ) -> Self {
         let assignments = logical
@@ -203,7 +204,7 @@ impl Program {
             logical,
             &assignments,
             registry,
-            restore_from,
+            restore_epoch,
             control_tx,
         )
         .await
@@ -215,10 +216,25 @@ impl Program {
         logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
         registry: Registry,
-        restore_from: Option<&CheckpointMetadata>,
+        restore_epoch: Option<u32>,
         control_tx: Sender<ControlResp>,
     ) -> Program {
         let mut physical = DiGraph::new();
+
+        let checkpoint_metadata = if let Some(epoch) = restore_epoch {
+            info!("Restoring checkpoint {} for job {}", epoch, job_id);
+            Some(
+                StateBackend::load_checkpoint_metadata(&job_id, epoch)
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!("failed to load checkpoint metadata for epoch {}", epoch)
+                    }),
+            )
+        } else {
+            None
+        };
+
+        debug!("Logical graph\n{:?}", dot::Dot::new(logical));
 
         let registry = Arc::new(registry);
 
@@ -238,9 +254,16 @@ impl Program {
                 .map(|edge| edge.weight().schema.clone())
                 .next();
 
-            let input_partitions = logical
-                .neighbors_directed(idx, Direction::Incoming)
-                .map(|n| logical.node_weight(n).unwrap().parallelism as u32)
+            let in_queue_count = logical
+                .edges_directed(idx, Direction::Incoming)
+                .map(|edge| match edge.weight().edge_type {
+                    LogicalEdgeType::Forward => 1,
+                    LogicalEdgeType::Shuffle
+                    | LogicalEdgeType::LeftJoin
+                    | LogicalEdgeType::RightJoin => {
+                        logical.node_weight(edge.source()).unwrap().parallelism as u32
+                    }
+                })
                 .sum();
 
             let node = logical.node_weight(idx).unwrap();
@@ -261,10 +284,10 @@ impl Program {
                         node.node_id,
                         i as u32,
                         parallelism as u32,
-                        input_partitions,
+                        in_queue_count,
                         in_schemas.clone(),
                         out_schema.clone(),
-                        restore_from,
+                        checkpoint_metadata.as_ref(),
                         control_tx.clone(),
                         registry.clone(),
                     )
@@ -336,17 +359,8 @@ impl Program {
         Program {
             name,
             graph: Arc::new(RwLock::new(physical)),
-            control_tx,
+            control_tx: Some(control_tx),
         }
-    }
-
-    pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
-        let mut tasks_per_operator = HashMap::new();
-        for node in self.graph.read().unwrap().node_weights() {
-            let entry = tasks_per_operator.entry(node.id().to_string()).or_insert(0);
-            *entry += 1;
-        }
-        tasks_per_operator
     }
 }
 
@@ -517,7 +531,11 @@ impl Engine {
             let mut futures = FuturesUnordered::new();
 
             for idx in node_indexes {
-                futures.push(self.schedule_node(&self.program.control_tx, idx, ready.clone()));
+                futures.push(self.schedule_node(
+                    &self.program.control_tx.as_ref().unwrap(),
+                    idx,
+                    ready.clone(),
+                ));
             }
 
             while let Some(result) = futures.next().await {
@@ -531,6 +549,8 @@ impl Engine {
         for n in self.program.graph.write().unwrap().edge_weights_mut() {
             n.tx = None;
         }
+
+        self.program.control_tx = None;
 
         RunningEngine {
             program: self.program,

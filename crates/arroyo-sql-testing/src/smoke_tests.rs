@@ -243,32 +243,36 @@ fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, paralle
                 .any(|(c, _)| c.operator_name == OperatorName::ExpressionWatermark)
         })
         .collect();
+
     let indices: Vec<_> = graph
         .node_indices()
         .filter(|index| {
-            graph
-                .node_weight(*index)
-                .unwrap()
-                .operator_chain
-                .iter()
-                .any(|(c, _)| match c.operator_name {
-                    OperatorName::ExpressionWatermark
-                    | OperatorName::ConnectorSource
-                    | OperatorName::ConnectorSink => false,
-                    _ => {
-                        for watermark_node in watermark_nodes.iter() {
-                            if has_path_connecting(&graph.clone(), *watermark_node, *index, None) {
-                                return true;
+            !watermark_nodes.contains(index)
+                && graph
+                    .node_weight(*index)
+                    .unwrap()
+                    .operator_chain
+                    .iter()
+                    .any(|(c, _)| match c.operator_name {
+                        OperatorName::ExpressionWatermark
+                        | OperatorName::ConnectorSource
+                        | OperatorName::ConnectorSink => false,
+                        _ => {
+                            for watermark_node in watermark_nodes.iter() {
+                                if has_path_connecting(&*graph, *watermark_node, *index, None) {
+                                    return true;
+                                }
                             }
+                            false
                         }
-                        false
-                    }
-                })
+                    })
         })
         .collect();
+
     for node in indices {
         graph.node_weight_mut(node).unwrap().parallelism = parallelism;
     }
+
     if parallelism > 1 {
         let mut edges_to_make_shuffle = vec![];
         for node in graph.externals(Direction::Outgoing) {
@@ -298,10 +302,10 @@ fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, paralle
 async fn run_and_checkpoint(
     job_id: Arc<String>,
     program: Program,
+    tasks_per_operator: HashMap<String, usize>,
     control_rx: &mut Receiver<ControlResp>,
     checkpoint_interval: i32,
 ) {
-    let tasks_per_operator = program.tasks_per_operator();
     let engine = Engine::for_local(program, job_id.to_string());
     let running_engine = engine.start().await;
     info!("Smoke test checkpointing enabled");
@@ -353,34 +357,38 @@ async fn finish_from_checkpoint(
     run_until_finished(&running_engine, control_rx).await;
 }
 
+fn tasks_per_operator(graph: &LogicalGraph) -> HashMap<String, usize> {
+    graph
+        .node_weights()
+        .flat_map(|node| {
+            node.operator_chain
+                .iter()
+                .map(|(op, _)| (op.operator_id.clone(), node.parallelism))
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_pipeline_and_assert_outputs(
     job_id: &str,
     mut graph: LogicalGraph,
-    restore_from: Option<CheckpointMetadata>,
     checkpoint_interval: i32,
     output_location: String,
     golden_output_location: String,
     udfs: &[LocalUdf],
     primary_keys: Option<&[&str]>,
 ) {
-    let (control_tx, mut control_rx) = channel(16);
-
     // remove output_location before running the pipeline
     if std::path::Path::new(&output_location).exists() {
         std::fs::remove_file(&output_location).unwrap();
     }
 
+    println!("Running completely");
+
+    let (control_tx, mut control_rx) = channel(128);
     run_completely(
         job_id,
-        Program::local_from_logical(
-            job_id.to_string(),
-            &graph,
-            udfs,
-            restore_from.as_ref(),
-            control_tx.clone(),
-        )
-        .await,
+        Program::local_from_logical(job_id.to_string(), &graph, udfs, None, control_tx).await,
         output_location.clone(),
         golden_output_location.clone(),
         primary_keys,
@@ -394,16 +402,13 @@ async fn run_pipeline_and_assert_outputs(
         set_internal_parallelism(&mut graph, 2);
     }
 
+    let (control_tx, mut control_rx) = channel(128);
+
+    println!("Run and checkpoint");
     run_and_checkpoint(
         Arc::new(job_id.to_string()),
-        Program::local_from_logical(
-            job_id.to_string(),
-            &graph,
-            udfs,
-            restore_from.as_ref(),
-            control_tx.clone(),
-        )
-        .await,
+        Program::local_from_logical(job_id.to_string(), &graph, udfs, None, control_tx).await,
+        tasks_per_operator(&graph),
         &mut control_rx,
         checkpoint_interval,
     )
@@ -413,16 +418,12 @@ async fn run_pipeline_and_assert_outputs(
         set_internal_parallelism(&mut graph, 3);
     }
 
+    let (control_tx, mut control_rx) = channel(128);
+
+    println!("Finish from checkpoint");
     finish_from_checkpoint(
         job_id,
-        Program::local_from_logical(
-            job_id.to_string(),
-            &graph,
-            udfs,
-            restore_from.as_ref(),
-            control_tx,
-        )
-        .await,
+        Program::local_from_logical(job_id.to_string(), &graph, udfs, Some(3), control_tx).await,
         &mut control_rx,
     )
     .await;
@@ -673,7 +674,6 @@ pub async fn correctness_run_codegen(
     run_pipeline_and_assert_outputs(
         &test_name,
         logical_program.graph,
-        None,
         checkpoint_interval,
         physical_output,
         golden_output_location,

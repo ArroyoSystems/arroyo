@@ -759,7 +759,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
-        let start_times_map: &mut GlobalKeyedView<usize, Option<SystemTime>> =
+        let start_times_map: &mut GlobalKeyedView<u32, Option<SystemTime>> =
             ctx.table_manager.get_global_keyed_state("e").await.unwrap();
         let start_time = start_times_map
             .get_all()

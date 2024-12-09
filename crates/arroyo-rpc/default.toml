@@ -10,7 +10,7 @@ worker-heartbeat-timeout = "30s"
 healthy-duration = "2m"
 worker-startup-time = "10m"
 task-startup-time = "2m"
-chaining.enabled = true
+chaining.enabled = false
 
 [pipeline.compaction]
 enabled = false

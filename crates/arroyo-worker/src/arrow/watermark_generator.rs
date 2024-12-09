@@ -140,7 +140,7 @@ impl ArrowOperator for WatermarkGenerator {
             // send final watermark on close
             collector
                 .broadcast_watermark(
-                    // this is in the year 2554, far enough out be close to inifinity,
+                    // this is in the year 2554, far enough out be close to infinity,
                     // but can still be formatted.
                     Watermark::EventTime(from_nanos(u64::MAX as u128)),
                 )

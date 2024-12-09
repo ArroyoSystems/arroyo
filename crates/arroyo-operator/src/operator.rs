@@ -845,11 +845,11 @@ impl ChainedOperator {
                     final_collector,
                 };
 
-                Box::pin(
-                    self.operator
-                        .on_close(final_message, &mut self.context, &mut collector),
-                )
-                .await;
+                self.operator
+                    .on_close(final_message, &mut self.context, &mut collector)
+                    .await;
+
+                Box::pin(next.on_close(final_message, final_collector)).await;
             }
             None => {
                 self.operator
@@ -873,6 +873,8 @@ async fn operator_run_behavior(
     let chain_info = &mut collector.chain_info.clone();
 
     ready.wait().await;
+
+    info!("Running node {}", chain_info);
 
     control_tx
         .send(ControlResp::TaskStarted {

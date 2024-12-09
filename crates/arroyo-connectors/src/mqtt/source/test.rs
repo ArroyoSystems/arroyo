@@ -148,7 +148,7 @@ impl MqttTopicTester {
                         DataType::Timestamp(TimeUnit::Nanosecond, None),
                         false,
                     ),
-                    Field::new("value", DataType::Utf8, false),
+                    Field::new("value", DataType::UInt64, false),
                 ])),
                 0,
             )),
