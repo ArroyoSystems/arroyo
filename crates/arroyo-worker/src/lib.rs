@@ -38,6 +38,7 @@ pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 
+use crate::utils::to_d2;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_df::physical::new_registry;
 use arroyo_rpc::config::config;
@@ -417,9 +418,12 @@ impl WorkerGrpc for WorkerServer {
         let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
             .expect("Failed to create LogicalProgram");
 
-        // if let Ok(v) = to_d2(&logical).await {
-        //     debug!("Starting execution for graph\n{}", v);
-        // }
+        debug!(
+            "Starting execution for graph\n{}",
+            to_d2(&logical)
+                .await
+                .unwrap_or_else(|e| format!("Failed to generate pipeline visualization: {e}"))
+        );
 
         for (udf_name, dylib_config) in &logical.program_config.udf_dylibs {
             info!("Loading UDF {}", udf_name);
@@ -451,26 +455,13 @@ impl WorkerGrpc for WorkerServer {
         let engine = {
             let network = { self.network.lock().unwrap().take().unwrap() };
 
-            let checkpoint_metadata = if let Some(epoch) = req.restore_epoch {
-                info!("Restoring checkpoint {} for job {}", epoch, self.job_id);
-                Some(
-                    StateBackend::load_checkpoint_metadata(&self.job_id, epoch)
-                        .await
-                        .unwrap_or_else(|_| {
-                            panic!("failed to load checkpoint metadata for epoch {}", epoch)
-                        }),
-                )
-            } else {
-                None
-            };
-
             let program = Program::from_logical(
                 self.name.to_string(),
                 &self.job_id,
                 &logical.graph,
                 &req.tasks,
                 registry,
-                checkpoint_metadata.as_ref(),
+                req.restore_epoch,
                 control_tx.clone(),
             )
             .await;

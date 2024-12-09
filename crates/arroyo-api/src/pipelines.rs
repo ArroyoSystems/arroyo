@@ -24,7 +24,9 @@ use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollec
 use arroyo_rpc::grpc::api::{ArrowProgram, ConnectorOp};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
-use arroyo_datastream::logical::{LogicalProgram, OperatorName};
+use arroyo_datastream::logical::{
+    ChainedLogicalOperator, LogicalNode, LogicalProgram, OperatorChain, OperatorName,
+};
 use arroyo_df::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::formats::Format;
@@ -54,6 +56,7 @@ use crate::{connection_tables, to_micros};
 use arroyo_rpc::config::config;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
+use petgraph::prelude::EdgeRef;
 
 async fn compile_sql<'a>(
     query: String,
@@ -333,21 +336,31 @@ pub(crate) async fn create_pipeline_int<'a>(
             };
             if should_replace {
                 if enable_sinks {
-                    todo!("enable sinks")
-                    // let new_idx = g.add_node(LogicalNode {
-                    //     operator_id: format!("{}_1", g.node_weight(idx).unwrap().operator_id),
-                    //     description: "Preview sink".to_string(),
-                    //     operator_name: OperatorName::ConnectorSink,
-                    //     operator_config: default_sink().encode_to_vec(),
-                    //     parallelism: 1,
-                    // });
-                    // let edges: Vec<_> = g
-                    //     .edges_directed(idx, Direction::Incoming)
-                    //     .map(|e| (e.source(), e.weight().clone()))
-                    //     .collect();
-                    // for (source, weight) in edges {
-                    //     g.add_edge(source, new_idx, weight);
-                    // }
+                    let new_idx = g.add_node(LogicalNode {
+                        node_id: g.node_weights().map(|n| n.node_id).max().unwrap() + 1,
+                        description: "Preview sink".to_string(),
+                        operator_chain: OperatorChain::new(ChainedLogicalOperator {
+                            operator_id: format!(
+                                "{}_1",
+                                g.node_weight(idx)
+                                    .unwrap()
+                                    .operator_chain
+                                    .first()
+                                    .operator_id
+                            ),
+                            operator_name: OperatorName::ConnectorSink,
+                            operator_config: default_sink().encode_to_vec(),
+                        }),
+                        parallelism: 1,
+                    });
+
+                    let edges: Vec<_> = g
+                        .edges_directed(idx, Direction::Incoming)
+                        .map(|e| (e.source(), e.weight().clone()))
+                        .collect();
+                    for (source, weight) in edges {
+                        g.add_edge(source, new_idx, weight);
+                    }
                 } else {
                     g.node_weight_mut(idx)
                         .unwrap()

@@ -27,7 +27,8 @@ use std::time::{Instant, SystemTime};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
-use tracing::warn;
+use tracing::log::debug;
+use tracing::{trace, warn};
 
 pub type QueueItem = ArrowMessage;
 
@@ -697,6 +698,7 @@ impl ArrowCollector {
     }
 
     pub async fn broadcast(&mut self, message: SignalMessage) {
+        trace!("[{}] Broadcast {:?}", self.chain_info, message);
         for out_node in &self.out_qs {
             for q in out_node {
                 q.send(ArrowMessage::Signal(message.clone()))
