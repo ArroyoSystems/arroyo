@@ -44,7 +44,6 @@ use arroyo_df::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_state::{BackingStore, StateBackend};
 
 pub mod arrow;
 

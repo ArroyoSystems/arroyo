@@ -32,7 +32,7 @@ use bincode::{Decode, Encode};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{EdgeRef, IntoEdgesDirected, NodeRef};
+use petgraph::visit::EdgeRef;
 use petgraph::{dot, Direction};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
@@ -224,7 +224,7 @@ impl Program {
         let checkpoint_metadata = if let Some(epoch) = restore_epoch {
             info!("Restoring checkpoint {} for job {}", epoch, job_id);
             Some(
-                StateBackend::load_checkpoint_metadata(&job_id, epoch)
+                StateBackend::load_checkpoint_metadata(job_id, epoch)
                     .await
                     .unwrap_or_else(|_| {
                         panic!("failed to load checkpoint metadata for epoch {}", epoch)
@@ -532,7 +532,7 @@ impl Engine {
 
             for idx in node_indexes {
                 futures.push(self.schedule_node(
-                    &self.program.control_tx.as_ref().unwrap(),
+                    self.program.control_tx.as_ref().unwrap(),
                     idx,
                     ready.clone(),
                 ));

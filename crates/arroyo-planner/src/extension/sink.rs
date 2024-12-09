@@ -164,9 +164,9 @@ impl ArroyoExtension for SinkExtension {
             OperatorName::ConnectorSink,
             operator_config,
             self.table.connector_op().unwrap().description.clone(),
-            1,            
+            1,
         );
-    
+
         let edges = input_schemas
             .into_iter()
             .map(|input_schema| {
