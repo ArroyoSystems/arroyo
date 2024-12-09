@@ -3,7 +3,7 @@ mod operator;
 use anyhow::{anyhow, bail};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::var_str::VarStr;
 use redis::aio::ConnectionManager;
 use redis::cluster::ClusterClient;
@@ -397,23 +397,25 @@ impl Connector for RedisConnector {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let client = RedisClient::new(&profile)?;
 
         let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
         let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);
 
-        Ok(OperatorNode::from_operator(Box::new(RedisSinkFunc {
-            serializer: ArrowSerializer::new(
-                config.format.expect("redis table must have a format"),
-            ),
-            table,
-            client,
-            cmd_q: Some((cmd_tx, cmd_rx)),
-            tx,
-            rx,
-            key_index: None,
-            hash_index: None,
-        })))
+        Ok(ConstructedOperator::from_operator(Box::new(
+            RedisSinkFunc {
+                serializer: ArrowSerializer::new(
+                    config.format.expect("redis table must have a format"),
+                ),
+                table,
+                client,
+                cmd_q: Some((cmd_tx, cmd_rx)),
+                tx,
+                rx,
+                key_index: None,
+                hash_index: None,
+            },
+        )))
     }
 }

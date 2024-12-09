@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -11,7 +11,7 @@ use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_types::{SignalMessage, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use tokio::select;
@@ -44,7 +44,7 @@ impl SourceOperator for WebsocketSourceFunc {
         global_table_config("e", "websocket source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) {
         let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -54,16 +54,20 @@ impl SourceOperator for WebsocketSourceFunc {
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
         }
+    }
 
-        ctx.initialize_deserializer(
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
         );
-    }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
@@ -77,7 +81,8 @@ impl SourceOperator for WebsocketSourceFunc {
 impl WebsocketSourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -90,7 +95,7 @@ impl WebsocketSourceFunc {
                     .expect("couldn't get state for websocket");
                 s.insert((), self.state.clone()).await;
 
-                if self.start_checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx, collector).await {
                     return Some(SourceFinishType::Immediate);
                 }
             }
@@ -120,18 +125,24 @@ impl WebsocketSourceFunc {
     async fn handle_message(
         &mut self,
         msg: &[u8],
-        ctx: &mut ArrowContext,
+        collector: &mut SourceCollector,
     ) -> Result<(), UserError> {
-        ctx.deserialize_slice(msg, SystemTime::now(), None).await?;
+        collector
+            .deserialize_slice(msg, SystemTime::now(), None)
+            .await?;
 
-        if ctx.should_flush() {
-            ctx.flush_buffer().await?;
+        if collector.should_flush() {
+            collector.flush_buffer().await?;
         }
 
         Ok(())
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         let uri = match Uri::from_str(&self.url.to_string()) {
             Ok(uri) => uri,
             Err(e) => {
@@ -212,10 +223,10 @@ impl WebsocketSourceFunc {
                             Some(Ok(msg)) => {
                                 match msg {
                                     tungstenite::Message::Text(t) => {
-                                        self.handle_message(t.as_bytes(), ctx).await?
+                                        self.handle_message(t.as_bytes(), collector).await?
                                     },
                                     tungstenite::Message::Binary(bs) => {
-                                        self.handle_message(&bs, ctx).await?
+                                        self.handle_message(&bs, collector).await?
                                     },
                                     tungstenite::Message::Ping(d) => {
                                         tx.send(tungstenite::Message::Pong(d)).await
@@ -245,12 +256,12 @@ impl WebsocketSourceFunc {
                     }
                     }
                     _ = flush_ticker.tick() => {
-                        if ctx.should_flush() {
-                            ctx.flush_buffer().await?;
+                        if collector.should_flush() {
+                            collector.flush_buffer().await?;
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
+                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await {
                             return Ok(r);
                         }
                     }
@@ -258,13 +269,12 @@ impl WebsocketSourceFunc {
             }
         } else {
             // otherwise set idle and just process control messages
-            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
-                Watermark::Idle,
-            )))
-            .await;
+            collector
+                .broadcast(SignalMessage::Watermark(Watermark::Idle))
+                .await;
             loop {
                 let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, msg).await {
+                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {
                     return Ok(r);
                 }
             }

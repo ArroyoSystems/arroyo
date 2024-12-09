@@ -28,6 +28,7 @@ use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use time::OffsetDateTime;
@@ -83,7 +84,7 @@ pub struct JobConfig {
     stop_mode: StopMode,
     checkpoint_interval: Duration,
     ttl: Option<Duration>,
-    parallelism_overrides: HashMap<String, usize>,
+    parallelism_overrides: HashMap<u32, usize>,
     restart_nonce: i32,
     restart_mode: RestartMode,
 }
@@ -146,12 +147,12 @@ pub enum RunningMessage {
     TaskFinished {
         worker_id: WorkerId,
         time: SystemTime,
-        operator_id: String,
+        node_id: u32,
         subtask_index: u32,
     },
     TaskFailed {
         worker_id: WorkerId,
-        operator_id: String,
+        node_id: u32,
         subtask_index: u32,
         reason: String,
     },
@@ -176,7 +177,7 @@ pub enum JobMessage {
     },
     TaskStarted {
         worker_id: WorkerId,
-        operator_id: String,
+        node_id: u32,
         operator_subtask: u64,
     },
     RunningMessage(RunningMessage),
@@ -249,7 +250,7 @@ impl ControllerGrpc for ControllerServer {
             &req.job_id,
             JobMessage::TaskStarted {
                 worker_id: WorkerId(req.worker_id),
-                operator_id: req.operator_id,
+                node_id: req.node_id,
                 operator_subtask: req.operator_subtask,
             },
         )
@@ -304,7 +305,7 @@ impl ControllerGrpc for ControllerServer {
             JobMessage::RunningMessage(RunningMessage::TaskFinished {
                 worker_id: WorkerId(req.worker_id),
                 time: from_micros(req.time),
-                operator_id: req.operator_id,
+                node_id: req.node_id,
                 subtask_index: req.operator_subtask as u32,
             }),
         )
@@ -323,7 +324,7 @@ impl ControllerGrpc for ControllerServer {
             &req.job_id,
             JobMessage::RunningMessage(RunningMessage::TaskFailed {
                 worker_id: WorkerId(req.worker_id),
-                operator_id: req.operator_id,
+                node_id: req.node_id,
                 subtask_index: req.operator_subtask as u32,
                 reason: req.error,
             }),
@@ -569,7 +570,9 @@ impl ControllerServer {
                             .as_object()
                             .unwrap()
                             .into_iter()
-                            .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
+                            .filter_map(|(k, v)| {
+                                Some((u32::from_str(k).ok()?, v.as_u64()? as usize))
+                            })
                             .collect(),
                         restart_nonce: p.config_restart_nonce,
                         restart_mode: p.restart_mode,

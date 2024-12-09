@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use arroyo_formats::ser::ArrowSerializer;
 use tracing::info;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_types::CheckpointBarrier;
 
@@ -32,23 +32,29 @@ impl ArrowOperator for FluvioSinkFunc {
         format!("fluvio-sink-{}", self.topic)
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         match self.get_producer().await {
             Ok(producer) => {
                 self.producer = Some(producer);
             }
             Err(e) => {
-                ctx.report_error(
-                    "Failed to construct Fluvio producer".to_string(),
-                    e.to_string(),
-                )
-                .await;
+                ctx.error_reporter
+                    .report_error(
+                        "Failed to construct Fluvio producer".to_string(),
+                        e.to_string(),
+                    )
+                    .await;
                 panic!("Failed to construct Fluvio producer: {:?}", e);
             }
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let values = self.serializer.serialize(&batch);
         for v in values {
             self.producer
@@ -60,7 +66,12 @@ impl ArrowOperator for FluvioSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut ArrowContext) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         self.producer.as_mut().unwrap().flush().await.unwrap();
     }
 }

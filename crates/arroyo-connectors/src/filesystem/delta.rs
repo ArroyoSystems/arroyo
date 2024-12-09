@@ -14,7 +14,7 @@ use crate::filesystem::{
 use crate::EmptyConfig;
 
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 use super::sink::{LocalParquetFileSystemSink, ParquetFileSystemSink};
 
@@ -154,7 +154,7 @@ impl Connector for DeltaLakeConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let TableType::Sink {
             write_path,
             file_settings,
@@ -179,13 +179,15 @@ impl Connector for DeltaLakeConnector {
         let is_local = backend_config.is_local();
         match (&format_settings, is_local) {
             (Some(FormatSettings::Parquet { .. }), true) => {
-                Ok(OperatorNode::from_operator(Box::new(
+                Ok(ConstructedOperator::from_operator(Box::new(
                     LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
                 )))
             }
-            (Some(FormatSettings::Parquet { .. }), false) => Ok(OperatorNode::from_operator(
-                Box::new(ParquetFileSystemSink::new(table, config)),
-            )),
+            (Some(FormatSettings::Parquet { .. }), false) => {
+                Ok(ConstructedOperator::from_operator(Box::new(
+                    ParquetFileSystemSink::new(table, config),
+                )))
+            }
             _ => bail!("Delta Lake sink only supports Parquet format"),
         }
     }

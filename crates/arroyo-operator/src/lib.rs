@@ -9,12 +9,12 @@ use crate::inq_reader::InQReader;
 use arrow::array::types::{TimestampNanosecondType, UInt64Type};
 use arrow::array::{Array, PrimitiveArray, RecordBatch, UInt64Array};
 use arrow::compute::kernels::numeric::{div, rem};
-use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfo};
 use bincode::{Decode, Encode};
 
-use crate::context::ArrowContext;
-use crate::operator::Registry;
-use operator::{OperatorConstructor, OperatorNode};
+use crate::context::OperatorContext;
+use crate::operator::{ConstructedOperator, Registry};
+use operator::OperatorConstructor;
 use tokio_stream::Stream;
 
 pub mod connector;
@@ -64,6 +64,7 @@ pub enum ControlOutcome {
     Stop,
     StopAndSendStop,
     Finish,
+    StopAfterCommit,
 }
 
 #[derive(Debug)]
@@ -113,7 +114,7 @@ impl CheckpointCounter {
 
 #[allow(unused)]
 pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
-    pub task_info: TaskInfoRef,
+    pub task_info: Arc<TaskInfo>,
     pub name: String,
     pub counter: CheckpointCounter,
     pub closed: HashSet<usize>,
@@ -132,26 +133,26 @@ pub struct ArrowTimerValue {
 }
 
 pub trait ErasedConstructor: Send {
-    fn with_config(&self, config: Vec<u8>, registry: Arc<Registry>)
-        -> anyhow::Result<OperatorNode>;
+    fn with_config(
+        &self,
+        config: &[u8],
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<ConstructedOperator>;
 }
 
 impl<T: OperatorConstructor> ErasedConstructor for T {
     fn with_config(
         &self,
-        config: Vec<u8>,
+        config: &[u8],
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
-        self.with_config(
-            prost::Message::decode(&mut config.as_slice()).unwrap(),
-            registry,
-        )
+    ) -> anyhow::Result<ConstructedOperator> {
+        self.with_config(prost::Message::decode(config).unwrap(), registry)
     }
 }
 
 pub fn get_timestamp_col<'a>(
     batch: &'a RecordBatch,
-    ctx: &mut ArrowContext,
+    ctx: &mut OperatorContext,
 ) -> &'a PrimitiveArray<TimestampNanosecondType> {
     batch
         .column(ctx.out_schema.as_ref().unwrap().timestamp_index)

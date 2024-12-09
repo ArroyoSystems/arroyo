@@ -105,13 +105,14 @@ impl AggregateExtension {
             final_projection: Some(final_physical_plan_node.encode_to_vec()),
         };
 
-        Ok(LogicalNode {
-            operator_id: format!("tumbling_{}", index),
-            operator_name: OperatorName::TumblingWindowAggregate,
-            operator_config: config.encode_to_vec(),
-            description: format!("TumblingWindow<{}>", config.name),
-            parallelism: 1,
-        })
+        Ok(LogicalNode::single(
+            index as u32,
+            format!("tumbling_{}", index),
+            OperatorName::TumblingWindowAggregate,
+            config.encode_to_vec(),
+            format!("TumblingWindow<{}>", config.name),
+            1,
+        ))
     }
 
     pub fn sliding_window_config(
@@ -154,13 +155,15 @@ impl AggregateExtension {
             final_projection: final_physical_plan_node.encode_to_vec(),
             // TODO add final aggregation.
         };
-        Ok(LogicalNode {
-            operator_id: format!("sliding_window_{}", index),
-            description: "sliding window".to_string(),
-            operator_name: OperatorName::SlidingWindowAggregate,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        })
+
+        Ok(LogicalNode::single(
+            index as u32,
+            format!("sliding_window_{}", index),
+            OperatorName::SlidingWindowAggregate,
+            config.encode_to_vec(),
+            "sliding window".to_string(),
+            1,
+        ))
     }
 
     pub fn session_window_config(
@@ -216,13 +219,14 @@ impl AggregateExtension {
             final_aggregation_plan: physical_plan_node.encode_to_vec(),
         };
 
-        Ok(LogicalNode {
-            operator_id: config.name.clone(),
-            description: format!("SessionWindow<{:?}>", gap),
-            operator_name: OperatorName::SessionWindowAggregate,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        })
+        Ok(LogicalNode::single(
+            index as u32,
+            format!("SessionWindow<{:?}>", gap),
+            OperatorName::SessionWindowAggregate,
+            config.encode_to_vec(),
+            config.name.clone(),
+            1,
+        ))
     }
 
     pub fn instant_window_config(
@@ -273,13 +277,14 @@ impl AggregateExtension {
             final_projection,
         };
 
-        Ok(LogicalNode {
-            operator_id: format!("instant_window_{}", index),
-            description: "instant window".to_string(),
-            operator_name: OperatorName::TumblingWindowAggregate,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        })
+        Ok(LogicalNode::single(
+            index as u32,
+            format!("instant_window_{}", index),
+            OperatorName::TumblingWindowAggregate,
+            config.encode_to_vec(),
+            "instant window".to_string(),
+            1,
+        ))
     }
 
     // projection assuming that _timestamp has been populated with the start of the bin.

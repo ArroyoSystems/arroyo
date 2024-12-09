@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -334,10 +334,10 @@ impl Connector for NatsConnector {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         Ok(match table.connector_type {
             ConnectorType::Source { ref source_type } => {
-                OperatorNode::from_source(Box::new(NatsSourceFunc {
+                ConstructedOperator::from_source(Box::new(NatsSourceFunc {
                     source_type: source_type
                         .clone()
                         .ok_or_else(|| anyhow!("`sourceType` is required"))?,
@@ -361,7 +361,7 @@ impl Connector for NatsConnector {
                 }))
             }
             ConnectorType::Sink { ref sink_type } => {
-                OperatorNode::from_operator(Box::new(NatsSinkFunc {
+                ConstructedOperator::from_operator(Box::new(NatsSinkFunc {
                     sink_type: sink_type
                         .clone()
                         .ok_or_else(|| anyhow!("`sinkType` is required"))?,

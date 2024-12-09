@@ -91,6 +91,7 @@ impl From<LoadCompactedDataReq> for CompactionResult {
 #[derive(Debug, Clone)]
 pub struct CheckpointCompleted {
     pub checkpoint_epoch: u32,
+    pub node_id: u32,
     pub operator_id: String,
     pub subtask_metadata: SubtaskCheckpointMetadata,
 }
@@ -98,6 +99,7 @@ pub struct CheckpointCompleted {
 #[derive(Debug, Clone)]
 pub struct CheckpointEvent {
     pub checkpoint_epoch: u32,
+    pub node_id: u32,
     pub operator_id: String,
     pub subtask_index: u32,
     pub time: SystemTime,
@@ -109,20 +111,21 @@ pub enum ControlResp {
     CheckpointEvent(CheckpointEvent),
     CheckpointCompleted(CheckpointCompleted),
     TaskStarted {
-        operator_id: String,
+        node_id: u32,
         task_index: usize,
         start_time: SystemTime,
     },
     TaskFinished {
-        operator_id: String,
+        node_id: u32,
         task_index: usize,
     },
     TaskFailed {
-        operator_id: String,
+        node_id: u32,
         task_index: usize,
         error: String,
     },
     Error {
+        node_id: u32,
         operator_id: String,
         task_index: usize,
         message: String,

@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -48,16 +48,18 @@ impl SourceOperator for FluvioSourceFunc {
         global_table_config("f", "fluvio source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        ctx.initialize_deserializer(
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
         );
-    }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
@@ -71,7 +73,7 @@ impl SourceOperator for FluvioSourceFunc {
 impl FluvioSourceFunc {
     async fn get_consumer(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
     ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>>>> {
         info!("Creating Fluvio consumer for {:?}", self.endpoint);
 
@@ -110,7 +112,9 @@ impl FluvioSourceFunc {
         let has_state = !state.is_empty();
 
         let parts: Vec<_> = (0..partitions)
-            .filter(|i| *i % ctx.task_info.parallelism == ctx.task_info.task_index)
+            .filter(|i| {
+                *i % ctx.task_info.parallelism as usize == ctx.task_info.task_index as usize
+            })
             .map(|i| {
                 let offset = state
                     .get(&(i as u32))
@@ -141,7 +145,11 @@ impl FluvioSourceFunc {
         Ok(streams)
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         let mut streams = self
             .get_consumer(ctx)
             .await
@@ -150,10 +158,9 @@ impl FluvioSourceFunc {
         if streams.is_empty() {
             warn!("Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
                 ctx.task_info.operator_id, ctx.task_info.task_index);
-            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
-                Watermark::Idle,
-            )))
-            .await;
+            collector
+                .broadcast(SignalMessage::Watermark(Watermark::Idle))
+                .await;
         }
 
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
@@ -166,10 +173,10 @@ impl FluvioSourceFunc {
                     match message {
                         Some((_, Ok(msg))) => {
                             let timestamp = from_millis(msg.timestamp().max(0) as u64);
-                            ctx.deserialize_slice(msg.value(), timestamp, None).await?;
+                            collector.deserialize_slice(msg.value(), timestamp, None).await?;
 
-                            if ctx.should_flush() {
-                                ctx.flush_buffer().await?;
+                            if collector.should_flush() {
+                                collector.flush_buffer().await?;
                             }
 
                             offsets.insert(msg.partition(), msg.offset());
@@ -183,8 +190,8 @@ impl FluvioSourceFunc {
                     }
                 }
                 _ = flush_ticker.tick() => {
-                    if ctx.should_flush() {
-                        ctx.flush_buffer().await?;
+                    if collector.should_flush() {
+                        collector.flush_buffer().await?;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
@@ -202,7 +209,7 @@ impl FluvioSourceFunc {
                                 }).await;
                             }
 
-                            if self.start_checkpoint(c, ctx).await {
+                            if self.start_checkpoint(c, ctx, collector).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },

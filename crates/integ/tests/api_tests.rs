@@ -230,6 +230,16 @@ async fn basic_pipeline() {
 
     let (pipeline_id, job_id, _) = start_and_monitor(test_id, &query, &[], 10).await.unwrap();
 
+    let sink_id = valid
+        .graph
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| n.description.contains("sink"))
+        .unwrap()
+        .node_id;
+
     // get error messages
     let errors = api_client
         .get_job_errors()
@@ -254,7 +264,7 @@ async fn basic_pipeline() {
             && metrics
                 .data
                 .iter()
-                .filter(|op| !op.operator_id.contains("sink"))
+                .filter(|op| !op.node_id == sink_id)
                 .map(|op| {
                     op.metric_groups
                         .iter()

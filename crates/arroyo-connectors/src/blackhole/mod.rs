@@ -1,7 +1,7 @@
 use crate::blackhole::operator::BlackholeSinkFunc;
 use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -120,8 +120,8 @@ impl Connector for BlackholeConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(Box::new(
+    ) -> anyhow::Result<ConstructedOperator> {
+        Ok(ConstructedOperator::from_operator(Box::new(
             BlackholeSinkFunc::new(),
         )))
     }

@@ -15,7 +15,7 @@ use crate::EmptyConfig;
 
 use crate::preview::operator::PreviewSink;
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 pub struct PreviewConnector {}
 
@@ -115,7 +115,9 @@ impl Connector for PreviewConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(Box::<PreviewSink>::default()))
+    ) -> anyhow::Result<ConstructedOperator> {
+        Ok(ConstructedOperator::from_operator(
+            Box::<PreviewSink>::default(),
+        ))
     }
 }

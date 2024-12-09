@@ -250,13 +250,14 @@ impl ArroyoExtension for AsyncUDFExtension {
             timeout_micros: self.timeout.as_micros() as u64,
         };
 
-        let node = LogicalNode {
-            operator_id: format!("async_udf_{}", index),
-            description: format!("async_udf<{}>", self.name),
-            operator_name: OperatorName::AsyncUdf,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        };
+        let node = LogicalNode::single(
+            index as u32,
+            format!("async_udf_{}", index),
+            OperatorName::AsyncUdf,
+            config.encode_to_vec(),
+            format!("async_udf<{}>", self.name),
+            1,
+        );
 
         let incoming_edge =
             LogicalEdge::project_all(LogicalEdgeType::Forward, input_schemas[0].as_ref().clone());

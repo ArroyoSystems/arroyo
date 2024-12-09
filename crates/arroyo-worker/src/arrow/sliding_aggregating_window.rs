@@ -3,8 +3,8 @@ use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::SchemaRef;
 use arroyo_operator::{
-    context::ArrowContext,
-    operator::{ArrowOperator, OperatorConstructor, OperatorNode},
+    context::OperatorContext,
+    operator::{ArrowOperator, ConstructedOperator, OperatorConstructor},
 };
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
@@ -21,7 +21,9 @@ use std::{
 
 use futures::stream::FuturesUnordered;
 
+use super::sync::streams::KeyedCloneableStreamFuture;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::context::Collector;
 use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion::execution::{
@@ -39,8 +41,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tracing::info;
-
-use super::sync::streams::KeyedCloneableStreamFuture;
 
 pub struct SlidingAggregatingWindowFunc<K: Copy> {
     slide: Duration,
@@ -113,7 +113,11 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn advance(&mut self, ctx: &mut ArrowContext) -> Result<()> {
+    async fn advance(
+        &mut self,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) -> Result<()> {
         let bin_start = match self.state {
             SlidingWindowState::NoData => unreachable!(),
             SlidingWindowState::OnlyBufferedData { earliest_bin_time } => earliest_bin_time,
@@ -204,7 +208,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             .execute(0, SessionContext::new().task_ctx())?;
         while let Some(batch) = final_projection_exec.next().await {
             let batch = batch.expect("should be able to compute batch");
-            ctx.collector.collect(batch).await;
+            collector.collect(batch).await;
         }
 
         Ok(())
@@ -453,7 +457,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema
@@ -505,7 +509,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
             &final_codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(
+        Ok(ConstructedOperator::from_operator(Box::new(
             SlidingAggregatingWindowFunc {
                 slide,
                 width,
@@ -554,7 +558,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -596,7 +600,12 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
     }
 
     // TODO: filter out late data
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -671,18 +680,24 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Option<Watermark> {
         let last_watermark = ctx.last_present_watermark()?;
 
         while self.should_advance(last_watermark) {
-            self.advance(ctx).await.unwrap();
+            self.advance(ctx, collector).await.unwrap();
         }
 
         Some(watermark)
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {

@@ -1,12 +1,12 @@
 use crate::sse::SseTable;
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{OperatorNode, SourceOperator};
+use arroyo_operator::context::{SourceCollector, SourceContext};
+use arroyo_operator::operator::{ConstructedOperator, SourceOperator};
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
-use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
+use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{string_to_map, ArrowMessage, SignalMessage, UserError, Watermark};
+use arroyo_types::{string_to_map, SignalMessage, UserError, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, Error, SSE};
@@ -33,13 +33,16 @@ pub struct SSESourceFunc {
 }
 
 impl SSESourceFunc {
-    pub fn new_operator(table: SseTable, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    pub fn new_operator(
+        table: SseTable,
+        config: OperatorConfig,
+    ) -> anyhow::Result<ConstructedOperator> {
         let headers = table
             .headers
             .as_ref()
             .map(|s| s.sub_env_vars().expect("Failed to substitute env vars"));
 
-        Ok(OperatorNode::from_source(Box::new(SSESourceFunc {
+        Ok(ConstructedOperator::from_source(Box::new(SSESourceFunc {
             url: table.endpoint,
             headers: string_to_map(&headers.unwrap_or("".to_string()), ':')
                 .expect("Invalid header map")
@@ -67,7 +70,11 @@ impl SourceOperator for SSESourceFunc {
         arroyo_state::global_table_config("e", "sse source state")
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
         let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -78,7 +85,7 @@ impl SourceOperator for SSESourceFunc {
             self.state = state.clone();
         }
 
-        match self.run_int(ctx).await {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
@@ -92,7 +99,8 @@ impl SourceOperator for SSESourceFunc {
 impl SSESourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -105,7 +113,7 @@ impl SSESourceFunc {
                     .expect("should be able to get SSE state");
                 s.insert((), self.state.clone()).await;
 
-                if self.start_checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx, collector).await {
                     return Some(SourceFinishType::Immediate);
                 }
             }
@@ -132,8 +140,12 @@ impl SSESourceFunc {
         None
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
-        ctx.initialize_deserializer(
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
@@ -171,11 +183,11 @@ impl SSESourceFunc {
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            ctx.deserialize_slice(
+                                            collector.deserialize_slice(
                                                 event.data.as_bytes(), SystemTime::now(), None).await?;
 
-                                            if ctx.should_flush() {
-                                                ctx.flush_buffer().await?;
+                                            if collector.should_flush() {
+                                                collector.flush_buffer().await?;
                                             }
                                         }
                                     }
@@ -196,13 +208,10 @@ impl SSESourceFunc {
                                 last_eof = Instant::now();
                             }
                             Some(Err(e)) => {
-                                ctx.control_tx.send(
-                                    ControlResp::Error {
-                                        operator_id: ctx.task_info.operator_id.clone(),
-                                        task_index: ctx.task_info.task_index,
-                                        message: "Error while reading from EventSource".to_string(),
-                                        details: format!("{:?}", e)}
-                                ).await.unwrap();
+                                ctx.report_user_error(UserError::new(
+                                    "Error while reading from EventSource",
+                                    format!("{:?}", e)
+                                )).await;
                                 panic!("Error while reading from EventSource: {:?}", e);
                             }
                             None => {
@@ -212,27 +221,26 @@ impl SSESourceFunc {
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
+                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await {
                             return Ok(r);
                         }
                     }
                     _ = flush_ticker.tick() => {
-                        if ctx.should_flush() {
-                            ctx.flush_buffer().await?;
+                        if collector.should_flush() {
+                            collector.flush_buffer().await?;
                         }
                     }
                 }
             }
         } else {
             // otherwise set idle and just process control messages
-            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
-                Watermark::Idle,
-            )))
-            .await;
+            collector
+                .broadcast(SignalMessage::Watermark(Watermark::Idle))
+                .await;
 
             loop {
                 let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, msg).await {
+                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {
                     return Ok(r);
                 }
             }

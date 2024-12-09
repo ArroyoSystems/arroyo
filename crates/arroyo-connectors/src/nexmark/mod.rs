@@ -5,7 +5,7 @@ mod test;
 use anyhow::{anyhow, bail};
 use arrow::datatypes::{Field, Schema, TimeUnit};
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -230,8 +230,8 @@ impl Connector for NexmarkConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         _: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_source(Box::new(
+    ) -> anyhow::Result<ConstructedOperator> {
+        Ok(ConstructedOperator::from_source(Box::new(
             NexmarkSourceFunc::from_config(&table),
         )))
     }

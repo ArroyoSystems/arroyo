@@ -5,13 +5,15 @@ use std::sync::Arc;
 
 use crate::mqtt::{create_connection, MqttConfig, Tls};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-use arroyo_operator::context::{batch_bounded, ArrowContext, BatchReceiver};
+use arroyo_operator::context::{
+    batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext,
+};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_types::{ArrowMessage, TaskInfo};
+use arroyo_types::{ArrowMessage, ChainInfo, TaskInfo};
 use rand::random;
 use rumqttc::v5::mqttbytes::QoS;
 use serde::{Deserialize, Serialize};
@@ -116,6 +118,7 @@ impl MqttTopicTester {
 
     async fn get_source_with_reader(&self, task_info: TaskInfo) -> MqttSourceWithReads {
         let config = self.get_config();
+        let task_info = Arc::new(task_info);
 
         let mut mqtt = MqttSourceFunc::new(
             config,
@@ -132,11 +135,10 @@ impl MqttTopicTester {
         let (command_tx, from_control_rx) = channel(128);
         let (data_tx, recv) = batch_bounded(128);
 
-        let mut ctx = ArrowContext::new(
-            task_info,
-            None,
-            control_rx,
-            command_tx,
+        let ctx = OperatorContext::new(
+            task_info.clone(),
+            None.as_ref(),
+            command_tx.clone(),
             1,
             vec![],
             Some(ArroyoSchema::new_unkeyed(
@@ -150,16 +152,35 @@ impl MqttTopicTester {
                 ])),
                 0,
             )),
-            None,
-            vec![vec![data_tx]],
             mqtt.tables(),
         )
         .await;
 
+        let chain_info = Arc::new(ChainInfo {
+            job_id: ctx.task_info.job_id.clone(),
+            node_id: ctx.task_info.node_id,
+            description: "mqtt source".to_string(),
+            task_index: ctx.task_info.task_index,
+        });
+
+        let mut ctx = SourceContext::from_operator(ctx, chain_info.clone(), control_rx);
+        let arrow_collector = ArrowCollector::new(
+            chain_info.clone(),
+            Some(ctx.out_schema.clone()),
+            vec![vec![data_tx]],
+        );
+        let mut collector = SourceCollector::new(
+            ctx.out_schema.clone(),
+            arrow_collector,
+            command_tx,
+            &chain_info,
+            &task_info,
+        );
+
         let subscribed = mqtt.subscribed();
         tokio::spawn(async move {
             mqtt.on_start(&mut ctx).await;
-            mqtt.run(&mut ctx).await;
+            mqtt.run(&mut ctx, &mut collector).await;
         });
 
         MqttSourceWithReads {

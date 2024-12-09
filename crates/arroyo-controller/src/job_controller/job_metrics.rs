@@ -29,7 +29,7 @@ pub fn get_metric_name(name: &str) -> Option<MetricName> {
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct TaskKey {
-    pub operator_id: u32,
+    pub node_id: u32,
     pub subtask_idx: u32,
 }
 
@@ -46,7 +46,7 @@ impl JobMetrics {
             for i in 0..program.graph[op].parallelism {
                 tasks.insert(
                     TaskKey {
-                        operator_id: op.index() as u32,
+                        node_id: op.index() as u32,
                         subtask_idx: i as u32,
                     },
                     TaskMetrics::new(),
@@ -60,23 +60,18 @@ impl JobMetrics {
         }
     }
 
-    pub async fn update(
-        &self,
-        operator_id: u32,
-        subtask_idx: u32,
-        values: &HashMap<MetricName, u64>,
-    ) {
+    pub async fn update(&self, node_id: u32, subtask_idx: u32, values: &HashMap<MetricName, u64>) {
         let now = SystemTime::now();
 
         let key = TaskKey {
-            operator_id,
+            node_id,
             subtask_idx,
         };
         let mut tasks = self.tasks.write().await;
         let Some(task) = tasks.get_mut(&key) else {
             warn!(
                 "Task not found for operator_id: {}, subtask_idx: {}",
-                operator_id, subtask_idx
+                node_id, subtask_idx
             );
             return;
         };
@@ -106,7 +101,7 @@ impl JobMetrics {
             HashMap::new();
 
         for (k, v) in self.tasks.read().await.iter() {
-            let op = metric_groups.entry(k.operator_id).or_default();
+            let op = metric_groups.entry(k.node_id).or_default();
 
             for (metric, rate) in &v.rates {
                 op.entry(*metric).or_default().push(SubtaskMetrics {
@@ -139,15 +134,14 @@ impl JobMetrics {
         metric_groups
             .into_iter()
             .map(|(op_id, metrics)| {
-                let operator_id = self
+                let node_id = self
                     .program
                     .graph
                     .node_weight(NodeIndex::new(op_id as usize))
                     .unwrap()
-                    .operator_id
-                    .clone();
+                    .node_id;
                 OperatorMetricGroup {
-                    operator_id,
+                    node_id,
                     metric_groups: metrics
                         .into_iter()
                         .map(|(name, subtasks)| MetricGroup {

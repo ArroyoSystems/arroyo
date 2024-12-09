@@ -24,7 +24,7 @@ use crate::{construct_http_client, pull_opt, EmptyConfig};
 
 use crate::webhook::operator::WebhookSinkFunc;
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
@@ -210,25 +210,27 @@ impl Connector for WebhookConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let url = table.endpoint.sub_env_vars()?;
-        Ok(OperatorNode::from_operator(Box::new(WebhookSinkFunc {
-            url: Arc::new(url.clone()),
-            client: construct_http_client(
-                &url,
-                table
-                    .headers
-                    .as_ref()
-                    .map(|s| s.sub_env_vars())
-                    .transpose()?,
-            )?,
-            semaphore: Arc::new(Semaphore::new(MAX_INFLIGHT as usize)),
-            serializer: ArrowSerializer::new(
-                config
-                    .format
-                    .expect("No format configured for webhook sink"),
-            ),
-            last_reported_error_at: Arc::new(Mutex::new(SystemTime::UNIX_EPOCH)),
-        })))
+        Ok(ConstructedOperator::from_operator(Box::new(
+            WebhookSinkFunc {
+                url: Arc::new(url.clone()),
+                client: construct_http_client(
+                    &url,
+                    table
+                        .headers
+                        .as_ref()
+                        .map(|s| s.sub_env_vars())
+                        .transpose()?,
+                )?,
+                semaphore: Arc::new(Semaphore::new(MAX_INFLIGHT as usize)),
+                serializer: ArrowSerializer::new(
+                    config
+                        .format
+                        .expect("No format configured for webhook sink"),
+                ),
+                last_reported_error_at: Arc::new(Mutex::new(SystemTime::UNIX_EPOCH)),
+            },
+        )))
     }
 }

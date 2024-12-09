@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Result};
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::retry;
 use arroyo_types::CheckpointBarrier;
@@ -32,7 +32,7 @@ impl ArrowOperator for KinesisSinkFunc {
         format!("kinesis-producer-{}", self.name)
     }
 
-    async fn on_start(&mut self, _ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, _ctx: &mut OperatorContext) {
         let mut loader = aws_config::defaults(BehaviorVersion::v2024_03_28());
         if let Some(region) = &self.aws_region {
             loader = loader.region(Region::new(region.clone()));
@@ -44,7 +44,12 @@ impl ArrowOperator for KinesisSinkFunc {
         self.in_progress_batch = Some(BatchRecordPreparer::new(client, self.name.clone()));
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         for v in self.serializer.serialize(&batch) {
             self.in_progress_batch
                 .as_mut()
@@ -56,7 +61,12 @@ impl ArrowOperator for KinesisSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut ArrowContext) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         retry!(
             self.in_progress_batch.as_mut().unwrap().flush().await,
             30,
@@ -67,7 +77,7 @@ impl ArrowOperator for KinesisSinkFunc {
         .expect("could not flush to Kinesis during checkpointing");
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut ArrowContext) {
+    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext, _: &mut dyn Collector) {
         self.maybe_flush_with_retries(ctx)
             .await
             .expect("failed to flush batch during tick");
@@ -75,7 +85,7 @@ impl ArrowOperator for KinesisSinkFunc {
 }
 
 impl KinesisSinkFunc {
-    async fn maybe_flush_with_retries(&mut self, ctx: &mut ArrowContext) -> Result<()> {
+    async fn maybe_flush_with_retries(&mut self, ctx: &mut OperatorContext) -> Result<()> {
         if !self
             .flush_config
             .should_flush(self.in_progress_batch.as_ref().unwrap())

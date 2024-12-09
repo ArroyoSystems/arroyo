@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::borrow::Cow;
 
 use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
-use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
+use arroyo_rpc::{CheckpointEvent, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -16,7 +16,7 @@ use rdkafka::ClientConfig;
 use arrow::array::{Array, AsArray, RecordBatch};
 use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{ArrowOperator, AsDisplayable, DisplayableOperator};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
@@ -75,10 +75,6 @@ impl From<SinkCommitMode> for ConsistencyMode {
 }
 
 impl KafkaSinkFunc {
-    fn is_committing(&self) -> bool {
-        matches!(self.consistency_mode, ConsistencyMode::ExactlyOnce { .. })
-    }
-
     fn set_timestamp_col(&mut self, schema: &ArroyoSchema) {
         if let Some(f) = &self.timestamp_field {
             if let Ok(f) = schema.schema.field_with_name(f) {
@@ -163,7 +159,7 @@ impl KafkaSinkFunc {
         Ok(())
     }
 
-    async fn flush(&mut self, ctx: &mut ArrowContext) {
+    async fn flush(&mut self, ctx: &mut OperatorContext) {
         self.producer
             .as_ref()
             .unwrap()
@@ -188,7 +184,7 @@ impl KafkaSinkFunc {
         ts: Option<i64>,
         k: Option<Vec<u8>>,
         v: Vec<u8>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         let mut rec = {
             let mut rec = FutureRecord::<Vec<u8>, Vec<u8>>::to(&self.topic);
@@ -271,7 +267,11 @@ impl ArrowOperator for KafkaSinkFunc {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    fn is_committing(&self) -> bool {
+        matches!(self.consistency_mode, ConsistencyMode::ExactlyOnce { .. })
+    }
+
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         self.set_timestamp_col(&ctx.in_schemas[0]);
         self.set_key_col(&ctx.in_schemas[0]);
 
@@ -279,7 +279,12 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("Producer creation failed");
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let values = self.serializer.serialize(&batch);
         let timestamps = batch
             .column(
@@ -306,7 +311,12 @@ impl ArrowOperator for KafkaSinkFunc {
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         self.flush(ctx).await;
         if let ConsistencyMode::ExactlyOnce {
             next_transaction_index,
@@ -330,7 +340,7 @@ impl ArrowOperator for KafkaSinkFunc {
         &mut self,
         epoch: u32,
         _commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
     ) {
         let ConsistencyMode::ExactlyOnce {
             next_transaction_index: _,
@@ -342,8 +352,10 @@ impl ArrowOperator for KafkaSinkFunc {
         };
 
         let Some(committing_producer) = producer_to_complete.take() else {
-            unimplemented!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
+            error!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
+            return;
         };
+
         let mut commits_attempted = 0;
         loop {
             if committing_producer
@@ -360,8 +372,9 @@ impl ArrowOperator for KafkaSinkFunc {
         }
         let checkpoint_event = ControlResp::CheckpointEvent(CheckpointEvent {
             checkpoint_epoch: epoch,
+            node_id: ctx.task_info.node_id,
             operator_id: ctx.task_info.operator_id.clone(),
-            subtask_index: ctx.task_info.task_index as u32,
+            subtask_index: ctx.task_info.task_index,
             time: SystemTime::now(),
             event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
         });
@@ -371,15 +384,12 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("sent commit event");
     }
 
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
+    async fn on_close(
+        &mut self,
+        _: &Option<SignalMessage>,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         self.flush(ctx).await;
-        if !self.is_committing() {
-            return;
-        }
-        if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
-            self.handle_commit(epoch, &commit_data, ctx).await;
-        } else {
-            warn!("no commit message received, not committing")
-        }
     }
 }

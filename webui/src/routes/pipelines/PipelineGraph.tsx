@@ -10,7 +10,7 @@ function PipelineGraphNode({
 }: {
   data: {
     node: PipelineNode;
-    setActiveOperator: (op: string) => void;
+    setActiveOperator: (op: number) => void;
     isActive: boolean;
     operatorBackpressure: number;
   };
@@ -47,15 +47,15 @@ export function PipelineGraphViewer({
 }: {
   graph: PipelineGraph;
   operatorMetricGroups?: OperatorMetricGroup[];
-  setActiveOperator: (op: string) => void;
-  activeOperator?: string;
+  setActiveOperator: (node: number) => void;
+  activeOperator?: number;
 }) {
   const nodeTypes = useMemo(() => ({ pipelineNode: PipelineGraphNode }), []);
 
   const nodes = graph.nodes.map(node => {
     let backpressure = 0;
     if (operatorMetricGroups && operatorMetricGroups.length > 0) {
-      const operatorMetricGroup = operatorMetricGroups.find(o => o.operatorId == node.nodeId);
+      const operatorMetricGroup = operatorMetricGroups.find(o => o.nodeId == node.nodeId);
       if (operatorMetricGroup) {
         const metricGroups = operatorMetricGroup.metricGroups;
         const backpressureMetrics = metricGroups.find(m => m.name == 'backpressure');
@@ -64,12 +64,15 @@ export function PipelineGraphViewer({
     }
 
     return {
-      id: node.nodeId,
+      id: String(node.nodeId),
       type: 'pipelineNode',
       data: {
         label: node.description,
         node: node,
-        setActiveOperator: setActiveOperator,
+        setActiveOperator: () => {
+          console.log(node);
+          return setActiveOperator(node.nodeId);
+        },
         isActive: node.nodeId == activeOperator,
         operatorBackpressure: backpressure,
       },
@@ -87,8 +90,8 @@ export function PipelineGraphViewer({
   const edges = graph.edges.map(edge => {
     return {
       id: `${edge.srcId}-${edge.destId}`,
-      source: edge.srcId,
-      target: edge.destId,
+      source: String(edge.srcId),
+      target: String(edge.destId),
       type: 'step',
     };
   });
@@ -99,8 +102,8 @@ export function PipelineGraphViewer({
     return {};
   });
 
-  nodes.forEach(node => g.setNode(node.id, node));
-  edges.forEach(edge => g.setEdge(edge.source, edge.target));
+  nodes.forEach(node => g.setNode(String(node.id), node));
+  edges.forEach(edge => g.setEdge(String(edge.source), String(edge.target)));
 
   dagre.layout(g);
 

@@ -5,7 +5,7 @@ use super::NatsState;
 use super::NatsTable;
 use super::ReplayPolicy;
 use super::{get_nats_client, SourceType};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::BadData;
@@ -13,7 +13,6 @@ use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::rpc::StopMode;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlMessage;
-use arroyo_rpc::ControlResp;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::UserError;
 use async_nats::jetstream::consumer;
@@ -58,19 +57,15 @@ impl SourceOperator for NatsSourceFunc {
         arroyo_state::global_table_config("n", "NATS source state")
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
+        match self.run_int(ctx, collector).await {
             Ok(res) => res,
             Err(err) => {
-                ctx.control_tx
-                    .send(ControlResp::Error {
-                        operator_id: ctx.task_info.operator_id.clone(),
-                        task_index: ctx.task_info.task_index,
-                        message: err.name.clone(),
-                        details: err.details.clone(),
-                    })
-                    .await
-                    .unwrap();
+                ctx.report_user_error(err.clone()).await;
                 panic!("{}: {}", err.name, err.details);
             }
         }
@@ -173,7 +168,7 @@ impl NatsSourceFunc {
         &mut self,
         stream: &async_nats::jetstream::stream::Stream,
         sequence_number: u64,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
     ) -> consumer::Consumer<consumer::pull::Config> {
         match sequence_number {
             1 => info!(
@@ -308,7 +303,7 @@ impl NatsSourceFunc {
         consumer
     }
 
-    async fn get_start_sequence_number(&self, ctx: &mut ArrowContext) -> anyhow::Result<u64> {
+    async fn get_start_sequence_number(&self, ctx: &mut SourceContext) -> anyhow::Result<u64> {
         let state: Vec<_> = ctx
             .table_manager
             .get_global_keyed_state::<String, NatsState>("n")
@@ -329,8 +324,12 @@ impl NatsSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
-        ctx.initialize_deserializer(
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
@@ -366,7 +365,7 @@ impl NatsSourceFunc {
                                     let payload = msg.payload.as_ref();
                                     let message_info = msg.info().expect("Couldn't get message information");
                                     let timestamp = message_info.published.into() ;
-                                    ctx.deserialize_slice(payload, timestamp, None).await?;
+                                    collector.deserialize_slice(payload, timestamp, None).await?;
 
                                     debug!("---------------------------------------------->");
                                     debug!(
@@ -398,8 +397,8 @@ impl NatsSourceFunc {
                                         message_info.delivered
                                     );
 
-                                    if ctx.should_flush() {
-                                        ctx.flush_buffer().await?;
+                                    if collector.should_flush() {
+                                        collector.flush_buffer().await?;
                                     }
 
                                     sequence_numbers.insert(
@@ -449,7 +448,7 @@ impl NatsSourceFunc {
                                         .ok_or_else(|| UserError::new("No sequence number could be fetched from the state", "")
                                     );
 
-                                    if self.start_checkpoint(c, ctx).await {
+                                    if self.start_checkpoint(c, ctx, collector).await {
                                         return Ok(SourceFinishType::Immediate);
                                     }
 
@@ -492,9 +491,9 @@ impl NatsSourceFunc {
                                 Some(msg) => {
                                     let payload = msg.payload.as_ref();
                                     let timestamp = SystemTime::now();
-                                    ctx.deserialize_slice(payload, timestamp, None).await?;
-                                    if ctx.should_flush() {
-                                        ctx.flush_buffer().await?;
+                                    collector.deserialize_slice(payload, timestamp, None).await?;
+                                    if collector.should_flush() {
+                                        collector.flush_buffer().await?;
                                     }
                                 },
                                 None => {
@@ -508,7 +507,7 @@ impl NatsSourceFunc {
                                 Some(ControlMessage::Checkpoint(c)) => {
                                     // TODO: Is checkpointing necessary for subjects?
                                     debug!("Starting checkpointing {}", ctx.task_info.task_index);
-                                    if self.start_checkpoint(c, ctx).await {
+                                    if self.start_checkpoint(c, ctx, collector).await {
                                         return Ok(SourceFinishType::Immediate);
                                     }
                                 }
