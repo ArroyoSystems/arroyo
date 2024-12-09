@@ -27,7 +27,6 @@ use std::time::{Instant, SystemTime};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
-use tracing::log::debug;
 use tracing::{trace, warn};
 
 pub type QueueItem = ArrowMessage;

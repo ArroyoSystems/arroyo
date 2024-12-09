@@ -16,9 +16,7 @@ use tokio::sync::mpsc::{channel, Receiver};
 
 use crate::udfs::get_udfs;
 use arroyo_rpc::config;
-use arroyo_rpc::grpc::rpc::{
-    CheckpointMetadata, StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
-};
+use arroyo_rpc::grpc::rpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_types::{to_micros, CheckpointBarrier};
