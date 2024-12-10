@@ -5,10 +5,11 @@ use arroyo_rpc::grpc::rpc::{
     TableSubtaskCheckpointMetadata,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::TaskInfoRef;
+use arroyo_types::TaskInfo;
 use prost::Message;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::debug;
 
@@ -79,7 +80,7 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
     // * checkpoint_message: If restoring from a checkpoint, the checkpoint data for that checkpoint's epoch.
     fn from_config(
         config: Self::ConfigMessage,
-        task_info: TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
     ) -> anyhow::Result<Self>
@@ -117,7 +118,7 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
 
     fn table_type() -> TableEnum;
 
-    fn task_info(&self) -> TaskInfoRef;
+    fn task_info(&self) -> Arc<TaskInfo>;
 
     fn files_to_keep(
         config: Self::ConfigMessage,
@@ -155,7 +156,7 @@ pub trait ErasedTable: Send + Sync + 'static {
     // * checkpoint_message: If restoring from a checkpoint, the checkpoint data for that checkpoint's epoch.
     fn from_config(
         config: TableConfig,
-        task_info: TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<TableCheckpointMetadata>,
     ) -> anyhow::Result<Self>
@@ -241,7 +242,7 @@ pub trait ErasedTable: Send + Sync + 'static {
 impl<T: Table + Sized + 'static> ErasedTable for T {
     fn from_config(
         config: TableConfig,
-        task_info: TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<TableCheckpointMetadata>,
     ) -> anyhow::Result<Self>
@@ -302,7 +303,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         let subtask_metadata = self.subtask_metadata_from_table(table_metadata)?;
         Ok(
             subtask_metadata.map(|metadata| TableSubtaskCheckpointMetadata {
-                subtask_index: self.task_info().task_index as u32,
+                subtask_index: self.task_info().task_index,
                 table_type: T::table_type().into(),
                 data: metadata.encode_to_vec(),
             }),
@@ -324,7 +325,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         let result =
             self.apply_compacted_checkpoint(epoch, compacted_checkpoint, subtask_metadata)?;
         Ok(TableSubtaskCheckpointMetadata {
-            subtask_index: self.task_info().task_index as u32,
+            subtask_index: self.task_info().task_index,
             table_type: T::table_type().into(),
             data: result.encode_to_vec(),
         })

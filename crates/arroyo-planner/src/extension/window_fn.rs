@@ -96,13 +96,14 @@ impl ArroyoExtension for WindowFunctionExtension {
             window_function_plan: window_plan_proto.encode_to_vec(),
         };
 
-        let logical_node = LogicalNode {
-            operator_id: format!("window_function_{}", index),
-            description: "window function".to_string(),
-            operator_name: OperatorName::WindowFunction,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        };
+        let logical_node = LogicalNode::single(
+            index as u32,
+            format!("window_function_{}", index),
+            OperatorName::WindowFunction,
+            config.encode_to_vec(),
+            "window function".to_string(),
+            1,
+        );
 
         let edge = arroyo_datastream::logical::LogicalEdge::project_all(
             // TODO: detect when this shuffle is unnecessary

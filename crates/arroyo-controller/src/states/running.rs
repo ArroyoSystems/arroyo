@@ -61,8 +61,8 @@ impl State for Running {
 
                             let job_controller = ctx.job_controller.as_mut().unwrap();
 
-                            for (op, p) in &c.parallelism_overrides {
-                                if let Some(actual) = job_controller.operator_parallelism(op){
+                            for (node_id, p) in &c.parallelism_overrides {
+                                if let Some(actual) = job_controller.operator_parallelism(*node_id){
                                     if actual != *p {
                                         return Ok(Transition::next(
                                             *self,

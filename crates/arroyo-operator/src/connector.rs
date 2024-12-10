@@ -1,4 +1,4 @@
-use crate::operator::OperatorNode;
+use crate::operator::ConstructedOperator;
 use anyhow::{anyhow, bail};
 use arrow::datatypes::{DataType, Field};
 use arroyo_rpc::api_types::connections::{
@@ -117,7 +117,7 @@ pub trait Connector: Send {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode>;
+    ) -> anyhow::Result<ConstructedOperator>;
 }
 #[allow(clippy::type_complexity)]
 #[allow(clippy::wrong_self_convention)]
@@ -186,7 +186,7 @@ pub trait ErasedConnector: Send {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection>;
 
-    fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<OperatorNode>;
+    fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<ConstructedOperator>;
 }
 
 impl<C: Connector> ErasedConnector for C {
@@ -320,7 +320,7 @@ impl<C: Connector> ErasedConnector for C {
         )
     }
 
-    fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<ConstructedOperator> {
         self.make_operator(
             self.parse_config(&config.connection).map_err(|e| {
                 anyhow!(

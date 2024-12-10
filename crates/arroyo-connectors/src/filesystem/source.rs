@@ -18,7 +18,7 @@ use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::select;
@@ -60,8 +60,12 @@ impl SourceOperator for FileSystemSourceFunc {
         "FileSystem".to_string()
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
+        match self.run_int(ctx, collector).await {
             Ok(s) => s,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
@@ -83,7 +87,11 @@ impl FileSystemSourceFunc {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         let (storage_provider, regex_pattern) = match &self.table {
             TableType::Source {
                 path,
@@ -116,7 +124,7 @@ impl FileSystemSourceFunc {
                 ))
             }
         };
-        ctx.initialize_deserializer(
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
@@ -136,7 +144,7 @@ impl FileSystemSourceFunc {
                 // hash the path and modulo by the number of tasks
                 let mut hasher = DefaultHasher::new();
                 path.hash(&mut hasher);
-                if (hasher.finish() as usize) % parallelism != task_index {
+                if (hasher.finish() as usize) % parallelism as usize != task_index as usize {
                     return ready(false);
                 }
 
@@ -164,7 +172,10 @@ impl FileSystemSourceFunc {
                 continue;
             }
 
-            if let Some(finish_type) = self.read_file(ctx, &storage_provider, &obj_key).await? {
+            if let Some(finish_type) = self
+                .read_file(ctx, collector, &storage_provider, &obj_key)
+                .await?
+            {
                 return Ok(finish_type);
             }
         }
@@ -274,7 +285,8 @@ impl FileSystemSourceFunc {
 
     async fn read_file(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         storage_provider: &StorageProvider,
         obj_key: &String,
     ) -> Result<Option<SourceFinishType>, UserError> {
@@ -298,7 +310,7 @@ impl FileSystemSourceFunc {
                     .get_newline_separated_stream(storage_provider, obj_key.to_string())
                     .await?
                     .skip(records_read);
-                self.read_line_file(ctx, line_reader, obj_key, records_read)
+                self.read_line_file(ctx, collector, line_reader, obj_key, records_read)
                     .await
             }
             Format::Avro(_) => todo!(),
@@ -307,12 +319,12 @@ impl FileSystemSourceFunc {
                     .get_record_batch_stream(
                         storage_provider,
                         obj_key,
-                        ctx.out_schema.as_ref().unwrap().schema.clone(),
+                        ctx.out_schema.schema.clone(),
                     )
                     .await?
                     .skip(records_read);
 
-                self.read_parquet_file(ctx, record_batch_stream, obj_key, records_read)
+                self.read_parquet_file(ctx, collector, record_batch_stream, obj_key, records_read)
                     .await
             }
             Format::RawString(_) => todo!(),
@@ -323,7 +335,8 @@ impl FileSystemSourceFunc {
 
     async fn read_parquet_file(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         mut record_batch_stream: impl Stream<Item = Result<RecordBatch, UserError>> + Unpin + Send,
         obj_key: &String,
         mut records_read: usize,
@@ -333,7 +346,7 @@ impl FileSystemSourceFunc {
                 item = record_batch_stream.next() => {
                     match item.transpose()? {
                         Some(batch) => {
-                            ctx.collect(batch).await;
+                            collector.collect(batch).await;
                             records_read += 1;
                         }
                         None => {
@@ -346,7 +359,7 @@ impl FileSystemSourceFunc {
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
                         self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
-                        if let Some(finish_type) = self.process_control_message(ctx, control_message).await {
+                        if let Some(finish_type) = self.process_control_message(ctx, collector, control_message).await {
                              return Ok(Some(finish_type))
                         }
                     }
@@ -357,7 +370,8 @@ impl FileSystemSourceFunc {
 
     async fn read_line_file(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         mut line_reader: impl Stream<Item = Result<String, UserError>> + Unpin + Send,
         obj_key: &String,
         mut records_read: usize,
@@ -367,15 +381,15 @@ impl FileSystemSourceFunc {
                 line = line_reader.next() => {
                     match line.transpose()? {
                         Some(line) => {
-                            ctx.deserialize_slice(line.as_bytes(), SystemTime::now(), None).await?;
+                            collector.deserialize_slice(line.as_bytes(), SystemTime::now(), None).await?;
                             records_read += 1;
-                            if ctx.should_flush() {
-                                ctx.flush_buffer().await?;
+                            if collector.should_flush() {
+                                collector.flush_buffer().await?;
                             }
                         }
                         None => {
                             info!("finished reading file {}", obj_key);
-                            ctx.flush_buffer().await?;
+                            collector.flush_buffer().await?;
                             self.file_states.insert(obj_key.to_string(), FileReadState::Finished);
                             return Ok(None);
                         }
@@ -384,7 +398,7 @@ impl FileSystemSourceFunc {
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
                         self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
-                        if let Some(finish_type) = self.process_control_message(ctx, control_message).await {
+                        if let Some(finish_type) = self.process_control_message(ctx, collector, control_message).await {
                             return Ok(Some(finish_type))
                         }
                     }
@@ -395,7 +409,8 @@ impl FileSystemSourceFunc {
 
     async fn process_control_message(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
         control_message: ControlMessage,
     ) -> Option<SourceFinishType> {
         match control_message {
@@ -409,7 +424,7 @@ impl FileSystemSourceFunc {
                         .await;
                 }
                 // checkpoint our state
-                if self.start_checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx, collector).await {
                     Some(SourceFinishType::Immediate)
                 } else {
                     None

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::SystemTime};
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
@@ -26,73 +26,22 @@ pub struct SingleFileSourceFunc {
 }
 
 impl SingleFileSourceFunc {
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        if ctx.task_info.task_index != 0 {
-            return SourceFinishType::Final;
-        }
-        ctx.initialize_deserializer(
-            self.format.clone(),
-            self.framing.clone(),
-            self.bad_data.clone(),
-        );
-
-        let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
-            ctx.table_manager.get_global_keyed_state("f").await.unwrap();
-
-        self.lines_read = state.get(&self.input_file).copied().unwrap_or_default();
-
-        let file = File::open(&self.input_file).await.expect(&self.input_file);
-        let mut lines = BufReader::new(file).lines();
-
-        let mut i = 0;
-
-        while let Some(s) = lines.next_line().await.unwrap() {
-            if i < self.lines_read {
-                i += 1;
-                continue;
-            }
-            ctx.deserialize_slice(s.as_bytes(), SystemTime::now(), None)
-                .await
-                .unwrap();
-            if ctx.should_flush() {
-                ctx.flush_buffer().await.unwrap();
-            }
-
-            self.lines_read += 1;
-            i += 1;
-
-            // wait for a control message after each line
-            let return_type = if self.wait_for_control {
-                self.handle_control(ctx.control_rx.recv().await, ctx).await
-            } else {
-                self.handle_control(ctx.control_rx.try_recv().ok(), ctx)
-                    .await
-            };
-
-            if let Some(value) = return_type {
-                return value;
-            }
-        }
-        ctx.flush_buffer().await.unwrap();
-        info!("file source finished");
-        SourceFinishType::Final
-    }
-
     async fn handle_control(
         &mut self,
         msg: Option<ControlMessage>,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
     ) -> Option<SourceFinishType> {
         match msg {
             Some(ControlMessage::Checkpoint(c)) => {
-                ctx.flush_buffer().await.unwrap();
+                collector.flush_buffer().await.unwrap();
                 let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
                     String,
                     usize,
                 > = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
                 state.insert(self.input_file.clone(), self.lines_read).await;
                 // checkpoint our state
-                if self.start_checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx, collector).await {
                     return Some(SourceFinishType::Immediate);
                 }
             }
@@ -127,7 +76,7 @@ impl SourceOperator for SingleFileSourceFunc {
         arroyo_state::global_table_config("f", "file_source")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) {
         let s: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> = ctx
             .table_manager
             .get_global_keyed_state("f")
@@ -138,7 +87,63 @@ impl SourceOperator for SingleFileSourceFunc {
             self.lines_read = *state;
         }
     }
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        self.run(ctx).await
+
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
+        if ctx.task_info.task_index != 0 {
+            return SourceFinishType::Final;
+        }
+        collector.initialize_deserializer(
+            self.format.clone(),
+            self.framing.clone(),
+            self.bad_data.clone(),
+        );
+
+        let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
+            ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+
+        self.lines_read = state.get(&self.input_file).copied().unwrap_or_default();
+
+        let file = File::open(&self.input_file).await.expect(&self.input_file);
+        let mut lines = BufReader::new(file).lines();
+
+        let mut i = 0;
+
+        while let Some(s) = lines.next_line().await.unwrap() {
+            if i < self.lines_read {
+                i += 1;
+                continue;
+            }
+            collector
+                .deserialize_slice(s.as_bytes(), SystemTime::now(), None)
+                .await
+                .unwrap();
+            if collector.should_flush() {
+                collector.flush_buffer().await.unwrap();
+            }
+
+            self.lines_read += 1;
+            i += 1;
+
+            // wait for a control message after each line
+            let return_type = if self.wait_for_control {
+                self.handle_control(ctx.control_rx.recv().await, ctx, collector)
+                    .await
+            } else {
+                self.handle_control(ctx.control_rx.try_recv().ok(), ctx, collector)
+                    .await
+            };
+
+            if let Some(value) = return_type {
+                return value;
+            }
+        }
+
+        collector.flush_buffer().await.unwrap();
+        info!("file source finished");
+        SourceFinishType::Final
     }
 }

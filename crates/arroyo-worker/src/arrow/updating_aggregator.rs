@@ -13,11 +13,12 @@ use arrow_array::{Array, BooleanArray, RecordBatch, StructArray};
 use arrow_array::cast::AsArray;
 use arrow_schema::SchemaRef;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::context::Collector;
 use arroyo_operator::{
-    context::ArrowContext,
+    context::OperatorContext,
     operator::{
-        ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode,
-        Registry,
+        ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator,
+        OperatorConstructor, Registry,
     },
 };
 use arroyo_rpc::df::ArroyoSchemaRef;
@@ -57,7 +58,11 @@ pub struct UpdatingAggregatingFunc {
 }
 
 impl UpdatingAggregatingFunc {
-    async fn flush(&mut self, ctx: &mut ArrowContext) -> Result<()> {
+    async fn flush(
+        &mut self,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) -> Result<()> {
         if self.sender.is_none() {
             return Ok(());
         }
@@ -158,11 +163,12 @@ impl UpdatingAggregatingFunc {
         }
 
         if !batches_to_write.is_empty() {
-            ctx.collect(concat_batches(
-                &batches_to_write[0].schema(),
-                batches_to_write.iter(),
-            )?)
-            .await;
+            collector
+                .collect(concat_batches(
+                    &batches_to_write[0].schema(),
+                    batches_to_write.iter(),
+                )?)
+                .await;
         }
 
         Ok(())
@@ -242,15 +248,25 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         }
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         if self.sender.is_none() {
             self.init_exec();
         }
         self.sender.as_ref().unwrap().send(batch).unwrap();
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
-        self.flush(ctx).await.unwrap();
+    async fn handle_checkpoint(
+        &mut self,
+        _: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
+        self.flush(ctx, collector).await.unwrap();
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
@@ -283,14 +299,20 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         Some(self.flush_interval)
     }
 
-    async fn handle_tick(&mut self, _tick: u64, ctx: &mut ArrowContext) {
-        self.flush(ctx).await.unwrap();
+    async fn handle_tick(
+        &mut self,
+        _tick: u64,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
+        self.flush(ctx, collector).await.unwrap();
     }
 
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Option<Watermark> {
         let last_watermark = ctx.last_present_watermark();
         let partial_table = ctx
@@ -299,7 +321,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
             .await
             .expect("should have partial table");
         if partial_table.would_expire(last_watermark) {
-            self.flush(ctx).await.unwrap();
+            self.flush(ctx, collector).await.unwrap();
         }
         let partial_table = ctx
             .table_manager
@@ -331,17 +353,18 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         }))
     }
 
-    async fn handle_future_result(&mut self, _result: Box<dyn Any + Send>, _: &mut ArrowContext) {
-        //unreachable!("should not have future result")
-    }
-
-    async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {
-        if let Some(SignalMessage::EndOfData) = final_mesage {
-            self.flush(ctx).await.unwrap();
+    async fn on_close(
+        &mut self,
+        final_message: &Option<SignalMessage>,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
+        if let Some(SignalMessage::EndOfData) = final_message {
+            self.flush(ctx, collector).await.unwrap();
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         // fetch the tables so they are ready to be queried.
         ctx.table_manager
             .get_last_key_value_table("f", ctx.last_present_watermark())
@@ -363,7 +386,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let receiver = Arc::new(RwLock::new(None));
 
         let codec = ArroyoPhysicalExtensionCodec {
@@ -407,7 +430,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
             config.ttl_micros
         };
 
-        Ok(OperatorNode::from_operator(Box::new(
+        Ok(ConstructedOperator::from_operator(Box::new(
             UpdatingAggregatingFunc {
                 partial_aggregation_plan,
                 partial_schema: Arc::new(partial_schema),

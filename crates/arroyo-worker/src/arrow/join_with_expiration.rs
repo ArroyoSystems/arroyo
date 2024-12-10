@@ -2,9 +2,10 @@ use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
-    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+    ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
+    Registry,
 };
 use arroyo_rpc::{
     df::ArroyoSchema,
@@ -41,7 +42,8 @@ impl JoinWithExpiration {
     async fn process_left(
         &mut self,
         record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Result<()> {
         let left_table = ctx
             .table_manager
@@ -70,7 +72,7 @@ impl JoinWithExpiration {
         self.compute_pair(
             self.left_input_schema.unkeyed_batch(&record_batch)?,
             right_batch,
-            ctx,
+            collector,
         )
         .await;
         Ok(())
@@ -79,7 +81,8 @@ impl JoinWithExpiration {
     async fn process_right(
         &mut self,
         right_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) -> Result<()> {
         let right_table = ctx
             .table_manager
@@ -108,7 +111,7 @@ impl JoinWithExpiration {
         self.compute_pair(
             left_batch,
             self.right_input_schema.unkeyed_batch(&right_batch)?,
-            ctx,
+            collector,
         )
         .await;
         Ok(())
@@ -118,7 +121,7 @@ impl JoinWithExpiration {
         &mut self,
         left: RecordBatch,
         right: RecordBatch,
-        ctx: &mut ArrowContext,
+        collector: &mut dyn Collector,
     ) {
         {
             self.right_passer.write().unwrap().replace(right);
@@ -131,7 +134,7 @@ impl JoinWithExpiration {
             .expect("successfully computed?");
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
-            ctx.collect(batch).await;
+            collector.collect(batch).await;
         }
     }
 }
@@ -162,7 +165,12 @@ impl ArrowOperator for JoinWithExpiration {
         }
     }
 
-    async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        _record_batch: RecordBatch,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         unreachable!();
     }
     async fn process_batch_index(
@@ -170,15 +178,16 @@ impl ArrowOperator for JoinWithExpiration {
         index: usize,
         total_inputs: usize,
         record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
     ) {
         match index / (total_inputs / 2) {
             0 => self
-                .process_left(record_batch, ctx)
+                .process_left(record_batch, ctx, collector)
                 .await
                 .expect("should process left"),
             1 => self
-                .process_right(record_batch, ctx)
+                .process_right(record_batch, ctx, collector)
                 .await
                 .expect("should process right"),
             _ => unreachable!(),
@@ -218,7 +227,7 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
         &self,
         config: Self::ConfigT,
         registry: Arc<Registry>,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let left_passer = Arc::new(RwLock::new(None));
         let right_passer = Arc::new(RwLock::new(None));
 
@@ -251,16 +260,18 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
             ttl = Duration::from_secs(24 * 60 * 60);
         }
 
-        Ok(OperatorNode::from_operator(Box::new(JoinWithExpiration {
-            left_expiration: ttl,
-            right_expiration: ttl,
-            left_input_schema,
-            right_input_schema,
-            left_schema,
-            right_schema,
-            left_passer,
-            right_passer,
-            join_execution_plan,
-        })))
+        Ok(ConstructedOperator::from_operator(Box::new(
+            JoinWithExpiration {
+                left_expiration: ttl,
+                right_expiration: ttl,
+                left_input_schema,
+                right_input_schema,
+                left_schema,
+                right_schema,
+                left_passer,
+                right_passer,
+                join_execution_plan,
+            },
+        )))
     }
 }

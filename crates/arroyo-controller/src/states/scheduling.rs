@@ -64,8 +64,8 @@ fn compute_assignments(
 
         for i in 0..node.parallelism {
             assignments.push(TaskAssignment {
-                operator_id: node.operator_id.clone(),
-                operator_subtask: i as u64,
+                node_id: node.node_id,
+                subtask_idx: i as u32,
                 worker_id: workers[worker_idx].id.0,
                 worker_addr: workers[worker_idx].data_address.clone(),
             });
@@ -363,6 +363,7 @@ impl State for Scheduling {
             metadata.min_epoch = min_epoch;
             if needs_commits {
                 let mut commit_subtasks = HashSet::new();
+                // (operator_id => (table_name => (subtask => data)))
                 let mut committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>> =
                     HashMap::new();
                 for operator_id in &metadata.operator_ids {
@@ -423,7 +424,9 @@ impl State for Scheduling {
                                 .program
                                 .graph
                                 .node_weights()
-                                .find(|node| node.operator_id == *operator_id)
+                                .find(|node| {
+                                    node.operator_chain.first().operator_id == *operator_id
+                                })
                                 .unwrap();
                             for subtask_index in 0..program_node.parallelism {
                                 commit_subtasks.insert((operator_id.clone(), subtask_index as u32));
@@ -516,15 +519,15 @@ impl State for Scheduling {
                 v = ctx.rx.recv() => {
                     match v {
                         Some(JobMessage::TaskStarted {
-                            operator_id,
+                            node_id,
                             operator_subtask,
                             ..
                         }) => {
-                            started_tasks.insert((operator_id, operator_subtask));
+                            started_tasks.insert((node_id, operator_subtask));
                         }
-                        Some(JobMessage::RunningMessage(RunningMessage::TaskFailed {worker_id, operator_id, subtask_index, reason})) => {
+                        Some(JobMessage::RunningMessage(RunningMessage::TaskFailed {worker_id, node_id, subtask_index, reason})) => {
                             return Err(ctx.retryable(self, "task failed on startup",
-                                anyhow!("task failed on job startup on {:?}: {}:{}: {}", worker_id, operator_id, subtask_index, reason), 10));
+                                anyhow!("task failed on job startup on {:?}: {}:{}: {}", worker_id, node_id, subtask_index, reason), 10));
                         }
                         Some(JobMessage::ConfigUpdate(c)) => {
                             stop_if_desired_non_running!(self, &c);

@@ -2,6 +2,7 @@
 #![allow(clippy::comparison_chain)]
 
 pub mod logical;
+pub mod optimizers;
 
 use arroyo_rpc::config::{config, DefaultSink};
 use arroyo_rpc::grpc::api;

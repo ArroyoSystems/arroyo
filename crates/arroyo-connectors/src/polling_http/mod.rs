@@ -21,7 +21,7 @@ use crate::{construct_http_client, pull_opt, pull_option_to_i64, EmptyConfig};
 
 use crate::polling_http::operator::{PollingHttpSourceFunc, PollingHttpSourceState};
 use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const DEFAULT_POLLING_INTERVAL: Duration = Duration::from_secs(1);
@@ -241,7 +241,7 @@ impl Connector for PollingHTTPConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
+    ) -> anyhow::Result<ConstructedOperator> {
         let headers = string_to_map(
             &table
                 .headers
@@ -262,31 +262,33 @@ impl Connector for PollingHTTPConnector {
         })
         .collect();
 
-        Ok(OperatorNode::from_source(Box::new(PollingHttpSourceFunc {
-            state: PollingHttpSourceState::default(),
-            client: reqwest::ClientBuilder::new()
-                .default_headers(headers)
-                .timeout(Duration::from_secs(5))
-                .build()
-                .expect("could not construct http client"),
-            endpoint: url::Url::from_str(&table.endpoint).expect("invalid endpoint"),
-            method: match table.method {
-                None | Some(Method::Get) => reqwest::Method::GET,
-                Some(Method::Post) => reqwest::Method::POST,
-                Some(Method::Put) => reqwest::Method::PUT,
-                Some(Method::Patch) => reqwest::Method::PATCH,
+        Ok(ConstructedOperator::from_source(Box::new(
+            PollingHttpSourceFunc {
+                state: PollingHttpSourceState::default(),
+                client: reqwest::ClientBuilder::new()
+                    .default_headers(headers)
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .expect("could not construct http client"),
+                endpoint: url::Url::from_str(&table.endpoint).expect("invalid endpoint"),
+                method: match table.method {
+                    None | Some(Method::Get) => reqwest::Method::GET,
+                    Some(Method::Post) => reqwest::Method::POST,
+                    Some(Method::Put) => reqwest::Method::PUT,
+                    Some(Method::Patch) => reqwest::Method::PATCH,
+                },
+                body: table.body.map(|b| b.into()),
+                polling_interval: table
+                    .poll_interval_ms
+                    .map(|d| Duration::from_millis(d as u64))
+                    .unwrap_or(DEFAULT_POLLING_INTERVAL),
+                emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
+                format: config
+                    .format
+                    .expect("PollingHTTP source must have a format"),
+                framing: config.framing,
+                bad_data: config.bad_data,
             },
-            body: table.body.map(|b| b.into()),
-            polling_interval: table
-                .poll_interval_ms
-                .map(|d| Duration::from_millis(d as u64))
-                .unwrap_or(DEFAULT_POLLING_INTERVAL),
-            emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
-            format: config
-                .format
-                .expect("PollingHTTP source must have a format"),
-            framing: config.framing,
-            bad_data: config.bad_data,
-        })))
+        )))
     }
 }

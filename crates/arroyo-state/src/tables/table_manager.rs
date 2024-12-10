@@ -6,22 +6,24 @@ use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::CompactionResult;
 use arroyo_rpc::{
     grpc::rpc::{
-        OperatorCheckpointMetadata, SubtaskCheckpointMetadata, TableConfig, TableEnum,
-        TableSubtaskCheckpointMetadata,
+        SubtaskCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata,
     },
     CheckpointCompleted, ControlResp,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{to_micros, CheckpointBarrier, Data, Key, TaskInfoRef};
+use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
 };
 
-use tracing::{debug, error, info, warn};
-
-use crate::{get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, StateMessage};
+use crate::{
+    get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, BackingStore, StateBackend,
+    StateMessage,
+};
 use crate::{CheckpointMessage, TableData};
+use arroyo_rpc::grpc::rpc::CheckpointMetadata;
+use tracing::{debug, error, info, warn};
 
 use super::expiring_time_key_map::{
     ExpiringTimeKeyTable, ExpiringTimeKeyView, KeyTimeView, LastKeyValueView,
@@ -34,9 +36,9 @@ pub struct TableManager {
     epoch: u32,
     min_epoch: u32,
     // ordered by table, then epoch.
-    tables: HashMap<String, Arc<Box<dyn ErasedTable>>>,
+    tables: HashMap<String, Arc<dyn ErasedTable>>,
     writer: BackendWriter,
-    task_info: TaskInfoRef,
+    task_info: Arc<TaskInfo>,
     storage: StorageProviderRef,
     caches: HashMap<String, Box<dyn Any + Send>>,
 }
@@ -53,8 +55,8 @@ pub struct BackendFlusher {
     storage: StorageProviderRef,
     control_tx: Sender<ControlResp>,
     finish_tx: Option<oneshot::Sender<()>>,
-    task_info: TaskInfoRef,
-    tables: HashMap<String, Arc<Box<dyn ErasedTable>>>,
+    task_info: Arc<TaskInfo>,
+    tables: HashMap<String, Arc<dyn ErasedTable>>,
     table_configs: HashMap<String, TableConfig>,
     table_checkpointers: HashMap<String, Box<dyn ErasedCheckpointer>>,
     current_epoch: u32,
@@ -75,8 +77,8 @@ impl BackendFlusher {
                         error!("Failed to flush state file: {:?}", err);
                         self.control_tx
                             .send(ControlResp::TaskFailed {
-                                operator_id: self.task_info.operator_id.clone(),
-                                task_index: self.task_info.task_index,
+                                node_id: self.task_info.node_id,
+                                task_index: self.task_info.task_index as usize,
                                 error: err.to_string(),
                             })
                             .await
@@ -163,7 +165,7 @@ impl BackendFlusher {
 
         // send controller the subtask metadata
         let subtask_metadata = SubtaskCheckpointMetadata {
-            subtask_index: self.task_info.task_index as u32,
+            subtask_index: self.task_info.task_index,
             start_time: to_micros(cp.time),
             finish_time: to_micros(SystemTime::now()),
             watermark: cp.watermark.map(to_micros),
@@ -174,6 +176,7 @@ impl BackendFlusher {
         self.control_tx
             .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
                 checkpoint_epoch: cp.epoch,
+                node_id: self.task_info.node_id,
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_metadata,
             }))
@@ -192,10 +195,10 @@ impl BackendFlusher {
 
 impl BackendWriter {
     fn new(
-        task_info: TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         control_tx: Sender<ControlResp>,
         table_configs: HashMap<String, TableConfig>,
-        tables: HashMap<String, Arc<Box<dyn ErasedTable>>>,
+        tables: HashMap<String, Arc<dyn ErasedTable>>,
         storage: StorageProviderRef,
         current_epoch: u32,
         last_epoch_checkpoints: HashMap<String, TableSubtaskCheckpointMetadata>,
@@ -225,12 +228,38 @@ impl BackendWriter {
 }
 
 impl TableManager {
-    pub async fn new(
-        task_info: TaskInfoRef,
+    pub async fn load(
+        task_info: Arc<TaskInfo>,
         table_configs: HashMap<String, TableConfig>,
         tx: Sender<ControlResp>,
-        checkpoint_metadata: Option<OperatorCheckpointMetadata>,
-    ) -> Result<Self> {
+        restore_from: Option<&CheckpointMetadata>,
+    ) -> Result<(Self, Option<SystemTime>)> {
+        let (watermark, checkpoint_metadata) = if let Some(metadata) = restore_from {
+            let (watermark, operator_metadata) = {
+                let metadata = StateBackend::load_operator_metadata(
+                    &task_info.job_id,
+                    &task_info.operator_id,
+                    metadata.epoch,
+                )
+                .await
+                .expect("lookup should succeed")
+                .expect("require metadata");
+                (
+                    metadata
+                        .operator_metadata
+                        .as_ref()
+                        .unwrap()
+                        .min_watermark
+                        .map(from_micros),
+                    metadata,
+                )
+            };
+
+            (watermark, Some(operator_metadata))
+        } else {
+            (None, None)
+        };
+
         let storage = get_storage_provider().await?;
 
         let tables = table_configs
@@ -242,23 +271,23 @@ impl TableManager {
                 let erased_table = match table_config.table_type() {
                     TableEnum::MissingTableType => bail!("should have table type"),
                     TableEnum::GlobalKeyValue => {
-                        Box::new(<GlobalKeyedTable as ErasedTable>::from_config(
+                        Arc::new(<GlobalKeyedTable as ErasedTable>::from_config(
                             table_config.clone(),
                             task_info.clone(),
                             storage.clone(),
                             table_restore_from,
-                        )?) as Box<dyn ErasedTable>
+                        )?) as Arc<dyn ErasedTable>
                     }
                     TableEnum::ExpiringKeyedTimeTable => {
-                        Box::new(<ExpiringTimeKeyTable as ErasedTable>::from_config(
+                        Arc::new(<ExpiringTimeKeyTable as ErasedTable>::from_config(
                             table_config.clone(),
                             task_info.clone(),
                             storage.clone(),
                             table_restore_from,
-                        )?) as Box<dyn ErasedTable>
+                        )?) as Arc<dyn ErasedTable>
                     }
                 };
-                Ok((table_name.to_string(), Arc::new(erased_table)))
+                Ok((table_name.to_string(), erased_table))
             })
             .collect::<Result<HashMap<_, _>>>()?;
 
@@ -299,15 +328,18 @@ impl TableManager {
             epoch,
             last_epoch_checkpoints,
         );
-        Ok(Self {
-            epoch,
-            min_epoch,
-            tables,
-            writer,
-            task_info,
-            storage: Arc::clone(storage),
-            caches: HashMap::new(),
-        })
+        Ok((
+            Self {
+                epoch,
+                min_epoch,
+                tables,
+                writer,
+                task_info,
+                storage: Arc::clone(storage),
+                caches: HashMap::new(),
+            },
+            watermark,
+        ))
     }
 
     pub async fn checkpoint(&mut self, barrier: CheckpointBarrier, watermark: Option<SystemTime>) {
@@ -330,13 +362,13 @@ impl TableManager {
         }
     }
 
-    pub async fn load_compacted(&mut self, compacted: CompactionResult) -> Result<()> {
+    pub async fn load_compacted(&mut self, compacted: &CompactionResult) -> Result<()> {
         if compacted.operator_id != self.task_info.operator_id {
             bail!("shouldn't be loading compaction for other operator");
         }
         self.writer
             .sender
-            .send(StateMessage::Compaction(compacted.compacted_tables))
+            .send(StateMessage::Compaction(compacted.compacted_tables.clone()))
             .await?;
         Ok(())
     }

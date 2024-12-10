@@ -62,6 +62,7 @@ use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewrit
 use crate::udafs::EmptyUdaf;
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::TIMESTAMP_FIELD;
@@ -851,13 +852,17 @@ pub async fn parse_and_get_arrow_program(
     }
     let graph = plan_to_graph_visitor.into_graph();
 
-    let program = LogicalProgram::new(
+    let mut program = LogicalProgram::new(
         graph,
         ProgramConfig {
             udf_dylibs: schema_provider.dylib_udfs.clone(),
             python_udfs: schema_provider.python_udfs.clone(),
         },
     );
+
+    if arroyo_rpc::config::config().pipeline.chaining.enabled {
+        program.optimize(&ChainingOptimizer {});
+    }
 
     Ok(CompiledSql {
         program,

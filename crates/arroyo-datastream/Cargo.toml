@@ -30,3 +30,4 @@ regex = "1.9.5"
 serde_json = "1.0.108"
 strum = { version = "0.25.0", features = ["derive"] }
 datafusion-proto = { workspace = true }
+itertools = "0.13.0"

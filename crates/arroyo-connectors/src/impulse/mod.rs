@@ -2,7 +2,7 @@ mod operator;
 
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, PrimitiveType, TestSourceMessage,
@@ -185,20 +185,22 @@ impl Connector for ImpulseConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         _: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_source(Box::new(ImpulseSourceFunc {
-            interval: table
-                .event_time_interval
-                .map(|i| Duration::from_nanos(i as u64)),
-            spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
-            limit: table
-                .message_count
-                .map(|n| n as usize)
-                .unwrap_or(usize::MAX),
-            state: ImpulseSourceState {
-                counter: 0,
-                start_time: SystemTime::now(),
+    ) -> anyhow::Result<ConstructedOperator> {
+        Ok(ConstructedOperator::from_source(Box::new(
+            ImpulseSourceFunc {
+                interval: table
+                    .event_time_interval
+                    .map(|i| Duration::from_nanos(i as u64)),
+                spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
+                limit: table
+                    .message_count
+                    .map(|n| n as usize)
+                    .unwrap_or(usize::MAX),
+                state: ImpulseSourceState {
+                    counter: 0,
+                    start_time: SystemTime::now(),
+                },
             },
-        })))
+        )))
     }
 }

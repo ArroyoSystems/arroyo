@@ -1,7 +1,7 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
-use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
+use crate::engine::{Engine, Program, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
 
@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
@@ -93,40 +93,42 @@ impl Debug for LogicalNode {
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
     sinks: Vec<Sender<ControlMessage>>,
-    operator_controls: HashMap<String, Vec<Sender<ControlMessage>>>, // operator_id -> vec of control tx
+    operator_to_node: HashMap<String, u32>,
+    operator_controls: HashMap<u32, Vec<Sender<ControlMessage>>>, // node_id -> vec of control tx
     shutdown_guard: ShutdownGuard,
 }
 
 pub struct LocalRunner {
     program: Program,
+    control_rx: Receiver<ControlResp>,
 }
 
 impl LocalRunner {
-    pub fn new(program: Program) -> Self {
-        Self { program }
+    pub fn new(program: Program, control_rx: Receiver<ControlResp>) -> Self {
+        Self {
+            program,
+            control_rx,
+        }
     }
 
-    pub async fn run(self) {
+    pub async fn run(mut self) {
         let name = format!("{}-0", self.program.name);
         let total_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name);
-        let (_running_engine, mut control_rx) = engine
-            .start(StreamConfig {
-                restore_epoch: None,
-            })
-            .await;
+
+        let _running_engine = engine.start().await;
 
         let mut finished_nodes = HashSet::new();
 
         loop {
-            while let Some(control_message) = control_rx.recv().await {
+            while let Some(control_message) = self.control_rx.recv().await {
                 debug!("received {:?}", control_message);
                 if let ControlResp::TaskFinished {
-                    operator_id,
+                    node_id,
                     task_index,
                 } = control_message
                 {
-                    finished_nodes.insert((operator_id, task_index));
+                    finished_nodes.insert((node_id, task_index));
                     if finished_nodes.len() == total_nodes {
                         return;
                     }
@@ -295,6 +297,7 @@ impl WorkerServer {
                                         worker_id: worker_id.0,
                                         time: to_micros(c.time),
                                         job_id: job_id.clone(),
+                                        node_id: c.node_id,
                                         operator_id: c.operator_id,
                                         subtask_index: c.subtask_index,
                                         epoch: c.checkpoint_epoch,
@@ -308,6 +311,7 @@ impl WorkerServer {
                                         worker_id: worker_id.0,
                                         time: c.subtask_metadata.finish_time,
                                         job_id: job_id.clone(),
+                                        node_id: c.node_id,
                                         operator_id: c.operator_id,
                                         epoch: c.checkpoint_epoch,
                                         needs_commit: false,
@@ -315,34 +319,35 @@ impl WorkerServer {
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::TaskFinished { operator_id, task_index }) => {
-                                info!(message = "Task finished", operator_id, task_index);
+                            Some(ControlResp::TaskFinished { node_id, task_index }) => {
+                                info!(message = "Task finished", node_id, task_index);
                                 controller.task_finished(Request::new(
                                     TaskFinishedReq {
                                         worker_id: worker_id.0,
                                         job_id: job_id.clone(),
                                         time: to_micros(SystemTime::now()),
-                                        operator_id: operator_id.to_string(),
+                                        node_id,
                                         operator_subtask: task_index as u64,
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::TaskFailed { operator_id, task_index, error }) => {
+                            Some(ControlResp::TaskFailed { node_id, task_index, error }) => {
                                 controller.task_failed(Request::new(
                                     TaskFailedReq {
                                         worker_id: worker_id.0,
                                         job_id: job_id.clone(),
                                         time: to_micros(SystemTime::now()),
-                                        operator_id: operator_id.to_string(),
+                                        node_id,
                                         operator_subtask: task_index as u64,
                                         error,
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::Error { operator_id, task_index, message, details}) => {
+                            Some(ControlResp::Error { node_id, operator_id, task_index, message, details}) => {
                                 controller.worker_error(Request::new(
                                     WorkerErrorReq {
                                         job_id: job_id.clone(),
+                                        node_id,
                                         operator_id,
                                         task_index: task_index as u32,
                                         message,
@@ -350,13 +355,13 @@ impl WorkerServer {
                                     }
                                 )).await.err()
                             }
-                            Some(ControlResp::TaskStarted {operator_id, task_index, start_time}) => {
+                            Some(ControlResp::TaskStarted {node_id, task_index, start_time}) => {
                                 controller.task_started(Request::new(
                                     TaskStartedReq {
                                         worker_id: worker_id.0,
                                         job_id: job_id.clone(),
                                         time: to_micros(start_time),
-                                        operator_id: operator_id.to_string(),
+                                        node_id,
                                         operator_subtask: task_index as u64,
                                     }
                                 )).await.err()
@@ -412,9 +417,12 @@ impl WorkerGrpc for WorkerServer {
         let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
             .expect("Failed to create LogicalProgram");
 
-        if let Ok(v) = to_d2(&logical).await {
-            debug!("Starting execution for graph\n{}", v);
-        }
+        debug!(
+            "Starting execution for graph\n{}",
+            to_d2(&logical)
+                .await
+                .unwrap_or_else(|e| format!("Failed to generate pipeline visualization: {e}"))
+        );
 
         for (udf_name, dylib_config) in &logical.program_config.udf_dylibs {
             info!("Loading UDF {}", udf_name);
@@ -441,11 +449,21 @@ impl WorkerGrpc for WorkerServer {
             })?;
         }
 
-        let (engine, control_rx) = {
+        let (control_tx, control_rx) = channel(128);
+
+        let engine = {
             let network = { self.network.lock().unwrap().take().unwrap() };
 
-            let program =
-                Program::from_logical(self.name.to_string(), &logical.graph, &req.tasks, registry);
+            let program = Program::from_logical(
+                self.name.to_string(),
+                &self.job_id,
+                &logical.graph,
+                &req.tasks,
+                registry,
+                req.restore_epoch,
+                control_tx.clone(),
+            )
+            .await;
 
             let engine = Engine::new(
                 program,
@@ -455,11 +473,7 @@ impl WorkerGrpc for WorkerServer {
                 network,
                 req.tasks,
             );
-            engine
-                .start(StreamConfig {
-                    restore_epoch: req.restore_epoch,
-                })
-                .await
+            engine.start().await
         };
 
         self.shutdown_guard
@@ -469,11 +483,13 @@ impl WorkerGrpc for WorkerServer {
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
         let operator_controls = engine.operator_controls();
+        let operator_to_node = engine.operator_to_node();
 
         let mut state = self.state.lock().unwrap();
         *state = Some(EngineState {
             sources,
             sinks,
+            operator_to_node,
             operator_controls,
             shutdown_guard: self.shutdown_guard.child("engine-state"),
         });
@@ -542,6 +558,7 @@ impl WorkerGrpc for WorkerServer {
     async fn commit(&self, request: Request<CommitReq>) -> Result<Response<CommitResp>, Status> {
         let req = request.into_inner();
         debug!("received commit request {:?}", req);
+
         let sender_commit_map_pairs = {
             let state_mutex = self.state.lock().unwrap();
             let Some(state) = state_mutex.as_ref() else {
@@ -549,9 +566,13 @@ impl WorkerGrpc for WorkerServer {
                     "Worker has not yet started execution",
                 ));
             };
+
             let mut sender_commit_map_pairs = vec![];
             for (operator_id, commit_operator) in req.committing_data {
-                let nodes = state.operator_controls.get(&operator_id).unwrap().clone();
+                let node_id = state.operator_to_node.get(&operator_id).unwrap_or_else(|| {
+                    panic!("Could not find node for operator id {}", operator_id)
+                });
+                let nodes = state.operator_controls.get(node_id).unwrap().clone();
                 let commit_map: HashMap<_, _> = commit_operator
                     .committing_data
                     .into_iter()
@@ -561,6 +582,7 @@ impl WorkerGrpc for WorkerServer {
             }
             sender_commit_map_pairs
         };
+
         for (senders, commit_map) in sender_commit_map_pairs {
             for sender in senders {
                 sender
@@ -584,7 +606,7 @@ impl WorkerGrpc for WorkerServer {
         let nodes = {
             let state = self.state.lock().unwrap();
             let s = state.as_ref().unwrap();
-            s.operator_controls.get(&req.operator_id).unwrap().clone()
+            s.operator_controls.get(&req.node_id).unwrap().clone()
         };
 
         let compacted: CompactionResult = req.into();
@@ -603,7 +625,7 @@ impl WorkerGrpc for WorkerServer {
             }
         }
 
-        return Ok(Response::new(LoadCompactedDataRes {}));
+        Ok(Response::new(LoadCompactedDataRes {}))
     }
 
     async fn stop_execution(

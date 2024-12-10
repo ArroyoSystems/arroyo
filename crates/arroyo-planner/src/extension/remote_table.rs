@@ -73,13 +73,15 @@ impl ArroyoExtension for RemoteTableExtension {
             name: format!("value_calculation({})", self.name),
             physical_plan: physical_plan_node.encode_to_vec(),
         };
-        let node = LogicalNode {
-            operator_id: format!("value_{}", index),
-            description: self.name.to_string(),
-            operator_name: OperatorName::ArrowValue,
-            parallelism: 1,
-            operator_config: config.encode_to_vec(),
-        };
+        let node = LogicalNode::single(
+            index as u32,
+            format!("value_{}", index),
+            OperatorName::ArrowValue,
+            config.encode_to_vec(),
+            self.name.to_string(),
+            1,
+        );
+
         let edges = input_schemas
             .into_iter()
             .map(|schema| LogicalEdge::project_all(LogicalEdgeType::Forward, (*schema).clone()))

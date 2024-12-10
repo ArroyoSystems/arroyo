@@ -60,13 +60,14 @@ impl ArroyoExtension for JoinExtension {
             ttl_micros: self.ttl.map(|t| t.as_micros() as u64),
         };
 
-        let logical_node = LogicalNode {
-            operator_id: format!("join_{}", index),
-            description: "join".to_string(),
+        let logical_node = LogicalNode::single(
+            index as u32,
+            format!("join_{}", index),
             operator_name,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        };
+            config.encode_to_vec(),
+            "join".to_string(),
+            1,
+        );
 
         let left_edge =
             LogicalEdge::project_all(LogicalEdgeType::LeftJoin, left_schema.as_ref().clone());

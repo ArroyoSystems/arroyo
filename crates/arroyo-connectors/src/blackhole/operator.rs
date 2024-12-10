@@ -1,5 +1,5 @@
 use arrow::array::RecordBatch;
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use async_trait::async_trait;
 
@@ -18,7 +18,12 @@ impl ArrowOperator for BlackholeSinkFunc {
         "BlackholeSink".to_string()
     }
 
-    async fn process_batch(&mut self, _: RecordBatch, _: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        _: RecordBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         // no-op
     }
 }

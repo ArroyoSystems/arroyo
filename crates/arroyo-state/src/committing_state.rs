@@ -40,12 +40,13 @@ impl CommittingState {
             .iter()
             .map(|(operator_id, _subtask_id)| operator_id.clone())
             .collect();
+
         operators_to_commit
             .into_iter()
-            .map(|operator_id| {
+            .map(|node_id| {
                 let committing_data = self
                     .committing_data
-                    .get(&operator_id)
+                    .get(&node_id)
                     .map(|table_map| {
                         table_map
                             .iter()
@@ -60,7 +61,7 @@ impl CommittingState {
                             .collect()
                     })
                     .unwrap_or_default();
-                (operator_id, OperatorCommitData { committing_data })
+                (node_id, OperatorCommitData { committing_data })
             })
             .collect()
     }

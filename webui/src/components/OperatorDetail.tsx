@@ -18,10 +18,10 @@ import { components } from '../gen/api-types';
 export interface OperatorDetailProps {
   pipelineId: string;
   jobId: string;
-  operatorId: string;
+  nodeId: number;
 }
 
-const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, operatorId }) => {
+const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, nodeId }) => {
   const { pipeline } = usePipeline(pipelineId);
   const { operatorMetricGroups, operatorMetricGroupsLoading, operatorMetricGroupsError } =
     useJobMetrics(pipelineId, jobId);
@@ -39,8 +39,8 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
     return <Loading size={'lg'} />;
   }
 
-  const node = pipeline.graph.nodes.find(n => n.nodeId == operatorId);
-  const operatorMetricGroup = operatorMetricGroups.find(o => o.operatorId == operatorId);
+  const node = pipeline.graph.nodes.find(n => n.nodeId == nodeId);
+  const operatorMetricGroup = operatorMetricGroups.find(o => o.nodeId == nodeId);
 
   if (!operatorMetricGroup) {
     return <Loading size={'lg'} />;
@@ -107,7 +107,20 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
         </Box>
       </HStack>
       <Box marginTop="10px">Backpressure: {backpressureBadge}</Box>
-      <Box marginTop="10px">{node?.operator}</Box>
+      <Box marginTop="10px">
+        <Box
+          display={'inline-block'}
+          border={'1px solid #aaa'}
+          px={1.5}
+          fontSize={12}
+          rounded={'full'}
+          mr={2}
+          title={'ID of this node'}
+        >
+          {node?.nodeId}
+        </Box>
+        {node?.description}
+      </Box>
       <Box marginTop="10px" fontFamily="monaco,ubuntu mono,fixed-width">
         <Code>{Math.round(msgRecv)} eps</Code> rx
         <Code marginLeft="20px">{Math.round(msgSent)} eps</Code> tx

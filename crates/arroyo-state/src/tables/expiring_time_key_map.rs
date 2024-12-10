@@ -24,7 +24,7 @@ use arroyo_rpc::{
 };
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{
-    from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfoRef,
+    from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfo,
 };
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 
@@ -50,7 +50,7 @@ use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpoint
 #[derive(Debug, Clone)]
 pub struct ExpiringTimeKeyTable {
     table_name: String,
-    task_info: TaskInfoRef,
+    task_info: Arc<TaskInfo>,
     schema: SchemaWithHashAndOperation,
     retention: Duration,
     storage_provider: StorageProviderRef,
@@ -258,7 +258,7 @@ impl Table for ExpiringTimeKeyTable {
 
     fn from_config(
         config: Self::ConfigMessage,
-        task_info: arroyo_types::TaskInfoRef,
+        task_info: Arc<TaskInfo>,
         storage_provider: arroyo_storage::StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
     ) -> anyhow::Result<Self> {
@@ -343,7 +343,7 @@ impl Table for ExpiringTimeKeyTable {
         table_metadata: Self::TableCheckpointMessage,
     ) -> anyhow::Result<Option<Self::TableSubtaskCheckpointMetadata>> {
         Ok(Some(ExpiringKeyedTimeSubtaskCheckpointMetadata {
-            subtask_index: self.task_info.task_index as u32,
+            subtask_index: self.task_info.task_index,
             watermark: None,
             files: table_metadata.files,
         }))
@@ -353,7 +353,7 @@ impl Table for ExpiringTimeKeyTable {
         TableEnum::ExpiringKeyedTimeTable
     }
 
-    fn task_info(&self) -> TaskInfoRef {
+    fn task_info(&self) -> Arc<TaskInfo> {
         self.task_info.clone()
     }
 
@@ -641,7 +641,7 @@ impl ExpiringTimeKeyTableCheckpointer {
             &parent.task_info.job_id,
             &parent.task_info.operator_id,
             &parent.table_name,
-            parent.task_info.task_index,
+            parent.task_info.task_index as usize,
             epoch,
             false,
         );
@@ -736,7 +736,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
         } else {
             Ok(Some((
                 ExpiringKeyedTimeSubtaskCheckpointMetadata {
-                    subtask_index: self.parent.task_info.task_index as u32,
+                    subtask_index: self.parent.task_info.task_index,
                     watermark: checkpoint.watermark.map(to_micros),
                     files,
                 },
@@ -750,7 +750,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
     }
 
     fn subtask_index(&self) -> u32 {
-        self.parent.task_info.task_index as u32
+        self.parent.task_info.task_index
     }
 }
 

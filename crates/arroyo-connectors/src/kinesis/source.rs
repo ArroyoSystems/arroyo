@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -164,16 +164,18 @@ impl SourceOperator for KinesisSourceFunc {
         global_table_config("k", "kinesis source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        ctx.initialize_deserializer(
+    async fn run(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> SourceFinishType {
+        collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
         );
-    }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        match self.run_int(ctx).await {
+        match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(UserError { name, details, .. }) => {
                 ctx.report_error(name.clone(), details.clone()).await;
@@ -189,7 +191,7 @@ impl KinesisSourceFunc {
     /// It returns a future for each shard to fetch the next shard iterator id.
     async fn init_shards(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
     ) -> anyhow::Result<Vec<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let mut futures = Vec::new();
         let s: &mut GlobalKeyedView<String, ShardState> = ctx
@@ -204,7 +206,7 @@ impl KinesisSourceFunc {
             .filter(|(shard_id, _shard_state)| {
                 let mut hasher = DefaultHasher::new();
                 shard_id.hash(&mut hasher);
-                let shard_hash = hasher.finish() as usize;
+                let shard_hash = hasher.finish() as u32;
                 shard_hash % ctx.task_info.parallelism == ctx.task_info.task_index
             })
         {
@@ -223,7 +225,7 @@ impl KinesisSourceFunc {
         &mut self,
         shard_id: String,
         async_result: AsyncResult,
-        ctx: &mut ArrowContext,
+        collector: &mut SourceCollector,
     ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
         match async_result {
             AsyncResult::ShardIteratorIdUpdate(new_shard_iterator) => {
@@ -231,7 +233,8 @@ impl KinesisSourceFunc {
                     .await
             }
             AsyncResult::GetRecords(get_records) => {
-                self.handle_get_records(shard_id, get_records, ctx).await
+                self.handle_get_records(shard_id, get_records, collector)
+                    .await
             }
             AsyncResult::NeedNewIterator => self.handle_need_new_iterator(shard_id).await,
         }
@@ -304,14 +307,14 @@ impl KinesisSourceFunc {
         &mut self,
         shard_id: String,
         get_records: GetRecordsOutput,
-        ctx: &mut ArrowContext,
+        collector: &mut SourceCollector,
     ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
         let last_sequence_number = get_records
             .records()
             .last()
             .map(|record| record.sequence_number().to_owned());
 
-        let next_shard_iterator = self.process_records(get_records, ctx).await?;
+        let next_shard_iterator = self.process_records(get_records, collector).await?;
         let shard_state = self.shards.get_mut(&shard_id).unwrap();
 
         if let Some(last_sequence_number) = last_sequence_number {
@@ -351,7 +354,11 @@ impl KinesisSourceFunc {
     /// * A `FuturesUnordered` tha contains futures for reading off of shards.
     /// * An interval that periodically polls for new shards, initializing their futures.
     /// * Polling off of the control queue, to perform checkpointing and stop the operator.
-    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+    async fn run_int(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> Result<SourceFinishType, UserError> {
         self.init_client().await;
         let starting_futures = self
             .init_shards(ctx)
@@ -368,13 +375,13 @@ impl KinesisSourceFunc {
                 result = futures.select_next_some() => {
                     let shard_id = result.name;
                     if let Some(future) = self.handle_async_result_split(shard_id,
-                        result.result.map_err(|e| UserError::new("Fatal Kinesis error", e.to_string()))?, ctx).await? {
+                        result.result.map_err(|e| UserError::new("Fatal Kinesis error", e.to_string()))?, collector).await? {
                             futures.push(future);
                         }
                 },
                 _ = shard_poll_interval.tick() => {
-                    if ctx.should_flush() {
-                        ctx.flush_buffer().await?;
+                    if collector.should_flush() {
+                        collector.flush_buffer().await?;
                     }
                     match self.sync_shards(ctx).await {
                         Err(err) => {
@@ -394,7 +401,7 @@ impl KinesisSourceFunc {
                             for (shard_id, shard_state) in &self.shards {
                                 s.insert(shard_id.clone(), shard_state.clone()).await;
                             }
-                            if self.start_checkpoint(c, ctx).await {
+                            if self.start_checkpoint(c, ctx, collector).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },
@@ -428,17 +435,18 @@ impl KinesisSourceFunc {
     async fn process_records(
         &mut self,
         get_records_output: GetRecordsOutput,
-        ctx: &mut ArrowContext,
+        collector: &mut SourceCollector,
     ) -> Result<Option<String>, UserError> {
         let records = get_records_output.records;
         for record in records {
             let data = record.data.into_inner();
             let timestamp = record.approximate_arrival_timestamp.unwrap();
-            ctx.deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128), None)
+            collector
+                .deserialize_slice(&data, from_nanos(timestamp.as_nanos() as u128), None)
                 .await?;
 
-            if ctx.should_flush() {
-                ctx.flush_buffer().await?
+            if collector.should_flush() {
+                collector.flush_buffer().await?
             }
         }
         Ok(get_records_output.next_shard_iterator)
@@ -446,7 +454,7 @@ impl KinesisSourceFunc {
 
     async fn sync_shards(
         &mut self,
-        ctx: &mut ArrowContext,
+        ctx: &mut SourceContext,
     ) -> Result<Vec<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let mut futures = Vec::new();
         for shard in self.get_splits().await? {
@@ -454,7 +462,7 @@ impl KinesisSourceFunc {
             let shard_id = shard.shard_id().to_string();
             let mut hasher = DefaultHasher::new();
             shard_id.hash(&mut hasher);
-            let shard_hash = hasher.finish() as usize;
+            let shard_hash = hasher.finish() as u32;
 
             if self.shards.contains_key(&shard_id)
                 || shard_hash % ctx.task_info.parallelism != ctx.task_info.task_index

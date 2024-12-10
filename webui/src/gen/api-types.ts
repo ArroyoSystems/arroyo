@@ -272,7 +272,7 @@ export interface components {
       createdAt: number;
       definition: string;
       description?: string | null;
-      dylibUrl: string;
+      dylibUrl?: string | null;
       id: string;
       language: components["schemas"]["UdfLanguage"];
       name: string;
@@ -355,7 +355,8 @@ export interface components {
     };
     OperatorMetricGroup: {
       metricGroups: (components["schemas"]["MetricGroup"])[];
-      operatorId: string;
+      /** Format: int32 */
+      nodeId: number;
     };
     OperatorMetricGroupCollection: {
       data: (components["schemas"]["OperatorMetricGroup"])[];
@@ -396,10 +397,12 @@ export interface components {
       hasMore: boolean;
     };
     PipelineEdge: {
-      destId: string;
+      /** Format: int32 */
+      destId: number;
       edgeType: string;
       keyType: string;
-      srcId: string;
+      /** Format: int32 */
+      srcId: number;
       valueType: string;
     };
     PipelineGraph: {
@@ -408,7 +411,8 @@ export interface components {
     };
     PipelineNode: {
       description: string;
-      nodeId: string;
+      /** Format: int32 */
+      nodeId: number;
       operator: string;
       /** Format: int32 */
       parallelism: number;
@@ -469,6 +473,7 @@ export interface components {
     SourceField: {
       fieldName: string;
       fieldType: components["schemas"]["SourceFieldType"];
+      metadataKey?: string | null;
       nullable: boolean;
     };
     SourceFieldType: {

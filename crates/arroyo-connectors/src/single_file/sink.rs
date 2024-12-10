@@ -8,7 +8,7 @@ use arroyo_types::{CheckpointBarrier, SignalMessage};
 
 use async_trait::async_trait;
 
-use arroyo_operator::context::ArrowContext;
+use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use tokio::{
     fs::{self, File, OpenOptions},
@@ -31,7 +31,12 @@ impl ArrowOperator for SingleFileSink {
         arroyo_state::global_table_config("f", "file_sink")
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
+    async fn process_batch(
+        &mut self,
+        batch: RecordBatch,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         let values = self.serializer.serialize(&batch);
         let file = self.file.as_mut().unwrap();
         for value in values {
@@ -40,7 +45,7 @@ impl ArrowOperator for SingleFileSink {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let file_path = Path::new(&self.output_path);
         let parent = file_path.parent().unwrap();
         fs::create_dir_all(&parent).await.unwrap();
@@ -72,13 +77,23 @@ impl ArrowOperator for SingleFileSink {
         self.file = Some(file);
     }
 
-    async fn on_close(&mut self, final_message: &Option<SignalMessage>, _ctx: &mut ArrowContext) {
+    async fn on_close(
+        &mut self,
+        final_message: &Option<SignalMessage>,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         if let Some(SignalMessage::EndOfData) = final_message {
             self.file.as_mut().unwrap().flush().await.unwrap();
         }
     }
 
-    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(
+        &mut self,
+        _b: CheckpointBarrier,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
         self.file.as_mut().unwrap().flush().await.unwrap();
         let state = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
         state

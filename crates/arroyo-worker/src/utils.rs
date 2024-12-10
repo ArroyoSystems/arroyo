@@ -1,7 +1,8 @@
 use crate::engine::construct_operator;
 use arrow_schema::Schema;
-use arroyo_datastream::logical::LogicalProgram;
+use arroyo_datastream::logical::{ChainedLogicalOperator, LogicalEdgeType, LogicalProgram};
 use arroyo_df::physical::new_registry;
+use arroyo_operator::operator::Registry;
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -11,6 +12,68 @@ fn format_arrow_schema_fields(schema: &Schema) -> Vec<(String, String)> {
         .iter()
         .map(|field| (field.name().clone(), field.data_type().to_string()))
         .collect()
+}
+
+fn write_op(d2: &mut String, registry: &Arc<Registry>, idx: usize, el: &ChainedLogicalOperator) {
+    let operator = construct_operator(el.operator_name, &el.operator_config, registry.clone());
+    let display = operator.display();
+
+    let mut label = format!("### {} ({})", operator.name(), &display.name);
+    for (field, value) in display.fields {
+        label.push_str(&format!("\n## {}\n\n{}", field, value));
+    }
+
+    writeln!(
+        d2,
+        "{}: {{
+  label: |markdown
+{}
+  |
+  shape: rectangle
+}}",
+        idx, label
+    )
+    .unwrap();
+}
+
+fn write_edge(
+    d2: &mut String,
+    from: usize,
+    to: usize,
+    edge_idx: usize,
+    edge_type: &LogicalEdgeType,
+    schema: &Schema,
+) {
+    let edge_label = format!("{}", edge_type);
+
+    let schema_node_name = format!("schema_{}", edge_idx);
+    let schema_fields = format_arrow_schema_fields(schema);
+
+    writeln!(d2, "{}: {{", schema_node_name).unwrap();
+    writeln!(d2, "  shape: sql_table").unwrap();
+
+    for (field_name, field_type) in schema_fields {
+        writeln!(
+            d2,
+            "  \"{}\": \"{}\"",
+            field_name.replace("\"", "\\\""),
+            field_type.replace("\"", "\\\"")
+        )
+        .unwrap();
+    }
+
+    writeln!(d2, "}}").unwrap();
+
+    writeln!(
+        d2,
+        "{} -> {}: \"{}\"",
+        from,
+        schema_node_name,
+        edge_label.replace("\"", "\\\"")
+    )
+    .unwrap();
+
+    writeln!(d2, "{} -> {}", schema_node_name, to).unwrap();
 }
 
 pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
@@ -30,66 +93,40 @@ pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
 
     for idx in logical.graph.node_indices() {
         let node = logical.graph.node_weight(idx).unwrap();
-        let operator = construct_operator(
-            node.operator_name,
-            node.operator_config.clone(),
-            registry.clone(),
-        );
-        let display = operator.display();
 
-        let mut label = format!("### {} ({})", operator.name(), &display.name);
-        for (field, value) in display.fields {
-            label.push_str(&format!("\n## {}\n\n{}", field, value));
+        if node.operator_chain.len() == 1 {
+            let el = node.operator_chain.first();
+            write_op(&mut d2, &registry, idx.index(), el);
+        } else {
+            writeln!(d2, "{}: {{", idx.index()).unwrap();
+            for (i, (el, edge)) in node.operator_chain.iter().enumerate() {
+                write_op(&mut d2, &registry, i, el);
+                if let Some(edge) = edge {
+                    write_edge(
+                        &mut d2,
+                        i,
+                        i + 1,
+                        i,
+                        &LogicalEdgeType::Forward,
+                        &edge.schema,
+                    );
+                }
+            }
+            writeln!(d2, "}}").unwrap();
         }
-
-        writeln!(
-            &mut d2,
-            "{}: {{
-  label: |markdown
-{}
-  |
-  shape: rectangle
-}}",
-            idx.index(),
-            label
-        )
-        .unwrap();
     }
 
     for idx in logical.graph.edge_indices() {
         let edge = logical.graph.edge_weight(idx).unwrap();
         let (from, to) = logical.graph.edge_endpoints(idx).unwrap();
-
-        let edge_label = format!("{}", edge.edge_type);
-
-        let schema_node_name = format!("schema_{}", idx.index());
-        let schema_fields = format_arrow_schema_fields(&edge.schema.schema);
-
-        writeln!(&mut d2, "{}: {{", schema_node_name).unwrap();
-        writeln!(&mut d2, "  shape: sql_table").unwrap();
-
-        for (field_name, field_type) in schema_fields {
-            writeln!(
-                &mut d2,
-                "  \"{}\": \"{}\"",
-                field_name.replace("\"", "\\\""),
-                field_type.replace("\"", "\\\"")
-            )
-            .unwrap();
-        }
-
-        writeln!(&mut d2, "}}").unwrap();
-
-        writeln!(
+        write_edge(
             &mut d2,
-            "{} -> {}: \"{}\"",
             from.index(),
-            schema_node_name,
-            edge_label.replace("\"", "\\\"")
-        )
-        .unwrap();
-
-        writeln!(&mut d2, "{} -> {}", schema_node_name, to.index()).unwrap();
+            to.index(),
+            idx.index(),
+            &edge.edge_type,
+            &edge.schema.schema,
+        );
     }
 
     Ok(d2)
