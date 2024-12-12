@@ -17,11 +17,11 @@ use arrow_array::{
     TimestampNanosecondArray,
 };
 use arrow_schema::{DataType, Field, FieldRef};
-use arroyo_df::schemas::window_arrow_struct;
 use arroyo_operator::{
     context::OperatorContext,
     operator::{ArrowOperator, ConstructedOperator, OperatorConstructor},
 };
+use arroyo_planner::schemas::window_arrow_struct;
 use arroyo_rpc::{
     grpc::{api, rpc::TableConfig},
     Converter,
@@ -32,9 +32,9 @@ use arroyo_state::{
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::Collector;
 use arroyo_operator::operator::Registry;
+use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},

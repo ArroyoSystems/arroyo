@@ -1,8 +1,8 @@
 use crate::engine::construct_operator;
 use arrow_schema::Schema;
 use arroyo_datastream::logical::{ChainedLogicalOperator, LogicalEdgeType, LogicalProgram};
-use arroyo_df::physical::new_registry;
 use arroyo_operator::operator::Registry;
+use arroyo_planner::physical::new_registry;
 use std::fmt::Write;
 use std::sync::Arc;
 

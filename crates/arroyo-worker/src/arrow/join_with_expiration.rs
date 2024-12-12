@@ -1,12 +1,12 @@
 use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
     Registry,
 };
+use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::{
     df::ArroyoSchema,
     grpc::{api, rpc::TableConfig},

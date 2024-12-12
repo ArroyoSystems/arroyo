@@ -13,11 +13,11 @@ use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorChain, OperatorName,
 };
-use arroyo_df::physical::new_registry;
 use arroyo_operator::context::{batch_bounded, BatchReceiver, BatchSender, OperatorContext};
 use arroyo_operator::operator::Registry;
 use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNode, SourceNode};
 use arroyo_operator::ErasedConstructor;
+use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::{

@@ -22,9 +22,9 @@ use std::{
 use futures::stream::FuturesUnordered;
 
 use super::sync::streams::KeyedCloneableStreamFuture;
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::Collector;
 use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
+use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion::execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},

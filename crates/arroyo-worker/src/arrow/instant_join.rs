@@ -2,11 +2,11 @@ use super::sync::streams::KeyedCloneableStreamFuture;
 use anyhow::Result;
 use arrow::compute::{max, min, partition, sort_to_indices, take};
 use arrow_array::{RecordBatch, TimestampNanosecondArray};
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
     ArrowOperator, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry,
 };
+use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::{api, rpc::TableConfig},

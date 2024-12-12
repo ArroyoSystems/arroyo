@@ -6,11 +6,11 @@ use std::{collections::BTreeMap, sync::RwLock, time::SystemTime};
 use anyhow::{anyhow, Result};
 use arrow::compute::{max, min};
 use arrow_array::RecordBatch;
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
     ArrowOperator, ConstructedOperator, OperatorConstructor, Registry,
 };
+use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};

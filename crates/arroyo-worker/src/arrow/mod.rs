@@ -1,12 +1,12 @@
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
-use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
-use arroyo_df::physical::DecodingContext;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
     Registry,
 };
+use arroyo_planner::physical::ArroyoPhysicalExtensionCodec;
+use arroyo_planner::physical::DecodingContext;
 use arroyo_rpc::grpc::api;
 use datafusion::common::DataFusionError;
 use datafusion::common::Result as DFResult;
