@@ -1,5 +1,5 @@
 [package]
-name = "arroyo-df"
+name = "arroyo-planner"
 version = "0.13.0-dev"
 edition = "2021"
 

@@ -20,7 +20,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-openapi = { path ="../arroyo-openapi" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
-arroyo-df = { path = "../arroyo-planner" }
+arroyo-planner = { path = "../arroyo-planner" }
 
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }

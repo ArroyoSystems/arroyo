@@ -27,8 +27,8 @@ use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{
     ChainedLogicalOperator, LogicalNode, LogicalProgram, OperatorChain, OperatorName,
 };
-use arroyo_df::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::ser::ArrowSerializer;
+use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
@@ -174,7 +174,7 @@ async fn compile_sql<'a>(
         schema_provider.add_connection_profile(profile);
     }
 
-    arroyo_df::parse_and_get_program(
+    arroyo_planner::parse_and_get_program(
         &query,
         schema_provider,
         SqlConfig {

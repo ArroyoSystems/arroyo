@@ -12,7 +12,6 @@ use arrow_array::{Array, BooleanArray, RecordBatch, StructArray};
 
 use arrow_array::cast::AsArray;
 use arrow_schema::SchemaRef;
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::Collector;
 use arroyo_operator::{
     context::OperatorContext,
@@ -21,6 +20,7 @@ use arroyo_operator::{
         OperatorConstructor, Registry,
     },
 };
+use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchemaRef;
 use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_rpc::{updating_meta_fields, UPDATING_META_FIELD};

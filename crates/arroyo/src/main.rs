@@ -1,7 +1,7 @@
 mod run;
 
 use anyhow::{anyhow, bail};
-use arroyo_df::{ArroyoSchemaProvider, SqlConfig};
+use arroyo_planner::{ArroyoSchemaProvider, SqlConfig};
 use arroyo_rpc::config;
 use arroyo_rpc::config::{config, DatabaseType};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
@@ -493,9 +493,10 @@ async fn visualize(query: Input, open: bool) {
     let query = std::io::read_to_string(query).expect("Failed to read query");
 
     let schema_provider = ArroyoSchemaProvider::new();
-    let compiled = arroyo_df::parse_and_get_program(&query, schema_provider, SqlConfig::default())
-        .await
-        .expect("Failed while planning query");
+    let compiled =
+        arroyo_planner::parse_and_get_program(&query, schema_provider, SqlConfig::default())
+            .await
+            .expect("Failed while planning query");
 
     let d2 = utils::to_d2(&compiled.program).await.unwrap();
 

@@ -40,7 +40,7 @@ use prost::Message;
 
 use crate::utils::to_d2;
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_df::physical::new_registry;
+use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;

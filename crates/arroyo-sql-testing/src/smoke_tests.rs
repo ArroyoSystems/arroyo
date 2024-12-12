@@ -2,7 +2,7 @@ use anyhow::Result;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
-use arroyo_df::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
+use arroyo_planner::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
 use petgraph::algo::has_path_connecting;
 use petgraph::visit::EdgeRef;

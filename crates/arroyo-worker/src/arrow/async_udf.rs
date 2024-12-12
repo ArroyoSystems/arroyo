@@ -3,12 +3,12 @@ use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
 use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
-use arroyo_df::ASYNC_RESULT_FIELD;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
     Registry,
 };
+use arroyo_planner::ASYNC_RESULT_FIELD;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
