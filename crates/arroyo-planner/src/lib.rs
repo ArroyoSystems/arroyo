@@ -588,7 +588,12 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
                         slide
                     );
                 }
-                Ok(Some(WindowType::Sliding { width, slide }))
+                if slide == width {
+                    // a hop window with slide == width is a tumble window
+                    Ok(Some(WindowType::Tumbling { width }))
+                } else {
+                    Ok(Some(WindowType::Sliding { width, slide }))
+                }
             }
             "tumble" => {
                 if args.len() != 1 {
