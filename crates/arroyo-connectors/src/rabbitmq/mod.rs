@@ -59,7 +59,7 @@ impl Connector for RabbitmqConnector {
         _: &str,
         config: Self::ProfileT,
         table: Self::TableT,
-        schema: Option<&arroyo_rpc::api_types::connections::ConnectionSchema>,
+        _schema: Option<&arroyo_rpc::api_types::connections::ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<arroyo_rpc::api_types::connections::TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
