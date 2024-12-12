@@ -65,6 +65,8 @@ spec:
                 name: {{ include "arroyo.fullname" . }}-postgresql
                 key: password
           {{- end }}
+
+        {{- include "tplvalues.render" (dict "value" .Values.env "context" $) | nindent 10 }}
       containers:
       - name: arroyo-controller
         securityContext:
@@ -96,6 +98,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.uid
+
+        {{- include "tplvalues.render" (dict "value" .Values.env "context" $) | nindent 8 }}
 
         ports:
         - containerPort: {{ .Values.controller.service.grpcPort }}
