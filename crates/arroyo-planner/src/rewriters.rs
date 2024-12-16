@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
+use crate::extension::lookup::LookupSource;
 
 /// Rewrites a logical plan to move projections out of table scans
 /// and into a separate projection node which may include virtual fields,
@@ -215,6 +216,19 @@ impl SourceRewriter<'_> {
         })))
     }
 
+    fn mutate_lookup_table(
+        &self,
+        table_scan: &TableScan,
+        table: &ConnectorTable
+    ) -> DFResult<Transformed<LogicalPlan>> {
+        Ok(Transformed::yes(LogicalPlan::Extension(Extension {
+            node: Arc::new(LookupSource {
+                table: table.clone(),
+                schema: table_scan.projected_schema.clone(),
+            })
+        })))
+    }
+
     fn mutate_table_from_query(
         &self,
         table_scan: &TableScan,
@@ -273,6 +287,7 @@ impl TreeNodeRewriter for SourceRewriter<'_> {
 
         match table {
             Table::ConnectorTable(table) => self.mutate_connector_table(&table_scan, table),
+            Table::LookupTable(table) => self.mutate_lookup_table(&table_scan, table),
             Table::MemoryTable {
                 name,
                 fields: _,

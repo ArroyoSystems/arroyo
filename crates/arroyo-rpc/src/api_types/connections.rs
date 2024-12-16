@@ -51,6 +51,7 @@ pub struct ConnectionProfilePost {
 pub enum ConnectionType {
     Source,
     Sink,
+    Lookup,
 }
 
 impl Display for ConnectionType {
@@ -58,6 +59,7 @@ impl Display for ConnectionType {
         match self {
             ConnectionType::Source => write!(f, "SOURCE"),
             ConnectionType::Sink => write!(f, "SINK"),
+            ConnectionType::Lookup => write!(f, "LOOKUP"),
         }
     }
 }
