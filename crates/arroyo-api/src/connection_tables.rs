@@ -509,6 +509,9 @@ async fn expand_avro_schema(
             ConnectionType::Sink => {
                 // don't fetch schemas for sinks for now
             }
+            ConnectionType::Lookup => {
+                todo!("lookup tables cannot be created via the UI")
+            }
         }
     }
 
@@ -520,6 +523,9 @@ async fn expand_avro_schema(
             ConnectionType::Sink => {
                 schema.inferred = Some(true);
                 Ok(schema)
+            }
+            ConnectionType::Lookup => {
+                todo!("lookup tables cannot be created via the UI")
             }
         };
     };
@@ -595,6 +601,9 @@ async fn expand_proto_schema(
             }
             ConnectionType::Sink => {
                 // don't fetch schemas for sinks for now
+            }
+            ConnectionType::Lookup => {
+                todo!("lookup tables cannot be created via the UI")
             }
         }
     }
@@ -696,6 +705,9 @@ async fn expand_json_schema(
             ConnectionType::Sink => {
                 // don't fetch schemas for sinks for now until we're better able to conform our output to the schema
                 schema.inferred = Some(true);
+            }
+            ConnectionType::Lookup => {
+                todo!("lookup tables cannot be created via the UI")
             }
         }
     }

@@ -826,8 +826,11 @@ pub async fn parse_and_get_arrow_program(
                         logical_plan.replace(plan_rewrite);
                         continue;
                     }
+                    Table::LookupTable(_) => {
+                        plan_err!("lookup (temporary) tables cannot be inserted into")
+                    }
                     Table::TableFromQuery { .. } => {
-                        plan_err!("Shouldn't be inserting more data into a table made with CREATE TABLE AS")
+                        plan_err!("shouldn't be inserting more data into a table made with CREATE TABLE AS")
                     }
                     Table::PreviewSink { .. } => {
                         plan_err!("queries shouldn't be able insert into preview sink.")
