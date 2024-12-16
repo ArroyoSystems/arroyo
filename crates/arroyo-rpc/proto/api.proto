@@ -70,6 +70,13 @@ message JoinOperator {
   optional uint64 ttl_micros = 6;
 }
 
+message LookupJoinOperator {
+  string name = 1;
+  ArroyoSchema schema = 2;
+  ConnectorOp connector = 3;
+  
+}
+
 message WindowFunctionOperator {
   string name = 1;
   ArroyoSchema input_schema = 2;

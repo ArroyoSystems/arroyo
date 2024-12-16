@@ -1,4 +1,5 @@
-mod operator;
+pub mod sink;
+pub mod lookup;
 
 use anyhow::{anyhow, bail};
 use arroyo_formats::ser::ArrowSerializer;
@@ -19,8 +20,8 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::OperatorConfig;
 
-use crate::redis::operator::sink::{GeneralConnection, RedisSinkFunc};
 use crate::{pull_opt, pull_option_to_u64};
+use crate::redis::sink::{GeneralConnection, RedisSinkFunc};
 
 pub struct RedisConnector {}
 
@@ -289,52 +290,61 @@ impl Connector for RedisConnector {
         }
 
         let sink = match typ.as_str() {
-            "sink" => TableType::Target(match pull_opt("target", options)?.as_str() {
-                "string" => Target::StringTable {
-                    key_prefix: pull_opt("target.key_prefix", options)?,
-                    key_column: options
-                        .remove("target.key_column")
-                        .map(|name| validate_column(schema, name, "target.key_column"))
-                        .transpose()?,
-                    ttl_secs: pull_option_to_u64("target.ttl_secs", options)?
-                        .map(|t| t.try_into())
-                        .transpose()
-                        .map_err(|_| anyhow!("target.ttl_secs must be greater than 0"))?,
-                },
-                "list" => Target::ListTable {
-                    list_prefix: pull_opt("target.key_prefix", options)?,
-                    list_key_column: options
-                        .remove("target.key_column")
-                        .map(|name| validate_column(schema, name, "target.key_column"))
-                        .transpose()?,
-                    max_length: pull_option_to_u64("target.max_length", options)?
-                        .map(|t| t.try_into())
-                        .transpose()
-                        .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,
-                    operation: match options.remove("target.operation").as_deref() {
-                        Some("append") | None => ListOperation::Append,
-                        Some("prepend") => ListOperation::Prepend,
-                        Some(op) => {
-                            bail!("'{}' is not a valid value for target.operation; must be one of 'append' or 'prepend'", op);
-                        }
-                    },
-                },
-                "hash" => Target::HashTable {
-                    hash_field_column: validate_column(
-                        schema,
-                        pull_opt("target.field_column", options)?,
-                        "targets.field_column",
-                    )?,
-                    hash_key_column: options
-                        .remove("target.key_column")
-                        .map(|name| validate_column(schema, name, "target.key_column"))
-                        .transpose()?,
-                    hash_key_prefix: pull_opt("target.key_prefix", options)?,
-                },
-                s => {
-                    bail!("'{}' is not a valid redis target", s);
+            "lookup" => {
+                TableType::Lookup {
+                    lookup: Default::default(),
                 }
-            }),
+            }
+            "sink" => {
+                let target = match pull_opt("target", options)?.as_str() {
+                    "string" => Target::StringTable {
+                        key_prefix: pull_opt("target.key_prefix", options)?,
+                        key_column: options
+                            .remove("target.key_column")
+                            .map(|name| validate_column(schema, name, "target.key_column"))
+                            .transpose()?,
+                        ttl_secs: pull_option_to_u64("target.ttl_secs", options)?
+                            .map(|t| t.try_into())
+                            .transpose()
+                            .map_err(|_| anyhow!("target.ttl_secs must be greater than 0"))?,
+                    },
+                    "list" => Target::ListTable {
+                        list_prefix: pull_opt("target.key_prefix", options)?,
+                        list_key_column: options
+                            .remove("target.key_column")
+                            .map(|name| validate_column(schema, name, "target.key_column"))
+                            .transpose()?,
+                        max_length: pull_option_to_u64("target.max_length", options)?
+                            .map(|t| t.try_into())
+                            .transpose()
+                            .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,
+                        operation: match options.remove("target.operation").as_deref() {
+                            Some("append") | None => ListOperation::Append,
+                            Some("prepend") => ListOperation::Prepend,
+                            Some(op) => {
+                                bail!("'{}' is not a valid value for target.operation; must be one of 'append' or 'prepend'", op);
+                            }
+                        },
+                    },
+                    "hash" => Target::HashTable {
+                        hash_field_column: validate_column(
+                            schema,
+                            pull_opt("target.field_column", options)?,
+                            "targets.field_column",
+                        )?,
+                        hash_key_column: options
+                            .remove("target.key_column")
+                            .map(|name| validate_column(schema, name, "target.key_column"))
+                            .transpose()?,
+                        hash_key_prefix: pull_opt("target.key_prefix", options)?,
+                    },
+                    s => {
+                        bail!("'{}' is not a valid redis target", s);
+                    }
+                };
+                
+                TableType::Sink { target }
+            },
             s => {
                 bail!("'{}' is not a valid type; must be `sink`", s);
             }
@@ -371,6 +381,15 @@ impl Connector for RedisConnector {
 
         let _ = RedisClient::new(&config)?;
 
+        let (connection_type, description) = match &table.connector_type {
+            TableType::Sink { .. } => {
+                (ConnectionType::Sink, "RedisSink")
+            }
+            TableType::Lookup { .. } => {
+                (ConnectionType::Lookup, "RedisLookup")
+            }
+        };
+        
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
@@ -380,15 +399,15 @@ impl Connector for RedisConnector {
             framing: schema.framing.clone(),
             metadata_fields: vec![],
         };
-
+        
         Ok(Connection {
             id,
             connector: self.name(),
             name: name.to_string(),
-            connection_type: ConnectionType::Sink,
+            connection_type,
             schema,
             config: serde_json::to_string(&config).unwrap(),
-            description: "RedisSink".to_string(),
+            description: description.to_string(),
         })
     }
 
@@ -400,22 +419,30 @@ impl Connector for RedisConnector {
     ) -> anyhow::Result<ConstructedOperator> {
         let client = RedisClient::new(&profile)?;
 
-        let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
-        let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);
+        match table.connector_type {
+            TableType::Sink { target } => {
+                let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
+                let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);
 
-        Ok(ConstructedOperator::from_operator(Box::new(
-            RedisSinkFunc {
-                serializer: ArrowSerializer::new(
-                    config.format.expect("redis table must have a format"),
-                ),
-                table,
-                client,
-                cmd_q: Some((cmd_tx, cmd_rx)),
-                tx,
-                rx,
-                key_index: None,
-                hash_index: None,
-            },
-        )))
+                Ok(ConstructedOperator::from_operator(Box::new(
+                    RedisSinkFunc {
+                        serializer: ArrowSerializer::new(
+                            config.format.expect("redis table must have a format"),
+                        ),
+                        target,
+                        client,
+                        cmd_q: Some((cmd_tx, cmd_rx)),
+                        tx,
+                        rx,
+                        key_index: None,
+                        hash_index: None,
+                    },
+                )))
+                
+            }
+            TableType::Lookup { .. } => {
+                todo!()
+            }
+        }
     }
 }

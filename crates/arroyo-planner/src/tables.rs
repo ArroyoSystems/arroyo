@@ -418,7 +418,7 @@ impl ConnectorTable {
     pub fn as_sql_source(&self) -> Result<SourceOperator> {
         match self.connection_type {
             ConnectionType::Source => {}
-            ConnectionType::Sink => {
+            ConnectionType::Sink | ConnectionType::Lookup => {
                 return plan_err!("cannot read from sink");
             }
         };
@@ -463,6 +463,7 @@ pub struct SourceOperator {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Table {
+    LookupTable(ConnectorTable),
     ConnectorTable(ConnectorTable),
     MemoryTable {
         name: String,
@@ -673,6 +674,7 @@ impl Table {
             columns,
             with_options,
             query: None,
+            temporary,
             ..
         }) = statement
         {
@@ -750,17 +752,23 @@ impl Table {
                         ),
                         None => None,
                     };
-                    Ok(Some(Table::ConnectorTable(
-                        ConnectorTable::from_options(
-                            &name,
-                            connector,
-                            fields,
-                            primary_keys,
-                            &mut with_map,
-                            connection_profile,
-                        )
-                        .map_err(|e| e.context(format!("Failed to create table {}", name)))?,
-                    )))
+                    let table = ConnectorTable::from_options(
+                        &name,
+                        connector,
+                        fields,
+                        primary_keys,
+                        &mut with_map,
+                        connection_profile,
+                    ).map_err(|e| e.context(format!("Failed to create table {}", name)))?;
+
+                    Ok(Some(match table.connection_type {
+                        ConnectionType::Source | ConnectionType::Sink => {
+                            Table::ConnectorTable(table)
+                        }
+                        ConnectionType::Lookup => {
+                            Table::LookupTable(table)
+                        }
+                    }))
                 }
             }
         } else {
@@ -798,7 +806,7 @@ impl Table {
     pub fn name(&self) -> &str {
         match self {
             Table::MemoryTable { name, .. } | Table::TableFromQuery { name, .. } => name.as_str(),
-            Table::ConnectorTable(c) => c.name.as_str(),
+            Table::ConnectorTable(c) | Table::LookupTable(c) => c.name.as_str(),
             Table::PreviewSink { .. } => "preview",
         }
     }
@@ -836,7 +844,11 @@ impl Table {
                 fields,
                 inferred_fields,
                 ..
-            }) => inferred_fields
+            }) | Table::LookupTable(ConnectorTable {
+                fields,
+                inferred_fields,
+            ..
+                                                }) => inferred_fields
                 .as_ref()
                 .map(|fs| fs.iter().map(|f| f.field().clone()).collect())
                 .unwrap_or_else(|| {
@@ -856,7 +868,7 @@ impl Table {
 
     pub fn connector_op(&self) -> Result<ConnectorOp> {
         match self {
-            Table::ConnectorTable(c) => Ok(c.connector_op()),
+            Table::ConnectorTable(c) | Table::LookupTable(c) => Ok(c.connector_op()),
             Table::MemoryTable { .. } => plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
             Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),

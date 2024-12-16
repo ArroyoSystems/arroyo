@@ -4,7 +4,7 @@ use crate::plan::WindowDetectingVisitor;
 use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata, ArroyoSchemaProvider};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::UPDATING_META_FIELD;
-use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor};
 use datafusion::common::{
     not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue,
     TableReference,
@@ -16,6 +16,8 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::coalesce;
 use std::sync::Arc;
+use crate::extension::lookup::{LookupJoin, LookupSource};
+use crate::tables::ConnectorTable;
 
 pub(crate) struct JoinRewriter<'a> {
     pub schema_provider: &'a ArroyoSchemaProvider,
@@ -189,6 +191,86 @@ impl JoinRewriter<'_> {
     }
 }
 
+#[derive(Default)]
+struct FindLookupExtension {
+    table: Option<ConnectorTable>,
+    filter: Option<Expr>,
+    alias: Option<TableReference>,
+}
+
+impl <'a> TreeNodeVisitor<'a> for FindLookupExtension {
+    type Node = LogicalPlan;
+
+    fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
+        match node {
+            LogicalPlan::Extension(e) => {
+                if let Some(s) = e.node.as_any().downcast_ref::<LookupSource>() {
+                    self.table = Some(s.table.clone());
+                    return Ok(TreeNodeRecursion::Stop);
+                }
+            }
+            LogicalPlan::Filter(filter) => {
+                if self.filter.replace(filter.predicate.clone()).is_some() {
+                    return plan_err!("multiple filters found in lookup join, which is not supported");
+                }
+            }
+            LogicalPlan::SubqueryAlias(s) => {
+                self.alias = Some(s.alias.clone());
+            }
+            _ => {
+                return plan_err!("lookup tables must be used directly within a join");
+            }
+        }
+        Ok(TreeNodeRecursion::Continue)
+    }
+}
+
+fn has_lookup(plan: &LogicalPlan) -> Result<bool> {
+    plan.exists(|p| Ok(match p {
+        LogicalPlan::Extension(e) => e.node.as_any().is::<LookupSource>(),
+        _ => false
+    }))
+}
+
+fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
+    if has_lookup(&join.left)? {
+        return plan_err!("lookup sources must be on the right side of an inner or left join");
+    }
+    
+    if !has_lookup(&join.right)? {
+        return Ok(None);
+    }
+    
+    println!("JOin = {:?} {:?}\n{:#?}", join.join_constraint, join.join_type, join.on);
+    
+    match join.join_type {
+        JoinType::Inner | JoinType::Left => {}
+        t => {
+            return plan_err!("{} join is not supported for lookup tables; must be a left or inner join", t);
+        }
+    }
+    
+    if join.filter.is_some() {
+        return plan_err!("filter join conditions are not supported for lookup joins; must have an equality condition");
+    }
+
+    let mut lookup = FindLookupExtension::default();
+    join.right.visit(&mut lookup)?;
+
+    let connector = lookup.table.expect("right side of join does not have lookup");
+
+    Ok(Some(LogicalPlan::Extension(Extension {
+        node: Arc::new(LookupJoin {
+            input: (*join.left).clone(),
+            schema: join.schema.clone(),
+            connector,
+            on: join.on.clone(),
+            filter: lookup.filter,
+            alias: lookup.alias,
+        })
+    })))
+}
+
 impl TreeNodeRewriter for JoinRewriter<'_> {
     type Node = LogicalPlan;
 
@@ -196,6 +278,11 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
         let LogicalPlan::Join(join) = node else {
             return Ok(Transformed::no(node));
         };
+        
+        if let Some(plan) = maybe_plan_lookup_join(&join)? {
+            return Ok(Transformed::yes(plan));
+        }
+        
         let is_instant = Self::check_join_windowing(&join)?;
 
         let Join {

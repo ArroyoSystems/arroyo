@@ -40,6 +40,8 @@ pub(crate) mod table_source;
 pub(crate) mod updating_aggregate;
 pub(crate) mod watermark_node;
 pub(crate) mod window_fn;
+pub(crate) mod lookup;
+
 pub(crate) trait ArroyoExtension: Debug {
     // if the extension has a name, return it so that we can memoize.
     fn node_name(&self) -> Option<NamedNode>;

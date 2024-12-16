@@ -32,6 +32,7 @@ pub enum OperatorName {
     AsyncUdf,
     Join,
     InstantJoin,
+    LookupJoin,
     WindowFunction,
     TumblingWindowAggregate,
     SlidingWindowAggregate,
@@ -376,6 +377,7 @@ impl LogicalProgram {
                     OperatorName::Join => "join-with-expiration".to_string(),
                     OperatorName::InstantJoin => "windowed-join".to_string(),
                     OperatorName::WindowFunction => "sql-window-function".to_string(),
+                    OperatorName::LookupJoin => "lookup-join".to_string(),
                     OperatorName::TumblingWindowAggregate => {
                         "sql-tumbling-window-aggregate".to_string()
                     }

@@ -61,6 +61,7 @@ impl SinkExtension {
                     (false, false) => {}
                 }
             }
+            Table::LookupTable(..) => return plan_err!("cannot use a lookup table as a sink"),
             Table::MemoryTable { .. } => return plan_err!("memory tables not supported"),
             Table::TableFromQuery { .. } => {}
             Table::PreviewSink { .. } => {
