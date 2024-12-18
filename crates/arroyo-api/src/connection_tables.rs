@@ -91,6 +91,9 @@ async fn get_and_validate_connector(
             connection_profile.config.clone(),
         )
     } else {
+        if connector.metadata().connection_config.is_some() {
+            return Err(bad_request("this connector requires a connection profile, but `connectionProfileId` was not specified"));
+        }
         (None, json! {{}})
     };
 
