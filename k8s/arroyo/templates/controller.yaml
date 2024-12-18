@@ -66,7 +66,9 @@ spec:
                 key: password
           {{- end }}
 
+        {{ if .Values.env }}
         {{- include "tplvalues.render" (dict "value" .Values.env "context" $) | nindent 10 }}
+        {{ end }}
       containers:
       - name: arroyo-controller
         securityContext:
@@ -99,7 +101,9 @@ spec:
             fieldRef:
               fieldPath: metadata.uid
 
+        {{ if .Values.env }}
         {{- include "tplvalues.render" (dict "value" .Values.env "context" $) | nindent 8 }}
+        {{ end }}
 
         ports:
         - containerPort: {{ .Values.controller.service.grpcPort }}
