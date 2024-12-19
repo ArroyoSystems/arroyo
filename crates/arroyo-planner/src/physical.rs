@@ -895,7 +895,7 @@ impl DebeziumUnrollingStream {
                     timestamp_builder.append_value(timestamp.value(i));
                 }
                 "u" => {
-                    take_indices.append_value((i + num_rows) as u32);
+                    take_indices.append_value(i as u32);
                     is_retract_builder.append_value(true);
                     timestamp_builder.append_value(timestamp.value(i));
                     take_indices.append_value((i + num_rows) as u32);
