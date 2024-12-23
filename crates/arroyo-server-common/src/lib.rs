@@ -60,12 +60,13 @@ pub fn init_logging(name: &str) -> Option<WorkerGuard> {
 }
 
 fn parse_level_filter() -> LevelFilter {
-    let level_filter = config()
-        .logging
-        .min_level
-        .clone()
-        .unwrap_or(std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or("info".to_string()));
-
+    let level_filter = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or(
+        config()
+            .logging
+            .min_level
+            .clone()
+            .unwrap_or("info".to_string()),
+    );
     match level_filter.to_lowercase().as_str() {
         "all" | "trace" => LevelFilter::TRACE,
         "debug" => LevelFilter::DEBUG,
