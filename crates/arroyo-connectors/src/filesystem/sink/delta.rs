@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use arrow::datatypes::{Schema, SchemaRef};
 use arroyo_storage::{get_current_credentials, StorageProvider};
 use arroyo_types::to_millis;
+use deltalake::TableProperty::{MinReaderVersion, MinWriterVersion};
 use deltalake::{
     aws::storage::s3_constants::AWS_S3_ALLOW_UNSAFE_RENAME,
     kernel::{Action, Add},
@@ -86,6 +87,8 @@ async fn create_new_table(
     CreateBuilder::new()
         .with_log_store(delta_object_store)
         .with_columns(delta_schema.fields().cloned())
+        .with_configuration_property(MinReaderVersion, Some("3"))
+        .with_configuration_property(MinWriterVersion, Some("7"))
         .await
         .map_err(Into::into)
 }
