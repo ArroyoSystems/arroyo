@@ -234,7 +234,6 @@ fn has_lookup(plan: &LogicalPlan) -> Result<bool> {
 }
 
 fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
-    println!("Planning lookup join");
     if has_lookup(&join.left)? {
         return plan_err!("lookup sources must be on the right side of an inner or left join");
     }

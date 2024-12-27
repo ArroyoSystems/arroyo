@@ -1,18 +1,13 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use arrow::array::{ArrayRef, AsArray, OffsetSizeTrait, RecordBatch};
-use arrow::compute::StringArrayType;
+use std::time::SystemTime;
+use arrow::array::{ArrayRef, AsArray, RecordBatch};
 use arrow::datatypes::DataType;
 use async_trait::async_trait;
-use futures::future::OptionFuture;
-use futures::stream::FuturesOrdered;
-use futures::StreamExt;
-use redis::{cmd, AsyncCommands, Pipeline, RedisFuture, RedisResult, Value};
+use redis::{cmd, Value};
 use redis::aio::ConnectionLike;
 use arroyo_formats::de::ArrowDeserializer;
+use arroyo_types::SourceError;
 use crate::LookupConnector;
-use crate::redis::{RedisClient, RedisConnector};
+use crate::redis::{RedisClient};
 use crate::redis::sink::GeneralConnection;
 
 pub struct RedisLookup {
@@ -21,29 +16,13 @@ pub struct RedisLookup {
     connection: Option<GeneralConnection>,
 }
 
-// pub enum RedisFutureOrNull<'a> {
-//     RedisFuture(RedisFuture<'a, String>),
-//     Null
-// }
-// 
-// impl <'a> Future for RedisFutureOrNull<'a> {
-//     type Output = RedisResult<Option<String>>;
-// 
-//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-//         match self {
-//             RedisFutureOrNull::RedisFuture(f) => (**f).poll().map(|t| Some(t)),
-//             RedisFutureOrNull::Null => Poll::Ready(None),
-//         }
-//     }
-// }
-
 #[async_trait]
 impl LookupConnector for RedisLookup {
     fn name(&self) -> String {
         "RedisLookup".to_string()
     }
 
-    async fn lookup(&mut self, keys: &[ArrayRef]) -> RecordBatch {
+    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, SourceError>> {
         if self.connection.is_none() {
             self.connection = Some(self.client.get_connection().await.unwrap());
         }
@@ -66,9 +45,11 @@ impl LookupConnector for RedisLookup {
         
         for v in vs {
             match v {
-                Value::Nil => {}
+                Value::Nil => {
+                    todo!("handle missing values")
+                }
                 Value::SimpleString(s) => {
-                    self.deserializer.deserialize_slice()
+                    self.deserializer.deserialize_slice(s.as_bytes(), SystemTime::now(), None).await;
                 }
                 v => {
                     panic!("unexpected type {:?}", v);
@@ -77,6 +58,6 @@ impl LookupConnector for RedisLookup {
         }
         
         
-        todo!()
+        self.deserializer.flush_buffer()
     }
 }

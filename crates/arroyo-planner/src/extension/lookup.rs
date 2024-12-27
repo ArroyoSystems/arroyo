@@ -67,15 +67,15 @@ multifield_partial_ord!(LookupJoin, input, connector, on, filter, alias);
 
 impl ArroyoExtension for LookupJoin {
     fn node_name(&self) -> Option<NamedNode> {
-        todo!()
+        None
     }
 
     fn plan_node(&self, planner: &Planner, index: usize, input_schemas: Vec<ArroyoSchemaRef>) -> datafusion::common::Result<NodeWithIncomingEdges> {
-        todo!()
+        let keys = 
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        todo!()
+        ArroyoSchema::from_schema_unkeyed(self.schema.inner().clone()).unwrap()
     }
 }
 
