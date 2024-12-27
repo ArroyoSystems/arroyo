@@ -1,14 +1,15 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use arrow::array::{ArrayRef, AsArray, RecordBatch};
+use arrow::array::{ArrayRef, AsArray, OffsetSizeTrait, RecordBatch};
 use arrow::compute::StringArrayType;
 use arrow::datatypes::DataType;
 use async_trait::async_trait;
 use futures::future::OptionFuture;
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
-use redis::{AsyncCommands, RedisFuture, RedisResult};
+use redis::{cmd, AsyncCommands, Pipeline, RedisFuture, RedisResult, Value};
+use redis::aio::ConnectionLike;
 use arroyo_formats::de::ArrowDeserializer;
 use crate::LookupConnector;
 use crate::redis::{RedisClient, RedisConnector};
@@ -50,26 +51,32 @@ impl LookupConnector for RedisLookup {
         assert_eq!(keys.len(), 1, "redis lookup can only have a single key");
         assert_eq!(*keys[0].data_type(), DataType::Utf8, "redis lookup key must be a string");
 
-        let key = keys[0].as_string();
 
         let connection = self.connection.as_mut().unwrap();
         
-        let result = connection.mget::<_, Vec<String>>(&key.iter().filter_map(|k| k).collect::<Vec<_>>())
-            .await
-            .unwrap();
+        let mut mget = cmd("mget");
         
-        let mut result_iter = result.iter();
-        
-        for k in key.iter() {
-            if k.is_some() {
-                self.deserializer.deserialize_slice()result_iter.next()
-            }
-        } 
-    
-        while let Some(t) = futures.next().await {
-            
+        for k in keys[0].as_string::<i32>() {
+            mget.arg(k.unwrap());
+        }
+
+        let Value::Array(vs) = connection.req_packed_command(&mget).await.unwrap() else {
+            panic!("value was not an array");
         };
         
-        Ok(())
+        for v in vs {
+            match v {
+                Value::Nil => {}
+                Value::SimpleString(s) => {
+                    self.deserializer.deserialize_slice()
+                }
+                v => {
+                    panic!("unexpected type {:?}", v);
+                }
+            }
+        }
+        
+        
+        todo!()
     }
 }

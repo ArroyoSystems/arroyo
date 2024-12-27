@@ -17,6 +17,7 @@ use datafusion::logical_expr::{
 use datafusion::prelude::coalesce;
 use std::sync::Arc;
 use crate::extension::lookup::{LookupJoin, LookupSource};
+use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 
 pub(crate) struct JoinRewriter<'a> {
@@ -233,6 +234,7 @@ fn has_lookup(plan: &LogicalPlan) -> Result<bool> {
 }
 
 fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
+    println!("Planning lookup join");
     if has_lookup(&join.left)? {
         return plan_err!("lookup sources must be on the right side of an inner or left join");
     }
@@ -262,7 +264,7 @@ fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
     Ok(Some(LogicalPlan::Extension(Extension {
         node: Arc::new(LookupJoin {
             input: (*join.left).clone(),
-            schema: join.schema.clone(),
+            schema: add_timestamp_field(join.schema.clone(), None)?,
             connector,
             on: join.on.clone(),
             filter: lookup.filter,
