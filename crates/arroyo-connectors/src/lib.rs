@@ -5,7 +5,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::var_str::VarStr;
-use arroyo_types::string_to_map;
+use arroyo_types::{string_to_map, SourceError};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -70,7 +70,7 @@ pub struct EmptyConfig {}
 pub trait LookupConnector {
     fn name(&self) -> String;
 
-    async fn lookup(&mut self, keys: &[ArrayRef]) -> RecordBatch;
+    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, SourceError>>;
 }
 
 

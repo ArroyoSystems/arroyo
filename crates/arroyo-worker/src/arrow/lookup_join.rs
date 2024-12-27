@@ -4,7 +4,6 @@ use std::sync::Arc;
 use arrow_array::{RecordBatch};
 use arrow::row::{OwnedRow, RowConverter};
 use async_trait::async_trait;
-use datafusion::common::DFSchemaRef;
 use datafusion::physical_expr::PhysicalExpr;
 
 use arroyo_connectors::LookupConnector;
@@ -69,13 +68,15 @@ impl ArrowOperator for LookupJoin {
                 .lookup(&cols)
                 .await;
 
-            let result_rows = self.result_row_converter.convert_columns(result_batch.columns())
-                .unwrap();
+            if let Some(result_batch) = result_batch {
+                let result_rows = self.result_row_converter.convert_columns(result_batch.unwrap().columns())
+                    .unwrap();
 
-            assert_eq!(result_rows.num_rows(), uncached_keys.len());
+                assert_eq!(result_rows.num_rows(), uncached_keys.len());
 
-            for (k, v) in uncached_keys.iter().zip(result_rows.iter()) {
-                self.cache.insert(k.as_ref().to_vec(), v.owned());
+                for (k, v) in uncached_keys.iter().zip(result_rows.iter()) {
+                    self.cache.insert(k.as_ref().to_vec(), v.owned());
+                }
             }
         }
 

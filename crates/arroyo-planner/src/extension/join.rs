@@ -80,7 +80,7 @@ impl ArroyoExtension for JoinExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema().as_ref().clone().into())).unwrap()
+        ArroyoSchema::from_schema_unkeyed(self.schema().inner().clone()).unwrap()
     }
 }
 

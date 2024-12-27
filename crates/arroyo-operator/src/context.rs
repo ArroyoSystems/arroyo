@@ -1,9 +1,8 @@
 use crate::{server_for_hash_array, RateLimiter};
-use arrow::array::{make_builder, Array, ArrayBuilder, PrimitiveArray, RecordBatch};
+use arrow::array::{Array,PrimitiveArray, RecordBatch};
 use arrow::compute::{partition, sort_to_indices, take};
-use arrow::datatypes::{SchemaRef, UInt64Type};
+use arrow::datatypes::{UInt64Type};
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
-use arroyo_formats::should_flush;
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
@@ -23,7 +22,7 @@ use std::collections::HashMap;
 use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::time::{SystemTime};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
@@ -205,44 +204,6 @@ pub fn batch_bounded(size: u32) -> (BatchSender, BatchReceiver) {
     )
 }
 
-struct ContextBuffer {
-    buffer: Vec<Box<dyn ArrayBuilder>>,
-    created: Instant,
-    schema: SchemaRef,
-}
-
-impl ContextBuffer {
-    fn new(schema: SchemaRef) -> Self {
-        let buffer = schema
-            .fields
-            .iter()
-            .map(|f| make_builder(f.data_type(), 16))
-            .collect();
-
-        Self {
-            buffer,
-            created: Instant::now(),
-            schema,
-        }
-    }
-
-    pub fn size(&self) -> usize {
-        self.buffer[0].len()
-    }
-
-    pub fn should_flush(&self) -> bool {
-        should_flush(self.size(), self.created)
-    }
-
-    pub fn finish(&mut self) -> RecordBatch {
-        RecordBatch::try_new(
-            self.schema.clone(),
-            self.buffer.iter_mut().map(|a| a.finish()).collect(),
-        )
-        .unwrap()
-    }
-}
-
 pub struct SourceContext {
     pub out_schema: ArroyoSchema,
     pub error_reporter: ErrorReporter,
@@ -303,7 +264,6 @@ impl SourceContext {
 
 pub struct SourceCollector {
     deserializer: Option<ArrowDeserializer>,
-    buffer: ContextBuffer,
     buffered_error: Option<UserError>,
     error_rate_limiter: RateLimiter,
     pub out_schema: ArroyoSchema,
@@ -322,7 +282,6 @@ impl SourceCollector {
         task_info: &Arc<TaskInfo>,
     ) -> Self {
         Self {
-            buffer: ContextBuffer::new(out_schema.schema.clone()),
             out_schema,
             collector,
             control_tx,
@@ -373,12 +332,11 @@ impl SourceCollector {
     }
 
     pub fn should_flush(&self) -> bool {
-        self.buffer.should_flush()
-            || self
-                .deserializer
-                .as_ref()
-                .map(|d| d.should_flush())
-                .unwrap_or(false)
+        self
+            .deserializer
+            .as_ref()
+            .map(|d| d.should_flush())
+            .unwrap_or(false)
     }
 
     pub async fn deserialize_slice(
@@ -393,7 +351,7 @@ impl SourceCollector {
             .expect("deserializer not initialized!");
 
         let errors = deserializer
-            .deserialize_slice(&mut self.buffer.buffer, msg, time, additional_fields)
+            .deserialize_slice( msg, time, additional_fields)
             .await;
         self.collect_source_errors(errors).await?;
 
@@ -443,11 +401,6 @@ impl SourceCollector {
     }
 
     pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
-        if self.buffer.size() > 0 {
-            let batch = self.buffer.finish();
-            self.collector.collect(batch).await;
-        }
-
         if let Some(deserializer) = self.deserializer.as_mut() {
             if let Some(buffer) = deserializer.flush_buffer() {
                 match buffer {

@@ -645,10 +645,9 @@ impl KafkaTester {
                         BadData::Fail {},
                         Arc::new(schema_resolver),
                     );
-                    let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
+                        .deserialize_slice(&msg, SystemTime::now(), None)
                         .await
                         .into_iter()
                         .next();
@@ -667,10 +666,9 @@ impl KafkaTester {
                         None,
                         BadData::Fail {},
                     );
-                    let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
+                        .deserialize_slice(&msg, SystemTime::now(), None)
                         .await
                         .into_iter()
                         .next();
@@ -701,10 +699,9 @@ impl KafkaTester {
                 let aschema: ArroyoSchema = schema.clone().into();
                 let mut deserializer =
                     ArrowDeserializer::new(format.clone(), aschema.clone(), None, BadData::Fail {});
-                let mut builders = aschema.builders();
 
                 let mut error = deserializer
-                    .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
+                    .deserialize_slice(&msg, SystemTime::now(), None)
                     .await
                     .into_iter()
                     .next();

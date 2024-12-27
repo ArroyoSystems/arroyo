@@ -74,7 +74,8 @@ message LookupJoinOperator {
   string name = 1;
   ArroyoSchema schema = 2;
   ConnectorOp connector = 3;
-  
+  repeated bytes key_exprs = 4;
+  JoinType join_type = 5;
 }
 
 message WindowFunctionOperator {
