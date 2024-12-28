@@ -919,7 +919,7 @@ async fn operator_run_behavior(
                 }
             }
 
-            p = sel.next() => {
+            p = sel.next(), if !shutdown_after_commit => {
                 match p {
                     Some(((idx, message), s)) => {
                         let local_idx = idx;
