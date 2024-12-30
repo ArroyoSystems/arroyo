@@ -1,10 +1,15 @@
 use crate::extension::join::JoinExtension;
 use crate::extension::key_calculation::KeyCalculationExtension;
+use crate::extension::lookup::{LookupJoin, LookupSource};
 use crate::plan::WindowDetectingVisitor;
+use crate::schemas::add_timestamp_field;
+use crate::tables::ConnectorTable;
 use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata, ArroyoSchemaProvider};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::UPDATING_META_FIELD;
-use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor};
+use datafusion::common::tree_node::{
+    Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
+};
 use datafusion::common::{
     not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue,
     TableReference,
@@ -15,10 +20,8 @@ use datafusion::logical_expr::{
     build_join_schema, BinaryExpr, Case, Expr, Extension, Join, LogicalPlan, Projection,
 };
 use datafusion::prelude::coalesce;
+use datafusion::sql::unparser::expr_to_sql;
 use std::sync::Arc;
-use crate::extension::lookup::{LookupJoin, LookupSource};
-use crate::schemas::add_timestamp_field;
-use crate::tables::ConnectorTable;
 
 pub(crate) struct JoinRewriter<'a> {
     pub schema_provider: &'a ArroyoSchemaProvider,
@@ -81,7 +84,6 @@ impl JoinRewriter<'_> {
     }
 
     fn create_join_key_plan(
-        &self,
         input: Arc<LogicalPlan>,
         join_expressions: Vec<Expr>,
         name: &'static str,
@@ -199,7 +201,7 @@ struct FindLookupExtension {
     alias: Option<TableReference>,
 }
 
-impl <'a> TreeNodeVisitor<'a> for FindLookupExtension {
+impl<'a> TreeNodeVisitor<'a> for FindLookupExtension {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
@@ -212,7 +214,9 @@ impl <'a> TreeNodeVisitor<'a> for FindLookupExtension {
             }
             LogicalPlan::Filter(filter) => {
                 if self.filter.replace(filter.predicate.clone()).is_some() {
-                    return plan_err!("multiple filters found in lookup join, which is not supported");
+                    return plan_err!(
+                        "multiple filters found in lookup join, which is not supported"
+                    );
                 }
             }
             LogicalPlan::SubqueryAlias(s) => {
@@ -227,48 +231,75 @@ impl <'a> TreeNodeVisitor<'a> for FindLookupExtension {
 }
 
 fn has_lookup(plan: &LogicalPlan) -> Result<bool> {
-    plan.exists(|p| Ok(match p {
-        LogicalPlan::Extension(e) => e.node.as_any().is::<LookupSource>(),
-        _ => false
-    }))
+    plan.exists(|p| {
+        Ok(match p {
+            LogicalPlan::Extension(e) => e.node.as_any().is::<LookupSource>(),
+            _ => false,
+        })
+    })
 }
 
 fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
     if has_lookup(&join.left)? {
         return plan_err!("lookup sources must be on the right side of an inner or left join");
     }
-    
+
     if !has_lookup(&join.right)? {
         return Ok(None);
     }
-    
-    println!("JOin = {:?} {:?}\n{:#?}", join.join_constraint, join.join_type, join.on);
-    
+
+    println!(
+        "JOin = {:?} {:?}\n{:#?}",
+        join.join_constraint, join.join_type, join.on
+    );
+
     match join.join_type {
         JoinType::Inner | JoinType::Left => {}
         t => {
-            return plan_err!("{} join is not supported for lookup tables; must be a left or inner join", t);
+            return plan_err!(
+                "{} join is not supported for lookup tables; must be a left or inner join",
+                t
+            );
         }
     }
-    
+
     if join.filter.is_some() {
         return plan_err!("filter join conditions are not supported for lookup joins; must have an equality condition");
     }
 
+    let on = join.on.iter().map(|(l, r)| {
+        match r {
+            Expr::Column(c) => Ok((l.clone(), c.clone())),
+            e => {
+                return plan_err!("invalid right-side condition for lookup join: `{}`; only column references are supported", 
+                expr_to_sql(e).map(|e| e.to_string()).unwrap_or_else(|_| e.to_string()));
+            }
+        }
+    }).collect::<Result<_>>()?;
+
     let mut lookup = FindLookupExtension::default();
     join.right.visit(&mut lookup)?;
 
-    let connector = lookup.table.expect("right side of join does not have lookup");
+    let connector = lookup
+        .table
+        .expect("right side of join does not have lookup");
+
+    let left_input = JoinRewriter::create_join_key_plan(
+        join.left.clone(),
+        join.on.iter().map(|(l, _)| l.clone()).collect(),
+        "left",
+    )?;
 
     Ok(Some(LogicalPlan::Extension(Extension {
         node: Arc::new(LookupJoin {
-            input: (*join.left).clone(),
+            input: left_input,
             schema: add_timestamp_field(join.schema.clone(), None)?,
             connector,
-            on: join.on.clone(),
+            on,
             filter: lookup.filter,
             alias: lookup.alias,
-        })
+            join_type: join.join_type,
+        }),
     })))
 }
 
@@ -279,11 +310,11 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
         let LogicalPlan::Join(join) = node else {
             return Ok(Transformed::no(node));
         };
-        
+
         if let Some(plan) = maybe_plan_lookup_join(&join)? {
             return Ok(Transformed::yes(plan));
         }
-        
+
         let is_instant = Self::check_join_windowing(&join)?;
 
         let Join {
@@ -308,8 +339,8 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
         let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
             on.clone().into_iter().unzip();
 
-        let left_input = self.create_join_key_plan(left, left_expressions, "left")?;
-        let right_input = self.create_join_key_plan(right, right_expressions, "right")?;
+        let left_input = Self::create_join_key_plan(left, left_expressions, "left")?;
+        let right_input = Self::create_join_key_plan(right, right_expressions, "right")?;
         let rewritten_join = LogicalPlan::Join(Join {
             schema: Arc::new(build_join_schema(
                 left_input.schema(),

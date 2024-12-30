@@ -641,7 +641,7 @@ impl KafkaTester {
                     let mut deserializer = ArrowDeserializer::with_schema_resolver(
                         format.clone(),
                         None,
-                        aschema.clone(),
+                        Arc::new(aschema),
                         BadData::Fail {},
                         Arc::new(schema_resolver),
                     );
@@ -662,7 +662,7 @@ impl KafkaTester {
                     let aschema: ArroyoSchema = schema.clone().into();
                     let mut deserializer = ArrowDeserializer::new(
                         format.clone(),
-                        aschema.clone(),
+                        Arc::new(aschema),
                         None,
                         BadData::Fail {},
                     );
@@ -697,8 +697,12 @@ impl KafkaTester {
             }
             Format::Protobuf(_) => {
                 let aschema: ArroyoSchema = schema.clone().into();
-                let mut deserializer =
-                    ArrowDeserializer::new(format.clone(), aschema.clone(), None, BadData::Fail {});
+                let mut deserializer = ArrowDeserializer::new(
+                    format.clone(),
+                    Arc::new(aschema),
+                    None,
+                    BadData::Fail {},
+                );
 
                 let mut error = deserializer
                     .deserialize_slice(&msg, SystemTime::now(), None)

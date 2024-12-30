@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context};
+use arrow::array::{ArrayRef, RecordBatch};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
@@ -6,13 +7,12 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::var_str::VarStr;
 use arroyo_types::{string_to_map, SourceError};
+use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use arrow::array::{ArrayRef, RecordBatch};
-use async_trait::async_trait;
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
 
@@ -65,14 +65,6 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
 
 #[derive(Serialize, Deserialize)]
 pub struct EmptyConfig {}
-
-#[async_trait]
-pub trait LookupConnector {
-    fn name(&self) -> String;
-
-    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, SourceError>>;
-}
-
 
 pub(crate) async fn send(tx: &mut Sender<TestSourceMessage>, msg: TestSourceMessage) {
     if tx.send(msg).await.is_err() {

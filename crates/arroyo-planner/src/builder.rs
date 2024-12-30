@@ -172,7 +172,7 @@ impl<'a> Planner<'a> {
 
         let (partial_schema, timestamp_index) = if add_timestamp_field {
             (
-                add_timestamp_field_arrow(partial_schema.clone()),
+                add_timestamp_field_arrow((*partial_schema).clone()),
                 partial_schema.fields().len(),
             )
         } else {
