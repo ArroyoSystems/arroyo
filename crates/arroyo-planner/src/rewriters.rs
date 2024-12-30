@@ -19,6 +19,7 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::logical_expr::UserDefinedLogicalNode;
 
+use crate::extension::lookup::LookupSource;
 use crate::extension::AsyncUDFExtension;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
 use datafusion::common::tree_node::{
@@ -36,7 +37,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::extension::lookup::LookupSource;
 
 /// Rewrites a logical plan to move projections out of table scans
 /// and into a separate projection node which may include virtual fields,
@@ -219,13 +219,13 @@ impl SourceRewriter<'_> {
     fn mutate_lookup_table(
         &self,
         table_scan: &TableScan,
-        table: &ConnectorTable
+        table: &ConnectorTable,
     ) -> DFResult<Transformed<LogicalPlan>> {
         Ok(Transformed::yes(LogicalPlan::Extension(Extension {
             node: Arc::new(LookupSource {
                 table: table.clone(),
                 schema: table_scan.projected_schema.clone(),
-            })
+            }),
         })))
     }
 

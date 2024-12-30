@@ -283,11 +283,9 @@ impl ArrowOperator for RedisSinkFunc {
                         last_flushed: Instant::now(),
                         max_push_keys: HashSet::new(),
                         behavior: match &self.target {
-                            Target::StringTable { ttl_secs, .. } => {
-                                RedisBehavior::Set {
-                                    ttl: ttl_secs.map(|t| t.get() as usize),
-                                }
-                            }
+                            Target::StringTable { ttl_secs, .. } => RedisBehavior::Set {
+                                ttl: ttl_secs.map(|t| t.get() as usize),
+                            },
                             Target::ListTable {
                                 max_length,
                                 operation,

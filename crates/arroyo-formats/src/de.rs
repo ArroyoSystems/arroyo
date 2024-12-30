@@ -3,9 +3,12 @@ use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
 use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
-use arrow_array::builder::{make_builder, ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder};
+use arrow_array::builder::{
+    make_builder, ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
+};
 use arrow_array::types::GenericBinaryType;
 use arrow_array::RecordBatch;
+use arrow_schema::SchemaRef;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{
     AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat, ProtobufFormat,
@@ -17,7 +20,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
-use arrow_schema::SchemaRef;
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
@@ -62,10 +64,9 @@ impl ContextBuffer {
             self.schema.clone(),
             self.buffer.iter_mut().map(|a| a.finish()).collect(),
         )
-            .unwrap()
+        .unwrap()
     }
 }
-
 
 pub struct FramingIterator<'a> {
     framing: Option<Arc<Framing>>,
@@ -121,7 +122,7 @@ impl<'a> Iterator for FramingIterator<'a> {
 pub struct ArrowDeserializer {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
-    schema: ArroyoSchema,
+    schema: Arc<ArroyoSchema>,
     bad_data: BadData,
     json_decoder: Option<(arrow::json::reader::Decoder, TimestampNanosecondBuilder)>,
     buffered_count: usize,
@@ -136,7 +137,7 @@ pub struct ArrowDeserializer {
 impl ArrowDeserializer {
     pub fn new(
         format: Format,
-        schema: ArroyoSchema,
+        schema: Arc<ArroyoSchema>,
         framing: Option<Framing>,
         bad_data: BadData,
     ) -> Self {
@@ -157,7 +158,7 @@ impl ArrowDeserializer {
     pub fn with_schema_resolver(
         format: Format,
         framing: Option<Framing>,
-        schema: ArroyoSchema,
+        schema: Arc<ArroyoSchema>,
         bad_data: BadData,
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
     ) -> Self {
@@ -228,15 +229,14 @@ impl ArrowDeserializer {
     }
 
     pub fn should_flush(&self) -> bool {
-        self.buffer.should_flush() ||
-            should_flush(self.buffered_count, self.buffered_since)
+        self.buffer.should_flush() || should_flush(self.buffered_count, self.buffered_since)
     }
 
     pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
         if self.buffer.size() > 0 {
             return Some(Ok(self.buffer.finish()));
         }
-        
+
         let (decoder, timestamp) = self.json_decoder.as_mut()?;
         self.buffered_since = Instant::now();
         self.buffered_count = 0;
@@ -298,7 +298,11 @@ impl ArrowDeserializer {
                 unstructured: true, ..
             }) => {
                 self.deserialize_raw_string(msg);
-                add_timestamp(&mut self.buffer.buffer, self.schema.timestamp_index, timestamp);
+                add_timestamp(
+                    &mut self.buffer.buffer,
+                    self.schema.timestamp_index,
+                    timestamp,
+                );
                 if let Some(fields) = additional_fields {
                     for (k, v) in fields.iter() {
                         add_additional_fields(&mut self.buffer.buffer, &self.schema, k, v);
@@ -307,7 +311,11 @@ impl ArrowDeserializer {
             }
             Format::RawBytes(_) => {
                 self.deserialize_raw_bytes(msg);
-                add_timestamp(&mut self.buffer.buffer, self.schema.timestamp_index, timestamp);
+                add_timestamp(
+                    &mut self.buffer.buffer,
+                    self.schema.timestamp_index,
+                    timestamp,
+                );
                 if let Some(fields) = additional_fields {
                     for (k, v) in fields.iter() {
                         add_additional_fields(&mut self.buffer.buffer, &self.schema, k, v);
@@ -386,11 +394,7 @@ impl ArrowDeserializer {
         Ok(())
     }
 
-    fn decode_into_json(
-        &mut self,
-        value: Value,
-        timestamp: SystemTime,
-    ) {
+    fn decode_into_json(&mut self, value: Value, timestamp: SystemTime) {
         let (idx, _) = self
             .schema
             .schema
@@ -402,7 +406,11 @@ impl ArrowDeserializer {
             .expect("'value' column has incorrect type");
 
         array.append_value(value.to_string());
-        add_timestamp(&mut self.buffer.buffer, self.schema.timestamp_index, timestamp);
+        add_timestamp(
+            &mut self.buffer.buffer,
+            self.schema.timestamp_index,
+            timestamp,
+        );
         self.buffered_count += 1;
     }
 
@@ -702,7 +710,7 @@ mod tests {
             ),
         ]));
 
-        let schema = ArroyoSchema::from_schema_unkeyed(schema).unwrap();
+        let schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema).unwrap());
 
         let deserializer = ArrowDeserializer::new(
             Format::Json(JsonFormat {
@@ -729,21 +737,13 @@ mod tests {
 
         assert_eq!(
             deserializer
-                .deserialize_slice(
-                    json!({ "x": 5 }).to_string().as_bytes(),
-                    now,
-                    None,
-                )
+                .deserialize_slice(json!({ "x": 5 }).to_string().as_bytes(), now, None,)
                 .await,
             vec![]
         );
         assert_eq!(
             deserializer
-                .deserialize_slice(
-                    json!({ "x": "hello" }).to_string().as_bytes(),
-                    now,
-                    None,
-                )
+                .deserialize_slice(json!({ "x": "hello" }).to_string().as_bytes(), now, None,)
                 .await,
             vec![]
         );
@@ -806,7 +806,7 @@ mod tests {
             .map(|f| make_builder(f.data_type(), 16))
             .collect();
 
-        let arroyo_schema = ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap();
+        let arroyo_schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap());
 
         let mut deserializer = ArrowDeserializer::new(
             Format::RawBytes(RawBytesFormat {}),
@@ -858,7 +858,7 @@ mod tests {
             .map(|f| make_builder(f.data_type(), 16))
             .collect();
 
-        let arroyo_schema = ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap();
+        let arroyo_schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap());
 
         let mut deserializer = ArrowDeserializer::new(
             Format::Json(JsonFormat {

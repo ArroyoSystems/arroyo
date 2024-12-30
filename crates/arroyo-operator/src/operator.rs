@@ -226,7 +226,7 @@ impl OperatorNode {
         control_rx: Receiver<ControlMessage>,
         mut in_qs: Vec<BatchReceiver>,
         out_qs: Vec<Vec<BatchSender>>,
-        out_schema: Option<ArroyoSchema>,
+        out_schema: Option<Arc<ArroyoSchema>>,
         ready: Arc<Barrier>,
     ) {
         info!(

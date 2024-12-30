@@ -1,7 +1,7 @@
 use crate::{server_for_hash_array, RateLimiter};
-use arrow::array::{Array,PrimitiveArray, RecordBatch};
+use arrow::array::{Array, PrimitiveArray, RecordBatch};
 use arrow::compute::{partition, sort_to_indices, take};
-use arrow::datatypes::{UInt64Type};
+use arrow::datatypes::UInt64Type;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime};
+use std::time::SystemTime;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
@@ -205,7 +205,7 @@ pub fn batch_bounded(size: u32) -> (BatchSender, BatchReceiver) {
 }
 
 pub struct SourceContext {
-    pub out_schema: ArroyoSchema,
+    pub out_schema: Arc<ArroyoSchema>,
     pub error_reporter: ErrorReporter,
     pub control_tx: Sender<ControlResp>,
     pub control_rx: Receiver<ControlMessage>,
@@ -266,7 +266,7 @@ pub struct SourceCollector {
     deserializer: Option<ArrowDeserializer>,
     buffered_error: Option<UserError>,
     error_rate_limiter: RateLimiter,
-    pub out_schema: ArroyoSchema,
+    pub out_schema: Arc<ArroyoSchema>,
     pub(crate) collector: ArrowCollector,
     control_tx: Sender<ControlResp>,
     chain_info: Arc<ChainInfo>,
@@ -275,7 +275,7 @@ pub struct SourceCollector {
 
 impl SourceCollector {
     pub fn new(
-        out_schema: ArroyoSchema,
+        out_schema: Arc<ArroyoSchema>,
         collector: ArrowCollector,
         control_tx: Sender<ControlResp>,
         chain_info: &Arc<ChainInfo>,
@@ -332,8 +332,7 @@ impl SourceCollector {
     }
 
     pub fn should_flush(&self) -> bool {
-        self
-            .deserializer
+        self.deserializer
             .as_ref()
             .map(|d| d.should_flush())
             .unwrap_or(false)
@@ -351,7 +350,7 @@ impl SourceCollector {
             .expect("deserializer not initialized!");
 
         let errors = deserializer
-            .deserialize_slice( msg, time, additional_fields)
+            .deserialize_slice(msg, time, additional_fields)
             .await;
         self.collect_source_errors(errors).await?;
 
@@ -453,8 +452,8 @@ pub struct OperatorContext {
     pub task_info: Arc<TaskInfo>,
     pub control_tx: Sender<ControlResp>,
     pub watermarks: WatermarkHolder,
-    pub in_schemas: Vec<ArroyoSchema>,
-    pub out_schema: Option<ArroyoSchema>,
+    pub in_schemas: Vec<Arc<ArroyoSchema>>,
+    pub out_schema: Option<Arc<ArroyoSchema>>,
     pub table_manager: TableManager,
     pub error_reporter: ErrorReporter,
 }
@@ -489,7 +488,7 @@ pub trait Collector: Send {
 #[derive(Clone)]
 pub struct ArrowCollector {
     pub chain_info: Arc<ChainInfo>,
-    out_schema: Option<ArroyoSchema>,
+    out_schema: Option<Arc<ArroyoSchema>>,
     out_qs: Vec<Vec<BatchSender>>,
     tx_queue_rem_gauges: QueueGauges,
     tx_queue_size_gauges: QueueGauges,
@@ -607,7 +606,7 @@ impl Collector for ArrowCollector {
 impl ArrowCollector {
     pub fn new(
         chain_info: Arc<ChainInfo>,
-        out_schema: Option<ArroyoSchema>,
+        out_schema: Option<Arc<ArroyoSchema>>,
         out_qs: Vec<Vec<BatchSender>>,
     ) -> Self {
         let tx_queue_size_gauges = register_queue_gauge(
@@ -673,8 +672,8 @@ impl OperatorContext {
         restore_from: Option<&CheckpointMetadata>,
         control_tx: Sender<ControlResp>,
         input_partitions: usize,
-        in_schemas: Vec<ArroyoSchema>,
-        out_schema: Option<ArroyoSchema>,
+        in_schemas: Vec<Arc<ArroyoSchema>>,
+        out_schema: Option<Arc<ArroyoSchema>>,
         tables: HashMap<String, TableConfig>,
     ) -> Self {
         let (table_manager, watermark) =
@@ -820,7 +819,7 @@ mod tests {
 
         let mut collector = ArrowCollector {
             chain_info,
-            out_schema: Some(ArroyoSchema::new_keyed(schema, 1, vec![0])),
+            out_schema: Some(Arc::new(ArroyoSchema::new_keyed(schema, 1, vec![0]))),
             out_qs,
             tx_queue_rem_gauges,
             tx_queue_size_gauges,

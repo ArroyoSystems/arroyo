@@ -759,15 +759,14 @@ impl Table {
                         primary_keys,
                         &mut with_map,
                         connection_profile,
-                    ).map_err(|e| e.context(format!("Failed to create table {}", name)))?;
+                    )
+                    .map_err(|e| e.context(format!("Failed to create table {}", name)))?;
 
                     Ok(Some(match table.connection_type {
                         ConnectionType::Source | ConnectionType::Sink => {
                             Table::ConnectorTable(table)
                         }
-                        ConnectionType::Lookup => {
-                            Table::LookupTable(table)
-                        }
+                        ConnectionType::Lookup => Table::LookupTable(table),
                     }))
                 }
             }
@@ -844,11 +843,12 @@ impl Table {
                 fields,
                 inferred_fields,
                 ..
-            }) | Table::LookupTable(ConnectorTable {
+            })
+            | Table::LookupTable(ConnectorTable {
                 fields,
                 inferred_fields,
-            ..
-                                                }) => inferred_fields
+                ..
+            }) => inferred_fields
                 .as_ref()
                 .map(|fs| fs.iter().map(|f| f.field().clone()).collect())
                 .unwrap_or_else(|| {

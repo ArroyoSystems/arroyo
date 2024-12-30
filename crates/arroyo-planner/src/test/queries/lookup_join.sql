@@ -13,7 +13,7 @@ CREATE TABLE orders (
 );
 
 CREATE TEMPORARY TABLE products (
-    product_id INT PRIMARY KEY,
+    key TEXT PRIMARY KEY,
     product_name TEXT,
     unit_price FLOAT,
     category TEXT,
@@ -36,4 +36,4 @@ SELECT
     (o.quantity * p.unit_price) as total_amount
 FROM orders o
     JOIN products p
-    ON o.product_id = p.product_id;
+    ON concat('blah', o.product_id) = p.key;

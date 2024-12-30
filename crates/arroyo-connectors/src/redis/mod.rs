@@ -1,27 +1,30 @@
-pub mod sink;
 pub mod lookup;
+pub mod sink;
 
 use anyhow::{anyhow, bail};
+use arroyo_formats::de::ArrowDeserializer;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::connector::{Connection, Connector, LookupConnector};
 use arroyo_operator::operator::ConstructedOperator;
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
+    TestSourceMessage,
+};
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::var_str::VarStr;
+use arroyo_rpc::OperatorConfig;
 use redis::aio::ConnectionManager;
 use redis::cluster::ClusterClient;
 use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
 
-use arroyo_rpc::api_types::connections::{
-    ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
-    TestSourceMessage,
-};
-use arroyo_rpc::OperatorConfig;
-
-use crate::{pull_opt, pull_option_to_u64};
+use crate::redis::lookup::RedisLookup;
 use crate::redis::sink::{GeneralConnection, RedisSinkFunc};
+use crate::{pull_opt, pull_option_to_u64};
 
 pub struct RedisConnector {}
 
@@ -290,11 +293,9 @@ impl Connector for RedisConnector {
         }
 
         let sink = match typ.as_str() {
-            "lookup" => {
-                TableType::Lookup {
-                    lookup: Default::default(),
-                }
-            }
+            "lookup" => TableType::Lookup {
+                lookup: Default::default(),
+            },
             "sink" => {
                 let target = match pull_opt("target", options)?.as_str() {
                     "string" => Target::StringTable {
@@ -342,9 +343,9 @@ impl Connector for RedisConnector {
                         bail!("'{}' is not a valid redis target", s);
                     }
                 };
-                
+
                 TableType::Sink { target }
-            },
+            }
             s => {
                 bail!("'{}' is not a valid type; must be `sink`", s);
             }
@@ -382,14 +383,10 @@ impl Connector for RedisConnector {
         let _ = RedisClient::new(&config)?;
 
         let (connection_type, description) = match &table.connector_type {
-            TableType::Sink { .. } => {
-                (ConnectionType::Sink, "RedisSink")
-            }
-            TableType::Lookup { .. } => {
-                (ConnectionType::Lookup, "RedisLookup")
-            }
+            TableType::Sink { .. } => (ConnectionType::Sink, "RedisSink"),
+            TableType::Lookup { .. } => (ConnectionType::Lookup, "RedisLookup"),
         };
-        
+
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
@@ -399,7 +396,7 @@ impl Connector for RedisConnector {
             framing: schema.framing.clone(),
             metadata_fields: vec![],
         };
-        
+
         Ok(Connection {
             id,
             connector: self.name(),
@@ -438,11 +435,31 @@ impl Connector for RedisConnector {
                         hash_index: None,
                     },
                 )))
-                
             }
             TableType::Lookup { .. } => {
-                todo!()
+                bail!("Cannot construct a lookup table as an operator");
             }
         }
+    }
+
+    fn make_lookup(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+        schema: Arc<ArroyoSchema>,
+    ) -> anyhow::Result<Box<dyn LookupConnector + Send>> {
+        Ok(Box::new(RedisLookup {
+            deserializer: ArrowDeserializer::new(
+                config
+                    .format
+                    .ok_or_else(|| anyhow!("Redis table must have a format"))?,
+                schema,
+                config.framing,
+                config.bad_data.unwrap_or_default(),
+            ),
+            client: RedisClient::new(&profile)?,
+            connection: None,
+        }))
     }
 }
