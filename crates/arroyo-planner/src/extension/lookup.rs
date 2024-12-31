@@ -1,6 +1,7 @@
 use crate::builder::{NamedNode, Planner};
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::multifield_partial_ord;
+use crate::schemas::add_timestamp_field_arrow;
 use crate::tables::ConnectorTable;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
@@ -13,7 +14,6 @@ use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use prost::Message;
 use std::fmt::Formatter;
 use std::sync::Arc;
-use crate::schemas::{add_timestamp_field_arrow};
 
 pub const SOURCE_EXTENSION_NAME: &str = "LookupSource";
 pub const JOIN_EXTENSION_NAME: &str = "LookupJoin";
@@ -88,8 +88,9 @@ impl ArroyoExtension for LookupJoin {
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> datafusion::common::Result<NodeWithIncomingEdges> {
         let schema = ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_ref().into()))?;
-        let lookup_schema = ArroyoSchema::from_schema_unkeyed(
-            add_timestamp_field_arrow(self.connector.physical_schema()))?;
+        let lookup_schema = ArroyoSchema::from_schema_unkeyed(add_timestamp_field_arrow(
+            self.connector.physical_schema(),
+        ))?;
         let join_config = LookupJoinOperator {
             input_schema: Some(schema.into()),
             lookup_schema: Some(lookup_schema.into()),

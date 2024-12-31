@@ -782,11 +782,9 @@ pub async fn construct_node(
 ) -> OperatorNode {
     if chain.is_source() {
         let (head, _) = chain.iter().next().unwrap();
-        let ConstructedOperator::Source(operator) = construct_operator(
-            head.operator_name,
-            &head.operator_config,
-            registry,
-        ) else {
+        let ConstructedOperator::Source(operator) =
+            construct_operator(head.operator_name, &head.operator_config, registry)
+        else {
             unreachable!();
         };
 

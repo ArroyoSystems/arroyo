@@ -49,7 +49,8 @@ impl LookupConnector for RedisLookup {
         for v in vs {
             match v {
                 Value::Nil => {
-                    self.deserializer.deserialize_slice("null".as_bytes(), SystemTime::now(), None)
+                    self.deserializer
+                        .deserialize_slice("null".as_bytes(), SystemTime::now(), None)
                         .await;
                 }
                 Value::SimpleString(s) => {

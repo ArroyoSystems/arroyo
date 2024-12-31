@@ -37,7 +37,7 @@ pub mod grpc {
     pub mod api {
         #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
         tonic::include_proto!("api");
-        
+
         impl From<self::JoinType> for arroyo_types::JoinType {
             fn from(value: JoinType) -> Self {
                 match value {

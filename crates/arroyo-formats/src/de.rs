@@ -7,7 +7,7 @@ use arrow_array::builder::{
     make_builder, ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
 };
 use arrow_array::types::GenericBinaryType;
-use arrow_array::RecordBatch;
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::SchemaRef;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{
@@ -33,7 +33,6 @@ pub enum FieldValueType<'a> {
 struct ContextBuffer {
     buffer: Vec<Box<dyn ArrayBuilder>>,
     created: Instant,
-    schema: SchemaRef,
 }
 
 impl ContextBuffer {
@@ -47,7 +46,6 @@ impl ContextBuffer {
         Self {
             buffer,
             created: Instant::now(),
-            schema,
         }
     }
 
@@ -59,12 +57,8 @@ impl ContextBuffer {
         should_flush(self.size(), self.created)
     }
 
-    pub fn finish(&mut self) -> RecordBatch {
-        RecordBatch::try_new(
-            self.schema.clone(),
-            self.buffer.iter_mut().map(|a| a.finish()).collect(),
-        )
-        .unwrap()
+    pub fn finish(&mut self) -> Vec<ArrayRef> {
+        self.buffer.iter_mut().map(|a| a.finish()).collect()
     }
 }
 
@@ -119,19 +113,111 @@ impl<'a> Iterator for FramingIterator<'a> {
     }
 }
 
+enum BufferDecoder {
+    Buffer(ContextBuffer),
+    JsonDecoder {
+        decoder: arrow::json::reader::Decoder,
+        buffered_count: usize,
+        buffered_since: Instant,
+    },
+}
+
+impl BufferDecoder {
+    fn should_flush(&self) -> bool {
+        match self {
+            BufferDecoder::Buffer(b) => b.should_flush(),
+            BufferDecoder::JsonDecoder {
+                buffered_count,
+                buffered_since,
+                ..
+            } => should_flush(*buffered_count, *buffered_since),
+        }
+    }
+
+    fn flush(
+        &mut self,
+        bad_data: &BadData,
+    ) -> Option<Result<(Vec<ArrayRef>, Option<BooleanArray>), SourceError>> {
+        match self {
+            BufferDecoder::Buffer(buffer) => {
+                if buffer.size() > 0 {
+                    Some(Ok((buffer.finish(), None)))
+                } else {
+                    None
+                }
+            }
+            BufferDecoder::JsonDecoder {
+                decoder,
+                buffered_since,
+                buffered_count,
+            } => {
+                *buffered_since = Instant::now();
+                *buffered_count = 0;
+                Some(match bad_data {
+                    BadData::Fail { .. } => decoder
+                        .flush()
+                        .map_err(|e| {
+                            SourceError::bad_data(format!("JSON does not match schema: {:?}", e))
+                        })
+                        .transpose()?
+                        .map(|batch| (batch.columns().to_vec(), None)),
+                    BadData::Drop { .. } => decoder
+                        .flush_with_bad_data()
+                        .map_err(|e| {
+                            SourceError::bad_data(format!(
+                                "Something went wrong decoding JSON: {:?}",
+                                e
+                            ))
+                        })
+                        .transpose()?
+                        .map(|(batch, mask, _)| (batch.columns().to_vec(), Some(mask))),
+                })
+            }
+        }
+    }
+
+    fn decode_json(&mut self, msg: &[u8]) -> Result<(), SourceError> {
+        match self {
+            BufferDecoder::Buffer(_) => {
+                unreachable!("Tried to decode JSON for non-JSON deserializer");
+            }
+            BufferDecoder::JsonDecoder {
+                decoder,
+                buffered_count,
+                ..
+            } => {
+                decoder
+                    .decode(msg)
+                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
+
+                *buffered_count += 1;
+
+                Ok(())
+            }
+        }
+    }
+
+    fn get_buffer(&mut self) -> &mut ContextBuffer {
+        match self {
+            BufferDecoder::Buffer(buffer) => buffer,
+            BufferDecoder::JsonDecoder { .. } => {
+                panic!("tried to get a raw buffer from a JSON deserializer");
+            }
+        }
+    }
+}
+
 pub struct ArrowDeserializer {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
     schema: Arc<ArroyoSchema>,
     bad_data: BadData,
-    json_decoder: Option<(arrow::json::reader::Decoder, TimestampNanosecondBuilder)>,
-    buffered_count: usize,
-    buffered_since: Instant,
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
     additional_fields_builder: Option<HashMap<String, Box<dyn ArrayBuilder>>>,
-    buffer: ContextBuffer,
+    timestamp_builder: Option<TimestampNanosecondBuilder>,
+    buffer_decoder: BufferDecoder,
 }
 
 impl ArrowDeserializer {
@@ -172,43 +258,42 @@ impl ArrowDeserializer {
             DescriptorPool::global()
         };
 
+        let buffer_decoder = match format {
+            Format::Json(..)
+            | Format::Avro(AvroFormat {
+                into_unstructured_json: false,
+                ..
+            })
+            | Format::Protobuf(ProtobufFormat {
+                into_unstructured_json: false,
+                ..
+            }) => BufferDecoder::JsonDecoder {
+                decoder: arrow_json::reader::ReaderBuilder::new(Arc::new(
+                    schema.schema_without_timestamp(),
+                ))
+                .with_limit_to_batch_size(false)
+                .with_strict_mode(false)
+                .with_allow_bad_data(matches!(bad_data, BadData::Drop { .. }))
+                .build_decoder()
+                .unwrap(),
+                buffered_count: 0,
+                buffered_since: Instant::now(),
+            },
+            _ => BufferDecoder::Buffer(ContextBuffer::new(Arc::new(
+                schema.schema_without_timestamp(),
+            ))),
+        };
+
         Self {
-            json_decoder: matches!(
-                format,
-                Format::Json(..)
-                    | Format::Avro(AvroFormat {
-                        into_unstructured_json: false,
-                        ..
-                    })
-                    | Format::Protobuf(ProtobufFormat {
-                        into_unstructured_json: false,
-                        ..
-                    })
-            )
-            .then(|| {
-                // exclude the timestamp field
-                (
-                    arrow_json::reader::ReaderBuilder::new(Arc::new(
-                        schema.schema_without_timestamp(),
-                    ))
-                    .with_limit_to_batch_size(false)
-                    .with_strict_mode(false)
-                    .with_allow_bad_data(matches!(bad_data, BadData::Drop { .. }))
-                    .build_decoder()
-                    .unwrap(),
-                    TimestampNanosecondBuilder::new(),
-                )
-            }),
             format: Arc::new(format),
             framing: framing.map(Arc::new),
-            buffer: ContextBuffer::new(schema.schema.clone()),
+            buffer_decoder,
+            timestamp_builder: Some(TimestampNanosecondBuilder::with_capacity(128)),
             schema,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
             bad_data,
             schema_resolver,
             proto_pool,
-            buffered_count: 0,
-            buffered_since: Instant::now(),
             additional_fields_builder: None,
         }
     }
@@ -219,108 +304,120 @@ impl ArrowDeserializer {
         timestamp: SystemTime,
         additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
     ) -> Vec<SourceError> {
-        match &*self.format {
-            Format::Avro(_) => self.deserialize_slice_avro(msg, timestamp).await,
-            _ => FramingIterator::new(self.framing.clone(), msg)
-                .map(|t| self.deserialize_single(t, timestamp, additional_fields))
-                .filter_map(|t| t.err())
-                .collect(),
+        self.deserialize_slice_int(msg, Some(timestamp), additional_fields)
+            .await
+    }
+
+    async fn deserialize_slice_int(
+        &mut self,
+        msg: &[u8],
+        timestamp: Option<SystemTime>,
+        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
+    ) -> Vec<SourceError> {
+        let (count, errors) = match &*self.format {
+            Format::Avro(_) => self.deserialize_slice_avro(msg).await,
+            _ => {
+                let mut count = 0;
+                let errors = FramingIterator::new(self.framing.clone(), msg)
+                    .map(|t| self.deserialize_single(t))
+                    .filter_map(|t| {
+                        if t.is_ok() {
+                            count += 1;
+                        }
+                        t.err()
+                    })
+                    .collect();
+                (count, errors)
+            }
+        };
+
+        if let Some(timestamp) = timestamp {
+            let b = self
+                .timestamp_builder
+                .as_mut()
+                .expect("tried to serialize timestamp to a schema without a timestamp column");
+
+            for _ in 0..count {
+                b.append_value(to_nanos(timestamp) as i64);
+            }
         }
+
+        if let Some(additional_fields) = additional_fields {
+            if self.additional_fields_builder.is_none() {
+                let mut builders = HashMap::new();
+                for (key, value) in additional_fields.iter() {
+                    let builder: Box<dyn ArrayBuilder> = match value {
+                        FieldValueType::Int32(_) => Box::new(Int32Builder::new()),
+                        FieldValueType::Int64(_) => Box::new(Int64Builder::new()),
+                        FieldValueType::String(_) => Box::new(StringBuilder::new()),
+                    };
+                    builders.insert(key.to_string(), builder);
+                }
+                self.additional_fields_builder = Some(builders);
+            }
+
+            let builders = self.additional_fields_builder.as_mut().unwrap();
+
+            for (k, v) in additional_fields {
+                add_additional_fields(builders, k, v, count);
+            }
+        }
+
+        errors
     }
 
     pub fn should_flush(&self) -> bool {
-        self.buffer.should_flush() || should_flush(self.buffered_count, self.buffered_since)
+        self.buffer_decoder.should_flush()
     }
 
     pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
-        if self.buffer.size() > 0 {
-            return Some(Ok(self.buffer.finish()));
+        let (mut arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
+            Ok((a, b)) => (a, b),
+            Err(e) => return Some(Err(e)),
+        };
+
+        if let Some(additional_fields) = &mut self.additional_fields_builder {
+            for (name, builder) in additional_fields {
+                let (idx, _) = self
+                    .schema
+                    .schema
+                    .column_with_name(&name)
+                    .unwrap_or_else(|| panic!("Field '{}' not found in schema", name));
+
+                let mut array = builder.finish();
+                if let Some(error_mask) = &error_mask {
+                    array = kernels::filter::filter(&array, error_mask).unwrap();
+                }
+
+                arrays[idx] = array;
+            }
+        };
+
+        if let Some(timestamp) = &mut self.timestamp_builder {
+            let array = if let Some(error_mask) = &error_mask {
+                kernels::filter::filter(&timestamp.finish(), error_mask).unwrap()
+            } else {
+                Arc::new(timestamp.finish())
+            };
+
+            arrays.insert(self.schema.timestamp_index, array);
         }
 
-        let (decoder, timestamp) = self.json_decoder.as_mut()?;
-        self.buffered_since = Instant::now();
-        self.buffered_count = 0;
-        match self.bad_data {
-            BadData::Fail { .. } => Some(
-                decoder
-                    .flush()
-                    .map_err(|e| {
-                        SourceError::bad_data(format!("JSON does not match schema: {:?}", e))
-                    })
-                    .transpose()?
-                    .map(|batch| {
-                        let mut columns = batch.columns().to_vec();
-                        columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
-                        flush_additional_fields_builders(
-                            &mut self.additional_fields_builder,
-                            &self.schema,
-                            &mut columns,
-                        );
-                        RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
-                    }),
-            ),
-            BadData::Drop { .. } => Some(
-                decoder
-                    .flush_with_bad_data()
-                    .map_err(|e| {
-                        SourceError::bad_data(format!(
-                            "Something went wrong decoding JSON: {:?}",
-                            e
-                        ))
-                    })
-                    .transpose()?
-                    .map(|(batch, mask, _)| {
-                        let mut columns = batch.columns().to_vec();
-                        let timestamp =
-                            kernels::filter::filter(&timestamp.finish(), &mask).unwrap();
-
-                        columns.insert(self.schema.timestamp_index, Arc::new(timestamp));
-                        flush_additional_fields_builders(
-                            &mut self.additional_fields_builder,
-                            &self.schema,
-                            &mut columns,
-                        );
-                        RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
-                    }),
-            ),
-        }
+        Some(Ok(
+            RecordBatch::try_new(self.schema.schema.clone(), arrays).unwrap()
+        ))
     }
 
-    fn deserialize_single(
-        &mut self,
-        msg: &[u8],
-        timestamp: SystemTime,
-        additional_fields: Option<&HashMap<&String, FieldValueType>>,
-    ) -> Result<(), SourceError> {
+    fn deserialize_single(&mut self, msg: &[u8]) -> Result<(), SourceError> {
         match &*self.format {
             Format::RawString(_)
             | Format::Json(JsonFormat {
                 unstructured: true, ..
             }) => {
                 self.deserialize_raw_string(msg);
-                add_timestamp(
-                    &mut self.buffer.buffer,
-                    self.schema.timestamp_index,
-                    timestamp,
-                );
-                if let Some(fields) = additional_fields {
-                    for (k, v) in fields.iter() {
-                        add_additional_fields(&mut self.buffer.buffer, &self.schema, k, v);
-                    }
-                }
             }
             Format::RawBytes(_) => {
                 self.deserialize_raw_bytes(msg);
-                add_timestamp(
-                    &mut self.buffer.buffer,
-                    self.schema.timestamp_index,
-                    timestamp,
-                );
-                if let Some(fields) = additional_fields {
-                    for (k, v) in fields.iter() {
-                        add_additional_fields(&mut self.buffer.buffer, &self.schema, k, v);
-                    }
-                }
             }
             Format::Json(json) => {
                 let msg = if json.confluent_schema_registry {
@@ -329,62 +426,17 @@ impl ArrowDeserializer {
                     msg
                 };
 
-                let Some((decoder, timestamp_builder)) = &mut self.json_decoder else {
-                    panic!("json decoder not initialized");
-                };
-
-                if self.additional_fields_builder.is_none() {
-                    if let Some(fields) = additional_fields.as_ref() {
-                        let mut builders = HashMap::new();
-                        for (key, value) in fields.iter() {
-                            let builder: Box<dyn ArrayBuilder> = match value {
-                                FieldValueType::Int32(_) => Box::new(Int32Builder::new()),
-                                FieldValueType::Int64(_) => Box::new(Int64Builder::new()),
-                                FieldValueType::String(_) => Box::new(StringBuilder::new()),
-                            };
-                            builders.insert(key, builder);
-                        }
-                        self.additional_fields_builder = Some(
-                            builders
-                                .into_iter()
-                                .map(|(k, v)| ((*k).clone(), v))
-                                .collect(),
-                        );
-                    }
-                }
-
-                decoder
-                    .decode(msg)
-                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
-                timestamp_builder.append_value(to_nanos(timestamp) as i64);
-
-                add_additional_fields_using_builder(
-                    additional_fields,
-                    &mut self.additional_fields_builder,
-                );
-                self.buffered_count += 1;
+                self.buffer_decoder.decode_json(msg)?;
             }
             Format::Protobuf(proto) => {
                 let json = proto::de::deserialize_proto(&mut self.proto_pool, proto, msg)?;
 
                 if proto.into_unstructured_json {
-                    self.decode_into_json(json, timestamp);
+                    self.decode_into_json(json);
                 } else {
-                    let Some((decoder, timestamp_builder)) = &mut self.json_decoder else {
-                        panic!("json decoder not initialized");
-                    };
-
-                    decoder
-                        .decode(json.to_string().as_bytes())
+                    self.buffer_decoder
+                        .decode_json(json.to_string().as_bytes())
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
-                    timestamp_builder.append_value(to_nanos(timestamp) as i64);
-
-                    add_additional_fields_using_builder(
-                        additional_fields,
-                        &mut self.additional_fields_builder,
-                    );
-
-                    self.buffered_count += 1;
                 }
             }
             Format::Avro(_) => unreachable!("this should not be called for avro"),
@@ -394,31 +446,21 @@ impl ArrowDeserializer {
         Ok(())
     }
 
-    fn decode_into_json(&mut self, value: Value, timestamp: SystemTime) {
+    fn decode_into_json(&mut self, value: Value) {
         let (idx, _) = self
             .schema
             .schema
             .column_with_name("value")
             .expect("no 'value' column for unstructured avro");
-        let array = self.buffer.buffer[idx]
+        let array = self.buffer_decoder.get_buffer().buffer[idx]
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .expect("'value' column has incorrect type");
 
         array.append_value(value.to_string());
-        add_timestamp(
-            &mut self.buffer.buffer,
-            self.schema.timestamp_index,
-            timestamp,
-        );
-        self.buffered_count += 1;
     }
 
-    pub async fn deserialize_slice_avro<'a>(
-        &mut self,
-        msg: &'a [u8],
-        timestamp: SystemTime,
-    ) -> Vec<SourceError> {
+    async fn deserialize_slice_avro(&mut self, msg: &[u8]) -> (usize, Vec<SourceError>) {
         let Format::Avro(format) = &*self.format else {
             unreachable!("not avro");
         };
@@ -433,13 +475,14 @@ impl ArrowDeserializer {
         {
             Ok(messages) => messages,
             Err(e) => {
-                return vec![e];
+                return (0, vec![e]);
             }
         };
 
         let into_json = format.into_unstructured_json;
 
-        messages
+        let mut count = 0;
+        let errors = messages
             .into_iter()
             .map(|record| {
                 let value = record.map_err(|e| {
@@ -447,27 +490,25 @@ impl ArrowDeserializer {
                 })?;
 
                 if into_json {
-                    self.decode_into_json(de::avro_to_json(value), timestamp);
+                    self.decode_into_json(de::avro_to_json(value));
                 } else {
                     // for now round-trip through json in order to handle unsupported avro features
                     // as that allows us to rely on raw json deserialization
                     let json = de::avro_to_json(value).to_string();
 
-                    let Some((decoder, timestamp_builder)) = &mut self.json_decoder else {
-                        panic!("json decoder not initialized");
-                    };
-
-                    decoder
-                        .decode(json.as_bytes())
+                    self.buffer_decoder
+                        .decode_json(json.as_bytes())
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
-                    self.buffered_count += 1;
-                    timestamp_builder.append_value(to_nanos(timestamp) as i64);
                 }
+
+                count += 1;
 
                 Ok(())
             })
             .filter_map(|r: Result<(), SourceError>| r.err())
-            .collect()
+            .collect();
+
+        (count, errors)
     }
 
     fn deserialize_raw_string(&mut self, msg: &[u8]) {
@@ -476,7 +517,7 @@ impl ArrowDeserializer {
             .schema
             .column_with_name("value")
             .expect("no 'value' column for RawString format");
-        self.buffer.buffer[col]
+        self.buffer_decoder.get_buffer().buffer[col]
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .expect("'value' column has incorrect type")
@@ -489,7 +530,7 @@ impl ArrowDeserializer {
             .schema
             .column_with_name("value")
             .expect("no 'value' column for RawBytes format");
-        self.buffer.buffer[col]
+        self.buffer_decoder.get_buffer().buffer[col]
             .as_any_mut()
             .downcast_mut::<GenericByteBuilder<GenericBinaryType<i32>>>()
             .expect("'value' column has incorrect type")
@@ -501,111 +542,42 @@ impl ArrowDeserializer {
     }
 }
 
-pub(crate) fn add_timestamp(
-    builder: &mut [Box<dyn ArrayBuilder>],
-    idx: usize,
-    timestamp: SystemTime,
-) {
-    builder[idx]
-        .as_any_mut()
-        .downcast_mut::<TimestampNanosecondBuilder>()
-        .expect("_timestamp column has incorrect type")
-        .append_value(to_nanos(timestamp) as i64);
-}
-
-pub(crate) fn add_additional_fields(
-    builder: &mut [Box<dyn ArrayBuilder>],
-    schema: &ArroyoSchema,
+fn add_additional_fields(
+    builders: &mut HashMap<String, Box<dyn ArrayBuilder>>,
     key: &str,
     value: &FieldValueType<'_>,
+    count: usize,
 ) {
-    let (idx, _) = schema
-        .schema
-        .column_with_name(key)
-        .unwrap_or_else(|| panic!("no '{}' column for additional fields", key));
+    let builder = builders
+        .get_mut(key)
+        .unwrap_or_else(|| panic!("unexpected additional field '{}'", key))
+        .as_any_mut();
     match value {
         FieldValueType::Int32(i) => {
-            builder[idx]
-                .as_any_mut()
+            let b = builder
                 .downcast_mut::<Int32Builder>()
-                .expect("additional field has incorrect type")
-                .append_value(*i);
-        }
-        FieldValueType::Int64(i) => {
-            builder[idx]
-                .as_any_mut()
-                .downcast_mut::<Int64Builder>()
-                .expect("additional field has incorrect type")
-                .append_value(*i);
-        }
-        FieldValueType::String(s) => {
-            builder[idx]
-                .as_any_mut()
-                .downcast_mut::<StringBuilder>()
-                .expect("additional field has incorrect type")
-                .append_value(s);
-        }
-    }
-}
+                .expect("additional field has incorrect type");
 
-pub(crate) fn add_additional_fields_using_builder(
-    additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
-    additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
-) {
-    if let Some(fields) = additional_fields {
-        for (k, v) in fields.iter() {
-            if let Some(builder) = additional_fields_builder
-                .as_mut()
-                .and_then(|b| b.get_mut(*k))
-            {
-                match v {
-                    FieldValueType::Int32(i) => {
-                        builder
-                            .as_any_mut()
-                            .downcast_mut::<Int32Builder>()
-                            .expect("additional field has incorrect type")
-                            .append_value(*i);
-                    }
-                    FieldValueType::Int64(i) => {
-                        builder
-                            .as_any_mut()
-                            .downcast_mut::<Int64Builder>()
-                            .expect("additional field has incorrect type")
-                            .append_value(*i);
-                    }
-                    FieldValueType::String(s) => {
-                        builder
-                            .as_any_mut()
-                            .downcast_mut::<StringBuilder>()
-                            .expect("additional field has incorrect type")
-                            .append_value(s);
-                    }
-                }
+            for _ in 0..count {
+                b.append_value(*i);
             }
         }
-    }
-}
+        FieldValueType::Int64(i) => {
+            let b = builder
+                .downcast_mut::<Int64Builder>()
+                .expect("additional field has incorrect type");
 
-pub(crate) fn flush_additional_fields_builders(
-    additional_fields_builder: &mut Option<HashMap<String, Box<dyn ArrayBuilder>>>,
-    schema: &ArroyoSchema,
-    columns: &mut [Arc<dyn arrow::array::Array>],
-) {
-    if let Some(additional_fields) = additional_fields_builder.take() {
-        for (field_name, mut builder) in additional_fields {
-            if let Some((idx, _)) = schema.schema.column_with_name(&field_name) {
-                let expected_type = schema.schema.fields[idx].data_type();
-                let built_column = builder.as_mut().finish();
-                let actual_type = built_column.data_type();
-                if expected_type != actual_type {
-                    panic!(
-                        "Type mismatch for column '{}': expected {:?}, got {:?}",
-                        field_name, expected_type, actual_type
-                    );
-                }
-                columns[idx] = Arc::new(built_column);
-            } else {
-                panic!("Field '{}' not found in schema", field_name);
+            for _ in 0..count {
+                b.append_value(*i);
+            }
+        }
+        FieldValueType::String(s) => {
+            let b = builder
+                .downcast_mut::<StringBuilder>()
+                .expect("additional field has incorrect type");
+
+            for _ in 0..count {
+                b.append_value(*s);
             }
         }
     }
@@ -615,10 +587,8 @@ pub(crate) fn flush_additional_fields_builders(
 mod tests {
     use crate::de::{ArrowDeserializer, FieldValueType, FramingIterator};
     use arrow::datatypes::Int32Type;
-    use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
-    use arrow_array::RecordBatch;
     use arrow_schema::{Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{
@@ -800,12 +770,6 @@ mod tests {
             ),
         ]));
 
-        let mut arrays: Vec<_> = schema
-            .fields
-            .iter()
-            .map(|f| make_builder(f.data_type(), 16))
-            .collect();
-
         let arroyo_schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap());
 
         let mut deserializer = ArrowDeserializer::new(
@@ -821,8 +785,7 @@ mod tests {
             .await;
         assert!(result.is_empty());
 
-        let arrays: Vec<_> = arrays.into_iter().map(|mut a| a.finish()).collect();
-        let batch = RecordBatch::try_new(schema, arrays).unwrap();
+        let batch = deserializer.flush_buffer().unwrap().unwrap();
 
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(
@@ -851,12 +814,6 @@ mod tests {
                 false,
             ),
         ]));
-
-        let mut arrays: Vec<_> = schema
-            .fields
-            .iter()
-            .map(|f| make_builder(f.data_type(), 16))
-            .collect();
 
         let arroyo_schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema.clone()).unwrap());
 

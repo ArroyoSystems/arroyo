@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::row::{OwnedRow, RowConverter, SortField};
-use arrow_array::RecordBatch;
-use arroyo_connectors::{connectors};
+use arrow_array::{Array, RecordBatch};
+use arroyo_connectors::connectors;
 use arroyo_operator::connector::LookupConnector;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
@@ -105,6 +105,9 @@ impl ArrowOperator for LookupJoin {
         let mut result = batch.columns().to_vec();
         result.extend(right_side);
 
+        println!("SCHEMA = {:?}", ctx.out_schema.as_ref().unwrap().schema);
+        println!("RESULT COLS = {:?}", result.iter().map(|s| s.data_type()));
+
         collector
             .collect(
                 RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), result)
@@ -143,20 +146,29 @@ impl OperatorConstructor for LookupJoinConstructor {
         let op = config.connector.unwrap();
         let operator_config = serde_json::from_str(&op.config)?;
 
-        let result_row_converter = RowConverter::new(lookup_schema.schema.fields.iter().map(|f|
-            SortField::new(f.data_type().clone())).collect())?;
-        
+        let result_row_converter = RowConverter::new(
+            lookup_schema
+                .schema
+                .fields
+                .iter()
+                .map(|f| SortField::new(f.data_type().clone()))
+                .collect(),
+        )?;
+
         let connector = connectors()
             .get(op.connector.as_str())
             .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
             .make_lookup(operator_config, Arc::new(lookup_schema))?;
-        
+
         Ok(ConstructedOperator::from_operator(Box::new(LookupJoin {
             connector,
             cache: Default::default(),
-            key_row_converter: RowConverter::new(exprs.iter().map(|e| 
-                Ok(SortField::new(e.data_type(&input_schema.schema)?)))
-                .collect::<anyhow::Result<_>>()?)?,
+            key_row_converter: RowConverter::new(
+                exprs
+                    .iter()
+                    .map(|e| Ok(SortField::new(e.data_type(&input_schema.schema)?)))
+                    .collect::<anyhow::Result<_>>()?,
+            )?,
             key_exprs: exprs,
             result_row_converter,
             join_type: join_type.into(),
