@@ -1,13 +1,11 @@
 use anyhow::{anyhow, bail, Context};
-use arrow::array::{ArrayRef, RecordBatch};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
 };
 use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::var_str::VarStr;
-use arroyo_types::{string_to_map, SourceError};
-use async_trait::async_trait;
+use arroyo_types::string_to_map;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
