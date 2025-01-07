@@ -1,10 +1,13 @@
 use crate::StorageError;
 use aws_config::BehaviorVersion;
-use aws_credential_types::provider::ProvideCredentials;
-use object_store::{aws::AwsCredential, CredentialProvider};
+use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
+use object_store::{aws::AwsCredential, CredentialProvider, TemporaryToken, TokenCache};
+use std::error::Error;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub struct ArroyoCredentialProvider {
+    cache: TokenCache<Arc<AwsCredential>>,
     provider: aws_credential_types::provider::SharedCredentialsProvider,
 }
 
@@ -28,6 +31,7 @@ impl ArroyoCredentialProvider {
             .clone();
 
         Ok(Self {
+            cache: TokenCache::default().with_min_ttl(Duration::from_secs(60)),
             provider: credentials,
         })
     }
@@ -41,21 +45,42 @@ impl ArroyoCredentialProvider {
     }
 }
 
+async fn get_token(
+    provider: &SharedCredentialsProvider,
+) -> Result<TemporaryToken<Arc<AwsCredential>>, Box<dyn Error + Send + Sync>> {
+    let creds = provider
+        .provide_credentials()
+        .await
+        .map_err(|e| object_store::Error::Generic {
+            store: "S3",
+            source: Box::new(e),
+        })?;
+
+    let expiry = creds
+        .expiry()
+        .map(|exp| Instant::now() + exp.elapsed().unwrap_or_default());
+
+    Ok(TemporaryToken {
+        token: Arc::new(AwsCredential {
+            key_id: creds.access_key_id().to_string(),
+            secret_key: creds.secret_access_key().to_string(),
+            token: creds.session_token().map(ToString::to_string),
+        }),
+        expiry,
+    })
+}
+
 #[async_trait::async_trait]
 impl CredentialProvider for ArroyoCredentialProvider {
     type Credential = AwsCredential;
 
     async fn get_credential(&self) -> object_store::Result<Arc<Self::Credential>> {
-        let creds = self.provider.provide_credentials().await.map_err(|e| {
-            object_store::Error::Generic {
+        self.cache
+            .get_or_insert_with(|| get_token(&self.provider))
+            .await
+            .map_err(|e| object_store::Error::Generic {
                 store: "S3",
-                source: Box::new(e),
-            }
-        })?;
-        Ok(Arc::new(AwsCredential {
-            key_id: creds.access_key_id().to_string(),
-            secret_key: creds.secret_access_key().to_string(),
-            token: creds.session_token().map(ToString::to_string),
-        }))
+                source: e,
+            })
     }
 }
