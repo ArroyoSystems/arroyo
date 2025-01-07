@@ -1,14 +1,15 @@
 use crate::StorageError;
-use aws_config::BehaviorVersion;
+use aws_config::identity::IdentityCache;
+use aws_config::timeout::TimeoutConfig;
+use aws_config::{BehaviorVersion, SdkConfig};
 use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
-use object_store::{aws::AwsCredential, CredentialProvider, TemporaryToken, TokenCache};
-use std::error::Error;
+use object_store::{aws::AwsCredential, CredentialProvider};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::sync::OnceCell;
 
 pub struct ArroyoCredentialProvider {
-    cache: TokenCache<Arc<AwsCredential>>,
-    provider: aws_credential_types::provider::SharedCredentialsProvider,
+    provider: SharedCredentialsProvider,
 }
 
 impl std::fmt::Debug for ArroyoCredentialProvider {
@@ -17,9 +18,34 @@ impl std::fmt::Debug for ArroyoCredentialProvider {
     }
 }
 
+static AWS_CONFIG: OnceCell<Arc<SdkConfig>> = OnceCell::const_new();
+
+async fn get_config<'a>() -> &'a SdkConfig {
+    &*AWS_CONFIG
+        .get_or_init(|| async {
+            Arc::new(
+                aws_config::defaults(BehaviorVersion::latest())
+                    .timeout_config(
+                        TimeoutConfig::builder()
+                            .operation_timeout(Duration::from_secs(60))
+                            .operation_attempt_timeout(Duration::from_secs(5))
+                            .build(),
+                    )
+                    .identity_cache(
+                        IdentityCache::lazy()
+                            .buffer_time(Duration::from_secs(60 * 5))
+                            .build(),
+                    )
+                    .load()
+                    .await,
+            )
+        })
+        .await
+}
+
 impl ArroyoCredentialProvider {
     pub async fn try_new() -> Result<Self, StorageError> {
-        let config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+        let config = get_config().await;
 
         let credentials = config
             .credentials_provider()
@@ -31,43 +57,13 @@ impl ArroyoCredentialProvider {
             .clone();
 
         Ok(Self {
-            cache: TokenCache::default().with_min_ttl(Duration::from_secs(60)),
             provider: credentials,
         })
     }
 
     pub async fn default_region() -> Option<String> {
-        aws_config::defaults(BehaviorVersion::latest())
-            .load()
-            .await
-            .region()
-            .map(|r| r.to_string())
+        get_config().await.region().map(|r| r.to_string())
     }
-}
-
-async fn get_token(
-    provider: &SharedCredentialsProvider,
-) -> Result<TemporaryToken<Arc<AwsCredential>>, Box<dyn Error + Send + Sync>> {
-    let creds = provider
-        .provide_credentials()
-        .await
-        .map_err(|e| object_store::Error::Generic {
-            store: "S3",
-            source: Box::new(e),
-        })?;
-
-    let expiry = creds
-        .expiry()
-        .map(|exp| Instant::now() + exp.elapsed().unwrap_or_default());
-
-    Ok(TemporaryToken {
-        token: Arc::new(AwsCredential {
-            key_id: creds.access_key_id().to_string(),
-            secret_key: creds.secret_access_key().to_string(),
-            token: creds.session_token().map(ToString::to_string),
-        }),
-        expiry,
-    })
 }
 
 #[async_trait::async_trait]
@@ -75,12 +71,16 @@ impl CredentialProvider for ArroyoCredentialProvider {
     type Credential = AwsCredential;
 
     async fn get_credential(&self) -> object_store::Result<Arc<Self::Credential>> {
-        self.cache
-            .get_or_insert_with(|| get_token(&self.provider))
-            .await
-            .map_err(|e| object_store::Error::Generic {
+        let creds = self.provider.provide_credentials().await.map_err(|e| {
+            object_store::Error::Generic {
                 store: "S3",
-                source: e,
-            })
+                source: Box::new(e),
+            }
+        })?;
+        Ok(Arc::new(AwsCredential {
+            key_id: creds.access_key_id().to_string(),
+            secret_key: creds.secret_access_key().to_string(),
+            token: creds.session_token().map(ToString::to_string),
+        }))
     }
 }
