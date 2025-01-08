@@ -13,7 +13,7 @@ use bincode::config;
 use prost::Message;
 use std::fmt::Debug;
 use std::{collections::HashMap, time::SystemTime};
-use tracing::info;
+use tracing::debug;
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {
     committer: TPC,
@@ -86,7 +86,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
         mut commit_data: HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut OperatorContext,
     ) {
-        info!("received commit message");
+        debug!("received commit message");
         let pre_commits = match self.committer.commit_strategy() {
             CommitStrategy::PerSubtask => std::mem::take(&mut self.pre_commits),
             CommitStrategy::PerOperator => {

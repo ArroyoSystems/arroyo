@@ -180,13 +180,6 @@ impl Scheduler for KubernetesScheduler {
         let replicas = (req.slots as f32 / config().kubernetes_scheduler.worker.task_slots as f32)
             .ceil() as usize;
 
-        info!(
-            job_id = *req.job_id,
-            message = "starting workers on k8s",
-            replicas,
-            task_slots = req.slots
-        );
-
         let max_slots_per_pod = config().kubernetes_scheduler.worker.task_slots as usize;
         let mut slots_scheduled = 0;
         let mut pods = vec![];

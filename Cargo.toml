@@ -63,7 +63,7 @@ prost = { version = "0.13", features = ["no-recursion-limit"] }
 prost-reflect = "0.14.0"
 prost-build = {version = "0.13" }
 prost-types = "0.13"
-aws-config = "1.5.6"
+aws-config = "1.5.13"
 reqwest = "0.12"
 
 [profile.release]

@@ -2,15 +2,15 @@ use arroyo_rpc::retry;
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
+use object_store::aws::AmazonS3ConfigKey;
 use object_store::buffered::BufWriter;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
+use object_store::ObjectMeta;
 use object_store::{
     aws::AmazonS3Builder, local::LocalFileSystem, MultipartId, ObjectStore, PutPayload,
 };
-use object_store::{CredentialProvider, ObjectMeta};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
@@ -35,9 +35,6 @@ pub struct StorageProvider {
     object_store: Arc<dyn ObjectStore>,
     multipart_store: Option<Arc<dyn MultipartStore>>,
     canonical_url: String,
-    // A URL that object_store can parse.
-    // May require storage_options to properly instantiate
-    object_store_base_url: String,
     storage_options: HashMap<String, String>,
 }
 
@@ -305,12 +302,6 @@ fn last<I: Sized, const COUNT: usize>(opts: [Option<I>; COUNT]) -> Option<I> {
     opts.into_iter().flatten().last()
 }
 
-pub async fn get_current_credentials() -> Result<Arc<AwsCredential>, StorageError> {
-    let provider = ArroyoCredentialProvider::try_new().await?;
-    let credentials = provider.get_credential().await?;
-    Ok(credentials)
-}
-
 impl StorageProvider {
     pub async fn for_url(url: &str) -> Result<Self, StorageError> {
         Self::for_url_with_options(url, HashMap::new()).await
@@ -424,7 +415,6 @@ impl StorageProvider {
         if let Some(key) = &config.key {
             canonical_url = format!("{}/{}", canonical_url, key);
         }
-        let object_store_base_url = format!("s3://{}", config.bucket);
 
         let object_store = Arc::new(builder.build().map_err(Into::<StorageError>::into)?);
 
@@ -433,7 +423,6 @@ impl StorageProvider {
             object_store: object_store.clone(),
             multipart_store: Some(object_store),
             canonical_url,
-            object_store_base_url,
             storage_options: s3_options
                 .into_iter()
                 .map(|(k, v)| (k.as_ref().to_string(), v))
@@ -454,15 +443,12 @@ impl StorageProvider {
             canonical_url = format!("{}/{}", canonical_url, key);
         }
 
-        let object_store_base_url = format!("https://{}.storage.googleapis.com", config.bucket);
-
         let object_store = Arc::new(builder.build()?);
 
         Ok(Self {
             config: BackendConfig::GCS(config),
             object_store: object_store.clone(),
             multipart_store: Some(object_store),
-            object_store_base_url,
             canonical_url,
             storage_options: HashMap::new(),
         })
@@ -481,13 +467,11 @@ impl StorageProvider {
         );
 
         let canonical_url = format!("file://{}", config.path);
-        let object_store_base_url = canonical_url.clone();
         Ok(Self {
             config: BackendConfig::Local(config),
             object_store,
             multipart_store: None,
             canonical_url,
-            object_store_base_url,
             storage_options: HashMap::new(),
         })
     }
@@ -625,13 +609,6 @@ impl StorageProvider {
 
     pub fn canonical_url_for(&self, path: &str) -> String {
         format!("{}/{}", self.canonical_url, path)
-    }
-
-    // Returns a url that will, combined with storage_options, parse to
-    // the same ObjectStore as self.object_store.
-    // Needed for systems that build their own ObjectStore, such as delta-rs
-    pub fn object_store_base_url(&self) -> &str {
-        &self.object_store_base_url
     }
 
     pub fn storage_options(&self) -> &HashMap<String, String> {
