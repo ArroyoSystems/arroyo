@@ -7,6 +7,7 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::OnceCell;
+use tracing::info;
 
 pub struct ArroyoCredentialProvider {
     cache: TokenCache<Arc<AwsCredential>>,
@@ -66,6 +67,7 @@ impl ArroyoCredentialProvider {
 async fn get_token(
     provider: &SharedCredentialsProvider,
 ) -> Result<TemporaryToken<Arc<AwsCredential>>, Box<dyn Error + Send + Sync>> {
+    info!("Getting credentials");
     let creds = provider
         .provide_credentials()
         .await
@@ -73,6 +75,7 @@ async fn get_token(
             store: "S3",
             source: Box::new(e),
         })?;
+    info!("Got credentials = {:?}", creds);
     let expiry = creds
         .expiry()
         .map(|exp| Instant::now() + exp.elapsed().unwrap_or_default());
