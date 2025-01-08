@@ -17,7 +17,7 @@ use parquet::{
     basic::ZstdLevel,
     file::properties::{EnabledStatistics, WriterProperties},
 };
-use tracing::info;
+use tracing::debug;
 
 use std::iter::Zip;
 
@@ -244,7 +244,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
                 bail!("global keyed data expects KeyedData, not record batches")
             }
             TableData::CommitData { data } => {
-                info!("received commit data");
+                debug!("received commit data");
                 // set commit data, failing if it was already set
                 if self.commit_data.is_some() {
                     bail!("commit data already set for this epoch")

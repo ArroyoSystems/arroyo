@@ -37,7 +37,7 @@ use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use arroyo_types::*;
@@ -507,7 +507,7 @@ async fn from_checkpoint(
             parts_to_add,
             trailing_bytes,
         } => {
-            info!("finishing file for path {:?}", path);
+            debug!("finishing file for path {:?}", path);
             let multipart_id = object_store
                 .start_multipart(path)
                 .await
@@ -527,7 +527,7 @@ async fn from_checkpoint(
                     .await?;
                 parts.push(upload_part);
             }
-            info!(
+            debug!(
                 "parts: {:?}, pushed_size: {:?}, multipart id: {:?}",
                 parts, pushed_size, multipart_id
             );
