@@ -3369,6 +3369,7 @@ source = "git+https://github.com/delta-io/delta-rs?rev=25ce38956e25722ba7a6cbc0f
 dependencies = [
  "deltalake-aws",
  "deltalake-core",
+ "deltalake-gcp",
 ]
 
 [[package]]
@@ -3452,6 +3453,24 @@ dependencies = [
  "urlencoding",
  "uuid",
  "z85",
+]
+
+[[package]]
+name = "deltalake-gcp"
+version = "0.6.0"
+source = "git+https://github.com/delta-io/delta-rs?rev=25ce38956e25722ba7a6cbc0f5a7dba6b3361554#25ce38956e25722ba7a6cbc0f5a7dba6b3361554"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "deltalake-core",
+ "futures",
+ "lazy_static",
+ "object_store",
+ "regex",
+ "thiserror 2.0.3",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

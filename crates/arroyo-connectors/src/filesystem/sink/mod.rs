@@ -32,6 +32,7 @@ use datafusion::{
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
     scalar::ScalarValue,
 };
+use deltalake::DeltaTable;
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
@@ -56,6 +57,7 @@ use self::{
     },
 };
 
+use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::{
     CommitStyle, FileNaming, FileSettings, FileSystemTable, FilenameStrategy, TableType,
 };
@@ -109,7 +111,7 @@ impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
         Self::create_and_start(table_properties, config.format)
     }
 
-    pub fn start(&mut self, schema: ArroyoSchemaRef) -> Result<()> {
+    pub async fn start(&mut self, schema: ArroyoSchemaRef) -> Result<()> {
         let TableType::Sink {
             write_path,
             file_settings,
@@ -132,21 +134,22 @@ impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
         self.partitioner = partition_func;
         let table = self.table.clone();
         let format = self.format.clone();
+        let storage_path: Path = StorageProvider::get_key(&write_path).unwrap();
+        let provider = StorageProvider::for_url_with_options(&write_path, storage_options.clone())
+            .await
+            .unwrap();
+        let mut writer = AsyncMultipartFileSystemWriter::<R>::new(
+            storage_path,
+            Arc::new(provider),
+            receiver,
+            checkpoint_sender,
+            table,
+            format,
+            schema,
+        )
+        .await?;
+
         tokio::spawn(async move {
-            let storage_path: Path = StorageProvider::get_key(&write_path).unwrap();
-            let provider =
-                StorageProvider::for_url_with_options(&write_path, storage_options.clone())
-                    .await
-                    .unwrap();
-            let mut writer = AsyncMultipartFileSystemWriter::<R>::new(
-                storage_path,
-                Arc::new(provider),
-                receiver,
-                checkpoint_sender,
-                table,
-                format,
-                schema,
-            );
             writer.run().await.unwrap();
         });
         Ok(())
@@ -437,9 +440,12 @@ struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
     schema: ArroyoSchemaRef,
 }
 
-#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum CommitState {
-    DeltaLake { last_version: i64 },
+    DeltaLake {
+        last_version: i64,
+        table: DeltaTable,
+    },
     VanillaParquet,
 }
 
@@ -701,7 +707,7 @@ impl<R> AsyncMultipartFileSystemWriter<R>
 where
     R: MultiPartWriter,
 {
-    fn new(
+    async fn new(
         path: Path,
         object_store: Arc<StorageProvider>,
         receiver: Receiver<FileSystemMessages>,
@@ -709,7 +715,7 @@ where
         writer_properties: FileSystemTable,
         format: Option<Format>,
         schema: ArroyoSchemaRef,
-    ) -> Self {
+    ) -> Result<Self> {
         let file_settings = if let TableType::Sink {
             ref file_settings, ..
         } = writer_properties.table_type
@@ -720,7 +726,15 @@ where
         };
 
         let commit_state = match file_settings.commit_style.unwrap() {
-            CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
+            CommitStyle::DeltaLake => CommitState::DeltaLake {
+                last_version: -1,
+                table: load_or_create_table(
+                    &path,
+                    &object_store,
+                    &schema.schema_without_timestamp(),
+                )
+                .await?,
+            },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
         let mut file_naming = file_settings.file_naming.clone().unwrap_or(FileNaming {
@@ -732,7 +746,7 @@ where
             file_naming.suffix = Some(R::suffix());
         }
 
-        Self {
+        Ok(Self {
             path,
             active_writers: HashMap::new(),
             watermark: None,
@@ -750,7 +764,7 @@ where
             file_naming,
             format,
             schema,
-        }
+        })
     }
 
     fn add_part_to_finish(&mut self, file_to_finish: FileToFinish) {
@@ -926,19 +940,16 @@ where
                 finished_files.push(file);
             }
         }
-        if let CommitState::DeltaLake { last_version } = self.commit_state {
-            if let Some(new_version) = delta::commit_files_to_delta(
-                &finished_files,
-                &self.path,
-                &self.object_store,
-                last_version,
-                Arc::new(self.schema.schema_without_timestamp()),
-            )
-            .await?
+        if let CommitState::DeltaLake {
+            last_version,
+            table,
+        } = &mut self.commit_state
+        {
+            if let Some(new_version) =
+                delta::commit_files_to_delta(&finished_files, &self.path, table, *last_version)
+                    .await?
             {
-                self.commit_state = CommitState::DeltaLake {
-                    last_version: new_version,
-                };
+                *last_version = new_version;
             }
         }
         let finished_message = CheckpointData::Finished {
@@ -950,8 +961,8 @@ where
     }
 
     fn delta_version(&mut self) -> i64 {
-        match self.commit_state {
-            CommitState::DeltaLake { last_version } => last_version,
+        match &self.commit_state {
+            CommitState::DeltaLake { last_version, .. } => *last_version,
             CommitState::VanillaParquet => 0,
         }
     }
@@ -1553,9 +1564,12 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
         ctx: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()> {
-        self.start(Arc::new(ctx.in_schemas.first().unwrap().clone()))?;
+        self.start(Arc::new(ctx.in_schemas.first().unwrap().clone()))
+            .await?;
+
         let mut max_file_index = 0;
         let mut recovered_files = Vec::new();
+
         for file_system_data_recovery in data_recovery {
             max_file_index = max_file_index.max(file_system_data_recovery.next_file_index);
             // task 0 is responsible for recovering all files.

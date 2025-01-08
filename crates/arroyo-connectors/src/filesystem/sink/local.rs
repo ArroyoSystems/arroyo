@@ -2,22 +2,15 @@ use std::{collections::HashMap, fs::create_dir_all, path::Path, sync::Arc, time:
 
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{
-    df::{ArroyoSchema, ArroyoSchemaRef},
-    formats::Format,
-    OperatorConfig,
-};
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, OperatorConfig};
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::physical_plan::PhysicalExpr;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
-use tracing::info;
+use tracing::debug;
 use uuid::Uuid;
-
-use crate::filesystem::{sink::two_phase_committer::TwoPhaseCommitter, FileSettings};
-use anyhow::{bail, Result};
 
 use super::{
     add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
@@ -25,6 +18,9 @@ use super::{
     FileSystemTable, FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
     TableType,
 };
+use crate::filesystem::sink::delta::load_or_create_table;
+use crate::filesystem::{sink::two_phase_committer::TwoPhaseCommitter, FileSettings};
+use anyhow::{bail, Result};
 
 pub struct LocalFileSystemWriter<V: LocalWriter> {
     // writer to a local tmp file
@@ -40,7 +36,7 @@ pub struct LocalFileSystemWriter<V: LocalWriter> {
     file_settings: FileSettings,
     format: Option<Format>,
     schema: Option<ArroyoSchemaRef>,
-    commit_state: CommitState,
+    commit_state: Option<CommitState>,
     filenaming: FileNaming,
 }
 
@@ -63,10 +59,6 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
         } = table_properties.table_type
         else {
             unreachable!("LocalFileSystemWriter can only be used as a sink")
-        };
-        let commit_state = match file_settings.as_ref().unwrap().commit_style.unwrap() {
-            CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
-            CommitStyle::Direct => CommitState::VanillaParquet,
         };
 
         let mut filenaming = file_settings
@@ -92,34 +84,14 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             partitioner: None,
             finished_files: Vec::new(),
             file_settings: file_settings.clone().unwrap(),
-            schema: None,
             format: config.format,
             rolling_policy: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
             table_properties,
-            commit_state,
+            schema: None,
+            commit_state: None,
             filenaming,
         };
         TwoPhaseCommitterOperator::new(writer)
-    }
-
-    fn init_schema_and_partitioner(&mut self, record_batch: &RecordBatch) -> Result<()> {
-        if self.schema.is_none() {
-            self.schema = Some(Arc::new(ArroyoSchema::from_fields(
-                record_batch
-                    .schema()
-                    .fields()
-                    .into_iter()
-                    .map(|field| field.as_ref().clone())
-                    .collect(),
-            )));
-        }
-        if self.partitioner.is_none() {
-            self.partitioner = get_partitioner_from_file_settings(
-                self.file_settings.clone(),
-                self.schema.as_ref().unwrap().clone(),
-            );
-        }
-        Ok(())
     }
 
     fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
@@ -258,13 +230,33 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         self.subtask_id = ctx.task_info.task_index as usize;
         self.finished_files = recovered_files;
         self.next_file_index = max_file_index;
+
+        let storage_provider = StorageProvider::for_url(&self.final_dir).await?;
+
+        let schema = Arc::new(ctx.in_schemas[0].clone());
+
+        self.commit_state = Some(match self.file_settings.commit_style.unwrap() {
+            CommitStyle::DeltaLake => CommitState::DeltaLake {
+                last_version: -1,
+                table: load_or_create_table(
+                    &object_store::path::Path::parse(&self.final_dir)?,
+                    &storage_provider,
+                    &schema.schema_without_timestamp(),
+                )
+                .await?,
+            },
+            CommitStyle::Direct => CommitState::VanillaParquet,
+        });
+
+        self.partitioner =
+            get_partitioner_from_file_settings(self.file_settings.clone(), schema.clone());
+
+        self.schema = Some(schema);
+
         Ok(())
     }
 
     async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
-        if self.schema.is_none() {
-            self.init_schema_and_partitioner(&batch)?;
-        }
         if let Some(partitioner) = self.partitioner.as_ref() {
             for (batch, partition) in batches_by_partition(batch, partitioner.clone())? {
                 let writer = self.get_or_insert_writer(&partition);
@@ -298,7 +290,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             if !tmp_file.exists() {
                 bail!("tmp file {} does not exist", tmp_file.to_string_lossy());
             }
-            info!(
+            debug!(
                 "committing file {} to {}",
                 tmp_file.to_string_lossy(),
                 destination.to_string_lossy()
@@ -311,20 +303,21 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 size: destination.metadata()?.len() as usize,
             });
         }
-        if let CommitState::DeltaLake { last_version } = self.commit_state {
-            let storage_provider = Arc::new(StorageProvider::for_url("/").await?);
+
+        if let CommitState::DeltaLake {
+            last_version,
+            table,
+        } = self.commit_state.as_mut().unwrap()
+        {
             if let Some(version) = delta::commit_files_to_delta(
                 &finished_files,
                 &object_store::path::Path::parse(&self.final_dir)?,
-                &storage_provider,
-                last_version,
-                Arc::new(self.schema.as_ref().unwrap().schema_without_timestamp()),
+                table,
+                *last_version,
             )
             .await?
             {
-                self.commit_state = CommitState::DeltaLake {
-                    last_version: version,
-                };
+                *last_version = version;
             }
         }
         Ok(())
