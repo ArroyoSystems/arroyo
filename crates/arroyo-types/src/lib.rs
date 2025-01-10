@@ -693,3 +693,5 @@ mod tests {
         );
     }
 }
+
+pub const LOOKUP_KEY_INDEX_FIELD: &str = "__lookup_key_index";

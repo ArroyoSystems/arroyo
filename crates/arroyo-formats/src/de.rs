@@ -3,28 +3,28 @@ use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
 use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
-use arrow_array::builder::{
-    make_builder, ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
-};
+use arrow_array::builder::{make_builder, ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder, UInt64Builder};
 use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
-use arrow_schema::SchemaRef;
+use arrow_schema::{DataType, Schema, SchemaRef};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{
     AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat, ProtobufFormat,
 };
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_types::{to_nanos, SourceError};
+use arroyo_types::{to_nanos, SourceError, LOOKUP_KEY_INDEX_FIELD};
 use prost_reflect::DescriptorPool;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
+use arroyo_rpc::MetadataField;
 
 #[derive(Debug, Clone)]
 pub enum FieldValueType<'a> {
     Int64(i64),
+    UInt64(u64),
     Int32(i32),
     String(&'a str),
     // Extend with more types as needed
@@ -50,7 +50,7 @@ impl ContextBuffer {
     }
 
     pub fn size(&self) -> usize {
-        self.buffer[0].len()
+        self.buffer.iter().map(|b| b.len()).max().unwrap()
     }
 
     pub fn should_flush(&self) -> bool {
@@ -210,13 +210,14 @@ impl BufferDecoder {
 pub struct ArrowDeserializer {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
-    schema: Arc<ArroyoSchema>,
+    final_schema: Arc<Schema>,
+    decoder_schema: Arc<Schema>,
     bad_data: BadData,
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     proto_pool: DescriptorPool,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
     additional_fields_builder: Option<HashMap<String, Box<dyn ArrayBuilder>>>,
-    timestamp_builder: Option<TimestampNanosecondBuilder>,
+    timestamp_builder: Option<(usize, TimestampNanosecondBuilder)>,
     buffer_decoder: BufferDecoder,
 }
 
@@ -238,13 +239,60 @@ impl ArrowDeserializer {
             Arc::new(FailingSchemaResolver::new()) as Arc<dyn SchemaResolver + Sync>
         };
 
-        Self::with_schema_resolver(format, framing, schema, bad_data, resolver)
+        Self::with_schema_resolver(format, framing, schema, &[], bad_data, resolver)
     }
-
+    
     pub fn with_schema_resolver(
         format: Format,
         framing: Option<Framing>,
         schema: Arc<ArroyoSchema>,
+        metadata_fields: &[MetadataField],
+        bad_data: BadData,
+        schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    ) -> Self {
+        Self::with_schema_resolver_and_raw_schema(
+            format,
+            framing,
+            Arc::new(schema.schema_without_timestamp()),
+            Some(schema.timestamp_index),
+            metadata_fields,
+            bad_data,
+            schema_resolver
+        )
+    }
+
+    pub fn for_lookup(
+        format: Format,
+        schema: Arc<Schema>,
+        metadata_fields: &[MetadataField],
+        bad_data: BadData,
+        schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    ) -> Self {
+        let mut metadata_fields = metadata_fields.to_vec();
+        metadata_fields
+            .push(MetadataField {
+                field_name: LOOKUP_KEY_INDEX_FIELD.to_string(),
+                key: LOOKUP_KEY_INDEX_FIELD.to_string(),
+                data_type: Some(DataType::UInt64),
+            });
+
+        Self::with_schema_resolver_and_raw_schema(
+            format,
+            None,
+            schema,
+            None,
+            &metadata_fields,
+            bad_data,
+            schema_resolver
+        )
+    }
+    
+    fn with_schema_resolver_and_raw_schema(
+        format: Format,
+        framing: Option<Framing>,
+        schema_without_timestamp: Arc<Schema>,
+        timestamp_idx: Option<usize>,
+        metadata_fields: &[MetadataField],
         bad_data: BadData,
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
     ) -> Self {
@@ -257,7 +305,20 @@ impl ArrowDeserializer {
         } else {
             DescriptorPool::global()
         };
+        
+        let metadata_names: HashSet<_> = metadata_fields.iter().map(|f| &f.field_name).collect();
 
+        let schema_without_additional = {
+            let fields = schema_without_timestamp.fields().iter()
+                .filter(|f| !metadata_names.contains(f.name()))
+                .map(|f| f.clone())
+                .collect::<Vec<_>>();
+            Arc::new(Schema::new_with_metadata(fields, schema_without_timestamp.metadata.clone()))
+        };
+        
+        println!("Schema without additional = {:?}", schema_without_additional);
+        println!("metadata_names = {:?}", metadata_names);
+        
         let buffer_decoder = match format {
             Format::Json(..)
             | Format::Avro(AvroFormat {
@@ -268,9 +329,7 @@ impl ArrowDeserializer {
                 into_unstructured_json: false,
                 ..
             }) => BufferDecoder::JsonDecoder {
-                decoder: arrow_json::reader::ReaderBuilder::new(Arc::new(
-                    schema.schema_without_timestamp(),
-                ))
+                decoder: arrow_json::reader::ReaderBuilder::new(schema_without_additional.clone())
                 .with_limit_to_batch_size(false)
                 .with_strict_mode(false)
                 .with_allow_bad_data(matches!(bad_data, BadData::Drop { .. }))
@@ -279,17 +338,16 @@ impl ArrowDeserializer {
                 buffered_count: 0,
                 buffered_since: Instant::now(),
             },
-            _ => BufferDecoder::Buffer(ContextBuffer::new(Arc::new(
-                schema.schema_without_timestamp(),
-            ))),
+            _ => BufferDecoder::Buffer(ContextBuffer::new(schema_without_additional.clone())),
         };
 
         Self {
             format: Arc::new(format),
             framing: framing.map(Arc::new),
             buffer_decoder,
-            timestamp_builder: Some(TimestampNanosecondBuilder::with_capacity(128)),
-            schema,
+            timestamp_builder: timestamp_idx.map(|i| (i, TimestampNanosecondBuilder::with_capacity(128))),
+            final_schema: schema_without_timestamp,
+            decoder_schema: schema_without_additional,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
             bad_data,
             schema_resolver,
@@ -298,21 +356,31 @@ impl ArrowDeserializer {
         }
     }
 
+    #[must_use]
     pub async fn deserialize_slice(
         &mut self,
         msg: &[u8],
         timestamp: SystemTime,
-        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
+        additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
     ) -> Vec<SourceError> {
         self.deserialize_slice_int(msg, Some(timestamp), additional_fields)
             .await
     }
 
+    #[must_use]
+    pub async fn deserialize_without_timestamp(
+        &mut self,
+        msg: &[u8],
+        additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
+    ) -> Vec<SourceError> {
+        self.deserialize_slice_int(msg, None, additional_fields).await
+    }
+    
     async fn deserialize_slice_int(
         &mut self,
         msg: &[u8],
         timestamp: Option<SystemTime>,
-        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
+        additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
     ) -> Vec<SourceError> {
         let (count, errors) = match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(msg).await,
@@ -332,7 +400,7 @@ impl ArrowDeserializer {
         };
 
         if let Some(timestamp) = timestamp {
-            let b = self
+            let (_, b) = self
                 .timestamp_builder
                 .as_mut()
                 .expect("tried to serialize timestamp to a schema without a timestamp column");
@@ -349,6 +417,7 @@ impl ArrowDeserializer {
                     let builder: Box<dyn ArrayBuilder> = match value {
                         FieldValueType::Int32(_) => Box::new(Int32Builder::new()),
                         FieldValueType::Int64(_) => Box::new(Int64Builder::new()),
+                        FieldValueType::UInt64(_) => Box::new(UInt64Builder::new()),
                         FieldValueType::String(_) => Box::new(StringBuilder::new()),
                     };
                     builders.insert(key.to_string(), builder);
@@ -369,18 +438,20 @@ impl ArrowDeserializer {
     pub fn should_flush(&self) -> bool {
         self.buffer_decoder.should_flush()
     }
-
+    
     pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
         let (mut arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
             Ok((a, b)) => (a, b),
             Err(e) => return Some(Err(e)),
         };
+        
+        println!("ARrays = {:?}", arrays);
+        println!("error mask = {:?}", error_mask);
 
         if let Some(additional_fields) = &mut self.additional_fields_builder {
             for (name, builder) in additional_fields {
                 let (idx, _) = self
-                    .schema
-                    .schema
+                    .final_schema
                     .column_with_name(&name)
                     .unwrap_or_else(|| panic!("Field '{}' not found in schema", name));
 
@@ -388,23 +459,29 @@ impl ArrowDeserializer {
                 if let Some(error_mask) = &error_mask {
                     array = kernels::filter::filter(&array, error_mask).unwrap();
                 }
+                
+                println!("Schema = {:?}", self.final_schema);
 
-                arrays[idx] = array;
+                arrays.insert(idx, array);
             }
         };
 
-        if let Some(timestamp) = &mut self.timestamp_builder {
+        println!("With add = {:?}", arrays);
+
+        if let Some((idx, timestamp)) = &mut self.timestamp_builder {
             let array = if let Some(error_mask) = &error_mask {
                 kernels::filter::filter(&timestamp.finish(), error_mask).unwrap()
             } else {
                 Arc::new(timestamp.finish())
             };
 
-            arrays.insert(self.schema.timestamp_index, array);
+            arrays.insert(*idx, array);
         }
+        
+        println!("With timestamp ={:?}", arrays);
 
         Some(Ok(
-            RecordBatch::try_new(self.schema.schema.clone(), arrays).unwrap()
+            RecordBatch::try_new(self.final_schema.clone(), arrays).unwrap()
         ))
     }
 
@@ -448,8 +525,7 @@ impl ArrowDeserializer {
 
     fn decode_into_json(&mut self, value: Value) {
         let (idx, _) = self
-            .schema
-            .schema
+            .decoder_schema
             .column_with_name("value")
             .expect("no 'value' column for unstructured avro");
         let array = self.buffer_decoder.get_buffer().buffer[idx]
@@ -512,9 +588,9 @@ impl ArrowDeserializer {
     }
 
     fn deserialize_raw_string(&mut self, msg: &[u8]) {
+        println!("Deserializing raw string {:?}", msg);
         let (col, _) = self
-            .schema
-            .schema
+            .decoder_schema
             .column_with_name("value")
             .expect("no 'value' column for RawString format");
         self.buffer_decoder.get_buffer().buffer[col]
@@ -526,8 +602,7 @@ impl ArrowDeserializer {
 
     fn deserialize_raw_bytes(&mut self, msg: &[u8]) {
         let (col, _) = self
-            .schema
-            .schema
+            .decoder_schema
             .column_with_name("value")
             .expect("no 'value' column for RawBytes format");
         self.buffer_decoder.get_buffer().buffer[col]
@@ -565,6 +640,15 @@ fn add_additional_fields(
         FieldValueType::Int64(i) => {
             let b = builder
                 .downcast_mut::<Int64Builder>()
+                .expect("additional field has incorrect type");
+
+            for _ in 0..count {
+                b.append_value(*i);
+            }
+        }
+        FieldValueType::UInt64(i) => {
+            let b = builder
+                .downcast_mut::<UInt64Builder>()
                 .expect("additional field has incorrect type");
 
             for _ in 0..count {
@@ -834,10 +918,10 @@ mod tests {
         let time = SystemTime::now();
         let mut additional_fields = std::collections::HashMap::new();
         let binding = "y".to_string();
-        additional_fields.insert(&binding, FieldValueType::Int32(5));
+        additional_fields.insert(binding.as_str(), FieldValueType::Int32(5));
         let z_value = "hello".to_string();
         let binding = "z".to_string();
-        additional_fields.insert(&binding, FieldValueType::String(&z_value));
+        additional_fields.insert(binding.as_str(), FieldValueType::String(&z_value));
 
         let result = deserializer
             .deserialize_slice(

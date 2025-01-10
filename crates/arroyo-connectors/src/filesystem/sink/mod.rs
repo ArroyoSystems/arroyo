@@ -1564,7 +1564,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
         ctx: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()> {
-        self.start(Arc::new(ctx.in_schemas.first().unwrap().clone()))?;
+        self.start(ctx.in_schemas.first().unwrap().clone()).await?;
 
         let mut max_file_index = 0;
         let mut recovered_files = Vec::new();

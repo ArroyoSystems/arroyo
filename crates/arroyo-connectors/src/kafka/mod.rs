@@ -642,6 +642,7 @@ impl KafkaTester {
                         format.clone(),
                         None,
                         Arc::new(aschema),
+                        &schema.metadata_fields(),
                         BadData::Fail {},
                         Arc::new(schema_resolver),
                     );

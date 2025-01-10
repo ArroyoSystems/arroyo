@@ -11,7 +11,7 @@ use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-
+use arrow::datatypes::DataType::UInt64;
 use crate::kafka::SourceOffset;
 use arroyo_operator::context::{
     batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext,
@@ -389,6 +389,7 @@ async fn test_kafka_with_metadata_fields() {
     let metadata_fields = vec![MetadataField {
         field_name: "offset".to_string(),
         key: "offset_id".to_string(),
+        data_type: Some(UInt64),
     }];
 
     // Set metadata fields in KafkaSourceFunc
@@ -420,7 +421,7 @@ async fn test_kafka_with_metadata_fields() {
         command_tx.clone(),
         1,
         vec![],
-        Some(ArroyoSchema::new_unkeyed(
+        Some(Arc::new(ArroyoSchema::new_unkeyed(
             Arc::new(Schema::new(vec![
                 Field::new(
                     "_timestamp",
@@ -431,7 +432,7 @@ async fn test_kafka_with_metadata_fields() {
                 Field::new("offset", DataType::Int64, false),
             ])),
             0,
-        )),
+        ))),
         kafka.tables(),
     )
     .await;

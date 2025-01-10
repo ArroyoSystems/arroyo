@@ -323,6 +323,7 @@ impl ConnectionSchema {
                 Some(MetadataField {
                     field_name: f.field_name.clone(),
                     key: f.metadata_key.clone()?,
+                    data_type: Some(Field::from(f.clone()).data_type().clone()),
                 })
             })
             .collect()

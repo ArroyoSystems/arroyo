@@ -201,6 +201,8 @@ pub struct RateLimit {
 pub struct MetadataField {
     pub field_name: String,
     pub key: String,
+    #[serde(default)]
+    pub data_type: Option<DataType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

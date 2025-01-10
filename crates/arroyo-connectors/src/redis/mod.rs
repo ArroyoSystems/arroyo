@@ -4,7 +4,7 @@ pub mod sink;
 use anyhow::{anyhow, bail};
 use arroyo_formats::de::ArrowDeserializer;
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_operator::connector::{Connection, Connector, LookupConnector};
+use arroyo_operator::connector::{Connection, Connector, LookupConnector, MetadataDef};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
@@ -19,9 +19,10 @@ use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use arrow::datatypes::{DataType, Schema};
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
-
+use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use crate::redis::lookup::RedisLookup;
 use crate::redis::sink::{GeneralConnection, RedisSinkFunc};
 use crate::{pull_opt, pull_option_to_u64};
@@ -41,7 +42,7 @@ import_types!(
 
 import_types!(schema = "src/redis/table.json");
 
-enum RedisClient {
+pub(crate) enum RedisClient {
     Standard(Client),
     Clustered(ClusterClient),
 }
@@ -176,6 +177,13 @@ impl Connector for RedisConnector {
             connection_config: Some(CONFIG_SCHEMA.to_string()),
             table_config: TABLE_SCHEMA.to_string(),
         }
+    }
+
+    fn metadata_defs(&self) -> &'static [MetadataDef] {
+        &[MetadataDef {
+            name: "key",
+            data_type: DataType::Utf8,
+        }]
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
@@ -394,7 +402,7 @@ impl Connector for RedisConnector {
             format: Some(format),
             bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
-            metadata_fields: vec![],
+            metadata_fields: schema.metadata_fields(),
         };
 
         Ok(Connection {
@@ -447,19 +455,21 @@ impl Connector for RedisConnector {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-        schema: Arc<ArroyoSchema>,
+        schema: Arc<Schema>,
     ) -> anyhow::Result<Box<dyn LookupConnector + Send>> {
         Ok(Box::new(RedisLookup {
-            deserializer: ArrowDeserializer::new(
+            deserializer: ArrowDeserializer::for_lookup(
                 config
                     .format
                     .ok_or_else(|| anyhow!("Redis table must have a format"))?,
                 schema,
-                config.framing,
+                &config.metadata_fields,                
                 config.bad_data.unwrap_or_default(),
+                Arc::new(FailingSchemaResolver::new()),
             ),
             client: RedisClient::new(&profile)?,
             connection: None,
+            metadata_fields: config.metadata_fields,
         }))
     }
 }

@@ -1,11 +1,10 @@
 use crate::operator::ConstructedOperator;
 use anyhow::{anyhow, bail};
 use arrow::array::{ArrayRef, RecordBatch};
-use arrow::datatypes::{DataType, Field};
+use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{DisplayAsSql, SourceError};
 use async_trait::async_trait;
@@ -129,7 +128,7 @@ pub trait Connector: Send {
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
-        schema: Arc<ArroyoSchema>,
+        schema: Arc<Schema>,
     ) -> anyhow::Result<Box<dyn LookupConnector + Send>> {
         bail!("{} is not a lookup connector", self.name())
     }
@@ -206,7 +205,7 @@ pub trait ErasedConnector: Send {
     fn make_lookup(
         &self,
         config: OperatorConfig,
-        schema: Arc<ArroyoSchema>,
+        schema: Arc<Schema>,
     ) -> anyhow::Result<Box<dyn LookupConnector + Send>>;
 }
 
@@ -360,7 +359,7 @@ impl<C: Connector> ErasedConnector for C {
     fn make_lookup(
         &self,
         config: OperatorConfig,
-        schema: Arc<ArroyoSchema>,
+        schema: Arc<Schema>,
     ) -> anyhow::Result<Box<dyn LookupConnector + Send>> {
         self.make_lookup(
             self.parse_config(&config.connection)?,

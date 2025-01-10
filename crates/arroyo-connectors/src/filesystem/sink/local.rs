@@ -233,7 +233,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
 
         let storage_provider = StorageProvider::for_url(&self.final_dir).await?;
 
-        let schema = Arc::new(ctx.in_schemas[0].clone());
+        let schema = ctx.in_schemas[0].clone();
 
         self.commit_state = Some(match self.file_settings.commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake {

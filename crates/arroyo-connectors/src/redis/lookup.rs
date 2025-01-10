@@ -1,19 +1,21 @@
+use std::collections::HashMap;
 use crate::redis::sink::GeneralConnection;
 use crate::redis::RedisClient;
-use arrow::array::{ArrayRef, AsArray, RecordBatch};
+use arrow::array::{Array, ArrayRef, AsArray, RecordBatch};
 use arrow::datatypes::DataType;
-use arroyo_formats::de::ArrowDeserializer;
+use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_operator::connector::LookupConnector;
-use arroyo_types::SourceError;
+use arroyo_types::{SourceError, LOOKUP_KEY_INDEX_FIELD};
 use async_trait::async_trait;
 use redis::aio::ConnectionLike;
 use redis::{cmd, Value};
-use std::time::SystemTime;
+use arroyo_rpc::MetadataField;
 
 pub struct RedisLookup {
     pub(crate) deserializer: ArrowDeserializer,
     pub(crate) client: RedisClient,
     pub(crate) connection: Option<GeneralConnection>,
+    pub(crate) metadata_fields: Vec<MetadataField>,
 }
 
 #[async_trait]
@@ -38,29 +40,54 @@ impl LookupConnector for RedisLookup {
 
         let mut mget = cmd("mget");
 
-        for k in keys[0].as_string::<i32>() {
+        let keys = keys[0].as_string::<i32>();
+        
+        for k in keys {
             mget.arg(k.unwrap());
+            println!("GETTTING {:?}", k);
         }
 
         let Value::Array(vs) = connection.req_packed_command(&mget).await.unwrap() else {
             panic!("value was not an array");
         };
 
-        for v in vs {
-            match v {
+        assert_eq!(vs.len(), keys.len(), "Redis sent back the wrong number of values");
+
+        let mut additional = HashMap::new();
+        
+        for (idx, (v, k)) in vs.iter().zip(keys).enumerate() {
+            additional.insert(LOOKUP_KEY_INDEX_FIELD, FieldValueType::UInt64(idx as u64));
+            for m in &self.metadata_fields {
+                additional.insert(m.field_name.as_str(), match m.key.as_str() {
+                    "key" => FieldValueType::String(k.unwrap()),
+                    k => unreachable!("Invalid metadata key '{}'", k)
+                });
+            }
+
+            let errors = match v {
                 Value::Nil => {
-                    self.deserializer
-                        .deserialize_slice("null".as_bytes(), SystemTime::now(), None)
-                        .await;
+                    println!("GOt null");
+                    vec![]
                 }
                 Value::SimpleString(s) => {
+                    println!("Got {:?}", s);
                     self.deserializer
-                        .deserialize_slice(s.as_bytes(), SystemTime::now(), None)
-                        .await;
+                        .deserialize_without_timestamp(s.as_bytes(), Some(&additional))
+                        .await
+                }
+                Value::BulkString(v) => {
+                    println!("Got {:?}", String::from_utf8(v.clone()));
+                    self.deserializer
+                        .deserialize_without_timestamp(&v, Some(&additional))
+                        .await
                 }
                 v => {
                     panic!("unexpected type {:?}", v);
                 }
+            };
+            
+            if !errors.is_empty() {
+                return Some(Err(errors.into_iter().next().unwrap()));
             }
         }
 

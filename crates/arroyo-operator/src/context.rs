@@ -9,7 +9,7 @@ use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
+use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp, MetadataField};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo, UserError,
@@ -302,12 +302,14 @@ impl SourceCollector {
         format: Format,
         framing: Option<Framing>,
         bad_data: Option<BadData>,
+        metadata_fields: &[MetadataField],
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
     ) {
         self.deserializer = Some(ArrowDeserializer::with_schema_resolver(
             format,
             framing,
             self.out_schema.clone(),
+            metadata_fields,
             bad_data.unwrap_or_default(),
             schema_resolver,
         ));
@@ -342,7 +344,7 @@ impl SourceCollector {
         &mut self,
         msg: &[u8],
         time: SystemTime,
-        additional_fields: Option<&HashMap<&String, FieldValueType<'_>>>,
+        additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
     ) -> Result<(), UserError> {
         let deserializer = self
             .deserializer

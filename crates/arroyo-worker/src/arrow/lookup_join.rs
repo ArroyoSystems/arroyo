@@ -1,17 +1,19 @@
 use std::collections::HashMap;
+use std::ops::Index;
 use std::sync::Arc;
 
 use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::{Array, RecordBatch};
+use arrow_array::cast::AsArray;
+use arrow_array::types::UInt64Type;
+use arrow_schema::DataType;
 use arroyo_connectors::connectors;
 use arroyo_operator::connector::LookupConnector;
 use arroyo_operator::context::{Collector, OperatorContext};
-use arroyo_operator::operator::{
-    ArrowOperator, ConstructedOperator, OperatorConstructor, Registry,
-};
+use arroyo_operator::operator::{ArrowOperator, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
-use arroyo_types::JoinType;
+use arroyo_types::{JoinType, LOOKUP_KEY_INDEX_FIELD};
 use async_trait::async_trait;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
@@ -32,7 +34,7 @@ pub struct LookupJoin {
 #[async_trait]
 impl ArrowOperator for LookupJoin {
     fn name(&self) -> String {
-        format!("LookupJoin<{}>", self.connector.name())
+        format!("LookupJoin({})", self.connector.name())
     }
 
     async fn process_batch(
@@ -71,16 +73,22 @@ impl ArrowOperator for LookupJoin {
 
             let result_batch = self.connector.lookup(&cols).await;
 
+            println!("Batch = {:?}", result_batch);
+
             if let Some(result_batch) = result_batch {
+                let mut result_batch = result_batch.unwrap();
+                let key_idx_col = result_batch.schema().index_of(LOOKUP_KEY_INDEX_FIELD).unwrap();
+
+                let keys = result_batch.remove_column(key_idx_col);
+                let keys = keys.as_primitive::<UInt64Type>();
+
                 let result_rows = self
                     .result_row_converter
-                    .convert_columns(result_batch.unwrap().columns())
+                    .convert_columns(result_batch.columns())
                     .unwrap();
 
-                assert_eq!(result_rows.num_rows(), uncached_keys.len());
-
-                for (k, v) in uncached_keys.iter().zip(result_rows.iter()) {
-                    self.cache.insert(k.as_ref().to_vec(), v.owned());
+                for (v, idx) in result_rows.iter().zip(keys) {
+                    self.cache.insert(uncached_keys[idx.unwrap() as usize].as_ref().to_vec(), v.owned());
                 }
             }
         }
@@ -88,6 +96,8 @@ impl ArrowOperator for LookupJoin {
         let mut output_rows = self
             .result_row_converter
             .empty_rows(batch.num_rows(), batch.num_rows() * 10);
+
+        println!("Cache {:?}", self.cache);
 
         for row in rows.iter() {
             output_rows.push(
@@ -102,6 +112,7 @@ impl ArrowOperator for LookupJoin {
             .result_row_converter
             .convert_rows(output_rows.iter())
             .unwrap();
+
         let mut result = batch.columns().to_vec();
         result.extend(right_side);
 
@@ -148,12 +159,16 @@ impl OperatorConstructor for LookupJoinConstructor {
 
         let result_row_converter = RowConverter::new(
             lookup_schema
-                .schema
+                .schema_without_timestamp()
                 .fields
                 .iter()
                 .map(|f| SortField::new(f.data_type().clone()))
                 .collect(),
         )?;
+
+        let lookup_schema = lookup_schema
+            .with_field(LOOKUP_KEY_INDEX_FIELD, DataType::UInt64, false)?
+            .schema_without_timestamp();
 
         let connector = connectors()
             .get(op.connector.as_str())
