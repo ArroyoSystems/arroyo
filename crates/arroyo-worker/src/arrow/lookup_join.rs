@@ -113,8 +113,18 @@ impl ArrowOperator for LookupJoin {
             .convert_rows(output_rows.iter())
             .unwrap();
 
-        let mut result = batch.columns().to_vec();
+        let in_schema = ctx.in_schemas.first().unwrap();
+        let key_indices = in_schema.key_indices.as_ref().unwrap();
+        let non_keys: Vec<_> = (0..batch.num_columns())
+            .into_iter()
+            .filter(|i| !key_indices.contains(i) && *i != in_schema.timestamp_index)
+            .collect();
+
+        let mut result = batch.project(&non_keys)
+            .unwrap().columns()
+            .to_vec();
         result.extend(right_side);
+        result.push(batch.column(in_schema.timestamp_index).clone());
 
         println!("SCHEMA = {:?}", ctx.out_schema.as_ref().unwrap().schema);
         println!("RESULT COLS = {:?}", result.iter().map(|s| s.data_type()));
