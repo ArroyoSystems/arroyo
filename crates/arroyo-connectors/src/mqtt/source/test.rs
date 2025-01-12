@@ -141,7 +141,7 @@ impl MqttTopicTester {
             command_tx.clone(),
             1,
             vec![],
-            Some(ArroyoSchema::new_unkeyed(
+            Some(Arc::new(ArroyoSchema::new_unkeyed(
                 Arc::new(Schema::new(vec![
                     Field::new(
                         "_timestamp",
@@ -151,7 +151,7 @@ impl MqttTopicTester {
                     Field::new("value", DataType::UInt64, false),
                 ])),
                 0,
-            )),
+            ))),
             mqtt.tables(),
         )
         .await;

@@ -14,7 +14,6 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
     TestSourceMessage,
 };
-use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::OperatorConfig;
@@ -453,7 +452,7 @@ impl Connector for RedisConnector {
     fn make_lookup(
         &self,
         profile: Self::ProfileT,
-        table: Self::TableT,
+        _: Self::TableT,
         config: OperatorConfig,
         schema: Arc<Schema>,
     ) -> anyhow::Result<Box<dyn LookupConnector + Send>> {

@@ -108,7 +108,7 @@ impl KafkaTopicTester {
             operator_ids: vec![task_info.operator_id.clone()],
         });
 
-        let out_schema = Some(ArroyoSchema::new_unkeyed(
+        let out_schema = Some(Arc::new(ArroyoSchema::new_unkeyed(
             Arc::new(Schema::new(vec![
                 Field::new(
                     "_timestamp",
@@ -118,7 +118,7 @@ impl KafkaTopicTester {
                 Field::new("value", DataType::Utf8, false),
             ])),
             0,
-        ));
+        )));
 
         let task_info = Arc::new(task_info);
 

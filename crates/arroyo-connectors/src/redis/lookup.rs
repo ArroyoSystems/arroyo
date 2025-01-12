@@ -82,7 +82,7 @@ impl LookupConnector for RedisLookup {
                 }
                 Value::BulkString(v) => {
                     self.deserializer
-                        .deserialize_without_timestamp(&v, Some(&additional))
+                        .deserialize_without_timestamp(v, Some(&additional))
                         .await
                 }
                 v => {

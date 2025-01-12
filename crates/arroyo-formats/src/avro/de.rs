@@ -132,8 +132,7 @@ pub(crate) fn avro_to_json(value: AvroValue) -> JsonValue {
 mod tests {
     use crate::avro::schema::to_arrow;
     use crate::de::ArrowDeserializer;
-    use arrow_array::builder::{make_builder, ArrayBuilder};
-    use arrow_array::RecordBatch;
+
     use arrow_json::writer::record_batch_to_vec;
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
@@ -257,6 +256,7 @@ mod tests {
                 Format::Avro(format),
                 None,
                 Arc::new(arroyo_schema.clone()),
+                &[],
                 BadData::Fail {},
                 resolver,
             ),
@@ -269,8 +269,7 @@ mod tests {
         writer_schema: Option<&str>,
         message: &[u8],
     ) -> Vec<serde_json::Map<String, serde_json::Value>> {
-        let (mut deserializer, arroyo_schema) =
-            deserializer_with_schema(format.clone(), writer_schema);
+        let (mut deserializer, _) = deserializer_with_schema(format.clone(), writer_schema);
 
         let errors = deserializer
             .deserialize_slice(message, SystemTime::now(), None)

@@ -641,6 +641,8 @@ pub fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
     start..=end
 }
 
+pub const LOOKUP_KEY_INDEX_FIELD: &str = "__lookup_key_index";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,5 +695,3 @@ mod tests {
         );
     }
 }
-
-pub const LOOKUP_KEY_INDEX_FIELD: &str = "__lookup_key_index";

@@ -1,4 +1,4 @@
-use arrow::compute::{filter_record_batch, is_null};
+use arrow::compute::filter_record_batch;
 use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
@@ -152,14 +152,12 @@ impl ArrowOperator for LookupJoin {
                 }
             }
 
-
             BooleanArray::from(nonnull)
         });
 
         let in_schema = ctx.in_schemas.first().unwrap();
         let key_indices = in_schema.key_indices.as_ref().unwrap();
         let non_keys: Vec<_> = (0..batch.num_columns())
-            .into_iter()
             .filter(|i| !key_indices.contains(i) && *i != in_schema.timestamp_index)
             .collect();
 

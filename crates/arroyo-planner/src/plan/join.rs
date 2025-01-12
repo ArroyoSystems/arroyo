@@ -201,7 +201,7 @@ struct FindLookupExtension {
     alias: Option<TableReference>,
 }
 
-impl<'a> TreeNodeVisitor<'a> for FindLookupExtension {
+impl TreeNodeVisitor<'_> for FindLookupExtension {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &Self::Node) -> Result<TreeNodeRecursion> {
@@ -266,8 +266,8 @@ fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
         match r {
             Expr::Column(c) => Ok((l.clone(), c.clone())),
             e => {
-                return plan_err!("invalid right-side condition for lookup join: `{}`; only column references are supported", 
-                expr_to_sql(e).map(|e| e.to_string()).unwrap_or_else(|_| e.to_string()));
+                plan_err!("invalid right-side condition for lookup join: `{}`; only column references are supported", 
+                expr_to_sql(e).map(|e| e.to_string()).unwrap_or_else(|_| e.to_string()))
             }
         }
     }).collect::<Result<_>>()?;

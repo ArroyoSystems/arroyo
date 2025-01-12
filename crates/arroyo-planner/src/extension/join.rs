@@ -10,7 +10,6 @@ use datafusion::logical_expr::{LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::generated::datafusion::PhysicalPlanNode;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use prost::Message;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub(crate) const JOIN_NODE_NAME: &str = "JoinNode";

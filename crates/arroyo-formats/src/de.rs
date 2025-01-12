@@ -137,6 +137,7 @@ impl BufferDecoder {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn flush(
         &mut self,
         bad_data: &BadData,
@@ -350,7 +351,7 @@ impl ArrowDeserializer {
                 .fields()
                 .iter()
                 .filter(|f| !metadata_names.contains(f.name()))
-                .map(|f| f.clone())
+                .cloned()
                 .collect::<Vec<_>>();
             Arc::new(Schema::new_with_metadata(
                 fields,
@@ -821,7 +822,7 @@ mod tests {
 
         let schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema).unwrap());
 
-        let deserializer = ArrowDeserializer::new(
+        ArrowDeserializer::new(
             Format::Json(JsonFormat {
                 confluent_schema_registry: false,
                 schema_id: None,
@@ -833,9 +834,7 @@ mod tests {
             schema,
             None,
             bad_data,
-        );
-
-        deserializer
+        )
     }
 
     #[tokio::test]

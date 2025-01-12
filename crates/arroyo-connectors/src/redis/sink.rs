@@ -1,4 +1,4 @@
-use crate::redis::{ListOperation, RedisClient, RedisTable, TableType, Target};
+use crate::redis::{ListOperation, RedisClient, Target};
 use arrow::array::{AsArray, RecordBatch};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, ErrorReporter, OperatorContext};
@@ -20,7 +20,7 @@ const FLUSH_BYTES: usize = 10 * 1024 * 1024;
 pub struct RedisSinkFunc {
     pub serializer: ArrowSerializer,
     pub target: Target,
-    pub client: RedisClient,
+    pub(crate) client: RedisClient,
     pub cmd_q: Option<(Sender<u32>, Receiver<RedisCmd>)>,
 
     pub rx: Receiver<u32>,
