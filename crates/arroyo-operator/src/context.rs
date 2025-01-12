@@ -320,6 +320,7 @@ impl SourceCollector {
         format: Format,
         framing: Option<Framing>,
         bad_data: Option<BadData>,
+        metadata_fields: &[MetadataField],
     ) {
         if self.deserializer.is_some() {
             panic!("Deserialize already initialized");
@@ -328,6 +329,7 @@ impl SourceCollector {
         self.deserializer = Some(ArrowDeserializer::new(
             format,
             self.out_schema.clone(),
+            metadata_fields,
             framing,
             bad_data.unwrap_or_default(),
         ));

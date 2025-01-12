@@ -81,6 +81,8 @@ message LookupJoinOperator {
   ConnectorOp connector = 3;
   repeated LookupJoinCondition key_exprs = 4;
   JoinType join_type = 5;
+  optional uint64 ttl_micros = 6;
+  optional uint64 max_capacity_bytes = 7;
 }
 
 message WindowFunctionOperator {

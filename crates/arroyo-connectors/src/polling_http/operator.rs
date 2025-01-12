@@ -208,6 +208,7 @@ impl PollingHttpSourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &[],
         );
 
         // since there's no way to partition across an http source, only read on the first task

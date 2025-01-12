@@ -1,9 +1,9 @@
+use arrow::compute::kernels::cast_utils::parse_interval_day_time;
+use arrow_schema::{DataType, Field, FieldRef, Schema};
+use arroyo_connectors::connector_for_type;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
-
-use arrow_schema::{DataType, Field, FieldRef, Schema};
-use arroyo_connectors::connector_for_type;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -72,8 +72,11 @@ pub struct ConnectorTable {
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
     pub primary_keys: Arc<Vec<String>>,
-
     pub inferred_fields: Option<Vec<DFField>>,
+
+    // for lookup tables
+    pub lookup_cache_max_bytes: Option<u64>,
+    pub lookup_cache_ttl: Option<Duration>,
 }
 
 multifield_partial_ord!(
@@ -206,6 +209,8 @@ impl From<Connection> for ConnectorTable {
             idle_time: DEFAULT_IDLE_TIME,
             primary_keys: Arc::new(vec![]),
             inferred_fields: None,
+            lookup_cache_max_bytes: None,
+            lookup_cache_ttl: None,
         }
     }
 }
@@ -214,6 +219,7 @@ impl ConnectorTable {
     fn from_options(
         name: &str,
         connector: &str,
+        temporary: bool,
         mut fields: Vec<FieldSpec>,
         primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
@@ -246,6 +252,14 @@ impl ConnectorTable {
 
         let framing = Framing::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
+
+        if temporary {
+            if let Some(t) = options.insert("type".to_string(), "lookup".to_string()) {
+                if t != "lookup" {
+                    return plan_err!("Cannot have a temporary table with type '{}'; temporary tables must be type 'lookup'", t);
+                }
+            }
+        }
 
         let mut input_to_schema_fields = fields.clone();
 
@@ -317,6 +331,26 @@ impl ConnectorTable {
             .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
             .filter(|t| *t <= 0)
             .map(|t| Duration::from_micros(t as u64));
+
+        table.lookup_cache_max_bytes = options
+            .remove("lookup.cache.max_bytes")
+            .map(|t| u64::from_str(&t))
+            .transpose()
+            .map_err(|_| {
+                DataFusionError::Plan("lookup.cache.max_bytes must be set to a number".to_string())
+            })?;
+
+        table.lookup_cache_ttl = options
+            .remove("lookup.cache.ttl")
+            .map(|t| parse_interval_day_time(&t))
+            .transpose()
+            .map_err(|e| {
+                DataFusionError::Plan(format!("lookup.cache.ttl must be a valid interval ({})", e))
+            })?
+            .map(|t| {
+                Duration::from_secs(t.days as u64 * 60 * 60 * 24)
+                    + Duration::from_millis(t.milliseconds as u64)
+            });
 
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
@@ -755,6 +789,7 @@ impl Table {
                     let table = ConnectorTable::from_options(
                         &name,
                         connector,
+                        *temporary,
                         fields,
                         primary_keys,
                         &mut with_map,

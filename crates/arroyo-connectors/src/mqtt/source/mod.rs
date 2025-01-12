@@ -101,6 +101,7 @@ impl MqttSourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &self.metadata_fields,
         );
 
         if ctx.task_info.task_index > 0 {

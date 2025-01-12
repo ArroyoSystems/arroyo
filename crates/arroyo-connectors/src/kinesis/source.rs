@@ -173,6 +173,7 @@ impl SourceOperator for KinesisSourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &[],
         );
 
         match self.run_int(ctx, collector).await {

@@ -19,9 +19,11 @@ use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
+use mini_moka::sync::Cache;
 use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Copy, Clone, PartialEq)]
 pub(crate) enum LookupJoinType {
@@ -33,7 +35,7 @@ pub(crate) enum LookupJoinType {
 pub struct LookupJoin {
     connector: Box<dyn LookupConnector + Send>,
     key_exprs: Vec<Arc<dyn PhysicalExpr>>,
-    cache: HashMap<Vec<u8>, OwnedRow>,
+    cache: Option<Cache<OwnedRow, OwnedRow>>,
     key_row_converter: RowConverter,
     result_row_converter: RowConverter,
     join_type: LookupJoinType,
@@ -68,12 +70,22 @@ impl ArrowOperator for LookupJoin {
             key_map.entry(row.owned()).or_default().push(i);
         }
 
-        let mut uncached_keys = Vec::new();
-        for k in key_map.keys() {
-            if !self.cache.contains_key(k.row().as_ref()) {
-                uncached_keys.push(k.clone());
+        let uncached_keys = if let Some(cache) = &mut self.cache {
+            let mut uncached_keys = Vec::new();
+            for k in key_map.keys() {
+                if !cache.contains_key(k) {
+                    uncached_keys.push(k);
+                }
             }
-        }
+            uncached_keys
+        } else {
+            key_map.keys().collect()
+        };
+
+        let mut results = HashMap::new();
+
+        #[allow(unused_assignments)]
+        let mut result_rows = None;
 
         if !uncached_keys.is_empty() {
             let cols = self
@@ -93,16 +105,17 @@ impl ArrowOperator for LookupJoin {
                 let keys = result_batch.remove_column(key_idx_col);
                 let keys = keys.as_primitive::<UInt64Type>();
 
-                let result_rows = self
-                    .result_row_converter
-                    .convert_columns(result_batch.columns())
-                    .unwrap();
+                result_rows = Some(
+                    self.result_row_converter
+                        .convert_columns(result_batch.columns())
+                        .unwrap(),
+                );
 
-                for (v, idx) in result_rows.iter().zip(keys) {
-                    self.cache.insert(
-                        uncached_keys[idx.unwrap() as usize].as_ref().to_vec(),
-                        v.owned(),
-                    );
+                for (v, idx) in result_rows.as_ref().unwrap().iter().zip(keys) {
+                    results.insert(uncached_keys[idx.unwrap() as usize].as_ref(), v);
+                    if let Some(cache) = &mut self.cache {
+                        cache.insert(uncached_keys[idx.unwrap() as usize].clone(), v.owned());
+                    }
                 }
             }
         }
@@ -112,12 +125,13 @@ impl ArrowOperator for LookupJoin {
             .empty_rows(batch.num_rows(), batch.num_rows() * 10);
 
         for row in rows.iter() {
-            output_rows.push(
-                self.cache
-                    .get(row.data())
-                    .expect("row should be cached")
-                    .row(),
-            );
+            let row = self
+                .cache
+                .as_mut()
+                .and_then(|c| c.get(&row.owned()))
+                .unwrap_or_else(|| results.get(row.as_ref()).unwrap().owned());
+
+            output_rows.push(row.row());
         }
 
         let right_side = self
@@ -225,9 +239,22 @@ impl OperatorConstructor for LookupJoinConstructor {
             .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
             .make_lookup(operator_config.clone(), lookup_schema.clone())?;
 
+        let max_capacity_bytes = config.max_capacity_bytes.unwrap_or_else(|| 8 * 1024 * 1024);
+        let cache = (max_capacity_bytes > 0).then(|| {
+            let mut c = Cache::builder()
+                .weigher(|k: &OwnedRow, v: &OwnedRow| (k.as_ref().len() + v.as_ref().len()) as u32)
+                .max_capacity(max_capacity_bytes);
+
+            if let Some(ttl) = config.ttl_micros {
+                c = c.time_to_live(Duration::from_micros(ttl));
+            }
+
+            c.build()
+        });
+
         Ok(ConstructedOperator::from_operator(Box::new(LookupJoin {
             connector,
-            cache: Default::default(),
+            cache,
             key_row_converter: RowConverter::new(
                 exprs
                     .iter()

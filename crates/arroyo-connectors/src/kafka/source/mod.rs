@@ -181,6 +181,7 @@ impl KafkaSourceFunc {
                 self.format.clone(),
                 self.framing.clone(),
                 self.bad_data.clone(),
+                &self.metadata_fields,
             );
         }
 

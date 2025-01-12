@@ -118,6 +118,11 @@ impl ArroyoExtension for LookupJoin {
                     return plan_err!("unsupported join type '{j}' for lookup join; only inner and left joins are supported");
                 }
             },
+            ttl_micros: self
+                .connector
+                .lookup_cache_ttl
+                .map(|t| t.as_micros() as u64),
+            max_capacity_bytes: self.connector.lookup_cache_max_bytes,
         };
 
         let incoming_edge =

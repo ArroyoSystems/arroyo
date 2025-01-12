@@ -100,6 +100,7 @@ impl SourceOperator for SingleFileSourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &[],
         );
 
         let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =

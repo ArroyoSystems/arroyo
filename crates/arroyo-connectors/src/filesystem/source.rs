@@ -128,6 +128,7 @@ impl FileSystemSourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &[],
         );
         let parallelism = ctx.task_info.parallelism;
         let task_index = ctx.task_info.task_index;

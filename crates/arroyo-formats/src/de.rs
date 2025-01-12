@@ -264,6 +264,7 @@ impl ArrowDeserializer {
     pub fn new(
         format: Format,
         schema: Arc<ArroyoSchema>,
+        metadata_fields: &[MetadataField],
         framing: Option<Framing>,
         bad_data: BadData,
     ) -> Self {
@@ -278,7 +279,7 @@ impl ArrowDeserializer {
             Arc::new(FailingSchemaResolver::new()) as Arc<dyn SchemaResolver + Sync>
         };
 
-        Self::with_schema_resolver(format, framing, schema, &[], bad_data, resolver)
+        Self::with_schema_resolver(format, framing, schema, metadata_fields, bad_data, resolver)
     }
 
     pub fn with_schema_resolver(
@@ -729,12 +730,13 @@ mod tests {
     use arrow::datatypes::Int32Type;
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
-    use arrow_schema::{Schema, TimeUnit};
+    use arrow_schema::{DataType, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{
         BadData, Format, Framing, FramingMethod, JsonFormat, NewlineDelimitedFraming,
         RawBytesFormat,
     };
+    use arroyo_rpc::MetadataField;
     use arroyo_types::{to_nanos, SourceError};
     use serde_json::json;
     use std::sync::Arc;
@@ -832,6 +834,7 @@ mod tests {
                 timestamp_format: Default::default(),
             }),
             schema,
+            &[],
             None,
             bad_data,
         )
@@ -913,6 +916,7 @@ mod tests {
         let mut deserializer = ArrowDeserializer::new(
             Format::RawBytes(RawBytesFormat {}),
             arroyo_schema,
+            &[],
             None,
             BadData::Fail {},
         );
@@ -941,7 +945,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_additional_fields_deserialisation() {
+    async fn test_additional_fields_deserialization() {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("x", arrow_schema::DataType::Int64, true),
             arrow_schema::Field::new("y", arrow_schema::DataType::Int32, true),
@@ -965,17 +969,26 @@ mod tests {
                 timestamp_format: Default::default(),
             }),
             arroyo_schema,
+            &[
+                MetadataField {
+                    field_name: "y".to_string(),
+                    key: "y".to_string(),
+                    data_type: Some(DataType::Int64),
+                },
+                MetadataField {
+                    field_name: "z".to_string(),
+                    key: "z".to_string(),
+                    data_type: Some(DataType::Utf8),
+                },
+            ],
             None,
             BadData::Drop {},
         );
 
         let time = SystemTime::now();
         let mut additional_fields = std::collections::HashMap::new();
-        let binding = "y".to_string();
-        additional_fields.insert(binding.as_str(), FieldValueType::Int32(5));
-        let z_value = "hello".to_string();
-        let binding = "z".to_string();
-        additional_fields.insert(binding.as_str(), FieldValueType::String(&z_value));
+        additional_fields.insert("y", FieldValueType::Int32(5));
+        additional_fields.insert("z", FieldValueType::String("hello"));
 
         let result = deserializer
             .deserialize_slice(
