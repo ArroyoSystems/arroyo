@@ -248,11 +248,6 @@ fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
         return Ok(None);
     }
 
-    println!(
-        "JOin = {:?} {:?}\n{:#?}",
-        join.join_constraint, join.join_type, join.on
-    );
-
     match join.join_type {
         JoinType::Inner | JoinType::Left => {}
         t => {

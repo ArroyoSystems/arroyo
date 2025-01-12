@@ -1,15 +1,15 @@
-use std::collections::HashMap;
 use crate::redis::sink::GeneralConnection;
 use crate::redis::RedisClient;
 use arrow::array::{Array, ArrayRef, AsArray, RecordBatch};
 use arrow::datatypes::DataType;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_operator::connector::LookupConnector;
+use arroyo_rpc::MetadataField;
 use arroyo_types::{SourceError, LOOKUP_KEY_INDEX_FIELD};
 use async_trait::async_trait;
 use redis::aio::ConnectionLike;
 use redis::{cmd, Value};
-use arroyo_rpc::MetadataField;
+use std::collections::HashMap;
 
 pub struct RedisLookup {
     pub(crate) deserializer: ArrowDeserializer,
@@ -41,42 +41,46 @@ impl LookupConnector for RedisLookup {
         let mut mget = cmd("mget");
 
         let keys = keys[0].as_string::<i32>();
-        
+
         for k in keys {
             mget.arg(k.unwrap());
-            println!("GETTTING {:?}", k);
         }
 
         let Value::Array(vs) = connection.req_packed_command(&mget).await.unwrap() else {
             panic!("value was not an array");
         };
 
-        assert_eq!(vs.len(), keys.len(), "Redis sent back the wrong number of values");
+        assert_eq!(
+            vs.len(),
+            keys.len(),
+            "Redis sent back the wrong number of values"
+        );
 
         let mut additional = HashMap::new();
-        
+
         for (idx, (v, k)) in vs.iter().zip(keys).enumerate() {
             additional.insert(LOOKUP_KEY_INDEX_FIELD, FieldValueType::UInt64(idx as u64));
             for m in &self.metadata_fields {
-                additional.insert(m.field_name.as_str(), match m.key.as_str() {
-                    "key" => FieldValueType::String(k.unwrap()),
-                    k => unreachable!("Invalid metadata key '{}'", k)
-                });
+                additional.insert(
+                    m.field_name.as_str(),
+                    match m.key.as_str() {
+                        "key" => FieldValueType::String(k.unwrap()),
+                        k => unreachable!("Invalid metadata key '{}'", k),
+                    },
+                );
             }
 
             let errors = match v {
                 Value::Nil => {
-                    println!("GOt null");
+                    self.deserializer.deserialize_null(Some(&additional));
                     vec![]
                 }
                 Value::SimpleString(s) => {
-                    println!("Got {:?}", s);
                     self.deserializer
                         .deserialize_without_timestamp(s.as_bytes(), Some(&additional))
                         .await
                 }
                 Value::BulkString(v) => {
-                    println!("Got {:?}", String::from_utf8(v.clone()));
                     self.deserializer
                         .deserialize_without_timestamp(&v, Some(&additional))
                         .await
@@ -85,7 +89,7 @@ impl LookupConnector for RedisLookup {
                     panic!("unexpected type {:?}", v);
                 }
             };
-            
+
             if !errors.is_empty() {
                 return Some(Err(errors.into_iter().next().unwrap()));
             }

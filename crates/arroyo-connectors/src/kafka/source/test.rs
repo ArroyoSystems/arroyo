@@ -5,14 +5,10 @@ use arroyo_state::tables::ErasedTable;
 use arroyo_state::{BackingStore, StateBackend};
 use rand::random;
 
-use arrow::array::{Array, StringArray};
-use arrow::datatypes::TimeUnit;
-use std::collections::{HashMap, VecDeque};
-use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
-use arrow::datatypes::DataType::UInt64;
 use crate::kafka::SourceOffset;
+use arrow::array::{Array, StringArray};
+use arrow::datatypes::DataType::UInt64;
+use arrow::datatypes::TimeUnit;
 use arroyo_operator::context::{
     batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext,
 };
@@ -29,6 +25,10 @@ use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use super::KafkaSourceFunc;

@@ -1,25 +1,33 @@
-use std::collections::HashMap;
-use std::ops::Index;
-use std::sync::Arc;
-
+use arrow::compute::{filter_record_batch, is_null};
 use arrow::row::{OwnedRow, RowConverter, SortField};
-use arrow_array::{Array, RecordBatch};
 use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
-use arrow_schema::DataType;
+use arrow_array::{Array, BooleanArray, RecordBatch};
+use arrow_schema::{DataType, Schema};
 use arroyo_connectors::connectors;
 use arroyo_operator::connector::LookupConnector;
 use arroyo_operator::context::{Collector, OperatorContext};
-use arroyo_operator::operator::{ArrowOperator, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, ConstructedOperator, OperatorConstructor, Registry,
+};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
-use arroyo_types::{JoinType, LOOKUP_KEY_INDEX_FIELD};
+use arroyo_rpc::{MetadataField, OperatorConfig};
+use arroyo_types::LOOKUP_KEY_INDEX_FIELD;
 use async_trait::async_trait;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+#[derive(Copy, Clone, PartialEq)]
+pub(crate) enum LookupJoinType {
+    Left,
+    Inner,
+}
 
 /// A simple in-operator cache storing the entire “right side” row batch keyed by a string.
 pub struct LookupJoin {
@@ -28,7 +36,9 @@ pub struct LookupJoin {
     cache: HashMap<Vec<u8>, OwnedRow>,
     key_row_converter: RowConverter,
     result_row_converter: RowConverter,
-    join_type: JoinType,
+    join_type: LookupJoinType,
+    lookup_schema: Arc<Schema>,
+    metadata_fields: Vec<MetadataField>,
 }
 
 #[async_trait]
@@ -73,11 +83,12 @@ impl ArrowOperator for LookupJoin {
 
             let result_batch = self.connector.lookup(&cols).await;
 
-            println!("Batch = {:?}", result_batch);
-
             if let Some(result_batch) = result_batch {
                 let mut result_batch = result_batch.unwrap();
-                let key_idx_col = result_batch.schema().index_of(LOOKUP_KEY_INDEX_FIELD).unwrap();
+                let key_idx_col = result_batch
+                    .schema()
+                    .index_of(LOOKUP_KEY_INDEX_FIELD)
+                    .unwrap();
 
                 let keys = result_batch.remove_column(key_idx_col);
                 let keys = keys.as_primitive::<UInt64Type>();
@@ -88,7 +99,10 @@ impl ArrowOperator for LookupJoin {
                     .unwrap();
 
                 for (v, idx) in result_rows.iter().zip(keys) {
-                    self.cache.insert(uncached_keys[idx.unwrap() as usize].as_ref().to_vec(), v.owned());
+                    self.cache.insert(
+                        uncached_keys[idx.unwrap() as usize].as_ref().to_vec(),
+                        v.owned(),
+                    );
                 }
             }
         }
@@ -96,8 +110,6 @@ impl ArrowOperator for LookupJoin {
         let mut output_rows = self
             .result_row_converter
             .empty_rows(batch.num_rows(), batch.num_rows() * 10);
-
-        println!("Cache {:?}", self.cache);
 
         for row in rows.iter() {
             output_rows.push(
@@ -113,6 +125,37 @@ impl ArrowOperator for LookupJoin {
             .convert_rows(output_rows.iter())
             .unwrap();
 
+        let nonnull = (self.join_type == LookupJoinType::Inner).then(|| {
+            let mut nonnull = vec![false; batch.num_rows()];
+
+            for (_, a) in self
+                .lookup_schema
+                .fields
+                .iter()
+                .zip(right_side.iter())
+                .filter(|(f, _)| {
+                    !self
+                        .metadata_fields
+                        .iter()
+                        .any(|m| &m.field_name == f.name())
+                })
+            {
+                if let Some(nulls) = a.logical_nulls() {
+                    for (a, b) in nulls.iter().zip(nonnull.iter_mut()) {
+                        *b |= a;
+                    }
+                } else {
+                    for b in &mut nonnull {
+                        *b = true;
+                    }
+                    break;
+                }
+            }
+
+
+            BooleanArray::from(nonnull)
+        });
+
         let in_schema = ctx.in_schemas.first().unwrap();
         let key_indices = in_schema.key_indices.as_ref().unwrap();
         let non_keys: Vec<_> = (0..batch.num_columns())
@@ -120,21 +163,18 @@ impl ArrowOperator for LookupJoin {
             .filter(|i| !key_indices.contains(i) && *i != in_schema.timestamp_index)
             .collect();
 
-        let mut result = batch.project(&non_keys)
-            .unwrap().columns()
-            .to_vec();
+        let mut result = batch.project(&non_keys).unwrap().columns().to_vec();
         result.extend(right_side);
         result.push(batch.column(in_schema.timestamp_index).clone());
 
-        println!("SCHEMA = {:?}", ctx.out_schema.as_ref().unwrap().schema);
-        println!("RESULT COLS = {:?}", result.iter().map(|s| s.data_type()));
+        let mut batch =
+            RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), result).unwrap();
 
-        collector
-            .collect(
-                RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), result)
-                    .unwrap(),
-            )
-            .await;
+        if let Some(nonnull) = nonnull {
+            batch = filter_record_batch(&batch, &nonnull).unwrap();
+        }
+
+        collector.collect(batch).await;
     }
 }
 
@@ -165,7 +205,7 @@ impl OperatorConstructor for LookupJoinConstructor {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         let op = config.connector.unwrap();
-        let operator_config = serde_json::from_str(&op.config)?;
+        let operator_config: OperatorConfig = serde_json::from_str(&op.config)?;
 
         let result_row_converter = RowConverter::new(
             lookup_schema
@@ -176,14 +216,16 @@ impl OperatorConstructor for LookupJoinConstructor {
                 .collect(),
         )?;
 
-        let lookup_schema = lookup_schema
-            .with_field(LOOKUP_KEY_INDEX_FIELD, DataType::UInt64, false)?
-            .schema_without_timestamp();
+        let lookup_schema = Arc::new(
+            lookup_schema
+                .with_field(LOOKUP_KEY_INDEX_FIELD, DataType::UInt64, false)?
+                .schema_without_timestamp(),
+        );
 
         let connector = connectors()
             .get(op.connector.as_str())
             .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
-            .make_lookup(operator_config, Arc::new(lookup_schema))?;
+            .make_lookup(operator_config.clone(), lookup_schema.clone())?;
 
         Ok(ConstructedOperator::from_operator(Box::new(LookupJoin {
             connector,
@@ -196,7 +238,13 @@ impl OperatorConstructor for LookupJoinConstructor {
             )?,
             key_exprs: exprs,
             result_row_converter,
-            join_type: join_type.into(),
+            join_type: match join_type {
+                api::JoinType::Inner => LookupJoinType::Inner,
+                api::JoinType::Left => LookupJoinType::Left,
+                jt => unreachable!("invalid lookup join type {:?}", jt),
+            },
+            lookup_schema,
+            metadata_fields: operator_config.metadata_fields,
         })))
     }
 }

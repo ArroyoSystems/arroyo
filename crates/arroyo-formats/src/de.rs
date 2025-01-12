@@ -3,7 +3,10 @@ use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
 use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
-use arrow_array::builder::{make_builder, ArrayBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder, UInt64Builder};
+use arrow_array::builder::{
+    make_builder, ArrayBuilder, BinaryBuilder, GenericByteBuilder, StringBuilder,
+    TimestampNanosecondBuilder, UInt64Builder,
+};
 use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Schema, SchemaRef};
@@ -12,6 +15,7 @@ use arroyo_rpc::formats::{
     AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat, ProtobufFormat,
 };
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
+use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
 use arroyo_types::{to_nanos, SourceError, LOOKUP_KEY_INDEX_FIELD};
 use prost_reflect::DescriptorPool;
 use serde_json::Value;
@@ -19,7 +23,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
-use arroyo_rpc::MetadataField;
 
 #[derive(Debug, Clone)]
 pub enum FieldValueType<'a> {
@@ -205,6 +208,41 @@ impl BufferDecoder {
             }
         }
     }
+
+    fn push_null(&mut self, schema: &Schema) {
+        match self {
+            BufferDecoder::Buffer(b) => {
+                for (f, b) in schema.fields.iter().zip(b.buffer.iter_mut()) {
+                    match f.data_type() {
+                        DataType::Binary => {
+                            b.as_any_mut()
+                                .downcast_mut::<BinaryBuilder>()
+                                .unwrap()
+                                .append_null();
+                        }
+                        DataType::Utf8 => {
+                            b.as_any_mut()
+                                .downcast_mut::<StringBuilder>()
+                                .unwrap()
+                                .append_null();
+                        }
+                        dt => {
+                            unreachable!("unsupported datatype {}", dt);
+                        }
+                    }
+                }
+            }
+            BufferDecoder::JsonDecoder {
+                decoder,
+                buffered_count,
+                ..
+            } => {
+                decoder.decode("{}".as_bytes()).unwrap();
+
+                *buffered_count += 1;
+            }
+        }
+    }
 }
 
 pub struct ArrowDeserializer {
@@ -241,7 +279,7 @@ impl ArrowDeserializer {
 
         Self::with_schema_resolver(format, framing, schema, &[], bad_data, resolver)
     }
-    
+
     pub fn with_schema_resolver(
         format: Format,
         framing: Option<Framing>,
@@ -257,7 +295,7 @@ impl ArrowDeserializer {
             Some(schema.timestamp_index),
             metadata_fields,
             bad_data,
-            schema_resolver
+            schema_resolver,
         )
     }
 
@@ -269,12 +307,11 @@ impl ArrowDeserializer {
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
     ) -> Self {
         let mut metadata_fields = metadata_fields.to_vec();
-        metadata_fields
-            .push(MetadataField {
-                field_name: LOOKUP_KEY_INDEX_FIELD.to_string(),
-                key: LOOKUP_KEY_INDEX_FIELD.to_string(),
-                data_type: Some(DataType::UInt64),
-            });
+        metadata_fields.push(MetadataField {
+            field_name: LOOKUP_KEY_INDEX_FIELD.to_string(),
+            key: LOOKUP_KEY_INDEX_FIELD.to_string(),
+            data_type: Some(DataType::UInt64),
+        });
 
         Self::with_schema_resolver_and_raw_schema(
             format,
@@ -283,10 +320,10 @@ impl ArrowDeserializer {
             None,
             &metadata_fields,
             bad_data,
-            schema_resolver
+            schema_resolver,
         )
     }
-    
+
     fn with_schema_resolver_and_raw_schema(
         format: Format,
         framing: Option<Framing>,
@@ -305,20 +342,22 @@ impl ArrowDeserializer {
         } else {
             DescriptorPool::global()
         };
-        
+
         let metadata_names: HashSet<_> = metadata_fields.iter().map(|f| &f.field_name).collect();
 
         let schema_without_additional = {
-            let fields = schema_without_timestamp.fields().iter()
+            let fields = schema_without_timestamp
+                .fields()
+                .iter()
                 .filter(|f| !metadata_names.contains(f.name()))
                 .map(|f| f.clone())
                 .collect::<Vec<_>>();
-            Arc::new(Schema::new_with_metadata(fields, schema_without_timestamp.metadata.clone()))
+            Arc::new(Schema::new_with_metadata(
+                fields,
+                schema_without_timestamp.metadata.clone(),
+            ))
         };
-        
-        println!("Schema without additional = {:?}", schema_without_additional);
-        println!("metadata_names = {:?}", metadata_names);
-        
+
         let buffer_decoder = match format {
             Format::Json(..)
             | Format::Avro(AvroFormat {
@@ -330,11 +369,11 @@ impl ArrowDeserializer {
                 ..
             }) => BufferDecoder::JsonDecoder {
                 decoder: arrow_json::reader::ReaderBuilder::new(schema_without_additional.clone())
-                .with_limit_to_batch_size(false)
-                .with_strict_mode(false)
-                .with_allow_bad_data(matches!(bad_data, BadData::Drop { .. }))
-                .build_decoder()
-                .unwrap(),
+                    .with_limit_to_batch_size(false)
+                    .with_strict_mode(false)
+                    .with_allow_bad_data(matches!(bad_data, BadData::Drop { .. }))
+                    .build_decoder()
+                    .unwrap(),
                 buffered_count: 0,
                 buffered_since: Instant::now(),
             },
@@ -345,7 +384,8 @@ impl ArrowDeserializer {
             format: Arc::new(format),
             framing: framing.map(Arc::new),
             buffer_decoder,
-            timestamp_builder: timestamp_idx.map(|i| (i, TimestampNanosecondBuilder::with_capacity(128))),
+            timestamp_builder: timestamp_idx
+                .map(|i| (i, TimestampNanosecondBuilder::with_capacity(128))),
             final_schema: schema_without_timestamp,
             decoder_schema: schema_without_additional,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
@@ -373,9 +413,18 @@ impl ArrowDeserializer {
         msg: &[u8],
         additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
     ) -> Vec<SourceError> {
-        self.deserialize_slice_int(msg, None, additional_fields).await
+        self.deserialize_slice_int(msg, None, additional_fields)
+            .await
     }
-    
+
+    pub fn deserialize_null(
+        &mut self,
+        additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
+    ) {
+        self.buffer_decoder.push_null(&self.decoder_schema);
+        self.add_additional_fields(additional_fields, 1);
+    }
+
     async fn deserialize_slice_int(
         &mut self,
         msg: &[u8],
@@ -399,6 +448,8 @@ impl ArrowDeserializer {
             }
         };
 
+        self.add_additional_fields(additional_fields, count);
+
         if let Some(timestamp) = timestamp {
             let (_, b) = self
                 .timestamp_builder
@@ -410,6 +461,14 @@ impl ArrowDeserializer {
             }
         }
 
+        errors
+    }
+
+    fn add_additional_fields(
+        &mut self,
+        additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
+        count: usize,
+    ) {
         if let Some(additional_fields) = additional_fields {
             if self.additional_fields_builder.is_none() {
                 let mut builders = HashMap::new();
@@ -431,54 +490,51 @@ impl ArrowDeserializer {
                 add_additional_fields(builders, k, v, count);
             }
         }
-
-        errors
     }
 
     pub fn should_flush(&self) -> bool {
         self.buffer_decoder.should_flush()
     }
-    
+
     pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
-        let (mut arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
+        let (arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
             Ok((a, b)) => (a, b),
             Err(e) => return Some(Err(e)),
         };
-        
-        println!("ARrays = {:?}", arrays);
-        println!("error mask = {:?}", error_mask);
+
+        let mut arrays: HashMap<_, _> = arrays
+            .into_iter()
+            .zip(self.decoder_schema.fields.iter())
+            .map(|(a, f)| (f.name().as_str(), a))
+            .collect();
 
         if let Some(additional_fields) = &mut self.additional_fields_builder {
             for (name, builder) in additional_fields {
-                let (idx, _) = self
-                    .final_schema
-                    .column_with_name(&name)
-                    .unwrap_or_else(|| panic!("Field '{}' not found in schema", name));
-
                 let mut array = builder.finish();
                 if let Some(error_mask) = &error_mask {
                     array = kernels::filter::filter(&array, error_mask).unwrap();
                 }
-                
-                println!("Schema = {:?}", self.final_schema);
 
-                arrays.insert(idx, array);
+                arrays.insert(name.as_str(), array);
             }
         };
 
-        println!("With add = {:?}", arrays);
-
-        if let Some((idx, timestamp)) = &mut self.timestamp_builder {
+        if let Some((_, timestamp)) = &mut self.timestamp_builder {
             let array = if let Some(error_mask) = &error_mask {
                 kernels::filter::filter(&timestamp.finish(), error_mask).unwrap()
             } else {
                 Arc::new(timestamp.finish())
             };
 
-            arrays.insert(*idx, array);
+            arrays.insert(TIMESTAMP_FIELD, array);
         }
-        
-        println!("With timestamp ={:?}", arrays);
+
+        let arrays = self
+            .final_schema
+            .fields
+            .iter()
+            .map(|f| arrays.get(f.name().as_str()).unwrap().clone())
+            .collect();
 
         Some(Ok(
             RecordBatch::try_new(self.final_schema.clone(), arrays).unwrap()
@@ -588,7 +644,6 @@ impl ArrowDeserializer {
     }
 
     fn deserialize_raw_string(&mut self, msg: &[u8]) {
-        println!("Deserializing raw string {:?}", msg);
         let (col, _) = self
             .decoder_schema
             .column_with_name("value")

@@ -1,7 +1,11 @@
 pub mod lookup;
 pub mod sink;
 
+use crate::redis::lookup::RedisLookup;
+use crate::redis::sink::{GeneralConnection, RedisSinkFunc};
+use crate::{pull_opt, pull_option_to_u64};
 use anyhow::{anyhow, bail};
+use arrow::datatypes::{DataType, Schema};
 use arroyo_formats::de::ArrowDeserializer;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector, LookupConnector, MetadataDef};
@@ -11,6 +15,7 @@ use arroyo_rpc::api_types::connections::{
     TestSourceMessage,
 };
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::OperatorConfig;
 use redis::aio::ConnectionManager;
@@ -19,13 +24,8 @@ use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use arrow::datatypes::{DataType, Schema};
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
-use arroyo_rpc::schema_resolver::FailingSchemaResolver;
-use crate::redis::lookup::RedisLookup;
-use crate::redis::sink::{GeneralConnection, RedisSinkFunc};
-use crate::{pull_opt, pull_option_to_u64};
 
 pub struct RedisConnector {}
 
@@ -463,7 +463,7 @@ impl Connector for RedisConnector {
                     .format
                     .ok_or_else(|| anyhow!("Redis table must have a format"))?,
                 schema,
-                &config.metadata_fields,                
+                &config.metadata_fields,
                 config.bad_data.unwrap_or_default(),
                 Arc::new(FailingSchemaResolver::new()),
             ),

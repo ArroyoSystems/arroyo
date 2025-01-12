@@ -350,7 +350,7 @@ impl Serialize for DebeziumOp {
     }
 }
 
-#[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Copy, Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
 pub enum JoinType {
     /// Inner Join
     Inner,
