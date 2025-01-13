@@ -239,7 +239,7 @@ impl OperatorConstructor for LookupJoinConstructor {
             .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
             .make_lookup(operator_config.clone(), lookup_schema.clone())?;
 
-        let max_capacity_bytes = config.max_capacity_bytes.unwrap_or_else(|| 8 * 1024 * 1024);
+        let max_capacity_bytes = config.max_capacity_bytes.unwrap_or(8 * 1024 * 1024);
         let cache = (max_capacity_bytes > 0).then(|| {
             let mut c = Cache::builder()
                 .weigher(|k: &OwnedRow, v: &OwnedRow| (k.as_ref().len() + v.as_ref().len()) as u32)
