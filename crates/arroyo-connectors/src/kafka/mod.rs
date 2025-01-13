@@ -664,6 +664,7 @@ impl KafkaTester {
                     let mut deserializer = ArrowDeserializer::new(
                         format.clone(),
                         Arc::new(aschema),
+                        &schema.metadata_fields(),
                         None,
                         BadData::Fail {},
                     );
@@ -701,6 +702,7 @@ impl KafkaTester {
                 let mut deserializer = ArrowDeserializer::new(
                     format.clone(),
                     Arc::new(aschema),
+                    &schema.metadata_fields(),
                     None,
                     BadData::Fail {},
                 );
