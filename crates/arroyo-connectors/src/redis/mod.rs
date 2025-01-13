@@ -303,13 +303,13 @@ impl Connector for RedisConnector {
             "lookup" => {
                 // for look-up tables, we require that there's a primary key metadata field
                 for f in &schema.fields {
-                    if schema.primary_keys.contains(&f.field_name) {
-                        if f.metadata_key.as_ref().map(|k| k != "key").unwrap_or(true) {
-                            bail!(
-                                "Redis lookup tables must have a PRIMARY KEY field defined as \
-                            `field_name TEXT GENERATED ALWAYS AS (metadata('key')) STORED`"
-                            );
-                        }
+                    if schema.primary_keys.contains(&f.field_name)
+                        && f.metadata_key.as_ref().map(|k| k != "key").unwrap_or(true)
+                    {
+                        bail!(
+                            "Redis lookup tables must have a PRIMARY KEY field defined as \
+                        `field_name TEXT GENERATED ALWAYS AS (metadata('key')) STORED`"
+                        );
                     }
                 }
 

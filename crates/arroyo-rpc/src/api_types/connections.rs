@@ -257,6 +257,7 @@ pub struct ConnectionSchema {
 }
 
 impl ConnectionSchema {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         format: Option<Format>,
         bad_data: Option<BadData>,
