@@ -1,4 +1,4 @@
-use crate::redis::{ListOperation, RedisClient, RedisTable, TableType, Target};
+use crate::redis::{ListOperation, RedisClient, Target};
 use arrow::array::{AsArray, RecordBatch};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, ErrorReporter, OperatorContext};
@@ -19,8 +19,8 @@ const FLUSH_BYTES: usize = 10 * 1024 * 1024;
 
 pub struct RedisSinkFunc {
     pub serializer: ArrowSerializer,
-    pub table: RedisTable,
-    pub client: RedisClient,
+    pub target: Target,
+    pub(crate) client: RedisClient,
     pub cmd_q: Option<(Sender<u32>, Receiver<RedisCmd>)>,
 
     pub rx: Receiver<u32>,
@@ -229,19 +229,19 @@ impl ArrowOperator for RedisSinkFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
-        match &self.table.connector_type {
-            TableType::Target(Target::ListTable {
+        match &self.target {
+            Target::ListTable {
                 list_key_column: Some(key),
                 ..
-            })
-            | TableType::Target(Target::StringTable {
+            }
+            | Target::StringTable {
                 key_column: Some(key),
                 ..
-            })
-            | TableType::Target(Target::HashTable {
+            }
+            | Target::HashTable {
                 hash_key_column: Some(key),
                 ..
-            }) => {
+            } => {
                 self.key_index = Some(
                     ctx.in_schemas
                         .first()
@@ -258,9 +258,9 @@ impl ArrowOperator for RedisSinkFunc {
             _ => {}
         }
 
-        if let TableType::Target(Target::HashTable {
+        if let Target::HashTable {
             hash_field_column, ..
-        }) = &self.table.connector_type
+        } = &self.target
         {
             self.hash_index = Some(ctx.in_schemas.first().expect("no in-schema for redis sink!")
                 .schema
@@ -282,17 +282,15 @@ impl ArrowOperator for RedisSinkFunc {
                         size_estimate: 0,
                         last_flushed: Instant::now(),
                         max_push_keys: HashSet::new(),
-                        behavior: match self.table.connector_type {
-                            TableType::Target(Target::StringTable { ttl_secs, .. }) => {
-                                RedisBehavior::Set {
-                                    ttl: ttl_secs.map(|t| t.get() as usize),
-                                }
-                            }
-                            TableType::Target(Target::ListTable {
+                        behavior: match &self.target {
+                            Target::StringTable { ttl_secs, .. } => RedisBehavior::Set {
+                                ttl: ttl_secs.map(|t| t.get() as usize),
+                            },
+                            Target::ListTable {
                                 max_length,
                                 operation,
                                 ..
-                            }) => {
+                            } => {
                                 let max = max_length.map(|x| x.get() as usize);
                                 match operation {
                                     ListOperation::Append => {
@@ -303,7 +301,7 @@ impl ArrowOperator for RedisSinkFunc {
                                     }
                                 }
                             }
-                            TableType::Target(Target::HashTable { .. }) => RedisBehavior::Hash,
+                            Target::HashTable { .. } => RedisBehavior::Hash,
                         },
                     }
                     .start();
@@ -328,39 +326,37 @@ impl ArrowOperator for RedisSinkFunc {
         _: &mut dyn Collector,
     ) {
         for (i, value) in self.serializer.serialize(&batch).enumerate() {
-            match &self.table.connector_type {
-                TableType::Target(target) => match &target {
-                    Target::StringTable { key_prefix, .. } => {
-                        let key = self.make_key(key_prefix, &batch, i);
-                        self.tx
-                            .send(RedisCmd::Data { key, value })
-                            .await
-                            .expect("Redis writer panicked");
-                    }
-                    Target::ListTable { list_prefix, .. } => {
-                        let key = self.make_key(list_prefix, &batch, i);
+            match &self.target {
+                Target::StringTable { key_prefix, .. } => {
+                    let key = self.make_key(key_prefix, &batch, i);
+                    self.tx
+                        .send(RedisCmd::Data { key, value })
+                        .await
+                        .expect("Redis writer panicked");
+                }
+                Target::ListTable { list_prefix, .. } => {
+                    let key = self.make_key(list_prefix, &batch, i);
 
-                        self.tx
-                            .send(RedisCmd::Data { key, value })
-                            .await
-                            .expect("Redis writer panicked");
-                    }
-                    Target::HashTable {
-                        hash_key_prefix, ..
-                    } => {
-                        let key = self.make_key(hash_key_prefix, &batch, i);
-                        let field = batch
-                            .column(self.hash_index.expect("no hash index"))
-                            .as_string::<i32>()
-                            .value(i)
-                            .to_string();
+                    self.tx
+                        .send(RedisCmd::Data { key, value })
+                        .await
+                        .expect("Redis writer panicked");
+                }
+                Target::HashTable {
+                    hash_key_prefix, ..
+                } => {
+                    let key = self.make_key(hash_key_prefix, &batch, i);
+                    let field = batch
+                        .column(self.hash_index.expect("no hash index"))
+                        .as_string::<i32>()
+                        .value(i)
+                        .to_string();
 
-                        self.tx
-                            .send(RedisCmd::HData { key, field, value })
-                            .await
-                            .expect("Redis writer panicked");
-                    }
-                },
+                    self.tx
+                        .send(RedisCmd::HData { key, field, value })
+                        .await
+                        .expect("Redis writer panicked");
+                }
             };
         }
     }

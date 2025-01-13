@@ -1,15 +1,18 @@
 use crate::operator::ConstructedOperator;
 use anyhow::{anyhow, bail};
-use arrow::datatypes::{DataType, Field};
+use arrow::array::{ArrayRef, RecordBatch};
+use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
-use arroyo_types::DisplayAsSql;
+use arroyo_types::{DisplayAsSql, SourceError};
+use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 
@@ -118,6 +121,17 @@ pub trait Connector: Send {
         table: Self::TableT,
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator>;
+
+    #[allow(unused)]
+    fn make_lookup(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+        schema: Arc<Schema>,
+    ) -> anyhow::Result<Box<dyn LookupConnector + Send>> {
+        bail!("{} is not a lookup connector", self.name())
+    }
 }
 #[allow(clippy::type_complexity)]
 #[allow(clippy::wrong_self_convention)]
@@ -187,6 +201,12 @@ pub trait ErasedConnector: Send {
     ) -> anyhow::Result<Connection>;
 
     fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<ConstructedOperator>;
+
+    fn make_lookup(
+        &self,
+        config: OperatorConfig,
+        schema: Arc<Schema>,
+    ) -> anyhow::Result<Box<dyn LookupConnector + Send>>;
 }
 
 impl<C: Connector> ErasedConnector for C {
@@ -335,4 +355,24 @@ impl<C: Connector> ErasedConnector for C {
             config,
         )
     }
+
+    fn make_lookup(
+        &self,
+        config: OperatorConfig,
+        schema: Arc<Schema>,
+    ) -> anyhow::Result<Box<dyn LookupConnector + Send>> {
+        self.make_lookup(
+            self.parse_config(&config.connection)?,
+            self.parse_table(&config.table)?,
+            config,
+            schema,
+        )
+    }
+}
+
+#[async_trait]
+pub trait LookupConnector {
+    fn name(&self) -> String;
+
+    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, SourceError>>;
 }

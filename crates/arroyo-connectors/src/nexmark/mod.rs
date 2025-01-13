@@ -91,6 +91,7 @@ pub fn nexmark_schema() -> ConnectionSchema {
             .collect(),
         definition: None,
         inferred: None,
+        primary_keys: Default::default(),
     }
 }
 

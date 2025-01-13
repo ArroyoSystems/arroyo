@@ -70,6 +70,21 @@ message JoinOperator {
   optional uint64 ttl_micros = 6;
 }
 
+message LookupJoinCondition {
+  bytes left_expr = 1;
+  string right_key = 2;
+}
+
+message LookupJoinOperator {
+  ArroyoSchema input_schema = 1;
+  ArroyoSchema lookup_schema = 2;
+  ConnectorOp connector = 3;
+  repeated LookupJoinCondition key_exprs = 4;
+  JoinType join_type = 5;
+  optional uint64 ttl_micros = 6;
+  optional uint64 max_capacity_bytes = 7;
+}
+
 message WindowFunctionOperator {
   string name = 1;
   ArroyoSchema input_schema = 2;

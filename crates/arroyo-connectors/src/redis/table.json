@@ -114,6 +114,15 @@
                         "target"
                     ],
                     "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "Lookup",
+                    "properties": {
+                        "lookup": {
+                            "type": "object"
+                        }
+                    }
                 }
             ]
         }

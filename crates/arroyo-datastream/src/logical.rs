@@ -32,6 +32,7 @@ pub enum OperatorName {
     AsyncUdf,
     Join,
     InstantJoin,
+    LookupJoin,
     WindowFunction,
     TumblingWindowAggregate,
     SlidingWindowAggregate,
@@ -133,16 +134,22 @@ impl TryFrom<LogicalProgram> for PipelineGraph {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LogicalEdge {
     pub edge_type: LogicalEdgeType,
-    pub schema: ArroyoSchema,
+    pub schema: Arc<ArroyoSchema>,
 }
 
 impl LogicalEdge {
     pub fn new(edge_type: LogicalEdgeType, schema: ArroyoSchema) -> Self {
-        LogicalEdge { edge_type, schema }
+        LogicalEdge {
+            edge_type,
+            schema: Arc::new(schema),
+        }
     }
 
     pub fn project_all(edge_type: LogicalEdgeType, schema: ArroyoSchema) -> Self {
-        LogicalEdge { edge_type, schema }
+        LogicalEdge {
+            edge_type,
+            schema: Arc::new(schema),
+        }
     }
 }
 
@@ -156,7 +163,7 @@ pub struct ChainedLogicalOperator {
 #[derive(Clone, Debug)]
 pub struct OperatorChain {
     pub(crate) operators: Vec<ChainedLogicalOperator>,
-    pub(crate) edges: Vec<ArroyoSchema>,
+    pub(crate) edges: Vec<Arc<ArroyoSchema>>,
 }
 
 impl OperatorChain {
@@ -167,7 +174,9 @@ impl OperatorChain {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&ChainedLogicalOperator, Option<&ArroyoSchema>)> {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (&ChainedLogicalOperator, Option<&Arc<ArroyoSchema>>)> {
         self.operators
             .iter()
             .zip_longest(self.edges.iter())
@@ -177,10 +186,10 @@ impl OperatorChain {
 
     pub fn iter_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&mut ChainedLogicalOperator, Option<&mut ArroyoSchema>)> {
+    ) -> impl Iterator<Item = (&mut ChainedLogicalOperator, Option<&Arc<ArroyoSchema>>)> {
         self.operators
             .iter_mut()
-            .zip_longest(self.edges.iter_mut())
+            .zip_longest(self.edges.iter())
             .map(|e| e.left_and_right())
             .map(|(l, r)| (l.unwrap(), r))
     }
@@ -376,6 +385,7 @@ impl LogicalProgram {
                     OperatorName::Join => "join-with-expiration".to_string(),
                     OperatorName::InstantJoin => "windowed-join".to_string(),
                     OperatorName::WindowFunction => "sql-window-function".to_string(),
+                    OperatorName::LookupJoin => "lookup-join".to_string(),
                     OperatorName::TumblingWindowAggregate => {
                         "sql-tumbling-window-aggregate".to_string()
                     }
@@ -436,7 +446,7 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
                         edges: node
                             .edges
                             .into_iter()
-                            .map(|e| Ok(e.try_into()?))
+                            .map(|e| Ok(Arc::new(e.try_into()?)))
                             .collect::<anyhow::Result<Vec<_>>>()?,
                     },
                     parallelism: node.parallelism as usize,
@@ -454,7 +464,7 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
                 target,
                 LogicalEdge {
                     edge_type: edge.edge_type().into(),
-                    schema: schema.clone().try_into()?,
+                    schema: Arc::new(schema.clone().try_into()?),
                 },
             );
         }
@@ -621,7 +631,7 @@ impl From<LogicalProgram> for ArrowProgram {
                         .operator_chain
                         .edges
                         .iter()
-                        .map(|edge| edge.clone().into())
+                        .map(|edge| (**edge).clone().into())
                         .collect(),
                 }
             })
@@ -637,7 +647,7 @@ impl From<LogicalProgram> for ArrowProgram {
                 api::ArrowEdge {
                     source: source.index() as i32,
                     target: target.index() as i32,
-                    schema: Some(edge.schema.clone().into()),
+                    schema: Some((*edge.schema).clone().into()),
                     edge_type: edge_type as i32,
                 }
             })

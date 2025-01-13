@@ -26,6 +26,7 @@ use self::{
     window_fn::WindowFunctionExtension,
 };
 use crate::builder::{NamedNode, Planner};
+use crate::extension::lookup::LookupJoin;
 use crate::schemas::{add_timestamp_field, has_timestamp_field};
 use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
 use join::JoinExtension;
@@ -34,12 +35,14 @@ pub(crate) mod aggregate;
 pub(crate) mod debezium;
 pub(crate) mod join;
 pub(crate) mod key_calculation;
+pub(crate) mod lookup;
 pub(crate) mod remote_table;
 pub(crate) mod sink;
 pub(crate) mod table_source;
 pub(crate) mod updating_aggregate;
 pub(crate) mod watermark_node;
 pub(crate) mod window_fn;
+
 pub(crate) trait ArroyoExtension: Debug {
     // if the extension has a name, return it so that we can memoize.
     fn node_name(&self) -> Option<NamedNode>;
@@ -85,6 +88,7 @@ impl<'a> TryFrom<&'a dyn UserDefinedLogicalNode> for &'a dyn ArroyoExtension {
             .or_else(|_| try_from_t::<ToDebeziumExtension>(node))
             .or_else(|_| try_from_t::<DebeziumUnrollingExtension>(node))
             .or_else(|_| try_from_t::<UpdatingAggregateExtension>(node))
+            .or_else(|_| try_from_t::<LookupJoin>(node))
             .map_err(|_| DataFusionError::Plan(format!("unexpected node: {}", node.name())))
     }
 }

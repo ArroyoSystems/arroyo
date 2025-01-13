@@ -132,8 +132,7 @@ pub(crate) fn avro_to_json(value: AvroValue) -> JsonValue {
 mod tests {
     use crate::avro::schema::to_arrow;
     use crate::de::ArrowDeserializer;
-    use arrow_array::builder::{make_builder, ArrayBuilder};
-    use arrow_array::RecordBatch;
+
     use arrow_json::writer::record_batch_to_vec;
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
@@ -214,7 +213,7 @@ mod tests {
     fn deserializer_with_schema(
         format: AvroFormat,
         writer_schema: Option<&str>,
-    ) -> (ArrowDeserializer, Vec<Box<dyn ArrayBuilder>>, ArroyoSchema) {
+    ) -> (ArrowDeserializer, ArroyoSchema) {
         let arrow_schema = if format.into_unstructured_json {
             Schema::new(vec![Field::new("value", DataType::Utf8, false)])
         } else {
@@ -239,13 +238,6 @@ mod tests {
             ArroyoSchema::from_schema_keys(Arc::new(Schema::new(fields)), vec![]).unwrap()
         };
 
-        let builders: Vec<_> = arroyo_schema
-            .schema
-            .fields
-            .iter()
-            .map(|f| make_builder(f.data_type(), 8))
-            .collect();
-
         let resolver: Arc<dyn SchemaResolver + Sync> = if let Some(schema) = &writer_schema {
             Arc::new(FixedSchemaResolver::new(
                 if format.confluent_schema_registry {
@@ -263,11 +255,11 @@ mod tests {
             ArrowDeserializer::with_schema_resolver(
                 Format::Avro(format),
                 None,
-                arroyo_schema.clone(),
+                Arc::new(arroyo_schema.clone()),
+                &[],
                 BadData::Fail {},
                 resolver,
             ),
-            builders,
             arroyo_schema,
         )
     }
@@ -277,23 +269,14 @@ mod tests {
         writer_schema: Option<&str>,
         message: &[u8],
     ) -> Vec<serde_json::Map<String, serde_json::Value>> {
-        let (mut deserializer, mut builders, arroyo_schema) =
-            deserializer_with_schema(format.clone(), writer_schema);
+        let (mut deserializer, _) = deserializer_with_schema(format.clone(), writer_schema);
 
         let errors = deserializer
-            .deserialize_slice(&mut builders, message, SystemTime::now(), None)
+            .deserialize_slice(message, SystemTime::now(), None)
             .await;
         assert_eq!(errors, vec![]);
 
-        let batch = if format.into_unstructured_json {
-            RecordBatch::try_new(
-                arroyo_schema.schema,
-                builders.into_iter().map(|mut b| b.finish()).collect(),
-            )
-            .unwrap()
-        } else {
-            deserializer.flush_buffer().unwrap().unwrap()
-        };
+        let batch = deserializer.flush_buffer().unwrap().unwrap();
 
         record_batch_to_vec(&batch, true, arrow_json::writer::TimestampFormat::RFC3339)
             .unwrap()

@@ -10,7 +10,6 @@ use datafusion::logical_expr::{LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::generated::datafusion::PhysicalPlanNode;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use prost::Message;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub(crate) const JOIN_NODE_NAME: &str = "JoinNode";
@@ -80,7 +79,7 @@ impl ArroyoExtension for JoinExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema().as_ref().clone().into())).unwrap()
+        ArroyoSchema::from_schema_unkeyed(self.schema().inner().clone()).unwrap()
     }
 }
 

@@ -5,14 +5,10 @@ use arroyo_state::tables::ErasedTable;
 use arroyo_state::{BackingStore, StateBackend};
 use rand::random;
 
-use arrow::array::{Array, StringArray};
-use arrow::datatypes::TimeUnit;
-use std::collections::{HashMap, VecDeque};
-use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
-
 use crate::kafka::SourceOffset;
+use arrow::array::{Array, StringArray};
+use arrow::datatypes::DataType::UInt64;
+use arrow::datatypes::TimeUnit;
 use arroyo_operator::context::{
     batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext,
 };
@@ -29,6 +25,10 @@ use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use super::KafkaSourceFunc;
@@ -108,7 +108,7 @@ impl KafkaTopicTester {
             operator_ids: vec![task_info.operator_id.clone()],
         });
 
-        let out_schema = Some(ArroyoSchema::new_unkeyed(
+        let out_schema = Some(Arc::new(ArroyoSchema::new_unkeyed(
             Arc::new(Schema::new(vec![
                 Field::new(
                     "_timestamp",
@@ -118,7 +118,7 @@ impl KafkaTopicTester {
                 Field::new("value", DataType::Utf8, false),
             ])),
             0,
-        ));
+        )));
 
         let task_info = Arc::new(task_info);
 
@@ -389,6 +389,7 @@ async fn test_kafka_with_metadata_fields() {
     let metadata_fields = vec![MetadataField {
         field_name: "offset".to_string(),
         key: "offset_id".to_string(),
+        data_type: Some(UInt64),
     }];
 
     // Set metadata fields in KafkaSourceFunc
@@ -420,7 +421,7 @@ async fn test_kafka_with_metadata_fields() {
         command_tx.clone(),
         1,
         vec![],
-        Some(ArroyoSchema::new_unkeyed(
+        Some(Arc::new(ArroyoSchema::new_unkeyed(
             Arc::new(Schema::new(vec![
                 Field::new(
                     "_timestamp",
@@ -431,7 +432,7 @@ async fn test_kafka_with_metadata_fields() {
                 Field::new("offset", DataType::Int64, false),
             ])),
             0,
-        )),
+        ))),
         kafka.tables(),
     )
     .await;

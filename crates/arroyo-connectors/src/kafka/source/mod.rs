@@ -173,6 +173,7 @@ impl KafkaSourceFunc {
                 self.format.clone(),
                 self.framing.clone(),
                 self.bad_data.clone(),
+                &self.metadata_fields,
                 schema_resolver.clone(),
             );
         } else {
@@ -180,6 +181,7 @@ impl KafkaSourceFunc {
                 self.format.clone(),
                 self.framing.clone(),
                 self.bad_data.clone(),
+                &self.metadata_fields,
             );
         }
 
@@ -201,7 +203,7 @@ impl KafkaSourceFunc {
                                 let connector_metadata = if !self.metadata_fields.is_empty() {
                                     let mut connector_metadata = HashMap::new();
                                     for f in &self.metadata_fields {
-                                        connector_metadata.insert(&f.field_name, match f.key.as_str() {
+                                        connector_metadata.insert(f.field_name.as_str(), match f.key.as_str() {
                                             "offset_id" => FieldValueType::Int64(msg.offset()),
                                             "partition" => FieldValueType::Int32(msg.partition()),
                                             "topic" => FieldValueType::String(topic),

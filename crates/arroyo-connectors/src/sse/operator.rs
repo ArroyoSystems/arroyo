@@ -149,6 +149,7 @@ impl SSESourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &[],
         );
 
         let mut client = eventsource_client::ClientBuilder::for_url(&self.url).unwrap();

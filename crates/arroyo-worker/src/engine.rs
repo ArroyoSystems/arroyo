@@ -1,6 +1,7 @@
 use crate::arrow::async_udf::AsyncUdfConstructor;
 use crate::arrow::instant_join::InstantJoinConstructor;
 use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
+use crate::arrow::lookup_join::LookupJoinConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
@@ -54,8 +55,8 @@ pub struct SubtaskNode {
     pub node_id: u32,
     pub subtask_idx: usize,
     pub parallelism: usize,
-    pub in_schemas: Vec<ArroyoSchema>,
-    pub out_schema: Option<ArroyoSchema>,
+    pub in_schemas: Vec<Arc<ArroyoSchema>>,
+    pub out_schema: Option<Arc<ArroyoSchema>>,
     pub node: OperatorNode,
 }
 
@@ -97,7 +98,7 @@ pub struct PhysicalGraphEdge {
     edge_idx: usize,
     in_logical_idx: usize,
     out_logical_idx: usize,
-    schema: ArroyoSchema,
+    schema: Arc<ArroyoSchema>,
     edge: LogicalEdgeType,
     tx: Option<BatchSender>,
     rx: Option<BatchReceiver>,
@@ -773,8 +774,8 @@ pub async fn construct_node(
     subtask_idx: u32,
     parallelism: u32,
     input_partitions: u32,
-    in_schemas: Vec<ArroyoSchema>,
-    out_schema: Option<ArroyoSchema>,
+    in_schemas: Vec<Arc<ArroyoSchema>>,
+    out_schema: Option<Arc<ArroyoSchema>>,
     restore_from: Option<&CheckpointMetadata>,
     control_tx: Sender<ControlResp>,
     registry: Arc<Registry>,
@@ -874,6 +875,7 @@ pub fn construct_operator(
         OperatorName::ExpressionWatermark => Box::new(WatermarkGeneratorConstructor),
         OperatorName::Join => Box::new(JoinWithExpirationConstructor),
         OperatorName::InstantJoin => Box::new(InstantJoinConstructor),
+        OperatorName::LookupJoin => Box::new(LookupJoinConstructor),
         OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(config).unwrap();

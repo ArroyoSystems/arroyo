@@ -37,6 +37,17 @@ pub mod grpc {
     pub mod api {
         #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
         tonic::include_proto!("api");
+
+        impl From<self::JoinType> for arroyo_types::JoinType {
+            fn from(value: JoinType) -> Self {
+                match value {
+                    JoinType::Inner => arroyo_types::JoinType::Inner,
+                    JoinType::Left => arroyo_types::JoinType::Left,
+                    JoinType::Right => arroyo_types::JoinType::Right,
+                    JoinType::Full => arroyo_types::JoinType::Full,
+                }
+            }
+        }
     }
 
     pub const API_FILE_DESCRIPTOR_SET: &[u8] =
@@ -190,6 +201,8 @@ pub struct RateLimit {
 pub struct MetadataField {
     pub field_name: String,
     pub key: String,
+    #[serde(default)]
+    pub data_type: Option<DataType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

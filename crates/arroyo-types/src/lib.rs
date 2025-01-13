@@ -350,7 +350,7 @@ impl Serialize for DebeziumOp {
     }
 }
 
-#[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Copy, Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
 pub enum JoinType {
     /// Inner Join
     Inner,
@@ -640,6 +640,8 @@ pub fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
     };
     start..=end
 }
+
+pub const LOOKUP_KEY_INDEX_FIELD: &str = "__lookup_key_index";
 
 #[cfg(test)]
 mod tests {

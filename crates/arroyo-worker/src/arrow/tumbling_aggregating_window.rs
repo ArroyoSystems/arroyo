@@ -181,7 +181,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
             .transpose()?;
 
         let aggregate_with_timestamp_schema =
-            add_timestamp_field_arrow(finish_execution_plan.schema());
+            add_timestamp_field_arrow((*finish_execution_plan.schema()).clone());
 
         Ok(ConstructedOperator::from_operator(Box::new(
             TumblingAggregatingWindowFunc {

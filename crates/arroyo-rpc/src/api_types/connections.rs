@@ -1,14 +1,14 @@
+use crate::df::{ArroyoSchema, ArroyoSchemaRef};
 use crate::formats::{BadData, Format, Framing};
 use crate::{primitive_to_sql, MetadataField};
+use ahash::HashSet;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
+use arroyo_types::ArroyoExtensionType;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-
-use crate::df::{ArroyoSchema, ArroyoSchemaRef};
-use arroyo_types::ArroyoExtensionType;
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -51,6 +51,7 @@ pub struct ConnectionProfilePost {
 pub enum ConnectionType {
     Source,
     Sink,
+    Lookup,
 }
 
 impl Display for ConnectionType {
@@ -58,6 +59,7 @@ impl Display for ConnectionType {
         match self {
             ConnectionType::Source => write!(f, "SOURCE"),
             ConnectionType::Sink => write!(f, "SINK"),
+            ConnectionType::Lookup => write!(f, "LOOKUP"),
         }
     }
 }
@@ -250,9 +252,12 @@ pub struct ConnectionSchema {
     pub fields: Vec<SourceField>,
     pub definition: Option<SchemaDefinition>,
     pub inferred: Option<bool>,
+    #[serde(default)]
+    pub primary_keys: HashSet<String>,
 }
 
 impl ConnectionSchema {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         format: Option<Format>,
         bad_data: Option<BadData>,
@@ -261,6 +266,7 @@ impl ConnectionSchema {
         fields: Vec<SourceField>,
         definition: Option<SchemaDefinition>,
         inferred: Option<bool>,
+        primary_keys: HashSet<String>,
     ) -> anyhow::Result<Self> {
         let s = ConnectionSchema {
             format,
@@ -270,6 +276,7 @@ impl ConnectionSchema {
             fields,
             definition,
             inferred,
+            primary_keys,
         };
 
         s.validate()
@@ -321,6 +328,7 @@ impl ConnectionSchema {
                 Some(MetadataField {
                     field_name: f.field_name.clone(),
                     key: f.metadata_key.clone()?,
+                    data_type: Some(Field::from(f.clone()).data_type().clone()),
                 })
             })
             .collect()

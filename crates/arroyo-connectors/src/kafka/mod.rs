@@ -641,14 +641,14 @@ impl KafkaTester {
                     let mut deserializer = ArrowDeserializer::with_schema_resolver(
                         format.clone(),
                         None,
-                        aschema.clone(),
+                        Arc::new(aschema),
+                        &schema.metadata_fields(),
                         BadData::Fail {},
                         Arc::new(schema_resolver),
                     );
-                    let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
+                        .deserialize_slice(&msg, SystemTime::now(), None)
                         .await
                         .into_iter()
                         .next();
@@ -663,14 +663,14 @@ impl KafkaTester {
                     let aschema: ArroyoSchema = schema.clone().into();
                     let mut deserializer = ArrowDeserializer::new(
                         format.clone(),
-                        aschema.clone(),
+                        Arc::new(aschema),
+                        &schema.metadata_fields(),
                         None,
                         BadData::Fail {},
                     );
-                    let mut builders = aschema.builders();
 
                     let mut error = deserializer
-                        .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
+                        .deserialize_slice(&msg, SystemTime::now(), None)
                         .await
                         .into_iter()
                         .next();
@@ -699,12 +699,16 @@ impl KafkaTester {
             }
             Format::Protobuf(_) => {
                 let aschema: ArroyoSchema = schema.clone().into();
-                let mut deserializer =
-                    ArrowDeserializer::new(format.clone(), aschema.clone(), None, BadData::Fail {});
-                let mut builders = aschema.builders();
+                let mut deserializer = ArrowDeserializer::new(
+                    format.clone(),
+                    Arc::new(aschema),
+                    &schema.metadata_fields(),
+                    None,
+                    BadData::Fail {},
+                );
 
                 let mut error = deserializer
-                    .deserialize_slice(&mut builders, &msg, SystemTime::now(), None)
+                    .deserialize_slice(&msg, SystemTime::now(), None)
                     .await
                     .into_iter()
                     .next();

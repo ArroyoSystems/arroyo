@@ -19,6 +19,7 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::logical_expr::UserDefinedLogicalNode;
 
+use crate::extension::lookup::LookupSource;
 use crate::extension::AsyncUDFExtension;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
 use datafusion::common::tree_node::{
@@ -215,6 +216,19 @@ impl SourceRewriter<'_> {
         })))
     }
 
+    fn mutate_lookup_table(
+        &self,
+        table_scan: &TableScan,
+        table: &ConnectorTable,
+    ) -> DFResult<Transformed<LogicalPlan>> {
+        Ok(Transformed::yes(LogicalPlan::Extension(Extension {
+            node: Arc::new(LookupSource {
+                table: table.clone(),
+                schema: table_scan.projected_schema.clone(),
+            }),
+        })))
+    }
+
     fn mutate_table_from_query(
         &self,
         table_scan: &TableScan,
@@ -273,6 +287,7 @@ impl TreeNodeRewriter for SourceRewriter<'_> {
 
         match table {
             Table::ConnectorTable(table) => self.mutate_connector_table(&table_scan, table),
+            Table::LookupTable(table) => self.mutate_lookup_table(&table_scan, table),
             Table::MemoryTable {
                 name,
                 fields: _,

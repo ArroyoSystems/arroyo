@@ -333,6 +333,7 @@ impl NatsSourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &[],
         );
 
         let nats_client = get_nats_client(&self.connection)

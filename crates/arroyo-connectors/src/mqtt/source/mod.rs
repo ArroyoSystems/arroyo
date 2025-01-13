@@ -101,6 +101,7 @@ impl MqttSourceFunc {
             self.format.clone(),
             self.framing.clone(),
             self.bad_data.clone(),
+            &self.metadata_fields,
         );
 
         if ctx.task_info.task_index > 0 {
@@ -152,7 +153,7 @@ impl MqttSourceFunc {
                             let connector_metadata = if !self.metadata_fields.is_empty() {
                                 let mut connector_metadata = HashMap::new();
                                 for mf in &self.metadata_fields {
-                                    connector_metadata.insert(&mf.field_name, match mf.key.as_str() {
+                                    connector_metadata.insert(mf.field_name.as_str(), match mf.key.as_str() {
                                         "topic" => FieldValueType::String(&topic),
                                         k => unreachable!("invalid metadata key '{}' for mqtt", k)
                                     });

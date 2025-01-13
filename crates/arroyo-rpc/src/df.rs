@@ -1,6 +1,6 @@
 use crate::grpc::api;
 use crate::{grpc, Converter, TIMESTAMP_FIELD};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use arrow::compute::kernels::numeric::div;
 use arrow::compute::{filter_record_batch, take};
 use arrow::datatypes::{DataType, Field, Schema, SchemaBuilder, TimeUnit};
@@ -382,6 +382,25 @@ impl ArroyoSchema {
             schema: Arc::new(unkeyed_schema),
             timestamp_index,
             key_indices: None,
+        })
+    }
+
+    pub fn with_field(&self, name: &str, data_type: DataType, nullable: bool) -> Result<Self> {
+        if self.schema.field_with_name(name).is_ok() {
+            bail!(
+                "cannot add field '{}' to schema, it is already present",
+                name
+            );
+        }
+        let mut fields = self.schema.fields().to_vec();
+        fields.push(Arc::new(Field::new(name, data_type, nullable)));
+        Ok(Self {
+            schema: Arc::new(Schema::new_with_metadata(
+                fields,
+                self.schema.metadata.clone(),
+            )),
+            timestamp_index: self.timestamp_index,
+            key_indices: self.key_indices.clone(),
         })
     }
 }

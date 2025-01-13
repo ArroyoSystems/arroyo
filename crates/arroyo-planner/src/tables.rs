@@ -1,9 +1,9 @@
+use arrow::compute::kernels::cast_utils::parse_interval_day_time;
+use arrow_schema::{DataType, Field, FieldRef, Schema};
+use arroyo_connectors::connector_for_type;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
-
-use arrow_schema::{DataType, Field, FieldRef, Schema};
-use arroyo_connectors::connector_for_type;
 
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
@@ -72,8 +72,11 @@ pub struct ConnectorTable {
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
     pub primary_keys: Arc<Vec<String>>,
-
     pub inferred_fields: Option<Vec<DFField>>,
+
+    // for lookup tables
+    pub lookup_cache_max_bytes: Option<u64>,
+    pub lookup_cache_ttl: Option<Duration>,
 }
 
 multifield_partial_ord!(
@@ -206,6 +209,8 @@ impl From<Connection> for ConnectorTable {
             idle_time: DEFAULT_IDLE_TIME,
             primary_keys: Arc::new(vec![]),
             inferred_fields: None,
+            lookup_cache_max_bytes: None,
+            lookup_cache_ttl: None,
         }
     }
 }
@@ -214,6 +219,7 @@ impl ConnectorTable {
     fn from_options(
         name: &str,
         connector: &str,
+        temporary: bool,
         mut fields: Vec<FieldSpec>,
         primary_keys: Vec<String>,
         options: &mut HashMap<String, String>,
@@ -246,6 +252,14 @@ impl ConnectorTable {
 
         let framing = Framing::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
+
+        if temporary {
+            if let Some(t) = options.insert("type".to_string(), "lookup".to_string()) {
+                if t != "lookup" {
+                    return plan_err!("Cannot have a temporary table with type '{}'; temporary tables must be type 'lookup'", t);
+                }
+            }
+        }
 
         let mut input_to_schema_fields = fields.clone();
 
@@ -294,6 +308,7 @@ impl ConnectorTable {
             schema_fields,
             None,
             Some(fields.is_empty()),
+            primary_keys.iter().cloned().collect(),
         )
         .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
 
@@ -317,6 +332,26 @@ impl ConnectorTable {
             .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
             .filter(|t| *t <= 0)
             .map(|t| Duration::from_micros(t as u64));
+
+        table.lookup_cache_max_bytes = options
+            .remove("lookup.cache.max_bytes")
+            .map(|t| u64::from_str(&t))
+            .transpose()
+            .map_err(|_| {
+                DataFusionError::Plan("lookup.cache.max_bytes must be set to a number".to_string())
+            })?;
+
+        table.lookup_cache_ttl = options
+            .remove("lookup.cache.ttl")
+            .map(|t| parse_interval_day_time(&t))
+            .transpose()
+            .map_err(|e| {
+                DataFusionError::Plan(format!("lookup.cache.ttl must be a valid interval ({})", e))
+            })?
+            .map(|t| {
+                Duration::from_secs(t.days as u64 * 60 * 60 * 24)
+                    + Duration::from_millis(t.milliseconds as u64)
+            });
 
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
@@ -418,7 +453,7 @@ impl ConnectorTable {
     pub fn as_sql_source(&self) -> Result<SourceOperator> {
         match self.connection_type {
             ConnectionType::Source => {}
-            ConnectionType::Sink => {
+            ConnectionType::Sink | ConnectionType::Lookup => {
                 return plan_err!("cannot read from sink");
             }
         };
@@ -463,6 +498,7 @@ pub struct SourceOperator {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Table {
+    LookupTable(ConnectorTable),
     ConnectorTable(ConnectorTable),
     MemoryTable {
         name: String,
@@ -673,6 +709,7 @@ impl Table {
             columns,
             with_options,
             query: None,
+            temporary,
             ..
         }) = statement
         {
@@ -750,17 +787,23 @@ impl Table {
                         ),
                         None => None,
                     };
-                    Ok(Some(Table::ConnectorTable(
-                        ConnectorTable::from_options(
-                            &name,
-                            connector,
-                            fields,
-                            primary_keys,
-                            &mut with_map,
-                            connection_profile,
-                        )
-                        .map_err(|e| e.context(format!("Failed to create table {}", name)))?,
-                    )))
+                    let table = ConnectorTable::from_options(
+                        &name,
+                        connector,
+                        *temporary,
+                        fields,
+                        primary_keys,
+                        &mut with_map,
+                        connection_profile,
+                    )
+                    .map_err(|e| e.context(format!("Failed to create table {}", name)))?;
+
+                    Ok(Some(match table.connection_type {
+                        ConnectionType::Source | ConnectionType::Sink => {
+                            Table::ConnectorTable(table)
+                        }
+                        ConnectionType::Lookup => Table::LookupTable(table),
+                    }))
                 }
             }
         } else {
@@ -798,7 +841,7 @@ impl Table {
     pub fn name(&self) -> &str {
         match self {
             Table::MemoryTable { name, .. } | Table::TableFromQuery { name, .. } => name.as_str(),
-            Table::ConnectorTable(c) => c.name.as_str(),
+            Table::ConnectorTable(c) | Table::LookupTable(c) => c.name.as_str(),
             Table::PreviewSink { .. } => "preview",
         }
     }
@@ -836,6 +879,11 @@ impl Table {
                 fields,
                 inferred_fields,
                 ..
+            })
+            | Table::LookupTable(ConnectorTable {
+                fields,
+                inferred_fields,
+                ..
             }) => inferred_fields
                 .as_ref()
                 .map(|fs| fs.iter().map(|f| f.field().clone()).collect())
@@ -856,7 +904,7 @@ impl Table {
 
     pub fn connector_op(&self) -> Result<ConnectorOp> {
         match self {
-            Table::ConnectorTable(c) => Ok(c.connector_op()),
+            Table::ConnectorTable(c) | Table::LookupTable(c) => Ok(c.connector_op()),
             Table::MemoryTable { .. } => plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
             Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
