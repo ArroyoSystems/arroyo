@@ -262,22 +262,28 @@ fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
         return plan_err!("filter join conditions are not supported for lookup joins; must have an equality condition");
     }
 
-    let on = join.on.iter().map(|(l, r)| {
-        match r {
-            Expr::Column(c) => Ok((l.clone(), c.clone())),
-            e => {
-                plan_err!("invalid right-side condition for lookup join: `{}`; only column references are supported", 
-                expr_to_sql(e).map(|e| e.to_string()).unwrap_or_else(|_| e.to_string()))
-            }
-        }
-    }).collect::<Result<_>>()?;
-
     let mut lookup = FindLookupExtension::default();
     join.right.visit(&mut lookup)?;
 
     let connector = lookup
         .table
         .expect("right side of join does not have lookup");
+
+    let on = join.on.iter().map(|(l, r)| {
+        match r {
+            Expr::Column(c) => {
+                if !connector.primary_keys.contains(&c.name) {
+                    plan_err!("the right-side of a look-up join condition must be a PRIMARY KEY column, but '{}' is not", c.name)
+                } else {
+                    Ok((l.clone(), c.clone()))
+                }
+            },
+            e => {
+                plan_err!("invalid right-side condition for lookup join: `{}`; only column references are supported", 
+                expr_to_sql(e).map(|e| e.to_string()).unwrap_or_else(|_| e.to_string()))
+            }
+        }
+    }).collect::<Result<_>>()?;
 
     let left_input = JoinRewriter::create_join_key_plan(
         join.left.clone(),

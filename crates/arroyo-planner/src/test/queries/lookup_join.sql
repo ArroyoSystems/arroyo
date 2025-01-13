@@ -1,39 +1,31 @@
-CREATE TABLE orders (
-    order_id INT,
-    user_id INT,
-    product_id INT,
-    quantity INT,
-    order_timestamp TIMESTAMP
-) with (
+CREATE TABLE events (
+    event_id TEXT,
+    timestamp TIMESTAMP,
+    customer_id TEXT,
+    event_type TEXT
+) WITH (
     connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
+    topic = 'events',
     type = 'source',
-    topic = 'orders',
-    format = 'json'
+    format = 'json',
+    bootstrap_servers = 'broker:9092'
 );
 
-CREATE TEMPORARY TABLE products (
-    key TEXT PRIMARY KEY,
-    product_name TEXT,
-    unit_price FLOAT,
-    category TEXT,
-    last_updated TIMESTAMP
+create temporary table customers (
+    customer_id TEXT PRIMARY KEY GENERATED ALWAYS AS (metadata('key')) STORED,
+    customer_name TEXT,
+    plan TEXT
 ) with (
     connector = 'redis',
+    format = 'raw_string',
+    address = 'redis://localhost:6379',
     format = 'json',
-    type = 'lookup',
-    address = 'redis://localhost:6379'
+    'lookup.cache.max_bytes' = '1000000',
+    'lookup.cache.ttl' = '5 second'
 );
 
-SELECT 
-    o.order_id,
-    o.user_id,
-    o.quantity,
-    o.order_timestamp,
-    p.product_name,
-    p.unit_price,
-    p.category,
-    (o.quantity * p.unit_price) as total_amount
-FROM orders o
-    JOIN products p
-    ON concat('blah', o.product_id) = p.key;
+SELECT  e.event_id,  e.timestamp,  e.customer_id,  e.event_type, c.customer_name, c.plan
+FROM  events e
+LEFT JOIN customers c
+ON e.customer_id = c.customer_id
+WHERE c.plan = 'Premium';

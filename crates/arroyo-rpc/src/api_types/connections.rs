@@ -1,14 +1,14 @@
+use crate::df::{ArroyoSchema, ArroyoSchemaRef};
 use crate::formats::{BadData, Format, Framing};
 use crate::{primitive_to_sql, MetadataField};
+use ahash::HashSet;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
+use arroyo_types::ArroyoExtensionType;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-
-use crate::df::{ArroyoSchema, ArroyoSchemaRef};
-use arroyo_types::ArroyoExtensionType;
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -252,6 +252,8 @@ pub struct ConnectionSchema {
     pub fields: Vec<SourceField>,
     pub definition: Option<SchemaDefinition>,
     pub inferred: Option<bool>,
+    #[serde(default)]
+    pub primary_keys: HashSet<String>,
 }
 
 impl ConnectionSchema {
@@ -263,6 +265,7 @@ impl ConnectionSchema {
         fields: Vec<SourceField>,
         definition: Option<SchemaDefinition>,
         inferred: Option<bool>,
+        primary_keys: HashSet<String>,
     ) -> anyhow::Result<Self> {
         let s = ConnectionSchema {
             format,
@@ -272,6 +275,7 @@ impl ConnectionSchema {
             fields,
             definition,
             inferred,
+            primary_keys,
         };
 
         s.validate()

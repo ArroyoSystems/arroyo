@@ -308,6 +308,7 @@ impl ConnectorTable {
             schema_fields,
             None,
             Some(fields.is_empty()),
+            primary_keys.iter().cloned().collect(),
         )
         .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
 

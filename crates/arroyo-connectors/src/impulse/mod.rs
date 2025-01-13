@@ -34,6 +34,7 @@ pub fn impulse_schema() -> ConnectionSchema {
         ],
         definition: None,
         inferred: None,
+        primary_keys: Default::default(),
     }
 }
 

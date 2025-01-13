@@ -300,9 +300,23 @@ impl Connector for RedisConnector {
         }
 
         let sink = match typ.as_str() {
-            "lookup" => TableType::Lookup {
-                lookup: Default::default(),
-            },
+            "lookup" => {
+                // for look-up tables, we require that there's a primary key metadata field
+                for f in &schema.fields {
+                    if schema.primary_keys.contains(&f.field_name) {
+                        if f.metadata_key.as_ref().map(|k| k != "key").unwrap_or(true) {
+                            bail!(
+                                "Redis lookup tables must have a PRIMARY KEY field defined as \
+                            `field_name TEXT GENERATED ALWAYS AS (metadata('key')) STORED`"
+                            );
+                        }
+                    }
+                }
+
+                TableType::Lookup {
+                    lookup: Default::default(),
+                }
+            }
             "sink" => {
                 let target = match pull_opt("target", options)?.as_str() {
                     "string" => Target::StringTable {
