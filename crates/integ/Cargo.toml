@@ -11,5 +11,5 @@ rand = "0.8.5"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.17"
 serde_json = { version = "1", features = ["preserve_order"] }
-rdkafka = "0.33"
+rdkafka = "0.37"
 reqwest = { workspace = true }

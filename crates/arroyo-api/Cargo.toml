@@ -15,36 +15,25 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-datastream = { path = "../arroyo-datastream" }
-arroyo-state = { path = "../arroyo-state" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 tonic = { workspace = true }
-tonic-reflection = { workspace = true }
-tonic-web = { workspace = true }
 prost = {workspace = true}
-prost-reflect = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
 tower = {workspace = true}
-rand = "0.8"
-rand_chacha = "0.3"
-async-trait = "0.1"
-chrono = "0.4"
-once_cell = "1"
 
 arrow = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
 
-bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.7", features = ["serde-1"]}
 
 http = "1"
 tower-http = { workspace = true, features = ["trace", "fs", "cors", "validate-request", "auth", "compression-zstd"]}
 axum = {workspace = true, features = ["tokio", "macros"]}
 axum-extra = { version = "0.9", features = ["typed-header"] }
-h2 = "0.4"
 thiserror = "1.0.40"
 utoipa = { workspace = true }
 utoipa-swagger-ui = { version = "7", features = ["axum"] }
@@ -52,29 +41,13 @@ utoipa-swagger-ui = { version = "7", features = ["axum"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-argon2 = "0.5"
-
 # logging
 tracing = "0.1"
 anyhow = "1.0.70"
 
-# json-schema support
-typify = "0.0.13"
-schemars = "0.8"
-
-# metric querying
-reqwest = {workspace = true}
-base64 = '0.21'
-
-# codegen
-syn = {version = "2", features = ["full"]}
-quote = "1"
-proc-macro2 = "1"
-
 # postgres
 postgres-types = { version = "*", features = ["derive"] }
 tokio-postgres = { version = "*", features = ["with-serde_json-1", "with-time-0_3", "with-uuid-1"] }
-deadpool-postgres = { workspace = true }
 
 # sqlite
 rusqlite = { workspace = true, features = ["bundled", "serde_json", "time"] }
@@ -83,9 +56,6 @@ futures = "0.3"
 futures-util = "0.3.28"
 time = "0.3"
 cornucopia_async = { workspace = true, features = ["with-serde_json-1"]}
-jwt-simple = "0.11.4"
-uuid = "1.3.3"
-regress = "0.10"
 apache-avro = { workspace = true }
 toml = "0.8"
 rust-embed = { version = "8", features = ["axum"] }

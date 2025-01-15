@@ -9,7 +9,6 @@ python = ["arroyo-udf-python/python-enabled"]
 
 [dependencies]
 arroyo-types = { path ="../arroyo-types" }
-arroyo-connectors = { path ="../arroyo-connectors" }
 arroyo-controller = { path = "../arroyo-controller" }
 arroyo-api = { path = "../arroyo-api" }
 arroyo-worker = { path = "../arroyo-worker" }
@@ -29,7 +28,6 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = [ "env-filter", "json" ]}
 
-postgres-types = { version = "*", features = ["derive"] }
 tokio-postgres = { version = "*", features = ["with-serde_json-1", "with-time-0_3", "with-uuid-1"] }
 deadpool-postgres = { workspace = true }
 cornucopia_async = { workspace = true }
@@ -37,7 +35,6 @@ rusqlite = {  workspace = true, features = ["backup"] }
 uuid = { version = "1.7.0", features = ["v4"] }
 refinery = { version = "0.8.14" , features = ["tokio-postgres", "rusqlite"] }
 anyhow = { version = "1.0.79"}
-dirs = "5.0.1"
 rand = "0.8.5"
 reqwest = { workspace = true}
 clio = { version = "0.3.5", features = ["clap", "clap-parse"] }
