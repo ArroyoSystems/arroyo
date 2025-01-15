@@ -32,7 +32,7 @@ typify = "0.0.13"
 schemars = "0.8"
 prost = {workspace = true}
 tonic = {workspace = true}
-governor = "0.7.0"
+governor = "0.8.0"
 anyhow = "1.0.71"
 tracing = "0.1.37"
 regress = "0.10.0"
@@ -42,7 +42,7 @@ rand = "0.8.5"
 base64 = "0.13.1"
 bytes = "1.5.0"
 url = "2.5.0"
-itertools = "0.11.0"
+itertools = "0.14.0"
 regex = "1"
 
 ##########################

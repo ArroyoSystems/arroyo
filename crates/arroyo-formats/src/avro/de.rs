@@ -98,7 +98,10 @@ pub(crate) fn avro_to_json(value: AvroValue) -> JsonValue {
         | Value::TimestampMillis(i)
         | Value::TimestampMicros(i)
         | Value::LocalTimestampMillis(i)
-        | Value::LocalTimestampMicros(i) => JsonValue::Number(serde_json::Number::from(i)),
+        | Value::LocalTimestampMicros(i)
+        | Value::TimestampNanos(i)
+        | Value::LocalTimestampNanos(i) => JsonValue::Number(serde_json::Number::from(i)),
+        Value::BigDecimal(d) => JsonValue::String(d.to_string()),
         Value::Float(f) => float_to_json(f as f64),
         Value::Double(f) => float_to_json(f),
         Value::String(s) | Value::Enum(_, s) => JsonValue::String(s),

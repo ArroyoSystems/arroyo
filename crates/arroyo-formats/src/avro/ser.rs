@@ -172,7 +172,7 @@ fn serialize_column<T: SerializeTarget>(
             {
                 if let Some(v) = &mut v {
                     serialize_column(
-                        item_schema,
+                        &item_schema.items,
                         v,
                         "",
                         &column.expect("unmasked null in list"),

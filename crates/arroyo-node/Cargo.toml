@@ -13,11 +13,9 @@ tonic-reflection = { workspace = true }
 prost = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-fork = "0.1"
 rand = "0.8"
 local-ip-address = "0.5"
 lazy_static = "1.4.0"
 prometheus = "0.13.3"
 tokio-stream = "0.1.14"
 anyhow = "1.0.72"
-base64 = "0.22.0"

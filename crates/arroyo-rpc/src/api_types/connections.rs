@@ -342,7 +342,7 @@ impl From<ConnectionSchema> for ArroyoSchema {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, IntoParams)]
+#[derive(Serialize, Clone, Debug, ToSchema, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionTable {
     #[serde(skip_serializing)]
