@@ -491,7 +491,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream",
  "toml",
- "tonic 0.13.0",
+ "tonic",
  "tower",
  "tower-http",
  "tracing",
@@ -514,7 +514,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml",
- "tonic 0.13.0",
+ "tonic",
  "tracing",
 ]
 
@@ -569,7 +569,7 @@ dependencies = [
  "tokio-rustls 0.25.0",
  "tokio-stream",
  "tokio-tungstenite",
- "tonic 0.13.0",
+ "tonic",
  "tracing",
  "typify 0.0.13",
  "url",
@@ -581,22 +581,15 @@ name = "arroyo-controller"
 version = "0.14.0-dev"
 dependencies = [
  "anyhow",
- "arrow-schema",
  "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
- "arroyo-storage",
  "arroyo-types",
  "arroyo-worker",
- "async-stream",
  "async-trait",
- "base64 0.22.1",
- "bincode",
- "chrono",
  "cornucopia",
  "cornucopia_async",
- "deadpool-postgres",
  "futures",
  "k8s-openapi",
  "kube",
@@ -604,31 +597,22 @@ dependencies = [
  "petgraph 0.7.1",
  "postgres",
  "postgres-types",
- "prettyplease 0.2.29",
- "proc-macro2",
  "prometheus",
  "prost 0.13.4",
- "quote",
  "rand 0.8.5",
  "refinery",
  "regex",
- "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
- "serde_yaml",
  "shlex",
- "syn 2.0.96",
  "thiserror 1.0.69",
  "time",
  "tokio",
  "tokio-postgres",
  "tokio-stream",
- "tonic 0.13.0",
- "tonic-reflection",
+ "tonic",
  "tracing",
- "uuid",
- "zstd",
 ]
 
 [[package]]
@@ -700,7 +684,7 @@ dependencies = [
  "prometheus",
  "rand 0.8.5",
  "tokio",
- "tonic 0.13.0",
+ "tonic",
  "tracing",
 ]
 
@@ -821,7 +805,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "tokio",
- "tonic 0.13.0",
+ "tonic",
  "tonic-build",
  "tracing",
  "url",
@@ -851,7 +835,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
- "tonic 0.13.0",
+ "tonic",
  "tower",
  "tower-http",
  "tracing",
@@ -1052,7 +1036,7 @@ dependencies = [
  "test-case",
  "tokio",
  "tokio-stream",
- "tonic 0.13.0",
+ "tonic",
  "tracing",
 ]
 
@@ -9024,27 +9008,6 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877c5b330756d856ffcc4553ab34a5684481ade925ecc54bcd1bf02b1d0d4d52"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "http 1.2.0",
- "http-body 1.0.1",
- "http-body-util",
- "percent-encoding",
- "pin-project",
- "prost 0.13.4",
- "tokio-stream",
- "tower-layer",
- "tower-service",
- "tracing",
-]
-
-[[package]]
-name = "tonic"
 version = "0.13.0"
 source = "git+https://github.com/hyperium/tonic?rev=b80428ba7dfcc607dfaac07022c360159ee1dc79#b80428ba7dfcc607dfaac07022c360159ee1dc79"
 dependencies = [
@@ -9085,19 +9048,6 @@ dependencies = [
  "prost-types",
  "quote",
  "syn 2.0.96",
-]
-
-[[package]]
-name = "tonic-reflection"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "878d81f52e7fcfd80026b7fdb6a9b578b3c3653ba987f87f0dce4b64043cba27"
-dependencies = [
- "prost 0.13.4",
- "prost-types",
- "tokio",
- "tokio-stream",
- "tonic 0.12.3",
 ]
 
 [[package]]
