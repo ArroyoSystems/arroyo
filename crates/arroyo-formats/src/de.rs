@@ -24,13 +24,13 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum FieldValueType<'a> {
-    Int64(i64),
-    UInt64(u64),
-    Int32(i32),
-    String(&'a str),
-    // Extend with more types as needed
+    Int64(Option<i64>),
+    UInt64(Option<u64>),
+    Int32(Option<i32>),
+    String(Option<&'a str>),
+    Bytes(Option<&'a [u8]>),
 }
 
 struct ContextBuffer {
@@ -480,6 +480,7 @@ impl ArrowDeserializer {
                         FieldValueType::Int64(_) => Box::new(Int64Builder::new()),
                         FieldValueType::UInt64(_) => Box::new(UInt64Builder::new()),
                         FieldValueType::String(_) => Box::new(StringBuilder::new()),
+                        FieldValueType::Bytes(_) => Box::new(BinaryBuilder::new()),
                     };
                     builders.insert(key.to_string(), builder);
                 }
@@ -489,7 +490,7 @@ impl ArrowDeserializer {
             let builders = self.additional_fields_builder.as_mut().unwrap();
 
             for (k, v) in additional_fields {
-                add_additional_fields(builders, k, v, count);
+                add_additional_fields(builders, k, *v, count);
             }
         }
     }
@@ -674,52 +675,50 @@ impl ArrowDeserializer {
     }
 }
 
+macro_rules! append_repeated_value {
+    ($builder:expr, $builder_ty:ty, $value:expr, $count:expr) => {{
+        let b = $builder
+            .downcast_mut::<$builder_ty>()
+            .expect("additional field has incorrect type");
+
+        if let Some(v) = $value {
+            for _ in 0..$count {
+                b.append_value(v);
+            }
+        } else {
+            for _ in 0..$count {
+                b.append_null();
+            }
+        }
+    }};
+}
+
 fn add_additional_fields(
     builders: &mut HashMap<String, Box<dyn ArrayBuilder>>,
     key: &str,
-    value: &FieldValueType<'_>,
+    value: FieldValueType<'_>,
     count: usize,
 ) {
     let builder = builders
         .get_mut(key)
         .unwrap_or_else(|| panic!("unexpected additional field '{}'", key))
         .as_any_mut();
+
     match value {
-        FieldValueType::Int32(i) => {
-            let b = builder
-                .downcast_mut::<Int32Builder>()
-                .expect("additional field has incorrect type");
-
-            for _ in 0..count {
-                b.append_value(*i);
-            }
+        FieldValueType::Int32(v) => {
+            append_repeated_value!(builder, Int32Builder, v, count);
         }
-        FieldValueType::Int64(i) => {
-            let b = builder
-                .downcast_mut::<Int64Builder>()
-                .expect("additional field has incorrect type");
-
-            for _ in 0..count {
-                b.append_value(*i);
-            }
+        FieldValueType::Int64(v) => {
+            append_repeated_value!(builder, Int64Builder, v, count);
         }
-        FieldValueType::UInt64(i) => {
-            let b = builder
-                .downcast_mut::<UInt64Builder>()
-                .expect("additional field has incorrect type");
-
-            for _ in 0..count {
-                b.append_value(*i);
-            }
+        FieldValueType::UInt64(v) => {
+            append_repeated_value!(builder, UInt64Builder, v, count);
         }
-        FieldValueType::String(s) => {
-            let b = builder
-                .downcast_mut::<StringBuilder>()
-                .expect("additional field has incorrect type");
-
-            for _ in 0..count {
-                b.append_value(*s);
-            }
+        FieldValueType::String(v) => {
+            append_repeated_value!(builder, StringBuilder, v, count);
+        }
+        FieldValueType::Bytes(v) => {
+            append_repeated_value!(builder, BinaryBuilder, v, count);
         }
     }
 }
@@ -987,8 +986,8 @@ mod tests {
 
         let time = SystemTime::now();
         let mut additional_fields = std::collections::HashMap::new();
-        additional_fields.insert("y", FieldValueType::Int32(5));
-        additional_fields.insert("z", FieldValueType::String("hello"));
+        additional_fields.insert("y", FieldValueType::Int32(Some(5)));
+        additional_fields.insert("z", FieldValueType::String(Some("hello")));
 
         let result = deserializer
             .deserialize_slice(

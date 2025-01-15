@@ -336,6 +336,10 @@ impl Connector for KafkaConnector {
                 name: "timestamp",
                 data_type: DataType::Int64,
             },
+            MetadataDef {
+                name: "key",
+                data_type: DataType::Binary,
+            },
         ]
     }
 

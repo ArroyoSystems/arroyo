@@ -204,10 +204,11 @@ impl KafkaSourceFunc {
                                     let mut connector_metadata = HashMap::new();
                                     for f in &self.metadata_fields {
                                         connector_metadata.insert(f.field_name.as_str(), match f.key.as_str() {
-                                            "offset_id" => FieldValueType::Int64(msg.offset()),
-                                            "partition" => FieldValueType::Int32(msg.partition()),
-                                            "topic" => FieldValueType::String(topic),
-                                            "timestamp" => FieldValueType::Int64(timestamp),
+                                            "key" => FieldValueType::Bytes(msg.key()),
+                                            "offset_id" => FieldValueType::Int64(Some(msg.offset())),
+                                            "partition" => FieldValueType::Int32(Some(msg.partition())),
+                                            "topic" => FieldValueType::String(Some(topic)),
+                                            "timestamp" => FieldValueType::Int64(Some(timestamp)),
                                             k => unreachable!("Invalid metadata key '{}'", k),
                                         });
                                     }
