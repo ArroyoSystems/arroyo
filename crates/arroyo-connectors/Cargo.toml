@@ -13,7 +13,6 @@ default = []
 arroyo-types = { path = "../arroyo-types" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-rpc = { path = "../arroyo-rpc" }
-arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-state = { path = "../arroyo-state" }
@@ -27,22 +26,18 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
-once_cell = "1.17.1"
 typify = "0.0.13"
-schemars = "0.8"
 prost = {workspace = true}
 tonic = {workspace = true}
-governor = "0.7.0"
+governor = "0.8.0"
 anyhow = "1.0.71"
 tracing = "0.1.37"
 regress = "0.10.0"
 futures = "0.3.28"
-axum = {workspace = true}
 rand = "0.8.5"
-base64 = "0.13.1"
 bytes = "1.5.0"
 url = "2.5.0"
-itertools = "0.11.0"
+itertools = "0.14.0"
 regex = "1"
 
 ##########################
@@ -50,11 +45,10 @@ regex = "1"
 ##########################
 
 # Kafka
-aws-sdk-kafka = { version = "1.44" }
 aws-msk-iam-sasl-signer = "1.0.0"
-rdkafka = { version = "0.36", features = ["cmake-build", "tracing", "sasl", "ssl-vendored", "zstd"] }
-rdkafka-sys = "4.7.0"
-sasl2-sys = { version = "0.1.6", features = ["vendored"] }
+rdkafka = { version = "0.37", features = ["cmake-build", "tracing", "sasl", "ssl-vendored", "zstd"] }
+rdkafka-sys = "4.8.0"
+sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 
 # SSE
 eventsource-client = "0.13.0"
@@ -69,11 +63,10 @@ reqwest = { workspace = true, features = ["stream"] }
 rabbitmq-stream-client = "0.7"
 
 # Redis
-redis = { version = "0.27", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
+redis = { version = "0.28", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
 
 # Fluvio
-fluvio = {version = "0.23", features = ["openssl"]}
-fluvio-future = "0.7"
+fluvio = {version = "0.24", features = ["openssl"]}
 
 # Kinesis
 aws-sdk-kinesis = { version = "1.44" }
@@ -94,7 +87,7 @@ tokio-rustls = "0.25"
 rustls = "0.22"
 
 # NATS
-async-nats = "0.37.0"
+async-nats = "0.38.0"
 
 [build-dependencies]
 glob = "0.3"

@@ -9,16 +9,13 @@ arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = {path = "../arroyo-rpc"}
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
-arroyo-formats = { path = "../arroyo-formats" }
 arroyo-operator = { path = "../arroyo-operator" }
-arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 datafusion = { workspace = true }
 datafusion-proto = { workspace = true }
 datafusion-functions = { workspace = true }
-datafusion-functions-window = { workspace = true }
 datafusion-functions-json = { workspace = true }
 
 prost = {workspace = true}
@@ -26,30 +23,20 @@ arrow-schema = {workspace = true, features = ["serde"] }
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
 
-bincode = { version = "2.0.0-rc.3", features = ["serde"]}
-petgraph = "0.6"
+petgraph = "0.7"
 tokio = "1.27"
 tokio-stream = { version = "0.1", features = ["full"] }
 futures = "0.3"
-quote = "1.0"
-regex = "1"
 arrow = { workspace = true, features = ["ffi"] }
 arrow-array = { workspace = true}
 anyhow = {version = "1.0.70", features = ["backtrace"]}
 async-trait = "0.1"
 
-proc-macro2 = "1"
 syn = {version = "2", features = ["full", "parsing", "extra-traits"]}
 tracing = "0.1.37"
-tracing-subscriber = "0.3"
 
 serde_json_path = "0.7"
-apache-avro = "0.16.0"
-prettyplease = "0.2.4"
 unicase = "2.7.0"
-toml = "0.8.8"
-
-xz2 = { version = "0.1.7", features = ["static"] }
 xxhash-rust = { version = "0.8.12", features = ["xxh3", "std"] }
 
 [dev-dependencies]

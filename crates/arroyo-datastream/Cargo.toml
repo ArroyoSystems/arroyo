@@ -5,29 +5,17 @@ edition = "2021"
 
 
 [dependencies]
-arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arrow-schema = { workspace = true, features = ["serde"] }
 
-ahash = {workspace = true}
-dyn-clone = "1.0.11"
-petgraph = {version = "0.6", features = ["serde-1"]}
+petgraph = {version = "0.7", features = ["serde-1"]}
 serde = {version = "1", features = ["derive"]}
 syn = {version = "2", features = ["full"]}
-quote = "1"
-proc-macro2 = "1"
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 rand = "0"
-toml = "0.8"
-bytes = "1.4"
-hex = "0.4"
-
-tokio = "1"
-tonic = {workspace = true}
 anyhow = "1.0.70"
 prost = {workspace = true}
-regex = "1.9.5"
 serde_json = "1.0.108"
-strum = { version = "0.25.0", features = ["derive"] }
+strum = { version = "0.26.0", features = ["derive"] }
 datafusion-proto = { workspace = true }
-itertools = "0.13.0"
+itertools = "0.14"

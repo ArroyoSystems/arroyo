@@ -65,6 +65,9 @@ prost-build = {version = "0.13" }
 prost-types = "0.13"
 aws-config = "1.5.13"
 reqwest = "0.12"
+rusqlite = "0.31"
+apache-avro = "0.17.0"
+k8s-openapi = "0.24.0"
 
 [profile.release]
 debug = 1

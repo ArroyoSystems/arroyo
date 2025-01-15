@@ -8,20 +8,12 @@ edition = "2021"
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
-arroyo-metrics = { path = "../arroyo-metrics" }
 arroyo-storage = { path = "../arroyo-storage" }
-arroyo-datastream = { path = "../arroyo-datastream" }
 
 datafusion = { workspace = true }
-datafusion-proto = { workspace = true }
-
-ahash = {workspace = true}
 
 anyhow = "1.0"
-backoff = "0.4.0"
-chrono = "0.4"
 tracing = "0.1"
-rand = "0.8"
 bincode = "2.0.0-rc.3"
 tokio = { version = "1", features = ["full", "tracing"] }
 arrow = { workspace = true }
@@ -30,13 +22,9 @@ arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 parquet = { workspace = true }
 async-trait = "0.1.68"
-async-stream = "0.3.4"
-ctor = "0.2"
 once_cell = "1.17.1"
 futures = "0.3"
-bytes = "1.4"
 prost = {workspace = true}
 prometheus = '0.13'
-tonic = {workspace = true}
 lazy_static = "1.4.0"
 object_store = { workspace = true }
