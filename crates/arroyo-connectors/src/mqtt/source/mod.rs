@@ -154,7 +154,7 @@ impl MqttSourceFunc {
                                 let mut connector_metadata = HashMap::new();
                                 for mf in &self.metadata_fields {
                                     connector_metadata.insert(mf.field_name.as_str(), match mf.key.as_str() {
-                                        "topic" => FieldValueType::String(&topic),
+                                        "topic" => FieldValueType::String(Some(&topic)),
                                         k => unreachable!("invalid metadata key '{}' for mqtt", k)
                                     });
                                 }

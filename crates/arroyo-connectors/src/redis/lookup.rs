@@ -59,12 +59,15 @@ impl LookupConnector for RedisLookup {
         let mut additional = HashMap::new();
 
         for (idx, (v, k)) in vs.iter().zip(keys).enumerate() {
-            additional.insert(LOOKUP_KEY_INDEX_FIELD, FieldValueType::UInt64(idx as u64));
+            additional.insert(
+                LOOKUP_KEY_INDEX_FIELD,
+                FieldValueType::UInt64(Some(idx as u64)),
+            );
             for m in &self.metadata_fields {
                 additional.insert(
                     m.field_name.as_str(),
                     match m.key.as_str() {
-                        "key" => FieldValueType::String(k.unwrap()),
+                        "key" => FieldValueType::String(Some(k.unwrap())),
                         k => unreachable!("Invalid metadata key '{}'", k),
                     },
                 );
