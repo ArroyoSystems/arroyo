@@ -62,3 +62,30 @@ async fn validate_query(path: &Path) {
         panic!("{}", e);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{parse_and_get_program, SqlConfig};
+    use crate::test::get_test_schema_provider;
+
+    #[tokio::test]
+    async fn test_query() {
+        let schema_provider = get_test_schema_provider();
+        let result = parse_and_get_program(r#"
+create table logs (
+    ip TEXT,
+    user_id TEXT,
+    timestamp TIMESTAMP,
+    request TEXT
+) with (
+    connector = 'sse',
+    endpoint = 'http://localhost:9563/sse',
+    format = 'json'
+);
+
+SELECT *  FROM
+    HOP(logs, timestamp, INTERVAL '5 MINUTES', INTERVAL '10 MINUTES');        
+        "#, schema_provider, SqlConfig::default()).await.unwrap();
+    }    
+}
+

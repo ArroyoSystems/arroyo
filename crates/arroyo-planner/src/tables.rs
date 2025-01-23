@@ -1,5 +1,5 @@
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
-use arrow_schema::{DataType, Field, FieldRef, Schema};
+use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef};
 use arroyo_connectors::connector_for_type;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -23,10 +23,7 @@ use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{config::ConfigOptions, DFSchema, Result, ScalarValue};
 use datafusion::common::{plan_err, Column, DataFusionError};
-use datafusion::logical_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
-    WriteOp,
-};
+use datafusion::logical_expr::{CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan, TableSource, WriteOp};
 use datafusion::optimizer::common_subexpr_eliminate::CommonSubexprEliminate;
 use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery;
 use datafusion::optimizer::eliminate_cross_join::EliminateCrossJoin;
@@ -57,6 +54,8 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
+use datafusion::datasource::DefaultTableSource;
+use crate::logical::LogicalBatchInput;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -143,7 +142,7 @@ fn produce_optimized_plan(
         &ConfigOptions::default(),
         |_plan, _rule| {},
     )?;
-
+    
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
         Arc::new(EliminateNestedUnion::new()),
         Arc::new(SimplifyExpressions::new()),
@@ -185,6 +184,7 @@ fn produce_optimized_plan(
         &OptimizerContext::default(),
         |_plan, _rule| {},
     )?;
+
     Ok(plan)
 }
 
@@ -496,7 +496,7 @@ pub struct SourceOperator {
 }
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd)]
 pub enum Table {
     LookupTable(ConnectorTable),
     ConnectorTable(ConnectorTable),
@@ -901,6 +901,10 @@ impl Table {
             }
         }
     }
+    
+    pub fn get_schema(&self) -> Schema {
+        Schema::new_with_metadata(self.get_fields(), HashMap::new())
+    }
 
     pub fn connector_op(&self) -> Result<ConnectorOp> {
         match self {
@@ -909,6 +913,14 @@ impl Table {
             Table::TableFromQuery { .. } => todo!(),
             Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
         }
+    }
+    
+    pub fn as_table_source(&self) -> Arc<dyn TableSource> {
+        let table_provider = LogicalBatchInput { 
+            table_name: self.name().to_string(), 
+            schema: Arc::new(self.get_schema()) 
+        };
+        Arc::new(DefaultTableSource::new(Arc::new(table_provider)))
     }
 }
 
@@ -951,7 +963,7 @@ impl Insert {
                 schema_provider,
             )?;
         }
-
+        
         let logical_plan = produce_optimized_plan(statement, schema_provider)?;
 
         match &logical_plan {

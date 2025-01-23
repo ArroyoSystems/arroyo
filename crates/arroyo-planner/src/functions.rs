@@ -1,11 +1,11 @@
-use crate::ArroyoSchemaProvider;
+use crate::{get_duration, ArroyoSchemaProvider};
 use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
 use arrow_array::cast::{as_string_array, AsArray};
 use arrow_array::types::{Float64Type, Int64Type};
 use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
-use arrow_schema::{DataType, Field, UnionFields, UnionMode};
-use datafusion::common::{DataFusionError, ScalarValue};
+use arrow_schema::{DataType, Field, Schema, SchemaRef, UnionFields, UnionMode};
+use datafusion::common::{plan_datafusion_err, plan_err, Column, DataFusionError, ScalarValue};
 use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr::{Alias, ScalarFunction};
@@ -18,6 +18,14 @@ use serde_json_path::JsonPath;
 use std::any::Any;
 use std::fmt::{Debug, Write};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+use async_trait::async_trait;
+use datafusion::catalog::Session;
+use datafusion::datasource::{provider_as_source, TableProvider, TableType};
+use datafusion::datasource::function::TableFunctionImpl;
+use datafusion::physical_plan::ExecutionPlan;
+use itertools::Itertools;
+use crate::schemas::window_arrow_struct;
 
 const SERIALIZE_JSON_UNION: &str = "serialize_json_union";
 

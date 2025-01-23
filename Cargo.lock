@@ -758,6 +758,7 @@ dependencies = [
  "datafusion-proto",
  "futures",
  "glob",
+ "itertools 0.14.0",
  "petgraph 0.7.1",
  "prost 0.13.4",
  "rstest 0.23.0",

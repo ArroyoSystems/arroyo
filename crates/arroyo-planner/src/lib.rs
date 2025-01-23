@@ -16,6 +16,7 @@ pub mod udafs;
 #[cfg(test)]
 mod test;
 mod utils;
+mod tvfs;
 
 use anyhow::bail;
 use arrow::datatypes::{self, DataType};
@@ -24,8 +25,8 @@ use arroyo_datastream::WindowType;
 
 use builder::NamedNode;
 use datafusion::common::tree_node::TreeNode;
-use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
-use datafusion::datasource::DefaultTableSource;
+use datafusion::common::{not_impl_err, plan_datafusion_err, plan_err, Column, DFSchema, Result, ScalarValue};
+use datafusion::datasource::{provider_as_source, DefaultTableSource, TableProvider};
 #[allow(deprecated)]
 use datafusion::prelude::SessionConfig;
 
@@ -78,9 +79,12 @@ use datafusion::sql::sqlparser::ast::{OneOrManyWithParens, Statement};
 use std::any::Any;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
+use datafusion::datasource::function::{TableFunction, TableFunctionImpl};
+use itertools::Itertools;
 use syn::Item;
 use tracing::{debug, info, warn};
 use unicase::UniCase;
+use crate::tvfs::{ArroyoTableFunctionImpl, HopTVFFunc};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 pub const ASYNC_RESULT_FIELD: &str = "__async_result";
@@ -111,6 +115,7 @@ pub struct ArroyoSchemaProvider {
     pub functions: HashMap<String, Arc<ScalarUDF>>,
     pub aggregate_functions: HashMap<String, Arc<AggregateUDF>>,
     pub window_functions: HashMap<String, Arc<WindowUDF>>,
+    pub table_functions: HashMap<UniCase<String>, Arc<dyn ArroyoTableFunctionImpl>>,
     pub connections: HashMap<String, Connection>,
     profiles: HashMap<String, ConnectionProfile>,
     pub udf_defs: HashMap<String, UdfDef>,
@@ -196,6 +201,8 @@ impl ArroyoSchemaProvider {
             ..Default::default()
         };
 
+        registry.register_udtf("hop", Arc::new(HopTVFFunc {}));
+        
         registry
             .register_udf(PlaceholderUdf::with_return(
                 "hop",
@@ -251,6 +258,13 @@ impl ArroyoSchemaProvider {
         register_functions(&mut registry);
 
         registry
+    }
+
+    pub fn register_udtf(&mut self, name: &str, fun: Arc<dyn ArroyoTableFunctionImpl>) {
+        self.table_functions.insert(
+            UniCase::new(name.to_string()),
+            fun,
+        );
     }
 
     pub fn add_connector_table(&mut self, connection: Connection) {
@@ -393,13 +407,6 @@ impl ArroyoSchemaProvider {
     }
 }
 
-fn create_table(table_name: String, schema: Arc<Schema>) -> Arc<dyn TableSource> {
-    let table_provider = LogicalBatchInput { table_name, schema };
-    let wrapped = Arc::new(table_provider);
-    let provider = DefaultTableSource::new(wrapped);
-    Arc::new(provider)
-}
-
 impl ContextProvider for ArroyoSchemaProvider {
     fn get_table_source(
         &self,
@@ -409,9 +416,19 @@ impl ContextProvider for ArroyoSchemaProvider {
             .get_table(name.to_string())
             .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", name)))?;
 
-        let fields = table.get_fields();
-        let schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
-        Ok(create_table(name.to_string(), schema))
+        Ok(table.as_table_source())
+    }
+
+    fn get_table_function_source(&self, name: &str, args: Vec<Expr>) -> Result<Arc<dyn TableSource>> {
+        let tbl_func = self
+            .table_functions
+            .get(&UniCase::new(name.to_string()))
+            .cloned()
+            .ok_or_else(|| plan_datafusion_err!("table function '{name}' not found"))?;
+        let provider = tbl_func.call(&args, self)?;
+
+        Ok(provider_as_source(provider))
+
     }
 
     fn get_function_meta(&self, name: &str) -> Option<Arc<ScalarUDF>> {
@@ -785,6 +802,8 @@ pub async fn parse_and_get_arrow_program(
             } => (logical_plan, Some(sink_name)),
             Insert::Anonymous { logical_plan } => (logical_plan, None),
         };
+        
+        println!("Plna = {}", plan.display_graphviz());
 
         let mut plan_rewrite = rewrite_plan(plan, &schema_provider)?;
 

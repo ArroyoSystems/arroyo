@@ -39,6 +39,8 @@ serde_json_path = "0.7"
 unicase = "2.7.0"
 xxhash-rust = { version = "0.8.12", features = ["xxh3", "std"] }
 
+itertools = "0.14.0"
+
 [dev-dependencies]
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}
 rstest = { version = "0.23" }
