@@ -1,6 +1,6 @@
 mod operator;
 
-use anyhow::{bail};
+use anyhow::bail;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
@@ -9,7 +9,6 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 use typify::import_types;
 

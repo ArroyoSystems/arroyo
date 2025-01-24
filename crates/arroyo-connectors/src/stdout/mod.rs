@@ -1,7 +1,5 @@
 mod operator;
 
-use std::collections::HashMap;
-
 use anyhow::anyhow;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use tokio::io::BufWriter;

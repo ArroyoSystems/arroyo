@@ -71,9 +71,7 @@ impl KafkaTable {
 pub struct KafkaConnector {}
 
 impl KafkaConnector {
-    pub fn connection_from_options(
-        options: &mut ConnectorOptions,
-    ) -> anyhow::Result<KafkaConfig> {
+    pub fn connection_from_options(options: &mut ConnectorOptions) -> anyhow::Result<KafkaConfig> {
         let auth = options.pull_opt_str("auth.type")?;
         let auth = match auth.as_deref() {
             Some("none") | None => KafkaConfigAuthentication::None {},
@@ -84,33 +82,48 @@ impl KafkaConnector {
                 password: VarStr::new(options.pull_str("auth.password")?),
             },
             Some("aws_msk_iam") => KafkaConfigAuthentication::AwsMskIam {
-                region: options.pull_str("auth.region")
+                region: options
+                    .pull_str("auth.region")
                     .map_err(|e| anyhow!("failed to get auth.region: {}", e))?,
             },
             Some(other) => bail!("unknown auth type '{}'", other),
         };
 
-        let schema_registry = options.pull_opt_str("schema_registry.endpoint")?.map(|endpoint| {
-            let api_key = options.pull_opt_str("schema_registry.api_key").ok().flatten().map(VarStr::new);
-            let api_secret = options.pull_opt_str("schema_registry.api_secret").ok().flatten().map(VarStr::new);
-            SchemaRegistry::ConfluentSchemaRegistry {
-                endpoint,
-                api_key,
-                api_secret,
-            }
-        });
+        let schema_registry = options
+            .pull_opt_str("schema_registry.endpoint")?
+            .map(|endpoint| {
+                let api_key = options
+                    .pull_opt_str("schema_registry.api_key")
+                    .ok()
+                    .flatten()
+                    .map(VarStr::new);
+                let api_secret = options
+                    .pull_opt_str("schema_registry.api_secret")
+                    .ok()
+                    .flatten()
+                    .map(VarStr::new);
+                SchemaRegistry::ConfluentSchemaRegistry {
+                    endpoint,
+                    api_key,
+                    api_secret,
+                }
+            });
 
         Ok(KafkaConfig {
             authentication: auth,
-            bootstrap_servers: BootstrapServers(options.pull_str("bootstrap_servers")
-                .map_err(|e| anyhow!("failed to get bootstrap_servers: {}", e))?),
+            bootstrap_servers: BootstrapServers(
+                options
+                    .pull_str("bootstrap_servers")
+                    .map_err(|e| anyhow!("failed to get bootstrap_servers: {}", e))?,
+            ),
             schema_registry_enum: schema_registry,
             connection_properties: HashMap::new(),
         })
     }
 
     pub fn table_from_options(options: &mut ConnectorOptions) -> anyhow::Result<KafkaTable> {
-        let typ = options.pull_str("type")
+        let typ = options
+            .pull_str("type")
             .map_err(|e| anyhow!("failed to get type: {}", e))?;
         let table_type = match typ.as_str() {
             "source" => {
@@ -149,10 +162,12 @@ impl KafkaConnector {
         };
 
         Ok(KafkaTable {
-            topic: options.pull_str("topic")
+            topic: options
+                .pull_str("topic")
                 .map_err(|e| anyhow!("failed to get topic: {}", e))?,
             type_: table_type,
-            client_configs: options.pull_opt_str("client_configs")?
+            client_configs: options
+                .pull_opt_str("client_configs")?
                 .map(|c| {
                     string_to_map(&c, '=').ok_or_else(|| {
                         anyhow!("invalid client_config: expected comma and equals-separated pairs")

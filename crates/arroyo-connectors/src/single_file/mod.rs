@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Result};
 use arroyo_formats::ser::ArrowSerializer;
-use std::collections::HashMap;
 use typify::import_types;
 
 use arroyo_operator::connector::Connection;
@@ -10,7 +9,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{EmptyConfig};
+use crate::EmptyConfig;
 
 use crate::single_file::sink::SingleFileSink;
 use crate::single_file::source::SingleFileSourceFunc;
@@ -122,15 +121,14 @@ impl Connector for SingleFileConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let path = options.pull_str("path")?;
         let Ok(table_type) = options.pull_str("type")?.try_into() else {
             bail!("'type' must be 'source' or 'sink'");
         };
 
-        let wait_for_control = options
-            .pull_opt_bool("wait_for_control")?;
+        let wait_for_control = options.pull_opt_bool("wait_for_control")?;
 
         self.from_config(
             None,

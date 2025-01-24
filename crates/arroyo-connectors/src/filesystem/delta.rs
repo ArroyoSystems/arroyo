@@ -1,7 +1,6 @@
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::Connection;
 use arroyo_storage::BackendConfig;
-use std::collections::HashMap;
 
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -142,7 +141,7 @@ impl Connector for DeltaLakeConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
 

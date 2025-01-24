@@ -1,7 +1,5 @@
-use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow_schema::{DataType, Field, FieldRef, Schema};
-use arroyo_connectors::{connector_for_type};
-use std::str::FromStr;
+use arroyo_connectors::connector_for_type;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
@@ -19,6 +17,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::ConnectorOptions;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{config::ConfigOptions, DFSchema, Result, ScalarValue};
@@ -49,15 +48,14 @@ use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
 use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::{CreateTable, Query, SqlOption};
+use datafusion::sql::sqlparser::ast::{CreateTable, Query};
 use datafusion::{
     optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
         planner::SqlToRel,
-        sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
+        sqlparser::ast::{ColumnDef, ColumnOption, Statement},
     },
 };
-use arroyo_rpc::ConnectorOptions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -322,8 +320,8 @@ impl ConnectorTable {
             table.fields = fields;
         }
 
-        table.event_time_field = options.pull_opt_str("event_time_field")?;
-        table.watermark_field = options.pull_opt_str("watermark_field")?;
+        table.event_time_field = options.pull_opt_field("event_time_field")?;
+        table.watermark_field = options.pull_opt_field("watermark_field")?;
 
         table.idle_time = options
             .pull_opt_i64("idle_micros")?
@@ -331,11 +329,9 @@ impl ConnectorTable {
             .filter(|t| *t <= 0)
             .map(|t| Duration::from_micros(t as u64));
 
-        table.lookup_cache_max_bytes = options
-            .pull_opt_u64("lookup.cache.max_bytes")?;
+        table.lookup_cache_max_bytes = options.pull_opt_u64("lookup.cache.max_bytes")?;
 
-        table.lookup_cache_ttl = options
-            .pull_opt_duration("lookup.cache.ttl")?;
+        table.lookup_cache_ttl = options.pull_opt_duration("lookup.cache.ttl")?;
 
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
@@ -675,7 +671,7 @@ impl Table {
         {
             let name: String = name.to_string();
             let mut connector_opts: ConnectorOptions = with_options.try_into()?;
-            
+
             let connector = connector_opts.pull_opt_str("connector")?;
             let fields = Self::schema_from_columns(&name, columns, schema_provider)?;
 
@@ -719,20 +715,21 @@ impl Table {
                     }))
                 }
                 Some(connector) => {
-                    let connection_profile = match connector_opts.pull_opt_str("connection_profile")? {
-                        Some(connection_profile_name) => Some(
-                            schema_provider
-                                .profiles
-                                .get(&connection_profile_name)
-                                .ok_or_else(|| {
-                                    DataFusionError::Plan(format!(
-                                        "connection profile '{}' not found",
-                                        connection_profile_name
-                                    ))
-                                })?,
-                        ),
-                        None => None,
-                    };
+                    let connection_profile =
+                        match connector_opts.pull_opt_str("connection_profile")? {
+                            Some(connection_profile_name) => Some(
+                                schema_provider
+                                    .profiles
+                                    .get(&connection_profile_name)
+                                    .ok_or_else(|| {
+                                        DataFusionError::Plan(format!(
+                                            "connection profile '{}' not found",
+                                            connection_profile_name
+                                        ))
+                                    })?,
+                            ),
+                            None => None,
+                        };
                     let table = ConnectorTable::from_options(
                         &name,
                         connector,

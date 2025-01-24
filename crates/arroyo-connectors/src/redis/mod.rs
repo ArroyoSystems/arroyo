@@ -20,7 +20,6 @@ use redis::aio::ConnectionManager;
 use redis::cluster::ClusterClient;
 use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
@@ -278,8 +277,7 @@ impl Connector for RedisConnector {
 
         let typ = options.pull_str("type")?;
 
-        let schema = s
-            .ok_or_else(|| anyhow!("No schema defined for Redis connection"))?;
+        let schema = s.ok_or_else(|| anyhow!("No schema defined for Redis connection"))?;
 
         fn validate_column(
             schema: &ConnectionSchema,
@@ -323,7 +321,8 @@ impl Connector for RedisConnector {
                             .pull_opt_str("target.key_column")?
                             .map(|name| validate_column(schema, name, "target.key_column"))
                             .transpose()?,
-                        ttl_secs: options.pull_opt_u64("target.ttl_secs")?
+                        ttl_secs: options
+                            .pull_opt_u64("target.ttl_secs")?
                             .map(|t| t.try_into())
                             .transpose()
                             .map_err(|_| anyhow!("target.ttl_secs must be greater than 0"))?,
@@ -334,7 +333,8 @@ impl Connector for RedisConnector {
                             .pull_opt_str("target.key_column")?
                             .map(|name| validate_column(schema, name, "target.key_column"))
                             .transpose()?,
-                        max_length: options.pull_opt_u64("target.max_length")?
+                        max_length: options
+                            .pull_opt_u64("target.max_length")?
                             .map(|t| t.try_into())
                             .transpose()
                             .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,

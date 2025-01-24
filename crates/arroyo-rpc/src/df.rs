@@ -12,10 +12,10 @@ use arrow_ord::cmp::gt_eq;
 use arrow_ord::partition::partition;
 use arrow_ord::sort::{lexsort_to_indices, SortColumn};
 use arroyo_types::to_nanos;
+use datafusion::common::{DataFusionError, Result as DFResult};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::SystemTime;
-use datafusion::common::{DataFusionError, Result as DFResult};
 
 pub type ArroyoSchemaRef = Arc<ArroyoSchema>;
 
@@ -168,10 +168,7 @@ impl ArroyoSchema {
         })
     }
 
-    pub fn from_schema_keys(
-        schema: Arc<Schema>,
-        key_indices: Vec<usize>,
-    ) -> DFResult<Self> {
+    pub fn from_schema_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> DFResult<Self> {
         let timestamp_index = schema
             .column_with_name(TIMESTAMP_FIELD)
             .ok_or_else(|| {

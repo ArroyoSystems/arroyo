@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
@@ -11,9 +11,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use datafusion::common::{plan_datafusion_err, Result as DFResult};
-use datafusion::common::plan_err;
-use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value};
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
 

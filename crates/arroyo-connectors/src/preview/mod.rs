@@ -1,7 +1,5 @@
 mod operator;
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, bail};
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
@@ -67,10 +65,10 @@ impl Connector for PreviewConnector {
 
     fn from_options(
         &self,
-        name: &str,
-        options: &mut ConnectorOptions,
-        schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _: &str,
+        _: &mut ConnectorOptions,
+        _: Option<&ConnectionSchema>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         bail!("Preview connector cannot be created in SQL");
     }

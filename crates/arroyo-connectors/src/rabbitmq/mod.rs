@@ -1,14 +1,14 @@
+use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
+use crate::ConnectionType;
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema};
 use arroyo_rpc::{api_types::connections::TestSourceMessage, ConnectorOptions, OperatorConfig};
 use rabbitmq_stream_client::types::OffsetSpecification;
 use rabbitmq_stream_client::{Environment, TlsConfiguration};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema};
-use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
-use crate::{ConnectionType};
 
 mod source;
 
@@ -106,21 +106,24 @@ impl Connector for RabbitmqConnector {
                 let username = options.pull_opt_str("username")?;
                 let password = options.pull_opt_str("password")?;
                 let virtual_host = options.pull_opt_str("virtual_host")?;
-                let port = options.pull_opt_u64("port")?
-                    .map(|i| u16::try_from(i).map_err(|i| 
-                        anyhow!("invalid 'port' for rabbitmq; must be <= {}", u16::MAX)))
+                let port = options
+                    .pull_opt_u64("port")?
+                    .map(|i| {
+                        u16::try_from(i).map_err(|_| {
+                            anyhow!("invalid 'port' for rabbitmq; must be <= {}", u16::MAX)
+                        })
+                    })
                     .transpose()?;
 
-                let tls_config = 
-                    Some(TlsConfig {
-                        enabled: options.pull_opt_bool("tls_config.enabled")?,
-                        trust_certificates: options
-                            .pull_opt_bool("tls_config.trust_certificates")?,
-                        root_certificates_path: options.pull_opt_str("tls_config.root_certificates_path")?,
-                        client_certificates_path: options
-                            .pull_opt_str("tls_config.client_certificates_path")?,
-                        client_keys_path: options.pull_opt_str("tls_config.client_keys_path")?,
-                    });
+                let tls_config = Some(TlsConfig {
+                    enabled: options.pull_opt_bool("tls_config.enabled")?,
+                    trust_certificates: options.pull_opt_bool("tls_config.trust_certificates")?,
+                    root_certificates_path: options
+                        .pull_opt_str("tls_config.root_certificates_path")?,
+                    client_certificates_path: options
+                        .pull_opt_str("tls_config.client_certificates_path")?,
+                    client_keys_path: options.pull_opt_str("tls_config.client_keys_path")?,
+                });
 
                 let load_balancer_mode = options.pull_opt_bool("load_balancer_mode")?;
 

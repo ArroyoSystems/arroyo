@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -14,8 +13,8 @@ use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_rpc::var_str::VarStr;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{AsyncClient, Event as MqttEvent, EventLoop, Incoming, MqttOptions};
 use rumqttc::Outgoing;
@@ -57,9 +56,7 @@ impl MqttTable {
 }
 
 impl MqttConnector {
-    pub fn connection_from_options(
-        options: &mut ConnectorOptions,
-    ) -> anyhow::Result<MqttConfig> {
+    pub fn connection_from_options(options: &mut ConnectorOptions) -> anyhow::Result<MqttConfig> {
         let url = options.pull_str("url")?;
         let username = options.pull_opt_str("username")?.map(VarStr::new);
         let password = options.pull_opt_str("password")?.map(VarStr::new);
@@ -87,7 +84,8 @@ impl MqttConnector {
 
     pub fn table_from_options(options: &mut ConnectorOptions) -> anyhow::Result<MqttTable> {
         let typ = options.pull_str("type")?;
-        let qos = options.pull_opt_str("qos")?
+        let qos = options
+            .pull_opt_str("qos")?
             .map(|s| match s.as_str() {
                 "AtMostOnce" => Ok(QualityOfService::AtMostOnce),
                 "AtLeastOnce" => Ok(QualityOfService::AtLeastOnce),
@@ -99,9 +97,12 @@ impl MqttConnector {
         let table_type = match typ.as_str() {
             "source" => TableType::Source {},
             "sink" => TableType::Sink {
-                retain: options.pull_opt_str("sink.retain")?
-                    .map(|s| s.parse::<bool>()
-                        .map_err(|_| anyhow!("'sink.retail' must be either 'true' or 'false'")))
+                retain: options
+                    .pull_opt_str("sink.retain")?
+                    .map(|s| {
+                        s.parse::<bool>()
+                            .map_err(|_| anyhow!("'sink.retail' must be either 'true' or 'false'"))
+                    })
                     .transpose()?
                     .unwrap_or(false),
             },

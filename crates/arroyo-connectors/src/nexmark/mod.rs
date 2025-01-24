@@ -2,7 +2,7 @@ mod operator;
 #[cfg(test)]
 mod test;
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use arrow::datatypes::{Field, Schema, TimeUnit};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
@@ -11,12 +11,10 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::str::FromStr;
 use typify::import_types;
 
 use crate::nexmark::operator::NexmarkSourceFunc;
-use crate::{EmptyConfig};
+use crate::EmptyConfig;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./nexmark.svg");

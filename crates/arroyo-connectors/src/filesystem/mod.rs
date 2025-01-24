@@ -17,7 +17,7 @@ use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{EmptyConfig};
+use crate::EmptyConfig;
 
 use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
@@ -187,7 +187,7 @@ impl Connector for FileSystemConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         match options.pull_opt_str("type")? {
             Some(t) if t == "source" => {
@@ -281,12 +281,17 @@ fn get_storage_url_and_options(
 ) -> Result<(String, HashMap<String, String>)> {
     let storage_url = opts.pull_str("path")?;
     let storage_keys: Vec<_> = opts.keys_with_prefix("storage.").cloned().collect();
-    
-    let storage_options = storage_keys.iter().map(|k| Ok((
-        k.trim_start_matches("storage.").to_string(),
-        opts.pull_str(k)?
-    ))).collect::<Result<HashMap<String, String>>>()?;
-    
+
+    let storage_options = storage_keys
+        .iter()
+        .map(|k| {
+            Ok((
+                k.trim_start_matches("storage.").to_string(),
+                opts.pull_str(k)?,
+            ))
+        })
+        .collect::<Result<HashMap<String, String>>>()?;
+
     BackendConfig::parse_url(&storage_url, true)?;
     Ok((storage_url, storage_options))
 }

@@ -6,7 +6,6 @@ use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, Te
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use fluvio::Offset;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use typify::import_types;
 
 use crate::fluvio::sink::FluvioSinkFunc;
@@ -87,7 +86,7 @@ impl Connector for FluvioConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let endpoint = options.pull_opt_str("endpoint")?;
         let topic = options.pull_str("topic")?;

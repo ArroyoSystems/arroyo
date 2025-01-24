@@ -1,13 +1,11 @@
+use crate::ConnectorOptions;
+use datafusion::common::{plan_datafusion_err, plan_err, Result as DFResult};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::str::FromStr;
 use std::sync::OnceLock;
 use utoipa::ToSchema;
-use crate::ConnectorOptions;
-use datafusion::common::{plan_datafusion_err, plan_err, Result as DFResult};
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
@@ -62,17 +60,13 @@ impl JsonFormat {
             .pull_opt_bool("json.confluent_schema_registry")?
             .unwrap_or(false);
 
-        let include_schema = opts
-            .pull_opt_bool("json.include_schema")?
-            .unwrap_or(false);
+        let include_schema = opts.pull_opt_bool("json.include_schema")?.unwrap_or(false);
 
         if include_schema && confluent_schema_registry {
             return plan_err!("at most one of `json.confluent_schema_registry` and `json.include_schema` may be set");
         }
 
-        let unstructured = opts
-            .pull_opt_bool("json.unstructured")?
-            .unwrap_or(false);
+        let unstructured = opts.pull_opt_bool("json.unstructured")?.unwrap_or(false);
 
         let timestamp_format: TimestampFormat = opts
             .pull_opt_str("json.timestamp_format")?
@@ -201,9 +195,11 @@ impl AvroFormat {
 
     pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
         Ok(Self::new(
-            opts.pull_opt_bool("avro.confluent_schema_registry")?.unwrap_or(false),
+            opts.pull_opt_bool("avro.confluent_schema_registry")?
+                .unwrap_or(false),
             opts.pull_opt_bool("avro.raw_datums")?.unwrap_or(false),
-            opts.pull_opt_bool("avro.into_unstructured_json")?.unwrap_or(false),
+            opts.pull_opt_bool("avro.into_unstructured_json")?
+                .unwrap_or(false),
         ))
     }
 
@@ -309,7 +305,12 @@ impl BadData {
         let method = match method.as_str() {
             "drop" => BadData::Drop {},
             "fail" => BadData::Fail {},
-            f => return plan_err!("invalid value for 'bad_data': `{}`; expected one of 'drop' or 'fail'", f),
+            f => {
+                return plan_err!(
+                    "invalid value for 'bad_data': `{}`; expected one of 'drop' or 'fail'",
+                    f
+                )
+            }
         };
 
         Ok(Some(method))
@@ -345,8 +346,7 @@ pub struct NewlineDelimitedFraming {
 
 impl NewlineDelimitedFraming {
     pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
-        let max_line_length = opts
-            .pull_opt_u64("framing.newline.max_length")?;
+        let max_line_length = opts.pull_opt_u64("framing.newline.max_length")?;
 
         Ok(NewlineDelimitedFraming { max_line_length })
     }

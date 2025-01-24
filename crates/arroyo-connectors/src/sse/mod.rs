@@ -1,6 +1,5 @@
 mod operator;
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
@@ -19,7 +18,7 @@ use arroyo_rpc::api_types::connections::{
 use serde::{Deserialize, Serialize};
 
 use crate::sse::operator::SSESourceFunc;
-use crate::{EmptyConfig};
+use crate::EmptyConfig;
 
 use arroyo_operator::connector::Connector;
 

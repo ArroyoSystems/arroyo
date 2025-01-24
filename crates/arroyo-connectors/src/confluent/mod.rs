@@ -1,7 +1,7 @@
+use crate::kafka;
 use crate::kafka::{
     KafkaConfig, KafkaConfigAuthentication, KafkaConnector, KafkaTable, KafkaTester, TableType,
 };
-use crate::{kafka};
 use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
@@ -35,8 +35,9 @@ impl ConfluentConnector {
     pub fn connection_from_options(
         opts: &mut ConnectorOptions,
     ) -> anyhow::Result<ConfluentProfile> {
-        let schema_registry: Option<anyhow::Result<_>> =
-            opts.pull_opt_str("schema_registry.endpoint")?.map(|endpoint| {
+        let schema_registry: Option<anyhow::Result<_>> = opts
+            .pull_opt_str("schema_registry.endpoint")?
+            .map(|endpoint| {
                 let api_key = VarStr::new(opts.pull_str("schema_registry.api_key")?);
                 let api_secret = VarStr::new(opts.pull_str("schema_registry.api_secret")?);
                 Ok(ConfluentSchemaRegistry {

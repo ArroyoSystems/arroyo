@@ -150,11 +150,12 @@ impl Connector for PollingHTTPConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let endpoint = options.pull_str("endpoint")?;
         let headers = options.pull_opt_str("headers")?;
-        let method: Option<Method> = options.pull_opt_str("method")?
+        let method: Option<Method> = options
+            .pull_opt_str("method")?
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'method'"))?;
@@ -162,7 +163,8 @@ impl Connector for PollingHTTPConnector {
         let body = options.pull_opt_str("body")?;
 
         let interval = options.pull_opt_i64("poll_interval_ms")?;
-        let emit_behavior: Option<EmitBehavior> = options.pull_opt_str("emit_behavior")?
+        let emit_behavior: Option<EmitBehavior> = options
+            .pull_opt_str("emit_behavior")?
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'emit_behavior'"))?;
