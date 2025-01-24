@@ -58,7 +58,6 @@ mod rest_utils;
 pub mod sql;
 mod udfs;
 
-
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
 fn default_max_nexmark_qps() -> f64 {
