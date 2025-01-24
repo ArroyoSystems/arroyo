@@ -14,6 +14,6 @@ CREATE VIEW tags AS (
     WHERE tag is not null
 );
 
-set updating_ttl = '5 seconds';
+set updating_ttl = interval '5' second;
 
 select count(distinct tag) from tags;

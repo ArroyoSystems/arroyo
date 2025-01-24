@@ -36,7 +36,7 @@ k8s-openapi = { workspace = true, features = ["v1_30"] }
 url = { version = "2", features = ["serde"] }
 dirs = "5.0.1"
 arc-swap = "1.7.1"
-datafusion-common = { workspace = true }
+datafusion = { workspace = true }
 rand = "0.8.5"
 percent-encoding = "2.3.1"
 

@@ -12,7 +12,7 @@ CREATE TABLE nexmark (
     type = 'source',
     path = '/home/data',
     'source.regex-pattern' = '00001-000.parquet',
-    event_time_field = 'datetime'
+    event_time_field = datetime
 );
 
 CREATE TABLE counts as (SELECT count(*) FROM nexmark);

@@ -20,8 +20,8 @@ create temporary table customers (
     format = 'raw_string',
     address = 'redis://localhost:6379',
     format = 'json',
-    'lookup.cache.max_bytes' = '1000000',
-    'lookup.cache.ttl' = '5 second'
+    'lookup.cache.max_bytes' = 1000000,
+    'lookup.cache.ttl' = interval '5' second
 );
 
 SELECT  e.event_id,  e.timestamp,  e.customer_id,  e.event_type, c.customer_name, c.plan

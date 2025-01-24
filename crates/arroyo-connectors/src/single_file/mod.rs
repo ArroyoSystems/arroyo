@@ -1,16 +1,15 @@
 use anyhow::{anyhow, bail, Result};
 use arroyo_formats::ser::ArrowSerializer;
-use std::collections::HashMap;
 use typify::import_types;
 
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, EmptyConfig};
+use crate::EmptyConfig;
 
 use crate::single_file::sink::SingleFileSink;
 use crate::single_file::source::SingleFileSourceFunc;
@@ -120,22 +119,16 @@ impl Connector for SingleFileConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let path = pull_opt("path", options)?;
-        let Ok(table_type) = pull_opt("type", options)?.try_into() else {
+        let path = options.pull_str("path")?;
+        let Ok(table_type) = options.pull_str("type")?.try_into() else {
             bail!("'type' must be 'source' or 'sink'");
         };
 
-        let wait_for_control = options
-            .remove("wait_for_control")
-            .map(|s| {
-                s.parse()
-                    .map_err(|_| anyhow!("'wait_for_control' must be a boolean"))
-            })
-            .transpose()?;
+        let wait_for_control = options.pull_opt_bool("wait_for_control")?;
 
         self.from_config(
             None,

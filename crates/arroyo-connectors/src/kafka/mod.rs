@@ -9,7 +9,7 @@ use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, SchemaResolver,
 };
-use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{schema_resolver, var_str::VarStr, ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use aws_config::Region;
 use aws_msk_iam_sasl_signer::generate_auth_token;
@@ -36,7 +36,7 @@ use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
 
-use crate::{pull_opt, send, ConnectionType};
+use crate::{send, ConnectionType};
 
 use crate::kafka::sink::KafkaSinkFunc;
 use crate::kafka::source::KafkaSourceFunc;
@@ -71,48 +71,52 @@ impl KafkaTable {
 pub struct KafkaConnector {}
 
 impl KafkaConnector {
-    pub fn connection_from_options(
-        options: &mut HashMap<String, String>,
-    ) -> anyhow::Result<KafkaConfig> {
-        let auth = options.remove("auth.type");
+    pub fn connection_from_options(options: &mut ConnectorOptions) -> anyhow::Result<KafkaConfig> {
+        let auth = options.pull_opt_str("auth.type")?;
         let auth = match auth.as_deref() {
             Some("none") | None => KafkaConfigAuthentication::None {},
             Some("sasl") => KafkaConfigAuthentication::Sasl {
-                mechanism: pull_opt("auth.mechanism", options)?,
-                protocol: pull_opt("auth.protocol", options)?,
-                username: VarStr::new(pull_opt("auth.username", options)?),
-                password: VarStr::new(pull_opt("auth.password", options)?),
+                mechanism: options.pull_str("auth.mechanism")?,
+                protocol: options.pull_str("auth.protocol")?,
+                username: VarStr::new(options.pull_str("auth.username")?),
+                password: VarStr::new(options.pull_str("auth.password")?),
             },
             Some("aws_msk_iam") => KafkaConfigAuthentication::AwsMskIam {
-                region: pull_opt("auth.region", options)?,
+                region: options.pull_str("auth.region")?,
             },
             Some(other) => bail!("unknown auth type '{}'", other),
         };
 
-        let schema_registry = options.remove("schema_registry.endpoint").map(|endpoint| {
-            let api_key = options.remove("schema_registry.api_key").map(VarStr::new);
-            let api_secret = options
-                .remove("schema_registry.api_secret")
-                .map(VarStr::new);
-            SchemaRegistry::ConfluentSchemaRegistry {
-                endpoint,
-                api_key,
-                api_secret,
-            }
-        });
+        let schema_registry = options
+            .pull_opt_str("schema_registry.endpoint")?
+            .map(|endpoint| {
+                let api_key = options
+                    .pull_opt_str("schema_registry.api_key")?
+                    .map(VarStr::new);
+                let api_secret = options
+                    .pull_opt_str("schema_registry.api_secret")?
+                    .map(VarStr::new);
+                datafusion::common::Result::<_>::Ok(SchemaRegistry::ConfluentSchemaRegistry {
+                    endpoint,
+                    api_key,
+                    api_secret,
+                })
+            })
+            .transpose()?;
+
         Ok(KafkaConfig {
             authentication: auth,
-            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", options)?),
+            bootstrap_servers: BootstrapServers(options.pull_str("bootstrap_servers")?),
             schema_registry_enum: schema_registry,
             connection_properties: HashMap::new(),
         })
     }
 
-    pub fn table_from_options(options: &mut HashMap<String, String>) -> anyhow::Result<KafkaTable> {
-        let typ = pull_opt("type", options)?;
+    pub fn table_from_options(options: &mut ConnectorOptions) -> anyhow::Result<KafkaTable> {
+        let typ = options.pull_str("type")?;
         let table_type = match typ.as_str() {
             "source" => {
-                let offset = options.remove("source.offset");
+                let offset = options.pull_opt_str("source.offset")?;
                 TableType::Source {
                     offset: match offset.as_deref() {
                         Some("earliest") => SourceOffset::Earliest,
@@ -120,25 +124,25 @@ impl KafkaConnector {
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
-                    read_mode: match options.remove("source.read_mode").as_deref() {
+                    read_mode: match options.pull_opt_str("source.read_mode")?.as_deref() {
                         Some("read_committed") => Some(ReadMode::ReadCommitted),
                         Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
-                    group_id: options.remove("source.group_id"),
-                    group_id_prefix: options.remove("source.group_id_prefix"),
+                    group_id: options.pull_opt_str("source.group_id")?,
+                    group_id_prefix: options.pull_opt_str("source.group_id_prefix")?,
                 }
             }
             "sink" => {
-                let commit_mode = options.remove("sink.commit_mode");
+                let commit_mode = options.pull_opt_str("sink.commit_mode")?;
                 TableType::Sink {
                     commit_mode: match commit_mode.as_deref() {
                         Some("at_least_once") | None => SinkCommitMode::AtLeastOnce,
                         Some("exactly_once") => SinkCommitMode::ExactlyOnce,
                         Some(other) => bail!("invalid value for commit_mode '{}'", other),
                     },
-                    timestamp_field: options.remove("sink.timestamp_field"),
-                    key_field: options.remove("sink.key_field"),
+                    timestamp_field: options.pull_opt_str("sink.timestamp_field")?,
+                    key_field: options.pull_opt_str("sink.key_field")?,
                 }
             }
             _ => {
@@ -147,10 +151,10 @@ impl KafkaConnector {
         };
 
         Ok(KafkaTable {
-            topic: pull_opt("topic", options)?,
+            topic: options.pull_str("topic")?,
             type_: table_type,
             client_configs: options
-                .remove("client_configs")
+                .pull_opt_str("client_configs")?
                 .map(|c| {
                     string_to_map(&c, '=').ok_or_else(|| {
                         anyhow!("invalid client_config: expected comma and equals-separated pairs")
@@ -158,7 +162,7 @@ impl KafkaConnector {
                 })
                 .transpose()?
                 .unwrap_or_else(HashMap::new),
-            value_subject: options.remove("value.subject"),
+            value_subject: options.pull_opt_str("value.subject")?,
         })
     }
 }
@@ -346,7 +350,7 @@ impl Connector for KafkaConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {

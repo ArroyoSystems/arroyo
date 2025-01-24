@@ -3,15 +3,14 @@ use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use fluvio::Offset;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use typify::import_types;
 
 use crate::fluvio::sink::FluvioSinkFunc;
 use crate::fluvio::source::FluvioSourceFunc;
-use crate::{pull_opt, ConnectionType, EmptyConfig};
+use crate::{ConnectionType, EmptyConfig};
 
 mod sink;
 mod source;
@@ -85,17 +84,17 @@ impl Connector for FluvioConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let endpoint = options.remove("endpoint");
-        let topic = pull_opt("topic", options)?;
-        let table_type = pull_opt("type", options)?;
+        let endpoint = options.pull_opt_str("endpoint")?;
+        let topic = options.pull_str("topic")?;
+        let table_type = options.pull_str("type")?;
 
         let table_type = match table_type.as_str() {
             "source" => {
-                let offset = options.remove("source.offset");
+                let offset = options.pull_opt_str("source.offset")?;
                 TableType::Source {
                     offset: match offset.as_deref() {
                         Some("earliest") => SourceOffset::Earliest,

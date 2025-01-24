@@ -788,7 +788,7 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "base64 0.21.7",
- "datafusion-common",
+ "datafusion",
  "dirs",
  "figment",
  "futures",

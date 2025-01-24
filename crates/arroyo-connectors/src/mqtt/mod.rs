@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -6,7 +5,6 @@ use std::time::Duration;
 
 use crate::mqtt::sink::MqttSinkFunc;
 use crate::mqtt::source::MqttSourceFunc;
-use crate::pull_opt;
 use anyhow::{anyhow, bail};
 use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
@@ -15,7 +13,8 @@ use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::var_str::VarStr;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{AsyncClient, Event as MqttEvent, EventLoop, Incoming, MqttOptions};
 use rumqttc::Outgoing;
@@ -57,19 +56,14 @@ impl MqttTable {
 }
 
 impl MqttConnector {
-    pub fn connection_from_options(
-        options: &mut HashMap<String, String>,
-    ) -> anyhow::Result<MqttConfig> {
-        let url = match options.remove("url") {
-            Some(host) => host,
-            None => bail!("url is required for mqtt connection"),
-        };
-        let username = options.remove("username").map(VarStr::new);
-        let password = options.remove("password").map(VarStr::new);
+    pub fn connection_from_options(options: &mut ConnectorOptions) -> anyhow::Result<MqttConfig> {
+        let url = options.pull_str("url")?;
+        let username = options.pull_opt_str("username")?.map(VarStr::new);
+        let password = options.pull_opt_str("password")?.map(VarStr::new);
 
-        let ca = options.remove("tls.ca").map(VarStr::new);
-        let cert = options.remove("tls.cert").map(VarStr::new);
-        let key = options.remove("tls.key").map(VarStr::new);
+        let ca = options.pull_opt_str("tls.ca")?.map(VarStr::new);
+        let cert = options.pull_opt_str("tls.cert")?.map(VarStr::new);
+        let key = options.pull_opt_str("tls.key")?.map(VarStr::new);
 
         let parsed_url = url::Url::parse(&url)?;
 
@@ -84,14 +78,14 @@ impl MqttConnector {
             username,
             password,
             tls,
-            client_prefix: options.remove("client_prefix"),
+            client_prefix: options.pull_opt_str("client_prefix")?,
         })
     }
 
-    pub fn table_from_options(options: &mut HashMap<String, String>) -> anyhow::Result<MqttTable> {
-        let typ = pull_opt("type", options)?;
+    pub fn table_from_options(options: &mut ConnectorOptions) -> anyhow::Result<MqttTable> {
+        let typ = options.pull_str("type")?;
         let qos = options
-            .remove("qos")
+            .pull_opt_str("qos")?
             .map(|s| {
                 QualityOfService::try_from(s).map_err(|s| anyhow!("invalid value for 'qos': {s}"))
             })
@@ -101,7 +95,7 @@ impl MqttConnector {
             "source" => TableType::Source {},
             "sink" => TableType::Sink {
                 retain: options
-                    .remove("sink.retain")
+                    .pull_opt_str("sink.retain")?
                     .map(|s| {
                         s.parse::<bool>()
                             .map_err(|_| anyhow!("'sink.retail' must be either 'true' or 'false'"))
@@ -115,7 +109,7 @@ impl MqttConnector {
         };
 
         Ok(MqttTable {
-            topic: pull_opt("topic", options)?,
+            topic: options.pull_str("topic")?,
             type_: table_type,
             qos,
         })
@@ -249,7 +243,7 @@ impl Connector for MqttConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {

@@ -1,7 +1,5 @@
-use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
@@ -19,6 +17,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::ConnectorOptions;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{config::ConfigOptions, DFSchema, Result, ScalarValue};
@@ -49,12 +48,12 @@ use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
 use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::{CreateTable, Query, SqlOption};
+use datafusion::sql::sqlparser::ast::{CreateTable, Query};
 use datafusion::{
     optimizer::{optimizer::Optimizer, OptimizerContext},
     sql::{
         planner::SqlToRel,
-        sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
+        sqlparser::ast::{ColumnDef, ColumnOption, Statement},
     },
 };
 
@@ -222,7 +221,7 @@ impl ConnectorTable {
         temporary: bool,
         mut fields: Vec<FieldSpec>,
         primary_keys: Vec<String>,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         connection_profile: Option<&ConnectionProfile>,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
@@ -254,7 +253,7 @@ impl ConnectorTable {
             .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
 
         if temporary {
-            if let Some(t) = options.insert("type".to_string(), "lookup".to_string()) {
+            if let Some(t) = options.insert_str("type", "lookup")? {
                 if t != "lookup" {
                     return plan_err!("Cannot have a temporary table with type '{}'; temporary tables must be type 'lookup'", t);
                 }
@@ -321,37 +320,18 @@ impl ConnectorTable {
             table.fields = fields;
         }
 
-        table.event_time_field = options.remove("event_time_field");
-        table.watermark_field = options.remove("watermark_field");
+        table.event_time_field = options.pull_opt_field("event_time_field")?;
+        table.watermark_field = options.pull_opt_field("watermark_field")?;
 
         table.idle_time = options
-            .remove("idle_micros")
-            .map(|t| i64::from_str(&t))
-            .transpose()
-            .map_err(|_| DataFusionError::Plan("idle_micros must be set to a number".to_string()))?
+            .pull_opt_i64("idle_micros")?
             .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
             .filter(|t| *t <= 0)
             .map(|t| Duration::from_micros(t as u64));
 
-        table.lookup_cache_max_bytes = options
-            .remove("lookup.cache.max_bytes")
-            .map(|t| u64::from_str(&t))
-            .transpose()
-            .map_err(|_| {
-                DataFusionError::Plan("lookup.cache.max_bytes must be set to a number".to_string())
-            })?;
+        table.lookup_cache_max_bytes = options.pull_opt_u64("lookup.cache.max_bytes")?;
 
-        table.lookup_cache_ttl = options
-            .remove("lookup.cache.ttl")
-            .map(|t| parse_interval_day_time(&t))
-            .transpose()
-            .map_err(|e| {
-                DataFusionError::Plan(format!("lookup.cache.ttl must be a valid interval ({})", e))
-            })?
-            .map(|t| {
-                Duration::from_secs(t.days as u64 * 60 * 60 * 24)
-                    + Duration::from_millis(t.milliseconds as u64)
-            });
+        table.lookup_cache_ttl = options.pull_opt_duration("lookup.cache.ttl")?;
 
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
@@ -512,30 +492,6 @@ pub enum Table {
     PreviewSink {
         logical_plan: LogicalPlan,
     },
-}
-
-fn value_to_inner_string(value: &Value) -> Result<String> {
-    match value {
-        Value::SingleQuotedString(s) | Value::UnicodeStringLiteral(s) => Ok(s.to_string()),
-        Value::DollarQuotedString(s) => Ok(s.to_string()),
-        Value::Number(_, _) | Value::Boolean(_) => Ok(value.to_string()),
-        Value::DoubleQuotedString(_)
-        | Value::EscapedStringLiteral(_)
-        | Value::NationalStringLiteral(_)
-        | Value::SingleQuotedByteStringLiteral(_)
-        | Value::DoubleQuotedByteStringLiteral(_)
-        | Value::TripleSingleQuotedString(_)
-        | Value::TripleDoubleQuotedString(_)
-        | Value::TripleSingleQuotedByteStringLiteral(_)
-        | Value::TripleDoubleQuotedByteStringLiteral(_)
-        | Value::SingleQuotedRawStringLiteral(_)
-        | Value::DoubleQuotedRawStringLiteral(_)
-        | Value::TripleSingleQuotedRawStringLiteral(_)
-        | Value::TripleDoubleQuotedRawStringLiteral(_)
-        | Value::HexStringLiteral(_)
-        | Value::Null
-        | Value::Placeholder(_) => plan_err!("Expected a string value, found {:?}", value),
-    }
 }
 
 fn plan_generating_expr(
@@ -714,23 +670,9 @@ impl Table {
         }) = statement
         {
             let name: String = name.to_string();
-            let mut with_map = HashMap::new();
-            for option in with_options {
-                let SqlOption::KeyValue { key, value } = &option else {
-                    return plan_err!("Invalid with option: {:?}", option);
-                };
+            let mut connector_opts: ConnectorOptions = with_options.try_into()?;
 
-                let sqlparser::ast::Expr::Value(value) = value else {
-                    return plan_err!(
-                        "Expected a string literal in with clause, but found {}",
-                        value
-                    );
-                };
-
-                with_map.insert(key.value.to_string(), value_to_inner_string(value)?);
-            }
-
-            let connector = with_map.remove("connector");
+            let connector = connector_opts.pull_opt_str("connector")?;
             let fields = Self::schema_from_columns(&name, columns, schema_provider)?;
 
             let primary_keys = columns
@@ -755,7 +697,7 @@ impl Table {
                         return plan_err!("Virtual fields are not supported in memory tables; instead write a query");
                     }
 
-                    if !with_map.is_empty() {
+                    if !connector_opts.is_empty() {
                         if connector.is_some() {
                             return plan_err!("Memory tables do not allow with options");
                         } else {
@@ -773,27 +715,28 @@ impl Table {
                     }))
                 }
                 Some(connector) => {
-                    let connection_profile = match with_map.remove("connection_profile") {
-                        Some(connection_profile_name) => Some(
-                            schema_provider
-                                .profiles
-                                .get(&connection_profile_name)
-                                .ok_or_else(|| {
-                                    DataFusionError::Plan(format!(
-                                        "connection profile '{}' not found",
-                                        connection_profile_name
-                                    ))
-                                })?,
-                        ),
-                        None => None,
-                    };
+                    let connection_profile =
+                        match connector_opts.pull_opt_str("connection_profile")? {
+                            Some(connection_profile_name) => Some(
+                                schema_provider
+                                    .profiles
+                                    .get(&connection_profile_name)
+                                    .ok_or_else(|| {
+                                        DataFusionError::Plan(format!(
+                                            "connection profile '{}' not found",
+                                            connection_profile_name
+                                        ))
+                                    })?,
+                            ),
+                            None => None,
+                        };
                     let table = ConnectorTable::from_options(
                         &name,
                         connector,
                         *temporary,
                         fields,
                         primary_keys,
-                        &mut with_map,
+                        &mut connector_opts,
                         connection_profile,
                     )
                     .map_err(|e| e.context(format!("Failed to create table {}", name)))?;

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
@@ -68,40 +68,6 @@ pub(crate) async fn send(tx: &mut Sender<TestSourceMessage>, msg: TestSourceMess
     if tx.send(msg).await.is_err() {
         warn!("Test API rx closed while sending message");
     }
-}
-
-pub(crate) fn pull_opt(name: &str, opts: &mut HashMap<String, String>) -> anyhow::Result<String> {
-    opts.remove(name)
-        .ok_or_else(|| anyhow!("required option '{}' not set", name))
-}
-
-pub(crate) fn pull_option_to_i64(
-    name: &str,
-    opts: &mut HashMap<String, String>,
-) -> anyhow::Result<Option<i64>> {
-    opts.remove(name)
-        .map(|value| {
-            value.parse::<i64>().context(format!(
-                "failed to parse {} as a number for option {}",
-                value, name
-            ))
-        })
-        .transpose()
-}
-
-pub(crate) fn pull_option_to_u64(
-    name: &str,
-    opts: &mut HashMap<String, String>,
-) -> anyhow::Result<Option<u64>> {
-    pull_option_to_i64(name, opts)?
-        .map(|x| {
-            if x < 0 {
-                bail!("invalid valid for {}, must be greater than 0", name);
-            } else {
-                Ok(x as u64)
-            }
-        })
-        .transpose()
 }
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {

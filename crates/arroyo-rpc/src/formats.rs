@@ -1,9 +1,9 @@
+use crate::ConnectorOptions;
+use datafusion::common::{plan_datafusion_err, plan_err, Result as DFResult};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::str::FromStr;
 use std::sync::OnceLock;
 use utoipa::ToSchema;
 
@@ -55,31 +55,24 @@ pub struct JsonFormat {
 }
 
 impl JsonFormat {
-    fn from_opts(debezium: bool, opts: &mut HashMap<String, String>) -> Result<Self, String> {
+    fn from_opts(debezium: bool, opts: &mut ConnectorOptions) -> DFResult<Self> {
         let confluent_schema_registry = opts
-            .remove("json.confluent_schema_registry")
-            .filter(|t: &String| t == "true")
-            .is_some();
+            .pull_opt_bool("json.confluent_schema_registry")?
+            .unwrap_or(false);
 
-        let include_schema = opts
-            .remove("json.include_schema")
-            .filter(|t| t == "true")
-            .is_some();
+        let include_schema = opts.pull_opt_bool("json.include_schema")?.unwrap_or(false);
 
         if include_schema && confluent_schema_registry {
-            return Err("can't include schema in message if using schema registry".to_string());
+            return plan_err!("at most one of `json.confluent_schema_registry` and `json.include_schema` may be set");
         }
 
-        let unstructured = opts
-            .remove("json.unstructured")
-            .filter(|t| t == "true")
-            .is_some();
+        let unstructured = opts.pull_opt_bool("json.unstructured")?.unwrap_or(false);
 
         let timestamp_format: TimestampFormat = opts
-            .remove("json.timestamp_format")
+            .pull_opt_str("json.timestamp_format")?
             .map(|t| t.as_str().try_into())
             .transpose()
-            .map_err(|_| "json.timestamp_format".to_string())?
+            .map_err(|_| plan_datafusion_err!("invalid value for `json.timestamp_format`"))?
             .unwrap_or_else(|| {
                 if debezium {
                     TimestampFormat::UnixMillis
@@ -200,17 +193,13 @@ impl AvroFormat {
         }
     }
 
-    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
+    pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
         Ok(Self::new(
-            opts.remove("avro.confluent_schema_registry")
-                .filter(|t| t == "true")
-                .is_some(),
-            opts.remove("avro.raw_datums")
-                .filter(|t| t == "true")
-                .is_some(),
-            opts.remove("avro.into_unstructured_json")
-                .filter(|t| t == "true")
-                .is_some(),
+            opts.pull_opt_bool("avro.confluent_schema_registry")?
+                .unwrap_or(false),
+            opts.pull_opt_bool("avro.raw_datums")?.unwrap_or(false),
+            opts.pull_opt_bool("avro.into_unstructured_json")?
+                .unwrap_or(false),
         ))
     }
 
@@ -247,8 +236,8 @@ pub struct ProtobufFormat {
 }
 
 impl ProtobufFormat {
-    pub fn from_opts(_opts: &mut HashMap<String, String>) -> Result<Self, String> {
-        Err("Protobuf is not yet supported in CREATE TABLE statements".to_string())
+    pub fn from_opts(_opts: &mut ConnectorOptions) -> DFResult<Self> {
+        plan_err!("Protobuf is not yet supported in CREATE TABLE statements")
     }
 }
 
@@ -264,8 +253,8 @@ pub enum Format {
 }
 
 impl Format {
-    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
-        let Some(name) = opts.remove("format") else {
+    pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Option<Self>> {
+        let Some(name) = opts.pull_opt_str("format")? else {
             return Ok(None);
         };
 
@@ -277,7 +266,7 @@ impl Format {
             "raw_string" => Format::RawString(RawStringFormat {}),
             "raw_bytes" => Format::RawBytes(RawBytesFormat {}),
             "parquet" => Format::Parquet(ParquetFormat {}),
-            f => return Err(format!("Unknown format '{}'", f)),
+            f => return plan_err!("unknown format '{}'", f),
         }))
     }
 
@@ -308,15 +297,20 @@ impl Default for BadData {
 }
 
 impl BadData {
-    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
-        let Some(method) = opts.remove("bad_data") else {
+    pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Option<Self>> {
+        let Some(method) = opts.pull_opt_str("bad_data")? else {
             return Ok(None);
         };
 
         let method = match method.as_str() {
             "drop" => BadData::Drop {},
             "fail" => BadData::Fail {},
-            f => return Err(format!("Unknown invalid data behavior '{}'", f)),
+            f => {
+                return plan_err!(
+                    "invalid value for 'bad_data': `{}`; expected one of 'drop' or 'fail'",
+                    f
+                )
+            }
         };
 
         Ok(Some(method))
@@ -330,14 +324,14 @@ pub struct Framing {
 }
 
 impl Framing {
-    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
-        let Some(method) = opts.remove("framing") else {
+    pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Option<Self>> {
+        let Some(method) = opts.pull_opt_str("framing")? else {
             return Ok(None);
         };
 
         let method = match method.as_str() {
             "newline" => FramingMethod::Newline(NewlineDelimitedFraming::from_opts(opts)?),
-            f => return Err(format!("Unknown framing method '{}'", f)),
+            f => return plan_err!("Unknown framing method '{}'", f),
         };
 
         Ok(Some(Framing { method }))
@@ -351,15 +345,8 @@ pub struct NewlineDelimitedFraming {
 }
 
 impl NewlineDelimitedFraming {
-    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
-        let max_line_length = opts
-            .remove("framing.newline.max_length")
-            .map(|t| u64::from_str(&t))
-            .transpose()
-            .map_err(|_| {
-                "invalid value for framing.newline.max_length; must be an unsigned integer"
-                    .to_string()
-            })?;
+    pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
+        let max_line_length = opts.pull_opt_u64("framing.newline.max_length")?;
 
         Ok(NewlineDelimitedFraming { max_line_length })
     }

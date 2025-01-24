@@ -1,11 +1,10 @@
 mod operator;
 
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{var_str::VarStr, ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
@@ -17,7 +16,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{construct_http_client, pull_opt, pull_option_to_i64, EmptyConfig};
+use crate::{construct_http_client, EmptyConfig};
 
 use crate::polling_http::operator::{PollingHttpSourceFunc, PollingHttpSourceState};
 use arroyo_operator::connector::Connector;
@@ -149,23 +148,23 @@ impl Connector for PollingHTTPConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let endpoint = pull_opt("endpoint", options)?;
-        let headers = options.remove("headers");
+        let endpoint = options.pull_str("endpoint")?;
+        let headers = options.pull_opt_str("headers")?;
         let method: Option<Method> = options
-            .remove("method")
+            .pull_opt_str("method")?
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'method'"))?;
 
-        let body = options.remove("body");
+        let body = options.pull_opt_str("body")?;
 
-        let interval = pull_option_to_i64("poll_interval_ms", options)?;
+        let interval = options.pull_opt_i64("poll_interval_ms")?;
         let emit_behavior: Option<EmitBehavior> = options
-            .remove("emit_behavior")
+            .pull_opt_str("emit_behavior")?
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'emit_behavior'"))?;

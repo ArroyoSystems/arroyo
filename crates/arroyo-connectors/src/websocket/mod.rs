@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -19,7 +18,7 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tungstenite::http::Request;
 use typify::import_types;
 
-use crate::{header_map, pull_opt, EmptyConfig};
+use crate::{header_map, EmptyConfig};
 
 use crate::websocket::operator::{WebsocketSourceFunc, WebsocketSourceState};
 use arroyo_operator::connector::Connector;
@@ -266,16 +265,16 @@ impl Connector for WebsocketConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let endpoint = pull_opt("endpoint", options)?;
-        let headers = options.remove("headers");
+        let endpoint = options.pull_str("endpoint")?;
+        let headers = options.pull_opt_str("headers")?;
         let mut subscription_messages = vec![];
 
         // add the single subscription message if it exists
-        if let Some(message) = options.remove("subscription_message") {
+        if let Some(message) = options.pull_opt_str("subscription_message")? {
             subscription_messages.push(SubscriptionMessage(message));
 
             if options.contains_key("subscription_messages.0") {
@@ -288,7 +287,7 @@ impl Connector for WebsocketConnector {
         // add the indexed subscription messages if they exist
         let mut message_index = 0;
         while let Some(message) =
-            options.remove(&format!("subscription_messages.{}", message_index))
+            options.pull_opt_str(&format!("subscription_messages.{}", message_index))?
         {
             subscription_messages.push(SubscriptionMessage(message));
             message_index += 1;

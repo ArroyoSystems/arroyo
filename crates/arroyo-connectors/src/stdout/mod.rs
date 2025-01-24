@@ -1,9 +1,7 @@
 mod operator;
 
-use std::collections::HashMap;
-
 use anyhow::anyhow;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use tokio::io::BufWriter;
 
 use arroyo_formats::ser::ArrowSerializer;
@@ -73,7 +71,7 @@ impl Connector for StdoutConnector {
     fn from_options(
         &self,
         name: &str,
-        _options: &mut HashMap<String, String>,
+        _options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {

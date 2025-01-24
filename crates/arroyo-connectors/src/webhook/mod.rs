@@ -1,11 +1,10 @@
 mod operator;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::anyhow;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
@@ -20,7 +19,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Semaphore};
 use typify::import_types;
 
-use crate::{construct_http_client, pull_opt, EmptyConfig};
+use crate::{construct_http_client, EmptyConfig};
 
 use crate::webhook::operator::WebhookSinkFunc;
 use arroyo_operator::connector::Connector;
@@ -179,13 +178,13 @@ impl Connector for WebhookConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let endpoint = pull_opt("endpoint", options)?;
+        let endpoint = options.pull_str("endpoint")?;
 
-        let headers = options.remove("headers").map(VarStr::new);
+        let headers = options.pull_opt_str("headers")?.map(VarStr::new);
 
         let table = WebhookTable {
             endpoint: VarStr::new(endpoint),

@@ -31,7 +31,7 @@ use datafusion::prelude::SessionConfig;
 
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::{Parser, ParserError};
-use datafusion::sql::{planner::ContextProvider, sqlparser, TableReference};
+use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
@@ -60,12 +60,11 @@ use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
 use crate::udafs::EmptyUdaf;
-use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::TIMESTAMP_FIELD;
+use arroyo_rpc::{duration_from_sql, TIMESTAMP_FIELD};
 use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
 use arroyo_udf_python::PythonUDF;
@@ -705,24 +704,8 @@ fn try_handle_set_variable(
             return plan_err!("invalid `SET updating_ttl` call; expected exactly one expression");
         }
 
-        let sqlparser::ast::Expr::Value(sqlparser::ast::Value::SingleQuotedString(s)) =
-            value.first().unwrap()
-        else {
-            return plan_err!(
-                "invalid `SET updating_ttl`; expected a singly-quoted string argument"
-            );
-        };
+        schema_provider.planning_options.ttl = duration_from_sql(value[0].clone())?;
 
-        let interval = parse_interval_day_time(s).map_err(|_| {
-            DataFusionError::Plan(format!(
-                "could not parse '{}' as an interval in `SET updating_ttl` statement",
-                s
-            ))
-        })?;
-
-        schema_provider.planning_options.ttl =
-            Duration::from_secs(interval.days as u64 * 24 * 60 * 60)
-                + Duration::from_millis(interval.milliseconds as u64);
         return Ok(true);
     }
 

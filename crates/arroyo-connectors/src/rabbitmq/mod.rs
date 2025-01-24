@@ -1,14 +1,14 @@
+use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
+use crate::ConnectionType;
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
-use arroyo_rpc::{api_types::connections::TestSourceMessage, OperatorConfig};
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema};
+use arroyo_rpc::{api_types::connections::TestSourceMessage, ConnectorOptions, OperatorConfig};
 use rabbitmq_stream_client::types::OffsetSpecification;
 use rabbitmq_stream_client::{Environment, TlsConfiguration};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
-
-use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
-use crate::{pull_opt, ConnectionType};
 
 mod source;
 
@@ -92,39 +92,40 @@ impl Connector for RabbitmqConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut std::collections::HashMap<String, String>,
-        schema: Option<&arroyo_rpc::api_types::connections::ConnectionSchema>,
-        profile: Option<&arroyo_rpc::api_types::connections::ConnectionProfile>,
-    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
+        options: &mut ConnectorOptions,
+        schema: Option<&ConnectionSchema>,
+        profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
         let connection_config = match profile {
             Some(connection_profile) => {
                 serde_json::from_value(connection_profile.config.clone())
                     .map_err(|e| anyhow!("Failed to parse connection config: {:?}", e))?
             }
             None => {
-                let host = options.remove("host");
-                let username = options.remove("username");
-                let password = options.remove("password");
-                let virtual_host = options.remove("virtual_host");
-                let port = match options.remove("port") {
-                    Some(v) => Some(v.parse::<u16>()?),
-                    None => None,
-                };
+                let host = options.pull_opt_str("host")?;
+                let username = options.pull_opt_str("username")?;
+                let password = options.pull_opt_str("password")?;
+                let virtual_host = options.pull_opt_str("virtual_host")?;
+                let port = options
+                    .pull_opt_u64("port")?
+                    .map(|i| {
+                        u16::try_from(i).map_err(|_| {
+                            anyhow!("invalid 'port' for rabbitmq; must be <= {}", u16::MAX)
+                        })
+                    })
+                    .transpose()?;
 
-                let tls_config = options
-                    .remove("tls_config.enabled")
-                    .map(|enabled| TlsConfig {
-                        enabled: Some(enabled == "true"),
-                        trust_certificates: options
-                            .remove("tls_config.trust_certificates")
-                            .map(|trust_certificates| trust_certificates == "true"),
-                        root_certificates_path: options.remove("tls_config.root_certificates_path"),
-                        client_certificates_path: options
-                            .remove("tls_config.client_certificates_path"),
-                        client_keys_path: options.remove("tls_config.client_keys_path"),
-                    });
+                let tls_config = Some(TlsConfig {
+                    enabled: options.pull_opt_bool("tls_config.enabled")?,
+                    trust_certificates: options.pull_opt_bool("tls_config.trust_certificates")?,
+                    root_certificates_path: options
+                        .pull_opt_str("tls_config.root_certificates_path")?,
+                    client_certificates_path: options
+                        .pull_opt_str("tls_config.client_certificates_path")?,
+                    client_keys_path: options.pull_opt_str("tls_config.client_keys_path")?,
+                });
 
-                let load_balancer_mode = options.remove("load_balancer_mode").map(|t| t == "true");
+                let load_balancer_mode = options.pull_opt_bool("load_balancer_mode")?;
 
                 RabbitmqStreamConfig {
                     host,
@@ -138,12 +139,12 @@ impl Connector for RabbitmqConnector {
             }
         };
 
-        let stream = pull_opt("stream", options)?;
-        let table_type = pull_opt("type", options)?;
+        let stream = options.pull_str("stream")?;
+        let table_type = options.pull_str("type")?;
 
         let table_type = match table_type.as_str() {
             "source" => {
-                let offset = options.remove("source.offset");
+                let offset = options.pull_opt_str("source.offset")?;
                 TableType::Source {
                     offset: match offset.as_deref() {
                         Some("first") => SourceOffset::First,

@@ -1,10 +1,9 @@
 mod operator;
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{var_str::VarStr, ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use eventsource_client::Client;
 use futures::StreamExt;
@@ -19,7 +18,7 @@ use arroyo_rpc::api_types::connections::{
 use serde::{Deserialize, Serialize};
 
 use crate::sse::operator::SSESourceFunc;
-use crate::{pull_opt, EmptyConfig};
+use crate::EmptyConfig;
 
 use arroyo_operator::connector::Connector;
 
@@ -124,13 +123,13 @@ impl Connector for SSEConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let endpoint = pull_opt("endpoint", options)?;
-        let headers = options.remove("headers");
-        let events = options.remove("events");
+        let endpoint = options.pull_str("endpoint")?;
+        let headers = options.pull_opt_str("headers")?;
+        let events = options.pull_opt_str("events")?;
 
         self.from_config(
             None,

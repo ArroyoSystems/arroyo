@@ -1,6 +1,6 @@
 CREATE TABLE nexmark WITH (
     connector = 'nexmark',
-    event_rate = '10'
+    event_rate = 10
 );
 
 SELECT

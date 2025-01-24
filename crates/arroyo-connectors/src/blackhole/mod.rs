@@ -5,8 +5,7 @@ use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::OperatorConfig;
-use std::collections::HashMap;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
 use crate::EmptyConfig;
 
@@ -75,7 +74,7 @@ impl Connector for BlackholeConnector {
     fn from_options(
         &self,
         name: &str,
-        _options: &mut HashMap<String, String>,
+        _options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {

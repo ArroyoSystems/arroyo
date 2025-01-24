@@ -1,7 +1,7 @@
+use crate::kafka;
 use crate::kafka::{
     KafkaConfig, KafkaConfigAuthentication, KafkaConnector, KafkaTable, KafkaTester, TableType,
 };
-use crate::{kafka, pull_opt};
 use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
@@ -9,7 +9,7 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
@@ -33,12 +33,13 @@ pub struct ConfluentConnector {}
 
 impl ConfluentConnector {
     pub fn connection_from_options(
-        opts: &mut HashMap<String, String>,
+        opts: &mut ConnectorOptions,
     ) -> anyhow::Result<ConfluentProfile> {
-        let schema_registry: Option<anyhow::Result<_>> =
-            opts.remove("schema_registry.endpoint").map(|endpoint| {
-                let api_key = VarStr::new(pull_opt("schema_registry.api_key", opts)?);
-                let api_secret = VarStr::new(pull_opt("schema_registry.api_secret", opts)?);
+        let schema_registry: Option<anyhow::Result<_>> = opts
+            .pull_opt_str("schema_registry.endpoint")?
+            .map(|endpoint| {
+                let api_key = VarStr::new(opts.pull_str("schema_registry.api_key")?);
+                let api_secret = VarStr::new(opts.pull_str("schema_registry.api_secret")?);
                 Ok(ConfluentSchemaRegistry {
                     endpoint: Some(endpoint),
                     api_key: Some(api_key),
@@ -47,9 +48,9 @@ impl ConfluentConnector {
             });
 
         Ok(ConfluentProfile {
-            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
-            key: VarStr::new(pull_opt("key", opts)?),
-            secret: VarStr::new(pull_opt("secret", opts)?),
+            bootstrap_servers: BootstrapServers(opts.pull_str("bootstrap_servers")?),
+            key: VarStr::new(opts.pull_str("key")?),
+            secret: VarStr::new(opts.pull_str("secret")?),
             schema_registry: schema_registry.transpose()?,
         })
     }
@@ -159,7 +160,7 @@ impl Connector for ConfluentConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
