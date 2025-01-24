@@ -74,71 +74,45 @@ impl NatsConnector {
                         description: options.pull_opt_str("consumer.description")?,
                         ack_policy: options
                             .pull_opt_str("consumer.ack_policy")?
-                            .unwrap_or_default()
-                            .parse()
+                            .map(|s| {
+                                s.parse()
+                                    .map_err(|e| anyhow!("invalid consumer.ack_policy: {}", e))
+                            })
+                            .transpose()?
                             .unwrap_or(AcknowledgmentPolicy::Explicit),
                         replay_policy: options
                             .pull_opt_str("consumer.replay_policy")?
-                            .unwrap_or_default()
-                            .parse()
+                            .map(|s| {
+                                s.parse()
+                                    .map_err(|e| anyhow!("invalid consumer.replay_policy: {}", e))
+                            })
+                            .transpose()?
                             .unwrap_or(ReplayPolicy::Instant),
-                        ack_wait: options
-                            .pull_opt_str("consumer.ack_wait")?
-                            .unwrap_or_default()
-                            .parse()
-                            .unwrap_or(30),
+                        ack_wait: options.pull_opt_i64("consumer.ack_wait")?.unwrap_or(30),
                         filter_subjects: options
                             .pull_opt_str("consumer.filter_subjects")?
                             .map_or_else(Vec::new, |s| s.split(',').map(String::from).collect()),
                         sample_frequency: options
-                            .pull_opt_str("consumer.sample_frequency")?
-                            .unwrap_or_default()
-                            .parse()
+                            .pull_opt_i64("consumer.sample_frequency")?
                             .unwrap_or(0),
-                        num_replicas: options
-                            .pull_opt_str("consumer.num_replicas")?
-                            .unwrap_or_default()
-                            .parse()
-                            .unwrap_or(1),
+                        num_replicas: options.pull_opt_i64("consumer.num_replicas")?.unwrap_or(1),
                         inactive_threshold: options
-                            .pull_opt_str("consumer.inactive_threshold")?
-                            .unwrap_or_default()
-                            .parse()
+                            .pull_opt_i64("consumer.inactive_threshold")?
                             .unwrap_or(600),
-                        rate_limit: options
-                            .pull_opt_str("consumer.rate_limit")?
-                            .unwrap_or_default()
-                            .parse()
-                            .unwrap_or(-1),
+                        rate_limit: options.pull_opt_i64("consumer.rate_limit")?.unwrap_or(-1),
                         max_ack_pending: options
-                            .pull_opt_str("consumer.max_ack_pending")?
-                            .unwrap_or_default()
-                            .parse()
+                            .pull_opt_i64("consumer.max_ack_pending")?
                             .unwrap_or(-1),
-                        max_deliver: options
-                            .pull_opt_str("consumer.max_deliver")?
-                            .unwrap_or_default()
-                            .parse()
-                            .unwrap_or(-1),
+                        max_deliver: options.pull_opt_i64("consumer.max_deliver")?.unwrap_or(-1),
                         max_waiting: options
-                            .pull_opt_str("consumer.max_waiting")?
-                            .unwrap_or_default()
-                            .parse()
+                            .pull_opt_i64("consumer.max_waiting")?
                             .unwrap_or(1000000),
-                        max_batch: options
-                            .pull_opt_str("consumer.max_batch")?
-                            .unwrap_or_default()
-                            .parse()
-                            .unwrap_or(10000),
+                        max_batch: options.pull_opt_i64("consumer.max_batch")?.unwrap_or(10000),
                         max_bytes: options
-                            .pull_opt_str("consumer.max_bytes")?
-                            .unwrap_or_default()
-                            .parse()
+                            .pull_opt_i64("consumer.max_bytes")?
                             .unwrap_or(104857600),
                         max_expires: options
-                            .pull_opt_str("consumer.max_expires")?
-                            .unwrap_or_default()
-                            .parse()
+                            .pull_opt_i64("consumer.max_expires")?
                             .unwrap_or(300000),
                     }),
                     (None, Some(subject)) => Some(SourceType::Core { subject }),

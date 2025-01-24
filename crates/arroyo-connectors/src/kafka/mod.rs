@@ -82,9 +82,7 @@ impl KafkaConnector {
                 password: VarStr::new(options.pull_str("auth.password")?),
             },
             Some("aws_msk_iam") => KafkaConfigAuthentication::AwsMskIam {
-                region: options
-                    .pull_str("auth.region")
-                    .map_err(|e| anyhow!("failed to get auth.region: {}", e))?,
+                region: options.pull_str("auth.region")?,
             },
             Some(other) => bail!("unknown auth type '{}'", other),
         };
@@ -93,38 +91,29 @@ impl KafkaConnector {
             .pull_opt_str("schema_registry.endpoint")?
             .map(|endpoint| {
                 let api_key = options
-                    .pull_opt_str("schema_registry.api_key")
-                    .ok()
-                    .flatten()
+                    .pull_opt_str("schema_registry.api_key")?
                     .map(VarStr::new);
                 let api_secret = options
-                    .pull_opt_str("schema_registry.api_secret")
-                    .ok()
-                    .flatten()
+                    .pull_opt_str("schema_registry.api_secret")?
                     .map(VarStr::new);
-                SchemaRegistry::ConfluentSchemaRegistry {
+                datafusion::common::Result::<_>::Ok(SchemaRegistry::ConfluentSchemaRegistry {
                     endpoint,
                     api_key,
                     api_secret,
-                }
-            });
+                })
+            })
+            .transpose()?;
 
         Ok(KafkaConfig {
             authentication: auth,
-            bootstrap_servers: BootstrapServers(
-                options
-                    .pull_str("bootstrap_servers")
-                    .map_err(|e| anyhow!("failed to get bootstrap_servers: {}", e))?,
-            ),
+            bootstrap_servers: BootstrapServers(options.pull_str("bootstrap_servers")?),
             schema_registry_enum: schema_registry,
             connection_properties: HashMap::new(),
         })
     }
 
     pub fn table_from_options(options: &mut ConnectorOptions) -> anyhow::Result<KafkaTable> {
-        let typ = options
-            .pull_str("type")
-            .map_err(|e| anyhow!("failed to get type: {}", e))?;
+        let typ = options.pull_str("type")?;
         let table_type = match typ.as_str() {
             "source" => {
                 let offset = options.pull_opt_str("source.offset")?;
@@ -162,9 +151,7 @@ impl KafkaConnector {
         };
 
         Ok(KafkaTable {
-            topic: options
-                .pull_str("topic")
-                .map_err(|e| anyhow!("failed to get topic: {}", e))?,
+            topic: options.pull_str("topic")?,
             type_: table_type,
             client_configs: options
                 .pull_opt_str("client_configs")?

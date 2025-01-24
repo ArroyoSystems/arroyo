@@ -34,9 +34,6 @@ pub mod stdout;
 pub mod webhook;
 pub mod websocket;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-
-pub struct EmptyConfig {}
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
         Box::new(blackhole::BlackholeConnector {}),
@@ -63,6 +60,9 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
 
     connectors.into_iter().map(|c| (c.name(), c)).collect()
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct EmptyConfig {}
 
 pub(crate) async fn send(tx: &mut Sender<TestSourceMessage>, msg: TestSourceMessage) {
     if tx.send(msg).await.is_err() {

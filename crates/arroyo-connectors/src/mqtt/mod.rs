@@ -86,11 +86,8 @@ impl MqttConnector {
         let typ = options.pull_str("type")?;
         let qos = options
             .pull_opt_str("qos")?
-            .map(|s| match s.as_str() {
-                "AtMostOnce" => Ok(QualityOfService::AtMostOnce),
-                "AtLeastOnce" => Ok(QualityOfService::AtLeastOnce),
-                "ExactlyOnce" => Ok(QualityOfService::ExactlyOnce),
-                _ => bail!("invalid value for 'qos': {}", s),
+            .map(|s| {
+                QualityOfService::try_from(s).map_err(|s| anyhow!("invalid value for 'qos': {s}"))
             })
             .transpose()?;
 
