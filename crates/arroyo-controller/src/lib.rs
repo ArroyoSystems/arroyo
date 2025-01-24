@@ -1,6 +1,8 @@
 #![allow(clippy::new_without_default)]
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
+// https://github.com/rust-lang/rust-clippy/issues/12908
+#![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
 use arroyo_rpc::config;

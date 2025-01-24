@@ -1,3 +1,6 @@
+// https://github.com/rust-lang/rust-clippy/issues/12908
+#![allow(clippy::needless_lifetimes)]
+
 use axum::response::IntoResponse;
 use axum::Json;
 use cornucopia_async::DatabaseSource;
@@ -54,6 +57,7 @@ pub mod rest;
 mod rest_utils;
 pub mod sql;
 mod udfs;
+
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 

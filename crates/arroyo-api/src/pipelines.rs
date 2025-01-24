@@ -58,7 +58,7 @@ use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
 use petgraph::prelude::EdgeRef;
 
-async fn compile_sql<'a>(
+async fn compile_sql(
     query: String,
     local_udfs: &Vec<Udf>,
     parallelism: usize,
@@ -291,7 +291,7 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn create_pipeline_int<'a>(
+pub(crate) async fn create_pipeline_int(
     name: String,
     query: String,
     udfs: Vec<Udf>,

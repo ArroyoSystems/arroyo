@@ -32,9 +32,10 @@ jobs:
           distribution: 'temurin'
           java-version: '11'
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.83
+        uses: dtolnay/rust-toolchain@master
         with:
           components: clippy, rustfmt
+          toolchain: 1.84
       - name: Check Formatting
         run: cargo fmt -- --check
       - uses: actions/setup-python@v5
