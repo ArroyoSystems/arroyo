@@ -37,7 +37,7 @@ use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
 use cornucopia_async::DatabaseSource;
 
-pub(crate) async fn create_job<'a>(
+pub(crate) async fn create_job(
     pipeline_name: &str,
     pipeline_id: i64,
     checkpoint_interval: Duration,

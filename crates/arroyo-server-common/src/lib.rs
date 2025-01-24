@@ -212,11 +212,11 @@ struct AdminState {
     name: String,
 }
 
-async fn root<'a>(State(state): State<Arc<AdminState>>) -> String {
+async fn root(State(state): State<Arc<AdminState>>) -> String {
     format!("{}\n", state.name)
 }
 
-async fn status<'a>() -> String {
+async fn status() -> String {
     "ok".to_string()
 }
 
@@ -244,7 +244,7 @@ async fn config_route() -> Result<String, StatusCode> {
     Ok(toml::to_string(&*config()).unwrap())
 }
 
-async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
+async fn details(State(state): State<Arc<AdminState>>) -> String {
     serde_json::to_string_pretty(&json!({
         "service": state.name,
         "git_sha": GIT_SHA,
