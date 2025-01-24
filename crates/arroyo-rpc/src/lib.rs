@@ -7,7 +7,7 @@ pub mod var_str;
 use crate::api_types::connections::PrimitiveType;
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
@@ -15,13 +15,10 @@ use arrow_schema::{DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use datafusion::catalog_common::TableReference;
 use datafusion::common::{
-    not_impl_err, plan_datafusion_err, plan_err, DFSchema, DFSchemaRef, Result as DFResult,
-    ScalarValue,
+    not_impl_err, plan_datafusion_err, plan_err, DFSchema, Result as DFResult, ScalarValue,
 };
 use datafusion::config::ConfigOptions;
-use datafusion::logical_expr::planner::PlannerResult;
 use datafusion::logical_expr::{AggregateUDF, ScalarUDF, TableSource, WindowUDF};
-use datafusion::prelude::SessionContext;
 use datafusion::sql::planner::{ContextProvider, PlannerContext, SqlToRel};
 use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value as SqlValue};
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
@@ -29,7 +26,6 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::{fs, time::SystemTime};

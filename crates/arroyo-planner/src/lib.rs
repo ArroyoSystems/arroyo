@@ -31,7 +31,7 @@ use datafusion::prelude::SessionConfig;
 
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::{Parser, ParserError};
-use datafusion::sql::{planner::ContextProvider, sqlparser, TableReference};
+use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
@@ -60,7 +60,6 @@ use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
 use crate::udafs::EmptyUdaf;
-use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
