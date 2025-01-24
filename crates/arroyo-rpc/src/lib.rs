@@ -7,11 +7,12 @@ pub mod var_str;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::{fs, time::SystemTime};
-
+use std::time::Duration;
 use crate::api_types::connections::PrimitiveType;
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::Result;
+use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{DataType, Field, Fields};
@@ -473,6 +474,32 @@ impl ConnectorOptions {
     pub fn pull_bool(&mut self, name: &str) -> DFResult<bool> {
         self.pull_opt_bool(name)?
             .ok_or_else(|| plan_datafusion_err!("required option '{}' not set", name))
+    }
+    
+    pub fn pull_opt_duration(&mut self, name: &str) -> DFResult<Option<Duration>> {
+        let interval = match self.options.remove(name) {
+            Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
+                parse_interval_day_time(&s)
+                    .map_err(|_| plan_datafusion_err!("expected with option '{}' to be an interval, but it was `{}`", name, s))?
+            }
+            Some(Expr::Interval(interval)) => {
+                parse_interval_day_time(&interval.to_string())
+                    .map_err(|_| plan_datafusion_err!("expected with option '{}' to be an interval, but it was `{}`", name, interval))?
+            }
+            Some(e) => {
+                return plan_err!("expected with option '{}' to be an double, but it was `{:?}`", name, e);
+            }
+            None => {
+                return Ok(None);
+            }
+        };
+
+        Ok(Some(Duration::from_secs(interval.days as u64 * 60 * 60 * 24)
+            + Duration::from_millis(interval.milliseconds as u64)))
+    }
+    
+    pub fn keys(&self) -> impl Iterator<Item=&String> {
+        self.options.keys()
     }
     
     pub fn keys_with_prefix<'a, 'b>(&'a self, prefix: &'b str) -> impl Iterator<Item=&'a String> + 'b where 'a : 'b {

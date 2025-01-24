@@ -322,37 +322,20 @@ impl ConnectorTable {
             table.fields = fields;
         }
 
-        table.event_time_field = options.remove("event_time_field");
-        table.watermark_field = options.remove("watermark_field");
+        table.event_time_field = options.pull_opt_str("event_time_field")?;
+        table.watermark_field = options.pull_opt_str("watermark_field")?;
 
         table.idle_time = options
-            .remove("idle_micros")
-            .map(|t| i64::from_str(&t))
-            .transpose()
-            .map_err(|_| DataFusionError::Plan("idle_micros must be set to a number".to_string()))?
+            .pull_opt_i64("idle_micros")?
             .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
             .filter(|t| *t <= 0)
             .map(|t| Duration::from_micros(t as u64));
 
         table.lookup_cache_max_bytes = options
-            .remove("lookup.cache.max_bytes")
-            .map(|t| u64::from_str(&t))
-            .transpose()
-            .map_err(|_| {
-                DataFusionError::Plan("lookup.cache.max_bytes must be set to a number".to_string())
-            })?;
+            .pull_opt_u64("lookup.cache.max_bytes")?;
 
         table.lookup_cache_ttl = options
-            .remove("lookup.cache.ttl")
-            .map(|t| parse_interval_day_time(&t))
-            .transpose()
-            .map_err(|e| {
-                DataFusionError::Plan(format!("lookup.cache.ttl must be a valid interval ({})", e))
-            })?
-            .map(|t| {
-                Duration::from_secs(t.days as u64 * 60 * 60 * 24)
-                    + Duration::from_millis(t.milliseconds as u64)
-            });
+            .pull_opt_duration("lookup.cache.ttl")?;
 
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
