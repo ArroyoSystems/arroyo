@@ -11,6 +11,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use datafusion::common::{plan_datafusion_err, Result as DFResult};
+use datafusion::common::plan_err;
+use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value};
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
 
@@ -69,6 +72,8 @@ pub(crate) async fn send(tx: &mut Sender<TestSourceMessage>, msg: TestSourceMess
         warn!("Test API rx closed while sending message");
     }
 }
+
+
 
 pub(crate) fn pull_opt(name: &str, opts: &mut HashMap<String, String>) -> anyhow::Result<String> {
     opts.remove(name)

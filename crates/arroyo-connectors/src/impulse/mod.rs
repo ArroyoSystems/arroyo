@@ -7,7 +7,7 @@ use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, PrimitiveType, TestSourceMessage,
 };
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -99,9 +99,9 @@ impl Connector for ImpulseConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
             .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;

@@ -5,7 +5,7 @@ use typify::import_types;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, TestSourceMessage};
-use arroyo_rpc::{api_types, OperatorConfig};
+use arroyo_rpc::{api_types, ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::{pull_opt, pull_option_to_i64, ConnectionSchema, ConnectionType, EmptyConfig};
@@ -128,9 +128,9 @@ impl Connector for KinesisConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let typ = pull_opt("type", options)?;
         let table_type = match typ.as_str() {

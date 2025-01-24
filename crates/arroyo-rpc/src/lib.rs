@@ -15,6 +15,8 @@ use anyhow::Result;
 use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{DataType, Field, Fields};
+use datafusion::common::{plan_datafusion_err, plan_err, Result as DFResult};
+use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value as SqlValue};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
@@ -339,6 +341,101 @@ impl Converter {
 pub fn get_hasher() -> ahash::RandomState {
     ahash::RandomState::with_seeds(HASH_SEEDS[0], HASH_SEEDS[1], HASH_SEEDS[2], HASH_SEEDS[3])
 }
+
+pub struct ConnectorOptions {
+    options: HashMap<String, Expr>
+}
+
+impl TryFrom<&Vec<SqlOption>> for ConnectorOptions {
+    type Error = datafusion::error::DataFusionError;
+
+    fn try_from(value: &Vec<SqlOption>) -> Result<Self, Self::Error> {
+        let mut options = HashMap::new();
+
+        for option in value {
+            let SqlOption::KeyValue { key, value } = &option else {
+                return plan_err!("invalid with option: '{}'; expected an `=` delimited key-value pair", option);
+            };
+
+            options.insert(key.value.to_string(), value.clone());
+        }
+
+        Ok(Self {
+            options,
+        })
+    }
+}
+
+impl ConnectorOptions {
+    pub fn pull_opt_str(&mut self, name: &str) -> DFResult<Option<String>> {
+        match self.options.remove(name) {
+            Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
+                Ok(Some(s))
+            }
+            Some(e) => {
+                plan_err!("expected with option '{}' to be a single-quoted string, but it was `{:?}`", name, e)
+            }
+            None => {
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn pull_str(&mut self, name: &str) -> DFResult<String> {
+        self.pull_opt_str(name)?
+            .ok_or_else(|| plan_datafusion_err!("required option '{}' not set", name))
+    }
+    
+    pub fn pull_opt_bool(&mut self, name: &str) -> DFResult<Option<bool>> {
+        match self.options.remove(name) {
+            Some(Expr::Value(SqlValue::Boolean(b))) => {
+                Ok(Some(b))
+            }
+            Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
+                match s.as_str() {
+                    "true" | "yes" => Ok(Some(true)),
+                    "false" | "no" => Ok(Some(false)),
+                    _ => plan_err!("expected with option '{}' to be a boolean, but it was `'{}'`", name, s),
+                }
+            }
+            Some(e) => {
+                plan_err!("expected with option '{}' to be a boolean, but it was `{:?}`", name, e)
+            }
+            None => {
+                Ok(None)
+            }
+        }
+    }
+    
+    pub fn pull_opt_u64(&mut self, name: &str) -> DFResult<Option<u64>> {
+        match self.options.remove(name) {
+            Some(Expr::Value(SqlValue::Number(s, _))) | Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
+                s.parse::<u64>()
+                    .map(|i| Some(i))
+                    .map_err(|_| plan_datafusion_err!("expected with option '{}' to be an unsigned integer, but it was `{}`", name, s))
+            }
+            Some(e) => {
+                plan_err!("expected with option '{}' to be an unsigned integer, but it was `{:?}`", name, e)
+            }
+            None => {
+                Ok(None)
+            }
+        }
+    }
+    
+    pub fn insert_str(&mut self, name: impl Into<String>, value: impl Into<String>) -> DFResult<Option<String>> {
+        let name = name.into();
+        let value = value.into();
+        let existing = self.pull_opt_str(&name)?;
+        self.options.insert(name, Expr::Value(SqlValue::SingleQuotedString(value)));
+        Ok(existing)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.options.is_empty()
+    }
+}
+
 
 #[macro_export]
 macro_rules! retry {

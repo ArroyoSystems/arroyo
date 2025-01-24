@@ -14,7 +14,7 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::{pull_opt, pull_option_to_i64, EmptyConfig};
@@ -185,9 +185,9 @@ impl Connector for FileSystemConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         match options.remove("type") {
             Some(t) if t == "source" => {

@@ -7,7 +7,7 @@ use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::{pull_opt, EmptyConfig};
@@ -120,9 +120,9 @@ impl Connector for SingleFileConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let path = pull_opt("path", options)?;
         let Ok(table_type) = pull_opt("type", options)?.try_into() else {

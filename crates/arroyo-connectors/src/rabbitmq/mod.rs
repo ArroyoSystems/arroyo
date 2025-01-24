@@ -1,12 +1,12 @@
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
-use arroyo_rpc::{api_types::connections::TestSourceMessage, OperatorConfig};
+use arroyo_rpc::{api_types::connections::TestSourceMessage, ConnectorOptions, OperatorConfig};
 use rabbitmq_stream_client::types::OffsetSpecification;
 use rabbitmq_stream_client::{Environment, TlsConfiguration};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
-
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema};
 use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
 use crate::{pull_opt, ConnectionType};
 
@@ -92,10 +92,10 @@ impl Connector for RabbitmqConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut std::collections::HashMap<String, String>,
-        schema: Option<&arroyo_rpc::api_types::connections::ConnectionSchema>,
-        profile: Option<&arroyo_rpc::api_types::connections::ConnectionProfile>,
-    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
+        options: &mut ConnectorOptions,
+        schema: Option<&ConnectionSchema>,
+        profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
         let connection_config = match profile {
             Some(connection_profile) => {
                 serde_json::from_value(connection_profile.config.clone())

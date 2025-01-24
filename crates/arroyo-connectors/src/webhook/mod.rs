@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::anyhow;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
@@ -179,9 +179,9 @@ impl Connector for WebhookConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
 

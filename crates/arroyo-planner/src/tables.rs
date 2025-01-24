@@ -1,6 +1,6 @@
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow_schema::{DataType, Field, FieldRef, Schema};
-use arroyo_connectors::connector_for_type;
+use arroyo_connectors::{connector_for_type};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
@@ -57,6 +57,7 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
+use arroyo_rpc::ConnectorOptions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -222,7 +223,7 @@ impl ConnectorTable {
         temporary: bool,
         mut fields: Vec<FieldSpec>,
         primary_keys: Vec<String>,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         connection_profile: Option<&ConnectionProfile>,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
@@ -254,7 +255,7 @@ impl ConnectorTable {
             .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
 
         if temporary {
-            if let Some(t) = options.insert("type".to_string(), "lookup".to_string()) {
+            if let Some(t) = options.insert_str("type", "lookup")? {
                 if t != "lookup" {
                     return plan_err!("Cannot have a temporary table with type '{}'; temporary tables must be type 'lookup'", t);
                 }
@@ -514,30 +515,6 @@ pub enum Table {
     },
 }
 
-fn value_to_inner_string(value: &Value) -> Result<String> {
-    match value {
-        Value::SingleQuotedString(s) | Value::UnicodeStringLiteral(s) => Ok(s.to_string()),
-        Value::DollarQuotedString(s) => Ok(s.to_string()),
-        Value::Number(_, _) | Value::Boolean(_) => Ok(value.to_string()),
-        Value::DoubleQuotedString(_)
-        | Value::EscapedStringLiteral(_)
-        | Value::NationalStringLiteral(_)
-        | Value::SingleQuotedByteStringLiteral(_)
-        | Value::DoubleQuotedByteStringLiteral(_)
-        | Value::TripleSingleQuotedString(_)
-        | Value::TripleDoubleQuotedString(_)
-        | Value::TripleSingleQuotedByteStringLiteral(_)
-        | Value::TripleDoubleQuotedByteStringLiteral(_)
-        | Value::SingleQuotedRawStringLiteral(_)
-        | Value::DoubleQuotedRawStringLiteral(_)
-        | Value::TripleSingleQuotedRawStringLiteral(_)
-        | Value::TripleDoubleQuotedRawStringLiteral(_)
-        | Value::HexStringLiteral(_)
-        | Value::Null
-        | Value::Placeholder(_) => plan_err!("Expected a string value, found {:?}", value),
-    }
-}
-
 fn plan_generating_expr(
     expr: &sqlparser::ast::Expr,
     name: &str,
@@ -714,23 +691,9 @@ impl Table {
         }) = statement
         {
             let name: String = name.to_string();
-            let mut with_map = HashMap::new();
-            for option in with_options {
-                let SqlOption::KeyValue { key, value } = &option else {
-                    return plan_err!("Invalid with option: {:?}", option);
-                };
-
-                let sqlparser::ast::Expr::Value(value) = value else {
-                    return plan_err!(
-                        "Expected a string literal in with clause, but found {}",
-                        value
-                    );
-                };
-
-                with_map.insert(key.value.to_string(), value_to_inner_string(value)?);
-            }
-
-            let connector = with_map.remove("connector");
+            let mut connector_opts: ConnectorOptions = with_options.try_into()?;
+            
+            let connector = connector_opts.pull_opt_str("connector")?;
             let fields = Self::schema_from_columns(&name, columns, schema_provider)?;
 
             let primary_keys = columns
@@ -755,7 +718,7 @@ impl Table {
                         return plan_err!("Virtual fields are not supported in memory tables; instead write a query");
                     }
 
-                    if !with_map.is_empty() {
+                    if !connector_opts.is_empty() {
                         if connector.is_some() {
                             return plan_err!("Memory tables do not allow with options");
                         } else {
@@ -773,7 +736,7 @@ impl Table {
                     }))
                 }
                 Some(connector) => {
-                    let connection_profile = match with_map.remove("connection_profile") {
+                    let connection_profile = match connector_opts.pull_opt_str("connection_profile")? {
                         Some(connection_profile_name) => Some(
                             schema_provider
                                 .profiles
@@ -793,7 +756,7 @@ impl Table {
                         *temporary,
                         fields,
                         primary_keys,
-                        &mut with_map,
+                        &mut connector_opts,
                         connection_profile,
                     )
                     .map_err(|e| e.context(format!("Failed to create table {}", name)))?;

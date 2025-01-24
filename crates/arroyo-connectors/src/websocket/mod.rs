@@ -8,7 +8,7 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -266,9 +266,9 @@ impl Connector for WebsocketConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
         let headers = options.remove("headers");

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{var_str::VarStr, ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use eventsource_client::Client;
 use futures::StreamExt;
@@ -124,9 +124,9 @@ impl Connector for SSEConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
         let headers = options.remove("headers");

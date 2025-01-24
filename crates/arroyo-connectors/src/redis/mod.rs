@@ -16,7 +16,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use redis::aio::ConnectionManager;
 use redis::cluster::ClusterClient;
 use redis::{Client, ConnectionInfo, IntoConnectionInfo};
@@ -235,8 +235,8 @@ impl Connector for RedisConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
-        s: Option<&ConnectionSchema>,
+        options: &mut ConnectorOptions,
+        schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let connection_config = match profile {
@@ -279,7 +279,7 @@ impl Connector for RedisConnector {
 
         let typ = pull_opt("type", options)?;
 
-        let schema = s
+        let schema = schema
             .as_ref()
             .ok_or_else(|| anyhow!("No schema defined for Redis connection"))?;
 
@@ -379,7 +379,7 @@ impl Connector for RedisConnector {
             RedisTable {
                 connector_type: sink,
             },
-            s,
+            schema,
         )
     }
 

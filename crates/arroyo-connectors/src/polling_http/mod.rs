@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{var_str::VarStr, ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
@@ -149,9 +149,9 @@ impl Connector for PollingHTTPConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _profile: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
         let headers = options.remove("headers");

@@ -9,7 +9,7 @@ use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, SchemaResolver,
 };
-use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{schema_resolver, var_str::VarStr, ConnectorOptions, OperatorConfig};
 use arroyo_types::string_to_map;
 use aws_config::Region;
 use aws_msk_iam_sasl_signer::generate_auth_token;
@@ -346,7 +346,7 @@ impl Connector for KafkaConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut HashMap<String, String>,
+        options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
