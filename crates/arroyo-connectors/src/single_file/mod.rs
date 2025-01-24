@@ -10,7 +10,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, EmptyConfig};
+use crate::{EmptyConfig};
 
 use crate::single_file::sink::SingleFileSink;
 use crate::single_file::source::SingleFileSourceFunc;
@@ -124,18 +124,13 @@ impl Connector for SingleFileConnector {
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let path = pull_opt("path", options)?;
-        let Ok(table_type) = pull_opt("type", options)?.try_into() else {
+        let path = options.pull_str("path")?;
+        let Ok(table_type) = options.pull_str("type")?.try_into() else {
             bail!("'type' must be 'source' or 'sink'");
         };
 
         let wait_for_control = options
-            .remove("wait_for_control")
-            .map(|s| {
-                s.parse()
-                    .map_err(|_| anyhow!("'wait_for_control' must be a boolean"))
-            })
-            .transpose()?;
+            .pull_opt_bool("wait_for_control")?;
 
         self.from_config(
             None,

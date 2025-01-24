@@ -1,6 +1,6 @@
 mod operator;
 
-use anyhow::{anyhow, bail};
+use anyhow::{bail};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
@@ -9,13 +9,12 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 use typify::import_types;
 
 use crate::impulse::operator::{ImpulseSourceFunc, ImpulseSourceState, ImpulseSpec};
-use crate::{pull_opt, source_field, ConnectionType, EmptyConfig};
+use crate::{source_field, ConnectionType, EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
@@ -101,22 +100,12 @@ impl Connector for ImpulseConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
-            .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
+        let event_rate = options.pull_f64("event_rate")?;
 
-        let event_time_interval: Option<i64> = options
-            .remove("event_time_interval")
-            .map(|t| i64::from_str(&t))
-            .transpose()
-            .map_err(|_| anyhow!("invalid value for event_time_interval; expected integer"))?;
-
-        let message_count: Option<i64> = options
-            .remove("message_count")
-            .map(|t| i64::from_str(&t))
-            .transpose()
-            .map_err(|_| anyhow!("invalid value for message count; expected integer"))?;
+        let event_time_interval = options.pull_opt_i64("event_time_interval")?;
+        let message_count = options.pull_opt_i64("message_count")?;
 
         // validate the schema
         if let Some(s) = schema {

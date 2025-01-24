@@ -11,7 +11,7 @@ use typify::import_types;
 
 use crate::fluvio::sink::FluvioSinkFunc;
 use crate::fluvio::source::FluvioSourceFunc;
-use crate::{pull_opt, ConnectionType, EmptyConfig};
+use crate::{ConnectionType, EmptyConfig};
 
 mod sink;
 mod source;
@@ -89,13 +89,13 @@ impl Connector for FluvioConnector {
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let endpoint = options.remove("endpoint");
-        let topic = pull_opt("topic", options)?;
-        let table_type = pull_opt("type", options)?;
+        let endpoint = options.pull_opt_str("endpoint")?;
+        let topic = options.pull_str("topic")?;
+        let table_type = options.pull_str("type")?;
 
         let table_type = match table_type.as_str() {
             "source" => {
-                let offset = options.remove("source.offset");
+                let offset = options.pull_opt_str("source.offset")?;
                 TableType::Source {
                     offset: match offset.as_deref() {
                         Some("earliest") => SourceOffset::Earliest,

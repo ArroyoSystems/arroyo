@@ -19,7 +19,7 @@ use arroyo_rpc::api_types::connections::{
 use serde::{Deserialize, Serialize};
 
 use crate::sse::operator::SSESourceFunc;
-use crate::{pull_opt, EmptyConfig};
+use crate::{EmptyConfig};
 
 use arroyo_operator::connector::Connector;
 
@@ -126,11 +126,11 @@ impl Connector for SSEConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let endpoint = pull_opt("endpoint", options)?;
-        let headers = options.remove("headers");
-        let events = options.remove("events");
+        let endpoint = options.pull_str("endpoint")?;
+        let headers = options.pull_opt_str("headers")?;
+        let events = options.pull_opt_str("events")?;
 
         self.from_config(
             None,

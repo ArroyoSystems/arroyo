@@ -1,7 +1,7 @@
 use crate::kafka::{
     KafkaConfig, KafkaConfigAuthentication, KafkaConnector, KafkaTable, KafkaTester, TableType,
 };
-use crate::{kafka, pull_opt};
+use crate::{kafka};
 use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
@@ -47,9 +47,9 @@ impl ConfluentConnector {
             });
 
         Ok(ConfluentProfile {
-            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
-            key: VarStr::new(pull_opt("key", opts)?),
-            secret: VarStr::new(pull_opt("secret", opts)?),
+            bootstrap_servers: BootstrapServers(opts.pull_str("bootstrap_servers")?),
+            key: VarStr::new(opts.pull_str("key")?),
+            secret: VarStr::new(opts.pull_str("secret")?),
             schema_registry: schema_registry.transpose()?,
         })
     }

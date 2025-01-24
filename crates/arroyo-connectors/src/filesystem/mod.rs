@@ -17,7 +17,7 @@ use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, pull_option_to_i64, EmptyConfig};
+use crate::{EmptyConfig};
 
 use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
@@ -189,15 +189,15 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        match options.remove("type") {
+        match options.pull_opt_str("type")? {
             Some(t) if t == "source" => {
                 let (storage_url, storage_options) = get_storage_url_and_options(options)?;
                 let compression_format = options
-                    .remove("compression_format")
+                    .pull_opt_str("compression_format")?
                     .map(|format| format.as_str().try_into().map_err(|err: &str| anyhow!(err)))
                     .transpose()?
                     .unwrap_or(CompressionFormat::None);
-                let matching_pattern = options.remove("source.regex-pattern");
+                let matching_pattern = options.pull_opt_str("source.regex-pattern")?;
                 self.from_config(
                     None,
                     name,
@@ -277,35 +277,36 @@ impl Connector for FileSystemConnector {
 }
 
 fn get_storage_url_and_options(
-    opts: &mut HashMap<String, String>,
+    opts: &mut ConnectorOptions,
 ) -> Result<(String, HashMap<String, String>)> {
-    let storage_url = pull_opt("path", opts)?;
-    let storage_options: HashMap<String, String> = opts
-        .iter()
-        .filter(|(k, _)| k.starts_with("storage."))
-        .map(|(k, v)| (k.trim_start_matches("storage.").to_string(), v.to_string()))
-        .collect();
-    opts.retain(|k, _| !k.starts_with("storage."));
+    let storage_url = opts.pull_str("path")?;
+    let storage_keys: Vec<_> = opts.keys_with_prefix("storage.").cloned().collect();
+    
+    let storage_options = storage_keys.iter().map(|k| Ok((
+        k.trim_start_matches("storage.").to_string(),
+        opts.pull_str(k)?
+    ))).collect::<Result<HashMap<String, String>>>()?;
+    
     BackendConfig::parse_url(&storage_url, true)?;
     Ok((storage_url, storage_options))
 }
 
 pub fn file_system_sink_from_options(
-    opts: &mut std::collections::HashMap<String, String>,
+    opts: &mut ConnectorOptions,
     schema: Option<&ConnectionSchema>,
     commit_style: CommitStyle,
 ) -> Result<FileSystemTable> {
     let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
 
-    let inactivity_rollover_seconds = pull_option_to_i64("inactivity_rollover_seconds", opts)?;
-    let max_parts = pull_option_to_i64("max_parts", opts)?;
-    let rollover_seconds = pull_option_to_i64("rollover_seconds", opts)?;
-    let target_file_size = pull_option_to_i64("target_file_size", opts)?;
-    let target_part_size = pull_option_to_i64("target_part_size", opts)?;
-    let prefix = opts.remove("filename.prefix");
-    let suffix = opts.remove("filename.suffix");
+    let inactivity_rollover_seconds = opts.pull_opt_i64("inactivity_rollover_seconds")?;
+    let max_parts = opts.pull_opt_i64("max_parts")?;
+    let rollover_seconds = opts.pull_opt_i64("rollover_seconds")?;
+    let target_file_size = opts.pull_opt_i64("target_file_size")?;
+    let target_part_size = opts.pull_opt_i64("target_part_size")?;
+    let prefix = opts.pull_opt_str("filename.prefix")?;
+    let suffix = opts.pull_opt_str("filename.suffix")?;
     let strategy = opts
-        .remove("filename.strategy")
+        .pull_opt_str("filename.strategy")?
         .map(|value| {
             FilenameStrategy::try_from(&value)
                 .map_err(|_err| anyhow!("{} is not a valid Filenaming Strategy", value))
@@ -313,11 +314,11 @@ pub fn file_system_sink_from_options(
         .transpose()?;
 
     let partition_fields: Vec<_> = opts
-        .remove("partition_fields")
+        .pull_opt_str("partition_fields")?
         .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
         .unwrap_or_default();
 
-    let time_partition_pattern = opts.remove("time_partition_pattern");
+    let time_partition_pattern = opts.pull_opt_str("time_partition_pattern")?;
 
     let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
         Some(Partitioning {
@@ -354,15 +355,15 @@ pub fn file_system_sink_from_options(
     ))? {
         Format::Parquet(..) => {
             let compression = opts
-                .remove("parquet_compression")
+                .pull_opt_str("parquet_compression")?
                 .map(|value| {
                     Compression::try_from(&value).map_err(|_err| {
                         anyhow!("{} is not a valid parquet_compression argument", value)
                     })
                 })
                 .transpose()?;
-            let row_batch_size = pull_option_to_i64("parquet_row_batch_size", opts)?;
-            let row_group_size = pull_option_to_i64("parquet_row_group_size", opts)?;
+            let row_batch_size = opts.pull_opt_i64("parquet_row_batch_size")?;
+            let row_group_size = opts.pull_opt_i64("parquet_row_group_size")?;
             Some(FormatSettings::Parquet {
                 compression,
                 row_batch_size,

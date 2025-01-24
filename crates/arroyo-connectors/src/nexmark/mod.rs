@@ -16,7 +16,7 @@ use std::str::FromStr;
 use typify::import_types;
 
 use crate::nexmark::operator::NexmarkSourceFunc;
-use crate::{pull_opt, EmptyConfig};
+use crate::{EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./nexmark.svg");
@@ -158,16 +158,11 @@ impl Connector for NexmarkConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
-            .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
+        let event_rate = options.pull_f64("event_rate")?;
 
-        let runtime = options
-            .remove("runtime")
-            .map(|t| f64::from_str(&t))
-            .transpose()
-            .map_err(|_| anyhow!("invalid value for runtime; expected float"))?;
+        let runtime = options.pull_opt_f64("runtime")?;
 
         if let Some(schema) = schema {
             if !schema.fields.is_empty() && schema.fields != nexmark_schema().fields {

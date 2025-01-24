@@ -3,7 +3,6 @@ pub mod sink;
 
 use crate::redis::lookup::RedisLookup;
 use crate::redis::sink::{GeneralConnection, RedisSinkFunc};
-use crate::{pull_opt, pull_option_to_u64};
 use anyhow::{anyhow, bail};
 use arrow::datatypes::{DataType, Schema};
 use arroyo_formats::de::ArrowDeserializer;
@@ -236,7 +235,7 @@ impl Connector for RedisConnector {
         &self,
         name: &str,
         options: &mut ConnectorOptions,
-        schema: Option<&ConnectionSchema>,
+        s: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let connection_config = match profile {
@@ -245,9 +244,9 @@ impl Connector for RedisConnector {
                     .map_err(|e| anyhow!("Failed to parse connection config: {:?}", e))?
             }
             None => {
-                let address = options.remove("address");
+                let address = options.pull_opt_str("address")?;
 
-                let cluster_addresses = options.remove("cluster.addresses");
+                let cluster_addresses = options.pull_opt_str("cluster.addresses")?;
                 let connection = match (address, cluster_addresses) {
                     (Some(address), None) => {
                         RedisConfigConnection::Address(Address(address.to_string()))
@@ -266,8 +265,8 @@ impl Connector for RedisConnector {
                     }
                 };
 
-                let username = options.remove("username").map(VarStr::new);
-                let password = options.remove("password").map(VarStr::new);
+                let username = options.pull_opt_str("username")?.map(VarStr::new);
+                let password = options.pull_opt_str("password")?.map(VarStr::new);
 
                 RedisConfig {
                     connection,
@@ -277,10 +276,9 @@ impl Connector for RedisConnector {
             }
         };
 
-        let typ = pull_opt("type", options)?;
+        let typ = options.pull_str("type")?;
 
-        let schema = schema
-            .as_ref()
+        let schema = s
             .ok_or_else(|| anyhow!("No schema defined for Redis connection"))?;
 
         fn validate_column(
@@ -318,29 +316,29 @@ impl Connector for RedisConnector {
                 }
             }
             "sink" => {
-                let target = match pull_opt("target", options)?.as_str() {
+                let target = match options.pull_str("target")?.as_str() {
                     "string" => Target::StringTable {
-                        key_prefix: pull_opt("target.key_prefix", options)?,
+                        key_prefix: options.pull_str("target.key_prefix")?,
                         key_column: options
-                            .remove("target.key_column")
+                            .pull_opt_str("target.key_column")?
                             .map(|name| validate_column(schema, name, "target.key_column"))
                             .transpose()?,
-                        ttl_secs: pull_option_to_u64("target.ttl_secs", options)?
+                        ttl_secs: options.pull_opt_u64("target.ttl_secs")?
                             .map(|t| t.try_into())
                             .transpose()
                             .map_err(|_| anyhow!("target.ttl_secs must be greater than 0"))?,
                     },
                     "list" => Target::ListTable {
-                        list_prefix: pull_opt("target.key_prefix", options)?,
+                        list_prefix: options.pull_str("target.key_prefix")?,
                         list_key_column: options
-                            .remove("target.key_column")
+                            .pull_opt_str("target.key_column")?
                             .map(|name| validate_column(schema, name, "target.key_column"))
                             .transpose()?,
-                        max_length: pull_option_to_u64("target.max_length", options)?
+                        max_length: options.pull_opt_u64("target.max_length")?
                             .map(|t| t.try_into())
                             .transpose()
                             .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,
-                        operation: match options.remove("target.operation").as_deref() {
+                        operation: match options.pull_opt_str("target.operation")?.as_deref() {
                             Some("append") | None => ListOperation::Append,
                             Some("prepend") => ListOperation::Prepend,
                             Some(op) => {
@@ -351,14 +349,14 @@ impl Connector for RedisConnector {
                     "hash" => Target::HashTable {
                         hash_field_column: validate_column(
                             schema,
-                            pull_opt("target.field_column", options)?,
+                            options.pull_str("target.field_column")?,
                             "targets.field_column",
                         )?,
                         hash_key_column: options
-                            .remove("target.key_column")
+                            .pull_opt_str("target.key_column")?
                             .map(|name| validate_column(schema, name, "target.key_column"))
                             .transpose()?,
-                        hash_key_prefix: pull_opt("target.key_prefix", options)?,
+                        hash_key_prefix: options.pull_str("target.key_prefix")?,
                     },
                     s => {
                         bail!("'{}' is not a valid redis target", s);
@@ -379,7 +377,7 @@ impl Connector for RedisConnector {
             RedisTable {
                 connector_type: sink,
             },
-            schema,
+            s,
         )
     }
 

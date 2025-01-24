@@ -73,9 +73,9 @@ impl Connector for StdoutConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut ConnectorOptions,
+        _options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        profile: Option<&ConnectionProfile>,
+        _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, schema)
     }

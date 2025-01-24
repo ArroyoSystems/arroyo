@@ -385,7 +385,7 @@ impl ConnectorOptions {
         self.pull_opt_str(name)?
             .ok_or_else(|| plan_datafusion_err!("required option '{}' not set", name))
     }
-    
+
     pub fn pull_opt_bool(&mut self, name: &str) -> DFResult<Option<bool>> {
         match self.options.remove(name) {
             Some(Expr::Value(SqlValue::Boolean(b))) => {
@@ -406,7 +406,7 @@ impl ConnectorOptions {
             }
         }
     }
-    
+
     pub fn pull_opt_u64(&mut self, name: &str) -> DFResult<Option<u64>> {
         match self.options.remove(name) {
             Some(Expr::Value(SqlValue::Number(s, _))) | Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
@@ -422,7 +422,64 @@ impl ConnectorOptions {
             }
         }
     }
+
+    pub fn pull_opt_i64(&mut self, name: &str) -> DFResult<Option<i64>> {
+        match self.options.remove(name) {
+            Some(Expr::Value(SqlValue::Number(s, _))) | Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
+                s.parse::<i64>()
+                    .map(|i| Some(i))
+                    .map_err(|_| plan_datafusion_err!("expected with option '{}' to be an integer, but it was `{}`", name, s))
+            }
+            Some(e) => {
+                plan_err!("expected with option '{}' to be an integer, but it was `{:?}`", name, e)
+            }
+            None => {
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn pull_i64(&mut self, name: &str) -> DFResult<i64> {
+        self.pull_opt_i64(name)?
+            .ok_or_else(|| plan_datafusion_err!("required option '{}' not set", name))
+    }
+
+    pub fn pull_u64(&mut self, name: &str) -> DFResult<u64> {
+        self.pull_opt_u64(name)?
+            .ok_or_else(|| plan_datafusion_err!("required option '{}' not set", name))
+    }
+
+    pub fn pull_opt_f64(&mut self, name: &str) -> DFResult<Option<f64>> {
+        match self.options.remove(name) {
+            Some(Expr::Value(SqlValue::Number(s, _))) | Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
+                s.parse::<f64>()
+                    .map(|i| Some(i))
+                    .map_err(|_| plan_datafusion_err!("expected with option '{}' to be a double, but it was `{}`", name, s))
+            }
+            Some(e) => {
+                plan_err!("expected with option '{}' to be an double, but it was `{:?}`", name, e)
+            }
+            None => {
+                Ok(None)
+            }
+        }
+    }
     
+    pub fn pull_f64(&mut self, name: &str) -> DFResult<f64> {
+        self.pull_opt_f64(name)?
+            .ok_or_else(|| plan_datafusion_err!("required option '{}' not set", name))
+    }
+    
+    pub fn pull_bool(&mut self, name: &str) -> DFResult<bool> {
+        self.pull_opt_bool(name)?
+            .ok_or_else(|| plan_datafusion_err!("required option '{}' not set", name))
+    }
+    
+    pub fn keys_with_prefix<'a, 'b>(&'a self, prefix: &'b str) -> impl Iterator<Item=&'a String> + 'b where 'a : 'b {
+        self.options.keys()
+            .filter(move |k| k.starts_with(prefix))
+    }
+
     pub fn insert_str(&mut self, name: impl Into<String>, value: impl Into<String>) -> DFResult<Option<String>> {
         let name = name.into();
         let value = value.into();
@@ -433,6 +490,10 @@ impl ConnectorOptions {
 
     pub fn is_empty(&self) -> bool {
         self.options.is_empty()
+    }
+    
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.options.contains_key(key)
     }
 }
 
