@@ -158,15 +158,15 @@ impl Connector for ImpulseConnector {
             metadata_fields: vec![],
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Source,
-            schema: impulse_schema(),
-            config: serde_json::to_string(&config).unwrap(),
+            self.name(),
+            name.to_string(),
+            ConnectionType::Source,
+            impulse_schema(),
+            &config,
             description,
-        })
+        ))
     }
 
     fn make_operator(

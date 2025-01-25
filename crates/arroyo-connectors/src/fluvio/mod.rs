@@ -156,15 +156,15 @@ impl Connector for FluvioConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: typ,
+            self.name(),
+            name.to_string(),
+            typ,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
-            description: desc,
-        })
+            &config,
+            desc,
+        ))
     }
 
     fn make_operator(

@@ -268,15 +268,15 @@ impl Connector for NatsConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
+            self.name(),
+            name.to_string(),
             connection_type,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
-            description: desc,
-        })
+            &config,
+            desc,
+        ))
     }
 
     fn from_options(

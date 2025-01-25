@@ -722,7 +722,7 @@ macro_rules! retry {
 }
 
 mod tests {
-    
+    use crate::parse_expr;
 
     #[test]
     fn test_parse_expr() {

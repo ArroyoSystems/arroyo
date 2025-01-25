@@ -117,6 +117,7 @@ impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
             file_settings,
             format_settings: _,
             storage_options,
+            ..
         } = self.table.clone().table_type
         else {
             unreachable!("multi-part writer can only be used as sink");

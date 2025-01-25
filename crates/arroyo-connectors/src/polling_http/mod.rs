@@ -224,15 +224,15 @@ impl Connector for PollingHTTPConnector {
             metadata_fields: vec![],
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Source,
+            self.name(),
+            name.to_string(),
+            ConnectionType::Source,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
+            &config,
             description,
-        })
+        ))
     }
 
     fn make_operator(

@@ -669,12 +669,12 @@ fn rewrite_sinks(extensions: Vec<LogicalPlan>) -> Result<Vec<LogicalPlan>> {
     let mut sink_inputs = build_sink_inputs(&extensions);
     let mut new_extensions = vec![];
     for extension in extensions {
-        let mut is_rewrited = false;
+        let mut is_rewritten = false;
         let result = extension.rewrite(&mut SinkInputRewriter::new(
             &mut sink_inputs,
-            &mut is_rewrited,
+            &mut is_rewritten,
         ))?;
-        if !(is_rewrited) {
+        if !is_rewritten {
             new_extensions.push(result.data);
         }
     }

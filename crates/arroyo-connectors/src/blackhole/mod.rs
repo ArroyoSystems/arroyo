@@ -101,17 +101,15 @@ impl Connector for BlackholeConnector {
             metadata_fields: vec![],
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Sink,
-            schema: s
-                .cloned()
-                .ok_or_else(|| anyhow!("no schema for blackhole sink"))?,
-            config: serde_json::to_string(&config).unwrap(),
+            self.name(),
+            name.to_string(),
+            ConnectionType::Sink,
+            s.cloned().ok_or_else(|| anyhow!("no schema for blackhole sink"))?,
+            &config,
             description,
-        })
+        ))
     }
 
     fn make_operator(

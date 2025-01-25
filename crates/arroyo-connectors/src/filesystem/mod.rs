@@ -170,15 +170,15 @@ impl Connector for FileSystemConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
+            self.name(),
+            name.to_string(),
             connection_type,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
+            &config,
             description,
-        })
+        ))
     }
 
     fn from_options(
@@ -245,6 +245,7 @@ impl Connector for FileSystemConnector {
                 format_settings,
                 storage_options: _,
                 write_path,
+                shuffle_by_partition,
             } => {
                 let backend_config = BackendConfig::parse_url(write_path, true)?;
                 match (format_settings, backend_config.is_local()) {
@@ -381,6 +382,9 @@ pub fn file_system_sink_from_options(
         file_naming,
     });
 
+    let shuffle_by_partition = opts.pull_opt_bool("shuffle_by_partition.enabled")?
+        .unwrap_or_default();
+
     let format_settings = match schema.format.as_ref().ok_or(anyhow!(
         "filesystem sink requires a format, such as json or parquet"
     ))? {
@@ -412,6 +416,9 @@ pub fn file_system_sink_from_options(
             format_settings,
             write_path: storage_url,
             storage_options,
+            shuffle_by_partition: Some(PartitionShuffleSettings {
+                enabled: Some(shuffle_by_partition)
+            })
         },
     })
 }

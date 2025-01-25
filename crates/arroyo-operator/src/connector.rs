@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
@@ -25,6 +25,35 @@ pub struct Connection {
     pub schema: ConnectionSchema,
     pub config: String,
     pub description: String,
+    pub partition_fields: HashSet<String>,
+}
+
+impl Connection {
+    pub fn new(
+        id: Option<i64>,
+        connector: &'static str,
+        name: String,
+        connection_type: ConnectionType,
+        schema: ConnectionSchema,
+        config: &impl Serialize,
+        description: String,
+    ) -> Self {
+        Connection {
+            id,
+            connector,
+            name,
+            connection_type,
+            schema,
+            config: serde_json::to_string(config).unwrap(),
+            description,
+            partition_fields: HashSet::new(),
+        }
+    }
+    
+    pub fn with_partition_fields(&mut self, partition_fields: HashSet<String>) -> &mut Self {
+        self.partition_fields = partition_fields;
+        self
+    }
 }
 
 pub struct MetadataDef {

@@ -416,15 +416,15 @@ impl Connector for RedisConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
+            self.name(),
+             name.to_string(),
             connection_type,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
-            description: description.to_string(),
-        })
+            &config,
+            description.to_string(),
+        ))
     }
 
     fn make_operator(

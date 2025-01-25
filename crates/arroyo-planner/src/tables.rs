@@ -2,7 +2,7 @@ use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
-
+use std::collections::HashSet;
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
@@ -72,6 +72,7 @@ pub struct ConnectorTable {
     pub idle_time: Option<Duration>,
     pub primary_keys: Arc<Vec<String>>,
     pub inferred_fields: Option<Vec<DFField>>,
+    pub partition_fields: Arc<Vec<String>>,
 
     // for lookup tables
     pub lookup_cache_max_bytes: Option<u64>,
@@ -207,6 +208,7 @@ impl From<Connection> for ConnectorTable {
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
             primary_keys: Arc::new(vec![]),
+            partition_fields: Arc::new(value.partition_fields.into_iter().collect()),
             inferred_fields: None,
             lookup_cache_max_bytes: None,
             lookup_cache_ttl: None,
@@ -319,7 +321,7 @@ impl ConnectorTable {
         if !fields.is_empty() {
             table.fields = fields;
         }
-
+        
         table.event_time_field = options.pull_opt_field("event_time_field")?;
         table.watermark_field = options.pull_opt_field("watermark_field")?;
 
@@ -851,6 +853,13 @@ impl Table {
             Table::MemoryTable { .. } => plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
             Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
+        }
+    }
+    
+    pub fn partition_fields(&self) -> Option<&Vec<String>> {
+        match self {
+            Table::ConnectorTable(c) => Some(&c.partition_fields),
+            _ => None,
         }
     }
 }
