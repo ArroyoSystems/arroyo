@@ -4,11 +4,12 @@ mod source;
 
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
+use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value};
 use regex::Regex;
-use std::collections::HashMap;
-
+use std::collections::{HashMap, HashSet};
 use typify::import_types;
 
+use crate::EmptyConfig;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -16,8 +17,6 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
-
-use crate::EmptyConfig;
 
 use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
@@ -301,6 +300,8 @@ pub fn file_system_sink_from_options(
     schema: Option<&ConnectionSchema>,
     commit_style: CommitStyle,
 ) -> Result<FileSystemTable> {
+    let schema = schema.ok_or_else(|| anyhow!("FileSystem connector requires a schema"))?;
+
     let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
 
     let inactivity_rollover_seconds = opts.pull_opt_i64("inactivity_rollover_seconds")?;
@@ -318,17 +319,42 @@ pub fn file_system_sink_from_options(
         })
         .transpose()?;
 
-    let partition_fields: Vec<_> = opts
-        .pull_opt_str("partition_fields")?
-        .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
-        .unwrap_or_default();
+    let schema_fields: HashSet<_> = schema
+        .fields
+        .iter()
+        .map(|f| f.field_name.as_str())
+        .collect();
+
+    let partition_fields: Option<Vec<_>> = opts
+        .pull_opt_array("partition_fields")
+        .map(|fields| {
+            if !fields.is_empty() && schema.inferred.unwrap_or_default() {
+                bail!("cannot use `partition_fields` option for an inferred schema; supply the fields of the sink within the CREATE TABLE statement");
+            }
+
+            fields.into_iter().map(|f| {
+                let f = match f {
+                    SqlExpr::Value(Value::SingleQuotedString(s)) => s,
+                    SqlExpr::Identifier(ident) => ident.value,
+                    expr => {
+                        bail!("invalid expression in `partition_fields`: {}; expected a column identifier", expr);
+                    }
+                };
+
+                if !schema_fields.contains(f.as_str()) {
+                    bail!("partition field '{}' does not exist in the schema", f);
+                }
+                Ok(f)
+            }).collect::<Result<_>>()
+        })
+        .transpose()?;
 
     let time_partition_pattern = opts.pull_opt_str("time_partition_pattern")?;
 
-    let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
+    let partitioning = if time_partition_pattern.is_some() || partition_fields.is_some() {
         Some(Partitioning {
             time_partition_pattern,
-            partition_fields,
+            partition_fields: partition_fields.unwrap_or_default(),
         })
     } else {
         None
@@ -355,7 +381,7 @@ pub fn file_system_sink_from_options(
         file_naming,
     });
 
-    let format_settings = match schema.as_ref().unwrap().format.as_ref().ok_or(anyhow!(
+    let format_settings = match schema.format.as_ref().ok_or(anyhow!(
         "filesystem sink requires a format, such as json or parquet"
     ))? {
         Format::Parquet(..) => {
