@@ -3,21 +3,24 @@ mod sink;
 mod source;
 
 use anyhow::{anyhow, bail, Result};
+use arrow::datatypes::Field;
 use arroyo_storage::BackendConfig;
+use datafusion::common::{Column, DFSchema};
+use datafusion::prelude::Expr;
+use datafusion::sql::unparser::expr_to_sql;
 use regex::Regex;
-use std::collections::HashMap;
-
+use std::collections::{HashMap, HashSet};
 use typify::import_types;
 
+use crate::EmptyConfig;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::{ConnectorOptions, OperatorConfig};
+use arroyo_rpc::{contextless_sql_to_expr, ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
-
-use crate::EmptyConfig;
+use tracing::warn;
 
 use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
@@ -301,6 +304,8 @@ pub fn file_system_sink_from_options(
     schema: Option<&ConnectionSchema>,
     commit_style: CommitStyle,
 ) -> Result<FileSystemTable> {
+    let schema = schema.ok_or_else(|| anyhow!("FileSystem connector requires a schema"))?;
+
     let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
 
     let inactivity_rollover_seconds = opts.pull_opt_i64("inactivity_rollover_seconds")?;
@@ -318,17 +323,61 @@ pub fn file_system_sink_from_options(
         })
         .transpose()?;
 
-    let partition_fields: Vec<_> = opts
+    let schema_fields: HashSet<_> = schema
+        .fields
+        .iter()
+        .map(|f| f.field_name.as_str())
+        .collect();
+    let df_schema = DFSchema::from_unqualified_fields(
+        schema
+            .fields
+            .iter()
+            .map(|f| Field::from(f.clone()))
+            .collect(),
+        HashMap::new(),
+    )?;
+
+    let partition_fields: Option<Vec<_>> = opts
         .pull_opt_str("partition_fields")?
-        .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
-        .unwrap_or_default();
+        .map(|fields| { 
+            warn!("FileSystemSink is using deprecated `partition_fields` config; switch to `partition_by`");
+            fields.split(',').map(|f| {
+                if !schema_fields.contains(f) {
+                    bail!("partition field '{}' does not exist in the schema", f);
+                }
+                Ok(Expr::Column(Column::from_name(f.to_string())))
+            }).collect::<Result<_>>()
+        })
+        .transpose()?;
+
+    let partition_by: Option<Vec<_>> = opts
+        .pull_opt_array("partition_by")
+        .map(|es| {
+            es.into_iter()
+                .map(|e| {
+                    contextless_sql_to_expr(e, Some(&df_schema))
+                        .map_err(|err| anyhow!("invalid expression in `partition_by`: {}", err))
+                })
+                .collect::<Result<_>>()
+        })
+        .transpose()?;
+
+    if partition_fields.is_some() && partition_by.is_some() {
+        bail!("at most one of `partition_fields` and `partition_by` may be set in FileSystem sink");
+    }
+
+    let partition_by = partition_by.or(partition_fields).unwrap_or_default();
 
     let time_partition_pattern = opts.pull_opt_str("time_partition_pattern")?;
 
-    let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
+    let partitioning = if time_partition_pattern.is_some() || !partition_by.is_empty() {
         Some(Partitioning {
             time_partition_pattern,
-            partition_fields,
+            partition_fields: vec![],
+            partition_by: partition_by
+                .iter()
+                .map(|e| Ok(expr_to_sql(e)?.to_string()))
+                .collect::<Result<Vec<_>>>()?,
         })
     } else {
         None
@@ -355,7 +404,7 @@ pub fn file_system_sink_from_options(
         file_naming,
     });
 
-    let format_settings = match schema.as_ref().unwrap().format.as_ref().ok_or(anyhow!(
+    let format_settings = match schema.format.as_ref().ok_or(anyhow!(
         "filesystem sink requires a format, such as json or parquet"
     ))? {
         Format::Parquet(..) => {

@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use ::arrow::datatypes::DataType::Utf8;
+use ::arrow::datatypes::Schema;
 use ::arrow::{
     array::StringBuilder,
     datatypes::{DataType, TimeUnit},
@@ -16,13 +18,19 @@ use ::arrow::{
 };
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, OperatorConfig, TIMESTAMP_FIELD};
+use arroyo_rpc::{
+    contextless_sql_to_expr, df::ArroyoSchemaRef, formats::Format, parse_expr,
+    EmptyContextProvider, OperatorConfig, TIMESTAMP_FIELD,
+};
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
+use datafusion::common::DFSchema;
 use datafusion::execution::SessionStateBuilder;
-use datafusion::prelude::concat;
+use datafusion::prelude::{cast, concat, lit};
+use datafusion::sql::planner::SqlToRel;
+use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::{
     common::{Column, Result as DFResult},
     logical_expr::{
@@ -161,96 +169,82 @@ fn get_partitioner_from_file_settings(
     schema: ArroyoSchemaRef,
 ) -> Option<Arc<dyn PhysicalExpr>> {
     let partitions = file_settings.partitioning?;
-    match (
-        partitions.time_partition_pattern,
-        partitions.partition_fields.is_empty(),
-    ) {
-        (None, false) => {
-            Some(partition_string_for_fields(schema, &partitions.partition_fields).unwrap())
-        }
-        (None, true) => None,
-        (Some(pattern), false) => Some(
-            partition_string_for_fields_and_time(schema, &partitions.partition_fields, pattern)
-                .unwrap(),
-        ),
-        (Some(pattern), true) => Some(partition_string_for_time(schema, pattern).unwrap()),
+
+    let mut partition_by = partitions.partition_by;
+    if partition_by.is_empty() {
+        partition_by = partitions.partition_fields;
     }
+
+    let expr = match (partitions.time_partition_pattern, partition_by.is_empty()) {
+        (None, false) => field_logical_expression(&schema.schema, &partition_by).unwrap(),
+        (None, true) => {
+            return None;
+        }
+        (Some(pattern), false) => {
+            let field_function = field_logical_expression(&schema.schema, &partition_by).unwrap();
+            let time_function = timestamp_logical_expression(pattern).unwrap();
+            concat(vec![time_function, lit("/"), field_function])
+        }
+        (Some(pattern), true) => timestamp_logical_expression(pattern).unwrap(),
+    };
+
+    Some(compile_expression(&expr, &schema.schema).unwrap())
 }
 
-fn partition_string_for_fields(
-    schema: ArroyoSchemaRef,
-    partition_fields: &[String],
-) -> Result<Arc<dyn PhysicalExpr>> {
-    let function = field_logical_expression(schema.clone(), partition_fields)?;
-    compile_expression(&function, schema)
-}
-
-fn partition_string_for_time(
-    schema: ArroyoSchemaRef,
-    time_partition_pattern: String,
-) -> Result<Arc<dyn PhysicalExpr>> {
-    let function = timestamp_logical_expression(time_partition_pattern)?;
-    compile_expression(&function, schema)
-}
-
-fn partition_string_for_fields_and_time(
-    schema: ArroyoSchemaRef,
-    partition_fields: &[String],
-    time_partition_pattern: String,
-) -> Result<Arc<dyn PhysicalExpr>> {
-    let field_function = field_logical_expression(schema.clone(), partition_fields)?;
-    let time_function = timestamp_logical_expression(time_partition_pattern)?;
-    let function = concat(vec![
-        time_function,
-        Expr::Literal(ScalarValue::Utf8(Some("/".to_string()))),
-        field_function,
-    ]);
-    compile_expression(&function, schema)
-}
-
-fn compile_expression(expr: &Expr, schema: ArroyoSchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
+fn compile_expression(expr: &Expr, schema: &Schema) -> Result<Arc<dyn PhysicalExpr>> {
     let physical_planner = DefaultPhysicalPlanner::default();
     let session_state = SessionStateBuilder::new().build();
 
     let plan = physical_planner.create_physical_expr(
         expr,
-        &(schema.schema.as_ref().clone()).try_into()?,
+        &(schema.clone().try_into()?),
         &session_state,
     )?;
     Ok(plan)
 }
 
-fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]) -> Result<Expr> {
-    let columns_as_string = partition_fields
+fn field_logical_expression(schema: &Schema, partition_exprs: &[String]) -> Result<Expr> {
+    let schema: DFSchema = schema.clone().try_into()?;
+    let logical: Vec<_> = partition_exprs
         .iter()
-        .map(|field| {
-            let field = schema.schema.field_with_name(field)?;
-            let column_expr = Expr::Column(Column::from_name(field.name().to_string()));
-            let expr = match field.data_type() {
-                DataType::Utf8 => column_expr,
-                _ => Expr::Cast(datafusion::logical_expr::Cast {
-                    expr: Box::new(column_expr),
-                    data_type: DataType::Utf8,
-                }),
-            };
-            Ok((field.name(), expr))
+        .map(|e| {
+            let parsed = parse_expr(e)?;
+            let expr = contextless_sql_to_expr(parsed, Some(&schema))?;
+            cast(expr, Utf8)
         })
-        .collect::<Result<Vec<_>>>()?;
-    let function = concat(
-        columns_as_string
-            .into_iter()
-            .enumerate()
-            .flat_map(|(i, (name, expr))| {
-                let preamble = if i == 0 {
-                    format!("{}=", name)
-                } else {
-                    format!("/{}=", name)
-                };
-                vec![Expr::Literal(ScalarValue::Utf8(Some(preamble))), expr]
-            })
-            .collect(),
-    );
-    Ok(function)
+        .collect::<Result<_>>()?;
+
+    //
+    // let columns_as_string = partition_fields
+    //     .iter()
+    //     .map(|field| {
+    //         let field = schema.field_with_name(field)?;
+    //         let column_expr = Expr::Column(Column::from_name(field.name().to_string()));
+    //         let expr = match field.data_type() {
+    //             DataType::Utf8 => column_expr,
+    //             _ => Expr::Cast(datafusion::logical_expr::Cast {
+    //                 expr: Box::new(column_expr),
+    //                 data_type: DataType::Utf8,
+    //             }),
+    //         };
+    //         Ok((field.name(), expr))
+    //     })
+    //     .collect::<Result<Vec<_>>>()?;
+    // let function = concat(
+    //     columns_as_string
+    //         .into_iter()
+    //         .enumerate()
+    //         .flat_map(|(i, (name, expr))| {
+    //             let preamble = if i == 0 {
+    //                 format!("{}=", name)
+    //             } else {
+    //                 format!("/{}=", name)
+    //             };
+    //             vec![Expr::Literal(ScalarValue::Utf8(Some(preamble))), expr]
+    //         })
+    //         .collect(),
+    // );
+    // Ok(function)
 }
 
 fn timestamp_logical_expression(time_partition_pattern: String) -> Result<Expr> {
