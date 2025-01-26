@@ -53,7 +53,6 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement},
     },
 };
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 

@@ -19,7 +19,6 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::logical_expr::UserDefinedLogicalNode;
 
-use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::extension::lookup::LookupSource;
 use crate::extension::AsyncUDFExtension;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
@@ -27,8 +26,7 @@ use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    plan_datafusion_err, plan_err, Column, DataFusionError, Result as DFResult, ScalarValue,
-    TableReference,
+    plan_err, Column, DataFusionError, Result as DFResult, ScalarValue, TableReference,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;

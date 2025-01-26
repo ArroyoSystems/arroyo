@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
