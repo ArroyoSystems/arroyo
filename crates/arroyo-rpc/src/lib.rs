@@ -15,8 +15,7 @@ use arrow_schema::{DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use datafusion::catalog_common::TableReference;
 use datafusion::common::{
-    not_impl_err, plan_datafusion_err, plan_err, DFSchema, Result as DFResult,
-    ScalarValue,
+    not_impl_err, plan_datafusion_err, plan_err, DFSchema, Result as DFResult, ScalarValue,
 };
 use datafusion::config::ConfigOptions;
 use datafusion::logical_expr::{AggregateUDF, ScalarUDF, TableSource, WindowUDF};
@@ -721,6 +720,7 @@ macro_rules! retry {
     }};
 }
 
+#[cfg(test)]
 mod tests {
     use crate::parse_expr;
 

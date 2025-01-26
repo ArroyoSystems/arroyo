@@ -114,12 +114,13 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        let (description, connection_type) = match table.table_type {
-            TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source),
+        let (description, connection_type, partition_fields) = match &table.table_type {
+            TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source, None),
             TableType::Sink {
-                ref write_path,
-                ref format_settings,
-                ref file_settings,
+                write_path,
+                format_settings,
+                file_settings,
+                shuffle_by_partition,
                 ..
             } => {
                 // confirm commit style is Direct
@@ -133,6 +134,24 @@ impl Connector for FileSystemConnector {
 
                 let backend_config = BackendConfig::parse_url(write_path, true)?;
                 let is_local = backend_config.is_local();
+
+                let partition_fields = match (shuffle_by_partition, file_settings) {
+                    (
+                        Some(PartitionShuffleSettings {
+                            enabled: Some(true),
+                            ..
+                        }),
+                        Some(FileSettings {
+                            partitioning:
+                                Some(Partitioning {
+                                    partition_fields, ..
+                                }),
+                            ..
+                        }),
+                    ) => Some(partition_fields.clone()),
+                    _ => None,
+                };
+
                 let description = match (format_settings, is_local) {
                     (Some(FormatSettings::Parquet { .. }), true) => {
                         "LocalFileSystem<Parquet>".to_string()
@@ -146,7 +165,7 @@ impl Connector for FileSystemConnector {
                     (Some(FormatSettings::Json { .. }), false) => "FileSystem<JSON>".to_string(),
                     (None, _) => bail!("have to have some format settings"),
                 };
-                (description, ConnectionType::Sink)
+                (description, ConnectionType::Sink, partition_fields)
             }
         };
 
@@ -178,7 +197,8 @@ impl Connector for FileSystemConnector {
             schema,
             &config,
             description,
-        ))
+        )
+        .with_partition_fields(partition_fields))
     }
 
     fn from_options(
@@ -245,7 +265,7 @@ impl Connector for FileSystemConnector {
                 format_settings,
                 storage_options: _,
                 write_path,
-                shuffle_by_partition,
+                ..
             } => {
                 let backend_config = BackendConfig::parse_url(write_path, true)?;
                 match (format_settings, backend_config.is_local()) {
@@ -382,7 +402,8 @@ pub fn file_system_sink_from_options(
         file_naming,
     });
 
-    let shuffle_by_partition = opts.pull_opt_bool("shuffle_by_partition.enabled")?
+    let shuffle_by_partition = opts
+        .pull_opt_bool("shuffle_by_partition.enabled")?
         .unwrap_or_default();
 
     let format_settings = match schema.format.as_ref().ok_or(anyhow!(
@@ -417,8 +438,8 @@ pub fn file_system_sink_from_options(
             write_path: storage_url,
             storage_options,
             shuffle_by_partition: Some(PartitionShuffleSettings {
-                enabled: Some(shuffle_by_partition)
-            })
+                enabled: Some(shuffle_by_partition),
+            }),
         },
     })
 }

@@ -106,7 +106,8 @@ impl Connector for BlackholeConnector {
             self.name(),
             name.to_string(),
             ConnectionType::Sink,
-            s.cloned().ok_or_else(|| anyhow!("no schema for blackhole sink"))?,
+            s.cloned()
+                .ok_or_else(|| anyhow!("no schema for blackhole sink"))?,
             &config,
             description,
         ))

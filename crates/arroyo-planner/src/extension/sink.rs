@@ -86,9 +86,8 @@ impl SinkExtension {
         })
     }
 
-    /* The input to a sink needs to be a non-transparent logical plan extension.
-      If it isn't, wrap the input in a RemoteTableExtension.
-    */
+    // The input to a sink needs to be a non-transparent logical plan extension.
+    // If it isn't, wrap the input in a RemoteTableExtension.
     pub fn add_remote_if_necessary(schema: &DFSchemaRef, input: &mut Arc<LogicalPlan>) {
         if let LogicalPlan::Extension(node) = input.as_ref() {
             let arroyo_extension: &dyn ArroyoExtension = (&node.node).try_into().unwrap();
@@ -171,15 +170,13 @@ impl ArroyoExtension for SinkExtension {
         let edges = input_schemas
             .into_iter()
             .map(|input_schema| {
-                LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone())
+                LogicalEdge::project_all(LogicalEdgeType::Shuffle, (*input_schema).clone())
             })
             .collect();
         Ok(NodeWithIncomingEdges { node, edges })
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        // this is kinda fake?
-        ArroyoSchema::from_schema_keys(Arc::new(self.inputs[0].schema().as_ref().into()), vec![])
-            .unwrap()
+        ArroyoSchema::from_fields(vec![])
     }
 }

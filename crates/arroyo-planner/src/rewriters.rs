@@ -19,6 +19,7 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::logical_expr::UserDefinedLogicalNode;
 
+use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::extension::lookup::LookupSource;
 use crate::extension::AsyncUDFExtension;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
@@ -26,7 +27,8 @@ use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    plan_err, Column, DataFusionError, Result as DFResult, ScalarValue, TableReference,
+    plan_datafusion_err, plan_err, Column, DataFusionError, Result as DFResult, ScalarValue,
+    TableReference,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
@@ -709,14 +711,14 @@ type SinkInputs = HashMap<NamedNode, Vec<LogicalPlan>>;
 
 pub(crate) struct SinkInputRewriter<'a> {
     sink_inputs: &'a mut SinkInputs,
-    is_rewrited: &'a mut bool,
+    pub was_removed: bool,
 }
 
 impl<'a> SinkInputRewriter<'a> {
-    pub(crate) fn new(sink_inputs: &'a mut SinkInputs, is_rewrited: &'a mut bool) -> Self {
+    pub(crate) fn new(sink_inputs: &'a mut SinkInputs) -> Self {
         Self {
             sink_inputs,
-            is_rewrited,
+            was_removed: false,
         }
     }
 }
@@ -734,7 +736,7 @@ impl TreeNodeRewriter for SinkInputRewriter<'_> {
                         });
                         return Ok(Transformed::new(extension, true, TreeNodeRecursion::Jump));
                     } else {
-                        *self.is_rewrited = true;
+                        self.was_removed = true;
                     }
                 }
             }

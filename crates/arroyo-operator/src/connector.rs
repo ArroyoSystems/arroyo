@@ -25,7 +25,7 @@ pub struct Connection {
     pub schema: ConnectionSchema,
     pub config: String,
     pub description: String,
-    pub partition_fields: HashSet<String>,
+    pub partition_fields: Option<Vec<String>>,
 }
 
 impl Connection {
@@ -46,11 +46,11 @@ impl Connection {
             schema,
             config: serde_json::to_string(config).unwrap(),
             description,
-            partition_fields: HashSet::new(),
+            partition_fields: None,
         }
     }
-    
-    pub fn with_partition_fields(&mut self, partition_fields: HashSet<String>) -> &mut Self {
+
+    pub fn with_partition_fields(mut self, partition_fields: Option<Vec<String>>) -> Self {
         self.partition_fields = partition_fields;
         self
     }

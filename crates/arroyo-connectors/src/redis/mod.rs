@@ -419,7 +419,7 @@ impl Connector for RedisConnector {
         Ok(Connection::new(
             id,
             self.name(),
-             name.to_string(),
+            name.to_string(),
             connection_type,
             schema,
             &config,

@@ -1,8 +1,3 @@
-use arrow_schema::{DataType, Field, FieldRef, Schema};
-use arroyo_connectors::connector_for_type;
-use std::sync::Arc;
-use std::{collections::HashMap, time::Duration};
-use std::collections::HashSet;
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
@@ -10,6 +5,8 @@ use crate::{
     fields_with_qualifiers, multifield_partial_ord, parse_sql, ArroyoSchemaProvider, DFField,
 };
 use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
+use arrow_schema::{DataType, Field, FieldRef, Schema};
+use arroyo_connectors::connector_for_type;
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
@@ -56,6 +53,9 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement},
     },
 };
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::{collections::HashMap, time::Duration};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -72,7 +72,7 @@ pub struct ConnectorTable {
     pub idle_time: Option<Duration>,
     pub primary_keys: Arc<Vec<String>>,
     pub inferred_fields: Option<Vec<DFField>>,
-    pub partition_fields: Arc<Vec<String>>,
+    pub partition_fields: Arc<Option<Vec<String>>>,
 
     // for lookup tables
     pub lookup_cache_max_bytes: Option<u64>,
@@ -208,7 +208,7 @@ impl From<Connection> for ConnectorTable {
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
             primary_keys: Arc::new(vec![]),
-            partition_fields: Arc::new(value.partition_fields.into_iter().collect()),
+            partition_fields: Arc::new(value.partition_fields),
             inferred_fields: None,
             lookup_cache_max_bytes: None,
             lookup_cache_ttl: None,
@@ -321,7 +321,7 @@ impl ConnectorTable {
         if !fields.is_empty() {
             table.fields = fields;
         }
-        
+
         table.event_time_field = options.pull_opt_field("event_time_field")?;
         table.watermark_field = options.pull_opt_field("watermark_field")?;
 
@@ -855,10 +855,10 @@ impl Table {
             Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
         }
     }
-    
+
     pub fn partition_fields(&self) -> Option<&Vec<String>> {
         match self {
-            Table::ConnectorTable(c) => Some(&c.partition_fields),
+            Table::ConnectorTable(c) => (*c.partition_fields).as_ref(),
             _ => None,
         }
     }

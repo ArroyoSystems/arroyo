@@ -490,6 +490,8 @@ async fn start_node() {
 }
 
 async fn visualize(query: Input, open: bool) {
+    let _guard = arroyo_server_common::init_logging(&"visualize");
+
     let query = std::io::read_to_string(query).expect("Failed to read query");
 
     let schema_provider = ArroyoSchemaProvider::new();

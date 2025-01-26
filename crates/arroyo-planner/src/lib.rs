@@ -24,7 +24,9 @@ use arroyo_datastream::WindowType;
 
 use builder::NamedNode;
 use datafusion::common::tree_node::TreeNode;
-use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
+use datafusion::common::{
+    not_impl_err, plan_datafusion_err, plan_err, Column, DFSchema, Result, ScalarValue,
+};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::prelude::SessionConfig;
@@ -59,6 +61,7 @@ use std::fmt::{Debug, Formatter};
 use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
+use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::udafs::EmptyUdaf;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
@@ -661,6 +664,57 @@ fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<Logic
     sink_inputs
 }
 
+fn maybe_add_key_extension_to_sink(plan: LogicalPlan) -> Result<LogicalPlan> {
+    let LogicalPlan::Extension(extension) = &plan else {
+        return Ok(plan);
+    };
+
+    let Some(sink) = extension.node.as_any().downcast_ref::<SinkExtension>() else {
+        return Ok(plan);
+    };
+
+    let Some(partition_fields) = sink.table.partition_fields() else {
+        return Ok(plan);
+    };
+
+    if partition_fields.is_empty() {
+        return Ok(plan);
+    }
+
+    let inputs = plan
+        .inputs()
+        .into_iter()
+        .map(|input| {
+            let keys = partition_fields
+                .iter()
+                .map(|pf| {
+                    input
+                        .schema()
+                        .index_of_column_by_name(None, pf)
+                        .ok_or_else(|| {
+                            plan_datafusion_err!(
+                                "Partition field '{pf}' not found in sink input schema"
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            Ok(LogicalPlan::Extension(Extension {
+                node: Arc::new(KeyCalculationExtension {
+                    name: Some("key-calc-partition".to_string()),
+                    keys,
+                    schema: input.schema().clone(),
+                    input: input.clone(),
+                }),
+            }))
+        })
+        .collect::<Result<_>>()?;
+
+    let node = sink.with_exprs_and_inputs(vec![], inputs)?;
+
+    Ok(LogicalPlan::Extension(Extension { node }))
+}
+
 /// rewrite_sinks will rewrite sink's inputs and remove duplicated sinks
 /// Collect inputs of [`SinkExtension`], it's help to merge [`SinkExtension`] with same table.
 /// Each `SinkExtension` can get itself inputs (is merged previously) by named_node,
@@ -669,16 +723,18 @@ fn rewrite_sinks(extensions: Vec<LogicalPlan>) -> Result<Vec<LogicalPlan>> {
     let mut sink_inputs = build_sink_inputs(&extensions);
     let mut new_extensions = vec![];
     for extension in extensions {
-        let mut is_rewritten = false;
-        let result = extension.rewrite(&mut SinkInputRewriter::new(
-            &mut sink_inputs,
-            &mut is_rewritten,
-        ))?;
-        if !is_rewritten {
+        let mut rewriter = SinkInputRewriter::new(&mut sink_inputs);
+        let result = extension.rewrite(&mut rewriter)?;
+        if !rewriter.was_removed {
             new_extensions.push(result.data);
         }
     }
-    Ok(new_extensions)
+
+    // add key execs to sinks that require partitioning
+    new_extensions
+        .into_iter()
+        .map(maybe_add_key_extension_to_sink)
+        .collect()
 }
 
 fn try_handle_set_variable(
