@@ -8,7 +8,8 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
 use crate::filesystem::{
-    file_system_sink_from_options, CommitStyle, FileSystemTable, FormatSettings, TableType,
+    file_system_sink_from_options, CommitStyle, FileSettings, FileSystemTable, FormatSettings,
+    PartitionShuffleSettings, Partitioning, TableType,
 };
 use crate::EmptyConfig;
 
@@ -81,6 +82,7 @@ impl Connector for DeltaLakeConnector {
             write_path,
             file_settings,
             format_settings,
+            shuffle_by_partition,
             ..
         } = &table.table_type
         else {
@@ -99,6 +101,24 @@ impl Connector for DeltaLakeConnector {
 
         let backend_config = BackendConfig::parse_url(write_path, true)?;
         let is_local = backend_config.is_local();
+
+        let partition_fields = match (shuffle_by_partition, file_settings) {
+            (
+                Some(PartitionShuffleSettings {
+                    enabled: Some(true),
+                    ..
+                }),
+                Some(FileSettings {
+                    partitioning:
+                        Some(Partitioning {
+                            partition_fields, ..
+                        }),
+                    ..
+                }),
+            ) => Some(partition_fields.clone()),
+            _ => None,
+        };
+
         let description = match (&format_settings, is_local) {
             (Some(FormatSettings::Parquet { .. }), true) => "LocalDeltaLake<Parquet>".to_string(),
             (Some(FormatSettings::Parquet { .. }), false) => "DeltaLake<Parquet>".to_string(),
@@ -125,15 +145,16 @@ impl Connector for DeltaLakeConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Sink,
+            self.name(),
+            name.to_string(),
+            ConnectionType::Sink,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
+            &config,
             description,
-        })
+        )
+        .with_partition_fields(partition_fields))
     }
 
     fn from_options(

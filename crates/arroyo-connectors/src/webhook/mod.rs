@@ -164,15 +164,15 @@ impl Connector for WebhookConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Sink,
+            self.name(),
+            name.to_string(),
+            ConnectionType::Sink,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
+            &config,
             description,
-        })
+        ))
     }
 
     fn from_options(

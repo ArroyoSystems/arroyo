@@ -709,14 +709,14 @@ type SinkInputs = HashMap<NamedNode, Vec<LogicalPlan>>;
 
 pub(crate) struct SinkInputRewriter<'a> {
     sink_inputs: &'a mut SinkInputs,
-    is_rewrited: &'a mut bool,
+    pub was_removed: bool,
 }
 
 impl<'a> SinkInputRewriter<'a> {
-    pub(crate) fn new(sink_inputs: &'a mut SinkInputs, is_rewrited: &'a mut bool) -> Self {
+    pub(crate) fn new(sink_inputs: &'a mut SinkInputs) -> Self {
         Self {
             sink_inputs,
-            is_rewrited,
+            was_removed: false,
         }
     }
 }
@@ -734,7 +734,7 @@ impl TreeNodeRewriter for SinkInputRewriter<'_> {
                         });
                         return Ok(Transformed::new(extension, true, TreeNodeRecursion::Jump));
                     } else {
-                        *self.is_rewrited = true;
+                        self.was_removed = true;
                     }
                 }
             }

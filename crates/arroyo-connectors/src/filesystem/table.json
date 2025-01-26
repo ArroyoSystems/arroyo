@@ -192,7 +192,18 @@
                 }
               },
               "additionalProperties": false
-            }
+            },
+            "shuffleByPartition": {
+              "title": "Partition shuffle settings",
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "title": "Enable partition shuffling",
+                  "type": "boolean",
+                  "description": "If enabled, we will shuffle by the partition keys, which can reduce the number of file sink produces; however this may cause backlog if data is skewed"
+                }
+              }
+            } 
           },
           "required": [
             "writePath"

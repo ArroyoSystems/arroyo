@@ -108,15 +108,15 @@ impl Connector for StdoutConnector {
             metadata_fields: vec![],
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Sink,
+            self.name(),
+            name.to_string(),
+            ConnectionType::Sink,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
+            &config,
             description,
-        })
+        ))
     }
 
     fn make_operator(

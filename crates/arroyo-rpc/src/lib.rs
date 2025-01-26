@@ -21,6 +21,8 @@ use datafusion::config::ConfigOptions;
 use datafusion::logical_expr::{AggregateUDF, ScalarUDF, TableSource, WindowUDF};
 use datafusion::sql::planner::{ContextProvider, PlannerContext, SqlToRel};
 use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value as SqlValue};
+use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
+use datafusion::sql::sqlparser::parser::Parser;
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use log::warn;
 use serde::{Deserialize, Serialize};
@@ -351,7 +353,7 @@ pub fn get_hasher() -> ahash::RandomState {
 }
 
 #[derive(Default)]
-struct EmptyContextProvider {
+pub struct EmptyContextProvider {
     config: ConfigOptions,
 }
 impl ContextProvider for EmptyContextProvider {
@@ -392,10 +394,17 @@ impl ContextProvider for EmptyContextProvider {
     }
 }
 
-pub fn contextless_sql_to_expr(expr: Expr) -> DFResult<datafusion::logical_expr::Expr> {
+pub fn contextless_sql_to_expr(
+    expr: Expr,
+    schema: Option<&DFSchema>,
+) -> DFResult<datafusion::logical_expr::Expr> {
     let provider = EmptyContextProvider::default();
     let s = SqlToRel::new(&provider);
-    s.sql_to_expr(expr, &DFSchema::empty(), &mut PlannerContext::new())
+    s.sql_to_expr(
+        expr,
+        schema.unwrap_or(&DFSchema::empty()),
+        &mut PlannerContext::new(),
+    )
 }
 
 pub fn duration_from_sql(expr: Expr) -> DFResult<Duration> {
@@ -409,7 +418,7 @@ pub fn duration_from_sql(expr: Expr) -> DFResult<Duration> {
                 .map_err(|_| plan_datafusion_err!("expected an interval, but found `{}`", s))?
         }
         expr => {
-            let expr = contextless_sql_to_expr(expr)
+            let expr = contextless_sql_to_expr(expr, None)
                 .map_err(|e| plan_datafusion_err!("invalid expression: {}", e))?;
 
             match expr {
@@ -627,6 +636,17 @@ impl ConnectorOptions {
         }
     }
 
+    pub fn pull_opt_array(&mut self, name: &str) -> Option<Vec<Expr>> {
+        Some(match self.options.remove(name)? {
+            Expr::Value(SqlValue::SingleQuotedString(s)) => s
+                .split(",")
+                .map(|p| Expr::Value(SqlValue::SingleQuotedString(p.to_string())))
+                .collect(),
+            Expr::Array(a) => a.elem,
+            e => vec![e],
+        })
+    }
+
     pub fn keys(&self) -> impl Iterator<Item = &String> {
         self.options.keys()
     }
@@ -663,6 +683,13 @@ impl ConnectorOptions {
     }
 }
 
+pub fn parse_expr(sql: &str) -> anyhow::Result<Expr> {
+    let dialect = PostgreSqlDialect {};
+    let parser = Parser::new(&dialect);
+    let mut parser = parser.try_with_sql(sql)?;
+    Ok(parser.parse_expr()?)
+}
+
 #[macro_export]
 macro_rules! retry {
     ($e:expr, $max_retries:expr, $base:expr, $max_delay:expr, |$err_var: ident| $error_handler:expr) => {{
@@ -691,4 +718,16 @@ macro_rules! retry {
             }
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parse_expr;
+
+    #[test]
+    fn test_parse_expr() {
+        let sql = "concat(1 + hello, 'blah')";
+        let parsed = parse_expr(sql).unwrap();
+        assert_eq!(parsed.to_string(), sql);
+    }
 }

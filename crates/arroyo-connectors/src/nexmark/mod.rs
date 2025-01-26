@@ -208,15 +208,15 @@ impl Connector for NexmarkConnector {
             metadata_fields: vec![],
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Source,
-            schema: nexmark_schema(),
-            config: serde_json::to_string(&config).unwrap(),
+            self.name(),
+            name.to_string(),
+            ConnectionType::Source,
+            nexmark_schema(),
+            &config,
             description,
-        })
+        ))
     }
 
     fn make_operator(

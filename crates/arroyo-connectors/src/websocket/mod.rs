@@ -251,15 +251,15 @@ impl Connector for WebsocketConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
-            connection_type: ConnectionType::Source,
+            self.name(),
+            name.to_string(),
+            ConnectionType::Source,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
+            &config,
             description,
-        })
+        ))
     }
 
     fn from_options(

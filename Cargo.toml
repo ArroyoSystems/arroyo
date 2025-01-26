@@ -75,7 +75,6 @@ debug = 1
 [profile.dev]
 split-debuginfo = "unpacked"
 
-
 [patch.crates-io]
 deltalake = { git = 'https://github.com/delta-io/delta-rs', rev = '25ce38956e25722ba7a6cbc0f5a7dba6b3361554' }
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }

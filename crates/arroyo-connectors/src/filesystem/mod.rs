@@ -4,11 +4,12 @@ mod source;
 
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
+use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value};
 use regex::Regex;
-use std::collections::HashMap;
-
+use std::collections::{HashMap, HashSet};
 use typify::import_types;
 
+use crate::EmptyConfig;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -16,8 +17,6 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
-
-use crate::EmptyConfig;
 
 use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
@@ -115,12 +114,13 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        let (description, connection_type) = match table.table_type {
-            TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source),
+        let (description, connection_type, partition_fields) = match &table.table_type {
+            TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source, None),
             TableType::Sink {
-                ref write_path,
-                ref format_settings,
-                ref file_settings,
+                write_path,
+                format_settings,
+                file_settings,
+                shuffle_by_partition,
                 ..
             } => {
                 // confirm commit style is Direct
@@ -134,6 +134,24 @@ impl Connector for FileSystemConnector {
 
                 let backend_config = BackendConfig::parse_url(write_path, true)?;
                 let is_local = backend_config.is_local();
+
+                let partition_fields = match (shuffle_by_partition, file_settings) {
+                    (
+                        Some(PartitionShuffleSettings {
+                            enabled: Some(true),
+                            ..
+                        }),
+                        Some(FileSettings {
+                            partitioning:
+                                Some(Partitioning {
+                                    partition_fields, ..
+                                }),
+                            ..
+                        }),
+                    ) => Some(partition_fields.clone()),
+                    _ => None,
+                };
+
                 let description = match (format_settings, is_local) {
                     (Some(FormatSettings::Parquet { .. }), true) => {
                         "LocalFileSystem<Parquet>".to_string()
@@ -147,7 +165,7 @@ impl Connector for FileSystemConnector {
                     (Some(FormatSettings::Json { .. }), false) => "FileSystem<JSON>".to_string(),
                     (None, _) => bail!("have to have some format settings"),
                 };
-                (description, ConnectionType::Sink)
+                (description, ConnectionType::Sink, partition_fields)
             }
         };
 
@@ -171,15 +189,16 @@ impl Connector for FileSystemConnector {
             metadata_fields: schema.metadata_fields(),
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
+            self.name(),
+            name.to_string(),
             connection_type,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
+            &config,
             description,
-        })
+        )
+        .with_partition_fields(partition_fields))
     }
 
     fn from_options(
@@ -246,6 +265,7 @@ impl Connector for FileSystemConnector {
                 format_settings,
                 storage_options: _,
                 write_path,
+                ..
             } => {
                 let backend_config = BackendConfig::parse_url(write_path, true)?;
                 match (format_settings, backend_config.is_local()) {
@@ -301,6 +321,8 @@ pub fn file_system_sink_from_options(
     schema: Option<&ConnectionSchema>,
     commit_style: CommitStyle,
 ) -> Result<FileSystemTable> {
+    let schema = schema.ok_or_else(|| anyhow!("FileSystem connector requires a schema"))?;
+
     let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
 
     let inactivity_rollover_seconds = opts.pull_opt_i64("inactivity_rollover_seconds")?;
@@ -318,17 +340,42 @@ pub fn file_system_sink_from_options(
         })
         .transpose()?;
 
-    let partition_fields: Vec<_> = opts
-        .pull_opt_str("partition_fields")?
-        .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
-        .unwrap_or_default();
+    let schema_fields: HashSet<_> = schema
+        .fields
+        .iter()
+        .map(|f| f.field_name.as_str())
+        .collect();
+
+    let partition_fields: Option<Vec<_>> = opts
+        .pull_opt_array("partition_fields")
+        .map(|fields| {
+            if !fields.is_empty() && schema.inferred.unwrap_or_default() {
+                bail!("cannot use `partition_fields` option for an inferred schema; supply the fields of the sink within the CREATE TABLE statement");
+            }
+
+            fields.into_iter().map(|f| {
+                let f = match f {
+                    SqlExpr::Value(Value::SingleQuotedString(s)) => s,
+                    SqlExpr::Identifier(ident) => ident.value,
+                    expr => {
+                        bail!("invalid expression in `partition_fields`: {}; expected a column identifier", expr);
+                    }
+                };
+
+                if !schema_fields.contains(f.as_str()) {
+                    bail!("partition field '{}' does not exist in the schema", f);
+                }
+                Ok(f)
+            }).collect::<Result<_>>()
+        })
+        .transpose()?;
 
     let time_partition_pattern = opts.pull_opt_str("time_partition_pattern")?;
 
-    let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
+    let partitioning = if time_partition_pattern.is_some() || partition_fields.is_some() {
         Some(Partitioning {
             time_partition_pattern,
-            partition_fields,
+            partition_fields: partition_fields.unwrap_or_default(),
         })
     } else {
         None
@@ -355,7 +402,11 @@ pub fn file_system_sink_from_options(
         file_naming,
     });
 
-    let format_settings = match schema.as_ref().unwrap().format.as_ref().ok_or(anyhow!(
+    let shuffle_by_partition = opts
+        .pull_opt_bool("shuffle_by_partition.enabled")?
+        .unwrap_or_default();
+
+    let format_settings = match schema.format.as_ref().ok_or(anyhow!(
         "filesystem sink requires a format, such as json or parquet"
     ))? {
         Format::Parquet(..) => {
@@ -386,6 +437,9 @@ pub fn file_system_sink_from_options(
             format_settings,
             write_path: storage_url,
             storage_options,
+            shuffle_by_partition: Some(PartitionShuffleSettings {
+                enabled: Some(shuffle_by_partition),
+            }),
         },
     })
 }

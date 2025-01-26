@@ -25,6 +25,35 @@ pub struct Connection {
     pub schema: ConnectionSchema,
     pub config: String,
     pub description: String,
+    pub partition_fields: Option<Vec<String>>,
+}
+
+impl Connection {
+    pub fn new(
+        id: Option<i64>,
+        connector: &'static str,
+        name: String,
+        connection_type: ConnectionType,
+        schema: ConnectionSchema,
+        config: &impl Serialize,
+        description: String,
+    ) -> Self {
+        Connection {
+            id,
+            connector,
+            name,
+            connection_type,
+            schema,
+            config: serde_json::to_string(config).unwrap(),
+            description,
+            partition_fields: None,
+        }
+    }
+
+    pub fn with_partition_fields(mut self, partition_fields: Option<Vec<String>>) -> Self {
+        self.partition_fields = partition_fields;
+        self
+    }
 }
 
 pub struct MetadataDef {

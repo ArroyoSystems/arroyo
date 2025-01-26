@@ -105,15 +105,15 @@ impl Connector for SingleFileConnector {
             metadata_fields: vec![],
         };
 
-        Ok(Connection {
+        Ok(Connection::new(
             id,
-            connector: self.name(),
-            name: name.to_string(),
+            self.name(),
+            name.to_string(),
             connection_type,
             schema,
-            config: serde_json::to_string(&config).unwrap(),
-            description: "Single File Source".to_string(),
-        })
+            &config,
+            "Single File Source".to_string(),
+        ))
     }
 
     fn from_options(
