@@ -634,7 +634,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
             let watermark = ctx.last_present_watermark();
 
             if watermark.is_some() && bin_start < self.bin_start(watermark.unwrap()) {
-                return;
+                continue;
             }
 
             self.state = match self.state {
