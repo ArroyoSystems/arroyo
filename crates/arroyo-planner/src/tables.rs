@@ -216,7 +216,7 @@ impl From<Connection> for ConnectorTable {
 }
 
 fn to_debezium_fields(fields: Vec<FieldRef>) -> Vec<Field> {
-    let df_struct_type = DataType::Struct(fields.iter().map(|f| f.clone()).collect());
+    let df_struct_type = DataType::Struct(fields.iter().cloned().collect());
     let before_field_spec = Field::new("before", df_struct_type.clone(), true);
     let after_field_spec = Field::new("after", df_struct_type, true);
     let op_field_spec = Field::new("op", DataType::Utf8, false);
@@ -286,7 +286,7 @@ impl ConnectorTable {
                         .collect(),
                 )
                 .into_iter()
-                .map(|f| FieldSpec::Struct(f))
+                .map(FieldSpec::Struct)
                 .collect();
             }
         }
