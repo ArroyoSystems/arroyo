@@ -70,7 +70,7 @@ pub struct ConnectorTable {
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
     pub primary_keys: Arc<Vec<String>>,
-    pub inferred_fields: Option<Vec<DFField>>,
+    pub inferred_fields: Option<Vec<FieldRef>>,
     pub partition_fields: Arc<Option<Vec<String>>>,
 
     // for lookup tables
@@ -215,6 +215,14 @@ impl From<Connection> for ConnectorTable {
     }
 }
 
+fn to_debezium_fields(fields: Vec<FieldRef>) -> Vec<Field> {
+    let df_struct_type = DataType::Struct(fields.iter().cloned().collect());
+    let before_field_spec = Field::new("before", df_struct_type.clone(), true);
+    let after_field_spec = Field::new("after", df_struct_type, true);
+    let op_field_spec = Field::new("op", DataType::Utf8, false);
+    vec![before_field_spec, after_field_spec, op_field_spec]
+}
+
 impl ConnectorTable {
     fn from_options(
         name: &str,
@@ -268,13 +276,19 @@ impl ConnectorTable {
             if fields.iter().any(|f| f.is_virtual()) {
                 return plan_err!("can't use virtual fields with debezium format");
             }
-            let df_struct_type =
-                DataType::Struct(fields.iter().map(|f| f.field().clone()).collect());
-            let before_field_spec =
-                FieldSpec::Struct(Field::new("before", df_struct_type.clone(), true));
-            let after_field_spec = FieldSpec::Struct(Field::new("after", df_struct_type, true));
-            let op_field_spec = FieldSpec::Struct(Field::new("op", DataType::Utf8, false));
-            input_to_schema_fields = vec![before_field_spec, after_field_spec, op_field_spec];
+
+            // if this is inferred, don't wrap the empty schema in Debezium format
+            if !fields.is_empty() {
+                input_to_schema_fields = to_debezium_fields(
+                    input_to_schema_fields
+                        .into_iter()
+                        .map(|f| Arc::new(f.field().clone()))
+                        .collect(),
+                )
+                .into_iter()
+                .map(FieldSpec::Struct)
+                .collect();
+            }
         }
 
         let schema_fields: Vec<SourceField> = input_to_schema_fields
@@ -811,6 +825,7 @@ impl Table {
             }
         }
 
+        let fields: Vec<_> = fields.into_iter().map(|f| f.field).collect();
         t.inferred_fields.replace(fields);
 
         Ok(())
@@ -828,15 +843,12 @@ impl Table {
                 fields,
                 inferred_fields,
                 ..
-            }) => inferred_fields
-                .as_ref()
-                .map(|fs| fs.iter().map(|f| f.field().clone()).collect())
-                .unwrap_or_else(|| {
-                    fields
-                        .iter()
-                        .map(|field| field.field().clone().into())
-                        .collect()
-                }),
+            }) => inferred_fields.clone().unwrap_or_else(|| {
+                fields
+                    .iter()
+                    .map(|field| field.field().clone().into())
+                    .collect()
+            }),
             Table::TableFromQuery { logical_plan, .. } => {
                 logical_plan.schema().fields().iter().cloned().collect()
             }
