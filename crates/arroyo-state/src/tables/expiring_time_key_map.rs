@@ -7,12 +7,8 @@ use std::{
 
 use anyhow::{anyhow, bail, Ok, Result};
 use arrow::compute::{concat_batches, filter_record_batch, kernels::aggregate, take};
-use arrow::row::OwnedRow;
-use arrow_array::{
-    cast::AsArray,
-    types::{TimestampNanosecondType, UInt64Type},
-    BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
-};
+use arrow::row::{OwnedRow, Row, Rows};
+use arrow_array::{cast::AsArray, types::{TimestampNanosecondType, UInt64Type}, ArrayRef, BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array};
 use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arroyo_rpc::{
     df::server_for_hash_array,
@@ -992,6 +988,10 @@ impl KeyTimeView {
     }
 }
 
+/// A view over the latest key–value state from a checkpointed backend.
+///
+/// Uses schema-based converters to encode/decode keys and values,
+/// tracking update timestamps and handling expiration.
 #[derive(Debug)]
 pub struct LastKeyValueView {
     parent: ExpiringTimeKeyTable,
@@ -1037,17 +1037,25 @@ impl LastKeyValueView {
             key_indices: schema.key_indices.as_ref().unwrap().clone(),
         })
     }
+
+    /// Inserts a batch of records, updating the stored key–value pairs and expiration metadata.
     pub async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
         self.insert_batch_internal(batch, false).await
     }
+    
+    pub fn convert_keys(&self, rows: Vec<Row>) -> Result<Vec<ArrayRef>> {
+        self.key_converter.convert_rows(rows)
+    }
 
+    /// Returns a new record batch with stored values and timestamps for keys found in the input batch.
+    ///
+    /// Projects keys from the input and attaches corresponding value data, along with a masking
+    /// array reporting which records in the original array matched. Rows with no match are omitted.
+    /// Returns a triple of (key rows, present data, mask of input batch)
     pub fn get_current_matching_values(
         &self,
         batch: &RecordBatch,
-    ) -> Result<Option<(RecordBatch, BooleanArray)>> {
-        if self.backing_map.is_empty() {
-            return Ok(None);
-        }
+    ) -> Result<(Rows, RecordBatch, BooleanArray)> {
         let key_batch: RecordBatch = batch.project(&self.key_indices)?;
         let key_rows = self
             .key_converter
@@ -1056,6 +1064,7 @@ impl LastKeyValueView {
         let mut prior_values = Vec::with_capacity(capacity);
         let mut prior_timestamp_builder = TimestampNanosecondArray::builder(capacity);
         let mut prior_row_filter = BooleanArray::builder(capacity);
+        
         for i in 0..batch.num_rows() {
             match self.backing_map.get(key_rows.row(i).as_ref()) {
                 None => {
@@ -1072,20 +1081,20 @@ impl LastKeyValueView {
                 }
             }
         }
+        
         let filter = prior_row_filter.finish();
         let filtered_key_batch: RecordBatch = filter_record_batch(&key_batch, &filter)?;
-        if filtered_key_batch.num_rows() == 0 {
-            return Ok(None);
-        }
+        
         let mut columns = filtered_key_batch.columns().to_vec();
         let value_columns = self.value_converter.convert_raw_rows(prior_values)?;
         columns.extend(value_columns);
         columns.push(Arc::new(prior_timestamp_builder.finish()));
 
-        Ok(Some((
+        Ok((
+            key_rows,
             RecordBatch::try_new(batch.schema(), columns)?,
             filter,
-        )))
+        ))
     }
 
     async fn insert_batch_internal(&mut self, batch: RecordBatch, is_backfill: bool) -> Result<()> {
@@ -1214,6 +1223,9 @@ impl LastKeyValueView {
         }
     }
 
+    /// Checks if any stored record is older than the retention window defined by the given watermark.
+    ///
+    /// Returns true if the earliest entry is older than `(watermark - retention)`.
     pub fn would_expire(&mut self, watermark: Option<SystemTime>) -> bool {
         let Some(watermark) = watermark else {
             return false;
@@ -1225,6 +1237,9 @@ impl LastKeyValueView {
         *earliest_timestamp < cutoff
     }
 
+    /// Expires records older than `(watermark - retention)` by removing them from the state.
+    ///
+    /// If no watermark is provided, no action is taken.
     pub fn expire(&mut self, watermark: Option<SystemTime>) -> Result<()> {
         let Some(watermark) = watermark else {
             return Ok(());

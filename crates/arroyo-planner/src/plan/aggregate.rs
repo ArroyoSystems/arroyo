@@ -29,13 +29,6 @@ impl AggregateRewriter<'_> {
         schema: Arc<DFSchema>,
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Transformed<LogicalPlan>> {
-        if input
-            .schema()
-            .has_column_with_unqualified_name(UPDATING_META_FIELD)
-        {
-            return plan_err!("can't currently nest updating aggregates");
-        }
-
         let key_count = key_fields.len();
         key_fields.extend(fields_with_qualifiers(input.schema()));
 

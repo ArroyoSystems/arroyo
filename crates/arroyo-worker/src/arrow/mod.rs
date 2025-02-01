@@ -36,6 +36,7 @@ pub mod tumbling_aggregating_window;
 pub mod updating_aggregator;
 pub mod watermark_generator;
 pub mod window_fn;
+mod incremental_aggregator;
 
 pub struct ValueExecutionOperator {
     name: String,
