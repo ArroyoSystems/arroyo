@@ -89,5 +89,8 @@ rustls = "0.22"
 # NATS
 async-nats = "0.38.0"
 
+# AMQP
+lapin = "2.5.0"
+
 [build-dependencies]
 glob = "0.3"
