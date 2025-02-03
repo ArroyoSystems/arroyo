@@ -54,8 +54,8 @@ impl SourceOperator for RabbitmqStreamSourceFunc {
         );
 
         match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
+            ok(r) => r,
+            err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
 
                 panic!("{}: {}", e.name, e.details);
@@ -99,7 +99,7 @@ impl RabbitmqStreamSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> Result<SourceFinishType, UserError> {
-        let mut consumer = self.get_consumer(ctx).await.map_err(|e| {
+        let mut consumer: Consumer = self.get_consumer(ctx).await.map_err(|e| {
             UserError::new(
                 "Could not create RabbitMQ Stream consumer",
                 format!("{:?}", e),
