@@ -8,7 +8,11 @@ use std::{
 use anyhow::{anyhow, bail, Ok, Result};
 use arrow::compute::{concat_batches, filter_record_batch, kernels::aggregate, take};
 use arrow::row::{OwnedRow, Row, Rows};
-use arrow_array::{cast::AsArray, types::{TimestampNanosecondType, UInt64Type}, ArrayRef, BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array};
+use arrow_array::{
+    cast::AsArray,
+    types::{TimestampNanosecondType, UInt64Type},
+    ArrayRef, BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
+};
 use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arroyo_rpc::{
     df::server_for_hash_array,
@@ -1042,7 +1046,7 @@ impl LastKeyValueView {
     pub async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
         self.insert_batch_internal(batch, false).await
     }
-    
+
     pub fn convert_keys(&self, rows: Vec<Row>) -> Result<Vec<ArrayRef>> {
         self.key_converter.convert_rows(rows)
     }
@@ -1064,7 +1068,7 @@ impl LastKeyValueView {
         let mut prior_values = Vec::with_capacity(capacity);
         let mut prior_timestamp_builder = TimestampNanosecondArray::builder(capacity);
         let mut prior_row_filter = BooleanArray::builder(capacity);
-        
+
         for i in 0..batch.num_rows() {
             match self.backing_map.get(key_rows.row(i).as_ref()) {
                 None => {
@@ -1081,10 +1085,10 @@ impl LastKeyValueView {
                 }
             }
         }
-        
+
         let filter = prior_row_filter.finish();
         let filtered_key_batch: RecordBatch = filter_record_batch(&key_batch, &filter)?;
-        
+
         let mut columns = filtered_key_batch.columns().to_vec();
         let value_columns = self.value_converter.convert_raw_rows(prior_values)?;
         columns.extend(value_columns);

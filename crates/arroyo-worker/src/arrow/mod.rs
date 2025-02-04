@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 pub mod async_udf;
+pub mod incremental_aggregator;
 pub mod instant_join;
 pub mod join_with_expiration;
 pub mod lookup_join;
@@ -36,7 +37,6 @@ pub mod tumbling_aggregating_window;
 pub mod updating_aggregator;
 pub mod watermark_generator;
 pub mod window_fn;
-mod incremental_aggregator;
 
 pub struct ValueExecutionOperator {
     name: String,

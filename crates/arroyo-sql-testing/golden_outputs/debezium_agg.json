@@ -1,6 +1,6 @@
-{"before":null,"after":{"count":104,"product_name":"Laptop"},"op":"c"}
-{"before":null,"after":{"count":101,"product_name":"Mouse"},"op":"c"}
-{"before":null,"after":{"count":92,"product_name":"Keyboard"},"op":"c"}
-{"before":null,"after":{"count":87,"product_name":"Monitor"},"op":"c"}
-{"before":null,"after":{"count":85,"product_name":"Smartphone"},"op":"c"}
-{"before":null,"after":{"count":90,"product_name":"Headphones"},"op":"c"}
+{"before":null,"after":{"c":104,"id":"p_Laptop","q":838},"op":"c"}
+{"before":null,"after":{"c":90,"id":"p_Headphones","q":722},"op":"c"}
+{"before":null,"after":{"c":92,"id":"p_Keyboard","q":751},"op":"c"}
+{"before":null,"after":{"c":101,"id":"p_Mouse","q":799},"op":"c"}
+{"before":null,"after":{"c":87,"id":"p_Monitor","q":694},"op":"c"}
+{"before":null,"after":{"c":85,"id":"p_Smartphone","q":699},"op":"c"}

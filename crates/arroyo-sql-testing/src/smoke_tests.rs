@@ -463,6 +463,8 @@ async fn run_completely(
 fn get_key(v: &str, primary_keys: Option<&[&str]>) -> Vec<String> {
     let v: Value = serde_json::from_str(v).unwrap();
 
+    println!("getting key from '{v}'");
+
     match primary_keys {
         Some(pks) => pks
             .iter()

@@ -1002,6 +1002,7 @@ pub enum AsDisplayable<'a> {
     Debug(&'a dyn Debug),
     Plan(&'a dyn ExecutionPlan),
     Schema(&'a Schema),
+    List(Vec<String>),
 }
 
 impl<'a> From<&'a str> for AsDisplayable<'a> {
@@ -1049,6 +1050,13 @@ impl Display for AsDisplayable<'_> {
             AsDisplayable::Schema(s) => {
                 for field in s.fields() {
                     write!(f, "\n  * {}: {:?}, ", field.name(), field.data_type())?;
+                }
+
+                Ok(())
+            }
+            AsDisplayable::List(list) => {
+                for s in list {
+                    write!(f, "\n * {}", s)?;
                 }
 
                 Ok(())

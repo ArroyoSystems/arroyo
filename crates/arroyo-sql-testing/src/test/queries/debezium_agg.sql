@@ -15,10 +15,9 @@ CREATE TABLE debezium_source (
 );
 
 CREATE TABLE output (
-    id INT PRIMARY KEY,
-    count INT,
-    d INT,
-    p FLOAT
+    id TEXT PRIMARY KEY,
+    c INT,
+    q INT
 ) WITH (
     connector = 'single_file',
     path = '$output_path',
@@ -27,6 +26,6 @@ CREATE TABLE output (
 );
 
 INSERT INTO output
-SELECT concat(product_name, 'blah'), count(*), count(distinct customer_name), avg(price + 5) + 10
+SELECT concat('p_', product_name), count(*), sum(quantity + 5) + 10
 FROM debezium_source
-group by concat(product_name, 'blah');
+group by concat('p_', product_name);

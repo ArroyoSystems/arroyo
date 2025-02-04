@@ -86,9 +86,10 @@ impl UpdatingAggregatingFunc {
 
         let mut final_input_batches = vec![];
 
-        if let Some((prior_partial_batch, _filter)) =
-            prior_partials.get_current_matching_values(&new_partial_batch)?
-        {
+        let (_, prior_partial_batch, _filter) =
+            prior_partials.get_current_matching_values(&new_partial_batch)?;
+
+        if prior_partial_batch.num_rows() > 0 {
             let combining_batches = vec![new_partial_batch, prior_partial_batch];
             let combine_batch = concat_batches(&self.partial_schema.schema, &combining_batches)?;
             let mut combine_exec = {
@@ -143,9 +144,9 @@ impl UpdatingAggregatingFunc {
                 results.columns().to_vec(),
             )?;
 
-            if let Some((prior_batch, _filter)) =
-                final_output_table.get_current_matching_values(&renamed_results)?
-            {
+            let (_, prior_batch, _filter) =
+                final_output_table.get_current_matching_values(&renamed_results)?;
+            if prior_batch.num_rows() > 0 {
                 batches_to_write.push(Self::set_retract_metadata(
                     out_schema.clone(),
                     prior_batch,
