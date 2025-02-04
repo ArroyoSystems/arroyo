@@ -3,9 +3,14 @@ use lapin::{
     options::*, publisher_confirm::Confirmation, types::FieldTable, BasicProperties, Connection,
     ConnectionProperties, Result,
 };
+use futures_lite::StreamExt;
 
 #[derive(Debug)]
-pub struct AmqpSourceFunc {}
+pub struct AmqpSourceFunc {
+    pub topic: String,
+
+
+}
 
 impl AmqpSourceFunc {
     async fn run_int(
@@ -20,10 +25,41 @@ impl AmqpSourceFunc {
         /// Depending on the event, it processes the message, flushes the buffer if needed, handles errors, or processes control messages such as checkpoints, stopping, committing, or loading compacted data.
         /// The function ensures that the stream is read and processed continuously until a stop condition is met.
         let conn = Connection::connect(&addr, ConnectionProperties::default()).await?;
-        todo!()
+        let channel = conn.create_channel().await.expect("create_channel");
+        let queue_name =  format!( "arroyo-{}-{}-consumer", ctx.task_info.job_id, ctx.task_info.operator_id);
+        let queue = channel.queue_declare(&queue_name, QueueDeclareOptions::default(), FieldTable::default()).await.expect("queue_declare");
+        let mut consumer = channel.basic_consume(queue, consumer_tag, options, arguments)
+
+
         // loop
         // as in the Kafka one, need a flush ticker on the SourceCollector
         // control message parsing on lines 240-ish
+        // https://github.com/amqp-rs/lapin/blob/main/examples/consumer.rs
+        // the docs first create a consumer and a channel, but here not sure what to do
+        // todo might add governor of rate limiting bevcomes necessary https://crates.io/crates/governor
+        let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
+        flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            select! {
+                delivery = consumer.next().await {
+                    Ok(delivery) =>{
+                        // match
+                        todo!("parse the message from amqp")
+                        if let Some(v) = delivery.parse{
+                            let timestamp = delivery.timestamp().
+                        }
+                        
+
+                    }
+                }
+                 _ = flush_ticker.tick() => {
+                    if collector.should_flush() {
+                        collector.flush_buffer().await?;
+                    }
+                }
+
+            }
+        }
     }
 }
 
