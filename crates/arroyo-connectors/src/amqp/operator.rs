@@ -139,7 +139,6 @@ impl AmqpSourceFunc {
     }
 }
 
-
 #[async_trait]
 impl SourceOperator for RabbitmqStreamSourceFunc {
     fn name(&self) -> String {
