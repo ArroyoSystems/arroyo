@@ -69,7 +69,7 @@ impl Accumulator for ArroyoUdaf {
         Ok(())
     }
 
-    fn evaluate(&mut self) -> Result<ScalarValue> {
+    fn evaluate(&self) -> Result<ScalarValue> {
         if self.args[0].values.is_empty() {
             return Ok(scalar_none(&self.output_type));
         }

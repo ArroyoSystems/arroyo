@@ -81,17 +81,21 @@ deltalake = { git = 'https://github.com/delta-io/delta-rs', rev = '25ce38956e257
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '53.2.0/parquet_bytes'}
 arrow-json = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '53.2.0/json'}
-datafusion = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-common = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-execution = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-physical-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-functions = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-datafusion-functions-window = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
+datafusion = { path = "../arrow-datafusion/datafusion/core" }
+datafusion-common = { path = "../arrow-datafusion/datafusion/common" }
+datafusion-execution = { path = "../arrow-datafusion/datafusion/execution" }
+datafusion-expr = { path = "../arrow-datafusion/datafusion/expr" }
+datafusion-expr-common = { path = "../arrow-datafusion/datafusion/expr-common" }
+datafusion-physical-expr = { path = "../arrow-datafusion/datafusion/physical-expr" }
+datafusion-physical-plan = { path = "../arrow-datafusion/datafusion/physical-plan" }
+datafusion-proto = { path = "../arrow-datafusion/datafusion/proto" }
+datafusion-functions = { path = "../arrow-datafusion/datafusion/functions" }
+datafusion-functions-aggregate = { path = "../arrow-datafusion/datafusion/functions-aggregate" }
+datafusion-functions-window = { path = "../arrow-datafusion/datafusion/functions-window" }
+
 datafusion-functions-json = {git = 'https://github.com/ArroyoSystems/datafusion-functions-json', branch = 'datafusion_43'}
 sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0.51.0/arroyo" }
+
 
 object_store = { git = 'http://github.com/ArroyoSystems/arrow-rs', branch = 'object_store_0.11.1/arroyo' }
 

@@ -6,7 +6,7 @@ use crate::{
     fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, ArroyoSchemaProvider,
     DFField, WindowBehavior,
 };
-use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
+use arroyo_rpc::TIMESTAMP_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
 use datafusion::functions_aggregate::expr_fn::max;

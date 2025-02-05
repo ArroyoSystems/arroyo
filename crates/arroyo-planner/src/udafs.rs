@@ -11,7 +11,7 @@ impl Accumulator for EmptyUdaf {
         unreachable!()
     }
 
-    fn evaluate(&mut self) -> Result<ScalarValue> {
+    fn evaluate(&self) -> Result<ScalarValue> {
         unreachable!()
     }
 
