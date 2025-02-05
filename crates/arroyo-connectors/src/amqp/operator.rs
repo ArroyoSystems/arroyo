@@ -1,4 +1,5 @@
 use arroyo_operator::{context::SourceCollector, operator::SourceOperator, SourceFinishType};
+use arroyo_rpc::{formats::Format, MetadataField};
 use futures_lite::StreamExt;
 use lapin::{
     options::*, publisher_confirm::Confirmation, types::FieldTable, BasicProperties, Connection,
@@ -8,6 +9,10 @@ use lapin::{
 #[derive(Debug)]
 pub struct AmqpSourceFunc {
     pub topic: String,
+    pub format: Format,
+    pub framing: Option<Framing>,
+    pub bad_data: Option<BadData>,
+    pub metadata_fields: Vec<MetadataField>,
 }
 
 impl AmqpSourceFunc {
@@ -50,6 +55,23 @@ impl AmqpSourceFunc {
         // todo might add governor if rate limiting bevcomes necessary https://crates.io/crates/governor
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        if let Some(schema_resolver) = &self.schema_resolver {
+            collector.initialize_deserializer_with_resolver(
+                self.format.clone(),
+                self.framing.clone(),
+                self.bad_data.clone(),
+                &self.metadata_fields,
+                schema_resolver.clone(),
+            );
+        } else {
+            collector.initialize_deserializer(
+                self.format.clone(),
+                self.framing.clone(),
+                self.bad_data.clone(),
+                &self.metadata_fields,
+            );
+        }
 
         loop {
             select! {
@@ -98,7 +120,6 @@ impl AmqpSourceFunc {
                         collector.flush_buffer().await?;
                     }
                 }
-                // 🔹 Handle control messages (Checkpoint, Stop, etc.)
                 control_message = ctx.control_rx.recv() => {
                     match control_message {
                         Some(ControlMessage::Checkpoint(c)) => {
