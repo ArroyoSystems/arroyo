@@ -109,9 +109,8 @@ message AsyncUdfOperator {
 
 message UpdatingAggregateOperator {
   string name = 1;
+  ArroyoSchema input_schema = 10;
   ArroyoSchema partial_schema = 2;
-  ArroyoSchema state_partial_schema = 3;
-  ArroyoSchema state_final_schema = 4;
   bytes partial_aggregation_plan = 5;
   bytes combine_plan = 6;
   bytes final_aggregation_plan = 7;

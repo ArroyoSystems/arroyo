@@ -388,73 +388,7 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
-        let receiver = Arc::new(RwLock::new(None));
 
-        let codec = ArroyoPhysicalExtensionCodec {
-            context: DecodingContext::UnboundedBatchStream(receiver.clone()),
-        };
-
-        let partial_aggregation_plan =
-            PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
-
-        // deserialize partial aggregation into execution plan with an UnboundedBatchStream source.
-        let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
-            &codec,
-        )?;
-
-        let partial_schema = config
-            .partial_schema
-            .ok_or_else(|| anyhow!("requires partial schema"))?
-            .try_into()?;
-
-        let combine_plan = PhysicalPlanNode::decode(&mut config.combine_plan.as_slice())?;
-        let combine_execution_plan = combine_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
-            &codec,
-        )?;
-
-        let finish_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
-
-        let finish_execution_plan = finish_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
-            &codec,
-        )?;
-
-        let ttl = if config.ttl_micros == 0 {
-            warn!("ttl was not set for updating aggregate");
-            24 * 60 * 60 * 1000 * 1000
-        } else {
-            config.ttl_micros
-        };
-
-        Ok(ConstructedOperator::from_operator(Box::new(
-            UpdatingAggregatingFunc {
-                partial_aggregation_plan,
-                partial_schema: Arc::new(partial_schema),
-                combine_plan: combine_execution_plan,
-                state_partial_schema: Arc::new(
-                    config
-                        .state_partial_schema
-                        .ok_or_else(|| anyhow!("requires partial schema"))?
-                        .try_into()?,
-                ),
-                state_final_schema: Arc::new(
-                    config
-                        .state_final_schema
-                        .ok_or_else(|| anyhow!("requires final schema"))?
-                        .try_into()?,
-                ),
-                flush_interval: Duration::from_micros(config.flush_interval_micros),
-                finish_execution_plan,
-                receiver,
-                sender: None,
-                exec: Arc::new(Mutex::new(None)),
-                ttl: Duration::from_micros(ttl),
-            },
-        )))
+        todo!()
     }
 }

@@ -225,9 +225,8 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
         let config = UpdatingAggregateOperator {
             name: "UpdatingAggregate".to_string(),
+            input_schema: Some((*input_schema).clone().into()),
             partial_schema: Some(partial_schema.into()),
-            state_partial_schema: Some(state_partial_schema.into()),
-            state_final_schema: Some(state_final_schema.into()),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             combine_plan: PhysicalPlanNode {
                 physical_plan_type: Some(PhysicalPlanType::Aggregate(Box::new(combine_aggregate))),

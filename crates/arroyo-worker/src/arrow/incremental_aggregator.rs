@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use arrow::row::RowConverter;
+use arrow::row::{RowConverter, SortField};
 use arrow_array::cast::AsArray;
 use arrow_schema::{Schema, SchemaBuilder};
 use arroyo_operator::context::Collector;
@@ -29,37 +29,93 @@ use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::physical_plan::aggregates::{AggregateExec, PhysicalGroupBy};
 use datafusion::physical_plan::udaf::AggregateFunctionExpr;
 use datafusion::physical_plan::{Accumulator, PhysicalExpr};
-use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
-use itertools::Itertools;
 use prost::Message;
 use std::time::Duration;
+use tracing::debug;
 use tracing::log::warn;
+
+/// Abstract over aggregations that support retracts (sliding accumulators), which we can use
+/// directly, and those that don't in which case we just need to store the raw values and aggregate
+/// them on demand
+enum IncrementalState {
+    Sliding(Box<dyn Accumulator>),
+    Batch(Arc<AggregateFunctionExpr>, HashMap<Vec<u8>, usize>, Arc<RowConverter>),
+}
+
+impl IncrementalState {
+    fn update_batch(&mut self, batch: &[ArrayRef]) -> DFResult<()> {
+        match self {
+            IncrementalState::Sliding(acc) => acc.update_batch(batch),
+            IncrementalState::Batch(_, data, row_converter) => {
+                for r in row_converter.convert_columns(batch)?.iter() {
+                    if data.contains_key(r.as_ref()) {
+                        *data.get_mut(r.as_ref()).unwrap() += 1;
+                    } else {
+                        data.insert(r.as_ref().to_vec(), 1);
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn retract_batch(&mut self, batch: &[ArrayRef]) -> DFResult<()> {
+        match self {
+            IncrementalState::Sliding(acc) => acc.retract_batch(batch),
+            IncrementalState::Batch(_, data, row_converter) => {
+                for r in row_converter.convert_columns(batch)?.iter() {
+                    if data.contains_key(r.as_ref()) {
+                        let v = data.get_mut(r.as_ref()).unwrap();
+                        if *v == 1 {
+                            data.remove(r.as_ref());
+                        } else {
+                            *v -= 1;
+                        }
+                    } else {
+                        debug!("tried to retract value for missing key: {:?}; this implies an append \
+                        was lost (possibly from source)", batch)
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn evaluate(&mut self) -> DFResult<ScalarValue> {
+        match self {
+            IncrementalState::Sliding(s) => s.evaluate(),
+            IncrementalState::Batch(agg, data, row_converter) => {
+                if data.is_empty() {
+                    Ok(ScalarValue::Null)
+                } else {
+                    let parser = row_converter.parser();
+                    let input = row_converter.convert_rows(data.keys().map(|v| parser.parse(v)))?;
+                    let mut acc = agg.create_accumulator()?;
+                    acc.update_batch(&input)?;
+                    acc.evaluate_mut()
+                }
+            }
+        }
+    }
+}
 
 pub struct IncrementalAggregatingFunc {
     flush_interval: Duration,
-    group_by: PhysicalGroupBy,
     metadata_expr: Arc<dyn PhysicalExpr>,
     aggregates: Vec<Arc<AggregateFunctionExpr>>,
-    accumulators: HashMap<Vec<u8>, Vec<Box<dyn Accumulator>>>,
+    accumulators: HashMap<Vec<u8>, Vec<IncrementalState>>,
+    agg_row_converters: Vec<Arc<RowConverter>>,
     updated_keys: HashMap<Vec<u8>, Option<Vec<ScalarValue>>>,
     partial_schema: Arc<ArroyoSchema>,
     schema_without_metadata: Arc<Schema>,
     ttl: Duration,
-    key_converter: Option<Arc<RowConverter>>,
+    key_converter: RowConverter,
 }
 
 const GLOBAL_KEY: Vec<u8> = vec![];
 
 impl IncrementalAggregatingFunc {
-    fn key_converter(&mut self, ctx: &OperatorContext) -> Arc<RowConverter> {
-        self.key_converter
-            .get_or_insert_with(|| {
-                Arc::new(RowConverter::new(ctx.in_schemas[0].sort_fields(false)).unwrap())
-            })
-            .clone()
-    }
-
     fn flush(&mut self, ctx: &mut OperatorContext) -> Result<Option<RecordBatch>> {
         let mut output_keys = Vec::with_capacity(self.updated_keys.len() * 2);
         let mut output_values =
@@ -75,9 +131,8 @@ impl IncrementalAggregatingFunc {
             let append = self
                 .accumulators
                 .get_mut(k)
-                .as_ref()
                 .unwrap()
-                .iter()
+                .iter_mut()
                 .map(|acc| acc.evaluate())
                 .collect::<DFResult<Vec<_>>>()?;
 
@@ -120,9 +175,8 @@ impl IncrementalAggregatingFunc {
             return Ok(None);
         }
 
-        let key_converter = self.key_converter(ctx);
-        let row_parser = key_converter.parser();
-        let mut result_cols = key_converter
+        let row_parser = self.key_converter.parser();
+        let mut result_cols = self.key_converter
             .convert_rows(output_keys.iter().map(|k| row_parser.parse(k.as_slice())))?;
 
         for acc in output_values {
@@ -188,10 +242,18 @@ impl IncrementalAggregatingFunc {
         retracts
     }
 
-    fn make_accumulators(&self) -> Vec<Box<dyn Accumulator>> {
+    fn make_accumulators(&self) -> Vec<IncrementalState> {
         self.aggregates
             .iter()
-            .map(|agg| agg.create_sliding_accumulator().unwrap())
+            .zip(self.agg_row_converters.iter())
+            .map(|(agg, row_converter)| {
+                let accumulator = agg.create_accumulator().unwrap();
+                if accumulator.supports_retract_batch() {
+                    IncrementalState::Sliding(accumulator)
+                } else {
+                    IncrementalState::Batch(agg.clone(), HashMap::new(), row_converter.clone())
+                }
+            })
             .collect()
     }
 
@@ -202,7 +264,7 @@ impl IncrementalAggregatingFunc {
 
         let mut first = false;
         
-        #[allow(clippy::map_entry)] // work around clippy bug
+        #[allow(clippy::map_entry)] // workaround for https://github.com/rust-lang/rust-clippy/issues/13934
         if !self.accumulators.contains_key(&GLOBAL_KEY) {
             first = true;
             self.accumulators
@@ -217,7 +279,7 @@ impl IncrementalAggregatingFunc {
             } else {
                 e.insert(Some(
                         accumulators
-                            .iter()
+                            .iter_mut()
                             .map(|acc| acc.evaluate())
                             .collect::<DFResult<_>>()?,
                     ));
@@ -250,15 +312,13 @@ impl IncrementalAggregatingFunc {
     fn keyed_aggregate(&mut self, batch: &RecordBatch, ctx: &OperatorContext) -> Result<()> {
         let retracts = Self::get_retracts(batch);
 
-        let key_converter = self.key_converter(ctx);
-
         let sort_columns = &ctx.in_schemas[0]
             .sort_columns(batch, false)
             .into_iter()
             .map(|e| e.values)
             .collect::<Vec<_>>();
 
-        let keys = key_converter.convert_columns(sort_columns).unwrap();
+        let keys = self.key_converter.convert_columns(sort_columns).unwrap();
 
         // store the initial values for keys which we are updating for the first time for the current
         // flush, so that we can retract them
@@ -268,7 +328,7 @@ impl IncrementalAggregatingFunc {
                     self.updated_keys.insert(
                         k.as_ref().to_vec(),
                         Some(
-                            accs.iter()
+                            accs.iter_mut()
                                 .map(|acc| acc.evaluate())
                                 .collect::<DFResult<_>>()?,
                         ),
@@ -539,22 +599,30 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             config.ttl_micros
         };
 
+        let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let finish_schema = finish_execution_plan.schema();
         let mut schema_without_metadata = SchemaBuilder::from((*finish_schema).clone());
         schema_without_metadata.remove(finish_schema.index_of(UPDATING_META_FIELD).unwrap());
+        
+        let mut agg_row_converters = vec![];
+        for agg in aggregate_exec.aggr_expr() {
+            agg_row_converters.push(Arc::new(RowConverter::new(agg.expressions().iter()
+                                  .map(|ex| Ok(SortField::new(ex.data_type(&input_schema.schema)?)))
+                                  .collect::<DFResult<_>>()?)?))
+        }
 
         Ok(ConstructedOperator::from_operator(Box::new(
             IncrementalAggregatingFunc {
                 partial_schema: partial_schema.into(),
                 flush_interval: Duration::from_micros(config.flush_interval_micros),
-                group_by: aggregate_exec.group_expr().clone(),
                 metadata_expr: aggregate_exec.group_expr().expr().last().unwrap().0.clone(),
                 ttl: Duration::from_micros(ttl),
                 aggregates: aggregate_exec.aggr_expr().to_vec(),
                 accumulators: Default::default(),
                 schema_without_metadata: Arc::new(schema_without_metadata.finish()),
                 updated_keys: Default::default(),
-                key_converter: None,
+                key_converter: RowConverter::new(input_schema.sort_fields(false))?,
+                agg_row_converters,
             },
         )))
     }
