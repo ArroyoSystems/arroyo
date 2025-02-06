@@ -1,5 +1,4 @@
 use arroyo_formats::de::FieldValueType;
-use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::{
     context::{SourceCollector, SourceContext},
     operator::SourceOperator,
@@ -11,16 +10,13 @@ use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
 use arroyo_types::*;
 use async_trait::async_trait;
 use futures::StreamExt;
-use lapin::{
-    options::*, publisher_confirm::Confirmation, types::FieldTable, BasicProperties, Connection,
-    ConnectionProperties, Result,
-};
+use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 #[derive(Debug)]
 pub struct AmqpSourceFunc {
@@ -33,13 +29,14 @@ pub struct AmqpSourceFunc {
     pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct AmqpState {
     pub delivery_tag: u64,
     pub offset: u64,
 }
 
 impl AmqpSourceFunc {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             address: todo!(),
             topic: todo!(),
@@ -60,7 +57,7 @@ impl AmqpSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> Result<SourceFinishType> {
         let conn = Connection::connect(&self.address, ConnectionProperties::default()).await?;
         let channel = conn.create_channel().await.expect("create_channel");
         let queue_name = format!(
@@ -86,8 +83,8 @@ impl AmqpSourceFunc {
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
-            .await
-            .map_err(|e| UserError::new("Failed to consume from queue", e.to_string()))?;
+            .await?;
+        // .map_err(|e| UserError::new("Failed to consume from queue", e.to_string()))?;
 
         // todo might add governor if rate limiting bevcomes necessary https://crates.io/crates/governor
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
@@ -120,7 +117,7 @@ impl AmqpSourceFunc {
 
                             // Extract timestamp (if exists)
                             let timestamp: u64 = delivery.properties.timestamp()
-                                .map(|t| t.as_millis() as u64)
+                                .map(|t| t.as_i8() as u64)
                                 .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() as u64); // Default to current time
 
                             // Extract metadata fields (equivalent to Kafka's metadata fields)
@@ -128,7 +125,6 @@ impl AmqpSourceFunc {
                             connector_metadata.insert("exchange", FieldValueType::String(delivery.exchange.as_str().into()));
                             connector_metadata.insert("routing_key", FieldValueType::String(delivery.routing_key.as_str().into()));
                             connector_metadata.insert("timestamp", FieldValueType::Int64(Some(timestamp)));
-                            connector_metadata.insert("redelivered", FieldValueType::Bool(delivery.redelivered));
 
                             // Deserialize and process the message
                             collector.deserialize_slice(&data, from_millis(timestamp), Some(&connector_metadata)).await?;
@@ -147,8 +143,7 @@ impl AmqpSourceFunc {
                             error!("Encountered AMQP error: {:?}", err);
                         },
                         None => {
-                            error!("AMQP Consumer stream ended unexpectedly.");
-                            break;
+                            tokio::time::sleep(Duration::from_millis(500)).await;
                         }
                     }
                 }
@@ -223,7 +218,7 @@ impl SourceOperator for AmqpSourceFunc {
         match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
+                ctx.report_error(e.clone(), "failed to configure the AMQP source").await;
 
                 panic!("{}: {}", e.name, e.details);
             }
