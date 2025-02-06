@@ -199,7 +199,7 @@ impl AmqpSourceFunc {
 }
 
 #[async_trait]
-impl ArrowOperator for AmqpSourceFunc{
+impl ArrowOperator for AmqpSourceFunc {
     fn name(&self) -> String {
         "AmqpSource".to_string()
     }
@@ -213,7 +213,6 @@ impl ArrowOperator for AmqpSourceFunc{
         // no-op
     }
 }
-
 
 #[async_trait]
 impl SourceOperator for AmqpSourceFunc {
