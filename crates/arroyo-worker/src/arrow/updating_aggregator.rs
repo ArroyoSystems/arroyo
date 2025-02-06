@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use arrow::compute::concat_batches;
 use std::borrow::Cow;
 use std::{
@@ -20,25 +20,18 @@ use arroyo_operator::{
         OperatorConstructor, Registry,
     },
 };
-use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchemaRef;
 use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_rpc::{updating_meta_fields, UPDATING_META_FIELD};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
-use datafusion::execution::{
-    runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
-};
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::{lock::Mutex, Future};
 use itertools::Itertools;
-use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
-use tracing::log::warn;
 
 pub struct UpdatingAggregatingFunc {
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
@@ -388,7 +381,6 @@ impl OperatorConstructor for UpdatingAggregatingConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
-
         todo!()
     }
 }

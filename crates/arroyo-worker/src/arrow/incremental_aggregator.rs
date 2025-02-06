@@ -1,15 +1,8 @@
+use crate::arrow::updating_cache::{Key, UpdatingCache};
 use anyhow::{anyhow, Result};
-use arrow_array::{Array, ArrayRef, BooleanArray, RecordBatch, StructArray};
-use std::borrow::{Borrow, Cow};
-use std::{
-    collections::HashMap,
-    mem,
-    sync::{Arc, RwLock},
-};
-use std::collections::LinkedList;
-use std::ptr::null_mut;
 use arrow::row::{RowConverter, SortField};
 use arrow_array::cast::AsArray;
+use arrow_array::{Array, ArrayRef, BooleanArray, RecordBatch, StructArray};
 use arrow_schema::{Schema, SchemaBuilder};
 use arroyo_operator::context::Collector;
 use arroyo_operator::{
@@ -25,37 +18,184 @@ use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_rpc::{updating_meta_fields, UPDATING_META_FIELD};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
-use datafusion::common::{exec_datafusion_err, Result as DFResult, ScalarValue};
+use datafusion::common::{Result as DFResult, ScalarValue};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
-use datafusion::physical_plan::aggregates::{AggregateExec};
+use datafusion::physical_plan::aggregates::AggregateExec;
 use datafusion::physical_plan::udaf::AggregateFunctionExpr;
-use datafusion::physical_plan::{execute_input_stream, Accumulator, PhysicalExpr};
+use datafusion::physical_plan::{Accumulator, PhysicalExpr};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
+use std::borrow::Cow;
 use std::time::{Duration, Instant};
-use rand::{thread_rng, Rng};
+use std::{
+    collections::HashMap,
+    mem,
+    sync::{Arc, RwLock},
+};
 use tracing::debug;
 use tracing::log::warn;
 
+/// Abstract over aggregations that support retracts (sliding accumulators), which we can use
+/// directly, and those that don't in which case we just need to store the raw values and aggregate
+/// them on demand
+enum IncrementalState {
+    Sliding {
+        accumulator: Box<dyn Accumulator>,
+    },
+    Batch {
+        expr: Arc<AggregateFunctionExpr>,
+        data: HashMap<Vec<u8>, usize>,
+        row_converter: Arc<RowConverter>,
+    },
+}
 
+impl IncrementalState {
+    fn update_batch(&mut self, batch: &[ArrayRef]) -> DFResult<()> {
+        match self {
+            IncrementalState::Sliding { accumulator, .. } => {
+                accumulator.update_batch(batch)?;
+            }
+            IncrementalState::Batch {
+                data,
+                row_converter,
+                ..
+            } => {
+                for r in row_converter.convert_columns(batch)?.iter() {
+                    if data.contains_key(r.as_ref()) {
+                        *data.get_mut(r.as_ref()).unwrap() += 1;
+                    } else {
+                        data.insert(r.as_ref().to_vec(), 1);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn retract_batch(&mut self, batch: &[ArrayRef]) -> DFResult<()> {
+        match self {
+            IncrementalState::Sliding { accumulator, .. } => accumulator.retract_batch(batch),
+            IncrementalState::Batch {
+                data,
+                row_converter,
+                ..
+            } => {
+                for r in row_converter.convert_columns(batch)?.iter() {
+                    if data.contains_key(r.as_ref()) {
+                        let v = data.get_mut(r.as_ref()).unwrap();
+                        if *v == 1 {
+                            data.remove(r.as_ref());
+                        } else {
+                            *v -= 1;
+                        }
+                    } else {
+                        debug!(
+                            "tried to retract value for missing key: {:?}; this implies an append \
+                        was lost (possibly from source)",
+                            batch
+                        )
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn evaluate(&mut self) -> DFResult<ScalarValue> {
+        match self {
+            IncrementalState::Sliding { accumulator, .. } => accumulator.evaluate(),
+            IncrementalState::Batch {
+                expr,
+                data,
+                row_converter,
+                ..
+            } => {
+                if data.is_empty() {
+                    Ok(ScalarValue::Null)
+                } else {
+                    let parser = row_converter.parser();
+                    let input = row_converter.convert_rows(data.keys().map(|v| parser.parse(v)))?;
+                    let mut acc = expr.create_accumulator()?;
+                    acc.update_batch(&input)?;
+                    acc.evaluate_mut()
+                }
+            }
+        }
+    }
+}
 
 pub struct IncrementalAggregatingFunc {
     flush_interval: Duration,
     metadata_expr: Arc<dyn PhysicalExpr>,
     aggregates: Vec<Arc<AggregateFunctionExpr>>,
-    accumulators: HashMap<Vec<u8>, CacheEntry>,
+    accumulators: UpdatingCache<Vec<IncrementalState>>,
     agg_row_converters: Vec<Arc<RowConverter>>,
-    updated_keys: HashMap<Vec<u8>, Option<Vec<ScalarValue>>>,
+    updated_keys: HashMap<Key, Option<Vec<ScalarValue>>>,
     partial_schema: Arc<ArroyoSchema>,
     schema_without_metadata: Arc<Schema>,
     ttl: Duration,
     key_converter: RowConverter,
-    last_timed_out: Instant,
 }
 
 const GLOBAL_KEY: Vec<u8> = vec![];
 
 impl IncrementalAggregatingFunc {
+    fn update_batch(
+        &mut self,
+        key: &[u8],
+        batch: &[Vec<ArrayRef>],
+        idx: Option<usize>,
+    ) -> DFResult<()> {
+        self.accumulators
+            .modify_and_update(key, Instant::now(), |values| {
+                for (inputs, accs) in batch.iter().zip(values.iter_mut()) {
+                    let values = if let Some(idx) = idx {
+                        &inputs.iter().map(|c| c.slice(idx, 1)).collect()
+                    } else {
+                        inputs
+                    };
+
+                    accs.update_batch(values)?;
+                }
+                Ok(())
+            })
+            .expect("tried to update for non-existent key")
+    }
+
+    fn retract_batch(
+        &mut self,
+        key: &[u8],
+        batch: &[Vec<ArrayRef>],
+        idx: Option<usize>,
+    ) -> DFResult<()> {
+        self.accumulators
+            .modify(key, |values| {
+                for (inputs, accs) in batch.iter().zip(values.iter_mut()) {
+                    let values = if let Some(idx) = idx {
+                        &inputs.iter().map(|c| c.slice(idx, 1)).collect()
+                    } else {
+                        inputs
+                    };
+
+                    accs.retract_batch(values)?;
+                }
+                Ok::<(), datafusion::common::DataFusionError>(())
+            })
+            .expect("tried to retract state for non-existent key")?;
+
+        Ok(())
+    }
+
+    fn evaluate(&mut self, key: &[u8]) -> DFResult<Vec<ScalarValue>> {
+        self.accumulators
+            .get_mut(key)
+            .expect("tried to evaluate non-existent key")
+            .iter_mut()
+            .map(|s| s.evaluate())
+            .collect::<DFResult<_>>()
+    }
+
     fn flush(&mut self, ctx: &mut OperatorContext) -> Result<Option<RecordBatch>> {
         let mut output_keys = Vec::with_capacity(self.updated_keys.len() * 2);
         let mut output_values =
@@ -68,11 +208,7 @@ impl IncrementalAggregatingFunc {
         let mut deleted_keys = vec![];
 
         for (k, retract) in updated_keys.iter().zip(updated_values.into_iter()) {
-            let append = self
-                .accumulators
-                .get_mut(k)
-                .unwrap()
-                .evaluate()?;
+            let append = self.evaluate(&k.0)?;
 
             if let Some(v) = retract {
                 // don't bother emitting updates that just retract / append the same values (excluding
@@ -106,7 +242,22 @@ impl IncrementalAggregatingFunc {
         }
 
         for k in deleted_keys {
-            self.accumulators.remove(k);
+            self.accumulators.remove(&k.0);
+        }
+
+        let mut ttld_keys = vec![];
+
+        for (k, mut v) in self.accumulators.time_out(Instant::now()) {
+            // retract items that are being ttl'd
+            is_retracts.push(true);
+            ttld_keys.push(k);
+
+            for (out, v) in output_values
+                .iter_mut()
+                .zip(v.iter_mut().map(|s| s.evaluate()))
+            {
+                out.push(v?);
+            }
         }
 
         if output_keys.is_empty() {
@@ -114,8 +265,12 @@ impl IncrementalAggregatingFunc {
         }
 
         let row_parser = self.key_converter.parser();
-        let mut result_cols = self.key_converter
-            .convert_rows(output_keys.iter().map(|k| row_parser.parse(k.as_slice())))?;
+        let mut result_cols = self.key_converter.convert_rows(
+            output_keys
+                .iter()
+                .map(|k| row_parser.parse(k.0.as_slice()))
+                .chain(ttld_keys.iter().map(|k| row_parser.parse(k.as_slice()))),
+        )?;
 
         for acc in output_values {
             result_cols.push(ScalarValue::iter_to_array(acc).unwrap());
@@ -140,13 +295,6 @@ impl IncrementalAggregatingFunc {
             ctx.out_schema.as_ref().unwrap().schema.clone(),
             final_batch,
         )?))
-    }
-
-    fn time_out_keys(&mut self) {
-        let now = Instant::now();
-        self.accumulators
-            .retain(|_, v| (now - v.updated) < self.ttl);
-        self.last_timed_out = now;
     }
 
     fn get_aggregate_state_cols(&self, batch: &RecordBatch) -> Vec<Vec<Arc<dyn Array>>> {
@@ -187,16 +335,14 @@ impl IncrementalAggregatingFunc {
         retracts
     }
 
-    fn make_accumulators(&self) -> CacheEntry {
-        let accumulators = self.aggregates
+    fn make_accumulators(&self) -> Vec<IncrementalState> {
+        self.aggregates
             .iter()
             .zip(self.agg_row_converters.iter())
             .map(|(agg, row_converter)| {
                 let accumulator = agg.create_accumulator().unwrap();
                 if accumulator.supports_retract_batch() {
-                    IncrementalState::Sliding {
-                        accumulator
-                    }
+                    IncrementalState::Sliding { accumulator }
                 } else {
                     IncrementalState::Batch {
                         expr: agg.clone(),
@@ -205,12 +351,7 @@ impl IncrementalAggregatingFunc {
                     }
                 }
             })
-            .collect();
-
-        CacheEntry {
-            updated: Instant::now(),
-            data: accumulators,
-        }
+            .collect()
     }
 
     fn global_aggregate(&mut self, batch: &RecordBatch) -> Result<()> {
@@ -219,27 +360,24 @@ impl IncrementalAggregatingFunc {
         let aggregate_input_cols = self.compute_inputs(&batch);
 
         let mut first = false;
-        
-        #[allow(clippy::map_entry)] // workaround for https://github.com/rust-lang/rust-clippy/issues/13934
+
+        #[allow(clippy::map_entry)]
+        // workaround for https://github.com/rust-lang/rust-clippy/issues/13934
         if !self.accumulators.contains_key(&GLOBAL_KEY) {
             first = true;
-            self.accumulators
-                .insert(GLOBAL_KEY, self.make_accumulators());
+            self.accumulators.insert(
+                Arc::new(GLOBAL_KEY),
+                Instant::now(),
+                self.make_accumulators(),
+            );
         }
 
-        let accumulators = self.accumulators.get_mut(&GLOBAL_KEY).unwrap();
-
-        if let std::collections::hash_map::Entry::Vacant(e) = self.updated_keys.entry(GLOBAL_KEY) {
+        if self.updated_keys.contains_key(GLOBAL_KEY.as_slice()) {
             if first {
-                e.insert(None);
+                self.updated_keys.insert(Key(Arc::new(GLOBAL_KEY)), None);
             } else {
-                e.insert(Some(
-                        accumulators
-                            .data
-                            .iter_mut()
-                            .map(|acc| acc.evaluate())
-                            .collect::<DFResult<_>>()?,
-                    ));
+                let v = Some(self.evaluate(&GLOBAL_KEY)?);
+                self.updated_keys.insert(Key(Arc::new(GLOBAL_KEY)), v);
             }
         }
 
@@ -248,18 +386,18 @@ impl IncrementalAggregatingFunc {
         if let Some(retracts) = retracts {
             for (i, r) in retracts.iter().enumerate() {
                 if r.unwrap_or_default() {
-                    accumulators.retract_batch(&aggregate_input_cols, Some(i))?;
+                    self.retract_batch(&GLOBAL_KEY, &aggregate_input_cols, Some(i))?;
                 } else {
-                    accumulators.update_batch(&aggregate_input_cols, Some(i))?;
+                    self.update_batch(&GLOBAL_KEY, &aggregate_input_cols, Some(i))?;
                 }
-
             }
         } else {
             // if these are all appends, we can much more efficiently do all of the updates at once
-            accumulators.update_batch(&aggregate_input_cols, None).unwrap();
+            self.update_batch(&GLOBAL_KEY, &aggregate_input_cols, None)
+                .unwrap();
         }
 
-        Ok(())        
+        Ok(())
     }
 
     fn keyed_aggregate(&mut self, batch: &RecordBatch, ctx: &OperatorContext) -> Result<()> {
@@ -277,15 +415,18 @@ impl IncrementalAggregatingFunc {
         // flush, so that we can retract them
         for k in &keys {
             if !self.updated_keys.contains_key(k.as_ref()) {
-                if let Some(accs) = self.accumulators.get_mut(k.as_ref()) {
+                if let Some((key, accs)) = self.accumulators.get_mut_key_value(k.as_ref()) {
                     self.updated_keys.insert(
-                        k.as_ref().to_vec(),
+                        key,
                         Some(
-                            accs.evaluate()?
+                            accs.iter_mut()
+                                .map(|s| s.evaluate())
+                                .collect::<DFResult<_>>()?,
                         ),
                     );
                 } else {
-                    self.updated_keys.insert(k.as_ref().to_vec(), None);
+                    self.updated_keys
+                        .insert(Key(Arc::new(k.as_ref().to_vec())), None);
                 }
             }
         }
@@ -294,20 +435,23 @@ impl IncrementalAggregatingFunc {
         let aggregate_input_cols = self.compute_inputs(&batch);
 
         for (i, key) in keys.iter().enumerate() {
-            let row_accumulators = if self.accumulators.contains_key(key.as_ref()) {
+            if self.accumulators.contains_key(key.as_ref()) {
                 self.accumulators.get_mut(key.as_ref()).unwrap()
             } else {
                 let new_accumulators = self.make_accumulators();
-                self.accumulators
-                    .insert(key.as_ref().to_vec(), new_accumulators);
+                self.accumulators.insert(
+                    Arc::new(key.as_ref().to_vec()),
+                    Instant::now(),
+                    new_accumulators,
+                );
                 self.accumulators.get_mut(key.as_ref()).unwrap()
             };
 
             let retract = retracts.map(|r| r.value(i)).unwrap_or_default();
             if retract {
-                row_accumulators.retract_batch(&aggregate_input_cols, Some(i))?;
+                self.retract_batch(key.as_ref(), &aggregate_input_cols, Some(i))?;
             } else {
-                row_accumulators.update_batch(&aggregate_input_cols, Some(i))?;
+                self.update_batch(key.as_ref(), &aggregate_input_cols, Some(i))?;
             }
         }
 
@@ -380,7 +524,6 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         _: &mut dyn Collector,
     ) {
         let input_schema = &ctx.in_schemas[0];
-        let output_schema = ctx.out_schema.as_ref().unwrap();
 
         if input_schema
             .key_indices
@@ -429,11 +572,6 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) {
-        if self.last_timed_out.elapsed() > Duration::from_secs(60 + thread_rng().gen_range(0..60)) {
-            self.time_out_keys();
-        }
-
-
         if let Some(batch) = self.flush(ctx).unwrap() {
             collector.collect(batch).await;
         }
@@ -543,23 +681,26 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             &codec,
         )?;
 
-        let ttl = if config.ttl_micros == 0 {
+        let ttl = Duration::from_micros(if config.ttl_micros == 0 {
             warn!("ttl was not set for updating aggregate");
             24 * 60 * 60 * 1000 * 1000
         } else {
             config.ttl_micros
-        };
+        });
 
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let finish_schema = finish_execution_plan.schema();
         let mut schema_without_metadata = SchemaBuilder::from((*finish_schema).clone());
         schema_without_metadata.remove(finish_schema.index_of(UPDATING_META_FIELD).unwrap());
-        
+
         let mut agg_row_converters = vec![];
         for agg in aggregate_exec.aggr_expr() {
-            agg_row_converters.push(Arc::new(RowConverter::new(agg.expressions().iter()
-                                  .map(|ex| Ok(SortField::new(ex.data_type(&input_schema.schema)?)))
-                                  .collect::<DFResult<_>>()?)?))
+            agg_row_converters.push(Arc::new(RowConverter::new(
+                agg.expressions()
+                    .iter()
+                    .map(|ex| Ok(SortField::new(ex.data_type(&input_schema.schema)?)))
+                    .collect::<DFResult<_>>()?,
+            )?))
         }
 
         Ok(ConstructedOperator::from_operator(Box::new(
@@ -567,14 +708,13 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 partial_schema: partial_schema.into(),
                 flush_interval: Duration::from_micros(config.flush_interval_micros),
                 metadata_expr: aggregate_exec.group_expr().expr().last().unwrap().0.clone(),
-                ttl: Duration::from_micros(ttl),
+                ttl,
                 aggregates: aggregate_exec.aggr_expr().to_vec(),
-                accumulators: Default::default(),
+                accumulators: UpdatingCache::with_time_to_idle(ttl),
                 schema_without_metadata: Arc::new(schema_without_metadata.finish()),
                 updated_keys: Default::default(),
                 key_converter: RowConverter::new(input_schema.sort_fields(false))?,
                 agg_row_converters,
-                last_timed_out: Instant::now(),
             },
         )))
     }

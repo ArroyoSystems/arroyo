@@ -1,88 +1,8 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::ptr::{NonNull};
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use arrow::row::RowConverter;
-use arrow_array::ArrayRef;
-use datafusion::logical_expr::Accumulator;
-use datafusion::physical_expr::aggregate::AggregateFunctionExpr;
-use datafusion::common::{exec_datafusion_err, Result as DFResult, ScalarValue};
-use tracing::debug;
-
-/// Abstract over aggregations that support retracts (sliding accumulators), which we can use
-/// directly, and those that don't in which case we just need to store the raw values and aggregate
-/// them on demand
-enum IncrementalState {
-    Sliding {
-        accumulator: Box<dyn Accumulator>
-    },
-    Batch {
-        expr: Arc<AggregateFunctionExpr>,
-        data: HashMap<Vec<u8>, usize>,
-        row_converter: Arc<RowConverter>
-    },
-}
-
-impl IncrementalState {
-    fn update_batch(&mut self, batch: &[ArrayRef]) -> DFResult<()> {
-        match self {
-            IncrementalState::Sliding { accumulator, .. } => {
-                accumulator.update_batch(batch)?;
-            },
-            IncrementalState::Batch { data, row_converter, .. } => {
-                for r in row_converter.convert_columns(batch)?.iter() {
-                    if data.contains_key(r.as_ref()) {
-                        *data.get_mut(r.as_ref()).unwrap() += 1;
-                    } else {
-                        data.insert(r.as_ref().to_vec(), 1);
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn retract_batch(&mut self, batch: &[ArrayRef]) -> DFResult<()> {
-        match self {
-            IncrementalState::Sliding { accumulator, .. } => accumulator.retract_batch(batch),
-            IncrementalState::Batch { data, row_converter, .. } => {
-                for r in row_converter.convert_columns(batch)?.iter() {
-                    if data.contains_key(r.as_ref()) {
-                        let v = data.get_mut(r.as_ref()).unwrap();
-                        if *v == 1 {
-                            data.remove(r.as_ref());
-                        } else {
-                            *v -= 1;
-                        }
-                    } else {
-                        debug!("tried to retract value for missing key: {:?}; this implies an append \
-                        was lost (possibly from source)", batch)
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-
-    fn evaluate(&mut self) -> DFResult<ScalarValue> {
-        match self {
-            IncrementalState::Sliding { accumulator, .. } => accumulator.evaluate(),
-            IncrementalState::Batch { expr, data, row_converter, .. } => {
-                if data.is_empty() {
-                    Ok(ScalarValue::Null)
-                } else {
-                    let parser = row_converter.parser();
-                    let input = row_converter.convert_rows(data.keys().map(|v| parser.parse(v)))?;
-                    let mut acc = expr.create_accumulator()?;
-                    acc.update_batch(&input)?;
-                    acc.evaluate_mut()
-                }
-            }
-        }
-    }
-}
 
 #[derive(Copy, Clone)]
 struct CacheNodePtr(Option<NonNull<CacheNode>>);
@@ -90,49 +10,13 @@ struct CacheNodePtr(Option<NonNull<CacheNode>>);
 unsafe impl Send for CacheNodePtr {}
 unsafe impl Sync for CacheNodePtr {}
 
-struct CacheEntry {
+struct CacheEntry<T: Send + Sync> {
     node: CacheNodePtr,
-    data: Vec<IncrementalState>,
+    data: T,
 }
 
-impl CacheEntry {
-    fn update_batch(&mut self, batch: &[Vec<ArrayRef>], idx: Option<usize>) -> DFResult<()> {
-        for (inputs, accs) in batch.iter().zip(self.data.iter_mut()) {
-            let values = if let Some(idx) = idx {
-                &inputs.iter().map(|c| c.slice(idx, 1)).collect()
-            } else {
-                inputs
-            };
-
-            accs.update_batch(values)?;
-        }
-
-        Ok(())
-    }
-
-    fn retract_batch(&mut self, batch: &[Vec<ArrayRef>], idx: Option<usize>) -> DFResult<()> {
-        for (inputs, accs) in batch.iter().zip(self.data.iter_mut()) {
-            let values = if let Some(idx) = idx {
-                &inputs.iter().map(|c| c.slice(idx, 1)).collect()
-            } else {
-                inputs
-            };
-
-            accs.retract_batch(values)?;
-        }
-
-        Ok(())
-    }
-
-    fn evaluate(&mut self) -> DFResult<Vec<ScalarValue>> {
-        self.data.iter_mut()
-            .map(|s| s.evaluate())
-            .collect::<DFResult<_>>()
-    }
-}
-
-pub(crate) struct Cache {
-    data: HashMap<Key, CacheEntry>,
+pub struct UpdatingCache<T: Send + Sync> {
+    data: HashMap<Key, CacheEntry<T>>,
     eviction_list_head: CacheNodePtr,
     eviction_list_tail: CacheNodePtr,
     ttl: Duration,
@@ -145,8 +29,8 @@ struct CacheNode {
     next: CacheNodePtr,
 }
 
-#[derive(Hash, Eq, PartialEq)]
-pub(crate) struct Key(Arc<Vec<u8>>);
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct Key(pub Arc<Vec<u8>>);
 
 impl Borrow<[u8]> for Key {
     fn borrow(&self) -> &[u8] {
@@ -154,46 +38,63 @@ impl Borrow<[u8]> for Key {
     }
 }
 
-impl Cache {
-    pub(crate) fn insert(&mut self, key: Arc<Vec<u8>>, value: Vec<IncrementalState>) {
-        let node = self.push_back(Instant::now(), Key(key.clone()));
+struct TTLIter<'a, T: Send + Sync> {
+    now: Instant,
+    cache: &'a mut UpdatingCache<T>,
+}
 
-        self.data.insert(Key(key), CacheEntry {
-            node,
-            data: value,
-        });
+impl<T: Send + Sync> Iterator for TTLIter<'_, T> {
+    type Item = (Arc<Vec<u8>>, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unsafe {
+            let head = self.cache.eviction_list_head.0?;
+            if self.now - (*head.as_ptr()).updated < self.cache.ttl {
+                return None;
+            }
+            // safety -- we've just checked that the node exists, so this can't panic
+            let k = self.cache.pop_front().unwrap();
+            let v = self.cache.data.remove(&k).unwrap();
+            Some((k.0, v.data))
+        }
+    }
+}
+
+impl<T: Send + Sync> UpdatingCache<T> {
+    pub fn with_time_to_idle(ttl: Duration) -> Self {
+        Self {
+            data: Default::default(),
+            eviction_list_tail: CacheNodePtr(None),
+            eviction_list_head: CacheNodePtr(None),
+            ttl,
+        }
+    }
+
+    pub fn insert(&mut self, key: Arc<Vec<u8>>, now: Instant, value: T) {
+        let node = self.push_back(now, Key(key.clone()));
+
+        self.data.insert(Key(key), CacheEntry { node, data: value });
 
         self.eviction_list_tail = node;
     }
-    
-    fn time_out(&mut self, now: Instant) -> Vec<Arc<Vec<u8>>> {
-        unsafe {
-            let mut v = vec![];
-            while let Some(head) = self.eviction_list_head.0 {
-                if (*head.as_ptr()).updated - now > self.ttl {
-                    // safety -- we've just checked that the node exists, so this can't panic
-                    let k = self.pop_front().unwrap();
-                    self.data.remove(&k);
-                    v.push(k.0);
-                } 
-            }
-            v
-        }
+
+    pub fn time_out(&mut self, now: Instant) -> impl Iterator<Item = (Arc<Vec<u8>>, T)> + '_ {
+        TTLIter { now, cache: self }
     }
-    
+
     fn pop_front(&mut self) -> Option<Key> {
         unsafe {
             self.eviction_list_head.0.map(|head| {
                 let boxed = Box::from_raw(head.as_ptr());
                 let key = boxed.key;
-                
+
                 self.eviction_list_head = boxed.prev;
                 if let Some(new) = self.eviction_list_head.0 {
-                    (*new.as_ptr()).next = CacheNodePtr(None);  
+                    (*new.as_ptr()).next = CacheNodePtr(None);
                 } else {
                     self.eviction_list_tail = CacheNodePtr(None);
                 }
-                
+
                 key
             })
         }
@@ -201,14 +102,14 @@ impl Cache {
 
     fn push_back(&mut self, updated: Instant, key: Key) -> CacheNodePtr {
         unsafe {
-            let node =  NonNull::new_unchecked(Box::into_raw(Box::new(CacheNode {
-                updated: Instant::now(),
+            let node = NonNull::new_unchecked(Box::into_raw(Box::new(CacheNode {
+                updated,
                 key,
                 // push to the back
                 prev: CacheNodePtr(None),
                 next: CacheNodePtr(None),
             })));
-            
+
             let wrapped_node = CacheNodePtr(Some(node));
 
             if let Some(tail) = self.eviction_list_tail.0 {
@@ -222,134 +123,373 @@ impl Cache {
             wrapped_node
         }
     }
-    
-    fn update_node(&mut self, node: CacheNodePtr, timestamp: Instant) {
-        let node = node.0.unwrap();
 
+    fn remove_node(&mut self, node: CacheNodePtr) {
         unsafe {
-            if self.eviction_list_tail.0 == Some(node) {
-                // nothing to do, it's already at the back
-                (*node.as_ptr()).updated = timestamp;
-                return;
-            }
+            if let Some(node) = node.0 {
+                if self.eviction_list_head.0 == Some(node) {
+                    self.eviction_list_head = (*node.as_ptr()).prev;
+                }
+                if self.eviction_list_tail.0 == Some(node) {
+                    self.eviction_list_tail = (*node.as_ptr()).next;
+                }
 
-            let key = if self.eviction_list_head.0 == Some(node) {
-                // if it's at the head, just use pop_front
-                self.pop_front().unwrap()
-            }  else {
-                // otherwise, it's neither at the front or back --remove it from its current location
                 if let Some(prev) = (*node.as_ptr()).prev.0 {
                     (*prev.as_ptr()).next = (*node.as_ptr()).next;
                 }
                 if let Some(next) = (*node.as_ptr()).next.0 {
                     (*next.as_ptr()).prev = (*node.as_ptr()).prev;
                 }
-                // free the memory
-                Box::from_raw(node.as_ptr()).key
-                // we don't need to update the head or tail, because they won't have changed
-            };
 
-            // re-insert it in the back
-            self.push_back(timestamp, key);
+                drop(Box::from_raw(node.as_ptr()));
+            }
         }
     }
 
-    pub(crate) fn update_batch(&mut self, key: &[u8], batch: &[Vec<ArrayRef>], idx: Option<usize>) -> DFResult<()> {
-        let entry = self.data.get_mut(key)
-            .ok_or_else(|| exec_datafusion_err!("tried to update state for non-existent key"))?;
+    fn update_node(&mut self, node: CacheNodePtr, timestamp: Instant) {
+        unsafe {
+            let Some(node_ptr) = node.0 else {
+                return;
+            };
 
-        entry.update_batch(batch, idx)?;
-        
+            if self.eviction_list_tail.0 == Some(node_ptr) {
+                // it's already at the back, just update the timestamp
+                (*node_ptr.as_ptr()).updated = timestamp;
+                return;
+            }
+
+            // Unlink node from current list.
+            if self.eviction_list_head.0 == Some(node_ptr) {
+                self.eviction_list_head = (*node_ptr.as_ptr()).prev;
+                if let Some(new_head) = self.eviction_list_head.0 {
+                    (*new_head.as_ptr()).next = CacheNodePtr(None);
+                }
+            } else {
+                if let Some(prev) = (*node_ptr.as_ptr()).prev.0 {
+                    (*prev.as_ptr()).next = (*node_ptr.as_ptr()).next;
+                }
+                if let Some(next) = (*node_ptr.as_ptr()).next.0 {
+                    (*next.as_ptr()).prev = (*node_ptr.as_ptr()).prev;
+                }
+            }
+            // Reinsert node at tail.
+
+            (*node_ptr.as_ptr()).updated = timestamp;
+            (*node_ptr.as_ptr()).prev = CacheNodePtr(None);
+            (*node_ptr.as_ptr()).next = self.eviction_list_tail;
+
+            if let Some(old_tail) = self.eviction_list_tail.0 {
+                (*old_tail.as_ptr()).prev = CacheNodePtr(Some(node_ptr));
+            }
+            self.eviction_list_tail = CacheNodePtr(Some(node_ptr));
+            if self.eviction_list_head.0.is_none() {
+                self.eviction_list_head = CacheNodePtr(Some(node_ptr));
+            }
+        }
+    }
+
+    pub fn modify_and_update<E, F: Fn(&mut T) -> Result<(), E>>(
+        &mut self,
+        key: &[u8],
+        now: Instant,
+        f: F,
+    ) -> Option<Result<(), E>> {
+        let entry = self.data.get_mut(key)?;
+
+        if let Err(e) = f(&mut entry.data) {
+            return Some(Err(e));
+        }
+
         let node = entry.node;
 
-        self.update_node(node, Instant::now());
-        
-        Ok(())
-    }
-    
-    pub(crate) fn retract_batch(&mut self, key: &[u8], batch: &[Vec<ArrayRef>], idx: Option<usize>) -> DFResult<()> {
-        let entry = self.data.get_mut(key)
-            .ok_or_else(|| exec_datafusion_err!("tried to update state for non-existent key"))?;
+        self.update_node(node, now);
 
-        entry.retract_batch(batch, idx)?;
-        
-        Ok(())
+        Some(Ok(()))
+    }
+
+    pub fn modify<E, F: Fn(&mut T) -> Result<(), E>>(
+        &mut self,
+        key: &[u8],
+        f: F,
+    ) -> Option<Result<(), E>> {
+        let entry = self.data.get_mut(key)?;
+
+        if let Err(e) = f(&mut entry.data) {
+            return Some(Err(e));
+        }
+
+        Some(Ok(()))
+    }
+
+    pub fn contains_key(&self, k: &[u8]) -> bool {
+        self.data.contains_key(k)
+    }
+
+    pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut T> {
+        self.data.get_mut(key).map(|t| &mut t.data)
+    }
+
+    pub fn get_mut_key_value(&mut self, key: &[u8]) -> Option<(Key, &mut T)> {
+        let k = self.data.get_key_value(key)?.0.clone();
+        Some((k, &mut self.data.get_mut(key)?.data))
+    }
+
+    pub fn remove(&mut self, key: &[u8]) -> Option<T> {
+        let node = self.data.remove(key)?;
+        self.remove_node(node.node);
+        Some(node.data)
     }
 }
 
-impl Drop for Cache {
+impl<T: Send + Sync> Drop for UpdatingCache<T> {
     fn drop(&mut self) {
-        while let Some(_) = self.pop_front() {}
+        while self.pop_front().is_some() {}
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Float64Array, Int64Array};
-    use arrow::datatypes::DataType;
-    use arrow_schema::{Field, Schema};
-    use datafusion::common::DFSchema;
-    use datafusion::execution::{SessionState, SessionStateBuilder, SessionStateDefaults};
-    use datafusion::functions_aggregate::sum::{sum, sum_udaf};
-    use datafusion::logical_expr::col;
-    use datafusion::physical_expr::PhysicalExpr;
-    use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 
     #[test]
-    fn test_cache_eviction() {
-        let mut cache = Cache {
-            data: HashMap::new(),
-            eviction_list_head: CacheNodePtr(None),
-            eviction_list_tail: CacheNodePtr(None), 
-            ttl: Duration::from_secs(60),
-        };
-    
-        let k1 = Arc::new(vec![1]);
-        let k2 = Arc::new(vec![2]); 
-        let k3 = Arc::new(vec![3]);
-    
-        cache.insert(k1.clone(), vec![]);
-        cache.insert(k2.clone(), vec![]);
-        cache.insert(k3.clone(), vec![]);
-    
-        let expired = cache.time_out(Instant::now() + Duration::from_secs(61));
-        assert_eq!(expired.len(), 3);
-        assert!(cache.data.is_empty());
-    }
-    
-    #[test]
-    fn test_cache_update() {
-        let mut cache = Cache {
-            data: HashMap::new(),
-            eviction_list_head: CacheNodePtr(None),
-            eviction_list_tail: CacheNodePtr(None),
-            ttl: Duration::from_secs(60),
-        };
-    
-        let k1 = Arc::new(vec![1]);
-        let array = Arc::new(Int64Array::from(vec![1, 2, 3])) as ArrayRef;
-        let input = vec![vec![array]];
+    fn test_insert_and_modify() {
+        let mut cache = UpdatingCache::with_time_to_idle(Duration::from_secs(60));
 
-        let state = SessionStateBuilder::default()
-            .with_default_features()
-            .build();
-        let schema = DFSchema::try_from(Schema::new(vec![Field::new("a", DataType::Int64, false)])).unwrap();
-        
-        let expr = DefaultPhysicalPlanner::default()
-            .create_physical_expr(&sum(col("a")), &schema, &state).unwrap();
-        
-        cache.insert(k1.clone(), vec![IncrementalState::Batch {
-            expr,
-            data: HashMap::new(),
-            row_converter: Arc::new(RowConverter::new(vec![DataType::Int64])),
-        }]);
-    
-        cache.update_batch(&k1, &input, None).unwrap();
-    
-        let entry = cache.data.get_mut(&*k1).unwrap();
-        let result = entry.evaluate().unwrap();
-        assert_eq!(result[0], ScalarValue::Int64(Some(6)));
+        let key = Arc::new(vec![1, 2, 3]);
+        let now = Instant::now();
+        cache.insert(key.clone(), now, 42);
+
+        assert!(cache
+            .modify(&key, |x| {
+                *x = 43;
+                Ok::<(), ()>(())
+            })
+            .unwrap()
+            .is_ok());
+
+        let v = cache.data.get(&Key(key)).unwrap();
+        assert_eq!(v.data, 43);
     }
-    
+
+    #[test]
+    fn test_timeout() {
+        let mut cache = UpdatingCache::with_time_to_idle(Duration::from_millis(10));
+
+        let key1 = Arc::new(vec![1]);
+        let key2 = Arc::new(vec![2]);
+
+        let start = Instant::now();
+        cache.insert(key1.clone(), start, "value1");
+        cache.insert(key2.clone(), start + Duration::from_millis(5), "value2");
+
+        let check_time = start + Duration::from_millis(11);
+        let timed_out: Vec<_> = cache.time_out(check_time).collect();
+        assert_eq!(timed_out.len(), 1);
+        assert_eq!(&*timed_out[0].0, &*key1);
+
+        assert!(cache.data.contains_key(&Key(key2)));
+        assert!(!cache.data.contains_key(&Key(key1)));
+    }
+
+    #[test]
+    fn test_update_keeps_alive() {
+        let mut cache = UpdatingCache::with_time_to_idle(Duration::from_millis(10));
+
+        let key = Arc::new(vec![1]);
+        let start = Instant::now();
+        cache.insert(key.clone(), start, "value");
+
+        let update_time = start + Duration::from_millis(5);
+        cache
+            .modify_and_update(&key, update_time, |_| Ok::<(), ()>(()))
+            .unwrap()
+            .unwrap();
+
+        let check_time = start + Duration::from_millis(11);
+        let timed_out: Vec<_> = cache.time_out(check_time).collect();
+        assert!(timed_out.is_empty());
+        assert!(cache.data.contains_key(&Key(key)));
+    }
+
+    #[test]
+    fn test_linked_list_ordering() {
+        let mut cache = UpdatingCache::with_time_to_idle(Duration::from_secs(60));
+
+        let key1 = Arc::new(vec![1]);
+        let key2 = Arc::new(vec![2]);
+        let key3 = Arc::new(vec![3]);
+
+        let now = Instant::now();
+        cache.insert(key1.clone(), now, 1);
+        cache.insert(key2.clone(), now + Duration::from_millis(1), 2);
+        cache.insert(key3.clone(), now + Duration::from_millis(2), 3);
+
+        let mut popped = Vec::new();
+        while let Some(key) = cache.pop_front() {
+            popped.push(key.0);
+        }
+
+        assert_eq!(popped, vec![key1, key2, key3]);
+    }
+
+    #[test]
+    fn test_remove_node() {
+        let mut cache = UpdatingCache::with_time_to_idle(Duration::from_secs(60));
+
+        let key1 = Arc::new(vec![1]);
+        let key2 = Arc::new(vec![2]);
+        let key3 = Arc::new(vec![3]);
+
+        let now = Instant::now();
+        cache.insert(key1.clone(), now, 1);
+        cache.insert(key2.clone(), now, 2);
+        cache.insert(key3.clone(), now, 3);
+
+        let node_to_remove = cache.data.get(&Key(key2.clone())).unwrap().node;
+        cache.remove_node(node_to_remove);
+
+        let mut popped = Vec::new();
+        while let Some(key) = cache.pop_front() {
+            popped.push(key.0);
+        }
+
+        assert_eq!(popped, vec![key1, key3]);
+    }
+
+    #[test]
+    fn reorder_with_update() {
+        let mut cache = UpdatingCache::<i32>::with_time_to_idle(Duration::from_secs(10));
+        let key1 = Arc::new(vec![1]);
+        let key2 = Arc::new(vec![2]);
+        let now = Instant::now();
+
+        cache.insert(key1.clone(), now, 100);
+        cache.insert(key2.clone(), now, 200);
+
+        cache
+            .modify_and_update(&[1], now + Duration::from_secs(1), |v| {
+                *v += 1;
+                Ok::<(), ()>(())
+            })
+            .unwrap()
+            .unwrap();
+
+        let _ = cache.modify_and_update(&[1], now + Duration::from_secs(2), |v| {
+            *v += 1;
+            Ok::<(), ()>(())
+        });
+    }
+
+    #[test]
+    fn test_ttl_eviction() {
+        let ttl = Duration::from_millis(100);
+        let mut cache = UpdatingCache::with_time_to_idle(ttl);
+        let now = Instant::now();
+        let key1 = Arc::new(vec![1]);
+        let key2 = Arc::new(vec![2]);
+        cache.insert(key1.clone(), now, 10);
+        cache.insert(key2.clone(), now, 20);
+
+        // Update key2 so that its updated time is later.
+        cache
+            .modify_and_update(&[2], now + Duration::from_millis(50), |v| {
+                *v += 1;
+                Ok::<(), ()>(())
+            })
+            .unwrap()
+            .unwrap();
+
+        // Simulate time after TTL for both keys.
+        let now2 = now + Duration::from_millis(150);
+        let evicted: Vec<_> = cache.time_out(now2).collect();
+        // With TTLIter’s condition (if now - updated < ttl then skip), both keys should be evicted.
+        assert_eq!(evicted.len(), 2);
+        assert_eq!(evicted[0].0.as_ref(), &[1]);
+        assert_eq!(evicted[1].0.as_ref(), &[2]);
+    }
+
+    #[test]
+    fn test_remove_key() {
+        let ttl = Duration::from_millis(100);
+        let mut cache = UpdatingCache::with_time_to_idle(ttl);
+        let now = Instant::now();
+        let key = Arc::new(vec![1]);
+        cache.insert(key.clone(), now, 42);
+        let value = cache.remove(&[1]).unwrap();
+        assert_eq!(value, 42);
+        assert!(!cache.contains_key(&[1]));
+        let evicted: Vec<_> = cache.time_out(now + Duration::from_millis(200)).collect();
+        assert!(evicted.is_empty());
+    }
+
+    #[test]
+    fn test_update_order() {
+        let ttl = Duration::from_secs(1);
+        let mut cache = UpdatingCache::with_time_to_idle(ttl);
+        let base = Instant::now();
+        let key_a = Arc::new(vec![b'A']);
+        let key_b = Arc::new(vec![b'B']);
+        let key_c = Arc::new(vec![b'C']);
+        cache.insert(key_a.clone(), base, 1);
+        cache.insert(key_b.clone(), base, 2);
+        cache.insert(key_c.clone(), base, 3);
+
+        // Update key B to give it a fresh timestamp.
+        let t_update = base + Duration::from_millis(500);
+        cache
+            .modify_and_update(b"B", t_update, |v| {
+                *v += 10;
+                Ok::<(), ()>(())
+            })
+            .unwrap()
+            .unwrap();
+
+        // Now all entries should be expired.
+        let t_eviction = base + Duration::from_secs(2);
+        let evicted: Vec<_> = cache.time_out(t_eviction).collect();
+        // Expected eviction order: the original head (A), then C, then the updated key (B) at the tail.
+        assert_eq!(evicted.len(), 3);
+        assert_eq!(evicted[0].0.as_ref(), b"A");
+        assert_eq!(evicted[1].0.as_ref(), b"C");
+        assert_eq!(evicted[2].0.as_ref(), b"B");
+    }
+
+    #[test]
+    fn test_get_mut_key_value() {
+        let ttl = Duration::from_secs(1);
+        let mut cache = UpdatingCache::with_time_to_idle(ttl);
+        let base = Instant::now();
+        let key = Arc::new(vec![1, 2, 3]);
+        cache.insert(key.clone(), base, 42);
+        if let Some((k, v)) = cache.get_mut_key_value(&[1, 2, 3]) {
+            *v += 1;
+            assert_eq!(*v, 43);
+            assert_eq!(k.0.as_ref(), &[1, 2, 3]);
+        } else {
+            panic!("Key not found");
+        }
+    }
+
+    #[test]
+    fn test_modify_error() {
+        let ttl = Duration::from_secs(1);
+        let mut cache = UpdatingCache::with_time_to_idle(ttl);
+        let base = Instant::now();
+        let key = Arc::new(vec![1]);
+        cache.insert(key.clone(), base, 42);
+        let res = cache.modify(&[1], |_v| Err("error"));
+        assert!(res.unwrap().is_err());
+    }
+
+    #[test]
+    fn test_drop_cleanup() {
+        let ttl = Duration::from_secs(1);
+        {
+            let mut cache = UpdatingCache::with_time_to_idle(ttl);
+            let base = Instant::now();
+            for i in 0..10 {
+                cache.insert(Arc::new(vec![i as u8]), base, i);
+            }
+        }
+    }
 }
