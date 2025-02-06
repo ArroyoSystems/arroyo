@@ -120,7 +120,6 @@ impl AmqpSourceFunc {
 
                             // Extract timestamp (if exists)
                             let timestamp: u64 = delivery.properties.timestamp()
-                                .map(|t| t.as_u8() as u64)
                                 .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() as u64); // Default to current time
 
                             // Extract metadata fields (equivalent to Kafka's metadata fields)
@@ -152,7 +151,7 @@ impl AmqpSourceFunc {
                 }
                 _ = flush_ticker.tick() => {
                     if collector.should_flush() {
-                        collector.flush_buffer().await?;
+                        collector.flush_buffer().await;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
@@ -237,10 +236,8 @@ impl SourceOperator for AmqpSourceFunc {
         match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
-                ctx.report_error(e.clone(), "failed to configure the AMQP source")
+                ctx.report_error(e, "failed to configure the AMQP source")
                     .await;
-
-                panic!("{}: {}", e.name, e.details);
             }
         }
     }
