@@ -218,7 +218,8 @@ impl SourceOperator for AmqpSourceFunc {
         match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
-                ctx.report_error(e.clone(), "failed to configure the AMQP source").await;
+                ctx.report_error(e.clone(), "failed to configure the AMQP source")
+                    .await;
 
                 panic!("{}: {}", e.name, e.details);
             }
