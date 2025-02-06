@@ -1,6 +1,8 @@
+use arrow::array::RecordBatch;
 use arroyo_formats::de::FieldValueType;
+use arroyo_operator::operator::ArrowOperator;
 use arroyo_operator::{
-    context::{SourceCollector, SourceContext},
+    context::{Collector, OperatorContext, SourceCollector, SourceContext},
     operator::SourceOperator,
     SourceFinishType,
 };
