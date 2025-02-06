@@ -1,22 +1,26 @@
 use arroyo_formats::de::FieldValueType;
-use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
-use arroyo_operator::{context::SourceCollector, operator::SourceOperator, SourceFinishType};
+use arroyo_operator::{
+    context::{SourceCollector, SourceContext},
+    operator::SourceOperator,
+    SourceFinishType,
+};
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{formats::Format, MetadataField};
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
 use arroyo_types::*;
 use async_trait::async_trait;
+use futures::StreamExt;
 use lapin::{
     options::*, publisher_confirm::Confirmation, types::FieldTable, BasicProperties, Connection,
     ConnectionProperties, Result,
 };
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
+use tracing::{debug, error};
 
 #[derive(Debug)]
 pub struct AmqpSourceFunc {
@@ -27,6 +31,11 @@ pub struct AmqpSourceFunc {
     pub bad_data: Option<BadData>,
     pub metadata_fields: Vec<MetadataField>,
     pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
+}
+
+pub struct AmqpState {
+    pub delivery_tag: u64,
+    pub offset: u64,
 }
 
 impl AmqpSourceFunc {
@@ -156,8 +165,9 @@ impl AmqpSourceFunc {
                             let s = ctx.table_manager.get_global_keyed_state("k").await
                                 .map_err(|err| UserError::new("Failed to get global key value", err.to_string()))?;
 
+                            // todo need to fix this with offsets
                             for (&delivery_tag, &offset) in &offsets {
-                                s.insert(delivery_tag, RabbitMQState {
+                                s.insert(delivery_tag,  AmqpState{
                                     delivery_tag,
                                     offset: offset + 1, // Simulating Kafka's offset increment
                                 }).await;
