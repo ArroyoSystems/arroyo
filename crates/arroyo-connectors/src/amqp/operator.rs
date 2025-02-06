@@ -58,6 +58,7 @@ impl AmqpSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> Result<SourceFinishType> {
+        let mut offsets = HashMap::new();
         let conn = Connection::connect(&self.address, ConnectionProperties::default()).await?;
         let channel = conn.create_channel().await.expect("create_channel");
         let queue_name = format!(
@@ -117,7 +118,7 @@ impl AmqpSourceFunc {
 
                             // Extract timestamp (if exists)
                             let timestamp: u64 = delivery.properties.timestamp()
-                                .map(|t| t.as_i8() as u64)
+                                .map(|t| t.as_u8() as u64)
                                 .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() as u64); // Default to current time
 
                             // Extract metadata fields (equivalent to Kafka's metadata fields)
@@ -127,10 +128,10 @@ impl AmqpSourceFunc {
                             connector_metadata.insert("timestamp", FieldValueType::Int64(Some(timestamp)));
 
                             // Deserialize and process the message
-                            collector.deserialize_slice(&data, from_millis(timestamp), Some(&connector_metadata)).await?;
+                            collector.deserialize_slice(&data, from_millis(timestamp), Some(&connector_metadata)).await;
 
                             if collector.should_flush() {
-                                collector.flush_buffer().await?;
+                                collector.flush_buffer().await;
                             }
 
                             // Store last processed offset (RabbitMQ uses delivery_tag instead of offset)
@@ -198,9 +199,26 @@ impl AmqpSourceFunc {
 }
 
 #[async_trait]
+impl ArrowOperator for AmqpSourceFunc{
+    fn name(&self) -> String {
+        "AmqpSource".to_string()
+    }
+
+    async fn process_batch(
+        &mut self,
+        _: RecordBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) {
+        // no-op
+    }
+}
+
+
+#[async_trait]
 impl SourceOperator for AmqpSourceFunc {
     fn name(&self) -> String {
-        format!("amqp-lapin-{}", self.stream)
+        format!("amqp-lapin-{}", self.topic)
     }
 
     async fn run(
