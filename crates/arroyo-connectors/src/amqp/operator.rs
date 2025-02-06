@@ -1,37 +1,62 @@
+use arroyo_formats::de::FieldValueType;
+use arroyo_operator::context::{SourceCollector, SourceContext};
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::{context::SourceCollector, operator::SourceOperator, SourceFinishType};
+use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::grpc::rpc::TableConfig;
+use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{formats::Format, MetadataField};
-use futures_lite::StreamExt;
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
+use arroyo_types::*;
+use async_trait::async_trait;
 use lapin::{
     options::*, publisher_confirm::Confirmation, types::FieldTable, BasicProperties, Connection,
     ConnectionProperties, Result,
 };
+use std::time::Duration;
+use tokio::select;
+use tokio::time::MissedTickBehavior;
 
 #[derive(Debug)]
 pub struct AmqpSourceFunc {
+    pub address: String,
     pub topic: String,
     pub format: Format,
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
     pub metadata_fields: Vec<MetadataField>,
+    pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
 }
 
 impl AmqpSourceFunc {
+    fn new() -> Self {
+        Self {
+            address: todo!(),
+            topic: todo!(),
+            format: todo!(),
+            framing: todo!(),
+            bad_data: todo!(),
+            metadata_fields: todo!(),
+            schema_resolver: todo!(),
+        }
+    }
+    /// Manages the main loop for consuming messages from the AMQP stream
+    /// It first creates a connection and handles any errors that occur during this process.
+    /// It sets up a ticker to periodically flush the message collector's buffer.
+    /// Inside the loop, it uses the select! macro to handle different asynchronous events: receiving a message from the consumer, ticking the flush ticker, or receiving control messages from the context.
+    /// Depending on the event, it processes the message, flushes the buffer if needed, handles errors, or processes control messages such as checkpoints, stopping, committing, or loading compacted data.
+    /// The function ensures that the stream is read and processed continuously until a stop condition is met.
     async fn run_int(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> Result<SourceFinishType, UserError> {
-        /// Manages the main loop for consuming messages from the AMQP stream
-        /// It first creates a connection and handles any errors that occur during this process.
-        /// It sets up a ticker to periodically flush the message collector's buffer.
-        /// Inside the loop, it uses the select! macro to handle different asynchronous events: receiving a message from the consumer, ticking the flush ticker, or receiving control messages from the context.
-        /// Depending on the event, it processes the message, flushes the buffer if needed, handles errors, or processes control messages such as checkpoints, stopping, committing, or loading compacted data.
-        /// The function ensures that the stream is read and processed continuously until a stop condition is met.
-        let conn = Connection::connect(&addr, ConnectionProperties::default()).await?;
+        let conn = Connection::connect(&self.address, ConnectionProperties::default()).await?;
         let channel = conn.create_channel().await.expect("create_channel");
         let queue_name = format!(
-            "{}-arroyo-{}-{}",
-            prefix, ctx.task_info.job_id, ctx.task_info.operator_id
+            "amqp-arroyo-{}-{}",
+            ctx.task_info.job_id, ctx.task_info.operator_id
         );
         let consumer_name = format!(
             "arroyo-{}-{}-consumer",
@@ -45,12 +70,15 @@ impl AmqpSourceFunc {
             )
             .await
             .expect("queue_declare");
-        let mut consumer = channel.basic_consume(
-            &queue_name,
-            &consumer_name,
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        );
+        let mut consumer = channel
+            .basic_consume(
+                &queue_name,
+                &consumer_name,
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| UserError::new("Failed to consume from queue", e.to_string()))?;
 
         // todo might add governor if rate limiting bevcomes necessary https://crates.io/crates/governor
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
@@ -135,7 +163,7 @@ impl AmqpSourceFunc {
                                 }).await;
                             }
 
-                            if self.start_checkpoint(c, &ctx, &collector).await {
+                            if self.start_checkpoint(c, ctx, collector).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },
@@ -152,6 +180,10 @@ impl AmqpSourceFunc {
                             ctx.load_compacted(compacted).await;
                         }
 
+                        Some(ControlMessage::Commit { .. }) => {
+                            unreachable!("sources shouldn't receive commit messages");
+                        },
+
                         Some(ControlMessage::NoOp) | None => {}
                     }
                 }
@@ -161,7 +193,7 @@ impl AmqpSourceFunc {
 }
 
 #[async_trait]
-impl SourceOperator for RabbitmqStreamSourceFunc {
+impl SourceOperator for AmqpSourceFunc {
     fn name(&self) -> String {
         format!("amqp-lapin-{}", self.stream)
     }
@@ -179,8 +211,8 @@ impl SourceOperator for RabbitmqStreamSourceFunc {
         );
 
         match self.run_int(ctx, collector).await {
-            ok(r) => r,
-            err(e) => {
+            Ok(r) => r,
+            Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
 
                 panic!("{}: {}", e.name, e.details);

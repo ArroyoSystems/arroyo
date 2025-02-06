@@ -12,7 +12,7 @@ mod operator;
 use crate::amqp::operator::AmqpSourceFunc;
 pub struct AmqpConnector {}
 
-const ICON: &str = &"placeholdersvg".to_string();
+static ICON: &str = &"placeholdersvg";
 
 impl Connector for AmqpConnector {
     type ProfileT = EmptyConfig;
