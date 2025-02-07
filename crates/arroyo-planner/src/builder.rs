@@ -4,23 +4,26 @@ use std::thread;
 use std::time::Duration;
 
 use arrow::datatypes::IntervalMonthDayNanoType;
-
+use arrow_schema::{Schema, SchemaRef};
 use arroyo_datastream::logical::{LogicalEdge, LogicalGraph, LogicalNode};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 
 use async_trait::async_trait;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{
-    plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, TableReference,
+    internal_err, plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue,
+    TableReference,
 };
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::FunctionRegistry;
 use datafusion::functions::datetime::date_bin;
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
-use datafusion::physical_expr::PhysicalExpr;
+use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
+use datafusion::physical_expr::{LexOrdering, PhysicalExpr};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
-use datafusion_proto::protobuf::{PhysicalExprNode, PhysicalPlanNode};
+use datafusion_proto::protobuf::{proto_error, PhysicalExprNode, PhysicalPlanNode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::runtime::Builder;
 use tokio::sync::oneshot;
@@ -36,12 +39,16 @@ use crate::physical::{
 };
 use crate::schemas::add_timestamp_field_arrow;
 use crate::ArroyoSchemaProvider;
+use datafusion_proto::physical_plan::from_proto::{parse_physical_expr, parse_physical_sort_expr};
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
-use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::{DefaultPhysicalExtensionCodec, PhysicalExtensionCodec};
+use datafusion_proto::protobuf::physical_aggregate_expr_node::AggregateFunction;
+use datafusion_proto::protobuf::physical_expr_node::ExprType;
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode},
 };
+use prost::Message;
 
 pub(crate) struct PlanToGraphVisitor<'a> {
     graph: DiGraph<LogicalNode, LogicalEdge>,
@@ -118,6 +125,16 @@ impl<'a> Planner<'a> {
     ) -> Result<Arc<dyn PhysicalExpr>> {
         self.planner
             .create_physical_expr(expr, input_dfschema, self.session_state)
+    }
+
+    pub(crate) fn serialize_as_physical_expr(
+        &self,
+        expr: &Expr,
+        schema: &DFSchema,
+    ) -> Result<Vec<u8>> {
+        let physical = self.create_physical_expr(&expr, &schema)?;
+        let proto = serialize_physical_expr(&physical, &DefaultPhysicalExtensionCodec {})?;
+        Ok(proto.encode_to_vec())
     }
 
     // This splits aggregates into two parts, the partial aggregation and the final aggregation.

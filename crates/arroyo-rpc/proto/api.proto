@@ -109,13 +109,12 @@ message AsyncUdfOperator {
 
 message UpdatingAggregateOperator {
   string name = 1;
-  ArroyoSchema input_schema = 10;
-  ArroyoSchema partial_schema = 2;
-  bytes partial_aggregation_plan = 5;
-  bytes combine_plan = 6;
-  bytes final_aggregation_plan = 7;
-  uint64 flush_interval_micros = 8;
-  uint64 ttl_micros = 9;
+  ArroyoSchema input_schema = 2;
+  ArroyoSchema final_schema = 3;
+  bytes aggregate_exec = 5;
+  bytes metadata_expr = 6;
+  uint64 flush_interval_micros = 7;
+  uint64 ttl_micros = 8;
 }
 
 message WasmUdfs {

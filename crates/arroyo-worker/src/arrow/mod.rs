@@ -8,22 +8,27 @@ use arroyo_operator::operator::{
 use arroyo_planner::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_planner::physical::DecodingContext;
 use arroyo_rpc::grpc::api;
-use datafusion::common::DataFusionError;
+use datafusion::common::{internal_err, DataFusionError};
 use datafusion::common::Result as DFResult;
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::runtime_env::RuntimeConfig;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::execution::{FunctionRegistry, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::memory::MemoryStream;
 use datafusion::physical_plan::{displayable, ExecutionPlan};
 use datafusion::physical_plan::{DisplayAs, PlanProperties};
-use datafusion_proto::physical_plan::AsExecutionPlan;
-use datafusion_proto::protobuf::PhysicalPlanNode;
+use datafusion_proto::physical_plan::{AsExecutionPlan, DefaultPhysicalExtensionCodec, PhysicalExtensionCodec};
+use datafusion_proto::protobuf::{proto_error, PhysicalExprNode, PhysicalPlanNode};
 use futures::StreamExt;
 use prost::Message as ProstMessage;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::RwLock;
+use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
+use datafusion::physical_expr::{LexOrdering, PhysicalExpr};
+use datafusion_proto::physical_plan::from_proto::{parse_physical_expr, parse_physical_sort_expr};
+use datafusion_proto::protobuf::physical_aggregate_expr_node::AggregateFunction;
+use datafusion_proto::protobuf::physical_expr_node::ExprType;
 
 pub mod async_udf;
 pub mod incremental_aggregator;
@@ -274,5 +279,60 @@ impl StatelessPhysicalExecutor {
             "Should only produce one output batch"
         );
         result
+    }
+}
+
+pub fn decode_aggregate(
+    schema: &SchemaRef,
+    name: &str,
+    expr: &PhysicalExprNode,
+    registry: &dyn FunctionRegistry 
+) -> DFResult<Arc<AggregateFunctionExpr>> {
+    let codec = &DefaultPhysicalExtensionCodec {};
+    let expr_type = expr
+        .expr_type
+        .as_ref()
+        .ok_or_else(|| proto_error("Unexpected empty aggregate physical expression"))?;
+
+    match expr_type {
+        ExprType::AggregateExpr(agg_node) => {
+            let input_phy_expr: Vec<Arc<dyn PhysicalExpr>> = agg_node
+                .expr
+                .iter()
+                .map(|e| parse_physical_expr(e, registry, schema, codec))
+                .collect::<DFResult<Vec<_>>>()?;
+            let ordering_req: LexOrdering = agg_node
+                .ordering_req
+                .iter()
+                .map(|e| {
+                    parse_physical_sort_expr(e, registry, schema, codec)
+                })
+                .collect::<DFResult<LexOrdering>>()?;
+            agg_node
+                .aggregate_function
+                .as_ref()
+                .map(|func| match func {
+                    AggregateFunction::UserDefinedAggrFunction(udaf_name) => {
+                        let agg_udf = match &agg_node.fun_definition {
+                            Some(buf) => codec.try_decode_udaf(udaf_name, buf)?,
+                            None => registry.udaf(udaf_name)?,
+                        };
+
+                        AggregateExprBuilder::new(agg_udf, input_phy_expr)
+                            .schema(Arc::clone(schema))
+                            .alias(name)
+                            .with_ignore_nulls(agg_node.ignore_nulls)
+                            .with_distinct(agg_node.distinct)
+                            .order_by(ordering_req)
+                            .build()
+                            .map(Arc::new)
+                    }
+                })
+                .transpose()?
+                .ok_or_else(|| {
+                    proto_error("Invalid AggregateExpr, missing aggregate_function")
+                })
+        }
+        _ => internal_err!("Invalid aggregate expression for AggregateExec"),
     }
 }

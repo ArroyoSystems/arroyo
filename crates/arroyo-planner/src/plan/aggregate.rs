@@ -76,7 +76,7 @@ impl AggregateRewriter<'_> {
 
         let timestamp_field: DFField = timestamp_field.into();
         let column = timestamp_field.qualified_column();
-        aggr_expr.push(max(col(column.clone())));
+        aggr_expr.push(max(col(column.clone())).alias("_timestamp"));
 
         let mut output_schema_fields = fields_with_qualifiers(&schema);
         output_schema_fields.push(timestamp_field.clone());

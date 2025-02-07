@@ -74,7 +74,7 @@ impl UpdatingAggregatingFunc {
             concat_batches(&self.state_partial_schema.schema, &partial_batches)?;
         let prior_partials = ctx
             .table_manager
-            .get_last_key_value_table("p", ctx.last_present_watermark())
+            .get_uncached_kv_table("p", ctx.last_present_watermark())
             .await?;
 
         let mut final_input_batches = vec![];
@@ -123,7 +123,7 @@ impl UpdatingAggregatingFunc {
 
         let final_output_table = ctx
             .table_manager
-            .get_last_key_value_table("f", ctx.last_present_watermark())
+            .get_uncached_kv_table("f", ctx.last_present_watermark())
             .await?;
 
         let mut batches_to_write = vec![];
@@ -311,7 +311,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         let last_watermark = ctx.last_present_watermark();
         let partial_table = ctx
             .table_manager
-            .get_last_key_value_table("p", last_watermark)
+            .get_uncached_kv_table("p", last_watermark)
             .await
             .expect("should have partial table");
         if partial_table.would_expire(last_watermark) {
@@ -319,7 +319,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
         }
         let partial_table = ctx
             .table_manager
-            .get_last_key_value_table("p", last_watermark)
+            .get_uncached_kv_table("p", last_watermark)
             .await
             .expect("should have partial table");
         partial_table
@@ -327,7 +327,7 @@ impl ArrowOperator for UpdatingAggregatingFunc {
             .expect("should expire partial table");
         let final_table = ctx
             .table_manager
-            .get_last_key_value_table("f", last_watermark)
+            .get_uncached_kv_table("f", last_watermark)
             .await
             .expect("should have final table");
         final_table
@@ -361,11 +361,11 @@ impl ArrowOperator for UpdatingAggregatingFunc {
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         // fetch the tables so they are ready to be queried.
         ctx.table_manager
-            .get_last_key_value_table("f", ctx.last_present_watermark())
+            .get_uncached_kv_table("f", ctx.last_present_watermark())
             .await
             .unwrap();
         ctx.table_manager
-            .get_last_key_value_table("p", ctx.last_present_watermark())
+            .get_uncached_kv_table("p", ctx.last_present_watermark())
             .await
             .unwrap();
     }
