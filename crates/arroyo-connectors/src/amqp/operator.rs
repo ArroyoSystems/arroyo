@@ -7,8 +7,11 @@ use arroyo_operator::{
     SourceFinishType,
 };
 use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
+use arroyo_state::global_table_config;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::*;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -60,33 +63,7 @@ impl AmqpSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> Result<SourceFinishType> {
-        let mut offsets = HashMap::new();
-        let conn = Connection::connect(&self.address, ConnectionProperties::default()).await?;
-        let channel = conn.create_channel().await.expect("create_channel");
-        let queue_name = format!(
-            "amqp-arroyo-{}-{}",
-            ctx.task_info.job_id, ctx.task_info.operator_id
-        );
-        let consumer_name = format!(
-            "arroyo-{}-{}-consumer",
-            ctx.task_info.job_id, ctx.task_info.operator_id
-        );
-        let queue = channel
-            .queue_declare(
-                &queue_name,
-                QueueDeclareOptions::default(),
-                FieldTable::default(),
-            )
-            .await
-            .expect("queue_declare");
-        let mut consumer = channel
-            .basic_consume(
-                &queue_name,
-                &consumer_name,
-                BasicConsumeOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
+        let consumer = self.get_consumer(ctx).await?;
         // .map_err(|e| UserError::new("Failed to consume from queue", e.to_string()))?;
 
         // todo might add governor if rate limiting bevcomes necessary https://crates.io/crates/governor
@@ -110,6 +87,12 @@ impl AmqpSourceFunc {
             );
         }
 
+        let state: &mut GlobalKeyedView<String, (String, AmqpState)> = ctx
+            .table_manager
+            .get_global_keyed_state("q")
+            .await
+            .expect("should have table");
+
         loop {
             select! {
                 delivery_result = consumer.next() => {
@@ -126,7 +109,7 @@ impl AmqpSourceFunc {
                             let mut connector_metadata = HashMap::new();
                             connector_metadata.insert("exchange", FieldValueType::String(delivery.exchange.as_str().into()));
                             connector_metadata.insert("routing_key", FieldValueType::String(delivery.routing_key.as_str().into()));
-                            connector_metadata.insert("timestamp", FieldValueType::Int64(Some(timestamp)));
+                            connector_metadata.insert("timestamp", FieldValueType::Int64(Some(timestamp.try_into().unwrap())));
 
                             // Deserialize and process the message
                             collector.deserialize_slice(&data, from_millis(timestamp), Some(&connector_metadata)).await;
@@ -159,7 +142,7 @@ impl AmqpSourceFunc {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("Starting checkpoint {}", ctx.task_info.task_index);
 
-                            let s = ctx.table_manager.get_global_keyed_state("k").await
+                            let s = ctx.table_manager.get_global_keyed_state("q").await
                                 .map_err(|err| UserError::new("Failed to get global key value", err.to_string()))?;
 
                             // todo need to fix this with offsets
@@ -197,6 +180,37 @@ impl AmqpSourceFunc {
             }
         }
     }
+
+    async fn get_consumer(&mut self, ctx: &mut SourceContext) -> Result<lapin::Consumer> {
+        let conn = Connection::connect(&self.address, ConnectionProperties::default()).await?;
+        let channel = conn.create_channel().await.expect("create_channel");
+        let queue_name = format!(
+            "amqp-arroyo-{}-{}",
+            ctx.task_info.job_id, ctx.task_info.operator_id
+        );
+        let consumer_name = format!(
+            "arroyo-{}-{}-consumer",
+            ctx.task_info.job_id, ctx.task_info.operator_id
+        );
+        let queue = channel
+            .queue_declare(
+                &queue_name,
+                QueueDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .expect("queue_declare");
+        let consumer = channel
+            .basic_consume(
+                &queue_name,
+                &consumer_name,
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        Ok(consumer)
+    }
 }
 
 #[async_trait]
@@ -221,6 +235,10 @@ impl SourceOperator for AmqpSourceFunc {
         format!("amqp-lapin-{}", self.topic)
     }
 
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        global_table_config("q", "AMQP table")
+    }
+
     async fn run(
         &mut self,
         ctx: &mut arroyo_operator::context::SourceContext,
@@ -237,7 +255,7 @@ impl SourceOperator for AmqpSourceFunc {
             Ok(r) => r,
             Err(e) => {
                 ctx.report_error(e, "failed to configure the AMQP source")
-                    .await;
+                    .await
             }
         }
     }
