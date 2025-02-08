@@ -39,7 +39,6 @@ pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
 pub(crate) mod sync;
 pub mod tumbling_aggregating_window;
-pub mod updating_aggregator;
 mod updating_cache;
 pub mod watermark_generator;
 pub mod window_fn;

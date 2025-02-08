@@ -28,7 +28,7 @@ use arroyo_types::{
 };
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::{
@@ -243,6 +243,13 @@ impl ExpiringTimeKeyTable {
             view.insert_batch_internal(batch, true).await?;
         }
         Ok(view)
+    }
+
+    pub(crate) async fn get_uncached_key_value_view(
+        &self,
+        state_tx: Sender<StateMessage>,
+    ) -> Result<UncachedKeyValueView> {
+        UncachedKeyValueView::new(self.clone(), state_tx)
     }
 }
 
@@ -1259,3 +1266,120 @@ impl LastKeyValueView {
         Ok(())
     }
 }
+
+
+pub struct UncachedKeyValueView {
+    parent: ExpiringTimeKeyTable,
+    key_converter: Converter,
+    value_converter: Converter,
+    value_indices: Vec<usize>,
+    key_indices: Vec<usize>,
+    state_tx: Sender<StateMessage>,
+}
+
+impl UncachedKeyValueView {
+    fn new(parent: ExpiringTimeKeyTable, state_tx: Sender<StateMessage>) -> Result<Self> {
+        let schema = parent.schema.memory_schema();
+        let key_converter = schema.converter(false)?;
+        let Some(generation_index) = parent.schema.generation_index() else {
+            bail!("should have generation index")
+        };
+        let value_converter = schema.value_converter(false, generation_index)?;
+        let value_indices = schema
+            .value_indices(false)
+            .into_iter()
+            .filter(|index| *index != generation_index)
+            .collect();
+
+        Ok(Self {
+            key_converter,
+            value_converter,
+            value_indices,
+            parent,
+            state_tx,
+            key_indices: schema.key_indices.as_ref().unwrap().clone(),
+        })
+    }
+
+    // Simply forward updates to state storage
+    pub async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
+        self.state_tx
+            .send(StateMessage::TableData {
+                table: self.parent.table_name.to_string(),
+                data: TableData::RecordBatch(batch),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub fn convert_keys(&self, rows: Vec<Row>) -> Result<Vec<ArrayRef>> {
+        self.key_converter.convert_rows(rows)
+    }
+
+    pub fn get_all(&mut self) -> impl Stream<Item = Result<RecordBatch>> {
+        let files: Vec<(String, bool)> = self.parent
+            .checkpoint_files
+            .iter()
+            .filter_map(|file| {
+                if file.max_routing_key >= *self.parent.task_info.key_range.start()
+                    && *self.parent.task_info.key_range.end() >= file.min_routing_key
+                {
+                    let needs_hash_filtering = *self.parent.task_info.key_range.end() < file.max_routing_key
+                        || *self.parent.task_info.key_range.start() > file.min_routing_key;
+                    Some((file.file.clone(), needs_hash_filtering))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let parent = self.parent.clone();
+        let schema = self.parent.schema.clone();
+
+        futures::stream::iter(files)
+            .map(move |(file, needs_filtering)| {
+                let parent = parent.clone();
+                let schema = schema.clone();
+
+                async move {
+                    let object_meta = parent.storage_provider.head(file.as_str()).await?;
+                    let object_reader = ParquetObjectReader::new(
+                        parent.storage_provider.get_backing_store(),
+                        object_meta
+                    );
+                    let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
+                    let stream = reader_builder.build()?;
+
+                    Ok(stream.map_err(anyhow::Error::from).try_filter_map(
+                        move |batch| {
+                            let schema = schema.clone();
+                            let needs_filtering = needs_filtering;
+                            let task_info = parent.task_info.clone();
+                            async move {
+                                let mut batch = batch;
+
+                                if needs_filtering {
+                                    match schema.filter_by_hash_index(batch, &task_info.key_range)? {
+                                        None => return Ok(None),
+                                        Some(filtered_batch) => batch = filtered_batch,
+                                    };
+                                }
+
+                                if batch.num_rows() == 0 {
+                                    return Ok(None);
+                                }
+
+                                // Project to remove metadata fields
+                                let projection: Vec<_> = (0..(batch.schema().fields().len() - 2)).collect();
+                                batch = batch.project(&projection)?;
+
+                                Ok(Some(batch))
+                            }
+                        },
+                    ))
+                }
+            })
+            .buffer_unordered(1)
+            .try_flatten()
+    }
+}    
