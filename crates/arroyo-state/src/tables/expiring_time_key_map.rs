@@ -1303,10 +1303,20 @@ impl UncachedKeyValueView {
 
     // Simply forward updates to state storage
     pub async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
+        let mut columns = batch.columns().to_vec();
+        let num_rows = batch.num_rows();
+        let generation_array = Arc::new(UInt64Array::from_iter(std::iter::repeat(0).take(num_rows)));
+        columns.push(generation_array);
+        
+        let batch_with_generation = RecordBatch::try_new(
+            self.parent.schema.memory_schema().schema.clone(),
+            columns,
+        )?;
+    
         self.state_tx
             .send(StateMessage::TableData {
                 table: self.parent.table_name.to_string(),
-                data: TableData::RecordBatch(batch),
+                data: TableData::RecordBatch(batch_with_generation),
             })
             .await?;
         Ok(())

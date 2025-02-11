@@ -18,7 +18,6 @@ CREATE TABLE output (
     id TEXT PRIMARY KEY,
     c INT,
     d INT,
-    m INT,
     q INT
 ) WITH (
     connector = 'single_file',
@@ -28,6 +27,6 @@ CREATE TABLE output (
 );
 
 INSERT INTO output
-SELECT concat('p_', product_name), count(*), count(distinct customer_name), median(quantity), sum(quantity + 5) + 10
+SELECT concat('p_', product_name), count(*), count(distinct customer_name), sum(quantity + 5) + 10
 FROM debezium_source
 group by concat('p_', product_name);

@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use arrow::row::{RowConverter, SortField};
 use arrow_array::cast::AsArray;
 use arrow_array::{Array, ArrayRef, BooleanArray, GenericListArray, ListArray, RecordBatch, StructArray, UInt64Array};
-use arrow_schema::{DataType, Field, Schema, SchemaBuilder};
+use arrow_schema::{DataType, Field, Schema, SchemaBuilder, TimeUnit};
 use arroyo_operator::context::Collector;
 use arroyo_operator::{
     context::OperatorContext,
@@ -40,6 +40,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 use arrow_array::builder::{ArrayBuilder, UInt64Builder};
+use datafusion::common::utils::array_into_list_array;
+use datafusion::logical_expr::function::StateFieldsArgs;
 use tracing::debug;
 use tracing::log::warn;
 
@@ -77,8 +79,14 @@ impl IncrementalState {
                     .as_any()
                     .downcast_ref::<UInt64Array>().ok_or_else(|| exec_datafusion_err!("count array has wrong type"))?;
 
+                println!("Restoring state\n__________________________\n");
                 for (k, count) in row_converter.convert_columns(&values)?.iter().zip(counts.iter()) {
-                    data.insert(k.as_ref().to_vec(), count.ok_or_else(|| exec_datafusion_err!("null count"))?);
+                    let count = count.ok_or_else(|| exec_datafusion_err!("null count"))?;
+                    println!("{:?}\t{}", k.as_ref(), count);
+                    if count > 0 {
+                        data.insert(k.as_ref().to_vec(), count)
+                            .ok_or_else(|| exec_datafusion_err!("found duplicate key '{:?}' while restoring batch state", k.as_ref()))?;                        
+                    }
                 }
 
                 Ok(())
@@ -112,13 +120,15 @@ impl IncrementalState {
                         count_array.append_value(*c);
                         parser.parse(k)
                     }))?;
+                
+                println!("Checkpointing state: {:?}", data);
 
                 cols.push(Arc::new(count_array.finish()));
 
                 Ok(cols.into_iter()
-                    .map(|col| ScalarValue::List(ListArray::n)))
+                    .map(|col|
+                        ScalarValue::List(Arc::new(array_into_list_array(col, true))))
                     .collect())
-
             }
         }
     }
@@ -188,7 +198,9 @@ impl IncrementalState {
                     Ok(ScalarValue::Null)
                 } else {
                     let parser = row_converter.parser();
-                    let input = row_converter.convert_rows(data.keys().map(|v| parser.parse(v)))?;
+                    let input = row_converter.convert_rows(data.iter()
+                        .filter(|(_, c)| **c > 0)
+                        .map(|(v, _)| parser.parse(v)))?;
                     let mut acc = expr.create_accumulator()?;
                     acc.update_batch(&input)?;
                     acc.evaluate_mut()
@@ -204,6 +216,16 @@ enum AccumulatorType {
     Batch,
 }
 
+impl AccumulatorType {
+    fn state_fields(&self, agg: &AggregateFunctionExpr) -> DFResult<Vec<Field>> {
+        Ok(match self {
+            AccumulatorType::Sliding => agg.sliding_state_fields()?,
+            // state for batch tables is handled separately
+            AccumulatorType::Batch => vec![],
+        })
+    }
+}
+
 struct Aggregator {
     func: Arc<AggregateFunctionExpr>,
     accumulator_type: AccumulatorType,
@@ -217,7 +239,8 @@ pub struct IncrementalAggregatingFunc {
     aggregates: Vec<Aggregator>,
     accumulators: UpdatingCache<Vec<IncrementalState>>,
     updated_keys: HashMap<Key, Option<Vec<ScalarValue>>>,
-    state_schema: Arc<ArroyoSchema>,
+    sliding_state_schema: Arc<ArroyoSchema>,
+    batch_state_schema: Arc<ArroyoSchema>,
     schema_without_metadata: Arc<Schema>,
     ttl: Duration,
     key_converter: RowConverter,
@@ -286,12 +309,12 @@ impl IncrementalAggregatingFunc {
 
         // initialize the accumulator cache
         let mut stream = Box::pin(table.get_all());
-        let key_converter = RowConverter::new(self.state_schema.sort_fields(false))?;
+        let key_converter = RowConverter::new(self.sliding_state_schema.sort_fields(false))?;
 
         while let Some(batch) = stream.next().await {
             let batch = batch?;
             let key_cols: Vec<_> = self
-                .state_schema
+                .sliding_state_schema
                 .sort_columns(&batch, false)
                 .into_iter()
                 .map(|c| c.values)
@@ -310,7 +333,7 @@ impl IncrementalAggregatingFunc {
 
             let now = Instant::now();
 
-            let key_rows = key_converter.convert_columns(&key_cols).unwrap();
+            let key_rows = key_converter.convert_columns(&key_cols)?;
             for (i, row) in key_rows.iter().enumerate() {
                 let mut accumulators = self.make_accumulators();
                 for ((_, state_cols), acc) in self
@@ -335,7 +358,11 @@ impl IncrementalAggregatingFunc {
     }
 
     async fn checkpoint(&mut self, ctx: &mut OperatorContext) -> Result<()> {
-        let mut states = vec![vec![]; self.state_schema.schema.fields.len()];
+        if self.updated_keys.is_empty() {
+            return Ok(());
+        }
+
+        let mut states = vec![vec![]; self.sliding_state_schema.schema.fields.len()];
         let parser = self.key_converter.parser();
 
         let mut cols = self.key_converter.convert_rows(self.updated_keys.keys().map(|k| {
@@ -351,10 +378,10 @@ impl IncrementalAggregatingFunc {
             parser.parse(k.0.as_ref())
         }))?;
 
-        cols.extend(states.into_iter().skip(cols.len()));
+        cols.extend(states.into_iter().skip(cols.len()).map(|c|
+            ScalarValue::iter_to_array(c.into_iter()).unwrap()));
 
-        let batch = RecordBatch::try_new(self.state_schema.schema.clone(),
-                                         cols)?;
+        let batch = RecordBatch::try_new(self.sliding_state_schema.schema.clone(), cols)?;
 
         let table = ctx.table_manager.get_uncached_key_value_view("a").await?;
         table.insert_batch(batch).await?;
@@ -649,7 +676,7 @@ impl ArrowOperator for IncrementalAggregatingFunc {
                 ("ttl", AsDisplayable::Debug(&self.ttl)),
                 (
                     "state_schema",
-                    AsDisplayable::Schema(&self.state_schema.schema),
+                    AsDisplayable::Schema(&self.sliding_state_schema.schema),
                 ),
                 ("aggregates", AsDisplayable::List(aggregates)),
             ],
@@ -682,22 +709,35 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) {
-        if let Some(batch) = self.flush(ctx).unwrap() {
+        if let Some(batch) = self.flush(ctx).await.unwrap() {
             collector.collect(batch).await;
         }
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![(
+        vec![
+            (
             "a".to_string(),
             timestamp_table_config(
                 "a",
                 "accumulator_state",
                 self.ttl,
                 true,
-                self.state_schema.as_ref().clone(),
+                self.sliding_state_schema.as_ref().clone(),
             ),
-        )]
+        ),
+            (
+                "b".to_string(),
+                timestamp_table_config(
+                    "b",
+                    "batch_state",
+                    self.ttl,
+                    true,
+                    self.batch_state_schema.as_ref().clone(),
+                ),
+            ),
+            
+        ]
         .into_iter()
         .collect()
     }
@@ -713,7 +753,7 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) {
-        if let Some(batch) = self.flush(ctx).unwrap() {
+        if let Some(batch) = self.flush(ctx).await.unwrap() {
             collector.collect(batch).await;
         }
     }
@@ -725,14 +765,14 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         collector: &mut dyn Collector,
     ) {
         if let Some(SignalMessage::EndOfData) = final_message {
-            if let Some(batch) = self.flush(ctx).unwrap() {
+            if let Some(batch) = self.flush(ctx).await.unwrap() {
                 collector.collect(batch).await;
             }
         }
     }
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
-        self.initialize(ctx).unwrap();
+        self.initialize(ctx).await.unwrap();
     }
 }
 
@@ -781,7 +821,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
 
         // the state schema is made up of the key fields + the state fields for each aggregator
         // (if it supports retraction) otherwise, the input data + a count
-        let mut state_fields = input_schema
+        let mut sliding_state_fields = input_schema
             .key_indices
             .as_ref()
             .map(|v| {
@@ -791,7 +831,9 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             })
             .unwrap_or_default();
 
-        let key_fields = (0..state_fields.len()).collect_vec();
+        let mut batch_state_fields = sliding_state_fields.clone();
+        
+        let key_fields = (0..sliding_state_fields.len()).collect_vec();
 
         let aggregates: Vec<_> = aggregate_exec
             .aggr_expr
@@ -828,51 +870,17 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                         .collect::<DFResult<_>>()?,
                 )?);
 
-                let fields = match t {
-                    AccumulatorType::Sliding => agg.state_fields()?,
-                    AccumulatorType::Batch => {
-                        let mut fields = vec![];
-                        for (i, expr) in agg.expressions().iter().enumerate() {
-                            fields.push(Field::new(
-                                format!("{}_{}", agg.name(), i),
-                                DataType::List(
-                                    Field::new(
-                                        "item",
-                                        expr.data_type(&input_schema.schema)?,
-                                        expr.nullable(&input_schema.schema)?,
-                                    )
-                                    .into(),
-                                ),
-                                false,
-                            ));
-                        }
-
-                        fields.push(Field::new(
-                            format!("{}_count", agg.name()),
-                            DataType::List(Field::new("item", DataType::UInt64, false).into()),
-                            false,
-                        ));
-
-                        fields
-                    }
-                };
+                let fields = t.state_fields(&agg)?;
 
                 let field_names = fields.iter().map(|f| f.name().to_string()).collect_vec();
-                state_fields.extend(fields.into_iter());
+                sliding_state_fields.extend(fields.into_iter());
 
                 Ok::<_, anyhow::Error>((agg, t, row_converter, field_names))
             })
             .flatten_ok()
             .collect::<Result<_>>()?;
 
-        // ensure the last field (timestamp) has the expected name
-        let timestamp_field = state_fields.pop().unwrap();
-        state_fields.push(timestamp_field.with_name(TIMESTAMP_FIELD));
-
-        let state_schema = Arc::new(ArroyoSchema::from_schema_keys(
-            Schema::new(state_fields).into(),
-            key_fields,
-        )?);
+        let state_schema = Schema::new(sliding_state_fields);
 
         let aggregates = aggregates
             .into_iter()
@@ -882,11 +890,37 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 row_converter,
                 state_cols: field_names
                     .iter()
-                    .map(|f| state_schema.schema.index_of(f).unwrap())
+                    .map(|f| state_schema.index_of(f).unwrap())
                     .collect(),
             })
             .collect();
 
+
+        // ensure the last field (timestamp) has the expected name before creating the arroyo schema
+        let mut state_fields = state_schema.fields().to_vec();
+        let timestamp_field = state_fields.pop().unwrap();
+        state_fields.push(Arc::new((*timestamp_field).clone().with_name(TIMESTAMP_FIELD)));
+
+        let sliding_state_schema = Arc::new(ArroyoSchema::from_schema_keys(
+            Arc::new(Schema::new(state_fields)),
+            key_fields.clone(),
+        )?);
+
+        batch_state_fields.push(Field::new("accumulator", DataType::UInt32, false));
+        batch_state_fields.push(Field::new("args_row", DataType::Binary, false));
+        batch_state_fields.push(Field::new("count", DataType::UInt64, false));
+        batch_state_fields.push(Field::new(TIMESTAMP_FIELD, DataType::Timestamp(TimeUnit::Nanosecond, None), false));
+        
+        let mut key_fields = key_fields;
+        // include accumulator and args_row in the keys
+        key_fields.push(key_fields.len());
+        key_fields.push(key_fields.len());
+        
+        let batch_state_schema = Arc::new(ArroyoSchema::from_schema_keys(
+            Arc::new(Schema::new(batch_state_fields)),
+            key_fields
+        )?);
+        
         Ok(ConstructedOperator::from_operator(Box::new(
             IncrementalAggregatingFunc {
                 flush_interval: Duration::from_micros(config.flush_interval_micros),
@@ -897,7 +931,8 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 schema_without_metadata: Arc::new(schema_without_metadata.finish()),
                 updated_keys: Default::default(),
                 key_converter: RowConverter::new(input_schema.sort_fields(false))?,
-                state_schema,
+                sliding_state_schema,
+                batch_state_schema,
             },
         )))
     }
