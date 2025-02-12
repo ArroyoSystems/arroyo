@@ -5,7 +5,7 @@ create table impulse with (
 );
 
 create temporary table lookup (
-    key TEXT PRIMARY KEY GENERATED ALWAYS AS (metadata('key')) STORED, 
+    key TEXT GENERATED ALWAYS AS (metadata('key')) STORED PRIMARY KEY,
     value TEXT,
     len INT
 ) with (

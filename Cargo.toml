@@ -68,6 +68,7 @@ reqwest = "0.12"
 rusqlite = "0.31"
 apache-avro = "0.17.0"
 k8s-openapi = "0.24.0"
+sqlparser = "0.51.0"
 
 [profile.release]
 debug = 1
@@ -89,8 +90,8 @@ datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafu
 datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
 datafusion-functions = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
 datafusion-functions-window = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '43.0.0/arroyo'}
-
 datafusion-functions-json = {git = 'https://github.com/ArroyoSystems/datafusion-functions-json', branch = 'datafusion_43'}
+sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0.51.0/arroyo" }
 
 object_store = { git = 'http://github.com/ArroyoSystems/arrow-rs', branch = 'object_store_0.11.1/arroyo' }
 
