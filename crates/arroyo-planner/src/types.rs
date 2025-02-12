@@ -1,15 +1,15 @@
 use std::{sync::Arc, time::SystemTime};
 
 use arrow::datatypes::{DataType, Field};
-use datafusion::common::{plan_err, Result};
+use datafusion::common::{plan_datafusion_err, plan_err, Result};
 
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
+use arroyo_types::ArroyoExtensionType;
+use datafusion::error::DataFusionError;
 use datafusion::sql::sqlparser::ast::{
     ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
 };
-
-use arroyo_types::ArroyoExtensionType;
-
+use itertools::Itertools;
 // Pulled from DataFusion
 
 pub(crate) fn convert_data_type(
@@ -102,9 +102,25 @@ fn convert_simple_data_type(
         }
         SQLDataType::Bytea => Ok(DataType::Binary),
         SQLDataType::Interval => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
-        // Explicitly list all other types so that if sqlparser
-        // adds/changes the `SQLDataType` the compiler will tell us on upgrade
-        // and avoid bugs like https://github.com/apache/arrow-datafusion/issues/3059
+        SQLDataType::Struct(fields, _) => {
+            let fields: Vec<_> = fields
+                .iter()
+                .map(|f| {
+                    Ok::<_, DataFusionError>(Arc::new(Field::new(
+                        f.field_name
+                            .as_ref()
+                            .ok_or_else(|| {
+                                plan_datafusion_err!("anonymous struct fields are not allowed")
+                            })?
+                            .to_string(),
+                        convert_data_type(&f.field_type)?.0,
+                        true,
+                    )))
+                })
+                .try_collect()?;
+
+            Ok(DataType::Struct(fields.into()))
+        }
         _ => return plan_err!("Unsupported SQL type {sql_type:?}"),
     };
 

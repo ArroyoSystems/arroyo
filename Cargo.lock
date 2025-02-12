@@ -758,12 +758,14 @@ dependencies = [
  "datafusion-proto",
  "futures",
  "glob",
+ "itertools 0.14.0",
  "petgraph 0.7.1",
  "prost 0.13.4",
  "rstest 0.23.0",
  "serde",
  "serde_json",
  "serde_json_path",
+ "sqlparser",
  "syn 2.0.96",
  "test-log",
  "tokio",
@@ -8328,8 +8330,7 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.51.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fe11944a61da0da3f592e19a45ebe5ab92dc14a779907ff1f08fbb797bfefc7"
+source = "git+https://github.com/ArroyoSystems/sqlparser-rs?branch=0.51.0%2Farroyo#65c1537c0a18be7f9c61d36980a893931ca1143c"
 dependencies = [
  "log",
  "sqlparser_derive",
@@ -8338,8 +8339,7 @@ dependencies = [
 [[package]]
 name = "sqlparser_derive"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01b2e185515564f15375f593fb966b5718bc624ba77fe49fa4616ad619690554"
+source = "git+https://github.com/ArroyoSystems/sqlparser-rs?branch=0.51.0%2Farroyo#65c1537c0a18be7f9c61d36980a893931ca1143c"
 dependencies = [
  "proc-macro2",
  "quote",
