@@ -12,6 +12,7 @@ unsafe impl Sync for CacheNodePtr {}
 
 struct CacheEntry<T: Send + Sync> {
     node: CacheNodePtr,
+    generation: u64,
     data: T,
 }
 
@@ -70,10 +71,29 @@ impl<T: Send + Sync> UpdatingCache<T> {
         }
     }
 
-    pub fn insert(&mut self, key: Arc<Vec<u8>>, now: Instant, value: T) {
-        let node = self.push_back(now, Key(key.clone()));
+    pub fn insert(&mut self, key: Arc<Vec<u8>>, now: Instant, generation: u64, value: T) {
+        let key = Key(key.clone());
 
-        self.data.insert(Key(key), CacheEntry { node, data: value });
+        if let Some(entry) = self.data.remove(&key) {
+            // if this key already exists, we only replace it if the new generation is larger
+            // than our existing generation
+            if entry.generation < generation {
+                self.remove_node(entry.node);
+            } else {
+                self.data.insert(key, entry);
+                return;
+            }
+        }
+
+        let node = self.push_back(now, key.clone());
+        self.data.insert(
+            key,
+            CacheEntry {
+                node,
+                generation,
+                data: value,
+            },
+        );
 
         self.eviction_list_tail = node;
     }
@@ -98,6 +118,10 @@ impl<T: Send + Sync> UpdatingCache<T> {
                 key
             })
         }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&[u8], &T)> {
+        self.data.iter().map(|(k, v)| (k.borrow(), &v.data))
     }
 
     fn push_back(&mut self, updated: Instant, key: Key) -> CacheNodePtr {
@@ -229,6 +253,10 @@ impl<T: Send + Sync> UpdatingCache<T> {
         self.data.get_mut(key).map(|t| &mut t.data)
     }
 
+    pub fn get_mut_generation(&mut self, key: &[u8]) -> Option<(&mut T, u64)> {
+        self.data.get_mut(key).map(|t| (&mut t.data, t.generation))
+    }
+
     pub fn get_mut_key_value(&mut self, key: &[u8]) -> Option<(Key, &mut T)> {
         let k = self.data.get_key_value(key)?.0.clone();
         Some((k, &mut self.data.get_mut(key)?.data))
@@ -257,7 +285,7 @@ mod tests {
 
         let key = Arc::new(vec![1, 2, 3]);
         let now = Instant::now();
-        cache.insert(key.clone(), now, 42);
+        cache.insert(key.clone(), now, 1, 42);
 
         assert!(cache
             .modify(&key, |x| {
@@ -279,8 +307,8 @@ mod tests {
         let key2 = Arc::new(vec![2]);
 
         let start = Instant::now();
-        cache.insert(key1.clone(), start, "value1");
-        cache.insert(key2.clone(), start + Duration::from_millis(5), "value2");
+        cache.insert(key1.clone(), start, 1, "value1");
+        cache.insert(key2.clone(), start + Duration::from_millis(5), 2, "value2");
 
         let check_time = start + Duration::from_millis(11);
         let timed_out: Vec<_> = cache.time_out(check_time).collect();
@@ -297,7 +325,7 @@ mod tests {
 
         let key = Arc::new(vec![1]);
         let start = Instant::now();
-        cache.insert(key.clone(), start, "value");
+        cache.insert(key.clone(), start, 1, "value");
 
         let update_time = start + Duration::from_millis(5);
         cache
@@ -320,9 +348,9 @@ mod tests {
         let key3 = Arc::new(vec![3]);
 
         let now = Instant::now();
-        cache.insert(key1.clone(), now, 1);
-        cache.insert(key2.clone(), now + Duration::from_millis(1), 2);
-        cache.insert(key3.clone(), now + Duration::from_millis(2), 3);
+        cache.insert(key1.clone(), now, 1, 1);
+        cache.insert(key2.clone(), now + Duration::from_millis(1), 2, 2);
+        cache.insert(key3.clone(), now + Duration::from_millis(2), 3, 3);
 
         let mut popped = Vec::new();
         while let Some(key) = cache.pop_front() {
@@ -341,9 +369,9 @@ mod tests {
         let key3 = Arc::new(vec![3]);
 
         let now = Instant::now();
-        cache.insert(key1.clone(), now, 1);
-        cache.insert(key2.clone(), now, 2);
-        cache.insert(key3.clone(), now, 3);
+        cache.insert(key1.clone(), now, 1, 1);
+        cache.insert(key2.clone(), now, 2, 2);
+        cache.insert(key3.clone(), now, 3, 3);
 
         let node_to_remove = cache.data.get(&Key(key2.clone())).unwrap().node;
         cache.remove_node(node_to_remove);
@@ -363,8 +391,8 @@ mod tests {
         let key2 = Arc::new(vec![2]);
         let now = Instant::now();
 
-        cache.insert(key1.clone(), now, 100);
-        cache.insert(key2.clone(), now, 200);
+        cache.insert(key1.clone(), now, 1, 100);
+        cache.insert(key2.clone(), now, 2, 200);
 
         cache
             .modify_and_update(&[1], now + Duration::from_secs(1), |v| {
@@ -387,10 +415,9 @@ mod tests {
         let now = Instant::now();
         let key1 = Arc::new(vec![1]);
         let key2 = Arc::new(vec![2]);
-        cache.insert(key1.clone(), now, 10);
-        cache.insert(key2.clone(), now, 20);
+        cache.insert(key1.clone(), now, 1, 10);
+        cache.insert(key2.clone(), now, 2, 20);
 
-        // Update key2 so that its updated time is later.
         cache
             .modify_and_update(&[2], now + Duration::from_millis(50), |v| {
                 *v += 1;
@@ -399,10 +426,8 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        // Simulate time after TTL for both keys.
         let now2 = now + Duration::from_millis(150);
         let evicted: Vec<_> = cache.time_out(now2).collect();
-        // With TTLIter’s condition (if now - updated < ttl then skip), both keys should be evicted.
         assert_eq!(evicted.len(), 2);
         assert_eq!(evicted[0].0.as_ref(), &[1]);
         assert_eq!(evicted[1].0.as_ref(), &[2]);
@@ -414,7 +439,7 @@ mod tests {
         let mut cache = UpdatingCache::with_time_to_idle(ttl);
         let now = Instant::now();
         let key = Arc::new(vec![1]);
-        cache.insert(key.clone(), now, 42);
+        cache.insert(key.clone(), now, 1, 42);
         let value = cache.remove(&[1]).unwrap();
         assert_eq!(value, 42);
         assert!(!cache.contains_key(&[1]));
@@ -430,11 +455,10 @@ mod tests {
         let key_a = Arc::new(vec![b'A']);
         let key_b = Arc::new(vec![b'B']);
         let key_c = Arc::new(vec![b'C']);
-        cache.insert(key_a.clone(), base, 1);
-        cache.insert(key_b.clone(), base, 2);
-        cache.insert(key_c.clone(), base, 3);
+        cache.insert(key_a.clone(), base, 1, 1);
+        cache.insert(key_b.clone(), base, 2, 2);
+        cache.insert(key_c.clone(), base, 3, 3);
 
-        // Update key B to give it a fresh timestamp.
         let t_update = base + Duration::from_millis(500);
         cache
             .modify_and_update(b"B", t_update, |v| {
@@ -444,10 +468,8 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        // Now all entries should be expired.
         let t_eviction = base + Duration::from_secs(2);
         let evicted: Vec<_> = cache.time_out(t_eviction).collect();
-        // Expected eviction order: the original head (A), then C, then the updated key (B) at the tail.
         assert_eq!(evicted.len(), 3);
         assert_eq!(evicted[0].0.as_ref(), b"A");
         assert_eq!(evicted[1].0.as_ref(), b"C");
@@ -460,7 +482,7 @@ mod tests {
         let mut cache = UpdatingCache::with_time_to_idle(ttl);
         let base = Instant::now();
         let key = Arc::new(vec![1, 2, 3]);
-        cache.insert(key.clone(), base, 42);
+        cache.insert(key.clone(), base, 1, 42);
         if let Some((k, v)) = cache.get_mut_key_value(&[1, 2, 3]) {
             *v += 1;
             assert_eq!(*v, 43);
@@ -476,7 +498,7 @@ mod tests {
         let mut cache = UpdatingCache::with_time_to_idle(ttl);
         let base = Instant::now();
         let key = Arc::new(vec![1]);
-        cache.insert(key.clone(), base, 42);
+        cache.insert(key.clone(), base, 1, 42);
         let res = cache.modify(&[1], |_v| Err("error"));
         assert!(res.unwrap().is_err());
     }
@@ -488,8 +510,25 @@ mod tests {
             let mut cache = UpdatingCache::with_time_to_idle(ttl);
             let base = Instant::now();
             for i in 0..10 {
-                cache.insert(Arc::new(vec![i as u8]), base, i);
+                cache.insert(Arc::new(vec![i as u8]), base, i as u64, i);
             }
         }
+    }
+
+    #[test]
+    fn test_generational_replacement() {
+        let ttl = Duration::from_secs(1);
+        let mut cache = UpdatingCache::with_time_to_idle(ttl);
+        let base = Instant::now();
+        let key = Arc::new(vec![1]);
+
+        cache.insert(key.clone(), base, 1, "first");
+        assert_eq!(cache.get_mut(&[1]), Some(&mut "first"));
+
+        cache.insert(key.clone(), base, 2, "second");
+        assert_eq!(cache.get_mut(&[1]), Some(&mut "second"));
+
+        cache.insert(key.clone(), base, 1, "third");
+        assert_eq!(cache.get_mut(&[1]), Some(&mut "second"));
     }
 }

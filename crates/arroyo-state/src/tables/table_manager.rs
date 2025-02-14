@@ -488,25 +488,25 @@ impl TableManager {
                 .tables
                 .get(table_name)
                 .ok_or_else(|| anyhow!("no registered table {}", table_name))?;
-                
+
             let expiring_time_key_table = table_implementation
                 .as_any()
                 .downcast_ref::<ExpiringTimeKeyTable>()
                 .ok_or_else(|| anyhow!("wrong table type for table {}", table_name))?;
-                
+
             let view = expiring_time_key_table
                 .get_uncached_key_value_view(self.writer.sender.clone())
                 .await?;
-                
+
             let cache: Box<dyn Any + Send> = Box::new(view);
             e.insert(cache);
         }
-        
+
         let cache = self.caches.get_mut(table_name).unwrap();
         let cache: &mut UncachedKeyValueView = cache
             .downcast_mut()
             .ok_or_else(|| anyhow!("Failed to downcast table {}", table_name))?;
-            
+
         Ok(cache)
     }
 }

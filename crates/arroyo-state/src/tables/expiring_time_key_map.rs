@@ -11,7 +11,8 @@ use arrow::row::{OwnedRow, Row, Rows};
 use arrow_array::{
     cast::AsArray,
     types::{TimestampNanosecondType, UInt64Type},
-    ArrayRef, BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
+    Array, ArrayRef, BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray,
+    UInt64Array,
 };
 use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arroyo_rpc::{
@@ -27,7 +28,7 @@ use arroyo_types::{
     from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfo,
 };
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
-
+use datafusion::prelude::col;
 use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
 use parquet::arrow::AsyncArrowWriter;
@@ -1267,7 +1268,6 @@ impl LastKeyValueView {
     }
 }
 
-
 pub struct UncachedKeyValueView {
     parent: ExpiringTimeKeyTable,
     key_converter: Converter,
@@ -1302,17 +1302,14 @@ impl UncachedKeyValueView {
     }
 
     // Simply forward updates to state storage
-    pub async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
-        let mut columns = batch.columns().to_vec();
-        let num_rows = batch.num_rows();
-        let generation_array = Arc::new(UInt64Array::from_iter(std::iter::repeat(0).take(num_rows)));
-        columns.push(generation_array);
-        
-        let batch_with_generation = RecordBatch::try_new(
-            self.parent.schema.memory_schema().schema.clone(),
-            columns,
-        )?;
-    
+    pub async fn insert_batch(&mut self, columns: Vec<ArrayRef>) -> Result<()> {
+        if columns.is_empty() {
+            return Ok(());
+        };
+
+        let batch_with_generation =
+            RecordBatch::try_new(self.parent.schema.memory_schema().schema.clone(), columns)?;
+
         self.state_tx
             .send(StateMessage::TableData {
                 table: self.parent.table_name.to_string(),
@@ -1326,15 +1323,21 @@ impl UncachedKeyValueView {
         self.key_converter.convert_rows(rows)
     }
 
+    /// Gets all data from the checkpoint files. Note this is not necessarily ordered, or
+    /// de-duplicated so callers must do so themselves. We avoid doing this here because
+    /// callers will likely already be doing some of the necessary work (like row conversion)
+    /// and it would be wasteful to do this multiple times.
     pub fn get_all(&mut self) -> impl Stream<Item = Result<RecordBatch>> {
-        let files: Vec<(String, bool)> = self.parent
+        let files: Vec<(String, bool)> = self
+            .parent
             .checkpoint_files
             .iter()
             .filter_map(|file| {
                 if file.max_routing_key >= *self.parent.task_info.key_range.start()
                     && *self.parent.task_info.key_range.end() >= file.min_routing_key
                 {
-                    let needs_hash_filtering = *self.parent.task_info.key_range.end() < file.max_routing_key
+                    let needs_hash_filtering = *self.parent.task_info.key_range.end()
+                        < file.max_routing_key
                         || *self.parent.task_info.key_range.start() > file.min_routing_key;
                     Some((file.file.clone(), needs_hash_filtering))
                 } else {
@@ -1355,21 +1358,22 @@ impl UncachedKeyValueView {
                     let object_meta = parent.storage_provider.head(file.as_str()).await?;
                     let object_reader = ParquetObjectReader::new(
                         parent.storage_provider.get_backing_store(),
-                        object_meta
+                        object_meta,
                     );
-                    let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
+                    let reader_builder =
+                        ParquetRecordBatchStreamBuilder::new(object_reader).await?;
                     let stream = reader_builder.build()?;
 
-                    Ok(stream.map_err(anyhow::Error::from).try_filter_map(
-                        move |batch| {
+                    Ok(stream
+                        .map_err(anyhow::Error::from)
+                        .try_filter_map(move |mut batch| {
                             let schema = schema.clone();
-                            let needs_filtering = needs_filtering;
                             let task_info = parent.task_info.clone();
                             async move {
-                                let mut batch = batch;
-
                                 if needs_filtering {
-                                    match schema.filter_by_hash_index(batch, &task_info.key_range)? {
+                                    match schema
+                                        .filter_by_hash_index(batch, &task_info.key_range)?
+                                    {
                                         None => return Ok(None),
                                         Some(filtered_batch) => batch = filtered_batch,
                                     };
@@ -1379,17 +1383,17 @@ impl UncachedKeyValueView {
                                     return Ok(None);
                                 }
 
-                                // Project to remove metadata fields
-                                let projection: Vec<_> = (0..(batch.schema().fields().len() - 2)).collect();
+                                // Project to remove metadata field
+                                let projection: Vec<_> =
+                                    (0..(batch.schema().fields().len() - 1)).collect();
                                 batch = batch.project(&projection)?;
 
                                 Ok(Some(batch))
                             }
-                        },
-                    ))
+                        }))
                 }
             })
             .buffer_unordered(1)
             .try_flatten()
     }
-}    
+}
