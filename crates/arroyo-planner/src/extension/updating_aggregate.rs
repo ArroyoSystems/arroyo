@@ -117,11 +117,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             planner.sync_plan(&self.aggregate)?,
             &ArroyoPhysicalExtensionCodec::default(),
         )?;
-
-        let LogicalPlan::Aggregate(aggregate) = &self.aggregate else {
-            return internal_err!("UpdatingAggregateExtension requires an aggregate plan");
-        };
-
+        
         let key_exprs: Vec<Expr> = self
             .key_fields
             .iter()

@@ -463,8 +463,6 @@ async fn run_completely(
 fn get_key(v: &str, primary_keys: Option<&[&str]>) -> Vec<String> {
     let v: Value = serde_json::from_str(v).unwrap();
 
-    println!("getting key from '{v}'");
-
     match primary_keys {
         Some(pks) => pks
             .iter()
@@ -531,6 +529,20 @@ fn is_debezium(value: &Value) -> bool {
     op.as_str().is_some()
 }
 
+fn order_by_pk(lines: HashSet<String>, pks: Option<&[&str]>) -> Vec<Value> {
+    let mut lines: Vec<Value> = lines.into_iter()
+        .map(|s| serde_json::from_str(&s).unwrap())
+        .collect();
+
+    let Some(pks) = pks else {
+        return lines;
+    };
+
+    lines.sort_by_key(|v| pks.iter().map(|pk| v.get(pk).unwrap().to_string()).collect::<Vec<_>>());
+
+    lines
+}
+
 fn check_debezium(
     name: &str,
     output_location: String,
@@ -539,11 +551,12 @@ fn check_debezium(
     golden_output_lines: Vec<Value>,
     primary_keys: Option<&[&str]>,
 ) {
-    let output_merged = merge_debezium(output_lines, primary_keys);
-    let golden_output_medged = merge_debezium(golden_output_lines, primary_keys);
-    assert_eq!(
-        output_merged, golden_output_medged,
-        "failed to check debezium equality ({}) for\noutput: {}\ngolden: {}",
+    let output_merged = order_by_pk(merge_debezium(output_lines, primary_keys), primary_keys);
+    let golden_output_merged = order_by_pk(merge_debezium(golden_output_lines, primary_keys), primary_keys);
+
+    similar_asserts::assert_eq!(
+        output_merged, golden_output_merged,
+        "Incorrect outputs for updating ({}) for\noutput: {}\ngolden: {}",
         name, output_location, golden_output_location
     );
 }
@@ -620,7 +633,7 @@ async fn check_output_files(
         .zip(golden_output_lines.into_iter())
         .enumerate()
         .for_each(|(i, (output_line, golden_output_line))| {
-            assert_eq!(
+            similar_asserts::assert_eq!(
                 output_line, golden_output_line,
                 "check {}: line {} of output and golden output differ\nactual:{}\nexpected:{})",
                 check_name, i, output_location, golden_output_location

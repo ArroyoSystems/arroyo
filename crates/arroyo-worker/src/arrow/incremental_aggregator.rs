@@ -1,9 +1,9 @@
 use crate::arrow::decode_aggregate;
 use crate::arrow::updating_cache::{Key, UpdatingCache};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{
-    ArrayBuilder, BinaryBuilder, TimestampNanosecondBuilder, UInt32Builder, UInt64Builder,
+    BinaryBuilder, TimestampNanosecondBuilder, UInt32Builder, UInt64Builder,
 };
 use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
@@ -122,12 +122,9 @@ impl IncrementalState {
             } => {
                 for r in row_converter.convert_columns(batch)?.iter() {
                     match data.get(r.as_ref()).map(|d| d.count) {
-                        Some(0) | Some(1) => {
-                            let Some((k, _)) = data.remove_entry(r.as_ref()) else {
-                                unreachable!()
-                            };
-
-                            changed_values.insert(k);
+                        Some(0) => {
+                            debug!("tried to retract value for key with count 0; this implies an \
+                            append was lost or a retract was duplicated");
                         }
                         Some(_) => {
                             data.get_mut(r.as_ref()).unwrap().dec();
@@ -206,7 +203,6 @@ pub struct IncrementalAggregatingFunc {
     schema_without_metadata: Arc<Schema>,
     ttl: Duration,
     key_converter: RowConverter,
-    batch_key_converter: RowConverter,
 }
 
 const GLOBAL_KEY: Vec<u8> = vec![];
@@ -388,8 +384,12 @@ impl IncrementalAggregatingFunc {
                         rows.push(row.to_owned())
                     }
                 }
+
+                // once we've checkpointed them, we can clear out keys with 0 counts
+                data.retain(|_, v| v.count > 0);
             }
         }
+
 
         let mut cols = self.key_converter.convert_rows(rows.into_iter())?;
 
@@ -429,7 +429,6 @@ impl IncrementalAggregatingFunc {
                 })
                 .collect_vec();
 
-            println!("batch schema = {:?}", batch.schema());
             let generations = batch.columns().last().unwrap().as_primitive::<UInt64Type>();
 
             let now = Instant::now();
@@ -532,17 +531,31 @@ impl IncrementalAggregatingFunc {
             }
         }
 
-        // TODO: delete any records with null timestamps
-        // for (k, v) in self.accumulators.iter() {
-        //     // the state system doesn't yet support deletes, so we'll determine if a value
-        //     // is deleted by the timestamp being null
-        //     let is_deleted = accumulators
-        //         .last_mut()
-        //         .ok_or_else(|| anyhow!("no aggregrates"))?
-        //         .evaluate()?
-        //         .is_null();
-        //
-        // }
+
+        let mut deleted_keys = vec![];
+        for (k, v) in self.accumulators.iter_mut() {
+            // the state system doesn't yet support deletes, so we'll determine if a value
+            // is deleted by the timestamp being null
+            let is_deleted = v
+                .last_mut()
+                .ok_or_else(|| anyhow!("no aggregrates"))?
+                .evaluate()?
+                .is_null();
+
+            if is_deleted {
+                deleted_keys.push(k.clone());
+            } else {
+                // clear empty entries from the batch accumulators
+                for is in v {
+                    if let IncrementalState::Batch { data, .. } = is {
+                        data.retain(|_, v| v.count > 0);
+                    }
+                }
+            }
+        }
+        for k in deleted_keys {
+            self.accumulators.remove(&k.0);
+        }
 
         Ok(())
     }
@@ -643,8 +656,7 @@ impl IncrementalAggregatingFunc {
                 .chain(ttld_keys.iter().map(|k| row_parser.parse(k.as_slice()))),
         )?;
 
-        for (i, acc) in output_values.into_iter().enumerate() {
-            println!("outputs[{}] = {:?}", i, acc);
+        for acc in output_values.into_iter() {
             result_cols.push(ScalarValue::iter_to_array(acc).unwrap());
         }
 
@@ -951,29 +963,6 @@ impl ArrowOperator for IncrementalAggregatingFunc {
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         self.initialize(ctx).await.unwrap();
-        for (k, v) in self.accumulators.iter() {
-            let ka = self
-                .key_converter
-                .convert_rows(vec![self.key_converter.parser().parse(k)])
-                .unwrap();
-            println!(
-                "{:?}|{}[{}]\n_________________",
-                k,
-                ka[0].as_string::<i32>().value(0),
-                ka.len()
-            );
-            println!(
-                "{}",
-                v.iter()
-                    .map(|v| match v {
-                        IncrementalState::Sliding { accumulator, .. } =>
-                            format!("{:?}", accumulator.state().unwrap()),
-                        IncrementalState::Batch { data, .. } => format!("{:?}", data),
-                    })
-                    .collect_vec()
-                    .join(" | ")
-            );
-        }
     }
 }
 
@@ -1137,7 +1126,6 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 schema_without_metadata: Arc::new(schema_without_metadata.finish()),
                 updated_keys: Default::default(),
                 key_converter: RowConverter::new(input_schema.sort_fields(false))?,
-                batch_key_converter: RowConverter::new(batch_state_schema.sort_fields(false))?,
                 sliding_state_schema,
                 batch_state_schema,
             },

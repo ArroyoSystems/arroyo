@@ -74,8 +74,6 @@ impl<T: Send + Sync> UpdatingCache<T> {
     pub fn insert(&mut self, key: Arc<Vec<u8>>, now: Instant, generation: u64, value: T) {
         let key = Key(key.clone());
 
-        println!("inserting {:?} with generation {}", key, generation);
-
         if let Some(entry) = self.data.remove(&key) {
             // if this key already exists, we only replace it if the new generation is larger
             // than our existing generation
@@ -122,8 +120,8 @@ impl<T: Send + Sync> UpdatingCache<T> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&[u8], &T)> {
-        self.data.iter().map(|(k, v)| (k.borrow(), &v.data))
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Key, &mut T)> {
+        self.data.iter_mut().map(|(k, v)| (k, &mut v.data))
     }
 
     fn push_back(&mut self, updated: Instant, key: Key) -> CacheNodePtr {
