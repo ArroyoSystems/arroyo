@@ -74,6 +74,8 @@ impl<T: Send + Sync> UpdatingCache<T> {
     pub fn insert(&mut self, key: Arc<Vec<u8>>, now: Instant, generation: u64, value: T) {
         let key = Key(key.clone());
 
+        println!("inserting {:?} with generation {}", key, generation);
+
         if let Some(entry) = self.data.remove(&key) {
             // if this key already exists, we only replace it if the new generation is larger
             // than our existing generation
@@ -224,6 +226,8 @@ impl<T: Send + Sync> UpdatingCache<T> {
             return Some(Err(e));
         }
 
+        entry.generation += 1;
+
         let node = entry.node;
 
         self.update_node(node, now);
@@ -237,6 +241,8 @@ impl<T: Send + Sync> UpdatingCache<T> {
         f: F,
     ) -> Option<Result<(), E>> {
         let entry = self.data.get_mut(key)?;
+
+        entry.generation += 1;
 
         if let Err(e) = f(&mut entry.data) {
             return Some(Err(e));

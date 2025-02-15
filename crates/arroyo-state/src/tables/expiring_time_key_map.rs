@@ -28,7 +28,6 @@ use arroyo_types::{
     from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfo,
 };
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
-use datafusion::prelude::col;
 use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
 use parquet::arrow::AsyncArrowWriter;
@@ -1385,7 +1384,7 @@ impl UncachedKeyValueView {
 
                                 // Project to remove metadata field
                                 let projection: Vec<_> =
-                                    (0..(batch.schema().fields().len() - 1)).collect();
+                                    (0..(batch.schema().fields().len() - 2)).collect();
                                 batch = batch.project(&projection)?;
 
                                 Ok(Some(batch))

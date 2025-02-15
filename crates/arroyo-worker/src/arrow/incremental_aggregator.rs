@@ -1,6 +1,6 @@
 use crate::arrow::decode_aggregate;
 use crate::arrow::updating_cache::{Key, UpdatingCache};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{
     ArrayBuilder, BinaryBuilder, TimestampNanosecondBuilder, UInt32Builder, UInt64Builder,
@@ -39,8 +39,8 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 use std::{collections::HashMap, mem, sync::Arc};
-use tracing::debug;
 use tracing::log::warn;
+use tracing::debug;
 
 #[derive(Debug, Copy, Clone)]
 struct BatchData {
@@ -62,8 +62,8 @@ impl BatchData {
     }
 
     fn dec(&mut self) {
-        self.count -= 1;
-        self.generation -= 1;
+        self.count = self.count.checked_sub(1).unwrap_or_default();
+        self.generation += 1;
     }
 }
 
@@ -157,19 +157,15 @@ impl IncrementalState {
                 row_converter,
                 ..
             } => {
-                if data.is_empty() {
-                    Ok(ScalarValue::Null)
-                } else {
-                    let parser = row_converter.parser();
-                    let input = row_converter.convert_rows(
-                        data.iter()
-                            .filter(|(_, c)| c.count > 0)
-                            .map(|(v, _)| parser.parse(&v.0)),
-                    )?;
-                    let mut acc = expr.create_accumulator()?;
-                    acc.update_batch(&input)?;
-                    acc.evaluate_mut()
-                }
+                let parser = row_converter.parser();
+                let input = row_converter.convert_rows(
+                    data.iter()
+                        .filter(|(_, c)| c.count > 0)
+                        .map(|(v, _)| parser.parse(&v.0)),
+                )?;
+                let mut acc = expr.create_accumulator()?;
+                acc.update_batch(&input)?;
+                acc.evaluate_mut()
             }
         }
     }
@@ -328,7 +324,7 @@ impl IncrementalAggregatingFunc {
             states
                 .into_iter()
                 .skip(cols.len())
-                .map(|c| ScalarValue::iter_to_array(c.into_iter()).unwrap()),
+                .map(|c| ScalarValue::iter_to_array(c).unwrap()),
         );
 
         cols.push(Arc::new(generation_builder.finish()));
@@ -371,7 +367,6 @@ impl IncrementalAggregatingFunc {
                 .get_mut(k.0.as_ref())
                 .expect("missing accumulator in cache during checkpoint")
                 .iter_mut()
-                .filter(|a| matches!(a, IncrementalState::Batch { .. }))
                 .enumerate()
             {
                 let IncrementalState::Batch {
@@ -380,7 +375,7 @@ impl IncrementalAggregatingFunc {
                     ..
                 } = state
                 else {
-                    unreachable!();
+                    continue;
                 };
 
                 for vk in changed_values.iter() {
@@ -434,6 +429,7 @@ impl IncrementalAggregatingFunc {
                 })
                 .collect_vec();
 
+            println!("batch schema = {:?}", batch.schema());
             let generations = batch.columns().last().unwrap().as_primitive::<UInt64Type>();
 
             let now = Instant::now();
@@ -503,27 +499,30 @@ impl IncrementalAggregatingFunc {
 
                 let key_rows = self.key_converter.convert_columns(&key_cols)?;
 
-                for ((i, row), our_generation) in key_rows.iter().enumerate().zip(generations) {
-                    let Some((accumulators, generation)) =
-                        self.accumulators.get_mut_generation(row.as_ref())
-                    else {
+                for (i, row) in key_rows.iter().enumerate() {
+                    let Some(accumulators) = self.accumulators.get_mut(row.as_ref()) else {
                         bail!(
                             "missing accumulator for key {:?} while restoring batch",
                             row.as_ref()
                         );
                     };
 
-                    if our_generation.unwrap() < generation {
-                        continue;
-                    }
-
                     let count = count_column.value(i);
                     let accumulator_idx = accumulator_column.value(i) as usize;
                     let args_row = args_row_column.value(i);
                     let generation = generations.value(i);
 
-                    if let IncrementalState::Batch { data, .. } = &mut accumulators[accumulator_idx]
-                    {
+                    let IncrementalState::Batch { data, .. } = &mut accumulators[accumulator_idx]
+                    else {
+                        bail!("expected aggregate {accumulator_idx} to be a batch accumulator, but was sliding");
+                    };
+
+                    if let Some(existing) = data.get_mut(args_row) {
+                        if existing.generation < generation {
+                            existing.count = count;
+                            existing.generation = generation;
+                        }
+                    } else {
                         data.insert(
                             Key(Arc::new(args_row.to_vec())),
                             BatchData { count, generation },
@@ -644,7 +643,8 @@ impl IncrementalAggregatingFunc {
                 .chain(ttld_keys.iter().map(|k| row_parser.parse(k.as_slice()))),
         )?;
 
-        for acc in output_values {
+        for (i, acc) in output_values.into_iter().enumerate() {
+            println!("outputs[{}] = {:?}", i, acc);
             result_cols.push(ScalarValue::iter_to_array(acc).unwrap());
         }
 
@@ -951,14 +951,29 @@ impl ArrowOperator for IncrementalAggregatingFunc {
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         self.initialize(ctx).await.unwrap();
-        // for (k, v) in self.accumulators.iter() {
-        //     let ka = self.key_converter.convert_rows(vec![self.key_converter.parser().parse(k)]).unwrap();
-        //     println!("{:?}|{}[{}]\n_________________", k, ka[0].as_string::<i32>().value(0), ka.len());
-        //     println!("{}", v.iter().map(|v| match v {
-        //         IncrementalState::Sliding { accumulator, .. } => format!("{:?}", accumulator.state().unwrap()),
-        //         IncrementalState::Batch { data, .. } => format!("{:?}", data),
-        //     }).collect_vec().join(" | "));
-        // }
+        for (k, v) in self.accumulators.iter() {
+            let ka = self
+                .key_converter
+                .convert_rows(vec![self.key_converter.parser().parse(k)])
+                .unwrap();
+            println!(
+                "{:?}|{}[{}]\n_________________",
+                k,
+                ka[0].as_string::<i32>().value(0),
+                ka.len()
+            );
+            println!(
+                "{}",
+                v.iter()
+                    .map(|v| match v {
+                        IncrementalState::Sliding { accumulator, .. } =>
+                            format!("{:?}", accumulator.state().unwrap()),
+                        IncrementalState::Batch { data, .. } => format!("{:?}", data),
+                    })
+                    .collect_vec()
+                    .join(" | ")
+            );
+        }
     }
 }
 
@@ -1028,7 +1043,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             .map(|(expr, name)| {
                 Ok(decode_aggregate(
                     &input_schema.schema,
-                    &name,
+                    name,
                     expr,
                     registry.as_ref(),
                 )?)

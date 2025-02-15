@@ -1,16 +1,14 @@
 use super::{ArroyoExtension, IsRetractExtension, NodeWithIncomingEdges};
-use crate::builder::{NamedNode, Planner, SplitPlanOutput};
+use crate::builder::{NamedNode, Planner};
 use crate::functions::multi_hash;
 use crate::physical::ArroyoPhysicalExtensionCodec;
-use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::config::config;
 use arroyo_rpc::{
-    df::ArroyoSchema, grpc::api::UpdatingAggregateOperator, updating_meta_field, TIMESTAMP_FIELD,
-    UPDATING_META_FIELD,
+    df::ArroyoSchema, grpc::api::UpdatingAggregateOperator,
 };
 use datafusion::common::{
-    internal_err, plan_err, DFSchema, DFSchemaRef, Result, TableReference, ToDFSchema,
+    internal_err, plan_err, DFSchemaRef, Result, TableReference, ToDFSchema,
 };
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
@@ -18,11 +16,8 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::named_struct;
 use datafusion::scalar::ScalarValue;
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
-use datafusion_proto::physical_plan::{to_proto, AsExecutionPlan, DefaultPhysicalExtensionCodec};
-use datafusion_proto::protobuf::{
-    physical_plan_node::PhysicalPlanType, PhysicalExprNode, PhysicalPlanNode,
-};
+use datafusion_proto::physical_plan::AsExecutionPlan;
+use datafusion_proto::protobuf::PhysicalPlanNode;
 use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
