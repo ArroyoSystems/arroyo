@@ -39,8 +39,8 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 use std::{collections::HashMap, mem, sync::Arc};
-use tracing::log::warn;
 use tracing::debug;
+use tracing::log::warn;
 
 #[derive(Debug, Copy, Clone)]
 struct BatchData {
@@ -124,8 +124,10 @@ impl IncrementalState {
                 for r in row_converter.convert_columns(batch)?.iter() {
                     match data.get(r.as_ref()).map(|d| d.count) {
                         Some(0) => {
-                            debug!("tried to retract value for key with count 0; this implies an \
-                            append was lost or a retract was duplicated");
+                            debug!(
+                                "tried to retract value for key with count 0; this implies an \
+                            append was lost or a retract was duplicated"
+                            );
                         }
                         Some(_) => {
                             data.get_mut(r.as_ref()).unwrap().dec();
@@ -391,7 +393,6 @@ impl IncrementalAggregatingFunc {
             }
         }
 
-
         let mut cols = self.key_converter.convert_rows(rows.into_iter())?;
 
         cols.push(Arc::new(accumulator_builder.finish()));
@@ -403,8 +404,14 @@ impl IncrementalAggregatingFunc {
         Ok(Some(cols))
     }
 
-    fn restore_sliding(&mut self, key: &[u8], now: Instant, i: usize, aggregate_states: &Vec<Vec<ArrayRef>>, generation: u64) -> Result<()> {
-        println!("Restoring sliding for {:?}", key);
+    fn restore_sliding(
+        &mut self,
+        key: &[u8],
+        now: Instant,
+        i: usize,
+        aggregate_states: &Vec<Vec<ArrayRef>>,
+        generation: u64,
+    ) -> Result<()> {
         let mut accumulators = self.make_accumulators();
         for ((_, state_cols), acc) in self
             .aggregates
@@ -413,17 +420,12 @@ impl IncrementalAggregatingFunc {
             .zip(accumulators.iter_mut())
         {
             if let IncrementalState::Sliding { accumulator, .. } = acc {
-                accumulator
-                    .merge_batch(&state_cols.iter().map(|c| c.slice(i, 1)).collect_vec())?
+                accumulator.merge_batch(&state_cols.iter().map(|c| c.slice(i, 1)).collect_vec())?
             }
         }
 
-        self.accumulators.insert(
-            Arc::new(key.to_vec()),
-            now,
-            generation,
-            accumulators,
-        );
+        self.accumulators
+            .insert(Arc::new(key.to_vec()), now, generation, accumulators);
 
         Ok(())
     }
@@ -442,7 +444,6 @@ impl IncrementalAggregatingFunc {
                 continue;
             }
 
-            println!("[{}]initialized from sliding batch\n{}", ctx.task_info.task_index, arrow::util::pretty::pretty_format_batches(&[batch.clone()]).unwrap());
             let key_cols: Vec<_> = self
                 .sliding_state_schema
                 .sort_columns(&batch, false)
@@ -471,7 +472,13 @@ impl IncrementalAggregatingFunc {
             } else {
                 let key_rows = key_converter.convert_columns(&key_cols)?;
                 for ((i, row), generation) in key_rows.iter().enumerate().zip(generations) {
-                    self.restore_sliding(row.as_ref(), now, i, &aggregate_states, generation.unwrap())?;
+                    self.restore_sliding(
+                        row.as_ref(),
+                        now,
+                        i,
+                        &aggregate_states,
+                        generation.unwrap(),
+                    )?;
                 }
             }
         }
@@ -490,8 +497,6 @@ impl IncrementalAggregatingFunc {
                 if batch.num_rows() == 0 {
                     continue;
                 }
-
-                println!("[{}]initialized from batch batch\n{}", ctx.task_info.task_index, arrow::util::pretty::pretty_format_batches(&[batch.clone()]).unwrap());
 
                 let key_cols: Vec<_> = self
                     .sliding_state_schema
@@ -525,8 +530,10 @@ impl IncrementalAggregatingFunc {
                 let key_rows = if key_cols.is_empty() {
                     vec![GLOBAL_KEY]
                 } else {
-                    self.key_converter.convert_columns(&key_cols)?
-                        .iter().map(|k| k.as_ref().to_vec())
+                    self.key_converter
+                        .convert_columns(&key_cols)?
+                        .iter()
+                        .map(|k| k.as_ref().to_vec())
                         .collect()
                 };
 
@@ -563,7 +570,6 @@ impl IncrementalAggregatingFunc {
                 }
             }
         }
-
 
         let mut deleted_keys = vec![];
         for (k, v) in self.accumulators.iter_mut() {
@@ -917,8 +923,7 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         let input_schema = &ctx.in_schemas[0];
 
         if input_schema
-            .key_indices
-            .as_ref()
+            .routing_keys()
             .map(|k| !k.is_empty())
             .unwrap_or_default()
         {
@@ -996,7 +1001,6 @@ impl ArrowOperator for IncrementalAggregatingFunc {
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         self.initialize(ctx).await.unwrap();
-        println!("[{}]initial {:?}", ctx.task_info.task_index, self.accumulators.get_mut(&GLOBAL_KEY));
     }
 }
 
@@ -1046,8 +1050,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
         // the state schema is made up of the key fields + the state fields for each aggregator
         // (if it supports retraction) otherwise, the input data + a count
         let mut sliding_state_fields = input_schema
-            .key_indices
-            .as_ref()
+            .routing_keys()
             .map(|v| {
                 v.iter()
                     .map(|idx| input_schema.schema.field(*idx).clone())
@@ -1139,16 +1142,20 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         ));
+        let timestamp_index = batch_state_fields.len() - 1;
 
-        let mut key_fields = key_fields;
+        let mut storage_key_fields = key_fields.clone();
         // include accumulator and args_row in the keys
-        key_fields.push(key_fields.len());
-        key_fields.push(key_fields.len());
+        storage_key_fields.push(storage_key_fields.len());
+        storage_key_fields.push(storage_key_fields.len());
 
-        let batch_state_schema = Arc::new(ArroyoSchema::from_schema_keys(
+        let batch_state_schema = Arc::new(ArroyoSchema::new(
             Arc::new(Schema::new(batch_state_fields)),
-            key_fields,
-        )?);
+            timestamp_index,
+            Some(storage_key_fields),
+            // only include the actual keys in the routing keys
+            Some(key_fields),
+        ));
 
         Ok(ConstructedOperator::from_operator(Box::new(
             IncrementalAggregatingFunc {

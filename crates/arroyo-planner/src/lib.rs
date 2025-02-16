@@ -992,11 +992,12 @@ pub fn schema_with_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> Result<
         })?
         .0;
 
-    Ok(ArroyoSchema {
+    Ok(ArroyoSchema::new(
         schema,
         timestamp_index,
-        key_indices: Some(key_indices),
-    })
+        Some(key_indices),
+        None,
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

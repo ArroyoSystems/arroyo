@@ -22,9 +22,7 @@ use arroyo_rpc::{
     Converter,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{
-    from_micros, from_nanos, print_time, server_for_hash, to_micros, TaskInfo,
-};
+use arroyo_types::{from_micros, from_nanos, print_time, server_for_hash, to_micros, TaskInfo};
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
@@ -452,9 +450,11 @@ impl TimeTableCompactor {
             operator_metadata: operator_metadata.clone(),
             writers: HashMap::new(),
         };
+
         let cutoff = operator_metadata
             .min_watermark
             .map(|min_micros| from_micros(min_micros) - retention);
+
         for (file_name, file) in files {
             let max_file_timestamp = from_micros(file.max_timestamp_micros);
             if cutoff
@@ -463,10 +463,12 @@ impl TimeTableCompactor {
             {
                 continue;
             }
+
             let reader = ParquetObjectReader::new(
                 compactor.storage_provider.get_backing_store(),
                 compactor.storage_provider.head(file_name.as_str()).await?,
             );
+
             let first_partition =
                 server_for_hash(file.min_routing_key, operator_metadata.parallelism as usize);
             let last_partition =
@@ -474,6 +476,7 @@ impl TimeTableCompactor {
             let multiple_partitions = first_partition != last_partition;
             let reader_builder = ParquetRecordBatchStreamBuilder::new(reader).await?;
             let mut stream = reader_builder.build()?;
+
             // projection to trim the metadata fields. Should probably be factored out.
             while let Some(batch) = stream.try_next().await? {
                 // Filter by _timestamp field
@@ -481,6 +484,7 @@ impl TimeTableCompactor {
                 if time_filtered.num_rows() == 0 {
                     continue;
                 }
+
                 if !multiple_partitions {
                     compactor
                         .write_batch(first_partition, time_filtered)
@@ -495,12 +499,14 @@ impl TimeTableCompactor {
                             .unwrap(),
                         operator_metadata.parallelism as usize,
                     )?;
+
                     let indices = sort_to_indices(&partitions, None, None).unwrap();
                     let columns = time_filtered
                         .columns()
                         .iter()
                         .map(|c| take(c, &indices, None).unwrap())
                         .collect();
+
                     let sorted =
                         RecordBatch::try_new(schema.state_schema().schema.clone(), columns)?;
                     let sorted_keys = take(&partitions, &indices, None)?;
@@ -930,12 +936,12 @@ impl KeyTimeView {
         let mut rows = vec![];
         for range in self.schema.partition(&sorted_batch, false)? {
             let value_batch = value_batch.slice(range.start, range.end - range.start);
-            let key_columns = if self.schema.key_indices.is_none() {
+            let key_columns = if self.schema.storage_keys().is_none() {
                 vec![]
             } else {
                 sorted_batch
                     .slice(range.start, 1)
-                    .project(self.schema.key_indices.as_ref().unwrap())?
+                    .project(self.schema.storage_keys().as_ref().unwrap())?
                     .columns()
                     .to_vec()
             };
@@ -964,7 +970,6 @@ impl KeyTimeView {
         Ok(rows)
     }
 }
-
 
 pub struct UncachedKeyValueView {
     parent: ExpiringTimeKeyTable,
@@ -1036,7 +1041,7 @@ impl UncachedKeyValueView {
             .map(move |(file, needs_filtering)| {
                 let parent = parent.clone();
                 let schema = schema.clone();
-                
+
                 async move {
                     let object_meta = parent.storage_provider.head(file.as_str()).await?;
                     let object_reader = ParquetObjectReader::new(

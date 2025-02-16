@@ -4,12 +4,8 @@ use crate::functions::multi_hash;
 use crate::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::config::config;
-use arroyo_rpc::{
-    df::ArroyoSchema, grpc::api::UpdatingAggregateOperator,
-};
-use datafusion::common::{
-    plan_err, DFSchemaRef, Result, TableReference, ToDFSchema,
-};
+use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator};
+use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference, ToDFSchema};
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
     col, lit, Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore,
@@ -117,7 +113,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             planner.sync_plan(&self.aggregate)?,
             &ArroyoPhysicalExtensionCodec::default(),
         )?;
-        
+
         let key_exprs: Vec<Expr> = self
             .key_fields
             .iter()

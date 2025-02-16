@@ -289,6 +289,8 @@ message ArroyoSchema {
   uint32 timestamp_index = 2;
   repeated uint32 key_indices = 3;
   bool has_keys = 4;
+  repeated uint32 routing_key_indices = 5;
+  bool has_routing_keys = 6;
 }
 
 message ChainedOperator {

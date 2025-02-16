@@ -3,7 +3,7 @@ use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
 use arrow_array::{Array, BooleanArray, RecordBatch};
-use arrow_schema::{DataType, Schema};
+use arrow_schema::{DataType, Field, Schema};
 use arroyo_connectors::connectors;
 use arroyo_operator::connector::LookupConnector;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -170,7 +170,7 @@ impl ArrowOperator for LookupJoin {
         });
 
         let in_schema = ctx.in_schemas.first().unwrap();
-        let key_indices = in_schema.key_indices.as_ref().unwrap();
+        let key_indices = in_schema.routing_keys().unwrap();
         let non_keys: Vec<_> = (0..batch.num_columns())
             .filter(|i| !key_indices.contains(i) && *i != in_schema.timestamp_index)
             .collect();
@@ -230,7 +230,9 @@ impl OperatorConstructor for LookupJoinConstructor {
 
         let lookup_schema = Arc::new(
             lookup_schema
-                .with_field(LOOKUP_KEY_INDEX_FIELD, DataType::UInt64, false)?
+                .with_additional_fields(
+                    [Field::new(LOOKUP_KEY_INDEX_FIELD, DataType::UInt64, false)].into_iter(),
+                )?
                 .schema_without_timestamp(),
         );
 

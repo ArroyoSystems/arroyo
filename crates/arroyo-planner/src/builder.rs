@@ -10,8 +10,7 @@ use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use async_trait::async_trait;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{
-    plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue,
-    TableReference,
+    plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, TableReference,
 };
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};

@@ -1,3 +1,4 @@
+--pk=left_count
 CREATE TABLE impulse (
   timestamp TIMESTAMP,
   counter bigint unsigned not null,
