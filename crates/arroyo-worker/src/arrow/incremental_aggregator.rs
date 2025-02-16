@@ -1,6 +1,7 @@
 use crate::arrow::decode_aggregate;
 use crate::arrow::updating_cache::{Key, UpdatingCache};
 use anyhow::{anyhow, bail, Result};
+use arrow::compute::max_array;
 use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{
     BinaryBuilder, TimestampNanosecondBuilder, UInt32Builder, UInt64Builder,
@@ -49,10 +50,10 @@ struct BatchData {
 }
 
 impl BatchData {
-    fn new() -> Self {
+    fn new(generation: u64) -> Self {
         Self {
             count: 1,
-            generation: 0,
+            generation,
         }
     }
 
@@ -85,7 +86,7 @@ enum IncrementalState {
 }
 
 impl IncrementalState {
-    fn update_batch(&mut self, batch: &[ArrayRef]) -> DFResult<()> {
+    fn update_batch(&mut self, new_geneeration: u64, batch: &[ArrayRef]) -> DFResult<()> {
         match self {
             IncrementalState::Sliding { accumulator, .. } => {
                 accumulator.update_batch(batch)?;
@@ -102,7 +103,7 @@ impl IncrementalState {
                         changed_values.insert(data.get_key_value(r.as_ref()).unwrap().0.clone());
                     } else {
                         let key = Key(Arc::new(r.as_ref().to_vec()));
-                        data.insert(key.clone(), BatchData::new());
+                        data.insert(key.clone(), BatchData::new(new_geneeration));
                         changed_values.insert(key);
                     }
                 }
@@ -206,6 +207,7 @@ pub struct IncrementalAggregatingFunc {
     schema_without_metadata: Arc<Schema>,
     ttl: Duration,
     key_converter: RowConverter,
+    new_generation: u64,
 }
 
 const GLOBAL_KEY: Vec<u8> = vec![];
@@ -226,7 +228,7 @@ impl IncrementalAggregatingFunc {
                         inputs
                     };
 
-                    accs.update_batch(values)?;
+                    accs.update_batch(self.new_generation, values)?;
                 }
                 Ok(())
             })
@@ -326,7 +328,12 @@ impl IncrementalAggregatingFunc {
                 .map(|c| ScalarValue::iter_to_array(c).unwrap()),
         );
 
-        cols.push(Arc::new(generation_builder.finish()));
+        let generations = generation_builder.finish();
+        self.new_generation = self
+            .new_generation
+            .max(max_array::<UInt64Type, _>(&generations).unwrap());
+
+        cols.push(Arc::new(generations));
 
         Ok(Some(cols))
     }
@@ -399,7 +406,12 @@ impl IncrementalAggregatingFunc {
         cols.push(Arc::new(args_row_builder.finish()));
         cols.push(Arc::new(count_builder.finish()));
         cols.push(Arc::new(timestamp_builder.finish()));
-        cols.push(Arc::new(generation_builder.finish()));
+
+        let generations = generation_builder.finish();
+        self.new_generation = self
+            .new_generation
+            .max(max_array::<UInt64Type, _>(&generations).unwrap());
+        cols.push(Arc::new(generations));
 
         Ok(Some(cols))
     }
@@ -774,7 +786,7 @@ impl IncrementalAggregatingFunc {
             self.accumulators.insert(
                 Arc::new(GLOBAL_KEY),
                 Instant::now(),
-                0,
+                self.new_generation,
                 self.make_accumulators(),
             );
         }
@@ -1169,6 +1181,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 key_converter: RowConverter::new(input_schema.sort_fields(false))?,
                 sliding_state_schema,
                 batch_state_schema,
+                new_generation: 0,
             },
         )))
     }
