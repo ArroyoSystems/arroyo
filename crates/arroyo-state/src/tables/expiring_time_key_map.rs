@@ -1,18 +1,16 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    mem,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use anyhow::{anyhow, bail, Ok, Result};
-use arrow::compute::{concat_batches, filter_record_batch, kernels::aggregate, take};
-use arrow::row::{OwnedRow, Row, Rows};
+use arrow::compute::{concat_batches, kernels::aggregate, take};
+use arrow::row::{OwnedRow, Row};
 use arrow_array::{
     cast::AsArray,
     types::{TimestampNanosecondType, UInt64Type},
-    Array, ArrayRef, BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray,
-    UInt64Array,
+    Array, ArrayRef, PrimitiveArray, RecordBatch,
 };
 use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arroyo_rpc::{
@@ -25,7 +23,7 @@ use arroyo_rpc::{
 };
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{
-    from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfo,
+    from_micros, from_nanos, print_time, server_for_hash, to_micros, TaskInfo,
 };
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -1038,7 +1036,7 @@ impl UncachedKeyValueView {
             .map(move |(file, needs_filtering)| {
                 let parent = parent.clone();
                 let schema = schema.clone();
-
+                
                 async move {
                     let object_meta = parent.storage_provider.head(file.as_str()).await?;
                     let object_reader = ParquetObjectReader::new(

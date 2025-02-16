@@ -2675,6 +2675,7 @@ checksum = "0e60eed09d8c01d3cee5b7d30acb059b76614c918fa0f992e0dd6eeb10daad6f"
 [[package]]
 name = "datafusion"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -2730,6 +2731,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow-schema",
  "async-trait",
@@ -2743,6 +2745,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -2766,6 +2769,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "log",
  "tokio",
@@ -2774,6 +2778,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "chrono",
@@ -2793,6 +2798,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -2815,6 +2821,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "datafusion-common",
@@ -2825,6 +2832,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "arrow-buffer",
@@ -2850,6 +2858,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -2869,6 +2878,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -2892,6 +2902,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-nested"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -2913,6 +2924,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "datafusion-common",
  "datafusion-expr",
@@ -2926,6 +2938,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "datafusion-common",
  "datafusion-physical-expr-common",
@@ -2934,6 +2947,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2952,6 +2966,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -2978,6 +2993,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -2991,6 +3007,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-optimizer"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -3005,6 +3022,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "ahash",
  "arrow",
@@ -3038,6 +3056,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "chrono",
@@ -3052,6 +3071,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto-common"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "chrono",
@@ -3063,6 +3083,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "43.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=43.0.0%2Farroyo#13dc2395f367909a0b36cc74ae1b13203b3a4d1e"
 dependencies = [
  "arrow",
  "arrow-array",

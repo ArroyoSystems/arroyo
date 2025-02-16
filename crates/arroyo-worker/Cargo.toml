@@ -32,7 +32,7 @@ serde_json = "1.0"
 serde = "1.0"
 ordered-float = "3"
 
-arrow = { workspace = true }
+arrow = { workspace = true, features = ["prettyprint"] }
 arrow-schema = {workspace = true, features = ["serde"]}
 arrow-array = { workspace = true}
 

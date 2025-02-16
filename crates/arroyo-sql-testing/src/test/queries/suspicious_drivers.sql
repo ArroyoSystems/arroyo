@@ -1,4 +1,3 @@
---fail=Error during planning: can't currently nest updating aggregates
 CREATE TABLE cars(
       timestamp TIMESTAMP,
       driver_id BIGINT,

@@ -1,3 +1,4 @@
+--pk=counter_mod
 CREATE TABLE impulse_source (
       timestamp TIMESTAMP,
       counter bigint unsigned not null,
@@ -9,7 +10,7 @@ CREATE TABLE impulse_source (
       type = 'source'
     );
     CREATE TABLE aggregates (
-      counter_mod BIGINT,
+      counter_mod BIGINT PRIMARY KEY,
       min BIGINT,
       max BIGINT,
       sum BIGINT,

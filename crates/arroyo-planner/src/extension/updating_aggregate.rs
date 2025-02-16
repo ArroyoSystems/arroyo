@@ -8,7 +8,7 @@ use arroyo_rpc::{
     df::ArroyoSchema, grpc::api::UpdatingAggregateOperator,
 };
 use datafusion::common::{
-    internal_err, plan_err, DFSchemaRef, Result, TableReference, ToDFSchema,
+    plan_err, DFSchemaRef, Result, TableReference, ToDFSchema,
 };
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{

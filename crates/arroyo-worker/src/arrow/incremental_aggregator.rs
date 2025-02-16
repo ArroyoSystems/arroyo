@@ -70,6 +70,7 @@ impl BatchData {
 /// Abstract over aggregations that support retracts (sliding accumulators), which we can use
 /// directly, and those that don't in which case we just need to store the raw values and aggregate
 /// them on demand
+#[derive(Debug)]
 enum IncrementalState {
     Sliding {
         expr: Arc<AggregateFunctionExpr>,
@@ -402,6 +403,31 @@ impl IncrementalAggregatingFunc {
         Ok(Some(cols))
     }
 
+    fn restore_sliding(&mut self, key: &[u8], now: Instant, i: usize, aggregate_states: &Vec<Vec<ArrayRef>>, generation: u64) -> Result<()> {
+        println!("Restoring sliding for {:?}", key);
+        let mut accumulators = self.make_accumulators();
+        for ((_, state_cols), acc) in self
+            .aggregates
+            .iter()
+            .zip(aggregate_states.iter())
+            .zip(accumulators.iter_mut())
+        {
+            if let IncrementalState::Sliding { accumulator, .. } = acc {
+                accumulator
+                    .merge_batch(&state_cols.iter().map(|c| c.slice(i, 1)).collect_vec())?
+            }
+        }
+
+        self.accumulators.insert(
+            Arc::new(key.to_vec()),
+            now,
+            generation,
+            accumulators,
+        );
+
+        Ok(())
+    }
+
     async fn initialize(&mut self, ctx: &mut OperatorContext) -> Result<()> {
         let table = ctx.table_manager.get_uncached_key_value_view("a").await?;
 
@@ -411,6 +437,12 @@ impl IncrementalAggregatingFunc {
 
         while let Some(batch) = stream.next().await {
             let batch = batch?;
+
+            if batch.num_rows() == 0 {
+                continue;
+            }
+
+            println!("[{}]initialized from sliding batch\n{}", ctx.task_info.task_index, arrow::util::pretty::pretty_format_batches(&[batch.clone()]).unwrap());
             let key_cols: Vec<_> = self
                 .sliding_state_schema
                 .sort_columns(&batch, false)
@@ -433,27 +465,14 @@ impl IncrementalAggregatingFunc {
 
             let now = Instant::now();
 
-            let key_rows = key_converter.convert_columns(&key_cols)?;
-            for ((i, row), generation) in key_rows.iter().enumerate().zip(generations) {
-                let mut accumulators = self.make_accumulators();
-                for ((_, state_cols), acc) in self
-                    .aggregates
-                    .iter()
-                    .zip(aggregate_states.iter())
-                    .zip(accumulators.iter_mut())
-                {
-                    if let IncrementalState::Sliding { accumulator, .. } = acc {
-                        accumulator
-                            .merge_batch(&state_cols.iter().map(|c| c.slice(i, 1)).collect_vec())?
-                    }
+            if key_cols.is_empty() {
+                // global aggregate
+                self.restore_sliding(&GLOBAL_KEY, now, 0, &aggregate_states, generations.value(0))?;
+            } else {
+                let key_rows = key_converter.convert_columns(&key_cols)?;
+                for ((i, row), generation) in key_rows.iter().enumerate().zip(generations) {
+                    self.restore_sliding(row.as_ref(), now, i, &aggregate_states, generation.unwrap())?;
                 }
-
-                self.accumulators.insert(
-                    Arc::new(row.as_ref().to_vec()),
-                    now,
-                    generation.unwrap(),
-                    accumulators,
-                );
             }
         }
 
@@ -467,6 +486,13 @@ impl IncrementalAggregatingFunc {
             let mut stream = Box::pin(table.get_all());
             while let Some(batch) = stream.next().await {
                 let batch = batch?;
+
+                if batch.num_rows() == 0 {
+                    continue;
+                }
+
+                println!("[{}]initialized from batch batch\n{}", ctx.task_info.task_index, arrow::util::pretty::pretty_format_batches(&[batch.clone()]).unwrap());
+
                 let key_cols: Vec<_> = self
                     .sliding_state_schema
                     .sort_columns(&batch, false)
@@ -496,14 +522,21 @@ impl IncrementalAggregatingFunc {
                     .unwrap();
                 let generations = batch.columns().last().unwrap().as_primitive::<UInt64Type>();
 
-                let key_rows = self.key_converter.convert_columns(&key_cols)?;
+                let key_rows = if key_cols.is_empty() {
+                    vec![GLOBAL_KEY]
+                } else {
+                    self.key_converter.convert_columns(&key_cols)?
+                        .iter().map(|k| k.as_ref().to_vec())
+                        .collect()
+                };
 
                 for (i, row) in key_rows.iter().enumerate() {
                     let Some(accumulators) = self.accumulators.get_mut(row.as_ref()) else {
-                        bail!(
+                        debug!(
                             "missing accumulator for key {:?} while restoring batch",
-                            row.as_ref()
+                            row
                         );
+                        continue;
                     };
 
                     let count = count_column.value(i);
@@ -740,7 +773,7 @@ impl IncrementalAggregatingFunc {
             );
         }
 
-        if self.updated_keys.contains_key(GLOBAL_KEY.as_slice()) {
+        if !self.updated_keys.contains_key(GLOBAL_KEY.as_slice()) {
             if first {
                 self.updated_keys.insert(Key(Arc::new(GLOBAL_KEY)), None);
             } else {
@@ -963,6 +996,7 @@ impl ArrowOperator for IncrementalAggregatingFunc {
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         self.initialize(ctx).await.unwrap();
+        println!("[{}]initial {:?}", ctx.task_info.task_index, self.accumulators.get_mut(&GLOBAL_KEY));
     }
 }
 
