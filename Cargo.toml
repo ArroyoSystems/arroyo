@@ -93,6 +93,7 @@ datafusion-functions-window = {git = 'https://github.com/ArroyoSystems/arrow-dat
 datafusion-functions-json = {git = 'https://github.com/ArroyoSystems/datafusion-functions-json', branch = 'datafusion_43'}
 sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0.51.0/arroyo" }
 
+
 object_store = { git = 'http://github.com/ArroyoSystems/arrow-rs', branch = 'object_store_0.11.1/arroyo' }
 
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }

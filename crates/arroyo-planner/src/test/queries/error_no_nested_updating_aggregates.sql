@@ -1,4 +1,3 @@
---fail=Error during planning: can't currently nest updating aggregates
 CREATE TABLE impulse with (
     connector = 'impulse',
     event_rate = '10'

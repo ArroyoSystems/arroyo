@@ -4,7 +4,6 @@ use std::thread;
 use std::time::Duration;
 
 use arrow::datatypes::IntervalMonthDayNanoType;
-
 use arroyo_datastream::logical::{LogicalEdge, LogicalGraph, LogicalNode};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 
@@ -42,6 +41,7 @@ use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode},
 };
+use prost::Message;
 
 pub(crate) struct PlanToGraphVisitor<'a> {
     graph: DiGraph<LogicalNode, LogicalEdge>,
@@ -118,6 +118,16 @@ impl<'a> Planner<'a> {
     ) -> Result<Arc<dyn PhysicalExpr>> {
         self.planner
             .create_physical_expr(expr, input_dfschema, self.session_state)
+    }
+
+    pub(crate) fn serialize_as_physical_expr(
+        &self,
+        expr: &Expr,
+        schema: &DFSchema,
+    ) -> Result<Vec<u8>> {
+        let physical = self.create_physical_expr(expr, schema)?;
+        let proto = serialize_physical_expr(&physical, &DefaultPhysicalExtensionCodec {})?;
+        Ok(proto.encode_to_vec())
     }
 
     // This splits aggregates into two parts, the partial aggregation and the final aggregation.

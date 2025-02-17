@@ -1,11 +1,11 @@
 use crate::arrow::async_udf::AsyncUdfConstructor;
+use crate::arrow::incremental_aggregator::IncrementalAggregatingConstructor;
 use crate::arrow::instant_join::InstantJoinConstructor;
 use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
 use crate::arrow::lookup_join::LookupJoinConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
-use crate::arrow::updating_aggregator::UpdatingAggregatingConstructor;
 use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
@@ -871,7 +871,7 @@ pub fn construct_operator(
         OperatorName::TumblingWindowAggregate => Box::new(TumblingAggregateWindowConstructor),
         OperatorName::SlidingWindowAggregate => Box::new(SlidingAggregatingWindowConstructor),
         OperatorName::SessionWindowAggregate => Box::new(SessionAggregatingWindowConstructor),
-        OperatorName::UpdatingAggregate => Box::new(UpdatingAggregatingConstructor),
+        OperatorName::UpdatingAggregate => Box::new(IncrementalAggregatingConstructor),
         OperatorName::ExpressionWatermark => Box::new(WatermarkGeneratorConstructor),
         OperatorName::Join => Box::new(JoinWithExpirationConstructor),
         OperatorName::InstantJoin => Box::new(InstantJoinConstructor),

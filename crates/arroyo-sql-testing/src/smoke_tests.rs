@@ -460,9 +460,7 @@ async fn run_completely(
     }
 }
 
-fn get_key(v: &str, primary_keys: Option<&[&str]>) -> Vec<String> {
-    let v: Value = serde_json::from_str(v).unwrap();
-
+fn get_key(v: &Value, primary_keys: Option<&[&str]>) -> Vec<String> {
     match primary_keys {
         Some(pks) => pks
             .iter()
@@ -474,7 +472,7 @@ fn get_key(v: &str, primary_keys: Option<&[&str]>) -> Vec<String> {
     }
 }
 
-fn merge_debezium(rows: Vec<Value>, primary_keys: Option<&[&str]>) -> HashSet<String> {
+fn merge_debezium(rows: Vec<Value>, primary_keys: Option<&[&str]>) -> HashSet<Value> {
     let mut state = HashMap::new();
     for r in rows {
         let before = r.get("before").map(roundtrip);
@@ -529,6 +527,22 @@ fn is_debezium(value: &Value) -> bool {
     op.as_str().is_some()
 }
 
+fn order_by_pk(lines: HashSet<Value>, pks: Option<&[&str]>) -> Vec<Value> {
+    let mut lines: Vec<Value> = lines.into_iter().collect();
+
+    let Some(pks) = pks else {
+        return lines;
+    };
+
+    lines.sort_by_key(|v| {
+        pks.iter()
+            .map(|pk| v.get(pk).unwrap().to_string())
+            .collect::<Vec<_>>()
+    });
+
+    lines
+}
+
 fn check_debezium(
     name: &str,
     output_location: String,
@@ -537,20 +551,27 @@ fn check_debezium(
     golden_output_lines: Vec<Value>,
     primary_keys: Option<&[&str]>,
 ) {
-    let output_merged = merge_debezium(output_lines, primary_keys);
-    let golden_output_medged = merge_debezium(golden_output_lines, primary_keys);
-    assert_eq!(
-        output_merged, golden_output_medged,
-        "failed to check debezium equality ({}) for\noutput: {}\ngolden: {}",
-        name, output_location, golden_output_location
+    let output_merged = order_by_pk(merge_debezium(output_lines, primary_keys), primary_keys);
+    let golden_output_merged = order_by_pk(
+        merge_debezium(golden_output_lines, primary_keys),
+        primary_keys,
+    );
+
+    similar_asserts::assert_eq!(
+        output_merged,
+        golden_output_merged,
+        "Incorrect outputs for updating ({}) for\noutput: {}\ngolden: {}",
+        name,
+        output_location,
+        golden_output_location
     );
 }
-fn roundtrip(v: &Value) -> String {
+fn roundtrip(v: &Value) -> Value {
     if v.is_null() {
-        return "null".to_string();
+        return Value::Null;
     }
     // round trip string through a btreemap to get consistent key ordering
-    serde_json::to_string(&serde_json::from_value::<BTreeMap<String, Value>>(v.clone()).unwrap())
+    serde_json::to_value(serde_json::from_value::<BTreeMap<String, Value>>(v.clone()).unwrap())
         .unwrap()
 }
 
@@ -578,29 +599,29 @@ async fn check_output_files(
         .lines()
         .map(|s| serde_json::from_str(s).unwrap())
         .collect();
-    if output_lines.len() != golden_output_lines.len() {
-        // might be updating, in which case lets see if we can cancel out rows
-        let Some(first_output) = output_lines.first() else {
-            panic!(
-                "failed at check {}, output has 0 lines, expect {} lines.\noutput: {}\ngolden: {}",
-                check_name,
-                golden_output_lines.len(),
-                output_location,
-                golden_output_location
-            );
-        };
-        if is_debezium(first_output) {
-            check_debezium(
-                check_name,
-                output_location,
-                golden_output_location,
-                output_lines,
-                golden_output_lines,
-                primary_keys,
-            );
-            return;
-        }
 
+    let Some(first_output) = output_lines.first() else {
+        panic!(
+            "failed at check {}, output has 0 lines, expect {} lines.\noutput: {}\ngolden: {}",
+            check_name,
+            golden_output_lines.len(),
+            output_location,
+            golden_output_location
+        );
+    };
+    if is_debezium(first_output) {
+        check_debezium(
+            check_name,
+            output_location,
+            golden_output_location,
+            output_lines,
+            golden_output_lines,
+            primary_keys,
+        );
+        return;
+    }
+
+    if output_lines.len() != golden_output_lines.len() {
         panic!(
             "failed at check {}, output has {} lines, expect {} lines.\noutput: {}\ngolden: {}",
             check_name,
@@ -611,17 +632,21 @@ async fn check_output_files(
         );
     }
 
-    output_lines.sort_by_cached_key(roundtrip);
-    golden_output_lines.sort_by_cached_key(roundtrip);
+    output_lines.sort_by_cached_key(|v| roundtrip(v).to_string());
+    golden_output_lines.sort_by_cached_key(|v| roundtrip(v).to_string());
     output_lines
         .into_iter()
         .zip(golden_output_lines.into_iter())
         .enumerate()
         .for_each(|(i, (output_line, golden_output_line))| {
-            assert_eq!(
-                output_line, golden_output_line,
+            similar_asserts::assert_eq!(
+                output_line,
+                golden_output_line,
                 "check {}: line {} of output and golden output differ\nactual:{}\nexpected:{})",
-                check_name, i, output_location, golden_output_location
+                check_name,
+                i,
+                output_location,
+                golden_output_location
             )
         });
 }

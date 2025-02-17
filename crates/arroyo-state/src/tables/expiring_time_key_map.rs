@@ -1,17 +1,16 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    mem,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use anyhow::{anyhow, bail, Ok, Result};
-use arrow::compute::{concat_batches, filter_record_batch, kernels::aggregate, take};
-use arrow::row::OwnedRow;
+use arrow::compute::{concat_batches, kernels::aggregate, take};
+use arrow::row::{OwnedRow, Row};
 use arrow_array::{
     cast::AsArray,
     types::{TimestampNanosecondType, UInt64Type},
-    BooleanArray, PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
+    Array, ArrayRef, PrimitiveArray, RecordBatch,
 };
 use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arroyo_rpc::{
@@ -23,12 +22,9 @@ use arroyo_rpc::{
     Converter,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{
-    from_micros, from_nanos, print_time, server_for_hash, to_micros, to_nanos, TaskInfo,
-};
+use arroyo_types::{from_micros, from_nanos, print_time, server_for_hash, to_micros, TaskInfo};
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
-
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::{
@@ -213,36 +209,11 @@ impl ExpiringTimeKeyTable {
         Ok(view)
     }
 
-    pub(crate) async fn get_last_key_value_view(
+    pub(crate) async fn get_uncached_key_value_view(
         &self,
         state_tx: Sender<StateMessage>,
-        watermark: Option<SystemTime>,
-    ) -> Result<LastKeyValueView> {
-        let cutoff = self.get_cutoff(watermark);
-        let files = self.get_files_with_filtering(cutoff);
-        let mut view = LastKeyValueView::new(self.clone(), state_tx)?;
-        let batches = self
-            .call_on_filtered_batches(files, |batch| {
-                let timestamp_array: &PrimitiveArray<TimestampNanosecondType> = batch
-                    .column(self.schema.timestamp_index())
-                    .as_primitive_opt()
-                    .ok_or_else(|| anyhow!("failed to find timestamp column"))?;
-                let max_timestamp = from_nanos(
-                    aggregate::max(timestamp_array)
-                        .ok_or_else(|| anyhow!("should have max timestamp"))?
-                        as u128,
-                );
-                if max_timestamp < cutoff {
-                    Ok(vec![])
-                } else {
-                    Ok(vec![batch])
-                }
-            })
-            .await?;
-        for batch in batches {
-            view.insert_batch_internal(batch, true).await?;
-        }
-        Ok(view)
+    ) -> Result<UncachedKeyValueView> {
+        UncachedKeyValueView::new(self.clone(), state_tx)
     }
 }
 
@@ -479,9 +450,11 @@ impl TimeTableCompactor {
             operator_metadata: operator_metadata.clone(),
             writers: HashMap::new(),
         };
+
         let cutoff = operator_metadata
             .min_watermark
             .map(|min_micros| from_micros(min_micros) - retention);
+
         for (file_name, file) in files {
             let max_file_timestamp = from_micros(file.max_timestamp_micros);
             if cutoff
@@ -490,10 +463,12 @@ impl TimeTableCompactor {
             {
                 continue;
             }
+
             let reader = ParquetObjectReader::new(
                 compactor.storage_provider.get_backing_store(),
                 compactor.storage_provider.head(file_name.as_str()).await?,
             );
+
             let first_partition =
                 server_for_hash(file.min_routing_key, operator_metadata.parallelism as usize);
             let last_partition =
@@ -501,6 +476,7 @@ impl TimeTableCompactor {
             let multiple_partitions = first_partition != last_partition;
             let reader_builder = ParquetRecordBatchStreamBuilder::new(reader).await?;
             let mut stream = reader_builder.build()?;
+
             // projection to trim the metadata fields. Should probably be factored out.
             while let Some(batch) = stream.try_next().await? {
                 // Filter by _timestamp field
@@ -508,6 +484,7 @@ impl TimeTableCompactor {
                 if time_filtered.num_rows() == 0 {
                     continue;
                 }
+
                 if !multiple_partitions {
                     compactor
                         .write_batch(first_partition, time_filtered)
@@ -522,12 +499,14 @@ impl TimeTableCompactor {
                             .unwrap(),
                         operator_metadata.parallelism as usize,
                     )?;
+
                     let indices = sort_to_indices(&partitions, None, None).unwrap();
                     let columns = time_filtered
                         .columns()
                         .iter()
                         .map(|c| take(c, &indices, None).unwrap())
                         .collect();
+
                     let sorted =
                         RecordBatch::try_new(schema.state_schema().schema.clone(), columns)?;
                     let sorted_keys = take(&partitions, &indices, None)?;
@@ -957,12 +936,12 @@ impl KeyTimeView {
         let mut rows = vec![];
         for range in self.schema.partition(&sorted_batch, false)? {
             let value_batch = value_batch.slice(range.start, range.end - range.start);
-            let key_columns = if self.schema.key_indices.is_none() {
+            let key_columns = if self.schema.storage_keys().is_none() {
                 vec![]
             } else {
                 sorted_batch
                     .slice(range.start, 1)
-                    .project(self.schema.key_indices.as_ref().unwrap())?
+                    .project(self.schema.storage_keys().as_ref().unwrap())?
                     .columns()
                     .to_vec()
             };
@@ -992,251 +971,117 @@ impl KeyTimeView {
     }
 }
 
-#[derive(Debug)]
-pub struct LastKeyValueView {
+pub struct UncachedKeyValueView {
     parent: ExpiringTimeKeyTable,
     key_converter: Converter,
-    value_converter: Converter,
-    value_indices: Vec<usize>,
-    // indices of schema that aren't keys, used for projection
-    backing_map: HashMap<Vec<u8>, Value>,
-    expirations: BTreeMap<SystemTime, HashSet<Vec<u8>>>,
     state_tx: Sender<StateMessage>,
-    key_indices: Vec<usize>,
-}
-#[derive(Debug)]
-struct Value {
-    value_row_bytes: Vec<u8>,
-    timestamp: SystemTime,
-    generation: u64,
 }
 
-impl LastKeyValueView {
+impl UncachedKeyValueView {
     fn new(parent: ExpiringTimeKeyTable, state_tx: Sender<StateMessage>) -> Result<Self> {
         let schema = parent.schema.memory_schema();
         let key_converter = schema.converter(false)?;
-        let Some(generation_index) = parent.schema.generation_index() else {
-            bail!("should have generation index")
-        };
-        let value_converter = schema.value_converter(false, generation_index)?;
-        let value_indices = schema
-            .value_indices(false)
-            .into_iter()
-            .filter(|index| *index != generation_index)
-            .collect();
-        let backing_map = HashMap::new();
-        let expirations = BTreeMap::new();
+
         Ok(Self {
             key_converter,
-            value_converter,
-            value_indices,
-            backing_map,
-            expirations,
             parent,
             state_tx,
-            key_indices: schema.key_indices.as_ref().unwrap().clone(),
         })
     }
-    pub async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
-        self.insert_batch_internal(batch, false).await
-    }
 
-    pub fn get_current_matching_values(
-        &self,
-        batch: &RecordBatch,
-    ) -> Result<Option<(RecordBatch, BooleanArray)>> {
-        if self.backing_map.is_empty() {
-            return Ok(None);
-        }
-        let key_batch: RecordBatch = batch.project(&self.key_indices)?;
-        let key_rows = self
-            .key_converter
-            .convert_all_columns(key_batch.columns(), key_batch.num_rows())?;
-        let capacity = batch.num_rows().min(self.backing_map.len());
-        let mut prior_values = Vec::with_capacity(capacity);
-        let mut prior_timestamp_builder = TimestampNanosecondArray::builder(capacity);
-        let mut prior_row_filter = BooleanArray::builder(capacity);
-        for i in 0..batch.num_rows() {
-            match self.backing_map.get(key_rows.row(i).as_ref()) {
-                None => {
-                    prior_row_filter.append_value(false);
-                }
-                Some(Value {
-                    value_row_bytes,
-                    timestamp,
-                    generation: _,
-                }) => {
-                    prior_row_filter.append_value(true);
-                    prior_timestamp_builder.append_value(to_nanos(*timestamp) as i64);
-                    prior_values.push(value_row_bytes.as_slice());
-                }
-            }
-        }
-        let filter = prior_row_filter.finish();
-        let filtered_key_batch: RecordBatch = filter_record_batch(&key_batch, &filter)?;
-        if filtered_key_batch.num_rows() == 0 {
-            return Ok(None);
-        }
-        let mut columns = filtered_key_batch.columns().to_vec();
-        let value_columns = self.value_converter.convert_raw_rows(prior_values)?;
-        columns.extend(value_columns);
-        columns.push(Arc::new(prior_timestamp_builder.finish()));
-
-        Ok(Some((
-            RecordBatch::try_new(batch.schema(), columns)?,
-            filter,
-        )))
-    }
-
-    async fn insert_batch_internal(&mut self, batch: RecordBatch, is_backfill: bool) -> Result<()> {
-        if batch.num_rows() == 0 {
+    // Simply forward updates to state storage
+    pub async fn insert_batch(&mut self, columns: Vec<ArrayRef>) -> Result<()> {
+        if columns.is_empty() {
             return Ok(());
-        }
-        let key_batch: RecordBatch = batch.project(&self.key_indices)?;
-        let value_batch = batch.project(&self.value_indices)?;
-        let key_rows = self
-            .key_converter
-            .convert_all_columns(key_batch.columns(), key_batch.num_rows())?;
-        let value_rows = self
-            .value_converter
-            .convert_all_columns(value_batch.columns(), key_batch.num_rows())?;
-        let timestamp_columns = batch
-            .column(self.parent.schema.memory_schema().timestamp_index)
-            .as_any()
-            .downcast_ref::<TimestampNanosecondArray>()
-            .ok_or_else(|| anyhow!("should be able to extract timestamp array"))?;
-        let mut max_timestamps = Vec::with_capacity(batch.num_rows());
-        let mut new_generation_values = Vec::with_capacity(batch.num_rows());
+        };
 
-        let generation_array = is_backfill
-            .then(|| {
-                batch
-                    .column(
-                        self.parent
-                            .schema
-                            .generation_index()
-                            .ok_or_else(|| anyhow!("should have generation index"))?,
-                    )
-                    .as_any()
-                    .downcast_ref::<UInt64Array>()
-                    .ok_or_else(|| anyhow!("should have generation array"))
-            })
-            .transpose()?;
-        for i in 0..batch.num_rows() {
-            let (max_timestamp, generation) = self.insert_entry(
-                key_rows.row(i).as_ref(),
-                value_rows.row(i).as_ref(),
-                from_nanos(timestamp_columns.value(i) as u128),
-                generation_array.map(|generation_array| generation_array.value(i)),
-            )?;
-            if !is_backfill {
-                new_generation_values.push(generation);
-                max_timestamps.push(to_nanos(max_timestamp) as i64);
-            }
-        }
-        if is_backfill {
-            return Ok(());
-        }
-        let mut columns = batch.columns().to_vec();
-        columns[self.parent.schema.memory_schema().timestamp_index] =
-            Arc::new(TimestampNanosecondArray::from(max_timestamps));
-        columns.push(Arc::new(UInt64Array::from(new_generation_values)));
-        let batch =
+        let batch_with_generation =
             RecordBatch::try_new(self.parent.schema.memory_schema().schema.clone(), columns)?;
+
         self.state_tx
             .send(StateMessage::TableData {
                 table: self.parent.table_name.to_string(),
-                data: TableData::RecordBatch(batch.clone()),
+                data: TableData::RecordBatch(batch_with_generation),
             })
             .await?;
         Ok(())
     }
 
-    fn insert_entry(
-        &mut self,
-        key_row: &[u8],
-        value_row: &[u8],
-        timestamp: SystemTime,
-        generation: Option<u64>,
-    ) -> Result<(SystemTime, u64)> {
-        match self.backing_map.get_mut(key_row) {
-            None => {
-                let generation = generation.unwrap_or_default();
-                self.backing_map.insert(
-                    key_row.to_vec(),
-                    Value {
-                        value_row_bytes: value_row.to_vec(),
-                        timestamp,
-                        generation,
-                    },
-                );
-                self.expirations
-                    .entry(timestamp)
-                    .or_default()
-                    .insert(key_row.to_vec());
-                Ok((timestamp, generation))
-            }
-            Some(Value {
-                value_row_bytes: old_value,
-                timestamp: existing_timestamp,
-                generation: current_generation,
-            }) => {
-                match generation {
-                    Some(generation) => {
-                        // this handles out of order backfills, we only want the largest generation.
-                        if generation < *current_generation {
-                            return Ok((*existing_timestamp, *current_generation));
-                        }
-                        *current_generation = generation;
-                        generation
-                    }
-                    // if it is new data, bump the generation by 1.
-                    None => {
-                        *current_generation += 1;
-                        *current_generation
-                    }
-                };
+    pub fn convert_keys(&self, rows: Vec<Row>) -> Result<Vec<ArrayRef>> {
+        self.key_converter.convert_rows(rows)
+    }
 
-                if *existing_timestamp < timestamp {
-                    self.expirations
-                        .get_mut(existing_timestamp)
-                        .unwrap()
-                        .remove(key_row);
-                    self.expirations
-                        .entry(timestamp)
-                        .or_default()
-                        .insert(key_row.to_vec());
-                    *existing_timestamp = timestamp;
+    /// Gets all data from the checkpoint files. Note this is not necessarily ordered, or
+    /// de-duplicated so callers must do so themselves. We avoid doing this here because
+    /// callers will likely already be doing some of the necessary work (like row conversion)
+    /// and it would be wasteful to do this multiple times.
+    pub fn get_all(&mut self) -> impl Stream<Item = Result<RecordBatch>> {
+        let files: Vec<(String, bool)> = self
+            .parent
+            .checkpoint_files
+            .iter()
+            .filter_map(|file| {
+                if file.max_routing_key >= *self.parent.task_info.key_range.start()
+                    && *self.parent.task_info.key_range.end() >= file.min_routing_key
+                {
+                    let needs_hash_filtering = *self.parent.task_info.key_range.end()
+                        < file.max_routing_key
+                        || *self.parent.task_info.key_range.start() > file.min_routing_key;
+                    Some((file.file.clone(), needs_hash_filtering))
+                } else {
+                    None
                 }
-                *old_value = value_row.to_vec();
-                Ok((*existing_timestamp, *current_generation))
-            }
-        }
-    }
+            })
+            .collect();
 
-    pub fn would_expire(&mut self, watermark: Option<SystemTime>) -> bool {
-        let Some(watermark) = watermark else {
-            return false;
-        };
-        let cutoff = watermark - self.parent.retention;
-        let Some((earliest_timestamp, _value)) = self.expirations.first_key_value() else {
-            return false;
-        };
-        *earliest_timestamp < cutoff
-    }
+        let parent = self.parent.clone();
+        let schema = self.parent.schema.clone();
 
-    pub fn expire(&mut self, watermark: Option<SystemTime>) -> Result<()> {
-        let Some(watermark) = watermark else {
-            return Ok(());
-        };
-        let cutoff = watermark - self.parent.retention;
-        let mut to_delete = self.expirations.split_off(&cutoff);
-        mem::swap(&mut self.expirations, &mut to_delete);
-        for keys in to_delete.values() {
-            for key in keys {
-                self.backing_map.remove(key);
-            }
-        }
-        Ok(())
+        futures::stream::iter(files)
+            .map(move |(file, needs_filtering)| {
+                let parent = parent.clone();
+                let schema = schema.clone();
+
+                async move {
+                    let object_meta = parent.storage_provider.head(file.as_str()).await?;
+                    let object_reader = ParquetObjectReader::new(
+                        parent.storage_provider.get_backing_store(),
+                        object_meta,
+                    );
+                    let reader_builder =
+                        ParquetRecordBatchStreamBuilder::new(object_reader).await?;
+                    let stream = reader_builder.build()?;
+
+                    Ok(stream
+                        .map_err(anyhow::Error::from)
+                        .try_filter_map(move |mut batch| {
+                            let schema = schema.clone();
+                            let task_info = parent.task_info.clone();
+                            async move {
+                                if needs_filtering {
+                                    match schema
+                                        .filter_by_hash_index(batch, &task_info.key_range)?
+                                    {
+                                        None => return Ok(None),
+                                        Some(filtered_batch) => batch = filtered_batch,
+                                    };
+                                }
+
+                                if batch.num_rows() == 0 {
+                                    return Ok(None);
+                                }
+
+                                // Project to remove metadata field
+                                let projection: Vec<_> =
+                                    (0..(batch.schema().fields().len() - 2)).collect();
+                                batch = batch.project(&projection)?;
+
+                                Ok(Some(batch))
+                            }
+                        }))
+                }
+            })
+            .buffer_unordered(1)
+            .try_flatten()
     }
 }

@@ -70,6 +70,7 @@ use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
 use arroyo_udf_python::PythonUDF;
 use datafusion::execution::{FunctionRegistry, SessionStateBuilder, SessionStateDefaults};
+use datafusion::functions_aggregate::variance::var_samp_udaf;
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
@@ -135,6 +136,9 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
     for p in SessionStateDefaults::default_aggregate_functions() {
         registry.register_udaf(p).unwrap();
     }
+
+    // some more UDAFs that are missing from the default list for some reason
+    registry.register_udaf(var_samp_udaf()).unwrap();
 
     for p in SessionStateDefaults::default_window_functions() {
         registry.register_udwf(p).unwrap();
@@ -992,11 +996,12 @@ pub fn schema_with_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> Result<
         })?
         .0;
 
-    Ok(ArroyoSchema {
+    Ok(ArroyoSchema::new(
         schema,
         timestamp_index,
-        key_indices: Some(key_indices),
-    })
+        Some(key_indices),
+        None,
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

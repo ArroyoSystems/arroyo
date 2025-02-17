@@ -1,3 +1,5 @@
+--pk=counter
+
 CREATE TABLE impulse_source (
     timestamp TIMESTAMP,
     counter BIGINT UNSIGNED NOT NULL,

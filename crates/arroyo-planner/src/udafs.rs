@@ -11,7 +11,7 @@ impl Accumulator for EmptyUdaf {
         unreachable!()
     }
 
-    fn evaluate(&mut self) -> Result<ScalarValue> {
+    fn evaluate(&self) -> Result<ScalarValue> {
         unreachable!()
     }
 
@@ -19,7 +19,7 @@ impl Accumulator for EmptyUdaf {
         unreachable!()
     }
 
-    fn state(&mut self) -> Result<Vec<ScalarValue>> {
+    fn state(&self) -> Result<Vec<ScalarValue>> {
         unreachable!()
     }
 

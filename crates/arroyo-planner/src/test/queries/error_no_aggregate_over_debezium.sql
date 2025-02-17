@@ -1,4 +1,3 @@
---fail=Error during planning: can't currently nest updating aggregates
 CREATE TABLE debezium_input (
     id int PRIMARY KEY,
     count int

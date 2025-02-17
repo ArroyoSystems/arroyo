@@ -501,7 +501,7 @@ pub struct ArrowCollector {
 
 fn repartition<'a>(
     record: &'a RecordBatch,
-    keys: &'a Option<Vec<usize>>,
+    keys: Option<&'a Vec<usize>>,
     qs: usize,
 ) -> impl Iterator<Item = (usize, RecordBatch)> + 'a {
     let mut buf = vec![0; record.num_rows()];
@@ -579,7 +579,7 @@ impl Collector for ArrowCollector {
             });
 
         for (i, out_q) in self.out_qs.iter_mut().enumerate() {
-            let partitions = repartition(&record, &out_schema.key_indices, out_q.len());
+            let partitions = repartition(&record, out_schema.routing_keys(), out_q.len());
 
             for (partition, batch) in partitions {
                 out_q[partition]
