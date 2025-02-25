@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
 pub const GENERATIONS_TO_COMPACT: u32 = 1; // only compact generation 0 files
@@ -123,31 +123,86 @@ impl BackingStore for ParquetBackend {
 
         let storage_client = get_storage_provider().await?;
 
-        // wait for all of the futures to complete
-        while let Some(result) = futures.next().await {
-            let operator_id = result?;
+        while !futures.is_empty() {
+            match tokio::time::timeout(std::time::Duration::from_secs(60), futures.next()).await {
+                Ok(Some(result)) => match result {
+                    Ok(operator_id) => {
+                        for epoch_to_remove in old_min_epoch..min_epoch {
+                            let path = metadata_path(&operator_path(
+                                &metadata.job_id,
+                                epoch_to_remove,
+                                &operator_id,
+                            ));
 
-            for epoch_to_remove in old_min_epoch..min_epoch {
-                let path = metadata_path(&operator_path(
-                    &metadata.job_id,
-                    epoch_to_remove,
-                    &operator_id,
-                ));
-                storage_client.delete_if_present(path).await?;
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(30),
+                                storage_client.delete_if_present(path),
+                            )
+                            .await
+                            {
+                                Ok(delete_result) => {
+                                    delete_result?;
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        message = "Timeout deleting operator metadata path",
+                                        job_id = metadata.job_id,
+                                        operator_id,
+                                        epoch = epoch_to_remove
+                                    );
+                                }
+                            }
+                        }
+                        debug!(
+                            message = "Finished cleaning operator",
+                            job_id = metadata.job_id,
+                            operator_id,
+                            min_epoch
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            message = "Error cleaning operator",
+                            job_id = metadata.job_id,
+                            error = format!("{:?}", e)
+                        );
+                    }
+                },
+                Ok(None) => {
+                    break;
+                }
+                Err(_) => {
+                    warn!(
+                        message = "Timeout occurred while waiting for operator cleanup",
+                        job_id = metadata.job_id
+                    );
+                    break;
+                }
             }
-            debug!(
-                message = "Finished cleaning operator",
-                job_id = metadata.job_id,
-                operator_id,
-                min_epoch
-            );
         }
 
         for epoch_to_remove in old_min_epoch..min_epoch {
-            storage_client
-                .delete_if_present(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
-                .await?;
+            let path = metadata_path(&base_path(&metadata.job_id, epoch_to_remove));
+
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                storage_client.delete_if_present(path),
+            )
+            .await
+            {
+                Ok(result) => {
+                    result?;
+                }
+                Err(_) => {
+                    warn!(
+                        message = "Timeout deleting checkpoint metadata path",
+                        job_id = metadata.job_id,
+                        epoch = epoch_to_remove
+                    );
+                }
+            }
         }
+
         metadata.min_epoch = min_epoch;
         Self::write_checkpoint_metadata(metadata).await?;
         Ok(())
