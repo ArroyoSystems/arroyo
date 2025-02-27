@@ -6,7 +6,7 @@ CREATE table debezium_source (
     initial_bid int,
     date_string text,
     datetime datetime GENERATED ALWAYS AS (CAST(date_string as timestamp)) STORED,
-    watermark datetime GENERATED ALWAYS AS (CAST(date_string as timestamp) - interval '1 second') STORED
+    "watermark" datetime GENERATED ALWAYS AS (CAST(date_string as timestamp) - interval '1 second') STORED
   ) WITH (
     connector = 'kafka',
     bootstrap_servers = 'localhost:9092',

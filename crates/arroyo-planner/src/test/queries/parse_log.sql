@@ -1,8 +1,8 @@
 create table logs (
     value TEXT NOT NULL,
-    parsed TEXT GENERATED ALWAYS AS (parse_log(value)) stored,
+    parsed TEXT GENERATED ALWAYS AS (parse_log(value)),
     event_time TIMESTAMP GENERATED ALWAYS AS
-        (CAST(extract_json_string(parse_log(value), '$.timestamp') as TIMESTAMP)) stored
+        (CAST(extract_json_string(parse_log(value), '$.timestamp') as TIMESTAMP))
 ) with (
     connector = 'kafka',
     type = 'source',

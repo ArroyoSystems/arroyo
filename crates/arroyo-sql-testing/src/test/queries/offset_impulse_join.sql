@@ -1,27 +1,25 @@
 CREATE TABLE impulse_source (
-  timestamp TIMESTAMP,
+  timestamp TIMESTAMP NOT NULL,
   counter bigint unsigned not null,
-  subtask_index bigint unsigned not null
+  subtask_index bigint unsigned not null,
+  WATERMARK FOR timestamp
 ) WITH (
   connector = 'single_file',
   path = '$input_dir/impulse.json',
   format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp'
+  type = 'source'
 );
 
 CREATE TABLE delayed_impulse_source (
-  timestamp TIMESTAMP,
+  timestamp TIMESTAMP NOT NULL,
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null,
-  watermark timestamp GENERATED ALWAYS AS (timestamp - INTERVAL '10 minute') STORED
+  watermark for timestamp AS (timestamp - INTERVAL '10 minute')
 ) WITH (
   connector = 'single_file',
   path = '$input_dir/impulse.json',
   format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp',
-  watermark_field = 'watermark'
+  type = 'source'
 );
 
 CREATE TABLE offset_output (
