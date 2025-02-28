@@ -5,7 +5,7 @@ use crate::{
     fields_with_qualifiers, multifield_partial_ord, parse_sql, ArroyoSchemaProvider, DFField,
 };
 use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
-use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
+use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
@@ -58,7 +58,6 @@ use datafusion::{
 use itertools::Itertools;
 use sqlparser::ast;
 use sqlparser::ast::TableConstraint;
-use std::ptr::null;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tracing::warn;
@@ -679,14 +678,23 @@ impl Table {
                         None
                     }
                 });
-                Ok((struct_field, generating_expression))
+
+                let metadata = column.options.iter().find_map(|option| {
+                    if let ColumnOption::MetadataField(field) = &option.option {
+                        Some(field.clone())
+                    } else {
+                        None
+                    }
+                });
+
+                Ok((struct_field, generating_expression, metadata))
             })
             .collect::<Result<Vec<_>>>()?;
 
         let physical_fields: Vec<_> = struct_field_pairs
             .iter()
             .filter_map(
-                |(field, generating_expression)| match generating_expression {
+                |(field, generating_expression, _)| match generating_expression {
                     Some(_) => None,
                     None => Some(field.clone()),
                 },
@@ -708,7 +716,7 @@ impl Table {
 
         struct_field_pairs
             .into_iter()
-            .map(|(struct_field, generating_expression)| {
+            .map(|(struct_field, generating_expression, metadata)| {
                 if let Some(generating_expression) = generating_expression {
                     let df_expr = plan_generating_expr(
                         &generating_expression,
@@ -721,6 +729,7 @@ impl Table {
                     df_expr.visit(&mut metadata_finder)?;
 
                     if let Some(key) = metadata_finder.key {
+                        warn!("metadata('key') function expressions are deprecated; use the METADATA FROM syntax");
                         Ok(FieldSpec::Metadata {
                             field: struct_field,
                             key,
@@ -732,7 +741,14 @@ impl Table {
                         })
                     }
                 } else {
-                    Ok(FieldSpec::Struct(struct_field))
+                    Ok(if let Some(key) = metadata {
+                        FieldSpec::Metadata {
+                            field: struct_field,
+                            key,
+                        }
+                    } else {
+                        FieldSpec::Struct(struct_field)                        
+                    })
                 }
             })
             .collect::<Result<Vec<_>>>()

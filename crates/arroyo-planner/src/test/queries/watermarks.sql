@@ -1,9 +1,9 @@
 CREATE TABLE orders (
   customer_id INT,
   order_id INT,
-  date_string TEXT,
+  date_string TEXT NOT NULL,
   timestamp TIMESTAMP GENERATED ALWAYS AS (CAST(date_string as TIMESTAMP)),
-  watermark FOR timestamp as timestamp - INTERVAL '5 seconds'
+  watermark FOR timestamp as CAST(date_string as TIMESTAMP) - INTERVAL '5 seconds'
 ) WITH (
   connector = 'kafka',
   format = 'json',

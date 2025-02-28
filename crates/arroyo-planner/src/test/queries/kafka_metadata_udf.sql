@@ -1,9 +1,9 @@
 create table users (
     id TEXT,
     name TEXT,
-    offset BIGINT GENERATED ALWAYS AS (metadata('offset_id')) STORED,
-    topic TEXT GENERATED ALWAYS AS (metadata('topic')) STORED,
-    partition INT GENERATED ALWAYS AS (metadata('partition')) STORED
+    offset BIGINT METADATA FROM 'offset_id',
+    topic TEXT METADATA FROM 'topic',
+    partition INT METADATA FROM 'partition'
 ) with (
     connector = 'kafka',
     topic = 'order_topic',
