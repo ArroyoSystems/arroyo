@@ -230,6 +230,7 @@ fn to_debezium_fields(fields: Vec<FieldRef>) -> Vec<Field> {
 }
 
 impl ConnectorTable {
+    #[allow(clippy::too_many_arguments)]
     fn from_options(
         name: &str,
         connector: &str,
