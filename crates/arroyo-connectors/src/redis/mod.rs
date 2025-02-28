@@ -304,7 +304,7 @@ impl Connector for RedisConnector {
                     {
                         bail!(
                             "Redis lookup tables must have a PRIMARY KEY field defined as \
-                        `field_name TEXT GENERATED ALWAYS AS (metadata('key')) STORED`"
+                        `field_name TEXT METADATA FROM 'key'`"
                         );
                     }
                 }

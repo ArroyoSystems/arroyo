@@ -5,7 +5,7 @@ create table impulse with (
 );
 
 create temporary table lookup (
-    key TEXT GENERATED ALWAYS AS (metadata('key')) STORED PRIMARY KEY,
+    key TEXT METADATA FROM 'key' PRIMARY KEY,
     value TEXT,
     len INT
 ) with (
@@ -13,7 +13,7 @@ create temporary table lookup (
     format = 'raw_string',
     address = 'redis://localhost:6379',
     format = 'json',
-    'lookup.cache.max_bytes' = '100000'
+    'lookup.cache.max_bytes' = 100000
 );
 
 select A.counter, B.key, B.value, len

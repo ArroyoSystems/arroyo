@@ -1,16 +1,14 @@
 CREATE TABLE cars (
-          timestamp TIMESTAMP,
+          timestamp TIMESTAMP NOT NULL,
           driver_id BIGINT,
           event_type TEXT,
           location TEXT,
-          watermark timestamp GENERATED ALWAYS AS (timestamp - interval '1 hour') STORED
+          watermark for timestamp AS (timestamp - interval '1 hour')
         ) WITH (
           connector = 'single_file',
           path = '$input_dir/cars.json',
           format = 'json',
-          type = 'source',
-          event_time_field = 'timestamp',
-          watermark_field = 'watermark'
+          type = 'source'
         );
         CREATE TABLE most_active_driver (
           start TIMESTAMP,

@@ -319,7 +319,7 @@ impl PlanToGraphVisitor<'_> {
 
         let NodeWithIncomingEdges { node, edges } = extension
             .plan_node(&self.planner, self.graph.node_count(), input_schemas)
-            .map_err(|e| e.context(format!("planning extension {:?}", extension)))?;
+            .map_err(|e| e.context(format!("planning operator {:?}", extension)))?;
 
         let node_index = self.graph.add_node(node);
         self.add_index_to_traversal(node_index);
@@ -395,8 +395,7 @@ impl TreeNodeVisitor<'_> for PlanToGraphVisitor<'_> {
         let arroyo_extension: &dyn ArroyoExtension = node
             .try_into()
             .map_err(|e: DataFusionError| e.context("converting extension"))?;
-        self.build_extension(input_nodes, arroyo_extension)
-            .map_err(|e| e.context("building extension"))?;
+        self.build_extension(input_nodes, arroyo_extension)?;
 
         Ok(TreeNodeRecursion::Continue)
     }

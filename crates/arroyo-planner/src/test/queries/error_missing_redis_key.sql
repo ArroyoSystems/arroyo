@@ -1,4 +1,4 @@
---fail=Redis lookup tables must have a PRIMARY KEY field defined as `field_name TEXT GENERATED ALWAYS AS (metadata('key')) STORED`
+--fail=Redis lookup tables must have a PRIMARY KEY field defined as `field_name TEXT METADATA FROM 'key'`
 create table impulse with (
     connector = 'impulse',
     event_rate = '2'

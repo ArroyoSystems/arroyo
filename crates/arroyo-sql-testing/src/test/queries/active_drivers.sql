@@ -3,14 +3,13 @@ CREATE TABLE cars(
       timestamp TIMESTAMP,
       driver_id BIGINT,
       event_type TEXT,
-      location TEXT
+      location TEXT,
+      WATERMARK for timestamp             
     ) WITH (
       connector = 'single_file',
       path = '$input_dir/cars.json',
       format = 'json',
-      type = 'source',
-      event_time_field = timestamp,
-      watermark_field = timestamp
+      type = 'source'
     );
 
 CREATE TABLE active_drivers (
