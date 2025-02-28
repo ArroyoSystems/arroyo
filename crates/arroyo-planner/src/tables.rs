@@ -747,7 +747,7 @@ impl Table {
                             key,
                         }
                     } else {
-                        FieldSpec::Struct(struct_field)                        
+                        FieldSpec::Struct(struct_field)
                     })
                 }
             })
