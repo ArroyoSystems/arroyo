@@ -937,11 +937,12 @@ dependencies = [
 
 [[package]]
 name = "arroyo-udf-common"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "arrow",
  "async-ffi",
+ "chrono",
  "regex",
  "serde",
  "syn 2.0.98",

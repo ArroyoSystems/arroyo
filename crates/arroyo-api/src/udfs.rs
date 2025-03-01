@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tonic::transport::Channel;
 use tracing::error;
 
-const PLUGIN_VERSION: &str = "=0.2.0";
+const PLUGIN_VERSION: &str = "^0.2.0";
 
 const LOCAL_UDF_LIB_CRATE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
