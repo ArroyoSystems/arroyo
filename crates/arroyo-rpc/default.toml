@@ -14,7 +14,7 @@ chaining.enabled = true
 
 [pipeline.compaction]
 enabled = false
-checkpoints-to-compact = 4
+checkpoints-to-compact = 10
 
 # Services
 

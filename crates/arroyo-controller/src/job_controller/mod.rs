@@ -201,7 +201,6 @@ impl RunningJobModel {
                                 {
                                     committing_state
                                         .subtask_committed(c.operator_id.clone(), c.subtask_index);
-                                    self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())
                                 }
@@ -385,11 +384,13 @@ impl RunningJobModel {
             return Ok(());
         }
 
-        info!(
+        debug!(
             message = "Compacting state",
             job_id = *self.job_id,
             epoch = self.epoch,
         );
+
+        let mut compacted = 0;
 
         let mut worker_clients: Vec<WorkerGrpcClient<Channel>> =
             self.workers.values().map(|w| w.connect.clone()).collect();
@@ -407,6 +408,8 @@ impl RunningJobModel {
                     continue;
                 }
 
+                compacted += compacted_tables.len();
+
                 // TODO: these should be put on separate tokio tasks.
                 for worker_client in &mut worker_clients {
                     worker_client
@@ -420,11 +423,14 @@ impl RunningJobModel {
             }
         }
 
-        info!(
-            message = "Finished compaction",
-            job_id = *self.job_id,
-            epoch = self.epoch,
-        );
+        if compacted != 0 {
+            info!(
+                message = "Finished compaction",
+                job_id = *self.job_id,
+                epoch = self.epoch,
+            );
+        }
+
         Ok(())
     }
 
@@ -447,7 +453,6 @@ impl RunningJobModel {
                             .await?;
                         self.last_checkpoint = Instant::now();
                         self.checkpoint_state = None;
-                        self.compact_state().await?;
 
                         info!(
                             message = "Finished checkpointing",
@@ -457,6 +462,9 @@ impl RunningJobModel {
                         );
                         // trigger a DB backup now that we're done checkpointing
                         notify_db();
+
+                        // compact if necessary
+                        self.compact_state().await?;
                     } else {
                         Self::update_checkpoint_in_db(
                             &checkpointing,
@@ -495,6 +503,9 @@ impl RunningJobModel {
                     );
                     // trigger a DB backup now that we're done checkpointing
                     notify_db();
+
+                    // compact if necessary
+                    self.compact_state().await?;
                 }
             }
         }
@@ -785,9 +796,7 @@ impl JobController {
         // check on checkpointing
         if self.model.checkpoint_state.is_some() {
             self.model.finish_checkpoint_if_done(&self.db).await?;
-        } else if self.model.last_checkpoint.elapsed() > self.config.checkpoint_interval
-            && self.cleanup_task.is_none()
-        {
+        } else if self.model.last_checkpoint.elapsed() > self.config.checkpoint_interval {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
         }
