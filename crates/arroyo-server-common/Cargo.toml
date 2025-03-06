@@ -7,7 +7,7 @@ edition = "2021"
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 
-jemalloc_pprof = "0.4.2"
+jemalloc_pprof = "0.7.0"
 
 # logging
 tracing = "0.1"
@@ -38,7 +38,7 @@ uuid = { version = "1.8.0", features = ["v4"] }
 
 # profile
 flate2 = "1.0.30"
-pprof = { version = "0.13.0", features = ["flamegraph", "protobuf-codec"] }
+pprof = { version = "0.14.0", features = ["flamegraph", "protobuf-codec"] }
 serde = { version = "1.0.96", features = ["derive"] }
 
 [build-dependencies]
