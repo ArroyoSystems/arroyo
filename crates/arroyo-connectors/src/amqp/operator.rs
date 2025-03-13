@@ -1,23 +1,20 @@
-use arrow::array::RecordBatch;
+use anyhow::{Context, Result};
 use arroyo_formats::de::FieldValueType;
-use arroyo_operator::operator::ArrowOperator;
 use arroyo_operator::{
-    context::{Collector, OperatorContext, SourceCollector, SourceContext},
+    context::{SourceCollector, SourceContext},
     operator::SourceOperator,
     SourceFinishType,
 };
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
 use arroyo_state::global_table_config;
-use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::*;
 use async_trait::async_trait;
+use bincode::{Decode, Encode};
 use futures::StreamExt;
-use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties, Result};
+use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
@@ -31,27 +28,14 @@ pub struct AmqpSourceFunc {
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
     pub metadata_fields: Vec<MetadataField>,
-    pub schema_resolver: Option<Arc<dyn SchemaResolver + Sync>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
 pub struct AmqpState {
     pub delivery_tag: u64,
-    pub offset: u64,
 }
 
 impl AmqpSourceFunc {
-    pub fn new() -> Self {
-        Self {
-            address: todo!(),
-            topic: todo!(),
-            format: todo!(),
-            framing: todo!(),
-            bad_data: todo!(),
-            metadata_fields: todo!(),
-            schema_resolver: todo!(),
-        }
-    }
     /// Manages the main loop for consuming messages from the AMQP stream
     /// It first creates a connection and handles any errors that occur during this process.
     /// It sets up a ticker to periodically flush the message collector's buffer.
@@ -62,36 +46,16 @@ impl AmqpSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType> {
-        let consumer = self.get_consumer(ctx).await?;
-        // .map_err(|e| UserError::new("Failed to consume from queue", e.to_string()))?;
+    ) -> Result<SourceFinishType, UserError> {
+        let mut consumer = self
+            .get_consumer(ctx)
+            .await
+            .map_err(|e| UserError::new("Failed to get a consumer", e.to_string()))?;
 
         // todo might add governor if rate limiting bevcomes necessary https://crates.io/crates/governor
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        if let Some(schema_resolver) = &self.schema_resolver {
-            collector.initialize_deserializer_with_resolver(
-                self.format.clone(),
-                self.framing.clone(),
-                self.bad_data.clone(),
-                &self.metadata_fields,
-                schema_resolver.clone(),
-            );
-        } else {
-            collector.initialize_deserializer(
-                self.format.clone(),
-                self.framing.clone(),
-                self.bad_data.clone(),
-                &self.metadata_fields,
-            );
-        }
-
-        let state: &mut GlobalKeyedView<String, (String, AmqpState)> = ctx
-            .table_manager
-            .get_global_keyed_state("q")
-            .await
-            .expect("should have table");
+        let mut deliveries_cache = HashMap::new();
 
         loop {
             select! {
@@ -112,17 +76,18 @@ impl AmqpSourceFunc {
                             connector_metadata.insert("timestamp", FieldValueType::Int64(Some(timestamp.try_into().unwrap())));
 
                             // Deserialize and process the message
-                            collector.deserialize_slice(&data, from_millis(timestamp), Some(&connector_metadata)).await;
+                            collector.deserialize_slice(&data, from_millis(timestamp), Some(&connector_metadata)).await?;
 
                             if collector.should_flush() {
-                                collector.flush_buffer().await;
+                                collector.flush_buffer().await?;
                             }
 
                             // Store last processed offset (RabbitMQ uses delivery_tag instead of offset)
-                            offsets.insert(delivery.delivery_tag, delivery.delivery_tag);
+                            // todo instead insert into delivery tags list?
+                            deliveries_cache.insert(delivery.delivery_tag, delivery.delivery_tag);
 
                             // Acknowledge the message
-                            delivery.ack(BasicAckOptions::default()).await?;
+                            delivery.ack(BasicAckOptions::default()).await.map_err(|e| UserError::new("failed to acknowledge the message", e.to_string()))?;
                         },
                         Some(Err(err)) => {
                             error!("Encountered AMQP error: {:?}", err);
@@ -134,7 +99,7 @@ impl AmqpSourceFunc {
                 }
                 _ = flush_ticker.tick() => {
                     if collector.should_flush() {
-                        collector.flush_buffer().await;
+                        collector.flush_buffer().await?;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
@@ -142,14 +107,12 @@ impl AmqpSourceFunc {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("Starting checkpoint {}", ctx.task_info.task_index);
 
-                            let s = ctx.table_manager.get_global_keyed_state("q").await
-                                .map_err(|err| UserError::new("Failed to get global key value", err.to_string()))?;
+                            let s = ctx.table_manager.get_global_keyed_state("q").await.map_err(|e| UserError::new("Could not get global key value", format!("{:?}", e)))?;
 
-                            // todo need to fix this with offsets
-                            for (&delivery_tag, &offset) in &offsets {
+                            // todo makes no sense needs fix
+                            for (_index, &delivery_tag) in &deliveries_cache {
                                 s.insert(delivery_tag,  AmqpState{
                                     delivery_tag,
-                                    offset: offset + 1, // Simulating Kafka's offset increment
                                 }).await;
                             }
 
@@ -182,8 +145,11 @@ impl AmqpSourceFunc {
     }
 
     async fn get_consumer(&mut self, ctx: &mut SourceContext) -> Result<lapin::Consumer> {
-        let conn = Connection::connect(&self.address, ConnectionProperties::default()).await?;
-        let channel = conn.create_channel().await.expect("create_channel");
+        let conn = Connection::connect(&self.address, ConnectionProperties::default())
+            .await
+            .context("failed to connect to rabbitmq.")?;
+
+        let channel = conn.create_channel().await.context("create_channel")?;
         let queue_name = format!(
             "amqp-arroyo-{}-{}",
             ctx.task_info.job_id, ctx.task_info.operator_id
@@ -192,14 +158,6 @@ impl AmqpSourceFunc {
             "arroyo-{}-{}-consumer",
             ctx.task_info.job_id, ctx.task_info.operator_id
         );
-        let queue = channel
-            .queue_declare(
-                &queue_name,
-                QueueDeclareOptions::default(),
-                FieldTable::default(),
-            )
-            .await
-            .expect("queue_declare");
         let consumer = channel
             .basic_consume(
                 &queue_name,
@@ -207,25 +165,10 @@ impl AmqpSourceFunc {
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
-            .await?;
+            .await
+            .context("Failed to create consumer")?;
 
         Ok(consumer)
-    }
-}
-
-#[async_trait]
-impl ArrowOperator for AmqpSourceFunc {
-    fn name(&self) -> String {
-        "AmqpSource".to_string()
-    }
-
-    async fn process_batch(
-        &mut self,
-        _: RecordBatch,
-        _: &mut OperatorContext,
-        _: &mut dyn Collector,
-    ) {
-        // no-op
     }
 }
 
@@ -254,8 +197,9 @@ impl SourceOperator for AmqpSourceFunc {
         match self.run_int(ctx, collector).await {
             Ok(r) => r,
             Err(e) => {
-                ctx.report_error(e, "failed to configure the AMQP source")
-                    .await
+                ctx.report_error(&e.name, "failed to configure the AMQP source")
+                    .await;
+                SourceFinishType::Graceful
             }
         }
     }

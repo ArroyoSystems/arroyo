@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::Result;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
@@ -112,14 +112,27 @@ impl Connector for AmqpConnector {
         ))
     }
 
+    // todo I need a table json actually for this and import it in the mod.rs
     fn make_operator(
         &self,
         _: Self::ProfileT,
-        _: Self::TableT,
-        _: OperatorConfig,
-    ) -> anyhow::Result<ConstructedOperator> {
-        Ok(ConstructedOperator::from_operator(Box::new(
-            AmqpSourceFunc::new(),
-        )))
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> Result<ConstructedOperator> {
+        match table.table_type {
+            TableType::Source => {
+                panic!("todo implement now")
+                Ok(ConstructedOperator::from_source(Box::new(AmqpSourceFunc {
+                    address: table,
+                    topic: config.bad_data,
+                    format: config.format,
+                    framing: todo!(),
+                    bad_data: config.bad_data?,
+                    metadata_fields: todo!(),
+                })))
+            }
+
+            TableType::Sink => unreachable!("not yet attempted"),
+        }
     }
 }
