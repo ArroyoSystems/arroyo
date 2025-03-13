@@ -28,7 +28,7 @@ async-trait = "0.1.74"
 apache-avro = {workspace =  true}
 regex = "1.9.5"
 base64 = "0.21.5"
-ahash = "0.8.7"
+ahash = { workspace = true }
 strum_macros = "0.26.2"
 strum = "0.26.2"
 figment = { version = "0.10", features = ["toml", "env", "yaml", "json"] }

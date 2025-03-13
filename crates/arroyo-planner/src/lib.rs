@@ -31,8 +31,6 @@ use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::prelude::SessionConfig;
 
-use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
-use datafusion::sql::sqlparser::parser::{Parser, ParserError};
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
@@ -72,11 +70,14 @@ use arroyo_udf_host::parse::{inner_type, UdfDef};
 use arroyo_udf_host::ParsedUdfFile;
 use arroyo_udf_python::PythonUDF;
 use datafusion::execution::{FunctionRegistry, SessionStateBuilder, SessionStateDefaults};
+use datafusion::functions_aggregate::variance::var_samp_udaf;
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::optimizer::Analyzer;
-use datafusion::sql::sqlparser::ast::{OneOrManyWithParens, Statement};
+use sqlparser::ast::{OneOrManyWithParens, Statement};
+use sqlparser::dialect::ArroyoDialect;
+use sqlparser::parser::{Parser, ParserError};
 use std::any::Any;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
@@ -135,6 +136,9 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
     for p in SessionStateDefaults::default_aggregate_functions() {
         registry.register_udaf(p).unwrap();
     }
+
+    // some more UDAFs that are missing from the default list for some reason
+    registry.register_udaf(var_samp_udaf()).unwrap();
 
     for p in SessionStateDefaults::default_window_functions() {
         registry.register_udwf(p).unwrap();
@@ -769,8 +773,7 @@ fn try_handle_set_variable(
 }
 
 pub(crate) fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
-    let dialect = PostgreSqlDialect {};
-    Parser::parse_sql(&dialect, sql)
+    Parser::parse_sql(&ArroyoDialect {}, sql)
 }
 
 pub async fn parse_and_get_arrow_program(
@@ -993,11 +996,12 @@ pub fn schema_with_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> Result<
         })?
         .0;
 
-    Ok(ArroyoSchema {
+    Ok(ArroyoSchema::new(
         schema,
         timestamp_index,
-        key_indices: Some(key_indices),
-    })
+        Some(key_indices),
+        None,
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

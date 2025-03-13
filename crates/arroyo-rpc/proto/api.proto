@@ -109,14 +109,12 @@ message AsyncUdfOperator {
 
 message UpdatingAggregateOperator {
   string name = 1;
-  ArroyoSchema partial_schema = 2;
-  ArroyoSchema state_partial_schema = 3;
-  ArroyoSchema state_final_schema = 4;
-  bytes partial_aggregation_plan = 5;
-  bytes combine_plan = 6;
-  bytes final_aggregation_plan = 7;
-  uint64 flush_interval_micros = 8;
-  uint64 ttl_micros = 9;
+  ArroyoSchema input_schema = 2;
+  ArroyoSchema final_schema = 3;
+  bytes aggregate_exec = 5;
+  bytes metadata_expr = 6;
+  uint64 flush_interval_micros = 7;
+  uint64 ttl_micros = 8;
 }
 
 message WasmUdfs {
@@ -291,6 +289,8 @@ message ArroyoSchema {
   uint32 timestamp_index = 2;
   repeated uint32 key_indices = 3;
   bool has_keys = 4;
+  repeated uint32 routing_key_indices = 5;
+  bool has_routing_keys = 6;
 }
 
 message ChainedOperator {

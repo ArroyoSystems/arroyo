@@ -2,7 +2,7 @@
 create table mqtt (
     name TEXT,
     value INT,
-    topic INT GENERATED ALWAYS AS (metadata('topic')) STORED
+    topic INT METADATA FROM 'topic'
 ) with (
     connector = 'mqtt',
     url = 'tcp://localhost:1883',

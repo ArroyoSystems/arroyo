@@ -1,16 +1,14 @@
 CREATE TABLE cars(
-          timestamp TIMESTAMP,
+          timestamp TIMESTAMP NOT NULL,
           driver_id BIGINT,
           event_type TEXT,
           location TEXT,
-          watermark TIMESTAMP GENERATED ALWAYS AS (timestamp - INTERVAL '1 minute') STORED
+          watermark for timestamp AS (timestamp - INTERVAL '1 minute')
         ) WITH (
           connector = 'single_file',
           path = '$input_dir/cars.json',
           format = 'json',
-          type = 'source',
-          event_time_field = 'timestamp',
-          watermark_field = 'watermark'
+          type = 'source'
         );
         CREATE TABLE group_by_aggregate (
           month TIMESTAMP,

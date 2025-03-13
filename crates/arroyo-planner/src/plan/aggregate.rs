@@ -6,7 +6,7 @@ use crate::{
     fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, ArroyoSchemaProvider,
     DFField, WindowBehavior,
 };
-use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
+use arroyo_rpc::TIMESTAMP_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
 use datafusion::functions_aggregate::expr_fn::max;
@@ -29,13 +29,6 @@ impl AggregateRewriter<'_> {
         schema: Arc<DFSchema>,
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Transformed<LogicalPlan>> {
-        if input
-            .schema()
-            .has_column_with_unqualified_name(UPDATING_META_FIELD)
-        {
-            return plan_err!("can't currently nest updating aggregates");
-        }
-
         let key_count = key_fields.len();
         key_fields.extend(fields_with_qualifiers(input.schema()));
 
@@ -83,7 +76,7 @@ impl AggregateRewriter<'_> {
 
         let timestamp_field: DFField = timestamp_field.into();
         let column = timestamp_field.qualified_column();
-        aggr_expr.push(max(col(column.clone())));
+        aggr_expr.push(max(col(column.clone())).alias("_timestamp"));
 
         let mut output_schema_fields = fields_with_qualifiers(&schema);
         output_schema_fields.push(timestamp_field.clone());

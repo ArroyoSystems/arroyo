@@ -246,7 +246,7 @@ message ExpiringKeyedTimeTableConfig {
   string description = 2;
   uint64 retention_micros = 3;
   bool generational = 4;
-  ArroyoSchema schema = 5;
+  api.ArroyoSchema schema = 5;
 }
 
 message ExpiringKeyedTimeSubtaskCheckpointMetadata {
@@ -308,15 +308,6 @@ enum TableEnum {
   MissingTableType = 0;
   GlobalKeyValue = 1;
   ExpiringKeyedTimeTable = 2;
-}
-
-// TODO: figure out how to share this
-message ArroyoSchema {
-  // json-encoded
-  string arrow_schema = 1;
-  uint32 timestamp_index = 2;
-  repeated uint32 key_indices = 3;
-  bool has_keys = 4;
 }
 
 // Worker

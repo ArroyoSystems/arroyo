@@ -12,7 +12,7 @@ CREATE TABLE events (
 );
 
 create temporary table customers (
-    customer_id TEXT PRIMARY KEY GENERATED ALWAYS AS (metadata('key')) STORED,
+    customer_id TEXT METADATA FROM 'key' PRIMARY KEY,
     customer_name TEXT,
     plan TEXT
 ) with (

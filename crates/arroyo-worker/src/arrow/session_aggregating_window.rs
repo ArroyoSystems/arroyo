@@ -161,7 +161,7 @@ impl SessionAggregatingWindowFunc {
         sorted_batch: RecordBatch,
         watermark: Option<SystemTime>,
     ) -> Result<()> {
-        let has_keys = self.config.input_schema_ref.key_indices.is_some();
+        let has_keys = self.config.input_schema_ref.routing_keys().is_some();
         let partition = if !has_keys {
             // if we don't have keys, we can just partition by the whole batch.
             vec![0..sorted_batch.num_rows()]
@@ -174,7 +174,7 @@ impl SessionAggregatingWindowFunc {
                     .take(
                         self.config
                             .input_schema_ref
-                            .key_indices
+                            .routing_keys()
                             .as_ref()
                             .unwrap()
                             .len(),
@@ -191,7 +191,7 @@ impl SessionAggregatingWindowFunc {
             let key_count = self
                 .config
                 .input_schema_ref
-                .key_indices
+                .routing_keys()
                 .as_ref()
                 .map(|keys| keys.len())
                 .unwrap_or(0);
@@ -711,14 +711,14 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
             .input_schema
             .ok_or_else(|| anyhow!("missing input schema"))?
             .try_into()?;
-        let row_converter = if input_schema.key_indices.is_none() {
+        let row_converter = if input_schema.routing_keys().is_none() {
             let array = Arc::new(BooleanArray::from(vec![false]));
             Converter::Empty(
                 RowConverter::new(vec![SortField::new(DataType::Boolean)])?,
                 array,
             )
         } else {
-            let key_count = input_schema.key_indices.as_ref().unwrap().len();
+            let key_count = input_schema.routing_keys().as_ref().unwrap().len();
             Converter::RowConverter(RowConverter::new(
                 input_schema
                     .schema

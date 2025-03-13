@@ -8,8 +8,8 @@ use arrow_array::{
     PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
 };
 use arrow_ord::cmp::{gt_eq, lt_eq};
-use arrow_schema::{DataType, Field, Schema};
-use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
+use arrow_schema::{DataType, Field};
+use arroyo_rpc::df::ArroyoSchemaRef;
 use arroyo_rpc::get_hasher;
 use arroyo_types::from_nanos;
 use bincode::config;
@@ -34,14 +34,7 @@ impl SchemaWithHashAndOperation {
         let mut fields = memory_schema.schema.fields().to_vec();
         let generation_index = if with_generation {
             fields.push(Arc::new(Field::new("_generation", DataType::UInt64, false)));
-            memory_schema = Arc::new(ArroyoSchema::new(
-                Arc::new(Schema::new_with_metadata(
-                    fields.clone(),
-                    memory_schema.schema.metadata().clone(),
-                )),
-                memory_schema.timestamp_index,
-                memory_schema.key_indices.clone(),
-            ));
+            memory_schema = Arc::new(memory_schema.with_fields(fields.clone()).unwrap());
             Some(fields.len() - 1)
         } else {
             None
@@ -49,21 +42,11 @@ impl SchemaWithHashAndOperation {
 
         fields.push(Arc::new(Field::new("_key_hash", DataType::UInt64, false)));
         let hash_index = fields.len() - 1;
-        fields.push(Arc::new(Field::new(
-            "_operation",
-            arrow::datatypes::DataType::Binary,
-            false,
-        )));
+        fields.push(Arc::new(Field::new("_operation", DataType::Binary, false)));
+
         let operation_index = fields.len() - 1;
-        let state_schema = Arc::new(Schema::new_with_metadata(
-            fields,
-            memory_schema.schema.metadata.clone(),
-        ));
-        let state_schema = Arc::new(ArroyoSchema::new(
-            state_schema,
-            memory_schema.timestamp_index,
-            memory_schema.key_indices.clone(),
-        ));
+        let state_schema = Arc::new(memory_schema.with_fields(fields).unwrap());
+
         Self {
             state_schema,
             memory_schema,
@@ -162,7 +145,7 @@ impl SchemaWithHashAndOperation {
     ) -> Result<(RecordBatch, ParquetStats)> {
         let key_batch = self
             .memory_schema
-            .key_indices
+            .routing_keys()
             .as_ref()
             .map(|key_indices| record_batch.project(key_indices))
             .transpose()?

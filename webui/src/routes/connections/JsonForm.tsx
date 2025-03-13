@@ -746,7 +746,7 @@ export function FormInner({
         .filter(key => {
           const property = schema.properties![key];
           // @ts-ignore
-          return !property.deprecated ?? true;
+          return !property.deprecated;
         })
         .map(key => {
           const property = schema.properties![key];

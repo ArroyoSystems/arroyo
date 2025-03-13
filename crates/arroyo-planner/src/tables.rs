@@ -17,11 +17,13 @@ use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::ConnectorOptions;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
-use datafusion::common::{config::ConfigOptions, DFSchema, Result, ScalarValue};
+use datafusion::common::{
+    config::ConfigOptions, plan_datafusion_err, DFSchema, Result, ScalarValue,
+};
 use datafusion::common::{plan_err, Column, DataFusionError};
 use datafusion::logical_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, Extension, LogicalPlan,
-    WriteOp,
+    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, ExprSchemable, Extension,
+    LogicalPlan, WriteOp,
 };
 use datafusion::optimizer::common_subexpr_eliminate::CommonSubexprEliminate;
 use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery;
@@ -53,8 +55,12 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement},
     },
 };
+use itertools::Itertools;
+use sqlparser::ast;
+use sqlparser::ast::TableConstraint;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectorTable {
@@ -224,14 +230,17 @@ fn to_debezium_fields(fields: Vec<FieldRef>) -> Vec<Field> {
 }
 
 impl ConnectorTable {
+    #[allow(clippy::too_many_arguments)]
     fn from_options(
         name: &str,
         connector: &str,
         temporary: bool,
         mut fields: Vec<FieldSpec>,
         primary_keys: Vec<String>,
+        watermark: Option<(String, Option<ast::Expr>)>,
         options: &mut ConnectorOptions,
         connection_profile: Option<&ConnectionProfile>,
+        schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
         if "delta" == connector {
@@ -335,8 +344,66 @@ impl ConnectorTable {
             table.fields = fields;
         }
 
-        table.event_time_field = options.pull_opt_field("event_time_field")?;
-        table.watermark_field = options.pull_opt_field("watermark_field")?;
+        if let Some(event_time_field) = options.pull_opt_field("event_time_field")? {
+            warn!("`event_time_field` WITH option is deprecated; use WATERMARK FOR syntax");
+            table.event_time_field = Some(event_time_field);
+        }
+
+        if let Some(watermark_field) = options.pull_opt_field("watermark_field")? {
+            warn!("`watermark_field` WITH option is deprecated; use WATERMARK FOR syntax");
+            table.watermark_field = Some(watermark_field);
+        }
+
+        if let Some((time_field, watermark_expr)) = watermark {
+            let schema =
+                DFSchema::try_from_qualified_schema(&table.name, &table.physical_schema())?;
+
+            let field = table
+                .fields
+                .iter()
+                .find(|f| f.field().name().as_str() == time_field)
+                .ok_or_else(|| {
+                    plan_datafusion_err!(
+                        "WATERMARK FOR field `{}` does not exist in table",
+                        time_field
+                    )
+                })?;
+
+            if !matches!(field.field().data_type(), DataType::Timestamp(_, None)) {
+                return plan_err!(
+                    "WATERMARK FOR field `{:?}` has type {}, but expected TIMESTAMP",
+                    time_field,
+                    field.field().data_type()
+                );
+            }
+
+            table.event_time_field = Some(time_field.clone());
+
+            if let Some(expr) = watermark_expr {
+                let logical_expr =
+                    plan_generating_expr(&expr, &table.name, &schema, schema_provider)
+                        .map_err(|e| e.context("could not plan watermark expression"))?;
+
+                let (data_type, nullable) = logical_expr.data_type_and_nullable(&schema)?;
+                if !matches!(data_type, DataType::Timestamp(_, _)) {
+                    return plan_err!(
+                        "the type of the WATERMARK FOR expression must be TIMESTAMP, but was {}",
+                        data_type
+                    );
+                }
+                if nullable {
+                    return plan_err!("the type of the WATERMARK FOR expression must be NOT NULL");
+                }
+
+                table.fields.push(FieldSpec::Virtual {
+                    field: Field::new("__watermark", logical_expr.get_type(&schema)?, false),
+                    expression: logical_expr,
+                });
+                table.watermark_field = Some("__watermark".to_string());
+            } else {
+                table.watermark_field = Some(time_field);
+            }
+        }
 
         table.idle_time = options
             .pull_opt_i64("idle_micros")?
@@ -612,14 +679,23 @@ impl Table {
                         None
                     }
                 });
-                Ok((struct_field, generating_expression))
+
+                let metadata = column.options.iter().find_map(|option| {
+                    if let ColumnOption::MetadataField(field) = &option.option {
+                        Some(field.clone())
+                    } else {
+                        None
+                    }
+                });
+
+                Ok((struct_field, generating_expression, metadata))
             })
             .collect::<Result<Vec<_>>>()?;
 
         let physical_fields: Vec<_> = struct_field_pairs
             .iter()
             .filter_map(
-                |(field, generating_expression)| match generating_expression {
+                |(field, generating_expression, _)| match generating_expression {
                     Some(_) => None,
                     None => Some(field.clone()),
                 },
@@ -641,7 +717,7 @@ impl Table {
 
         struct_field_pairs
             .into_iter()
-            .map(|(struct_field, generating_expression)| {
+            .map(|(struct_field, generating_expression, metadata)| {
                 if let Some(generating_expression) = generating_expression {
                     let df_expr = plan_generating_expr(
                         &generating_expression,
@@ -654,6 +730,7 @@ impl Table {
                     df_expr.visit(&mut metadata_finder)?;
 
                     if let Some(key) = metadata_finder.key {
+                        warn!("metadata('key') function expressions are deprecated; use the METADATA FROM syntax");
                         Ok(FieldSpec::Metadata {
                             field: struct_field,
                             key,
@@ -665,7 +742,14 @@ impl Table {
                         })
                     }
                 } else {
-                    Ok(FieldSpec::Struct(struct_field))
+                    Ok(if let Some(key) = metadata {
+                        FieldSpec::Metadata {
+                            field: struct_field,
+                            key,
+                        }
+                    } else {
+                        FieldSpec::Struct(struct_field)
+                    })
                 }
             })
             .collect::<Result<Vec<_>>>()
@@ -681,6 +765,7 @@ impl Table {
             with_options,
             query: None,
             temporary,
+            constraints,
             ..
         }) = statement
         {
@@ -745,14 +830,32 @@ impl Table {
                             ),
                             None => None,
                         };
+
+                    let watermark_constraints: Vec<_> = constraints
+                        .iter()
+                        .map(|c| match c {
+                            TableConstraint::Watermark {
+                                column_name,
+                                watermark_expr,
+                            } => Ok((column_name.to_string(), watermark_expr.clone())),
+                            c => Err(plan_datafusion_err!("Unsupported table constraint `{}`", c)),
+                        })
+                        .try_collect()?;
+
+                    if watermark_constraints.len() > 1 {
+                        return plan_err!("Only one WATERMARK FOR constraint is allowed per table");
+                    }
+
                     let table = ConnectorTable::from_options(
                         &name,
                         connector,
                         *temporary,
                         fields,
                         primary_keys,
+                        watermark_constraints.into_iter().next(),
                         &mut connector_opts,
                         connection_profile,
+                        schema_provider,
                     )
                     .map_err(|e| e.context(format!("Failed to create table {}", name)))?;
 
