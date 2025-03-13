@@ -220,7 +220,7 @@ impl KafkaSourceFunc {
                                 collector.deserialize_slice(v, from_millis(timestamp.max(0) as u64), connector_metadata.as_ref()).await?;
 
                                 if collector.should_flush() {
-                                    collector.flush_buffer().await?;
+                                    collector.flush_buffer().await;
                                 }
 
                                 offsets.insert(msg.partition(), msg.offset());
