@@ -3,7 +3,7 @@ use crate::kafka::{
     KafkaConfig, KafkaConfigAuthentication, KafkaConnector, KafkaTable, KafkaTester, TableType,
 };
 use anyhow::anyhow;
-use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::connector::{Connection, Connector, MetadataDef};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -132,6 +132,10 @@ impl Connector for ConfluentConnector {
     ) -> Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
         let profile = profile.into();
         KafkaConnector {}.get_autocomplete(profile)
+    }
+
+    fn metadata_defs(&self) -> &'static [MetadataDef] {
+        KafkaConnector {}.metadata_defs()
     }
 
     fn test(
