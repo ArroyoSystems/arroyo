@@ -15,10 +15,7 @@ use arroyo_rpc::{
 };
 use arroyo_types::get_test_task_info;
 use parquet::data_type::AsBytes;
-use rumqttc::{
-    v5::{mqttbytes::QoS, Event, Incoming},
-    Outgoing,
-};
+use rumqttc::{mqttbytes::QoS, Event, Incoming, Outgoing};
 use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 
@@ -60,7 +57,7 @@ impl MqttTopicTester {
         }
     }
 
-    async fn get_client(&self) -> (rumqttc::v5::AsyncClient, rumqttc::v5::EventLoop) {
+    async fn get_client(&self) -> (rumqttc::AsyncClient, rumqttc::EventLoop) {
         let config = self.get_config();
         create_connection(&config, 0).expect("Failed to create connection")
     }

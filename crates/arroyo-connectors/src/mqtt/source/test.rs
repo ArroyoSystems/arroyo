@@ -15,7 +15,7 @@ use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{ArrowMessage, ChainInfo, TaskInfo};
 use rand::random;
-use rumqttc::v5::mqttbytes::QoS;
+use rumqttc::mqttbytes::QoS;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -98,7 +98,7 @@ impl MqttTopicTester {
         }
     }
 
-    async fn get_client(&self) -> rumqttc::v5::AsyncClient {
+    async fn get_client(&self) -> rumqttc::AsyncClient {
         let config = self.get_config();
         let (client, mut eventloop) =
             create_connection(&config, 0).expect("Failed to create connection");
