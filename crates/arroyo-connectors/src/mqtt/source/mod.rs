@@ -10,9 +10,9 @@ use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
 use arroyo_types::{SignalMessage, UserError, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
-use rumqttc::v5::mqttbytes::QoS;
-use rumqttc::v5::{ConnectionError, Event as MqttEvent, Incoming};
+use rumqttc::mqttbytes::QoS;
 use rumqttc::Outgoing;
+use rumqttc::{Event as MqttEvent, Incoming};
 
 use crate::mqtt::{create_connection, MqttConfig};
 use arroyo_operator::context::{SourceCollector, SourceContext};
@@ -148,7 +148,7 @@ impl MqttSourceFunc {
                 event = eventloop.poll() => {
                     match event {
                         Ok(MqttEvent::Incoming(Incoming::Publish(p))) => {
-                            let topic = String::from_utf8_lossy(&p.topic).to_string();
+                            let topic = String::from_utf8_lossy(p.topic.as_bytes()).to_string();
 
                             let connector_metadata = if !self.metadata_fields.is_empty() {
                                 let mut connector_metadata = HashMap::new();
@@ -171,9 +171,6 @@ impl MqttSourceFunc {
                         }
                         Ok(_) => (),
                         Err(err) => {
-                            if let ConnectionError::Timeout(_) = err {
-                                continue;
-                            }
                             tracing::error!("Failed to poll mqtt eventloop: {}", err);
                             if let Err(err) = client
                                 .subscribe(

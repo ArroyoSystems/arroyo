@@ -576,6 +576,7 @@ dependencies = [
  "sasl2-sys",
  "serde",
  "serde_json",
+ "test-log",
  "tokio",
  "tokio-rustls 0.25.0",
  "tokio-stream",

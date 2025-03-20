@@ -89,5 +89,8 @@ rustls = "0.22"
 # NATS
 async-nats = "0.38.0"
 
+[dev-dependencies]
+test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
+
 [build-dependencies]
 glob = "0.3"

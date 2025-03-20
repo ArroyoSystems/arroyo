@@ -15,9 +15,9 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
-use rumqttc::v5::mqttbytes::QoS;
-use rumqttc::v5::{AsyncClient, Event as MqttEvent, EventLoop, Incoming, MqttOptions};
+use rumqttc::mqttbytes::QoS;
 use rumqttc::Outgoing;
+use rumqttc::{AsyncClient, Event as MqttEvent, EventLoop, Incoming, MqttOptions};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use rustls_native_certs::load_native_certs;
 use serde::{Deserialize, Serialize};
