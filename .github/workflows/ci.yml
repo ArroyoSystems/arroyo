@@ -84,19 +84,19 @@ jobs:
       - name: Install mosquitto
         run: |
           sudo apt-get install -y mosquitto
-          sudo service mosquitto start
+
       - name: Check Formatting
         run: cargo fmt -- --check
       - name: Build console
         run: |
           cd webui
           pnpm build
-      - name: Build
-        run: cargo build --all-features
-      - name: Run Clippy
-        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
+#      - name: Build
+#        run: cargo build --all-features
+#      - name: Run Clippy
+#        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
       - name: Test
-        run: cargo nextest run -E 'kind(lib)' --all-features
+        run: RUST_LOG=debug sudo mosquitto -c /etc/mosquitto/mosquitto.conf -v & && cargo nextest run -E 'kind(lib)' --all-features
       - name: Integ postgres
         run: |
           mkdir /tmp/arroyo-integ

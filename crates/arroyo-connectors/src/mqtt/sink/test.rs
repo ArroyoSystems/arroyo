@@ -98,7 +98,7 @@ struct MqttSinkWithWrites {
     ctx: OperatorContext,
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_mqtt() {
     let mqtt_tester = MqttTopicTester {
         topic: "mqtt-arroyo-test-sink".to_string(),
