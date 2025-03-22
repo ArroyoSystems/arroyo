@@ -65,6 +65,14 @@ data:
         {{- end }} 
         resources: {{ .Values.worker.resources | toYaml | nindent 10 }}
         service-account-name: {{ .Values.serviceAccount.name | quote }}
+        {{- with .Values.worker.nodeSelector }}
+        node-selector:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.worker.tolerations }}
+        tolerations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         env:
           {{- toYaml .Values.env | nindent 10 }}
         volumes:
