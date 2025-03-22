@@ -38,7 +38,7 @@ worker:
   # Tolerations for worker pods assignment
   # ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
   #
-  tolerations: {}
+  tolerations: []
     # - key: "dedicated"
     #   operator: "Equal"
     #   value: "arroyo"
