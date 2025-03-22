@@ -30,6 +30,21 @@ worker:
       memory: 490Mi
       cpu: 900m
   slots: 16
+  # ref: https://kubernetes.io/docs/user-guide/node-selection/
+  nodeSelector: {}
+    # kubernetes.io/role: worker
+    # node-type: arroyo-worker
+
+  # Tolerations for worker pods assignment
+  # ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+  #
+  tolerations: {}
+    # - key: "dedicated"
+    #   operator: "Equal"
+    #   value: "arroyo"
+    #   effect: "NoSchedule"
+    # - key: "CriticalAddonsOnly"
+    #   operator: "Exists"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster
