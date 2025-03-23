@@ -1,6 +1,7 @@
 use arrow::array::{RecordBatch, StringArray};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use super::MqttSinkFunc;
 use crate::mqtt::{create_connection, MqttConfig, Tls};
@@ -13,12 +14,9 @@ use arroyo_rpc::{
     formats::{Format, JsonFormat},
     var_str::VarStr,
 };
-use arroyo_types::get_test_task_info;
+use arroyo_types::{get_test_task_info, to_nanos};
 use parquet::data_type::AsBytes;
-use rumqttc::{
-    v5::{mqttbytes::QoS, Event, Incoming},
-    Outgoing,
-};
+use rumqttc::{mqttbytes::QoS, Event, Incoming, Outgoing};
 use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 
@@ -60,9 +58,14 @@ impl MqttTopicTester {
         }
     }
 
-    async fn get_client(&self) -> (rumqttc::v5::AsyncClient, rumqttc::v5::EventLoop) {
+    async fn get_client(&self) -> (rumqttc::AsyncClient, rumqttc::EventLoop) {
         let config = self.get_config();
-        create_connection(&config, 0).expect("Failed to create connection")
+        create_connection(
+            &config,
+            &format!("test-sink-{}", to_nanos(SystemTime::now())),
+            0,
+        )
+        .expect("Failed to create connection")
     }
 
     async fn get_sink_with_writes(&self) -> MqttSinkWithWrites {
@@ -77,7 +80,9 @@ impl MqttTopicTester {
 
         let (command_tx, _) = channel(128);
 
-        let task_info = Arc::new(get_test_task_info());
+        let mut task_info = get_test_task_info();
+        task_info.operator_id = "mqtt_sink".to_string();
+        let task_info = Arc::new(task_info);
 
         let mut ctx = OperatorContext::new(
             task_info,
