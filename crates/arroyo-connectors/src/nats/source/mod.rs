@@ -192,7 +192,7 @@ impl NatsSourceFunc {
         };
 
         let consumer_name = format!(
-            "{}-{}",
+            "{}-{}-{}",
             match &self.source_type {
                 SourceType::Jetstream { stream, .. } => {
                     stream
@@ -201,7 +201,8 @@ impl NatsSourceFunc {
                     subject
                 }
             },
-            &ctx.task_info.operator_id.replace("operator_", "")
+            &ctx.task_info.operator_id.replace("operator_", ""),
+            &ctx.task_info.job_id.replace("job_", "")
         );
 
         let consumer_config = match &self.source_type {
