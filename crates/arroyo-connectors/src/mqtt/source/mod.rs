@@ -10,9 +10,9 @@ use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
 use arroyo_types::{SignalMessage, UserError, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
-use rumqttc::v5::mqttbytes::QoS;
-use rumqttc::v5::{ConnectionError, Event as MqttEvent, Incoming};
+use rumqttc::mqttbytes::QoS;
 use rumqttc::Outgoing;
+use rumqttc::{Event as MqttEvent, Incoming};
 
 use crate::mqtt::{create_connection, MqttConfig};
 use arroyo_operator::context::{SourceCollector, SourceContext};
@@ -115,16 +115,19 @@ impl MqttSourceFunc {
                 .await;
         }
 
-        let (client, mut eventloop) =
-            match create_connection(&self.config, ctx.task_info.task_index as usize) {
-                Ok(c) => c,
-                Err(e) => {
-                    return Err(UserError {
-                        name: "MqttSourceError".to_string(),
-                        details: format!("Failed to create connection: {}", e),
-                    });
-                }
-            };
+        let (client, mut eventloop) = match create_connection(
+            &self.config,
+            &ctx.task_info.operator_id,
+            ctx.task_info.task_index as usize,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(UserError {
+                    name: "MqttSourceError".to_string(),
+                    details: format!("Failed to create connection: {}", e),
+                });
+            }
+        };
 
         match client.subscribe(self.topic.clone(), self.qos).await {
             Ok(_) => (),
@@ -148,7 +151,7 @@ impl MqttSourceFunc {
                 event = eventloop.poll() => {
                     match event {
                         Ok(MqttEvent::Incoming(Incoming::Publish(p))) => {
-                            let topic = String::from_utf8_lossy(&p.topic).to_string();
+                            let topic = String::from_utf8_lossy(p.topic.as_bytes()).to_string();
 
                             let connector_metadata = if !self.metadata_fields.is_empty() {
                                 let mut connector_metadata = HashMap::new();
@@ -171,9 +174,6 @@ impl MqttSourceFunc {
                         }
                         Ok(_) => (),
                         Err(err) => {
-                            if let ConnectionError::Timeout(_) = err {
-                                continue;
-                            }
                             tracing::error!("Failed to poll mqtt eventloop: {}", err);
                             if let Err(err) = client
                                 .subscribe(

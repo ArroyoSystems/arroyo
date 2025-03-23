@@ -2,6 +2,7 @@ use arrow::array::UInt64Array;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use crate::mqtt::{create_connection, MqttConfig, Tls};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
@@ -13,9 +14,9 @@ use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_types::{ArrowMessage, ChainInfo, TaskInfo};
+use arroyo_types::{to_nanos, ArrowMessage, ChainInfo, TaskInfo};
 use rand::random;
-use rumqttc::v5::mqttbytes::QoS;
+use rumqttc::mqttbytes::QoS;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -98,10 +99,14 @@ impl MqttTopicTester {
         }
     }
 
-    async fn get_client(&self) -> rumqttc::v5::AsyncClient {
+    async fn get_client(&self) -> rumqttc::AsyncClient {
         let config = self.get_config();
-        let (client, mut eventloop) =
-            create_connection(&config, 0).expect("Failed to create connection");
+        let (client, mut eventloop) = create_connection(
+            &config,
+            &format!("test-source-{}", to_nanos(SystemTime::now())),
+            0,
+        )
+        .expect("Failed to create connection");
 
         tokio::spawn(async move {
             loop {

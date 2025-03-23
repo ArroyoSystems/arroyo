@@ -9,9 +9,9 @@ use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::formats::Format;
-use rumqttc::v5::mqttbytes::QoS;
-use rumqttc::v5::AsyncClient;
-use rumqttc::v5::ConnectionError;
+use rumqttc::mqttbytes::QoS;
+use rumqttc::AsyncClient;
+use rumqttc::ConnectionError;
 
 #[cfg(test)]
 mod test;
@@ -48,7 +48,11 @@ impl ArrowOperator for MqttSinkFunc {
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let mut attempts = 0;
         while attempts < 20 {
-            match super::create_connection(&self.config, ctx.task_info.task_index as usize) {
+            match super::create_connection(
+                &self.config,
+                &ctx.task_info.operator_id,
+                ctx.task_info.task_index as usize,
+            ) {
                 Ok((client, mut eventloop)) => {
                     self.client = Some(client);
                     let stopped = self.stopped.clone();
@@ -57,10 +61,7 @@ impl ArrowOperator for MqttSinkFunc {
                             match eventloop.poll().await {
                                 Ok(_) => (),
                                 Err(err) => match err {
-                                    ConnectionError::Timeout(_) => (),
-                                    ConnectionError::MqttState(rumqttc::v5::StateError::Io(
-                                        err,
-                                    ))
+                                    ConnectionError::MqttState(rumqttc::StateError::Io(err))
                                     | ConnectionError::Io(err)
                                         if err.kind() == std::io::ErrorKind::ConnectionAborted
                                             || err.kind()
