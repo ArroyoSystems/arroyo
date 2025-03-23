@@ -167,6 +167,8 @@ impl KubernetesScheduler {
                     }
                 ],
                 "serviceAccountName": c.worker.service_account_name,
+                "nodeSelector": c.worker.node_selector,
+                "tolerations": c.worker.tolerations,
             }
         })).unwrap()
     }

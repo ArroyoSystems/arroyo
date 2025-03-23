@@ -2,7 +2,7 @@ use arc_swap::ArcSwapOption;
 use figment::providers::{Env, Format, Json, Toml, Yaml};
 use figment::Figment;
 use k8s_openapi::api::core::v1::{
-    EnvVar, LocalObjectReference, ResourceRequirements, Volume, VolumeMount,
+    EnvVar, LocalObjectReference, ResourceRequirements, Toleration, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use log::warn;
@@ -553,6 +553,10 @@ pub struct KubernetesWorkerConfig {
     pub volume_mounts: Vec<VolumeMount>,
 
     pub command: String,
+
+    pub node_selector: BTreeMap<String, String>,
+
+    pub tolerations: Vec<Toleration>,
 }
 
 impl KubernetesWorkerConfig {
