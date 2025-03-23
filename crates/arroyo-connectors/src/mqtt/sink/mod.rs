@@ -48,7 +48,11 @@ impl ArrowOperator for MqttSinkFunc {
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let mut attempts = 0;
         while attempts < 20 {
-            match super::create_connection(&self.config, ctx.task_info.task_index as usize) {
+            match super::create_connection(
+                &self.config,
+                &ctx.task_info.operator_id,
+                ctx.task_info.task_index as usize,
+            ) {
                 Ok((client, mut eventloop)) => {
                     self.client = Some(client);
                     let stopped = self.stopped.clone();

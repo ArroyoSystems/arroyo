@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::mqtt::sink::MqttSinkFunc;
 use crate::mqtt::source::MqttSourceFunc;
@@ -15,6 +15,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
+use arroyo_types::to_nanos;
 use rumqttc::mqttbytes::QoS;
 use rumqttc::Outgoing;
 use rumqttc::{AsyncClient, Event as MqttEvent, EventLoop, Incoming, MqttOptions};
@@ -315,7 +316,11 @@ async fn test_inner(
         .await
         .unwrap();
 
-    let (client, mut eventloop) = create_connection(&c, 0)?;
+    let (client, mut eventloop) = create_connection(
+        &c,
+        &format!("mqtt-tester-{}", to_nanos(SystemTime::now())),
+        0,
+    )?;
 
     let wait_for_incomming = match t {
         Some(t) => {
@@ -395,20 +400,17 @@ fn load_private_key<'a>(certificate: &str) -> anyhow::Result<PrivatePkcs8KeyDer<
 
 pub(crate) fn create_connection(
     c: &MqttConfig,
-    task_id: usize,
+    name: &str,
+    task_index: usize,
 ) -> anyhow::Result<(AsyncClient, EventLoop)> {
-    // It creates a client id with the format: <client_prefix>_<task_id><current_time_in_millis>
+    // It creates a client id with the format: <client_prefix>_<name>_<task_index>
     // because the client id must be unique for each connection. Otherwise, the broker will only keep one active connection
     // per client id
     let client_id = format!(
-        "{}_{}{}",
+        "{}_{}_{}",
         c.client_prefix.as_deref().unwrap_or("arroyo-mqtt"),
-        task_id,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-            % 100000,
+        name,
+        task_index,
     );
 
     let mut url = url::Url::parse(&c.url)?;

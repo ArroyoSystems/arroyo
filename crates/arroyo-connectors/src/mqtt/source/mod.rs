@@ -115,16 +115,19 @@ impl MqttSourceFunc {
                 .await;
         }
 
-        let (client, mut eventloop) =
-            match create_connection(&self.config, ctx.task_info.task_index as usize) {
-                Ok(c) => c,
-                Err(e) => {
-                    return Err(UserError {
-                        name: "MqttSourceError".to_string(),
-                        details: format!("Failed to create connection: {}", e),
-                    });
-                }
-            };
+        let (client, mut eventloop) = match create_connection(
+            &self.config,
+            &ctx.task_info.operator_id,
+            ctx.task_info.task_index as usize,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(UserError {
+                    name: "MqttSourceError".to_string(),
+                    details: format!("Failed to create connection: {}", e),
+                });
+            }
+        };
 
         match client.subscribe(self.topic.clone(), self.qos).await {
             Ok(_) => (),
