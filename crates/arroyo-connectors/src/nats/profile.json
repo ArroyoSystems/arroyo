@@ -40,16 +40,18 @@
         {
           "type": "object",
           "title": "Jwt",
-          "required": ["jwt", "nkey_seed"],
-          "sensitive": ["jwt", "nkey_seed"],
+          "required": ["jwt", "nkeySeed"],
+          "sensitive": ["jwt", "nkeySeed"],
           "properties": {
             "jwt": {
               "type": "string",
+              "title": "JWT",
               "description": "The JWT to use for authentication",
               "format": "var-str"
             },
-            "nkey_seed": {
+            "nkeySeed": {
               "type": "string",
+              "title": "NKey Seed",
               "description": "The NKey seed to use for authentication",
               "format": "var-str"
             }
