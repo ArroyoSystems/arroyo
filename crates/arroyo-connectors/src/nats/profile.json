@@ -1,56 +1,65 @@
 {
-    "type": "object",
-    "title": "NatsConfig",
-    "properties": {
-        "servers": {
-            "type": "string",
-            "title": "NATS Servers",
-            "format": "var-str",
-            "description": "Comma-separated list of NATS servers to connect to",
-            "examples": [
-                "nats-1:4222,nats-2:4222"
-            ]
-        },
-        "authentication": {
-            "type": "object",
-            "oneOf": [
-                {
-                    "type": "object",
-                    "title": "None",
-                    "properties": {
-                    },
-                    "additionalProperties": false
-                },
-                {
-                    "type": "object",
-                    "title": "Credentials",
-                    "required": [
-                        "username",
-                        "password"
-                    ],
-                    "sensitive": [
-                        "user",
-                        "password"
-                    ],
-                    "properties": {
-                        "username": {
-                            "type": "string",
-                            "description": "The username to use for authentication",
-                            "format": "var-str"
-                        },
-                        "password": {
-                            "type": "string",
-                            "description": "The password to use for authentication",
-                            "format": "var-str"
-                        }
-                    },
-                    "additionalProperties": false
-                }
-            ]
-        }
+  "type": "object",
+  "title": "NatsConfig",
+  "properties": {
+    "servers": {
+      "type": "string",
+      "title": "NATS Servers",
+      "format": "var-str",
+      "description": "Comma-separated list of NATS servers to connect to",
+      "examples": ["nats-1:4222,nats-2:4222"]
     },
-    "required": [
-        "servers",
-        "authentication"
-    ]
+    "authentication": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "None",
+          "properties": {},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "Credentials",
+          "required": ["username", "password"],
+          "sensitive": ["user", "password"],
+          "properties": {
+            "username": {
+              "type": "string",
+              "description": "The username to use for authentication",
+              "format": "var-str"
+            },
+            "password": {
+              "type": "string",
+              "description": "The password to use for authentication",
+              "format": "var-str"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "Jwt",
+          "required": ["jwt", "nkeySeed"],
+          "sensitive": ["jwt", "nkeySeed"],
+          "properties": {
+            "jwt": {
+              "type": "string",
+              "title": "JWT",
+              "description": "The JWT to use for authentication",
+              "format": "var-str"
+            },
+            "nkeySeed": {
+              "type": "string",
+              "title": "NKey Seed",
+              "description": "The NKey seed to use for authentication",
+              "format": "var-str"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": ["servers", "authentication"]
 }
