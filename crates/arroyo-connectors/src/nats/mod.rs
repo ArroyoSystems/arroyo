@@ -52,6 +52,10 @@ impl NatsConnector {
                 username: VarStr::new(options.pull_str("auth.username")?),
                 password: VarStr::new(options.pull_str("auth.password")?),
             },
+            Some("jwt") => NatsConfigAuthentication::Jwt {
+                jwt: VarStr::new(options.pull_str("auth.jwt")?),
+                nkey_seed: VarStr::new(options.pull_str("auth.nkey_seed")?),
+            },
             Some(other) => bail!("Unknown auth type '{}'", other),
         };
 
@@ -375,6 +379,22 @@ async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::
                 username.sub_env_vars().map_err(|e| e.context("username"))?,
                 password.sub_env_vars().map_err(|e| e.context("password"))?,
             )
+        }
+        NatsConfigAuthentication::Jwt { jwt, nkey_seed } => {
+            let jwt = jwt.sub_env_vars().map_err(|e| e.context("jwt"))?;
+            let seed = nkey_seed
+                .sub_env_vars()
+                .map_err(|e| e.context("nkey_seed"))?;
+
+            let key_pair = std::sync::Arc::new(
+                nkeys::KeyPair::from_seed(&seed)
+                    .map_err(|e| anyhow!("Invalid NKey seed: {}", e))?,
+            );
+
+            opts = opts.jwt(jwt, move |nonce| {
+                let key_pair = key_pair.clone();
+                async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+            });
         }
     };
     let client = opts

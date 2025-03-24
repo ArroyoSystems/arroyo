@@ -558,6 +558,7 @@ dependencies = [
  "glob",
  "governor",
  "itertools 0.14.0",
+ "nkeys 0.3.2",
  "object_store",
  "parquet",
  "prost",
@@ -1195,7 +1196,7 @@ dependencies = [
  "bytes",
  "futures",
  "memchr",
- "nkeys",
+ "nkeys 0.4.4",
  "nuid",
  "once_cell",
  "pin-project",
@@ -5828,6 +5829,22 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "nkeys"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aad178aad32087b19042ee36dfd450b73f5f934fbfb058b59b198684dfec4c47"
+dependencies = [
+ "byteorder",
+ "data-encoding",
+ "ed25519",
+ "ed25519-dalek",
+ "getrandom 0.2.15",
+ "log",
+ "rand 0.8.5",
+ "signatory",
 ]
 
 [[package]]
