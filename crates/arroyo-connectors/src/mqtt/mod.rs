@@ -318,7 +318,8 @@ async fn test_inner(
 
     let (client, mut eventloop) = create_connection(
         &c,
-        &format!("mqtt-tester-{}", to_nanos(SystemTime::now())),
+        &format!("tester_{}", to_nanos(SystemTime::now())),
+        "mqtt-tester-0",
         0,
     )?;
 
@@ -400,16 +401,18 @@ fn load_private_key<'a>(certificate: &str) -> anyhow::Result<PrivatePkcs8KeyDer<
 
 pub(crate) fn create_connection(
     c: &MqttConfig,
-    name: &str,
+    job_id: &str,
+    operator_id: &str,
     task_index: usize,
 ) -> anyhow::Result<(AsyncClient, EventLoop)> {
     // It creates a client id with the format: <client_prefix>_<name>_<task_index>
     // because the client id must be unique for each connection. Otherwise, the broker will only keep one active connection
     // per client id
     let client_id = format!(
-        "{}_{}_{}",
+        "{}_{}_{}_{}",
         c.client_prefix.as_deref().unwrap_or("arroyo-mqtt"),
-        name,
+        job_id,
+        operator_id,
         task_index,
     );
 

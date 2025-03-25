@@ -103,7 +103,8 @@ impl MqttTopicTester {
         let config = self.get_config();
         let (client, mut eventloop) = create_connection(
             &config,
-            &format!("test-source-{}", to_nanos(SystemTime::now())),
+            &format!("test-{}", to_nanos(SystemTime::now())),
+            "source_0",
             0,
         )
         .expect("Failed to create connection");

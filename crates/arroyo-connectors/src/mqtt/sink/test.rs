@@ -62,7 +62,8 @@ impl MqttTopicTester {
         let config = self.get_config();
         create_connection(
             &config,
-            &format!("test-sink-{}", to_nanos(SystemTime::now())),
+            &format!("test-{}", to_nanos(SystemTime::now())),
+            "sink_0",
             0,
         )
         .expect("Failed to create connection")
