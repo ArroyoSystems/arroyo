@@ -212,6 +212,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
             name: Cow::Borrowed("TumblingAggregatingWindowFunc"),
             fields: vec![
                 ("width", AsDisplayable::Debug(&self.width)),
+                ("partial_schema", self.partial_schema.schema.as_ref().into()),
                 (
                     "partial_aggregation_plan",
                     self.partial_aggregation_plan.as_ref().into(),

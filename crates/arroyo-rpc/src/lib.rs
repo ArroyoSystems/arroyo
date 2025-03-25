@@ -9,7 +9,7 @@ use crate::formats::{BadData, Format, Framing};
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::Result;
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
-use arrow::row::{OwnedRow, RowConverter, Rows, SortField};
+use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
@@ -344,6 +344,13 @@ impl Converter {
                 Ok(row_converter.convert_rows(row_list)?)
             }
             Converter::Empty(_row_converter, _array) => Ok(vec![]),
+        }
+    }
+
+    pub fn parser(&self) -> Option<RowParser> {
+        match self {
+            Converter::RowConverter(r) => Some(r.parser()),
+            Converter::Empty(_, _) => None,
         }
     }
 }
