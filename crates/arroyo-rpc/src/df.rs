@@ -196,6 +196,10 @@ impl ArroyoSchema {
             .unwrap()
     }
 
+    pub fn has_routing_keys(&self) -> bool {
+        self.routing_keys().map(|k| !k.is_empty()).unwrap_or(false)
+    }
+
     pub fn routing_keys(&self) -> Option<&Vec<usize>> {
         self.routing_key_indices
             .as_ref()

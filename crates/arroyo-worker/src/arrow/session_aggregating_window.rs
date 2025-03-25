@@ -1,16 +1,10 @@
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    sync::{Arc, RwLock},
-    time::SystemTime,
-};
-
 use anyhow::{anyhow, bail, Context, Result};
 use arrow::{
     compute::{
         concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices, max,
         partition, take, SortColumn,
     },
-    row::{OwnedRow, RowConverter, SortField},
+    row::{RowConverter, SortField},
 };
 use arrow_array::{
     types::TimestampNanosecondType, Array, BooleanArray, PrimitiveArray, RecordBatch, StructArray,
@@ -31,9 +25,15 @@ use arroyo_state::{
 };
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
+use std::borrow::Cow;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::{Arc, RwLock},
+    time::SystemTime,
+};
 
 use arroyo_operator::context::Collector;
-use arroyo_operator::operator::Registry;
+use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use datafusion::execution::{
@@ -50,11 +50,13 @@ use tracing::{debug, warn};
 
 pub struct SessionAggregatingWindowFunc {
     config: Arc<SessionWindowConfig>,
-    keys_by_next_watermark_action: BTreeMap<SystemTime, HashSet<OwnedRow>>,
-    key_computations: HashMap<OwnedRow, KeyComputingHolder>,
-    keys_by_start_time: BTreeMap<SystemTime, HashSet<OwnedRow>>,
+    keys_by_next_watermark_action: BTreeMap<SystemTime, HashSet<Vec<u8>>>,
+    key_computations: HashMap<Vec<u8>, KeyComputingHolder>,
+    keys_by_start_time: BTreeMap<SystemTime, HashSet<Vec<u8>>>,
     row_converter: Converter,
 }
+
+const GLOBAL_KEY: Vec<u8> = vec![];
 
 impl SessionAggregatingWindowFunc {
     fn should_advance(&self, watermark: SystemTime) -> bool {
@@ -98,13 +100,14 @@ impl SessionAggregatingWindowFunc {
     async fn results_at_watermark(
         &mut self,
         watermark: SystemTime,
-    ) -> Result<Vec<(OwnedRow, Vec<SessionWindowResult>)>> {
+    ) -> Result<Vec<(Vec<u8>, Vec<SessionWindowResult>)>> {
         let mut results = vec![];
         while self.should_advance(watermark) {
             let (_next_watermark_action, keys) = self
                 .keys_by_next_watermark_action
                 .pop_first()
                 .ok_or_else(|| anyhow!("should have a key to advance"))?;
+
             for key in keys {
                 let key_computation = self
                     .key_computations
@@ -137,7 +140,9 @@ impl SessionAggregatingWindowFunc {
                     let next_watermark_action = key_computation.next_watermark_action().unwrap();
                     if next_watermark_action == _next_watermark_action {
                         bail!(" processed a watermark at {} and next watermark action stayed at {}. batches by start time {:?}, active_session date_end():{:?} ",
-                        print_time(watermark), print_time(next_watermark_action), key_computation.batches_by_start_time, key_computation.active_session.as_ref().map(|session| print_time(session.data_end)));
+                            print_time(watermark),
+                            print_time(next_watermark_action), key_computation.batches_by_start_time,
+                            key_computation.active_session.as_ref().map(|session| print_time(session.data_end)));
                     }
                     self.keys_by_next_watermark_action
                         .entry(next_watermark_action)
@@ -161,8 +166,7 @@ impl SessionAggregatingWindowFunc {
         sorted_batch: RecordBatch,
         watermark: Option<SystemTime>,
     ) -> Result<()> {
-        let has_keys = self.config.input_schema_ref.routing_keys().is_some();
-        let partition = if !has_keys {
+        let partition = if !self.config.input_schema_ref.has_routing_keys() {
             // if we don't have keys, we can just partition by the whole batch.
             vec![0..sorted_batch.num_rows()]
         } else {
@@ -186,19 +190,26 @@ impl SessionAggregatingWindowFunc {
             .ranges()
         };
 
+        let key_count = self
+            .config
+            .input_schema_ref
+            .routing_keys()
+            .map(|keys| keys.len())
+            .unwrap_or(0);
+
         for range in partition {
             let key_batch = sorted_batch.slice(range.start, range.end - range.start);
-            let key_count = self
-                .config
-                .input_schema_ref
-                .routing_keys()
-                .as_ref()
-                .map(|keys| keys.len())
-                .unwrap_or(0);
-            let row = self
-                .row_converter
-                .convert_columns(&key_batch.slice(0, 1).columns()[0..key_count])
-                .context("failed to convert rows")?;
+
+            let row = if key_count == 0 {
+                GLOBAL_KEY
+            } else {
+                self.row_converter
+                    .convert_columns(&key_batch.slice(0, 1).columns()[0..key_count])
+                    .context("failed to convert rows")?
+                    .as_ref()
+                    .to_vec()
+            };
+
             let key_computation =
                 self.key_computations
                     .entry(row.clone())
@@ -207,6 +218,7 @@ impl SessionAggregatingWindowFunc {
                         active_session: None,
                         batches_by_start_time: BTreeMap::new(),
                     });
+
             let initial_next_watermark_action = key_computation.next_watermark_action();
             let initial_data_start = key_computation.earliest_data();
             key_computation
@@ -219,6 +231,7 @@ impl SessionAggregatingWindowFunc {
             let new_initial_data_start = key_computation
                 .earliest_data()
                 .expect("should have earliest data");
+
             match initial_next_watermark_action {
                 Some(initial_next_watermark_action) => {
                     if initial_next_watermark_action != new_next_watermark_action {
@@ -297,20 +310,24 @@ impl SessionAggregatingWindowFunc {
 
     fn to_record_batch(
         &self,
-        results: Vec<(OwnedRow, Vec<SessionWindowResult>)>,
+        results: Vec<(Vec<u8>, Vec<SessionWindowResult>)>,
         ctx: &mut OperatorContext,
     ) -> Result<RecordBatch> {
-        debug!("first result is {:#?}", results[0]);
         let (rows, results): (Vec<_>, Vec<_>) = results
             .iter()
-            .flat_map(|(owned_row, session_results)| {
-                let row = owned_row.row();
+            .flat_map(|(row, session_results)| {
                 session_results
                     .iter()
                     .map(move |session_result| (row, session_result))
             })
             .unzip();
-        let key_columns = self.row_converter.convert_rows(rows)?;
+
+        let key_columns = if let Some(parser) = self.row_converter.parser() {
+            self.row_converter
+                .convert_rows(rows.iter().map(|row| parser.parse(row.as_ref())).collect())?
+        } else {
+            vec![]
+        };
 
         let window_start_array = PrimitiveArray::<TimestampNanosecondType>::from(
             results
@@ -758,6 +775,27 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         "session_window".to_string()
     }
 
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("SessionAggregatingWindowFunc"),
+            fields: vec![
+                (
+                    "gap",
+                    format!("{} seconds", self.config.gap.as_secs()).into(),
+                ),
+                (
+                    "window_field",
+                    self.config.window_field.name().as_str().into(),
+                ),
+                (
+                    "window_index",
+                    AsDisplayable::Display(&self.config.window_index),
+                ),
+                ("physical_exec", (&*self.config.final_physical_exec).into()),
+            ],
+        }
+    }
+
     async fn on_start(&mut self, ctx: &mut OperatorContext) {
         let start_times_map: &mut GlobalKeyedView<u32, Option<SystemTime>> =
             ctx.table_manager.get_global_keyed_state("e").await.unwrap();
@@ -778,7 +816,9 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             .get_expiring_time_key_table("s", start_time)
             .await
             .expect("should be able to load table");
+
         let all_batches = table.all_batches_for_watermark(start_time);
+
         for (_max_timestamp, batches) in all_batches {
             for batch in batches {
                 let batch = self
@@ -856,6 +896,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             .downcast_ref::<TimestampNanosecondArray>()
             .expect("should have max timestamp"))
         .unwrap();
+
         table.insert(from_nanos(max_timestamp as u128), sorted.clone());
 
         self.add_at_watermark(sorted, current_watermark)
