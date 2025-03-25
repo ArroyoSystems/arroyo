@@ -117,6 +117,7 @@ impl MqttSourceFunc {
 
         let (client, mut eventloop) = match create_connection(
             &self.config,
+            &ctx.task_info.job_id,
             &ctx.task_info.operator_id,
             ctx.task_info.task_index as usize,
         ) {
