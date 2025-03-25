@@ -905,9 +905,11 @@ where
     }
 
     fn process_callback(&mut self, name: String, callback: MultipartCallback) -> Result<()> {
-        let writer = self.writers.get_mut(&name).ok_or_else(|| {
-            anyhow::anyhow!("missing writer {} for callback {:?}", name, callback)
-        })?;
+        let Some(writer) = self.writers.get_mut(&name) else {
+            warn!("missing writer {} for callback {:?}", name, callback);
+            return Ok(());
+        };
+
         match callback {
             MultipartCallback::InitializedMultipart { multipart_id } => {
                 self.futures
