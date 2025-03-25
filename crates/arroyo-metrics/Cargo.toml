@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-metrics"
-version = "0.14.0-dev"
+version = "0.14.0"
 edition = "2021"
 
 [dependencies]
