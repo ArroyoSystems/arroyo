@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
-    ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
+    ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
 };
 use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::var_str::VarStr;
@@ -17,16 +17,22 @@ use tracing::warn;
 pub mod blackhole;
 pub mod confluent;
 pub mod filesystem;
+#[cfg(feature = "fluvio")]
 pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
+#[cfg(feature = "kinesis")]
 pub mod kinesis;
+#[cfg(feature = "mqtt")]
 pub mod mqtt;
+#[cfg(feature = "nats")]
 pub mod nats;
 pub mod nexmark;
 pub mod polling_http;
 pub mod preview;
+#[cfg(feature = "rabbitmq")]
 pub mod rabbitmq;
+#[cfg(feature = "redis")]
 pub mod redis;
 pub mod single_file;
 pub mod sse;
@@ -40,16 +46,22 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(confluent::ConfluentConnector {}),
         Box::new(filesystem::delta::DeltaLakeConnector {}),
         Box::new(filesystem::FileSystemConnector {}),
+        #[cfg(feature = "fluvio")]
         Box::new(fluvio::FluvioConnector {}),
         Box::new(impulse::ImpulseConnector {}),
         Box::new(kafka::KafkaConnector {}),
+        #[cfg(feature = "kinesis")]
         Box::new(kinesis::KinesisConnector {}),
+        #[cfg(feature = "mqtt")]
         Box::new(mqtt::MqttConnector {}),
+        #[cfg(feature = "nats")]
         Box::new(nats::NatsConnector {}),
         Box::new(nexmark::NexmarkConnector {}),
         Box::new(polling_http::PollingHTTPConnector {}),
         Box::new(preview::PreviewConnector {}),
+        #[cfg(feature = "rabbitmq")]
         Box::new(rabbitmq::RabbitmqConnector {}),
+        #[cfg(feature = "redis")]
         Box::new(redis::RedisConnector {}),
         Box::new(single_file::SingleFileConnector {}),
         Box::new(sse::SSEConnector {}),

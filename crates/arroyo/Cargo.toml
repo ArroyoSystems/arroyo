@@ -4,8 +4,16 @@ version = "0.15.0-dev"
 edition = "2021"
 
 [features]
+default = ["all-connectors"]
 profiling = ["tikv-jemallocator/profiling"]
 python = ["arroyo-udf-python/python-enabled"]
+all-connectors = ["arroyo-connectors/all-connectors"]
+redis = ["arroyo-connectors/redis"]
+fluvio = ["arroyo-connectors/fluvio"]
+kinesis = ["arroyo-connectors/kinesis"]
+rabbitmq = ["arroyo-connectors/rabbitmq"]
+mqtt = ["arroyo-connectors/mqtt"]
+nats = ["arroyo-connectors/nats"]
 
 [dependencies]
 arroyo-types = { path ="../arroyo-types" }
@@ -20,6 +28,7 @@ arroyo-openapi = { path ="../arroyo-openapi" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 arroyo-planner = { path = "../arroyo-planner" }
+arroyo-connectors = { path = "../arroyo-connectors", default-features = false }
 
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
