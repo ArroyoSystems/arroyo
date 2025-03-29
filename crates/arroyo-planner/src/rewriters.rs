@@ -705,6 +705,24 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
     }
 }
 
+pub struct RowTimeRewriter {}
+
+impl TreeNodeRewriter for RowTimeRewriter {
+    type Node = Expr;
+    fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+        if let Expr::ScalarFunction(func) = &node {
+            if func.name() == "row_time" {
+                let transformed = Expr::Column(Column {
+                    relation: None,
+                    name: "_timestamp".to_string(),
+                });
+                return Ok(Transformed::yes(transformed));
+            }
+        }
+        Ok(Transformed::no(node))
+    }
+}
+
 type SinkInputs = HashMap<NamedNode, Vec<LogicalPlan>>;
 
 pub(crate) struct SinkInputRewriter<'a> {

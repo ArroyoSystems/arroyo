@@ -253,6 +253,13 @@ impl ArroyoSchemaProvider {
                 DataType::Utf8,
             ))
             .unwrap();
+        registry
+            .register_udf(PlaceholderUdf::with_return(
+                "row_time",
+                vec![],
+                DataType::Timestamp(datatypes::TimeUnit::Nanosecond, None),
+            ))
+            .unwrap();
 
         register_functions(&mut registry);
 
@@ -541,7 +548,6 @@ pub async fn parse_and_get_program(
     if query.trim().is_empty() {
         return plan_err!("Query is empty");
     }
-
     parse_and_get_arrow_program(query, schema_provider, config).await
 }
 
