@@ -548,7 +548,6 @@ pub async fn parse_and_get_program(
     if query.trim().is_empty() {
         return plan_err!("Query is empty");
     }
-    
     parse_and_get_arrow_program(query, schema_provider, config).await
 }
 
