@@ -548,8 +548,6 @@ pub async fn parse_and_get_program(
     if query.trim().is_empty() {
         return plan_err!("Query is empty");
     }
-
-    info!("Planning SQL query: {}", query);  // Add this line to log the SQL
     
     parse_and_get_arrow_program(query, schema_provider, config).await
 }
