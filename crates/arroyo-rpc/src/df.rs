@@ -12,7 +12,7 @@ use arrow_ord::cmp::gt_eq;
 use arrow_ord::partition::partition;
 use arrow_ord::sort::{lexsort_to_indices, SortColumn};
 use arrow_schema::FieldRef;
-use arroyo_types::to_nanos;
+use arroyo_types::{from_nanos, to_nanos};
 use datafusion::common::{DataFusionError, Result as DFResult};
 use std::ops::Range;
 use std::sync::Arc;
@@ -208,6 +208,17 @@ impl ArroyoSchema {
 
     pub fn storage_keys(&self) -> Option<&Vec<usize>> {
         self.key_indices.as_ref()
+    }
+
+    pub fn row_time(&self, batch: &RecordBatch, row_idx: usize) -> 
+    SystemTime {
+        let timestamp_array = batch
+            .column(self.timestamp_index)
+            .as_any()
+            .downcast_ref::<TimestampNanosecondArray>()
+            .unwrap();
+        let nanos = timestamp_array.value(row_idx);
+        from_nanos(nanos as u128)
     }
 
     pub fn filter_by_time(
