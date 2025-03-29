@@ -715,7 +715,7 @@ impl TreeNodeRewriter for RowTimeRewriter {
                 let transformed = Expr::Column(Column {
                     relation: None,
                     name: "_timestamp".to_string(),
-                });                
+                });
                 return Ok(Transformed::yes(transformed));
             }
         }

@@ -210,8 +210,7 @@ impl ArroyoSchema {
         self.key_indices.as_ref()
     }
 
-    pub fn row_time(&self, batch: &RecordBatch, row_idx: usize) -> 
-    SystemTime {
+    pub fn row_time(&self, batch: &RecordBatch, row_idx: usize) -> SystemTime {
         let timestamp_array = batch
             .column(self.timestamp_index)
             .as_any()

@@ -22,8 +22,8 @@ use crate::{
         join::JOIN_NODE_NAME,
     },
     fields_with_qualifiers, find_window,
-    rewriters::SourceRewriter,
     rewriters::RowTimeRewriter,
+    rewriters::SourceRewriter,
     schema_from_df_fields_with_metadata,
     schemas::{add_timestamp_field, has_timestamp_field},
     ArroyoSchemaProvider, DFField, WindowBehavior,
@@ -304,12 +304,14 @@ impl TreeNodeRewriter for ArroyoRewriter<'_> {
                     projection.expr.push(Expr::Column(field.qualified_column()));
                 }
 
-                let rewritten = projection.expr.iter()
+                let rewritten = projection
+                    .expr
+                    .iter()
                     .map(|expr| expr.clone().rewrite(&mut RowTimeRewriter {}))
                     .collect::<Result<Vec<_>>>()?;
                 if rewritten.iter().any(|r| r.transformed) {
                     projection.expr = rewritten.into_iter().map(|r| r.data).collect();
-                } 
+                }
                 return AsyncUdfRewriter::new(self.schema_provider).f_up(node);
             }
             LogicalPlan::Aggregate(aggregate) => {
