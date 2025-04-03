@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::{sync::mpsc::error::TryRecvError, time::sleep};
 use tracing::debug;
-use tracing::{info, log::warn};
+use tracing::{info, warn};
 
 const HOT_AUCTION_RATIO: u64 = 100;
 const HOT_BIDDER_RATIO: u64 = 100;

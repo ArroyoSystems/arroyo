@@ -54,7 +54,7 @@ rusqlite = { workspace = true, features = ["bundled", "serde_json", "time"] }
 
 futures = "0.3"
 futures-util = "0.3.28"
-time = "0.3"
+time = { version = "0.3", features = ["serde"] }
 cornucopia_async = { workspace = true, features = ["with-serde_json-1"]}
 apache-avro = { workspace = true }
 toml = "0.8"
