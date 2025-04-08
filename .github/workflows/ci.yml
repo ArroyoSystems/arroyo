@@ -21,7 +21,7 @@ jobs:
           pnpm check
           
   build-rust:
-    runs-on: ubicloud-standard-30
+    runs-on: ubuntu-22.04-32
     env:
       DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
     steps:

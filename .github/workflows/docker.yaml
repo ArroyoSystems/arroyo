@@ -21,10 +21,10 @@ jobs:
           - linux/arm64
         include:
           - platform: linux/amd64
-            runs_on: buildjet-32vcpu-ubuntu-2204
+            runs_on: ubuntu-22.04-32
             arch: amd64
           - platform: linux/arm64
-            runs_on: buildjet-32vcpu-ubuntu-2204-arm
+            runs_on: ubuntu-22.04-32-arm
             arch: arm64
     runs-on: ${{ matrix.runs_on }}
     steps:
