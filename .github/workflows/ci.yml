@@ -21,7 +21,7 @@ jobs:
           pnpm check
           
   build-rust:
-    runs-on: ubicloud-standard-30
+    runs-on: ubuntu-22.04-32
     env:
       DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
     steps:
@@ -36,6 +36,15 @@ jobs:
         with:
           components: clippy, rustfmt
           toolchain: 1.84
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Check Formatting
         run: cargo fmt -- --check
       - uses: actions/setup-python@v5
