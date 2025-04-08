@@ -19,8 +19,8 @@ jobs:
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
-          - { runner: buildjet-32vcpu-ubuntu-2204, protoc: linux-x86_64, pyarch: x86_64, artifact: linux-x86_64 }
-          - { runner: buildjet-32vcpu-ubuntu-2204-arm, protoc: linux-aarch_64, pyarch: aarch64, artifact: linux-arm64 }
+          - { runner: ubuntu-22.04-32, protoc: linux-x86_64, pyarch: x86_64, artifact: linux-x86_64 }
+          - { runner: ubuntu-22.04-32-arm, protoc: linux-aarch_64, pyarch: aarch64, artifact: linux-arm64 }
     runs-on: ${{ matrix.config.runner }}
     services:
       postgres:
