@@ -431,6 +431,7 @@ dependencies = [
  "anyhow",
  "arroyo-api",
  "arroyo-compiler-service",
+ "arroyo-connectors",
  "arroyo-controller",
  "arroyo-node",
  "arroyo-openapi",

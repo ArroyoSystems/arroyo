@@ -8,7 +8,8 @@ use arroyo_rpc::api_types::connections::{ConnectionProfile, TestSourceMessage};
 use arroyo_rpc::{api_types, ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{ConnectionType, EmptyConfig};
+use arroyo_rpc::api_types::connections::ConnectionSchema;
 
 use crate::kinesis::sink::{FlushConfig, KinesisSinkFunc};
 use crate::kinesis::source::KinesisSourceFunc;
