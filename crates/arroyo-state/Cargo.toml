@@ -25,6 +25,6 @@ async-trait = "0.1.68"
 once_cell = "1.17.1"
 futures = "0.3"
 prost = {workspace = true}
-prometheus = '0.13'
+prometheus = '0.14'
 lazy_static = "1.4.0"
 object_store = { workspace = true }

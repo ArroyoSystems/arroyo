@@ -25,7 +25,6 @@ members = [
     "crates/arroyo-udf/arroyo-udf-macros",
     "crates/arroyo-udf/arroyo-udf-python",
     "crates/arroyo-worker",
-    "crates/copy-artifacts",
     "crates/integ",
 ]
 
@@ -33,9 +32,9 @@ resolver = "2"
 
 [workspace.dependencies]
 tonic = { version = "0.13", features = ["zstd"] }
-tonic-build = { version = "0.12" }
-tonic-web = { version = "0.12" }
-tonic-reflection = { version = "0.12" }
+tonic-build = { version = "0.13" }
+tonic-web = { version = "0.13" }
+tonic-reflection = { version = "0.13" }
 tower = { version = "0.5" }
 tower-http = {version = "0.6"}
 axum = { version = "0.7" }
@@ -66,9 +65,11 @@ prost-types = "0.13"
 aws-config = "1.5.13"
 reqwest = "0.12"
 rusqlite = "0.31"
-apache-avro = "0.17.0"
+apache-avro = "0.18.0"
 k8s-openapi = "0.24.0"
 sqlparser = "0.51.0"
+petgraph = "0.8"
+rand = "0.9"
 
 [profile.release]
 debug = 1
@@ -98,6 +99,3 @@ object_store = { git = 'http://github.com/ArroyoSystems/arrow-rs', branch = 'obj
 
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
 cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
-
-# needed until 0.13 is released to get tower 0.5 upgrade
-tonic = { git = "https://github.com/hyperium/tonic", rev = "b80428ba7dfcc607dfaac07022c360159ee1dc79" }

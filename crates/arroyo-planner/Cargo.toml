@@ -23,7 +23,7 @@ arrow-schema = {workspace = true, features = ["serde"] }
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
 
-petgraph = "0.7"
+petgraph = { workspace = true }
 tokio = "1.27"
 tokio-stream = { version = "0.1", features = ["full"] }
 futures = "0.3"
@@ -44,7 +44,7 @@ sqlparser = { workspace = true}
 
 [dev-dependencies]
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}
-rstest = { version = "0.23" }
+rstest = { version = "0.25" }
 
 [build-dependencies]
 glob = "0.3.1"

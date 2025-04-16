@@ -28,13 +28,13 @@ tower = {workspace = true}
 arrow = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
 
-petgraph = {version = "0.7", features = ["serde-1"]}
+petgraph = {workspace = true, features = ["serde-1"]}
 
 http = "1"
 tower-http = { workspace = true, features = ["trace", "fs", "cors", "validate-request", "auth", "compression-zstd"]}
 axum = {workspace = true, features = ["tokio", "macros"]}
 axum-extra = { version = "0.9", features = ["typed-header"] }
-thiserror = "1.0.40"
+thiserror = "2"
 utoipa = { workspace = true }
 utoipa-swagger-ui = { version = "7", features = ["axum"] }
 

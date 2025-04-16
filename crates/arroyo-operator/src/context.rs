@@ -538,7 +538,7 @@ fn repartition<'a>(
         result.into_iter()
     } else {
         let range_size = record.num_rows() / qs + 1;
-        let rotation = rand::thread_rng().gen_range(0..qs);
+        let rotation = rand::rng().random_range(0..qs);
         let result: Vec<_> = (0..qs)
             .filter_map(|i| {
                 let start = i * range_size;

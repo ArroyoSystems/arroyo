@@ -13,7 +13,7 @@ use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use petgraph::Direction;
 use prost::Message;
-use rand::distributions::Alphanumeric;
+use rand::distr::Alphanumeric;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::DefaultHasher;

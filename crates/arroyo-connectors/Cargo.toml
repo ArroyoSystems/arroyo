@@ -34,7 +34,7 @@ anyhow = "1.0.71"
 tracing = "0.1.37"
 regress = "0.10.0"
 futures = "0.3.28"
-rand = "0.8.5"
+rand = { workspace = true }
 bytes = "1.5.0"
 url = "2.5.0"
 itertools = "0.14.0"

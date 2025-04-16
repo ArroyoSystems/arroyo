@@ -216,7 +216,7 @@ struct OutNetworkLink {
 
 impl OutNetworkLink {
     pub async fn connect(dest: String) -> Self {
-        let mut rand = StdRng::from_entropy();
+        let mut rand = StdRng::from_os_rng();
         for i in 0..10 {
             match TcpStream::connect(&dest).await {
                 Ok(stream) => {
@@ -229,7 +229,7 @@ impl OutNetworkLink {
                 Err(e) => {
                     warn!("Failed to connect to {dest}: {:?}", e);
                     tokio::time::sleep(Duration::from_millis(
-                        (i + 1) * (50 + rand.gen_range(1..50)),
+                        (i + 1) * (50 + rand.random_range(1..50)),
                     ))
                     .await;
                 }

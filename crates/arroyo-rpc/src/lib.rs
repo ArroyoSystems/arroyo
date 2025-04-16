@@ -716,7 +716,7 @@ macro_rules! retry {
                     let tmp = $max_delay.min($base * (2u32.pow(retries)));
                     let backoff = tmp / 2
                         + Duration::from_micros(
-                            rand::thread_rng().gen_range(0..tmp.as_micros() as u64 / 2),
+                            rand::rng().random_range(0..tmp.as_micros() as u64 / 2),
                         );
 
                     tokio::time::sleep(backoff).await;

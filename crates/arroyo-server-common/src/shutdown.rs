@@ -1,4 +1,3 @@
-use axum::async_trait;
 use futures::future::OptionFuture;
 use std::future::Future;
 use std::io;
@@ -10,6 +9,7 @@ use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use tonic::async_trait;
 use tracing::{debug, error, info, warn};
 
 static ERROR_CODE: AtomicI32 = AtomicI32::new(0);
