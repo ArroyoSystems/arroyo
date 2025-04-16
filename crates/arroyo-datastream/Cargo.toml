@@ -8,14 +8,14 @@ edition = "2021"
 arroyo-rpc = { path = "../arroyo-rpc" }
 arrow-schema = { workspace = true, features = ["serde"] }
 
-petgraph = {version = "0.7", features = ["serde-1"]}
+petgraph = {workspace = true, features = ["serde-1"]}
 serde = {version = "1", features = ["derive"]}
 syn = {version = "2", features = ["full"]}
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
-rand = "0.8"
+rand = { workspace = true }
 anyhow = "1.0.70"
 prost = {workspace = true}
 serde_json = "1.0.108"
-strum = { version = "0.26.0", features = ["derive"] }
+strum = { version = "0.27", features = ["derive"] }
 datafusion-proto = { workspace = true }
 itertools = "0.14"

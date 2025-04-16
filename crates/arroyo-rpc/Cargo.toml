@@ -27,17 +27,17 @@ tracing = "0.1.40"
 async-trait = "0.1.74"
 apache-avro = {workspace =  true}
 regex = "1.9.5"
-base64 = "0.21.5"
+base64 = "0.22"
 ahash = { workspace = true }
-strum_macros = "0.26.2"
-strum = "0.26.2"
+strum_macros = "0.27"
+strum = "0.27"
 figment = { version = "0.10", features = ["toml", "env", "yaml", "json"] }
 k8s-openapi = { workspace = true, features = ["v1_30"] }
 url = { version = "2", features = ["serde"] }
-dirs = "5.0.1"
+dirs = "6"
 arc-swap = "1.7.1"
 datafusion = { workspace = true }
-rand = "0.8.5"
+rand = { workspace = true }
 percent-encoding = "2.3.1"
 
 [build-dependencies]

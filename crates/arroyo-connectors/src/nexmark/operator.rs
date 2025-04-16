@@ -11,10 +11,8 @@ use arroyo_rpc::ControlMessage;
 use arroyo_types::{to_millis, to_nanos};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use rand::{
-    distributions::Alphanumeric, distributions::DistString, rngs::SmallRng, seq::SliceRandom, Rng,
-    SeedableRng,
-};
+use rand::prelude::IndexedRandom;
+use rand::{distr::Alphanumeric, distr::SampleString, rngs::SmallRng, Rng, SeedableRng};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -530,7 +528,7 @@ impl GeneratorConfig {
     }
 
     fn random_string(random: &mut SmallRng, max_length: u32) -> String {
-        let size = random.gen_range(MIN_STRING_LENGTH..max_length);
+        let size = random.random_range(MIN_STRING_LENGTH..max_length);
         Alphanumeric.sample_string(random, size as usize)
     }
 
@@ -557,7 +555,7 @@ impl GeneratorConfig {
 
         let mut seller;
         // Here P(auction will be for a hot seller) = 1 - 1/hotSellersRatio.
-        if random.gen_range(0..(self.configuration.hot_seller_ratio)) > 0 {
+        if random.random_range(0..(self.configuration.hot_seller_ratio)) > 0 {
             // Choose the first person in the batch of last HOT_SELLER_RATIO people.
             seller = (self.last_base0_person_id(event_id) / HOT_SELLER_RATIO) * HOT_SELLER_RATIO;
         } else {
@@ -565,7 +563,7 @@ impl GeneratorConfig {
         }
         seller += FIRST_PERSON_ID;
 
-        let category = FIRST_CATEGORY_ID + random.gen_range(0..NUM_CATEGORIES);
+        let category = FIRST_CATEGORY_ID + random.random_range(0..NUM_CATEGORIES);
         let initial_bid = Self::next_price(random);
         let expires = timestamp + self.next_auction_length(event_counts_so_far, random, timestamp);
         let name = Self::random_string(random, 20);
@@ -616,7 +614,7 @@ impl GeneratorConfig {
         } else {
             max_auction - self.configuration.num_inflight_auctions
         };
-        random.gen_range(min_auction..max_auction + 1 + AUCTION_ID_LEAD)
+        random.random_range(min_auction..max_auction + 1 + AUCTION_ID_LEAD)
     }
 
     fn last_base0_person_id(&self, event_id: u64) -> u64 {
@@ -634,7 +632,7 @@ impl GeneratorConfig {
     fn next_base0_person_id(&self, event_id: u64, random: &mut SmallRng) -> u64 {
         let num_people = self.last_base0_person_id(event_id);
         let active_people = u64::min(num_people, self.configuration.num_active_people);
-        let n = random.gen_range(0..(active_people + PERSON_ID_LEAD));
+        let n = random.random_range(0..(active_people + PERSON_ID_LEAD));
         num_people - active_people + n
     }
 
@@ -644,7 +642,7 @@ impl GeneratorConfig {
     }
 
     fn next_price(random: &mut SmallRng) -> u64 {
-        (f64::powf(10.0, random.gen_range(0.0..6.0)) * 100.0) as u64
+        (f64::powf(10.0, random.random_range(0.0..6.0)) * 100.0) as u64
     }
 
     fn next_auction_length(
@@ -667,7 +665,10 @@ impl GeneratorConfig {
         // Choose a length with average horizonMs.
         let horizon = future_auction.duration_since(timestamp).unwrap();
         Duration::from_nanos(
-            1 + u64::max(random.gen_range(0..(1 + horizon.as_nanos() as u64 * 2)), 1),
+            1 + u64::max(
+                random.random_range(0..(1 + horizon.as_nanos() as u64 * 2)),
+                1,
+            ),
         )
     }
 
@@ -691,10 +692,10 @@ impl GeneratorConfig {
         );
         let credit_card = format!(
             "{:04} {:04} {:04} {:04}",
-            random.gen_range(0..10000),
-            random.gen_range(0..10000),
-            random.gen_range(0..10000),
-            random.gen_range(0..10000)
+            random.random_range(0..10000),
+            random.random_range(0..10000),
+            random.random_range(0..10000),
+            random.random_range(0..10000)
         );
         let city = US_CITIES.choose(random).unwrap().to_string();
         let state = US_STATES.choose(random).unwrap().to_string();
@@ -725,13 +726,13 @@ impl GeneratorConfig {
         timestamp: SystemTime,
         channel_cache: &mut ChannelCache,
     ) -> Bid {
-        let mut auction = if random.gen_range(0..self.configuration.hot_auction_ratio) > 0 {
+        let mut auction = if random.random_range(0..self.configuration.hot_auction_ratio) > 0 {
             (self.last_base0_auction_id(event_id) / HOT_AUCTION_RATIO) * HOT_AUCTION_RATIO
         } else {
             self.next_base0_auction_id(event_id, random)
         };
         auction += FIRST_AUCTION_ID;
-        let mut bidder = if random.gen_range(0..self.configuration.hot_bidders_ratio) > 0 {
+        let mut bidder = if random.random_range(0..self.configuration.hot_bidders_ratio) > 0 {
             (self.last_base0_person_id(event_id) / HOT_BIDDER_RATIO) * HOT_BIDDER_RATIO
         } else {
             self.next_base0_person_id(event_id, random)
@@ -740,12 +741,12 @@ impl GeneratorConfig {
         let price = Self::next_price(random);
         let channel;
         let url;
-        if random.gen_range(0..HOT_CHANNELS_RATIO) > 0 {
-            let i = random.gen_range(0..HOT_CHANNELS.len());
+        if random.random_range(0..HOT_CHANNELS_RATIO) > 0 {
+            let i = random.random_range(0..HOT_CHANNELS.len());
             channel = HOT_CHANNELS[i].to_string();
             url = HOT_URLS[i].to_string();
         } else {
-            let pair = channel_cache.get_channel(random.gen_range(0..CHANNELS_NUMBER));
+            let pair = channel_cache.get_channel(random.random_range(0..CHANNELS_NUMBER));
             channel = pair.0.to_string();
             url = pair.1;
         }
@@ -789,7 +790,7 @@ impl ChannelCache {
             GeneratorConfig::random_string(random, 5),
             GeneratorConfig::random_string(random, 5)
         );
-        if random.gen_range(0..10) > 0 {
+        if random.random_range(0..10) > 0 {
             return (
                 format!("channel-{}", channel),
                 format!("{}&channel_id={}", url, channel),

@@ -7,9 +7,8 @@ edition = "2021"
 arroyo-openapi = { path = "../arroyo-openapi" }
 anyhow = "1.0.71"
 tokio = { version = "1.16.1", features = ["full"] }
-rand = "0.8.5"
+rand = { workspace = true }
 tracing = "0.1.37"
-tracing-subscriber = "0.3.17"
 serde_json = { version = "1", features = ["preserve_order"] }
 rdkafka = "0.37"
 reqwest = { workspace = true }

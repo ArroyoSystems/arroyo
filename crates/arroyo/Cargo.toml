@@ -35,7 +35,7 @@ rusqlite = {  workspace = true, features = ["backup"] }
 uuid = { version = "1.7.0", features = ["v4"] }
 refinery = { version = "0.8.14" , features = ["tokio-postgres", "rusqlite"] }
 anyhow = { version = "1.0.79"}
-rand = "0.8.5"
+rand = { workspace = true }
 reqwest = { workspace = true}
 clio = { version = "0.3.5", features = ["clap", "clap-parse"] }
 async-trait = "0.1.80"

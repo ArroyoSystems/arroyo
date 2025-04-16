@@ -1,76 +1,13 @@
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use bincode::{Decode, Encode};
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
-use std::ops::{Range, RangeInclusive};
+use std::ops::RangeInclusive;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-#[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
-pub struct Window {
-    pub start: SystemTime,
-    pub end: SystemTime,
-}
-
-impl Window {
-    pub fn new(start: SystemTime, end: SystemTime) -> Self {
-        Self { start, end }
-    }
-
-    pub fn session(start: SystemTime, gap: Duration) -> Self {
-        Self {
-            start,
-            end: start + gap,
-        }
-    }
-
-    pub fn contains(&self, t: SystemTime) -> bool {
-        self.start <= t && t < self.end
-    }
-
-    pub fn size(&self) -> Duration {
-        self.end.duration_since(self.start).unwrap_or_default()
-    }
-
-    pub fn extend(&self, new_end: SystemTime, max_size: Duration) -> Window {
-        let new_end = self.end.max(new_end);
-        Window {
-            start: self.start,
-            end: if new_end.duration_since(self.start).unwrap_or_default() > max_size {
-                self.start + max_size
-            } else {
-                new_end
-            },
-        }
-    }
-}
-
-impl From<Range<SystemTime>> for Window {
-    fn from(value: Range<SystemTime>) -> Self {
-        Self {
-            start: value.start,
-            end: value.end,
-        }
-    }
-}
-
-impl Serialize for Window {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut state = serializer.serialize_struct("Window", 2)?;
-
-        state.serialize_field("start", &to_millis(self.start))?;
-        state.serialize_field("end", &to_millis(self.end))?;
-
-        state.end()
-    }
-}
 
 // worker configuration
 pub const JOB_ID_ENV: &str = "JOB_ID";
@@ -152,11 +89,14 @@ pub fn string_to_map(s: &str, pair_delimeter: char) -> Option<HashMap<String, St
         .collect()
 }
 
-pub trait Key: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static {}
-impl<T: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static> Key for T {}
+pub trait Key:
+    Debug + Clone + Encode + Decode<()> + Hash + PartialEq + Eq + Send + 'static
+{
+}
+impl<T: Debug + Clone + Encode + Decode<()> + Hash + PartialEq + Eq + Send + 'static> Key for T {}
 
-pub trait Data: Debug + Clone + Encode + Decode + Send + 'static {}
-impl<T: Debug + Clone + Encode + Decode + Send + 'static> Data for T {}
+pub trait Data: Debug + Clone + Encode + Decode<()> + Send + 'static {}
+impl<T: Debug + Clone + Encode + Decode<()> + Send + 'static> Data for T {}
 
 #[derive(Debug, Copy, Clone, Encode, Decode, PartialEq, Eq)]
 pub enum Watermark {

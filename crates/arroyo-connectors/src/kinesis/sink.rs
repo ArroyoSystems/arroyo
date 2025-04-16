@@ -33,7 +33,7 @@ impl ArrowOperator for KinesisSinkFunc {
     }
 
     async fn on_start(&mut self, _ctx: &mut OperatorContext) {
-        let mut loader = aws_config::defaults(BehaviorVersion::v2024_03_28());
+        let mut loader = aws_config::defaults(BehaviorVersion::v2025_01_17());
         if let Some(region) = &self.aws_region {
             loader = loader.region(Region::new(region.clone()));
         }

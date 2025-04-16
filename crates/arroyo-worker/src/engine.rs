@@ -27,9 +27,8 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{range_for_server, Key, TaskInfo, WorkerId};
+use arroyo_types::{range_for_server, TaskInfo, WorkerId};
 use arroyo_udf_host::LocalUdf;
-use bincode::{Decode, Encode};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -39,17 +38,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::{Arc, RwLock};
-use std::time::SystemTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
 use tracing::{debug, info, warn};
-
-#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
-pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
-    pub time: SystemTime,
-    pub key: K,
-    pub data: T,
-}
 
 pub struct SubtaskNode {
     pub node_id: u32,

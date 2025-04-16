@@ -17,9 +17,9 @@ arroyo-operator = { path = "../arroyo-operator" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 
-rand = "0.8"
+rand = { workspace = true }
 bincode = "2.0.0-rc.3"
-petgraph = "0.7"
+petgraph = { workspace = true }
 prometheus = {version = "0.13", features = ["process"] }
 futures = "0.3"
 tokio = { version = "1", features = ["full", "tracing"] }

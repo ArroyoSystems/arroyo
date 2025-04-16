@@ -159,9 +159,7 @@ impl ArrowOperator for LookupJoin {
                         *b |= a;
                     }
                 } else {
-                    for b in &mut nonnull {
-                        *b = true;
-                    }
+                    nonnull.fill(true);
                     break;
                 }
             }
