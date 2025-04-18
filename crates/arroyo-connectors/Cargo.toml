@@ -7,7 +7,20 @@ edition = "2021"
 to_string_trait_impl = "allow"
 
 [features]
-default = []
+all-connectors = [
+    "redis",
+    "fluvio",
+    "kinesis",
+    "rabbitmq",
+    "mqtt",
+    "nats",
+]
+redis = ["dep:redis"]
+fluvio = ["dep:fluvio"]
+kinesis = ["dep:aws-sdk-kinesis"]
+rabbitmq = ["dep:rabbitmq-stream-client"]
+mqtt = ["dep:rumqttc"]
+nats = ["dep:async-nats", "dep:nkeys"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
@@ -44,11 +57,16 @@ regex = "1"
 # connector dependencies #
 ##########################
 
+rustls-native-certs =  { version = "0.8" }
+rustls-pemfile = { version = "2" }
+tokio-rustls = { version = "0.25" }
+rustls = { version = "0.22" }
+
 # Kafka
-aws-msk-iam-sasl-signer = "1.0.0"
+aws-msk-iam-sasl-signer = { version = "1.0.0" }
 rdkafka = { version = "0.37", features = ["cmake-build", "tracing", "sasl", "ssl-vendored", "zstd"] }
-rdkafka-sys = "4.8.0"
-sasl2-sys = { version = "0.1.22", features = ["vendored"] }
+rdkafka-sys = { version = "4.8.0"}
+sasl2-sys = { version = "0.1.22", features = ["vendored"]}
 
 # SSE
 eventsource-client = "0.13.0"
@@ -60,35 +78,31 @@ tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 reqwest = { workspace = true, features = ["stream"] }
 
 # RabbitMQ Stream
-rabbitmq-stream-client = "0.7"
+rabbitmq-stream-client = { version = "0.7", optional = true }
 
 # Redis
-redis = { version = "0.28", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
+redis = { version = "0.28", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"], optional = true }
 
 # Fluvio
-fluvio = {version = "0.24", features = ["openssl"]}
+fluvio = {version = "0.24", features = ["openssl"], optional = true}
 
 # Kinesis
-aws-sdk-kinesis = { version = "1.44" }
+aws-sdk-kinesis = { version = "1.44", optional = true }
 aws-config = { workspace = true }
 uuid = { version = "1.7.0", features = ["v4"] }
 
 # Filesystem
-parquet = { workspace = true, features = ["async"]}
+parquet = { workspace = true, features = ["async"] }
 object_store = { workspace = true }
 deltalake = { workspace = true, features = ["s3", "gcs"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 
 # MQTT
-rumqttc = { version = "0.24.0", features = ["url"] }
-rustls-native-certs =  "0.8"
-rustls-pemfile = "2"
-tokio-rustls = "0.25"
-rustls = "0.22"
+rumqttc = { version = "0.24.0", features = ["url"], optional = true }
 
 # NATS
-async-nats = "0.38.0"
-nkeys = "0.3.0"
+async-nats = { version = "0.38.0", optional = true }
+nkeys = { version = "0.3.0", optional = true }
 
 [build-dependencies]
 glob = "0.3"
