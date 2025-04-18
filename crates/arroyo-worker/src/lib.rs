@@ -23,7 +23,7 @@ use rand::random;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
@@ -229,7 +229,11 @@ impl WorkerServer {
         );
 
         let id = self.id;
-        let local_ip = local_ip().unwrap();
+        let local_ip = if config.worker.bind_address.is_loopback() {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        } else {
+            local_ip().unwrap()
+        };
 
         let rpc_address = format!("http://{}:{}", local_ip, local_addr.port());
         let data_address = format!("{}:{}", local_ip, data_port);
