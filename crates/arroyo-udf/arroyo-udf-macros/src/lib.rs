@@ -159,10 +159,27 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
                     } else {
                         quote!()
                     };
-
-                    quote!(let #id = arroyo_udf_plugin::arrow::array::PrimitiveArray::<arroyo_udf_plugin::arrow::datatypes::#arrow_type>::from(
-                        args.next().unwrap()
-                    ).iter()#filter.collect();)
+                        
+                    match field.data_type() {
+                        DataType::Utf8 => {
+                            quote!(
+                                let binding = arroyo_udf_plugin::arrow::array::StringArray::from(
+                                    args.next().unwrap()
+                                );
+                                let #id: Vec<&str> = binding.iter()#filter.map(|s| s.as_ref()).collect();
+                            )
+                        }
+                        DataType::Binary => {
+                            quote!(let #id = arroyo_udf_plugin::arrow::array::BinaryArray::from(
+                                args.next().unwrap()
+                            ).iter()#filter.collect();)
+                        }
+                        _ => {
+                            quote!(let #id = arroyo_udf_plugin::arrow::array::PrimitiveArray::<arroyo_udf_plugin::arrow::datatypes::#arrow_type>::from(
+                                args.next().unwrap()
+                            ).iter()#filter.collect();)
+                        }
+                    }
                 }
                 _ => {
                     quote!(let #id = arroyo_udf_plugin::arrow::array::PrimitiveArray::<arroyo_udf_plugin::arrow::datatypes::#arrow_type>::from(args.next().unwrap());)
