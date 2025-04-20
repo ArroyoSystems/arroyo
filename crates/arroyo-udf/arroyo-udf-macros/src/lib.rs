@@ -158,8 +158,7 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
                         quote!(.filter_map(|x| x))
                     } else {
                         quote!()
-                    };
-                        
+                    };                   
                     match field.data_type() {
                         DataType::Utf8 => {
                             quote!(
