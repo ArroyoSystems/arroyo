@@ -56,7 +56,7 @@ impl SinkExtension {
                         schema = input.schema().clone();
                     }
                     (true, false) => {
-                        return plan_err!("input is updating, but sink is not updating");
+                        return plan_err!("input is updating, but sink is not configured as an updating sink (hint: use `format = 'debezium_json'`)");
                     }
                     (false, false) => {}
                 }
