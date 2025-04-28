@@ -62,7 +62,7 @@ export interface paths {
     /** List all pipelines */
     get: operations["get_pipelines"];
     /**
-     * Create a new pipeline
+     * Create a new pipeline 
      * @description The API will create a single job for the pipeline.
      */
     post: operations["create_pipeline"];
@@ -154,7 +154,7 @@ export interface components {
       startTime: number;
     };
     CheckpointCollection: {
-      data: components["schemas"]["Checkpoint"][];
+      data: (components["schemas"]["Checkpoint"])[];
     };
     CheckpointEventSpan: {
       description: string;
@@ -168,7 +168,7 @@ export interface components {
     CheckpointSpanType: "alignment" | "sync" | "async" | "committing";
     ConnectionAutocompleteResp: {
       values: {
-        [key: string]: string[];
+        [key: string]: (string)[] | undefined;
       };
     };
     ConnectionProfile: {
@@ -179,7 +179,7 @@ export interface components {
       name: string;
     };
     ConnectionProfileCollection: {
-      data: components["schemas"]["ConnectionProfile"][];
+      data: (components["schemas"]["ConnectionProfile"])[];
     };
     ConnectionProfilePost: {
       config: unknown;
@@ -189,11 +189,10 @@ export interface components {
     ConnectionSchema: {
       badData?: components["schemas"]["BadData"] | null;
       definition?: components["schemas"]["SchemaDefinition"] | null;
-      fields: components["schemas"]["SourceField"][];
+      fields: (components["schemas"]["SourceField"])[];
       format?: components["schemas"]["Format"] | null;
       framing?: components["schemas"]["Framing"] | null;
       inferred?: boolean | null;
-      primaryKeys?: string[];
       structName?: string | null;
     };
     ConnectionTable: {
@@ -210,7 +209,7 @@ export interface components {
       tableType: components["schemas"]["ConnectionType"];
     };
     ConnectionTableCollection: {
-      data: components["schemas"]["ConnectionTable"][];
+      data: (components["schemas"]["ConnectionTable"])[];
       hasMore: boolean;
     };
     ConnectionTablePost: {
@@ -221,7 +220,7 @@ export interface components {
       schema?: components["schemas"]["ConnectionSchema"] | null;
     };
     /** @enum {string} */
-    ConnectionType: "source" | "sink" | "lookup";
+    ConnectionType: "source" | "sink";
     Connector: {
       connectionConfig?: string | null;
       customSchemas: boolean;
@@ -237,7 +236,7 @@ export interface components {
       testing: boolean;
     };
     ConnectorCollection: {
-      data: components["schemas"]["Connector"][];
+      data: (components["schemas"]["Connector"])[];
     };
     ErrorResp: {
       error: string;
@@ -249,19 +248,19 @@ export interface components {
     }, {
       list: components["schemas"]["SourceField"];
     }]>;
-    Format: {
+    Format: OneOf<[{
       json: components["schemas"]["JsonFormat"];
-    } | {
+    }, {
       avro: components["schemas"]["AvroFormat"];
-    } | {
+    }, {
       protobuf: components["schemas"]["ProtobufFormat"];
-    } | {
+    }, {
       parquet: components["schemas"]["ParquetFormat"];
-    } | {
+    }, {
       raw_string: components["schemas"]["RawStringFormat"];
-    } | {
+    }, {
       raw_bytes: components["schemas"]["RawBytesFormat"];
-    };
+    }]>;
     Framing: {
       method: components["schemas"]["FramingMethod"];
     };
@@ -282,7 +281,7 @@ export interface components {
       updatedAt: number;
     };
     GlobalUdfCollection: {
-      data: components["schemas"]["GlobalUdf"][];
+      data: (components["schemas"]["GlobalUdf"])[];
     };
     Job: {
       /** Format: int64 */
@@ -301,7 +300,7 @@ export interface components {
       tasks?: number | null;
     };
     JobCollection: {
-      data: components["schemas"]["Job"][];
+      data: (components["schemas"]["Job"])[];
     };
     /** @enum {string} */
     JobLogLevel: "info" | "warn" | "error";
@@ -317,7 +316,7 @@ export interface components {
       taskIndex?: number | null;
     };
     JobLogMessageCollection: {
-      data: components["schemas"]["JobLogMessage"][];
+      data: (components["schemas"]["JobLogMessage"])[];
       hasMore: boolean;
     };
     JsonFormat: {
@@ -337,7 +336,7 @@ export interface components {
     };
     MetricGroup: {
       name: components["schemas"]["MetricName"];
-      subtasks: components["schemas"]["SubtaskMetrics"][];
+      subtasks: (components["schemas"]["SubtaskMetrics"])[];
     };
     /** @enum {string} */
     MetricName: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure" | "tx_queue_size" | "tx_queue_rem";
@@ -349,18 +348,18 @@ export interface components {
       /** Format: int64 */
       bytes: number;
       operatorId: string;
-      subtasks: components["schemas"]["SubtaskCheckpointGroup"][];
+      subtasks: (components["schemas"]["SubtaskCheckpointGroup"])[];
     };
     OperatorCheckpointGroupCollection: {
-      data: components["schemas"]["OperatorCheckpointGroup"][];
+      data: (components["schemas"]["OperatorCheckpointGroup"])[];
     };
     OperatorMetricGroup: {
-      metricGroups: components["schemas"]["MetricGroup"][];
+      metricGroups: (components["schemas"]["MetricGroup"])[];
       /** Format: int32 */
       nodeId: number;
     };
     OperatorMetricGroupCollection: {
-      data: components["schemas"]["OperatorMetricGroup"][];
+      data: (components["schemas"]["OperatorMetricGroup"])[];
     };
     OutputData: {
       batch: string;
@@ -369,7 +368,7 @@ export interface components {
       startId: number;
       /** Format: int32 */
       subtaskIdx: number;
-      timestamps: number[];
+      timestamps: (number)[];
     };
     PaginationQueryParams: {
       /** Format: int32 */
@@ -391,10 +390,10 @@ export interface components {
       preview: boolean;
       query: string;
       stop: components["schemas"]["StopType"];
-      udfs: components["schemas"]["Udf"][];
+      udfs: (components["schemas"]["Udf"])[];
     };
     PipelineCollection: {
-      data: components["schemas"]["Pipeline"][];
+      data: (components["schemas"]["Pipeline"])[];
       hasMore: boolean;
     };
     PipelineEdge: {
@@ -407,8 +406,8 @@ export interface components {
       valueType: string;
     };
     PipelineGraph: {
-      edges: components["schemas"]["PipelineEdge"][];
-      nodes: components["schemas"]["PipelineNode"][];
+      edges: (components["schemas"]["PipelineEdge"])[];
+      nodes: (components["schemas"]["PipelineNode"])[];
     };
     PipelineNode: {
       description: string;
@@ -432,7 +431,7 @@ export interface components {
       /** Format: int64 */
       parallelism: number;
       query: string;
-      udfs?: components["schemas"]["Udf"][] | null;
+      udfs?: (components["schemas"]["Udf"])[] | null;
     };
     PipelineRestart: {
       force?: boolean | null;
@@ -440,7 +439,7 @@ export interface components {
     PreviewPost: {
       enableSinks?: boolean;
       query: string;
-      udfs?: components["schemas"]["Udf"][] | null;
+      udfs?: (components["schemas"]["Udf"])[] | null;
     };
     /** @enum {string} */
     PrimitiveType: "Int32" | "Int64" | "UInt32" | "UInt64" | "F32" | "F64" | "Bool" | "String" | "Bytes" | "UnixMillis" | "UnixMicros" | "UnixNanos" | "DateTime" | "Json";
@@ -453,7 +452,7 @@ export interface components {
       messageName?: string | null;
     };
     QueryValidationResult: {
-      errors: string[];
+      errors: (string)[];
       graph?: components["schemas"]["PipelineGraph"] | null;
     };
     RawBytesFormat: Record<string, never>;
@@ -463,7 +462,7 @@ export interface components {
     }, {
       protobuf_schema: {
         dependencies?: {
-          [key: string]: string;
+          [key: string]: string | undefined;
         };
         schema: string;
       };
@@ -485,20 +484,20 @@ export interface components {
     /** @enum {string} */
     StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
     StructType: {
-      fields: components["schemas"]["SourceField"][];
+      fields: (components["schemas"]["SourceField"])[];
       name?: string | null;
     };
     SubtaskCheckpointGroup: {
       /** Format: int64 */
       bytes: number;
-      eventSpans: components["schemas"]["CheckpointEventSpan"][];
+      eventSpans: (components["schemas"]["CheckpointEventSpan"])[];
       /** Format: int32 */
       index: number;
     };
     SubtaskMetrics: {
       /** Format: int32 */
       index: number;
-      metrics: components["schemas"]["Metric"][];
+      metrics: (components["schemas"]["Metric"])[];
     };
     TestSourceMessage: {
       done: boolean;
@@ -520,12 +519,12 @@ export interface components {
       prefix: string;
     };
     UdfValidationResult: {
-      errors: string[];
+      errors: (string)[];
       udfName?: string | null;
     };
     ValidateQueryPost: {
       query: string;
-      udfs?: components["schemas"]["Udf"][] | null;
+      udfs?: (components["schemas"]["Udf"])[] | null;
     };
     ValidateUdfPost: {
       definition: string;
@@ -538,8 +537,6 @@ export interface components {
   headers: never;
   pathItems: never;
 }
-
-export type $defs = Record<string, never>;
 
 export type external = Record<string, never>;
 
@@ -598,9 +595,7 @@ export interface operations {
     };
     responses: {
       /** @description Deleted connection profile */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
   /** Get autocomplete suggestions for a connection profile */
@@ -662,9 +657,7 @@ export interface operations {
     };
     responses: {
       /** @description Schema is valid */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
   /** Test a Connection Table */
@@ -676,9 +669,7 @@ export interface operations {
     };
     responses: {
       /** @description Job output as 'text/event-stream' */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
   /** Delete a Connection Table */
@@ -691,9 +682,7 @@ export interface operations {
     };
     responses: {
       /** @description Deleted connection table */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
   /** List all connectors */
@@ -722,9 +711,7 @@ export interface operations {
   ping: {
     responses: {
       /** @description Ping endpoint */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
   /** List all pipelines */
@@ -745,7 +732,7 @@ export interface operations {
     };
   };
   /**
-   * Create a new pipeline
+   * Create a new pipeline 
    * @description The API will create a single job for the pipeline.
    */
   create_pipeline: {
@@ -834,9 +821,7 @@ export interface operations {
     };
     responses: {
       /** @description Deleted pipeline */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
   /** Update a pipeline */
@@ -996,9 +981,7 @@ export interface operations {
     };
     responses: {
       /** @description Job output as 'text/event-stream' */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
   /** Get Global UDFs */
@@ -1054,9 +1037,7 @@ export interface operations {
     };
     responses: {
       /** @description Deleted UDF */
-      200: {
-        content: never;
-      };
+      200: never;
     };
   };
 }
