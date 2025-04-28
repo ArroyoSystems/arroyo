@@ -142,9 +142,7 @@ export function SchemaEditor({
             >
               Length delimited
             </Checkbox>
-            <FormHelperText>
-              Use length delimited decoding for the protobuf message
-            </FormHelperText>
+            <FormHelperText>Use length delimited decoding for the protobuf message</FormHelperText>
           </FormControl>
         </Box>
         <Box maxW={'lg'}>
