@@ -233,6 +233,9 @@ pub struct ProtobufFormat {
 
     #[serde(default)]
     pub confluent_schema_registry: bool,
+
+    #[serde(default)]
+    pub length_delimited: bool,
 }
 
 impl ProtobufFormat {
