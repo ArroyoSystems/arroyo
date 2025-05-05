@@ -19,6 +19,11 @@ pub(crate) fn deserialize_proto(
         })?;
     }
 
+    if proto.length_delimited {
+        read_varint(&mut msg)
+            .map_err(|e| SourceError::bad_data(format!("invalid protobuf varint: {:?}", e)))?;
+    }
+
     let message = proto.message_name.as_ref().expect("no message name");
     let descriptor = pool.get_message_by_name(message).expect("no descriptor");
 

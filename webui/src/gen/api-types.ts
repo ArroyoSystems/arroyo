@@ -448,6 +448,7 @@ export interface components {
       compiledSchema?: string | null;
       confluentSchemaRegistry?: boolean;
       intoUnstructuredJson?: boolean;
+      lengthDelimited?: boolean;
       messageName?: string | null;
     };
     QueryValidationResult: {

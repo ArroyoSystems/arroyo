@@ -37,6 +37,7 @@ export function SchemaEditor({
   const [tested, setTested] = useState<string | undefined>();
   const [rawDatum, setRawDatum] = useState<boolean>(false);
   const [messageName, setMessageName] = useState<string>('');
+  const [lengthDelimited, setLengthDelimited] = useState<boolean>(false);
 
   const valid = tested == editor?.getValue() && errors?.length == 0;
 
@@ -56,6 +57,8 @@ export function SchemaEditor({
     if (format == 'protobuf') {
       // @ts-ignore
       state.schema!.format['protobuf']!.messageName = messageName;
+      // @ts-ignore
+      state.schema!.format['protobuf']!.lengthDelimited = lengthDelimited;
       // update the state
       setState({
         ...state,
@@ -128,21 +131,36 @@ export function SchemaEditor({
 
   if (format == 'protobuf') {
     formatOptions = (
-      <Box maxW={'lg'}>
-        <FormControl>
-          <FormLabel>Message name</FormLabel>
-          <Input
-            value={messageName}
-            onChange={e => {
-              console.log('message name', e.target.value);
-              setMessageName(e.target.value);
-            }}
-          />
-          <FormHelperText>
-            The name of the protobuf message for the data in this table
-          </FormHelperText>
-        </FormControl>
-      </Box>
+      <>
+        <Box maxW={'lg'}>
+          <FormControl>
+            <Checkbox
+              onChange={e => {
+                setLengthDelimited(e.target.checked);
+              }}
+              isChecked={lengthDelimited}
+            >
+              Length delimited
+            </Checkbox>
+            <FormHelperText>Use length delimited decoding for the protobuf message</FormHelperText>
+          </FormControl>
+        </Box>
+        <Box maxW={'lg'}>
+          <FormControl>
+            <FormLabel>Message name</FormLabel>
+            <Input
+              value={messageName}
+              onChange={e => {
+                console.log('message name', e.target.value);
+                setMessageName(e.target.value);
+              }}
+            />
+            <FormHelperText>
+              The name of the protobuf message for the data in this table
+            </FormHelperText>
+          </FormControl>
+        </Box>
+      </>
     );
   }
 
