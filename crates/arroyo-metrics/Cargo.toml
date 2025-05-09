@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
-prometheus = {version = "0.14", features = ["process"] }
+prometheus = { workspace = true, features = ["process"] }
 lazy_static = "1.4.0"

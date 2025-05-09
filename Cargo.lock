@@ -601,7 +601,7 @@ dependencies = [
  "petgraph 0.8.1",
  "postgres",
  "postgres-types",
- "prometheus 0.13.4",
+ "prometheus",
  "prost",
  "rand 0.9.0",
  "refinery",
@@ -672,7 +672,7 @@ version = "0.15.0-dev"
 dependencies = [
  "arroyo-types",
  "lazy_static",
- "prometheus 0.14.0",
+ "prometheus",
 ]
 
 [[package]]
@@ -685,7 +685,7 @@ dependencies = [
  "arroyo-types",
  "lazy_static",
  "local-ip-address 0.6.3",
- "prometheus 0.14.0",
+ "prometheus",
  "rand 0.9.0",
  "tokio",
  "tonic",
@@ -831,7 +831,7 @@ dependencies = [
  "lazy_static",
  "once_cell",
  "pprof",
- "prometheus 0.14.0",
+ "prometheus",
  "reqwest",
  "serde",
  "serde_json",
@@ -897,7 +897,7 @@ dependencies = [
  "object_store",
  "once_cell",
  "parquet",
- "prometheus 0.14.0",
+ "prometheus",
  "prost",
  "tokio",
  "tracing",
@@ -1032,7 +1032,7 @@ dependencies = [
  "mini-moka",
  "ordered-float 3.9.2",
  "petgraph 0.8.1",
- "prometheus 0.13.4",
+ "prometheus",
  "prost",
  "rand 0.9.0",
  "serde",
@@ -6935,37 +6935,14 @@ dependencies = [
 
 [[package]]
 name = "procfs"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "731e0d9356b0c25f16f33b5be79b1c57b562f141ebfcdb0ad8ac2c13a24293b4"
-dependencies = [
- "bitflags 2.9.0",
- "hex",
- "lazy_static",
- "procfs-core 0.16.0",
- "rustix 0.38.44",
-]
-
-[[package]]
-name = "procfs"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc5b72d8145275d844d4b5f6d4e1eef00c8cd889edb6035c21675d1bb1f45c9f"
 dependencies = [
  "bitflags 2.9.0",
  "hex",
- "procfs-core 0.17.0",
+ "procfs-core",
  "rustix 0.38.44",
-]
-
-[[package]]
-name = "procfs-core"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d3554923a69f4ce04c4a754260c338f505ce22642d3830e049a399fc2059a29"
-dependencies = [
- "bitflags 2.9.0",
- "hex",
 ]
 
 [[package]]
@@ -7060,23 +7037,6 @@ dependencies = [
 
 [[package]]
 name = "prometheus"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
-dependencies = [
- "cfg-if",
- "fnv",
- "lazy_static",
- "libc",
- "memchr",
- "parking_lot 0.12.3",
- "procfs 0.16.0",
- "protobuf 2.28.0",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "prometheus"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
@@ -7087,7 +7047,7 @@ dependencies = [
  "libc",
  "memchr",
  "parking_lot 0.12.3",
- "procfs 0.17.0",
+ "procfs",
  "protobuf 3.7.2",
  "thiserror 2.0.12",
 ]
