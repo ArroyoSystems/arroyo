@@ -17,7 +17,6 @@ use arroyo_rpc::grpc::rpc::{
 use arroyo_types::{
     from_millis, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
 };
-use local_ip_address::local_ip;
 use rand::random;
 
 use std::collections::{HashMap, HashSet};
@@ -223,20 +222,22 @@ impl WorkerServer {
 
         *self.network.lock().unwrap() = Some(network);
 
-        info!(
-            "Started worker data for {} on 0.0.0.0:{}",
-            self.name, data_port
-        );
-
         let id = self.id;
         let local_ip = if config.worker.bind_address.is_loopback() {
             IpAddr::V4(Ipv4Addr::LOCALHOST)
+        } else if config.worker.bind_address.is_ipv4() {
+            local_ip_address::local_ip().expect("could not determine worker ipv4 address")
         } else {
-            local_ip().unwrap()
+            local_ip_address::local_ipv6().expect("could not determine worker ipv6 address")
         };
 
-        let rpc_address = format!("http://{}:{}", local_ip, local_addr.port());
-        let data_address = format!("{}:{}", local_ip, data_port);
+        let rpc_address = if local_ip.is_ipv4() {
+            format!("http://{}:{}", local_ip, local_addr.port())
+        } else {
+            format!("http://[{}]:{}", local_ip, local_addr.port())
+        };
+
+        let data_address = SocketAddr::new(local_ip, data_port).to_string();
         let job_id = self.job_id.clone();
 
         self.shutdown_guard
