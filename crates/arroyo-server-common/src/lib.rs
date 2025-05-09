@@ -281,8 +281,6 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
     let addr = config().admin.bind_address;
     let port = config().admin.http_port;
 
-    info!("Starting {} admin server on {}:{}", service, addr, port);
-
     let state = Arc::new(AdminState {
         name: format!("arroyo-{}", service),
     });
@@ -299,6 +297,12 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
 
     let addr = SocketAddr::new(addr, port);
     let listener = TcpListener::bind(addr).await?;
+
+    info!(
+        "Starting {} admin server on {}",
+        service,
+        listener.local_addr()?
+    );
 
     axum::serve(listener, app.into_make_service())
         .await

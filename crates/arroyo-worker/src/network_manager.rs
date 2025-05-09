@@ -7,13 +7,14 @@ use arrow_array::RecordBatch;
 use arrow_schema::{ArrowError, SchemaRef};
 use arroyo_types::ArrowMessage;
 use bincode::config;
+use std::net::SocketAddr;
 use std::{collections::HashMap, mem::size_of, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     io::{self, BufReader, BufWriter},
     select,
     sync::Mutex,
 };
-use tracing::warn;
+use tracing::{info, warn};
 
 use bytes::{Buf, BufMut};
 use rand::rngs::StdRng;
@@ -28,6 +29,7 @@ use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
 
 use arroyo_operator::inq_reader::InQReader;
+use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
 
 #[derive(Clone)]
@@ -209,13 +211,13 @@ struct NetworkReceiver {
 }
 
 struct OutNetworkLink {
-    _dest: String,
+    _dest: SocketAddr,
     stream: BufWriter<TcpStream>,
     receivers: Vec<NetworkReceiver>,
 }
 
 impl OutNetworkLink {
-    pub async fn connect(dest: String) -> Self {
+    pub async fn connect(dest: SocketAddr) -> Self {
         let mut rand = StdRng::from_os_rng();
         for i in 0..10 {
             match TcpStream::connect(&dest).await {
@@ -318,11 +320,12 @@ impl NetworkManager {
     }
 
     pub async fn open_listener(&mut self, shutdown_guard: ShutdownGuard) -> u16 {
-        let port = self.port;
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
-            .await
-            .unwrap();
+        let socket_addr = SocketAddr::new(config().worker.bind_address, self.port);
+
+        let listener = TcpListener::bind(socket_addr).await.unwrap();
         let port = listener.local_addr().unwrap().port();
+
+        info!("Started worker data listener on {}", socket_addr);
 
         let streams = Arc::clone(&self.in_streams);
         shutdown_guard.into_spawn_task(async move {
@@ -379,8 +382,8 @@ impl NetworkManager {
         }
     }
 
-    pub async fn connect(&self, addr: String, quad: Quad, rx: BatchReceiver) {
-        let link = OutNetworkLink::connect(addr.clone()).await;
+    pub async fn connect(&self, addr: SocketAddr, quad: Quad, rx: BatchReceiver) {
+        let link = OutNetworkLink::connect(addr).await;
         let mut ins = self.out_streams.lock().await;
         if let std::collections::hash_map::Entry::Vacant(e) = ins.entry(quad) {
             e.insert(link);
@@ -566,8 +569,12 @@ mod test {
         let port = nm.open_listener(shutdown.guard("test")).await;
 
         let (client_tx, client_rx) = batch_bounded(10);
-        nm.connect(format!("localhost:{}", port), quad, client_rx)
-            .await;
+        nm.connect(
+            format!("127.0.0.1:{}", port).parse().unwrap(),
+            quad,
+            client_rx,
+        )
+        .await;
 
         nm.start(senders).await;
 
