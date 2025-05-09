@@ -14,5 +14,5 @@ tracing = "0.1"
 rand = { workspace = true }
 local-ip-address = "0.6"
 lazy_static = "1.4.0"
-prometheus = "0.14"
+prometheus = { workspace = true }
 anyhow = "1.0.72"

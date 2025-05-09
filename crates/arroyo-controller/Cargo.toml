@@ -21,7 +21,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
 rand = { workspace = true }
 petgraph = {workspace = true, features = ["serde-1"]}
-prometheus = "0.13"
+prometheus = {workspace = true}
 async-trait = "0.1"
 lazy_static = "1.4.0"
 

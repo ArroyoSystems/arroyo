@@ -70,6 +70,7 @@ k8s-openapi = "0.24.0"
 sqlparser = "0.51.0"
 petgraph = "0.8"
 rand = "0.9"
+prometheus = "0.14.0"
 
 [profile.release]
 debug = 1
