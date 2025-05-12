@@ -23,6 +23,7 @@ use std::time::Duration;
 use url::Url;
 
 const DEFAULT_CONFIG: &str = include_str!("../default.toml");
+const SENSITIVE_MASK: &str = "*********";
 
 static CONFIG: ArcSwapOption<Config> = ArcSwapOption::const_empty();
 
@@ -693,7 +694,7 @@ impl<T: Serialize + DeserializeOwned + Debug + Clone> Serialize for Sensitive<T>
     where
         S: Serializer,
     {
-        serializer.serialize_str("*********")
+        serializer.serialize_str(SENSITIVE_MASK)
     }
 }
 
@@ -702,6 +703,12 @@ impl<T: Serialize + DeserializeOwned + Debug + Clone> Deref for Sensitive<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl<T: Serialize + DeserializeOwned + Debug + Clone> std::fmt::Display for Sensitive<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", SENSITIVE_MASK)
     }
 }
 
@@ -776,6 +783,11 @@ mod tests {
                     .unwrap()
                     .as_str()
                     .unwrap(),
+                "*********"
+            );
+
+            assert_eq!(
+                std::format!("{}", config.database.postgres.password),
                 "*********"
             );
 
