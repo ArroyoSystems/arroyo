@@ -73,6 +73,12 @@ const S3_URL: &str = r"^[sS]3[aA]?://(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 // unofficial, but convenient -- s3::https://my-endpoint.com:1234/mybucket/puppy.jpg
 const S3_ENDPOINT_URL: &str = r"^[sS]3[aA]?::(?<protocol>https?)://(?P<endpoint>[^:/]+):(?<port>\d+)/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 
+// Cloudflare R2
+const R2_URL: &str =
+    r"^[rR]2://((?P<account_id>[a-zA-Z0-9]+)@)?(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
+const R2_ENDPOINT: &str = r"^https://(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
+const R2_VIRTUAL: &str = r"^https://(?P<bucket>[a-z0-9\-]+).(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com(/(?P<key>.+))?$";
+
 // file:///my/path/directory
 const FILE_URI: &str = r"^file://(?P<path>.*)$";
 // file:/my/path/directory
@@ -91,6 +97,7 @@ const GCS_URL: &str = r"^[gG][sS]://(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
 enum Backend {
     S3,
+    R2,
     #[allow(clippy::upper_case_acronyms)]
     GCS,
     Local,
@@ -108,6 +115,15 @@ fn matchers() -> &'static HashMap<Backend, Vec<Regex>> {
                 Regex::new(S3_VIRTUAL).unwrap(),
                 Regex::new(S3_ENDPOINT_URL).unwrap(),
                 Regex::new(S3_URL).unwrap(),
+            ],
+        );
+
+        m.insert(
+            Backend::R2,
+            vec![
+                Regex::new(R2_URL).unwrap(),
+                Regex::new(R2_ENDPOINT).unwrap(),
+                Regex::new(R2_VIRTUAL).unwrap(),
             ],
         );
 
@@ -153,15 +169,12 @@ pub struct S3Config {
     key: Option<Path>,
 }
 
-impl S3Config {
-    pub fn new(bucket: String, region: String, key: String) -> Self {
-        Self {
-            endpoint: None,
-            region: Some(region),
-            bucket,
-            key: Some(key.into()),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct R2Config {
+    account_id: String,
+    bucket: String,
+    jurisdiction: Option<String>, // e.g., "eu"
+    key: Option<Path>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +192,7 @@ pub struct LocalConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendConfig {
     S3(S3Config),
+    R2(R2Config),
     GCS(GCSConfig),
     Local(LocalConfig),
 }
@@ -189,6 +203,7 @@ impl BackendConfig {
             if let Some(matches) = v.iter().filter_map(|r| r.captures(url)).next() {
                 return match k {
                     Backend::S3 => Self::parse_s3(matches),
+                    Backend::R2 => Self::parse_r2(url, matches),
                     Backend::GCS => Self::parse_gcs(matches),
                     Backend::Local => Self::parse_local(matches, with_key),
                 };
@@ -205,7 +220,6 @@ impl BackendConfig {
             .expect("bucket should always be available")
             .as_str()
             .to_string();
-
         let region = last([
             std::env::var("AWS_DEFAULT_REGION").ok(),
             matches.name("region").map(|m| m.as_str().to_string()),
@@ -241,6 +255,41 @@ impl BackendConfig {
             endpoint,
             region,
             bucket,
+            key,
+        }))
+    }
+
+    fn parse_r2(url: &str, matches: Captures) -> Result<Self, StorageError> {
+        let account_id = last([
+            std::env::var("CLOUDFLARE_ACCOUNT_ID").ok(),
+            matches
+                .name("account_id")
+                .map(|m| m.as_str().to_lowercase()),
+        ])
+        .ok_or_else(|| {
+            StorageError::PathError(format!(
+                "Could not determine Cloudflare Account ID from '{url}'; \
+                    must be specified either as part of the URL or via the \
+                    CLOUDFLARE_ACCOUNT_ID environment variable"
+            ))
+        })?;
+
+        let jurisdiction = matches
+            .name("jurisdiction")
+            .map(|s| s.as_str().to_lowercase());
+
+        let bucket = matches
+            .name("bucket")
+            .expect("bucket should always be available")
+            .as_str()
+            .to_string();
+
+        let key = matches.name("key").map(|m| m.as_str().into());
+
+        Ok(Self::R2(R2Config {
+            account_id,
+            bucket,
+            jurisdiction,
             key,
         }))
     }
@@ -288,6 +337,7 @@ impl BackendConfig {
     fn key(&self) -> Option<&Path> {
         match self {
             BackendConfig::S3(s3) => s3.key.as_ref(),
+            BackendConfig::R2(r2) => r2.key.as_ref(),
             BackendConfig::GCS(gcs) => gcs.key.as_ref(),
             BackendConfig::Local(local) => local.key.as_ref(),
         }
@@ -313,6 +363,7 @@ impl StorageProvider {
         let config: BackendConfig = BackendConfig::parse_url(url, false)?;
 
         match config {
+            BackendConfig::R2(config) => Self::construct_r2(config, options).await,
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
             BackendConfig::GCS(config) => Self::construct_gcs(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
@@ -331,6 +382,7 @@ impl StorageProvider {
 
         let provider = match config {
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
+            BackendConfig::R2(config) => Self::construct_r2(config, options).await,
             BackendConfig::GCS(config) => Self::construct_gcs(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
@@ -342,6 +394,7 @@ impl StorageProvider {
         let config = BackendConfig::parse_url(url, true)?;
         let key = match &config {
             BackendConfig::S3(s3) => s3.key.as_ref(),
+            BackendConfig::R2(r2) => r2.key.as_ref(),
             BackendConfig::GCS(gcs) => gcs.key.as_ref(),
             BackendConfig::Local(local) => local.key.as_ref(),
         }
@@ -416,7 +469,7 @@ impl StorageProvider {
             canonical_url = format!("{}/{}", canonical_url, key);
         }
 
-        let object_store = Arc::new(builder.build().map_err(Into::<StorageError>::into)?);
+        let object_store = Arc::new(builder.build()?);
 
         Ok(Self {
             config: BackendConfig::S3(config),
@@ -427,6 +480,69 @@ impl StorageProvider {
                 .into_iter()
                 .map(|(k, v)| (k.as_ref().to_string(), v))
                 .collect(),
+        })
+    }
+
+    async fn construct_r2(
+        config: R2Config,
+        options: HashMap<String, String>,
+    ) -> Result<Self, StorageError> {
+        let mut builder = AmazonS3Builder::from_env().with_bucket_name(&config.bucket);
+
+        builder = builder.with_access_key_id(
+            last([
+                std::env::var("AWS_ACCESS_KEY_ID").ok(),
+                std::env::var("R2_ACCESS_KEY_ID").ok(),
+                options.get("aws_access_key_id").cloned(),
+                options.get("r2_access_key_id").cloned(),
+            ])
+            .ok_or_else(|| {
+                StorageError::CredentialsError(
+                    "access_key_id not provided for R2 storage backend".to_string(),
+                )
+            })?,
+        );
+
+        builder = builder.with_secret_access_key(
+            last([
+                std::env::var("AWS_SECRET_ACCESS_KEY").ok(),
+                std::env::var("R2_SECRET_ACCESS_KEY").ok(),
+                options.get("aws_secret_access_key").cloned(),
+                options.get("r2_secret_access_key").cloned(),
+            ])
+            .ok_or_else(|| {
+                StorageError::CredentialsError(
+                    "secret_access_key not provided for R2 storage backend".to_string(),
+                )
+            })?,
+        );
+
+        let mut endpoint = "https://".to_string();
+        endpoint.push_str(&config.account_id);
+        if let Some(jurisdiction) = config.jurisdiction.as_ref() {
+            endpoint.push('.');
+            endpoint.push_str(jurisdiction);
+        }
+        endpoint.push_str(".r2.cloudflarestorage.com");
+
+        let mut canonical_url = format!("{endpoint}/{}", config.bucket);
+        if let Some(key) = &config.key {
+            canonical_url.push('/');
+            canonical_url.push_str(key.as_ref());
+        }
+
+        builder = builder
+            .with_endpoint(endpoint)
+            .with_virtual_hosted_style_request(false);
+
+        let object_store = Arc::new(builder.build()?);
+
+        Ok(Self {
+            config: BackendConfig::R2(config),
+            object_store: object_store.clone(),
+            multipart_store: Some(object_store),
+            canonical_url,
+            storage_options: HashMap::new(),
         })
     }
 
@@ -758,6 +874,67 @@ mod tests {
                 region: None,
                 bucket: "my-bucket".to_string(),
                 key: Some("path/test.pdf".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_r2_configs() {
+        assert_eq!(
+            BackendConfig::parse_url(
+                "r2://97493190cfb48832a99ee97a7637ff6a@my-bucket1/puppy.jpg",
+                false
+            )
+            .unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "97493190cfb48832a99ee97a7637ff6a".to_string(),
+                bucket: "my-bucket1".to_string(),
+                jurisdiction: None,
+                key: Some("puppy.jpg".into()),
+            })
+        );
+
+        unsafe {
+            std::env::set_var("CLOUDFLARE_ACCOUNT_ID", "4bed8261ff878a81208da2fface71221");
+        }
+
+        assert_eq!(
+            BackendConfig::parse_url("r2://mybucket/puppy.jpg", false).unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "4bed8261ff878a81208da2fface71221".to_string(),
+                bucket: "mybucket".to_string(),
+                jurisdiction: None,
+                key: Some("puppy.jpg".into()),
+            })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url("https://266035a37ceb5d774c51af1272485f1f.r2.cloudflarestorage.com/mybucket/my/key/path", false).unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "266035a37ceb5d774c51af1272485f1f".to_string(),
+                bucket: "mybucket".to_string(),
+                jurisdiction: None,
+                key: Some("my/key/path".into()),
+            })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url("https://266035a37ceb5d774c51af1272485f1f.eu.r2.cloudflarestorage.com/mybucket/my/key/path", false).unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "266035a37ceb5d774c51af1272485f1f".to_string(),
+                bucket: "mybucket".to_string(),
+                jurisdiction: Some("eu".to_string()),
+                key: Some("my/key/path".into()),
+            })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url("https://my-bucket.266035a37ceb5d774c51af1272485f1f.eu.r2.cloudflarestorage.com/my/key/path", false).unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "266035a37ceb5d774c51af1272485f1f".to_string(),
+                bucket: "my-bucket".to_string(),
+                jurisdiction: Some("eu".to_string()),
+                key: Some("my/key/path".into()),
             })
         );
     }

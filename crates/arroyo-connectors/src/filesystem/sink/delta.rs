@@ -12,7 +12,8 @@ use deltalake::{
     table::PeekCommit,
     DeltaTable, DeltaTableBuilder,
 };
-use object_store::{path::Path, ObjectStore};
+use object_store::path::Path;
+use object_store::ObjectStore;
 use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
@@ -52,7 +53,7 @@ pub(crate) async fn load_or_create_table(
     deltalake::gcp::register_handlers(None);
 
     let (backing_store, url): (Arc<dyn ObjectStore>, _) = match storage_provider.config() {
-        BackendConfig::S3(_) => (
+        BackendConfig::S3(_) | BackendConfig::R2(_) => (
             Arc::new(S3StorageBackend::try_new(
                 storage_provider.get_backing_store(),
                 true,
