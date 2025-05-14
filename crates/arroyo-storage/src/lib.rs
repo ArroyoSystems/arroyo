@@ -77,6 +77,7 @@ const S3_ENDPOINT_URL: &str = r"^[sS]3[aA]?::(?<protocol>https?)://(?P<endpoint>
 const R2_URL: &str =
     r"^[rR]2://((?P<account_id>[a-zA-Z0-9]+)@)?(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 const R2_ENDPOINT: &str = r"^https://(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
+const R2_VIRTUAL: &str = r"^https://(?P<bucket>[a-z0-9\-]+).(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com(/(?P<key>.+))?$";
 
 // file:///my/path/directory
 const FILE_URI: &str = r"^file://(?P<path>.*)$";
@@ -122,6 +123,7 @@ fn matchers() -> &'static HashMap<Backend, Vec<Regex>> {
             vec![
                 Regex::new(R2_URL).unwrap(),
                 Regex::new(R2_ENDPOINT).unwrap(),
+                Regex::new(R2_VIRTUAL).unwrap(),
             ],
         );
 
@@ -921,6 +923,16 @@ mod tests {
             BackendConfig::R2(crate::R2Config {
                 account_id: "266035a37ceb5d774c51af1272485f1f".to_string(),
                 bucket: "mybucket".to_string(),
+                jurisdiction: Some("eu".to_string()),
+                key: Some("my/key/path".into()),
+            })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url("https://my-bucket.266035a37ceb5d774c51af1272485f1f.eu.r2.cloudflarestorage.com/my/key/path", false).unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "266035a37ceb5d774c51af1272485f1f".to_string(),
+                bucket: "my-bucket".to_string(),
                 jurisdiction: Some("eu".to_string()),
                 key: Some("my/key/path".into()),
             })
