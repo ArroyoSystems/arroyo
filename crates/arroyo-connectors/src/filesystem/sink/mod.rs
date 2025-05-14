@@ -699,6 +699,7 @@ impl RollingPolicy {
 pub struct MultiPartWriterStats {
     bytes_written: usize,
     parts_written: usize,
+    part_size: Option<usize>,
     last_write_at: Instant,
     first_write_at: Instant,
     representative_timestamp: SystemTime,
@@ -1417,6 +1418,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
                 parts_written: 0,
+                part_size: None,
                 last_write_at: Instant::now(),
                 first_write_at: Instant::now(),
                 representative_timestamp,

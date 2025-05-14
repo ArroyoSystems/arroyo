@@ -591,6 +591,13 @@ impl StorageProvider {
             storage_options: HashMap::new(),
         })
     }
+    
+    pub fn requires_same_part_sizes(&self) -> bool {
+        match self.config {
+            BackendConfig::R2(_) => true,
+            _ => false,
+        }
+    }
 
     pub async fn list(
         &self,
@@ -637,7 +644,7 @@ impl StorageProvider {
 
         Ok(bytes)
     }
-
+ 
     pub async fn get_if_present(
         &self,
         path: impl Into<Path>,
@@ -763,8 +770,12 @@ impl StorageProvider {
     }
 
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
-        storage_retry!(self.get_multipart().create_multipart(path).await)
-            .map_err(Into::<StorageError>::into)
+        let id = storage_retry!(self.get_multipart().create_multipart(path).await)
+            .map_err(Into::<StorageError>::into)?;
+
+        debug!(message = "started multipart upload", path=path.as_ref(), id=id.as_str());
+        
+        Ok(id)
     }
 
     pub async fn add_multipart(
@@ -774,12 +785,16 @@ impl StorageProvider {
         part_number: usize,
         bytes: Bytes,
     ) -> Result<PartId, StorageError> {
-        storage_retry!(
+        let part_id = storage_retry!(
             self.get_multipart()
                 .put_part(path, multipart_id, part_number, bytes.clone().into())
                 .await
         )
-        .map_err(Into::<StorageError>::into)
+        .map_err(Into::<StorageError>::into)?;
+        
+        debug!(message = "added part", path=path.as_ref(), id=multipart_id.as_str(), part_number, size=bytes.len());
+        
+        Ok(part_id)
     }
 
     pub async fn close_multipart(
@@ -788,6 +803,8 @@ impl StorageProvider {
         multipart_id: &MultipartId,
         parts: Vec<PartId>,
     ) -> Result<(), StorageError> {
+        debug!(message = "closing multipart", path=path.as_ref(), id=multipart_id.as_str(), parts=parts.len());
+        
         storage_retry!(
             self.get_multipart()
                 .complete_multipart(path, multipart_id, parts.clone())

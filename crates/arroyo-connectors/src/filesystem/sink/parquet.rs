@@ -19,7 +19,7 @@ use parquet::{
     basic::{GzipLevel, ZstdLevel},
     file::properties::WriterProperties,
 };
-
+use tracing::debug;
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
     BatchBufferingWriter, FileSettings, FileSystemTable, MultiPartWriterStats, TableType,
@@ -108,6 +108,9 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
         } else {
             5 * 1024 * 1024
         };
+        
+        debug!("target part size = {}", target_part_size);
+        
         let shared_buffer = SharedBuffer::new(target_part_size);
         let writer_properties = writer_properties_from_table(config);
         let writer = ArrowWriter::try_new(
@@ -231,6 +234,7 @@ impl LocalWriter for ParquetLocalWriter {
                 representative_timestamp: representitive_timestamp(
                     batch.column(self.schema.timestamp_index),
                 )?,
+                part_size: None,
             });
         } else {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
