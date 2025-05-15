@@ -591,12 +591,9 @@ impl StorageProvider {
             storage_options: HashMap::new(),
         })
     }
-    
+
     pub fn requires_same_part_sizes(&self) -> bool {
-        match self.config {
-            BackendConfig::R2(_) => true,
-            _ => false,
-        }
+        matches!(self.config, BackendConfig::R2(_))
     }
 
     pub async fn list(
@@ -644,7 +641,7 @@ impl StorageProvider {
 
         Ok(bytes)
     }
- 
+
     pub async fn get_if_present(
         &self,
         path: impl Into<Path>,
@@ -773,8 +770,12 @@ impl StorageProvider {
         let id = storage_retry!(self.get_multipart().create_multipart(path).await)
             .map_err(Into::<StorageError>::into)?;
 
-        debug!(message = "started multipart upload", path=path.as_ref(), id=id.as_str());
-        
+        debug!(
+            message = "started multipart upload",
+            path = path.as_ref(),
+            id = id.as_str()
+        );
+
         Ok(id)
     }
 
@@ -791,9 +792,15 @@ impl StorageProvider {
                 .await
         )
         .map_err(Into::<StorageError>::into)?;
-        
-        debug!(message = "added part", path=path.as_ref(), id=multipart_id.as_str(), part_number, size=bytes.len());
-        
+
+        debug!(
+            message = "added part",
+            path = path.as_ref(),
+            id = multipart_id.as_str(),
+            part_number,
+            size = bytes.len()
+        );
+
         Ok(part_id)
     }
 
@@ -803,8 +810,13 @@ impl StorageProvider {
         multipart_id: &MultipartId,
         parts: Vec<PartId>,
     ) -> Result<(), StorageError> {
-        debug!(message = "closing multipart", path=path.as_ref(), id=multipart_id.as_str(), parts=parts.len());
-        
+        debug!(
+            message = "closing multipart",
+            path = path.as_ref(),
+            id = multipart_id.as_str(),
+            parts = parts.len()
+        );
+
         storage_retry!(
             self.get_multipart()
                 .complete_multipart(path, multipart_id, parts.clone())

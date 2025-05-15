@@ -20,6 +20,7 @@ use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, OperatorConfig, TIMESTAMP
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::concat;
@@ -62,6 +63,8 @@ use crate::filesystem::{
     CommitStyle, FileNaming, FileSettings, FileSystemTable, FilenameStrategy, TableType,
 };
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
+
+const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
 
 pub struct FileSystemSink<R: MultiPartWriter + Send + 'static> {
     sender: Option<Sender<FileSystemMessages>>,
@@ -1111,7 +1114,7 @@ impl MultipartManager {
 
     fn write_next_part(
         &mut self,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
         match &self.multipart_id {
             Some(_multipart_id) => Ok(Some(self.get_part_upload_future(PartToUpload {
@@ -1156,7 +1159,7 @@ impl MultipartManager {
                     &location,
                     &multipart_id,
                     part_to_upload.part_index,
-                    part_to_upload.byte_data.into(),
+                    part_to_upload.byte_data,
                 )
                 .await?;
             Ok(MultipartCallbackWithName {
@@ -1246,7 +1249,7 @@ impl MultipartManager {
                     parts_to_add: self
                         .parts_to_add
                         .iter()
-                        .map(|val| val.byte_data.clone())
+                        .map(|val| val.byte_data.to_vec())
                         .collect(),
                     trailing_bytes: None,
                 };
@@ -1281,7 +1284,7 @@ impl MultipartManager {
                     PartIdOrBufferedData::BufferedData { data } => {
                         InFlightPartCheckpoint::InProgressPart {
                             part: part_index,
-                            data: data.clone(),
+                            data: data.to_vec(),
                         }
                     }
                 })
@@ -1305,7 +1308,7 @@ impl MultipartManager {
                 parts_to_add: self
                     .parts_to_add
                     .iter()
-                    .map(|val| val.byte_data.clone())
+                    .map(|val| val.byte_data.to_vec())
                     .collect(),
                 trailing_bytes,
             };
@@ -1323,7 +1326,7 @@ impl MultipartManager {
                 PartIdOrBufferedData::BufferedData { data } => {
                     InFlightPartCheckpoint::InProgressPart {
                         part: part_index,
-                        data: data.clone(),
+                        data: data.to_vec(),
                     }
                 }
             })
@@ -1365,17 +1368,24 @@ impl MultipartManager {
 pub trait BatchBufferingWriter: Send {
     fn new(config: &FileSystemTable, format: Option<Format>, schema: ArroyoSchemaRef) -> Self;
     fn suffix() -> String;
-    fn add_batch_data(&mut self, data: RecordBatch) -> Option<Vec<u8>>;
-    fn buffer_length(&self) -> usize;
-    fn evict_current_buffer(&mut self) -> Vec<u8>;
+    fn add_batch_data(&mut self, data: RecordBatch);
+    fn buffered_bytes(&self) -> usize;
+    /// Splits currently written data from the buffer (up to pos) and returns it. Note there may
+    /// still be additional interally-buffered data that has not been written out into the
+    /// actual buffer, for example in-progress row groups. This method does not flush those
+    /// in progress writes.
+    ///
+    /// Panics if pos > `self.buffered_bytes()`
+    fn split_at(&mut self, pos: usize) -> Bytes;
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Vec<u8>>;
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes>;
 }
 pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     batch_buffering_writer: BBW,
     multipart_manager: MultipartManager,
     stats: Option<MultiPartWriterStats>,
     schema: ArroyoSchemaRef,
+    target_part_size_bytes: usize,
 }
 #[async_trait]
 impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
@@ -1388,11 +1398,29 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         schema: ArroyoSchemaRef,
     ) -> Self {
         let batch_buffering_writer = BBW::new(config, format, schema.clone());
+
+        let FileSystemTable {
+            table_type:
+                TableType::Sink {
+                    file_settings:
+                        Some(FileSettings {
+                            target_part_size, ..
+                        }),
+                    ..
+                },
+        } = config
+        else {
+            panic!("FileSystem source configuration in sink");
+        };
+
         Self {
             batch_buffering_writer,
             multipart_manager: MultipartManager::new(object_store, path, partition),
             stats: None,
             schema,
+            target_part_size_bytes: target_part_size
+                .map(|t| t as usize)
+                .unwrap_or(DEFAULT_TARGET_PART_SIZE),
         }
     }
 
@@ -1428,13 +1456,25 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         let stats = self.stats.as_mut().unwrap();
         stats.last_write_at = Instant::now();
 
-        let prev_size = self.batch_buffering_writer.buffer_length();
-        if let Some(bytes) = self.batch_buffering_writer.add_batch_data(batch) {
+        let prev_size = self.batch_buffering_writer.buffered_bytes();
+        self.batch_buffering_writer.add_batch_data(batch);
+
+        let bytes = match stats.part_size {
+            Some(part_size) => (self.batch_buffering_writer.buffered_bytes() >= part_size)
+                .then(|| self.batch_buffering_writer.split_at(part_size)),
+            None => (self.batch_buffering_writer.buffered_bytes() >= self.target_part_size_bytes)
+                .then(|| {
+                    self.batch_buffering_writer
+                        .split_at(self.batch_buffering_writer.buffered_bytes())
+                }),
+        };
+
+        if let Some(bytes) = bytes {
             stats.bytes_written += bytes.len() - prev_size;
             stats.parts_written += 1;
             self.multipart_manager.write_next_part(bytes)
         } else {
-            stats.bytes_written += self.batch_buffering_writer.buffer_length() - prev_size;
+            stats.bytes_written += self.batch_buffering_writer.buffered_bytes() - prev_size;
             Ok(None)
         }
     }
@@ -1504,13 +1544,13 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
 struct PartToUpload {
     part_index: usize,
-    byte_data: Vec<u8>,
+    byte_data: Bytes,
 }
 
 #[derive(Debug)]
 enum PartIdOrBufferedData {
     PartId(PartId),
-    BufferedData { data: Vec<u8> },
+    BufferedData { data: Bytes },
 }
 
 pub struct MultipartCallbackWithName {

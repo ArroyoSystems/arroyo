@@ -418,12 +418,12 @@ pub fn file_system_sink_from_options(
                     })
                 })
                 .transpose()?;
-            let row_batch_size = opts.pull_opt_i64("parquet_row_batch_size")?;
-            let row_group_size = opts.pull_opt_i64("parquet_row_group_size")?;
+            let row_group_size_bytes = opts.pull_opt_nonzero_u64("parquet_row_group_size_bytes")?;
             Some(FormatSettings::Parquet {
                 compression,
-                row_batch_size,
-                row_group_size,
+                row_batch_size: None,
+                row_group_size: None,
+                row_group_size_bytes,
             })
         }
         Format::Json(..) => Some(FormatSettings::Json {

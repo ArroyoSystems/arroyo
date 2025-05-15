@@ -1,10 +1,7 @@
-use std::{
-    fs::File,
-    io::Write,
-    sync::Arc,
-    time::{Instant, SystemTime},
+use super::{
+    local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
+    BatchBufferingWriter, FileSystemTable, MultiPartWriterStats, TableType,
 };
-
 use crate::filesystem::{Compression, FormatSettings};
 use anyhow::Result;
 use arrow::{
@@ -13,46 +10,58 @@ use arrow::{
 };
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
+use bytes::{BufMut, Bytes, BytesMut};
 use datafusion::physical_plan::PhysicalExpr;
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},
     file::properties::WriterProperties,
 };
-use tracing::debug;
-use super::{
-    local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, FileSettings, FileSystemTable, MultiPartWriterStats, TableType,
+use std::sync::Mutex;
+use std::{
+    fs::File,
+    io::Write,
+    mem,
+    sync::Arc,
+    time::{Instant, SystemTime},
 };
 
-fn writer_properties_from_table(table: &FileSystemTable) -> WriterProperties {
+const DEFAULT_ROW_GROUP_BYTES: usize = 1024 * 1024 * 128; // 128MB
+
+fn writer_properties_from_table(table: &FileSystemTable) -> (WriterProperties, usize) {
     let mut parquet_writer_options = WriterProperties::builder();
-    if let TableType::Sink {
+
+    let TableType::Sink {
         format_settings:
             Some(FormatSettings::Parquet {
                 compression,
                 row_batch_size: _,
-                row_group_size,
+                row_group_size: _,
+                row_group_size_bytes,
             }),
         ..
     } = table.table_type
-    {
-        if let Some(compression) = compression {
-            let compression = match compression {
-                Compression::None => parquet::basic::Compression::UNCOMPRESSED,
-                Compression::Snappy => parquet::basic::Compression::SNAPPY,
-                Compression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
-                Compression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
-                Compression::Lz4 => parquet::basic::Compression::LZ4,
-            };
-            parquet_writer_options = parquet_writer_options.set_compression(compression);
-        }
-        if let Some(row_group_size) = row_group_size {
-            parquet_writer_options =
-                parquet_writer_options.set_max_row_group_size(row_group_size as usize);
-        }
+    else {
+        panic!("FileSystem source configuration in sink");
+    };
+
+    if let Some(compression) = compression {
+        let compression = match compression {
+            Compression::None => parquet::basic::Compression::UNCOMPRESSED,
+            Compression::Snappy => parquet::basic::Compression::SNAPPY,
+            Compression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
+            Compression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
+            Compression::Lz4 => parquet::basic::Compression::LZ4,
+        };
+        parquet_writer_options = parquet_writer_options.set_compression(compression);
     }
-    parquet_writer_options.build()
+
+    (
+        parquet_writer_options.build(),
+        row_group_size_bytes
+            .map(|i| i.get() as usize)
+            .unwrap_or(DEFAULT_ROW_GROUP_BYTES),
+    )
 }
 
 /// A buffer with interior mutability shared by the [`ArrowWriter`] and
@@ -61,16 +70,24 @@ fn writer_properties_from_table(table: &FileSystemTable) -> WriterProperties {
 struct SharedBuffer {
     /// The inner buffer for reading and writing
     ///
-    /// The lock is used to obtain internal mutability, so no worry about the
+    /// The lock is used to obtain shared internal mutability, so no worry about the
     /// lock contention.
-    buffer: Arc<futures::lock::Mutex<Vec<u8>>>,
+    buffer: Arc<Mutex<bytes::buf::Writer<BytesMut>>>,
 }
 
 impl SharedBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buffer: Arc::new(futures::lock::Mutex::new(Vec::with_capacity(capacity))),
+            buffer: Arc::new(Mutex::new(BytesMut::with_capacity(capacity).writer())),
         }
+    }
+
+    pub fn into_inner(self) -> BytesMut {
+        Arc::into_inner(self.buffer)
+            .unwrap()
+            .into_inner()
+            .unwrap()
+            .into_inner()
     }
 }
 
@@ -81,40 +98,25 @@ impl Write for SharedBuffer {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        let mut buffer = self.buffer.try_lock().unwrap();
-        Write::flush(&mut *buffer)
+        Ok(())
     }
 }
 
 pub struct RecordBatchBufferingWriter {
     writer: Option<ArrowWriter<SharedBuffer>>,
-    shared_buffer: SharedBuffer,
-    target_part_size: usize,
+    buffer: SharedBuffer,
+    row_group_size_bytes: usize,
     schema: ArroyoSchemaRef,
 }
 
 impl BatchBufferingWriter for RecordBatchBufferingWriter {
     fn new(config: &FileSystemTable, _format: Option<Format>, schema: ArroyoSchemaRef) -> Self {
-        let target_part_size = if let TableType::Sink {
-            file_settings:
-                Some(FileSettings {
-                    target_part_size: Some(target_part_size),
-                    ..
-                }),
-            ..
-        } = config.table_type
-        {
-            target_part_size as usize
-        } else {
-            5 * 1024 * 1024
-        };
-        
-        debug!("target part size = {}", target_part_size);
-        
-        let shared_buffer = SharedBuffer::new(target_part_size);
-        let writer_properties = writer_properties_from_table(config);
+        let (writer_properties, row_group_size_bytes) = writer_properties_from_table(config);
+
+        let buffer = SharedBuffer::new(row_group_size_bytes);
+
         let writer = ArrowWriter::try_new(
-            shared_buffer.clone(),
+            buffer.clone(),
             Arc::new(schema.schema_without_timestamp()),
             Some(writer_properties),
         )
@@ -122,8 +124,8 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
 
         Self {
             writer: Some(writer),
-            shared_buffer,
-            target_part_size,
+            buffer,
+            row_group_size_bytes,
             schema,
         }
     }
@@ -132,53 +134,56 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
         "parquet".to_string()
     }
 
-    fn add_batch_data(&mut self, mut data: RecordBatch) -> Option<Vec<u8>> {
+    fn add_batch_data(&mut self, mut data: RecordBatch) {
         let writer = self.writer.as_mut().unwrap();
+
         // remove timestamp column
         self.schema.remove_timestamp_column(&mut data);
         writer.write(&data).unwrap();
-        if self.buffer_length() > self.target_part_size {
-            Some(self.evict_current_buffer())
-        } else {
-            None
+
+        if writer.in_progress_size() > self.row_group_size_bytes {
+            writer.flush().unwrap();
         }
     }
 
-    fn buffer_length(&self) -> usize {
-        self.shared_buffer.buffer.try_lock().unwrap().len()
+    fn buffered_bytes(&self) -> usize {
+        self.buffer.buffer.lock().unwrap().get_ref().len()
     }
 
-    fn evict_current_buffer(&mut self) -> Vec<u8> {
-        let mut buffer = self.shared_buffer.buffer.try_lock().unwrap();
-        let current_buffer_data = buffer.to_vec();
-        buffer.clear();
-        current_buffer_data
+    fn split_at(&mut self, pos: usize) -> Bytes {
+        let mut buf = self.buffer.buffer.lock().unwrap();
+        buf.get_mut().split_off(pos).freeze()
     }
 
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
         let writer: &mut ArrowWriter<SharedBuffer> = self.writer.as_mut().unwrap();
         writer.flush().unwrap();
-        let result = self
+
+        let trailing_bytes = self
             .writer
             .as_mut()
             .unwrap()
             .get_trailing_bytes(SharedBuffer::new(0))
-            .unwrap();
-        let trailing_bytes: Vec<u8> = result.buffer.try_lock().unwrap().to_vec();
+            .unwrap()
+            .into_inner();
+
+        // TODO: this copy can likely be avoided, as the section we are copying is immutable
         // copy out the current bytes in the shared buffer, plus the trailing bytes
-        let mut copied_bytes = self.shared_buffer.buffer.try_lock().unwrap().to_vec();
+        let mut copied_bytes = self.buffer.buffer.lock().unwrap().get_ref().to_vec();
         copied_bytes.extend_from_slice(&trailing_bytes);
         Some(copied_bytes)
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Vec<u8>> {
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes> {
         let mut writer = self.writer.take().unwrap();
         if let Some(batch) = final_batch {
             writer.write(&batch).unwrap();
         }
         writer.close().unwrap();
-        let buffer = self.shared_buffer.buffer.try_lock().unwrap();
-        Some(buffer.to_vec())
+        let mut buffer = SharedBuffer::new(self.row_group_size_bytes);
+        mem::swap(&mut buffer, &mut self.buffer);
+
+        Some(buffer.into_inner().freeze())
     }
 }
 
@@ -190,6 +195,7 @@ pub struct ParquetLocalWriter {
     shared_buffer: SharedBuffer,
     stats: Option<MultiPartWriterStats>,
     schema: ArroyoSchemaRef,
+    row_group_size_bytes: usize,
 }
 
 impl LocalWriter for ParquetLocalWriter {
@@ -201,7 +207,8 @@ impl LocalWriter for ParquetLocalWriter {
         schema: ArroyoSchemaRef,
     ) -> Self {
         let shared_buffer = SharedBuffer::new(0);
-        let writer_properties = writer_properties_from_table(table_properties);
+        let (writer_properties, row_group_size_bytes) =
+            writer_properties_from_table(table_properties);
         let writer = ArrowWriter::try_new(
             shared_buffer.clone(),
             Arc::new(schema.schema_without_timestamp()),
@@ -216,6 +223,7 @@ impl LocalWriter for ParquetLocalWriter {
             destination_path: final_path,
             shared_buffer,
             stats: None,
+            row_group_size_bytes,
             schema,
         }
     }
@@ -240,19 +248,23 @@ impl LocalWriter for ParquetLocalWriter {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
         }
         self.schema.remove_timestamp_column(&mut batch);
-        self.writer.as_mut().unwrap().write(&batch)?;
+        let writer = self.writer.as_mut().unwrap();
+        writer.write(&batch)?;
+        if writer.bytes_written() >= self.row_group_size_bytes {
+            writer.flush()?;
+        }
         Ok(())
     }
 
     fn sync(&mut self) -> anyhow::Result<usize> {
         let mut buffer = self.shared_buffer.buffer.try_lock().unwrap();
-        self.file.write_all(&buffer)?;
+        self.file.write_all(buffer.get_ref())?;
         self.file.sync_all()?;
         // get size of the file
         let metadata = self.file.metadata()?;
         let size = metadata.len() as usize;
         self.stats.as_mut().unwrap().bytes_written = size;
-        buffer.clear();
+        buffer.get_mut().clear();
         Ok(size)
     }
 
@@ -279,6 +291,7 @@ impl LocalWriter for ParquetLocalWriter {
             .buffer
             .try_lock()
             .unwrap()
+            .get_ref()
             .to_vec();
         Ok(Some(CurrentFileRecovery {
             tmp_file: self.tmp_path.clone(),

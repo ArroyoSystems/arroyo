@@ -81,11 +81,21 @@
                     },
                     "rowBatchSize": {
                       "title": "Row Batch Size",
-                      "type": "integer"
+                      "type": "integer",
+                      "deprecated": true,
+                      "hidden": true
                     },
                     "rowGroupSize": {
                       "title": "Row Group Size",
-                      "type": "integer"
+                      "type": "integer",
+                      "deprecated": true,
+                      "hidden": true
+                    },
+                    "rowGroupSizeBytes": {
+                      "title": "Row Group Bytes",
+                      "type": "integer",
+                      "description": "Target number of bytes for each Parquet Row Group",
+                      "minimum": 1
                     }
                   },
                   "additionalProperties": false

@@ -3,86 +3,66 @@ use std::{fs::File, io::Write, time::Instant};
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
+use bytes::{Bytes, BytesMut};
 
 use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
-    BatchBufferingWriter, FileSettings, MultiPartWriterStats, TableType,
+    BatchBufferingWriter, MultiPartWriterStats,
 };
 
 pub struct JsonWriter {
-    current_buffer: Vec<u8>,
+    current_buffer: BytesMut,
     serializer: ArrowSerializer,
-    target_part_size: usize,
 }
 
 impl BatchBufferingWriter for JsonWriter {
     fn new(
-        config: &super::FileSystemTable,
+        _: &super::FileSystemTable,
         format: Option<Format>,
         _schema: ArroyoSchemaRef,
     ) -> Self {
-        let target_part_size = if let TableType::Sink {
-            file_settings:
-                Some(FileSettings {
-                    target_part_size: Some(target_part_size),
-                    ..
-                }),
-            ..
-        } = config.table_type
-        {
-            target_part_size as usize
-        } else {
-            5 * 1024 * 1024
-        };
         Self {
-            current_buffer: Vec::new(),
+            current_buffer: BytesMut::new(),
             serializer: ArrowSerializer::new(format.expect("should have format")),
-            target_part_size,
         }
     }
     fn suffix() -> String {
         "json".to_string()
     }
 
-    fn add_batch_data(&mut self, batch: RecordBatch) -> Option<Vec<u8>> {
+    fn add_batch_data(&mut self, batch: RecordBatch) {
         for k in self.serializer.serialize(&batch) {
             self.current_buffer.extend(k);
             self.current_buffer.extend(b"\n");
         }
-        if self.buffer_length() > self.target_part_size {
-            Some(self.evict_current_buffer())
-        } else {
-            None
-        }
     }
 
-    fn buffer_length(&self) -> usize {
+    fn buffered_bytes(&self) -> usize {
         self.current_buffer.len()
     }
 
-    fn evict_current_buffer(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.current_buffer)
+    fn split_at(&mut self, pos: usize) -> Bytes {
+        self.current_buffer.split_to(pos).freeze()
     }
 
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
         if self.current_buffer.is_empty() {
             None
         } else {
-            Some(self.current_buffer.clone())
+            Some(self.current_buffer.to_vec())
         }
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Vec<u8>> {
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes> {
         if let Some(final_batch) = final_batch {
-            if let Some(final_batch) = self.add_batch_data(final_batch) {
-                return Some(final_batch);
-            }
+            self.add_batch_data(final_batch);
         }
+
         if self.current_buffer.is_empty() {
             None
         } else {
-            Some(self.evict_current_buffer())
+            Some(self.current_buffer.split().freeze())
         }
     }
 }
