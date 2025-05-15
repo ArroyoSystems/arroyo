@@ -437,7 +437,7 @@ struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
     futures: FuturesUnordered<BoxedTryFuture<MultipartCallbackWithName>>,
     files_to_finish: Vec<FileToFinish>,
     properties: FileSystemTable,
-    rolling_policy: RollingPolicy,
+    rolling_policies: Vec<RollingPolicy>,
     commit_state: CommitState,
     file_naming: FileNaming,
     format: Option<Format>,
@@ -627,13 +627,13 @@ pub struct FinishedFile {
     size: usize,
 }
 
+#[derive(Debug)]
 enum RollingPolicy {
     PartLimit(usize),
     SizeLimit(usize),
     InactivityDuration(Duration),
     RolloverDuration(Duration),
     WatermarkExpiration { pattern: String },
-    AnyPolicy(Vec<RollingPolicy>),
 }
 
 impl RollingPolicy {
@@ -647,9 +647,6 @@ impl RollingPolicy {
             RollingPolicy::RolloverDuration(duration) => {
                 stats.first_write_at.elapsed() >= *duration
             }
-            RollingPolicy::AnyPolicy(policies) => policies
-                .iter()
-                .any(|policy| policy.should_roll(stats, watermark)),
             RollingPolicy::WatermarkExpiration { pattern } => {
                 let Some(watermark) = watermark else {
                     return false;
@@ -670,7 +667,7 @@ impl RollingPolicy {
         }
     }
 
-    fn from_file_settings(file_settings: &FileSettings) -> RollingPolicy {
+    fn from_file_settings(file_settings: &FileSettings) -> Vec<RollingPolicy> {
         let mut policies = vec![];
         let part_size_limit = file_settings.max_parts.unwrap_or(1000) as usize;
         // this is a hard limit, so will always be present.
@@ -694,7 +691,7 @@ impl RollingPolicy {
                 });
             }
         }
-        RollingPolicy::AnyPolicy(policies)
+        policies
     }
 }
 
@@ -763,7 +760,7 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
-            rolling_policy: RollingPolicy::from_file_settings(file_settings),
+            rolling_policies: RollingPolicy::from_file_settings(file_settings),
             properties: writer_properties,
             commit_state,
             file_naming,
@@ -825,8 +822,14 @@ where
                     for (partition, filename) in &self.active_writers {
                             let writer = self.writers.get_mut(filename).unwrap();
                             if let Some(stats) = writer.stats() {
-                            if self.rolling_policy.should_roll(&stats, self.watermark) {
 
+                            let should_roll = self.rolling_policies.iter()
+                            .find(|p| {
+                                p.should_roll(&stats, self.watermark)
+                            });
+
+                            if let Some(policy) = should_roll {
+                                debug!("rolling file {} due to policy {:?}", filename, policy);
                                 if let Some(future) = writer.close()? {
                                     self.futures.push(future);
                                     removed_partitions.push((partition.clone(), false));
@@ -1376,7 +1379,7 @@ pub trait BatchBufferingWriter: Send {
     /// in progress writes.
     ///
     /// Panics if pos > `self.buffered_bytes()`
-    fn split_at(&mut self, pos: usize) -> Bytes;
+    fn split_to(&mut self, pos: usize) -> Bytes;
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
     fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes>;
 }
@@ -1456,25 +1459,30 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         let stats = self.stats.as_mut().unwrap();
         stats.last_write_at = Instant::now();
 
-        let prev_size = self.batch_buffering_writer.buffered_bytes();
         self.batch_buffering_writer.add_batch_data(batch);
 
         let bytes = match stats.part_size {
+            None => {
+                if self.batch_buffering_writer.buffered_bytes() >= self.target_part_size_bytes {
+                    let buf = self
+                        .batch_buffering_writer
+                        .split_to(self.batch_buffering_writer.buffered_bytes());
+                    assert!(buf.len() > 0);
+                    stats.part_size = Some(buf.len());
+                    Some(buf)
+                } else {
+                    None
+                }
+            }
             Some(part_size) => (self.batch_buffering_writer.buffered_bytes() >= part_size)
-                .then(|| self.batch_buffering_writer.split_at(part_size)),
-            None => (self.batch_buffering_writer.buffered_bytes() >= self.target_part_size_bytes)
-                .then(|| {
-                    self.batch_buffering_writer
-                        .split_at(self.batch_buffering_writer.buffered_bytes())
-                }),
+                .then(|| self.batch_buffering_writer.split_to(part_size)),
         };
 
         if let Some(bytes) = bytes {
-            stats.bytes_written += bytes.len() - prev_size;
+            stats.bytes_written += bytes.len();
             stats.parts_written += 1;
             self.multipart_manager.write_next_part(bytes)
         } else {
-            stats.bytes_written += self.batch_buffering_writer.buffered_bytes() - prev_size;
             Ok(None)
         }
     }

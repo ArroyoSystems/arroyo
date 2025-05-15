@@ -551,7 +551,9 @@ impl ConnectorOptions {
 
     pub fn pull_opt_nonzero_u64(&mut self, name: &str) -> DFResult<Option<NonZero<u64>>> {
         match self.pull_opt_u64(name)? {
-            Some(0) => plan_err!("expected with option '{name}' to be greater than 0, but it was 0"),
+            Some(0) => {
+                plan_err!("expected with option '{name}' to be greater than 0, but it was 0")
+            }
             Some(i) => Ok(Some(NonZeroU64::new(i).unwrap())),
             None => Ok(None),
         }

@@ -150,9 +150,9 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
         self.buffer.buffer.lock().unwrap().get_ref().len()
     }
 
-    fn split_at(&mut self, pos: usize) -> Bytes {
+    fn split_to(&mut self, pos: usize) -> Bytes {
         let mut buf = self.buffer.buffer.lock().unwrap();
-        buf.get_mut().split_off(pos).freeze()
+        buf.get_mut().split_to(pos).freeze()
     }
 
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {

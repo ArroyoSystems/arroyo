@@ -31,7 +31,7 @@ pub struct LocalFileSystemWriter<V: LocalWriter> {
     subtask_id: usize,
     partitioner: Option<Arc<dyn PhysicalExpr>>,
     finished_files: Vec<FilePreCommit>,
-    rolling_policy: RollingPolicy,
+    rolling_policies: Vec<RollingPolicy>,
     table_properties: FileSystemTable,
     file_settings: FileSettings,
     format: Option<Format>,
@@ -85,7 +85,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             finished_files: Vec::new(),
             file_settings: file_settings.clone().unwrap(),
             format: config.format,
-            rolling_policy: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
+            rolling_policies: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
             table_properties,
             schema: None,
             commit_state: None,
@@ -333,7 +333,12 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         for (partition, writer) in self.writers.iter_mut() {
             writer.sync()?;
             let stats = writer.stats();
-            if self.rolling_policy.should_roll(&stats, watermark) || stopping {
+            if self
+                .rolling_policies
+                .iter()
+                .any(|p| p.should_roll(&stats, watermark))
+                || stopping
+            {
                 partitions_to_roll.push(partition.clone());
             }
         }

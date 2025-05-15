@@ -17,11 +17,7 @@ pub struct JsonWriter {
 }
 
 impl BatchBufferingWriter for JsonWriter {
-    fn new(
-        _: &super::FileSystemTable,
-        format: Option<Format>,
-        _schema: ArroyoSchemaRef,
-    ) -> Self {
+    fn new(_: &super::FileSystemTable, format: Option<Format>, _schema: ArroyoSchemaRef) -> Self {
         Self {
             current_buffer: BytesMut::new(),
             serializer: ArrowSerializer::new(format.expect("should have format")),
@@ -42,7 +38,7 @@ impl BatchBufferingWriter for JsonWriter {
         self.current_buffer.len()
     }
 
-    fn split_at(&mut self, pos: usize) -> Bytes {
+    fn split_to(&mut self, pos: usize) -> Bytes {
         self.current_buffer.split_to(pos).freeze()
     }
 
