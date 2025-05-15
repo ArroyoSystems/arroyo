@@ -488,7 +488,7 @@ pub trait MultiPartWriter {
 
     fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData;
 
-    fn close(&mut self) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>>;
+    fn close(&mut self) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>>;
 
     fn stats(&self) -> Option<MultiPartWriterStats>;
 
@@ -830,8 +830,9 @@ where
 
                             if let Some(policy) = should_roll {
                                 debug!("rolling file {} due to policy {:?}", filename, policy);
-                                if let Some(future) = writer.close()? {
-                                    self.futures.push(future);
+                                let futures = writer.close()?;
+                                if !futures.is_empty() {
+                                    self.futures.extend(futures.into_iter());
                                     removed_partitions.push((partition.clone(), false));
                                 } else {
                                     removed_partitions.push((partition.clone(), true));
@@ -1035,9 +1036,9 @@ where
     async fn stop(&mut self) -> Result<()> {
         for filename in self.active_writers.values() {
             let writer = self.writers.get_mut(filename).unwrap();
-            let close_future: Option<BoxedTryFuture<MultipartCallbackWithName>> = writer.close()?;
-            if let Some(future) = close_future {
-                self.futures.push(future);
+            let close_futures = writer.close()?;
+            if !close_futures.is_empty() {
+                self.futures.extend(close_futures);
             } else {
                 self.writers.remove(filename);
             }
@@ -1467,7 +1468,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
                     let buf = self
                         .batch_buffering_writer
                         .split_to(self.batch_buffering_writer.buffered_bytes());
-                    assert!(buf.len() > 0);
+                    assert!(!buf.is_empty(), "Trying to write empty part file");
                     stats.part_size = Some(buf.len());
                     Some(buf)
                 } else {
@@ -1514,7 +1515,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         }
     }
 
-    fn close(&mut self) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
+    fn close(&mut self) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
         self.write_closing_multipart()
     }
@@ -1531,21 +1532,48 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
 impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     fn write_closing_multipart(
         &mut self,
-    ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
+    ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
         if let Some(bytes) = self.batch_buffering_writer.close(None) {
-            self.multipart_manager.write_next_part(bytes)
+            let part_size = self
+                .stats
+                .as_ref()
+                .and_then(|s| s.part_size)
+                .unwrap_or_default();
+            if self
+                .multipart_manager
+                .storage_provider
+                .requires_same_part_sizes()
+                && bytes.len() > part_size
+            {
+                // our last part is bigger than our part size, which isn't allowed by some object stores
+                // so we need to split it up
+                debug!("final multipart upload ({}) is bigger than part size ({}) so splitting into two",
+                    bytes.len(), part_size);
+                let mut part1 = bytes;
+                let part2 = part1.split_off(part_size);
+                // these can't be None, so safe to unwrap
+                let f1 = self.multipart_manager.write_next_part(part1)?.unwrap();
+                let f2 = self.multipart_manager.write_next_part(part2)?.unwrap();
+                Ok(vec![f1, f2])
+            } else {
+                Ok(self
+                    .multipart_manager
+                    .write_next_part(bytes)?
+                    .into_iter()
+                    .collect())
+            }
         } else if self.multipart_manager.all_uploads_finished() {
             // Return a finished file future
             let name = self.multipart_manager.name();
-            Ok(Some(Box::pin(async move {
+            Ok(vec![Box::pin(async move {
                 Ok(MultipartCallbackWithName {
                     name,
                     callback: MultipartCallback::UploadsFinished,
                 })
-            })))
+            })])
         } else {
-            Ok(None)
+            Ok(vec![])
         }
     }
 }

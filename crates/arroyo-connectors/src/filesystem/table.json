@@ -82,14 +82,12 @@
                     "rowBatchSize": {
                       "title": "Row Batch Size",
                       "type": "integer",
-                      "deprecated": true,
-                      "hidden": true
+                      "deprecated": true
                     },
                     "rowGroupSize": {
                       "title": "Row Group Size",
                       "type": "integer",
-                      "deprecated": true,
-                      "hidden": true
+                      "deprecated": true
                     },
                     "rowGroupSizeBytes": {
                       "title": "Row Group Bytes",

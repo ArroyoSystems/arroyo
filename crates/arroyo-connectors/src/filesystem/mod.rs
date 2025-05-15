@@ -411,14 +411,14 @@ pub fn file_system_sink_from_options(
     ))? {
         Format::Parquet(..) => {
             let compression = opts
-                .pull_opt_str("parquet_compression")?
+                .pull_opt_str("parquet.compression")?
                 .map(|value| {
                     Compression::try_from(&value).map_err(|_err| {
-                        anyhow!("{} is not a valid parquet_compression argument", value)
+                        anyhow!("{} is not a valid parquet.compression argument", value)
                     })
                 })
                 .transpose()?;
-            let row_group_size_bytes = opts.pull_opt_nonzero_u64("parquet_row_group_size_bytes")?;
+            let row_group_size_bytes = opts.pull_opt_nonzero_u64("parquet.row_group_size_bytes")?;
             Some(FormatSettings::Parquet {
                 compression,
                 row_batch_size: None,

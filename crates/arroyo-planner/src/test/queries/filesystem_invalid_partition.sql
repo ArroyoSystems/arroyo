@@ -30,7 +30,7 @@ create table events_sink (
     path = 's3://my-s3-bucket/data/events',
     format = 'parquet',
     'filename.strategy' = 'uuid',
-    parquet_compression = 'zstd',
+    'parquet.compression' = 'zstd',
     time_partition_pattern = '%Y/%m/%d/%H',
     partition_fields = [type, not_a_real_field],
     rollover_seconds = 6000

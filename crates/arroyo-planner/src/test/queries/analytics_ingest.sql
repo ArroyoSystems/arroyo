@@ -21,7 +21,7 @@ create table account_created_sink with (
     path = 's3://my-s3-bucket/data/account_created',
     format = 'parquet',
     'filename.strategy' = 'uuid',
-    parquet_compression = 'zstd',
+    'parquet.compression' = 'zstd',
     time_partition_pattern = '%Y/%m/%d/%H',
     rollover_seconds = 6000
 );
