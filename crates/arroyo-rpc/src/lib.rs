@@ -28,6 +28,7 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::num::{NonZero, NonZeroU64};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::{fs, time::SystemTime};
@@ -544,6 +545,16 @@ impl ConnectorOptions {
                     e
                 )
             }
+            None => Ok(None),
+        }
+    }
+
+    pub fn pull_opt_nonzero_u64(&mut self, name: &str) -> DFResult<Option<NonZero<u64>>> {
+        match self.pull_opt_u64(name)? {
+            Some(0) => {
+                plan_err!("expected with option '{name}' to be greater than 0, but it was 0")
+            }
+            Some(i) => Ok(Some(NonZeroU64::new(i).unwrap())),
             None => Ok(None),
         }
     }

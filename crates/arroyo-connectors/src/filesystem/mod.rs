@@ -26,6 +26,8 @@ use self::sink::{
     JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
 };
 
+const MINIMUM_PART_SIZE: i64 = 5 * 1024 * 1024;
+
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./filesystem.svg");
 
@@ -330,6 +332,13 @@ pub fn file_system_sink_from_options(
     let rollover_seconds = opts.pull_opt_i64("rollover_seconds")?;
     let target_file_size = opts.pull_opt_i64("target_file_size")?;
     let target_part_size = opts.pull_opt_i64("target_part_size")?;
+
+    if let Some(target_part_size) = target_part_size {
+        if target_part_size < MINIMUM_PART_SIZE {
+            bail!("target_part_size must be at least {}", MINIMUM_PART_SIZE);
+        }
+    }
+
     let prefix = opts.pull_opt_str("filename.prefix")?;
     let suffix = opts.pull_opt_str("filename.suffix")?;
     let strategy = opts
@@ -411,19 +420,19 @@ pub fn file_system_sink_from_options(
     ))? {
         Format::Parquet(..) => {
             let compression = opts
-                .pull_opt_str("parquet_compression")?
+                .pull_opt_str("parquet.compression")?
                 .map(|value| {
                     Compression::try_from(&value).map_err(|_err| {
-                        anyhow!("{} is not a valid parquet_compression argument", value)
+                        anyhow!("{} is not a valid parquet.compression argument", value)
                     })
                 })
                 .transpose()?;
-            let row_batch_size = opts.pull_opt_i64("parquet_row_batch_size")?;
-            let row_group_size = opts.pull_opt_i64("parquet_row_group_size")?;
+            let row_group_size_bytes = opts.pull_opt_nonzero_u64("parquet.row_group_size_bytes")?;
             Some(FormatSettings::Parquet {
                 compression,
-                row_batch_size,
-                row_group_size,
+                row_batch_size: None,
+                row_group_size: None,
+                row_group_size_bytes,
             })
         }
         Format::Json(..) => Some(FormatSettings::Json {

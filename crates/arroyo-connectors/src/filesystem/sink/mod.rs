@@ -20,6 +20,7 @@ use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, OperatorConfig, TIMESTAMP
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::concat;
@@ -62,6 +63,8 @@ use crate::filesystem::{
     CommitStyle, FileNaming, FileSettings, FileSystemTable, FilenameStrategy, TableType,
 };
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
+
+const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
 
 pub struct FileSystemSink<R: MultiPartWriter + Send + 'static> {
     sender: Option<Sender<FileSystemMessages>>,
@@ -434,7 +437,7 @@ struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
     futures: FuturesUnordered<BoxedTryFuture<MultipartCallbackWithName>>,
     files_to_finish: Vec<FileToFinish>,
     properties: FileSystemTable,
-    rolling_policy: RollingPolicy,
+    rolling_policies: Vec<RollingPolicy>,
     commit_state: CommitState,
     file_naming: FileNaming,
     format: Option<Format>,
@@ -485,7 +488,7 @@ pub trait MultiPartWriter {
 
     fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData;
 
-    fn close(&mut self) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>>;
+    fn close(&mut self) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>>;
 
     fn stats(&self) -> Option<MultiPartWriterStats>;
 
@@ -624,13 +627,13 @@ pub struct FinishedFile {
     size: usize,
 }
 
+#[derive(Debug)]
 enum RollingPolicy {
     PartLimit(usize),
     SizeLimit(usize),
     InactivityDuration(Duration),
     RolloverDuration(Duration),
     WatermarkExpiration { pattern: String },
-    AnyPolicy(Vec<RollingPolicy>),
 }
 
 impl RollingPolicy {
@@ -644,9 +647,6 @@ impl RollingPolicy {
             RollingPolicy::RolloverDuration(duration) => {
                 stats.first_write_at.elapsed() >= *duration
             }
-            RollingPolicy::AnyPolicy(policies) => policies
-                .iter()
-                .any(|policy| policy.should_roll(stats, watermark)),
             RollingPolicy::WatermarkExpiration { pattern } => {
                 let Some(watermark) = watermark else {
                     return false;
@@ -667,7 +667,7 @@ impl RollingPolicy {
         }
     }
 
-    fn from_file_settings(file_settings: &FileSettings) -> RollingPolicy {
+    fn from_file_settings(file_settings: &FileSettings) -> Vec<RollingPolicy> {
         let mut policies = vec![];
         let part_size_limit = file_settings.max_parts.unwrap_or(1000) as usize;
         // this is a hard limit, so will always be present.
@@ -691,7 +691,7 @@ impl RollingPolicy {
                 });
             }
         }
-        RollingPolicy::AnyPolicy(policies)
+        policies
     }
 }
 
@@ -699,6 +699,7 @@ impl RollingPolicy {
 pub struct MultiPartWriterStats {
     bytes_written: usize,
     parts_written: usize,
+    part_size: Option<usize>,
     last_write_at: Instant,
     first_write_at: Instant,
     representative_timestamp: SystemTime,
@@ -759,7 +760,7 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
-            rolling_policy: RollingPolicy::from_file_settings(file_settings),
+            rolling_policies: RollingPolicy::from_file_settings(file_settings),
             properties: writer_properties,
             commit_state,
             file_naming,
@@ -821,10 +822,17 @@ where
                     for (partition, filename) in &self.active_writers {
                             let writer = self.writers.get_mut(filename).unwrap();
                             if let Some(stats) = writer.stats() {
-                            if self.rolling_policy.should_roll(&stats, self.watermark) {
 
-                                if let Some(future) = writer.close()? {
-                                    self.futures.push(future);
+                            let should_roll = self.rolling_policies.iter()
+                            .find(|p| {
+                                p.should_roll(&stats, self.watermark)
+                            });
+
+                            if let Some(policy) = should_roll {
+                                debug!("rolling file {} due to policy {:?}", filename, policy);
+                                let futures = writer.close()?;
+                                if !futures.is_empty() {
+                                    self.futures.extend(futures.into_iter());
                                     removed_partitions.push((partition.clone(), false));
                                 } else {
                                     removed_partitions.push((partition.clone(), true));
@@ -1028,9 +1036,9 @@ where
     async fn stop(&mut self) -> Result<()> {
         for filename in self.active_writers.values() {
             let writer = self.writers.get_mut(filename).unwrap();
-            let close_future: Option<BoxedTryFuture<MultipartCallbackWithName>> = writer.close()?;
-            if let Some(future) = close_future {
-                self.futures.push(future);
+            let close_futures = writer.close()?;
+            if !close_futures.is_empty() {
+                self.futures.extend(close_futures);
             } else {
                 self.writers.remove(filename);
             }
@@ -1110,7 +1118,7 @@ impl MultipartManager {
 
     fn write_next_part(
         &mut self,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
         match &self.multipart_id {
             Some(_multipart_id) => Ok(Some(self.get_part_upload_future(PartToUpload {
@@ -1155,7 +1163,7 @@ impl MultipartManager {
                     &location,
                     &multipart_id,
                     part_to_upload.part_index,
-                    part_to_upload.byte_data.into(),
+                    part_to_upload.byte_data,
                 )
                 .await?;
             Ok(MultipartCallbackWithName {
@@ -1245,7 +1253,7 @@ impl MultipartManager {
                     parts_to_add: self
                         .parts_to_add
                         .iter()
-                        .map(|val| val.byte_data.clone())
+                        .map(|val| val.byte_data.to_vec())
                         .collect(),
                     trailing_bytes: None,
                 };
@@ -1280,7 +1288,7 @@ impl MultipartManager {
                     PartIdOrBufferedData::BufferedData { data } => {
                         InFlightPartCheckpoint::InProgressPart {
                             part: part_index,
-                            data: data.clone(),
+                            data: data.to_vec(),
                         }
                     }
                 })
@@ -1304,7 +1312,7 @@ impl MultipartManager {
                 parts_to_add: self
                     .parts_to_add
                     .iter()
-                    .map(|val| val.byte_data.clone())
+                    .map(|val| val.byte_data.to_vec())
                     .collect(),
                 trailing_bytes,
             };
@@ -1322,7 +1330,7 @@ impl MultipartManager {
                 PartIdOrBufferedData::BufferedData { data } => {
                     InFlightPartCheckpoint::InProgressPart {
                         part: part_index,
-                        data: data.clone(),
+                        data: data.to_vec(),
                     }
                 }
             })
@@ -1364,17 +1372,24 @@ impl MultipartManager {
 pub trait BatchBufferingWriter: Send {
     fn new(config: &FileSystemTable, format: Option<Format>, schema: ArroyoSchemaRef) -> Self;
     fn suffix() -> String;
-    fn add_batch_data(&mut self, data: RecordBatch) -> Option<Vec<u8>>;
-    fn buffer_length(&self) -> usize;
-    fn evict_current_buffer(&mut self) -> Vec<u8>;
+    fn add_batch_data(&mut self, data: RecordBatch);
+    fn buffered_bytes(&self) -> usize;
+    /// Splits currently written data from the buffer (up to pos) and returns it. Note there may
+    /// still be additional interally-buffered data that has not been written out into the
+    /// actual buffer, for example in-progress row groups. This method does not flush those
+    /// in progress writes.
+    ///
+    /// Panics if pos > `self.buffered_bytes()`
+    fn split_to(&mut self, pos: usize) -> Bytes;
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Vec<u8>>;
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes>;
 }
 pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     batch_buffering_writer: BBW,
     multipart_manager: MultipartManager,
     stats: Option<MultiPartWriterStats>,
     schema: ArroyoSchemaRef,
+    target_part_size_bytes: usize,
 }
 #[async_trait]
 impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
@@ -1387,11 +1402,29 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         schema: ArroyoSchemaRef,
     ) -> Self {
         let batch_buffering_writer = BBW::new(config, format, schema.clone());
+
+        let FileSystemTable {
+            table_type:
+                TableType::Sink {
+                    file_settings:
+                        Some(FileSettings {
+                            target_part_size, ..
+                        }),
+                    ..
+                },
+        } = config
+        else {
+            panic!("FileSystem source configuration in sink");
+        };
+
         Self {
             batch_buffering_writer,
             multipart_manager: MultipartManager::new(object_store, path, partition),
             stats: None,
             schema,
+            target_part_size_bytes: target_part_size
+                .map(|t| t as usize)
+                .unwrap_or(DEFAULT_TARGET_PART_SIZE),
         }
     }
 
@@ -1417,6 +1450,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
                 parts_written: 0,
+                part_size: None,
                 last_write_at: Instant::now(),
                 first_write_at: Instant::now(),
                 representative_timestamp,
@@ -1426,13 +1460,30 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         let stats = self.stats.as_mut().unwrap();
         stats.last_write_at = Instant::now();
 
-        let prev_size = self.batch_buffering_writer.buffer_length();
-        if let Some(bytes) = self.batch_buffering_writer.add_batch_data(batch) {
-            stats.bytes_written += bytes.len() - prev_size;
+        self.batch_buffering_writer.add_batch_data(batch);
+
+        let bytes = match stats.part_size {
+            None => {
+                if self.batch_buffering_writer.buffered_bytes() >= self.target_part_size_bytes {
+                    let buf = self
+                        .batch_buffering_writer
+                        .split_to(self.target_part_size_bytes);
+                    assert!(!buf.is_empty(), "Trying to write empty part file");
+                    stats.part_size = Some(buf.len());
+                    Some(buf)
+                } else {
+                    None
+                }
+            }
+            Some(part_size) => (self.batch_buffering_writer.buffered_bytes() >= part_size)
+                .then(|| self.batch_buffering_writer.split_to(part_size)),
+        };
+
+        if let Some(bytes) = bytes {
+            stats.bytes_written += bytes.len();
             stats.parts_written += 1;
             self.multipart_manager.write_next_part(bytes)
         } else {
-            stats.bytes_written += self.batch_buffering_writer.buffer_length() - prev_size;
             Ok(None)
         }
     }
@@ -1464,7 +1515,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         }
     }
 
-    fn close(&mut self) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
+    fn close(&mut self) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
         self.write_closing_multipart()
     }
@@ -1481,34 +1532,61 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
 impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     fn write_closing_multipart(
         &mut self,
-    ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
+    ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
+
         if let Some(bytes) = self.batch_buffering_writer.close(None) {
-            self.multipart_manager.write_next_part(bytes)
+            let existing_part_size = self.stats.as_ref().and_then(|s| s.part_size);
+
+            if self
+                .multipart_manager
+                .storage_provider
+                .requires_same_part_sizes()
+                && existing_part_size.is_some()
+                && bytes.len() > existing_part_size.unwrap()
+            {
+                // our last part is bigger than our part size, which isn't allowed by some object stores
+                // so we need to split it up
+                let part_size = existing_part_size.unwrap();
+                debug!("final multipart upload ({}) is bigger than part size ({}) so splitting into two",
+                    bytes.len(), part_size);
+                let mut part1 = bytes;
+                let part2 = part1.split_off(part_size);
+                // these can't be None, so safe to unwrap
+                let f1 = self.multipart_manager.write_next_part(part1)?.unwrap();
+                let f2 = self.multipart_manager.write_next_part(part2)?.unwrap();
+                Ok(vec![f1, f2])
+            } else {
+                Ok(self
+                    .multipart_manager
+                    .write_next_part(bytes)?
+                    .into_iter()
+                    .collect())
+            }
         } else if self.multipart_manager.all_uploads_finished() {
             // Return a finished file future
             let name = self.multipart_manager.name();
-            Ok(Some(Box::pin(async move {
+            Ok(vec![Box::pin(async move {
                 Ok(MultipartCallbackWithName {
                     name,
                     callback: MultipartCallback::UploadsFinished,
                 })
-            })))
+            })])
         } else {
-            Ok(None)
+            Ok(vec![])
         }
     }
 }
 
 struct PartToUpload {
     part_index: usize,
-    byte_data: Vec<u8>,
+    byte_data: Bytes,
 }
 
 #[derive(Debug)]
 enum PartIdOrBufferedData {
     PartId(PartId),
-    BufferedData { data: Vec<u8> },
+    BufferedData { data: Bytes },
 }
 
 pub struct MultipartCallbackWithName {

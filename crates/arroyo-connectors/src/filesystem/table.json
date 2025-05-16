@@ -81,11 +81,19 @@
                     },
                     "rowBatchSize": {
                       "title": "Row Batch Size",
-                      "type": "integer"
+                      "type": "integer",
+                      "deprecated": true
                     },
                     "rowGroupSize": {
                       "title": "Row Group Size",
-                      "type": "integer"
+                      "type": "integer",
+                      "deprecated": true
+                    },
+                    "rowGroupSizeBytes": {
+                      "title": "Row Group Bytes",
+                      "type": "integer",
+                      "description": "Target number of bytes for each Parquet Row Group",
+                      "minimum": 1
                     }
                   },
                   "additionalProperties": false
@@ -115,7 +123,8 @@
                 "targetPartSize": {
                   "title": "Target Part Size",
                   "type": "integer",
-                  "description": "Target size for each part of the multipart upload, in bytes"
+                  "description": "Target size for each part of the multipart upload, in bytes",
+                  "minimum": 5242880
                 },
                 "maxParts": {
                   "title": "Max Parts",
