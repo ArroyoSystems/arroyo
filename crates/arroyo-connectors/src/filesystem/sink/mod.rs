@@ -1467,7 +1467,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
                 if self.batch_buffering_writer.buffered_bytes() >= self.target_part_size_bytes {
                     let buf = self
                         .batch_buffering_writer
-                        .split_to(self.batch_buffering_writer.buffered_bytes());
+                        .split_to(self.target_part_size_bytes);
                     assert!(!buf.is_empty(), "Trying to write empty part file");
                     stats.part_size = Some(buf.len());
                     Some(buf)
@@ -1534,20 +1534,20 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
         &mut self,
     ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
+
         if let Some(bytes) = self.batch_buffering_writer.close(None) {
-            let part_size = self
-                .stats
-                .as_ref()
-                .and_then(|s| s.part_size)
-                .unwrap_or_default();
+            let existing_part_size = self.stats.as_ref().and_then(|s| s.part_size);
+
             if self
                 .multipart_manager
                 .storage_provider
                 .requires_same_part_sizes()
-                && bytes.len() > part_size
+                && existing_part_size.is_some()
+                && bytes.len() > existing_part_size.unwrap()
             {
                 // our last part is bigger than our part size, which isn't allowed by some object stores
                 // so we need to split it up
+                let part_size = existing_part_size.unwrap();
                 debug!("final multipart upload ({}) is bigger than part size ({}) so splitting into two",
                     bytes.len(), part_size);
                 let mut part1 = bytes;

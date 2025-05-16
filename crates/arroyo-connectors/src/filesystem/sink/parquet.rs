@@ -250,7 +250,7 @@ impl LocalWriter for ParquetLocalWriter {
         self.schema.remove_timestamp_column(&mut batch);
         let writer = self.writer.as_mut().unwrap();
         writer.write(&batch)?;
-        if writer.bytes_written() >= self.row_group_size_bytes {
+        if writer.in_progress_size() >= self.row_group_size_bytes {
             writer.flush()?;
         }
         Ok(())
