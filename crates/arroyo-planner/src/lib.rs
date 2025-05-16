@@ -714,6 +714,8 @@ fn maybe_add_key_extension_to_sink(plan: LogicalPlan) -> Result<LogicalPlan> {
         })
         .collect::<Result<_>>()?;
 
+    let mut sink = sink.clone();
+    sink.shuffle_inputs = true;
     let node = sink.with_exprs_and_inputs(vec![], inputs)?;
 
     Ok(LogicalPlan::Extension(Extension { node }))
@@ -860,6 +862,7 @@ pub async fn parse_and_get_arrow_program(
                         table.clone(),
                         plan_rewrite.schema().clone(),
                         Arc::new(plan_rewrite),
+                        false,
                     ),
                     Table::MemoryTable { logical_plan, .. } => {
                         if logical_plan.is_some() {
@@ -886,6 +889,7 @@ pub async fn parse_and_get_arrow_program(
                 },
                 plan_rewrite.schema().clone(),
                 Arc::new(plan_rewrite),
+                false,
             ),
         };
         extensions.push(LogicalPlan::Extension(Extension {
