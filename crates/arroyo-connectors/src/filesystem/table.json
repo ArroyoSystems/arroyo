@@ -123,7 +123,8 @@
                 "targetPartSize": {
                   "title": "Target Part Size",
                   "type": "integer",
-                  "description": "Target size for each part of the multipart upload, in bytes"
+                  "description": "Target size for each part of the multipart upload, in bytes",
+                  "minimum": 5242880
                 },
                 "maxParts": {
                   "title": "Max Parts",

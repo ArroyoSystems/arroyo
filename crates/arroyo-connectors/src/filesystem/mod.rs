@@ -26,6 +26,8 @@ use self::sink::{
     JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
 };
 
+const MINIMUM_PART_SIZE: i64 = 5 * 1024 * 1024;
+
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./filesystem.svg");
 
@@ -330,6 +332,13 @@ pub fn file_system_sink_from_options(
     let rollover_seconds = opts.pull_opt_i64("rollover_seconds")?;
     let target_file_size = opts.pull_opt_i64("target_file_size")?;
     let target_part_size = opts.pull_opt_i64("target_part_size")?;
+
+    if let Some(target_part_size) = target_part_size {
+        if target_part_size < MINIMUM_PART_SIZE {
+            bail!("target_part_size must be at least {}", MINIMUM_PART_SIZE);
+        }
+    }
+
     let prefix = opts.pull_opt_str("filename.prefix")?;
     let suffix = opts.pull_opt_str("filename.suffix")?;
     let strategy = opts
