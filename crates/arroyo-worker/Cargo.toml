@@ -14,7 +14,7 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-planner = { path = "../arroyo-planner" }
 arroyo-operator = { path = "../arroyo-operator" }
-arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-connectors = { path = "../arroyo-connectors", default-features = false }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 
 rand = { workspace = true }
