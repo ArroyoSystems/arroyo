@@ -31,7 +31,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::{fs, time::SystemTime};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{
+    mpsc::{channel, Receiver, Sender},
+    oneshot,
+};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     service::Interceptor,
@@ -66,9 +69,9 @@ pub mod grpc {
         tonic::include_file_descriptor_set!("api_descriptor");
 }
 
-static DB_BACKUP_NOTIFIER: OnceLock<Sender<bool>> = OnceLock::new();
+static DB_BACKUP_NOTIFIER: OnceLock<Sender<oneshot::Sender<()>>> = OnceLock::new();
 
-pub fn init_db_notifier() -> Receiver<bool> {
+pub fn init_db_notifier() -> Receiver<oneshot::Sender<()>> {
     let (tx, rx) = channel(1);
     DB_BACKUP_NOTIFIER
         .set(tx)
@@ -76,8 +79,9 @@ pub fn init_db_notifier() -> Receiver<bool> {
     rx
 }
 
-pub fn notify_db() -> Option<()> {
-    DB_BACKUP_NOTIFIER.get()?.try_send(true).ok()
+pub fn notify_db() -> Option<oneshot::Receiver<()>> {
+    let (tx, rx) = oneshot::channel();
+    DB_BACKUP_NOTIFIER.get()?.try_send(tx).ok().map(|_| rx)
 }
 
 #[derive(Debug)]
