@@ -1,4 +1,4 @@
-use crate::{rest_utils::ErrorResp, AuthData, OrgMetadata};
+use crate::{rest_utils::ErrorResp, AuthData, OrgMetadata, DEFAULT_ORG};
 use axum_extra::headers::authorization::Bearer;
 use axum_extra::headers::Authorization;
 use axum_extra::TypedHeader;
@@ -10,7 +10,7 @@ pub(crate) async fn authenticate(
 ) -> Result<AuthData, ErrorResp> {
     Ok(AuthData {
         user_id: "user".to_string(),
-        organization_id: "org".to_string(),
+        organization_id: DEFAULT_ORG.to_string(),
         role: "admin".to_string(),
         org_metadata: OrgMetadata {
             can_create_programs: true,

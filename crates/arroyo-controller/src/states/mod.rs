@@ -11,7 +11,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use anyhow::{anyhow, Result};
 use cornucopia_async::DatabaseSource;
@@ -437,6 +437,13 @@ async fn execute_state<'a>(
 ) -> (Option<Box<dyn State>>, JobContext<'a>) {
     let state_name = state.name();
 
+    debug!(
+        message = "executing state",
+        job_id = *ctx.config.id,
+        state = state_name,
+        config = format!("{:?}", ctx.config)
+    );
+
     let next: Option<Box<dyn State>> = match state.next(&mut ctx).await {
         Ok(Transition::Advance(s)) => {
             info!(
@@ -547,8 +554,8 @@ async fn execute_state<'a>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn run_to_completion(
-    config: Arc<RwLock<JobConfig>>,
+async fn run_to_completion(
+    config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     mut program: LogicalProgram,
     mut status: JobStatus,
     mut state: Box<dyn State>,
@@ -558,7 +565,7 @@ pub async fn run_to_completion(
     metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 ) {
     let mut ctx = JobContext {
-        config: config.read().unwrap().clone(),
+        config: config.read().unwrap().0.clone(),
         status: &mut status,
         program: &mut program,
         db: db.clone(),
@@ -571,6 +578,7 @@ pub async fn run_to_completion(
     };
 
     loop {
+        config.write().unwrap().1 = AppliedStatus::Applied;
         match execute_state(state, ctx).await {
             (Some(new_state), new_ctx) => {
                 state = new_state;
@@ -579,14 +587,20 @@ pub async fn run_to_completion(
             (None, _) => break,
         }
 
-        ctx.config = config.read().unwrap().clone();
+        ctx.config = config.read().unwrap().0.clone();
     }
+}
+
+#[derive(Copy, Clone)]
+enum AppliedStatus {
+    Applied,
+    NotApplied,
 }
 
 pub struct StateMachine {
     tx: Option<Sender<JobMessage>>,
-    pub config: Arc<RwLock<JobConfig>>,
-    pub state: Arc<RwLock<String>>,
+    config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
+    pub(crate) state: Arc<RwLock<String>>,
     metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     db: DatabaseSource,
     scheduler: Arc<dyn Scheduler>,
@@ -603,7 +617,7 @@ impl StateMachine {
     ) -> Self {
         let mut this = Self {
             tx: None,
-            config: Arc::new(RwLock::new(config)),
+            config: Arc::new(RwLock::new((config, AppliedStatus::NotApplied))),
             state: Arc::new(RwLock::new(status.state.clone())),
             metrics,
             db,
@@ -689,11 +703,11 @@ impl StateMachine {
                 let db = self.db.clone();
                 let scheduler = self.scheduler.clone();
                 let metrics = self.metrics.clone();
-                let pipeline_id = config.read().unwrap().pipeline_id;
+                let pipeline_id = config.read().unwrap().0.pipeline_id;
                 match Self::get_program(&db, &status.id, pipeline_id).await {
                     Ok(Some(program)) => {
                         shutdown_guard.into_spawn_task(async move {
-                            let id = { config.read().unwrap().id.clone() };
+                            let id = { config.read().unwrap().0.id.clone() };
                             info!(message = "starting state machine", job_id = *id);
                             run_to_completion(
                                 config,
@@ -731,17 +745,19 @@ impl StateMachine {
         shutdown_guard: &ShutdownGuard,
     ) {
         *self.state.write().unwrap() = status.state.clone();
-        if *self.config.read().unwrap() != config {
+        if self.config.read().unwrap().0 != config {
             let update = JobMessage::ConfigUpdate(config.clone());
             {
                 let mut c = self.config.write().unwrap();
-                *c = config;
+                *c = (config, AppliedStatus::NotApplied);
             }
             if self.send(update).await.is_err() {
                 self.start(status, shutdown_guard.clone_temporary()).await;
             }
         } else {
-            self.restart_if_needed(status, shutdown_guard).await;
+            let applied = self.config.read().unwrap().1;
+            self.restart_if_needed(applied, status, shutdown_guard)
+                .await;
         }
     }
 
@@ -762,9 +778,14 @@ impl StateMachine {
     }
 
     // for states that should be running, check them and restart if needed
-    async fn restart_if_needed(&mut self, status: JobStatus, shutdown_guard: &ShutdownGuard) {
-        match status.state.as_str() {
-            "Running" | "Recovering" | "Rescaling" => {
+    async fn restart_if_needed(
+        &mut self,
+        applied: AppliedStatus,
+        status: JobStatus,
+        shutdown_guard: &ShutdownGuard,
+    ) {
+        match (applied, status.state.as_str()) {
+            (_, "Running" | "Recovering" | "Rescaling") | (AppliedStatus::NotApplied, _) => {
                 // done() means there isn't a task running, but these states
                 // need to be advanced.
                 if self.done() {

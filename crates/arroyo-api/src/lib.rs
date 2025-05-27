@@ -79,6 +79,8 @@ fn default_kafka_qps() -> u32 {
     10_000
 }
 
+pub const DEFAULT_ORG: &str = "org";
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct OrgMetadata {
     #[serde(default)]
