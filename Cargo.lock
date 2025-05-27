@@ -557,7 +557,6 @@ dependencies = [
  "rabbitmq-stream-client",
  "rand 0.9.0",
  "rdkafka",
- "rdkafka-sys",
  "redis",
  "regex",
  "regress 0.10.3",

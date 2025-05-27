@@ -97,7 +97,6 @@ impl ShutdownHandler for PipelineShutdownHandler {
             .await
         {
             warn!("Unable to stop pipeline with a final checkpoint: {}", e);
-            return;
         }
 
         if (timeout(
@@ -112,8 +111,10 @@ impl ShutdownHandler for PipelineShutdownHandler {
             );
         }
 
-        // start a final backup
-        notify_db();
+        // start a final backup and wait for it to finish
+        if let Some(c) = notify_db() {
+            let _ = c.await;
+        }
     }
 }
 
@@ -343,6 +344,39 @@ impl MaybeLocalDb {
     }
 }
 
+fn schedule_db_backups(shutdown: &Shutdown, maybe_local_db: MaybeLocalDb) {
+    let backup_guard = shutdown.guard("backup_db");
+    tokio::spawn(async move {
+        let guard = backup_guard;
+        let token = guard.token();
+        let mut timer = interval(Duration::from_secs(60));
+        timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        let mut rx = init_db_notifier();
+
+        while !token.is_cancelled() {
+            let ch = select! {
+                _ = timer.tick() => None,
+                Some(ch) = rx.recv() => {
+                    Some(ch)
+                }
+                _ = token.cancelled() => {
+                    return;
+                }
+            };
+
+            if let Err(e) = maybe_local_db.backup().await {
+                error!("Failed to back up database: {:?}", e);
+            }
+
+            if let Some(ch) = ch {
+                // this just means the client dropped the channel and doesn't care to be notified
+                let _ = ch.send(());
+            }
+        }
+    });
+}
+
 pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging_with_filter(
         "pipeline",
@@ -427,29 +461,7 @@ pub async fn run(args: RunArgs) {
     ));
 
     // start DB backup task
-    let backup_guard = shutdown.guard("backup_db");
-    tokio::spawn(async move {
-        let guard = backup_guard;
-        let token = guard.token();
-        let mut timer = interval(Duration::from_secs(60));
-        timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        let mut rx = init_db_notifier();
-
-        while !token.is_cancelled() {
-            select! {
-                _ = timer.tick() => {}
-                Some(_) = rx.recv() => {}
-                _ = token.cancelled() => {
-                    // do one final backup before shutting down
-                }
-            }
-
-            if let Err(e) = maybe_local_db.backup().await {
-                error!("Failed to back up database: {:?}", e);
-            }
-        }
-    });
+    schedule_db_backups(&shutdown, maybe_local_db);
 
     let shutdown_handler = PipelineShutdownHandler {
         client: client.clone(),
