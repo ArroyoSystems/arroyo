@@ -7,10 +7,10 @@ use object_store::buffered::BufWriter;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
-use object_store::ObjectMeta;
 use object_store::{
     aws::AmazonS3Builder, local::LocalFileSystem, MultipartId, ObjectStore, PutPayload,
 };
+use object_store::{Error, ObjectMeta};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
@@ -149,6 +149,16 @@ fn matchers() -> &'static HashMap<Backend, Vec<Regex>> {
     })
 }
 
+fn should_retry(e: &object_store::Error) -> bool {
+    match e {
+        Error::Generic { source, .. } => {
+            // some operations (like CompleteMultipartUpload)
+            !source.to_string().contains("status 404 Not Found")
+        }
+        _ => false,
+    }
+}
+
 macro_rules! storage_retry {
     ($e: expr) => {
         retry!(
@@ -156,7 +166,8 @@ macro_rules! storage_retry {
             10,
             Duration::from_millis(100),
             Duration::from_secs(10),
-            |e| error!("Error: {}. Retrying...", e)
+            |e| error!("Error: {}. Retrying...", e),
+            should_retry
         )
     };
 }
@@ -165,21 +176,21 @@ macro_rules! storage_retry {
 pub struct S3Config {
     endpoint: Option<String>,
     region: Option<String>,
-    bucket: String,
+    pub bucket: String,
     key: Option<Path>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct R2Config {
     account_id: String,
-    bucket: String,
+    pub bucket: String,
     jurisdiction: Option<String>, // e.g., "eu"
     key: Option<Path>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GCSConfig {
-    bucket: String,
+    pub bucket: String,
     key: Option<Path>,
 }
 
@@ -767,8 +778,12 @@ impl StorageProvider {
     }
 
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
-        let id = storage_retry!(self.get_multipart().create_multipart(path).await)
-            .map_err(Into::<StorageError>::into)?;
+        let id = storage_retry!(
+            self.get_multipart()
+                .create_multipart(&self.qualify_path(path))
+                .await
+        )
+        .map_err(Into::<StorageError>::into)?;
 
         debug!(
             message = "started multipart upload",
@@ -788,7 +803,12 @@ impl StorageProvider {
     ) -> Result<PartId, StorageError> {
         let part_id = storage_retry!(
             self.get_multipart()
-                .put_part(path, multipart_id, part_number, bytes.clone().into())
+                .put_part(
+                    &self.qualify_path(path),
+                    multipart_id,
+                    part_number,
+                    bytes.clone().into()
+                )
                 .await
         )
         .map_err(Into::<StorageError>::into)?;
@@ -819,7 +839,7 @@ impl StorageProvider {
 
         storage_retry!(
             self.get_multipart()
-                .complete_multipart(path, multipart_id, parts.clone())
+                .complete_multipart(&self.qualify_path(path), multipart_id, parts.clone())
                 .await
         )
         .map_err(Into::<StorageError>::into)?;

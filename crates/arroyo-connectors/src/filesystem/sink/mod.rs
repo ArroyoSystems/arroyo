@@ -138,12 +138,12 @@ impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
         self.partitioner = partition_func;
         let table = self.table.clone();
         let format = self.format.clone();
-        let storage_path: Path = StorageProvider::get_key(&write_path).unwrap();
+
         let provider = StorageProvider::for_url_with_options(&write_path, storage_options.clone())
             .await
             .unwrap();
+
         let mut writer = AsyncMultipartFileSystemWriter::<R>::new(
-            storage_path,
             Arc::new(provider),
             receiver,
             checkpoint_sender,
@@ -425,7 +425,6 @@ pub enum InFlightPartCheckpoint {
 }
 
 struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
-    path: Path,
     active_writers: HashMap<Option<String>, String>,
     watermark: Option<SystemTime>,
     max_file_index: usize,
@@ -710,7 +709,6 @@ where
     R: MultiPartWriter,
 {
     async fn new(
-        path: Path,
         object_store: Arc<StorageProvider>,
         receiver: Receiver<FileSystemMessages>,
         checkpoint_sender: Sender<CheckpointData>,
@@ -730,12 +728,8 @@ where
         let commit_state = match file_settings.commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake {
                 last_version: -1,
-                table: load_or_create_table(
-                    &path,
-                    &object_store,
-                    &schema.schema_without_timestamp(),
-                )
-                .await?,
+                table: load_or_create_table(&object_store, &schema.schema_without_timestamp())
+                    .await?,
             },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
@@ -749,7 +743,6 @@ where
         }
 
         Ok(Self {
-            path,
             active_writers: HashMap::new(),
             watermark: None,
             max_file_index: 0,
@@ -890,9 +883,10 @@ where
         );
 
         let path = match partition {
-            Some(sub_bucket) => format!("{}/{}/{}", self.path, sub_bucket, filename),
-            None => format!("{}/{}", self.path, filename),
+            Some(sub_bucket) => format!("{}/{}", sub_bucket, filename),
+            None => filename.clone(),
         };
+
         R::new(
             self.object_store.clone(),
             path.into(),
@@ -957,8 +951,7 @@ where
         } = &mut self.commit_state
         {
             if let Some(new_version) =
-                delta::commit_files_to_delta(&finished_files, &self.path, table, *last_version)
-                    .await?
+                delta::commit_files_to_delta(&finished_files, table, *last_version).await?
             {
                 *last_version = new_version;
             }
@@ -1014,7 +1007,7 @@ where
                     filename, err
                 );
                 // check if the file is already there with the correct size.
-                let contents = self.object_store.get(filename.as_str()).await?;
+                let contents = self.object_store.get(location).await?;
                 if contents.len() == size {
                     Ok(Some(FinishedFile {
                         filename,

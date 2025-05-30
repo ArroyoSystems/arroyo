@@ -714,34 +714,46 @@ pub fn parse_expr(sql: &str) -> anyhow::Result<Expr> {
 
 #[macro_export]
 macro_rules! retry {
-    ($e:expr, $max_retries:expr, $base:expr, $max_delay:expr, |$err_var: ident| $error_handler:expr) => {{
-        use std::time::Duration;
-        use tracing::error;
-        let mut retries: u32 = 0;
+    ($e:expr, $max_retries:expr, $base:expr, $max_delay:expr, |$err_var:ident| $error_handler:expr, $retry_if:expr) => {{
         use rand::Rng;
+        use std::time::Duration;
+        let mut retries: u32 = 0;
         loop {
             match $e {
                 Ok(value) => break Ok(value),
-                Err(e) if retries < $max_retries => {
-                    retries += 1;
-                    {
-                        let $err_var = e;
-                        $error_handler;
-                    }
-                    let tmp = $max_delay.min($base * (2u32.pow(retries)));
-                    let backoff = tmp / 2
-                        + Duration::from_micros(
-                            rand::rng().random_range(0..tmp.as_micros() as u64 / 2),
-                        );
+                Err(e) => {
+                    if retries < $max_retries && $retry_if(&e) {
+                        retries += 1;
+                        {
+                            let $err_var = e;
+                            $error_handler;
+                        }
+                        let tmp = $max_delay.min($base * (2u32.pow(retries)));
+                        let backoff = tmp / 2
+                            + Duration::from_micros(
+                                rand::rng().random_range(0..tmp.as_micros() as u64 / 2),
+                            );
 
-                    tokio::time::sleep(backoff).await;
+                        tokio::time::sleep(backoff).await;
+                    } else {
+                        break Err(e);
+                    }
                 }
-                Err(e) => break Err(e),
             }
         }
     }};
-}
 
+    ($e:expr, $max_retries:expr, $base:expr, $max_delay:expr, |$err_var:ident| $error_handler:expr) => {
+        retry!(
+            $e,
+            $max_retries,
+            $base,
+            $max_delay,
+            |$err_var| $error_handler,
+            |_| true
+        )
+    };
+}
 #[cfg(test)]
 mod tests {
     use crate::parse_expr;
