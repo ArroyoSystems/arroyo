@@ -1,7 +1,7 @@
 use super::FinishedFile;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use arrow::datatypes::Schema;
-use arroyo_storage::{BackendConfig, StorageProvider};
+use arroyo_storage::{BackendConfig, R2Config, S3Config, StorageProvider};
 use arroyo_types::to_millis;
 use deltalake::aws::storage::S3StorageBackend;
 use deltalake::TableProperty::{MinReaderVersion, MinWriterVersion};
@@ -12,6 +12,7 @@ use deltalake::{
     table::PeekCommit,
     DeltaTable, DeltaTableBuilder,
 };
+use itertools::Itertools;
 use object_store::path::Path;
 use object_store::ObjectStore;
 use std::sync::Arc;
@@ -24,7 +25,6 @@ use url::Url;
 
 pub(crate) async fn commit_files_to_delta(
     finished_files: &[FinishedFile],
-    relative_table_path: &Path,
     table: &mut DeltaTable,
     last_version: i64,
 ) -> Result<Option<i64>> {
@@ -32,11 +32,9 @@ pub(crate) async fn commit_files_to_delta(
         return Ok(None);
     }
 
-    let add_actions = create_add_actions(finished_files, relative_table_path)?;
+    let add_actions = finished_files.iter().map(create_add_action).collect_vec();
 
-    if let Some(new_version) =
-        check_existing_files(table, last_version, finished_files, relative_table_path).await?
-    {
+    if let Some(new_version) = check_existing_files(table, last_version, finished_files).await? {
         return Ok(Some(new_version));
     }
 
@@ -45,26 +43,37 @@ pub(crate) async fn commit_files_to_delta(
 }
 
 pub(crate) async fn load_or_create_table(
-    table_path: &Path,
     storage_provider: &StorageProvider,
     schema: &Schema,
 ) -> Result<DeltaTable> {
     deltalake::aws::register_handlers(None);
     deltalake::gcp::register_handlers(None);
 
+    let empty_path = &Path::parse("").unwrap();
+
     let (backing_store, url): (Arc<dyn ObjectStore>, _) = match storage_provider.config() {
-        BackendConfig::S3(_) | BackendConfig::R2(_) => (
-            Arc::new(S3StorageBackend::try_new(
-                storage_provider.get_backing_store(),
-                true,
-            )?),
-            format!("s3://{}", storage_provider.qualify_path(table_path)),
-        ),
-        BackendConfig::GCS(_) => (
+        BackendConfig::S3(S3Config { bucket, .. }) | BackendConfig::R2(R2Config { bucket, .. }) => {
+            (
+                Arc::new(S3StorageBackend::try_new(
+                    storage_provider.get_backing_store(),
+                    true,
+                )?),
+                format!(
+                    "s3://{}/{}",
+                    bucket,
+                    storage_provider.qualify_path(empty_path)
+                ),
+            )
+        }
+        BackendConfig::GCS(gcs) => (
             storage_provider.get_backing_store(),
-            format!("gs://{}", storage_provider.qualify_path(table_path)),
+            format!(
+                "gs://{}/{}",
+                gcs.bucket,
+                storage_provider.qualify_path(empty_path)
+            ),
         ),
-        BackendConfig::Local(_) => (storage_provider.get_backing_store(), table_path.to_string()),
+        BackendConfig::Local(_) => (storage_provider.get_backing_store(), "/".to_string()),
     };
 
     let mut delta = DeltaTableBuilder::from_uri(&url)
@@ -85,45 +94,25 @@ pub(crate) async fn load_or_create_table(
     }
 }
 
-fn create_add_actions(
-    finished_files: &[FinishedFile],
-    relative_table_path: &Path,
-) -> Result<Vec<Action>> {
-    finished_files
-        .iter()
-        .map(|file| create_add_action(file, relative_table_path))
-        .collect()
-}
+fn create_add_action(file: &FinishedFile) -> Action {
+    debug!("creating add action for file {:?}", file);
 
-fn create_add_action(file: &FinishedFile, relative_table_path: &Path) -> Result<Action> {
-    debug!(
-        "creating add action for file {:?}, relative table path {}",
-        file, relative_table_path
-    );
-    let subpath = file
-        .filename
-        .strip_prefix(&relative_table_path.to_string())
-        .context(format!(
-            "File {} is not in table {}",
-            file.filename, relative_table_path
-        ))?
-        .trim_start_matches('/');
+    let subpath = file.filename.trim_start_matches('/');
 
-    Ok(Action::Add(Add {
+    Action::Add(Add {
         path: subpath.to_string(),
         size: file.size as i64,
         partition_values: HashMap::new(),
         modification_time: to_millis(SystemTime::now()) as i64,
         data_change: true,
         ..Default::default()
-    }))
+    })
 }
 
 async fn check_existing_files(
     table: &mut DeltaTable,
     last_version: i64,
     finished_files: &[FinishedFile],
-    relative_table_path: &Path,
 ) -> Result<Option<i64>> {
     if last_version >= table.version() {
         return Ok(None);
@@ -131,12 +120,7 @@ async fn check_existing_files(
 
     let files: HashSet<_> = finished_files
         .iter()
-        .map(|file| {
-            file.filename
-                .strip_prefix(&relative_table_path.to_string())
-                .unwrap()
-                .to_string()
-        })
+        .map(|file| file.filename.to_string())
         .collect();
 
     let mut version_to_check = last_version;

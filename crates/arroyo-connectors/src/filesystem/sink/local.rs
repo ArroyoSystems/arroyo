@@ -238,12 +238,8 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         self.commit_state = Some(match self.file_settings.commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake {
                 last_version: -1,
-                table: load_or_create_table(
-                    &object_store::path::Path::parse(&self.final_dir)?,
-                    &storage_provider,
-                    &schema.schema_without_timestamp(),
-                )
-                .await?,
+                table: load_or_create_table(&storage_provider, &schema.schema_without_timestamp())
+                    .await?,
             },
             CommitStyle::Direct => CommitState::VanillaParquet,
         });
@@ -277,28 +273,45 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         if pre_commit.is_empty() {
             return Ok(());
         }
+
         let mut finished_files = vec![];
+
         for FilePreCommit {
             tmp_file,
             destination,
         } in pre_commit
         {
             let (tmp_file, destination) = (Path::new(&tmp_file), Path::new(&destination));
+
             if destination.exists() {
                 return Ok(());
             }
+
             if !tmp_file.exists() {
                 bail!("tmp file {} does not exist", tmp_file.to_string_lossy());
             }
+
             debug!(
                 "committing file {} to {}",
                 tmp_file.to_string_lossy(),
                 destination.to_string_lossy()
             );
+
             tokio::fs::rename(tmp_file, destination).await?;
+
+            let filename = destination
+                .to_string_lossy()
+                .strip_prefix(&self.final_dir)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "invalid file in commit: {:?}; must be in directory {}",
+                        destination, self.final_dir
+                    )
+                })
+                .to_string();
+
             finished_files.push(FinishedFile {
-                filename: object_store::path::Path::parse(destination.to_string_lossy())?
-                    .to_string(),
+                filename,
                 partition: None,
                 size: destination.metadata()?.len() as usize,
             });
@@ -309,13 +322,8 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             table,
         } = self.commit_state.as_mut().unwrap()
         {
-            if let Some(version) = delta::commit_files_to_delta(
-                &finished_files,
-                &object_store::path::Path::parse(&self.final_dir)?,
-                table,
-                *last_version,
-            )
-            .await?
+            if let Some(version) =
+                delta::commit_files_to_delta(&finished_files, table, *last_version).await?
             {
                 *last_version = version;
             }
