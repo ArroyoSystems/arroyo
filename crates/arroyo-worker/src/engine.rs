@@ -81,7 +81,7 @@ impl Debug for QueueNode {
 
 #[derive(Debug)]
 pub enum SubtaskOrQueueNode {
-    SubtaskNode(SubtaskNode),
+    SubtaskNode(Box<SubtaskNode>),
     QueueNode(QueueNode),
 }
 
@@ -143,7 +143,7 @@ impl SubtaskOrQueueNode {
 
     fn unwrap_subtask(self) -> SubtaskNode {
         match self {
-            SubtaskOrQueueNode::SubtaskNode(n) => n,
+            SubtaskOrQueueNode::SubtaskNode(n) => *n,
             SubtaskOrQueueNode::QueueNode(_) => panic!("not subtask node"),
         }
     }
@@ -264,7 +264,7 @@ impl Program {
                 &node.parallelism
             });
             for i in 0..parallelism {
-                physical.add_node(SubtaskOrQueueNode::SubtaskNode(SubtaskNode {
+                physical.add_node(SubtaskOrQueueNode::SubtaskNode(Box::new(SubtaskNode {
                     node_id: node.node_id,
                     subtask_idx: i,
                     parallelism,
@@ -284,7 +284,7 @@ impl Program {
                         registry.clone(),
                     )
                     .await,
-                }));
+                })));
             }
         }
 

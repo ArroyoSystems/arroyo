@@ -60,7 +60,7 @@ impl SourceRewriter<'_> {
                                     name: field.name().to_string(),
                                 }))
                             }
-                            FieldSpec::Virtual { expression, .. } => Some(expression.clone()),
+                            FieldSpec::Virtual { expression, .. } => Some(*expression.clone()),
                         };
                     }
                     None
@@ -121,7 +121,7 @@ impl SourceRewriter<'_> {
                                     name: field.name().to_string(),
                                 }))
                             }
-                            FieldSpec::Virtual { expression, .. } => Some(expression.clone()),
+                            FieldSpec::Virtual { expression, .. } => Some(*expression.clone()),
                         };
                     }
                     None
