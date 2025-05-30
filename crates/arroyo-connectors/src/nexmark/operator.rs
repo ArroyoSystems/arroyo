@@ -609,11 +609,7 @@ impl GeneratorConfig {
 
     pub fn next_base0_auction_id(&self, event_id: u64, random: &mut SmallRng) -> u64 {
         let max_auction = self.last_base0_auction_id(event_id);
-        let min_auction = if max_auction < self.configuration.num_inflight_auctions {
-            0
-        } else {
-            max_auction - self.configuration.num_inflight_auctions
-        };
+        let min_auction = max_auction.saturating_sub(self.configuration.num_inflight_auctions);
         random.random_range(min_auction..max_auction + 1 + AUCTION_ID_LEAD)
     }
 

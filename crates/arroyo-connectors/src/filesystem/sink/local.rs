@@ -238,8 +238,10 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         self.commit_state = Some(match self.file_settings.commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake {
                 last_version: -1,
-                table: load_or_create_table(&storage_provider, &schema.schema_without_timestamp())
-                    .await?,
+                table: Box::new(
+                    load_or_create_table(&storage_provider, &schema.schema_without_timestamp())
+                        .await?,
+                ),
             },
             CommitStyle::Direct => CommitState::VanillaParquet,
         });

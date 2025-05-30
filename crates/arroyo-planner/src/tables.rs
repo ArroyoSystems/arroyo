@@ -103,7 +103,7 @@ multifield_partial_ord!(
 pub enum FieldSpec {
     Struct(Field),
     Metadata { field: Field, key: String },
-    Virtual { field: Field, expression: Expr },
+    Virtual { field: Field, expression: Box<Expr> },
 }
 
 impl FieldSpec {
@@ -397,7 +397,7 @@ impl ConnectorTable {
 
                 table.fields.push(FieldSpec::Virtual {
                     field: Field::new("__watermark", logical_expr.get_type(&schema)?, false),
-                    expression: logical_expr,
+                    expression: Box::new(logical_expr),
                 });
                 table.watermark_field = Some("__watermark".to_string());
             } else {
@@ -738,7 +738,7 @@ impl Table {
                     } else {
                         Ok(FieldSpec::Virtual {
                             field: struct_field,
-                            expression: df_expr,
+                            expression: Box::new(df_expr),
                         })
                     }
                 } else {

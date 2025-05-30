@@ -447,7 +447,7 @@ struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
 pub enum CommitState {
     DeltaLake {
         last_version: i64,
-        table: DeltaTable,
+        table: Box<DeltaTable>,
     },
     VanillaParquet,
 }
@@ -728,8 +728,9 @@ where
         let commit_state = match file_settings.commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake {
                 last_version: -1,
-                table: load_or_create_table(&object_store, &schema.schema_without_timestamp())
-                    .await?,
+                table: Box::new(
+                    load_or_create_table(&object_store, &schema.schema_without_timestamp()).await?,
+                ),
             },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
