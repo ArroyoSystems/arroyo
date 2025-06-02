@@ -15,16 +15,18 @@ fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=../arroyo-api/migrations");
     println!("cargo:rerun-if-changed=../arroyo-api/sqlite_migrations");
 
-    let mut client = Client::configure()
-        .dbname("arroyo")
-        .host("localhost")
-        .port(5432)
-        .user("arroyo")
-        .password("arroyo")
-        .connect(NoTls)
-        .unwrap_or_else(|_| {
-            panic!("Could not connect to postgres: arroyo:arroyo@localhost:5432/arroyo")
-        });
+    let mut client = match std::env::var("DATABASE_URL") {
+        Ok(database_url) => Client::connect(&database_url, NoTls)
+            .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e)),
+        Err(_) => Client::configure()
+            .dbname("arroyo")
+            .host("localhost")
+            .port(5432)
+            .user("arroyo")
+            .password("arroyo")
+            .connect(NoTls)
+            .unwrap_or_else(|e| panic!("Failed to connect to default database: {}", e)),
+    };
 
     let mut sqlite =
         rusqlite::Connection::open_in_memory().expect("Couldn't open sqlite memory connection");
