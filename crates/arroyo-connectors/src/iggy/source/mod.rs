@@ -128,7 +128,7 @@ impl IggySourceFunc {
         let consumer = Consumer::new(Identifier::numeric(self.consumer_id).unwrap());
 
         loop {
-            if let Some(control_message) = ctx.control_rx.try_recv().ok() {
+            if let Ok(control_message) = ctx.control_rx.try_recv() {
                 match control_message {
                     ControlMessage::Checkpoint(barrier) => {
                         let state = IggyState { offset };
@@ -216,7 +216,7 @@ impl IggySourceFunc {
 
                 self.process_message(message, collector).await?;
 
-                if let Err(_) = rate_limiter.check() {
+                if rate_limiter.check().is_err() {
                     sleep(Duration::from_millis(10)).await;
                 }
             }

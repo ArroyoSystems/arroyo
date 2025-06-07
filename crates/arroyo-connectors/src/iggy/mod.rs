@@ -150,7 +150,7 @@ impl arroyo_operator::connector::Connector for IggyConnector {
 
         let config = IggyConfig {
             endpoint: endpoint.clone(),
-            transport: transport_protocol.clone(),
+            transport: transport_protocol,
             authentication: authentication.clone(),
         };
 
@@ -240,7 +240,7 @@ impl arroyo_operator::connector::Connector for IggyConnector {
             name: name.to_string(),
             connector: self.name(),
             connection_type: self.table_type(config, table),
-            description: format!("Iggy Connection"),
+            description: "Iggy Connection".to_string(),
             config: serde_json::to_string(&operator_config)?,
             schema,
             partition_fields: None,

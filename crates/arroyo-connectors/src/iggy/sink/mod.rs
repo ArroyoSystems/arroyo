@@ -118,19 +118,18 @@ impl ArrowOperator for IggySinkFunc {
         let timestamps = ctx
             .out_schema
             .as_ref()
-            .and_then(|schema| Some(schema.timestamp_column(&batch)));
+            .map(|schema| schema.timestamp_column(&batch));
 
         let mut messages = Vec::new();
         for (i, v) in values.into_iter().enumerate() {
             let _timestamp = timestamps
-                .map(|ts| {
+                .and_then(|ts| {
                     if ts.is_null(i) {
                         None
                     } else {
                         Some(ts.value(i) / 1_000_000)
                     }
-                })
-                .flatten();
+                });
 
             let message = Message {
                 id: 0,
