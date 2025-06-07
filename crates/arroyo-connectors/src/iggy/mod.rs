@@ -30,7 +30,6 @@ const CONFIG_SCHEMA: &str = include_str!("./profile.json");
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./iggy.svg");
 
-
 typify::import_types!(
     schema = "src/iggy/profile.json",
     convert = {
@@ -40,13 +39,11 @@ typify::import_types!(
 
 typify::import_types!(schema = "src/iggy/table.json");
 
-
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum PartitioningStrategy {
     PartitionId(u32),
     Balanced,
 }
-
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum IggySourceOffset {
@@ -358,16 +355,13 @@ impl IggyTester {
     async fn connect(&self) -> Result<IggyClient, String> {
         info!("Testing connection to Iggy at {}", self.connection.endpoint);
 
-        
         let client = IggyClient::default();
 
-        
         client
             .connect()
             .await
             .map_err(|e| format!("Failed to connect to Iggy server: {:?}", e))?;
 
-        
         match &self.connection.authentication {
             IggyConfigAuthentication::None {} => {
                 info!("No authentication required");
@@ -413,12 +407,10 @@ impl IggyTester {
         schema: Option<ConnectionSchema>,
         mut tx: Sender<TestSourceMessage>,
     ) -> Result<()> {
-        
         let client = self.connect().await.map_err(|e| anyhow!("{}", e))?;
 
         self.info(&mut tx, "Connected to Iggy").await;
 
-        
         let stream_id = Identifier::from_str(&table.stream)
             .map_err(|e| anyhow!("Invalid stream identifier '{}': {:?}", table.stream, e))?;
 
@@ -443,7 +435,6 @@ impl IggyTester {
             }
         }
 
-        
         let topic_id = Identifier::from_str(&table.topic)
             .map_err(|e| anyhow!("Invalid topic identifier '{}': {:?}", table.topic, e))?;
 
@@ -469,7 +460,6 @@ impl IggyTester {
             }
         }
 
-        
         if let TableType::Source {
             partition_id,
             consumer_id,
@@ -483,12 +473,12 @@ impl IggyTester {
                     .map_err(|e| anyhow!("Invalid consumer ID {}: {:?}", consumer_id, e))?,
             );
 
-            let polling_strategy = PollingStrategy::offset(0); 
+            let polling_strategy = PollingStrategy::offset(0);
             let partition_id = Some(*partition_id as u32);
-            let messages_per_batch = 10; 
+            let messages_per_batch = 10;
 
             let start = Instant::now();
-            let timeout = Duration::from_secs(10); 
+            let timeout = Duration::from_secs(10);
 
             while start.elapsed() < timeout {
                 match client
@@ -499,7 +489,7 @@ impl IggyTester {
                         &consumer,
                         &polling_strategy,
                         messages_per_batch,
-                        false, 
+                        false,
                     )
                     .await
                 {
@@ -514,7 +504,6 @@ impl IggyTester {
                             )
                             .await;
 
-                            
                             if let Some(schema) = &schema {
                                 if let Some(format) = &schema.format {
                                     if let Some(first_message) = polled_messages.messages.first() {
@@ -561,11 +550,9 @@ impl IggyTester {
                     }
                 }
 
-                
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
 
-            
             self.info(
                 &mut tx,
                 &format!(
@@ -588,9 +575,6 @@ impl IggyTester {
         _format: &arroyo_rpc::formats::Format,
         _msg: Vec<u8>,
     ) -> Result<()> {
-        
-        
-        
         Ok(())
     }
 
