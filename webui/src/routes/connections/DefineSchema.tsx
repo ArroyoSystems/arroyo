@@ -9,7 +9,14 @@ import {
   Stack,
   Text,
 } from '@chakra-ui/react';
-import React, { ChangeEvent, ChangeEventHandler, Dispatch, ReactElement, useState, useMemo } from 'react';
+import React, {
+  ChangeEvent,
+  ChangeEventHandler,
+  Dispatch,
+  ReactElement,
+  useState,
+  useMemo,
+} from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { SchemaEditor } from './SchemaEditor';
 import {
