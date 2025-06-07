@@ -12,7 +12,7 @@ arrow = { workspace = true }
 arrow-array = { workspace = true }
 arrow-ord = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
-tonic = { workspace = true }
+tonic = { workspace = true, features = ["tls-native-roots", "tls-webpki-roots"] }
 prost = {workspace = true}
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3.30" }
@@ -39,6 +39,8 @@ arc-swap = "1.7.1"
 datafusion = { workspace = true }
 rand = { workspace = true }
 percent-encoding = "2.3.1"
+rustls-native-certs = "0.8.1"
+rustls = {workspace = true}
 
 [build-dependencies]
 tonic-build = { workspace = true }

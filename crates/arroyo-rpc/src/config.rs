@@ -1,3 +1,4 @@
+use anyhow::{anyhow, bail};
 use arc_swap::ArcSwapOption;
 use figment::providers::{Env, Format, Json, Toml, Yaml};
 use figment::Figment;
@@ -56,22 +57,25 @@ pub fn initialize_config(path: Option<&Path>, dir: Option<&Path>) {
     }
 
     let current = CONFIG.load();
+
+    let mut config: Config = match load_config(&paths).extract() {
+        Ok(config) => config,
+        Err(errors) => {
+            eprintln!("Configuration is invalid!");
+            for err in errors {
+                eprintln!("  • {err}");
+            }
+
+            exit(1);
+        }
+    };
+
+    config.config_path = path.map(|p| p.to_path_buf());
+    config.config_dir = dir.map(|p| p.to_path_buf());
+
     if current.is_none()
         && CONFIG
-            .compare_and_swap(
-                current,
-                match load_config(&paths).extract() {
-                    Ok(config) => Some(config),
-                    Err(errors) => {
-                        eprintln!("Configuration is invalid!");
-                        for err in errors {
-                            eprintln!("  • {err}");
-                        }
-
-                        exit(1);
-                    }
-                },
-            )
+            .compare_and_swap(current, Some(Arc::new(config)))
             .is_none()
     {
         return;
@@ -209,6 +213,10 @@ pub struct Config {
     /// Admin service configuration
     pub admin: AdminConfig,
 
+    /// Global TLS configuration
+    #[serde(default)]
+    pub tls: TlsConfig,
+
     /// Default pipeline configuration
     pub pipeline: PipelineConfig,
 
@@ -243,6 +251,12 @@ pub struct Config {
     /// process with a non-standard port.
     compiler_endpoint: Option<Url>,
 
+    /// Path to the config file
+    pub config_path: Option<PathBuf>,
+
+    /// Directory to look for config files in
+    pub config_dir: Option<PathBuf>,
+
     /// Run options
     #[serde(default)]
     pub run: RunConfig,
@@ -266,6 +280,26 @@ impl Config {
             .map(|t| t.to_string())
             .unwrap_or_else(|| format!("http://localhost:{}", self.compiler.rpc_port))
     }
+
+    /// Get effective TLS configuration for a service, falling back to global config
+    pub fn get_tls_config<'a>(
+        &'a self,
+        service_tls: &'a Option<TlsConfig>,
+    ) -> Option<&'a TlsConfig> {
+        if !self.is_tls_enabled(service_tls) {
+            return None;
+        };
+
+        service_tls.as_ref().or(Some(&self.tls))
+    }
+
+    /// Check if TLS is enabled for a service
+    pub fn is_tls_enabled(&self, service_tls: &Option<TlsConfig>) -> bool {
+        service_tls
+            .as_ref()
+            .map(|tls| tls.enabled)
+            .unwrap_or(self.tls.enabled)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -279,6 +313,10 @@ pub struct ApiConfig {
 
     /// The HTTP port for the API service in run mode; defaults to a random port
     pub run_http_port: Option<u16>,
+
+    /// TLS configuration for API service
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -292,6 +330,10 @@ pub struct ControllerConfig {
 
     /// The scheduler to use
     pub scheduler: Scheduler,
+
+    /// TLS configuration for controller gRPC service
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -329,6 +371,10 @@ pub struct CompilerConfig {
     /// enable in development environments)
     #[serde(default)]
     pub use_local_udf_crate: bool,
+
+    /// TLS configuration for compiler gRPC service
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -355,6 +401,10 @@ pub struct WorkerConfig {
 
     /// Size of the queues between nodes in the dataflow graph
     pub queue_size: u32,
+
+    /// TLS configuration for worker TCP shuffling
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -371,6 +421,10 @@ pub struct NodeConfig {
 
     /// Number of task slots for this node
     pub task_slots: u32,
+
+    /// TLS configuration for Node gRPC
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 impl NodeConfig {
@@ -387,6 +441,10 @@ pub struct AdminConfig {
 
     /// HTTP port the admin service will listen on
     pub http_port: u16,
+
+    /// TLS configuration for admin service
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -709,6 +767,43 @@ impl<T: Serialize + DeserializeOwned + Debug + Clone> Deref for Sensitive<T> {
 impl<T: Serialize + DeserializeOwned + Debug + Clone> std::fmt::Display for Sensitive<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", SENSITIVE_MASK)
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TlsConfig {
+    /// Whether TLS is enabled
+    pub enabled: bool,
+
+    /// Path to the certificate file (PEM format)
+    pub cert_file: Option<PathBuf>,
+
+    /// Path to the private key file (PEM format)
+    pub key_file: Option<PathBuf>,
+}
+
+pub struct LoadedTlsConfig {
+    pub cert: Vec<u8>,
+    pub key: Vec<u8>,
+}
+
+impl TlsConfig {
+    async fn read(name: &str, path: Option<&PathBuf>) -> anyhow::Result<Vec<u8>> {
+        let Some(path) = path else {
+            bail!("TLS enabled but no {name} specified");
+        };
+
+        tokio::fs::read(path)
+            .await
+            .map_err(|e| anyhow!("could not read {name} file: {e}"))
+    }
+
+    pub async fn load(&self) -> anyhow::Result<LoadedTlsConfig> {
+        Ok(LoadedTlsConfig {
+            cert: Self::read("cert-file", self.cert_file.as_ref()).await?,
+            key: Self::read("key-file", self.key_file.as_ref()).await?,
+        })
     }
 }
 

@@ -5,9 +5,11 @@ pub mod schema_resolver;
 pub mod var_str;
 
 use crate::api_types::connections::PrimitiveType;
+use crate::config::{config, TlsConfig};
 use crate::formats::{BadData, Format, Framing};
+use crate::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
@@ -24,22 +26,25 @@ use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value as SqlValue};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
-use log::warn;
+use log::{debug, warn};
+use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::num::{NonZero, NonZeroU64};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 use std::{fs, time::SystemTime};
 use tokio::sync::{
     mpsc::{channel, Receiver, Sender},
     oneshot,
 };
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     service::Interceptor,
 };
+use url::Url;
 
 pub mod config;
 pub mod df;
@@ -754,6 +759,56 @@ macro_rules! retry {
         )
     };
 }
+
+pub fn native_cert_store() -> Arc<RootCertStore> {
+    static CERTS: LazyLock<Arc<RootCertStore>> = LazyLock::new(|| {
+        let mut roots = RootCertStore::empty();
+        let result = rustls_native_certs::load_native_certs();
+        for error in result.errors {
+            warn!("Errored while loading native certs: {:?}", error);
+        }
+
+        for cert in result.certs {
+            if let Err(e) = roots.add(cert) {
+                warn!("Failed to add cert to store: {:?}", e);
+            }
+        }
+
+        Arc::new(roots)
+    });
+
+    CERTS.clone()
+}
+
+pub async fn grpc_channel_builder(endpoint: String, tls: &Option<TlsConfig>) -> Result<Endpoint> {
+    if config().is_tls_enabled(tls) {
+        let mut endpoint = Url::parse(&endpoint)?;
+        endpoint
+            .set_scheme("https")
+            .map_err(|_| anyhow!("invalid URL for gRPC endpoint: {}", endpoint))?;
+        debug!("connecting to grpc endpoint via TLS {endpoint}");
+        let b = Channel::from_shared(endpoint.to_string())?;
+
+        let config = ClientTlsConfig::new().with_enabled_roots();
+
+        Ok(b.tls_config(config)?)
+    } else {
+        debug!("connecting to grpc endpoint {endpoint}");
+        Ok(Channel::from_shared(endpoint.to_string())?)
+    }
+}
+
+/// Connect to a gRPC service with optional TLS
+pub async fn connect_grpc(endpoint: String, tls: &Option<TlsConfig>) -> Result<Channel> {
+    Ok(grpc_channel_builder(endpoint, tls).await?.connect().await?)
+}
+
+pub async fn controller_client() -> Result<ControllerGrpcClient<Channel>> {
+    let endpoint = config().controller_endpoint();
+    let channel = connect_grpc(endpoint, &config().controller.tls).await?;
+    Ok(ControllerGrpcClient::new(channel))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::parse_expr;

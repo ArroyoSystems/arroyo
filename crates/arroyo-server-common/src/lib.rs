@@ -2,6 +2,7 @@
 
 mod profile;
 pub mod shutdown;
+pub mod tls;
 
 use anyhow::anyhow;
 use arroyo_types::POSTHOG_KEY;
@@ -278,8 +279,8 @@ fn require_profiling_activated(
 }
 
 pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
-    let addr = config().admin.bind_address;
-    let port = config().admin.http_port;
+    let config = config();
+    let addr = SocketAddr::new(config.admin.bind_address, config.admin.http_port);
 
     let state = Arc::new(AdminState {
         name: format!("arroyo-{}", service),
@@ -295,18 +296,26 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
         .route("/debug/pprof/profile", get(handle_get_profile))
         .with_state(state);
 
-    let addr = SocketAddr::new(addr, port);
-    let listener = TcpListener::bind(addr).await?;
+    if let Some(tls_config) = config.get_tls_config(&config.admin.tls) {
+        let tls_config = tls::create_http_tls_config(tls_config).await?;
+        info!("Starting {} HTTPS admin server on {}", service, addr);
 
-    info!(
-        "Starting {} admin server on {}",
-        service,
-        listener.local_addr()?
-    );
+        axum_server::bind_rustls(addr, tls_config)
+            .serve(app.into_make_service())
+            .await
+            .map_err(|e| anyhow!("Failed to start admin HTTPS server: {}", e))
+    } else {
+        let listener = TcpListener::bind(addr).await?;
+        info!(
+            "Starting {} HTTP admin server on {}",
+            service,
+            listener.local_addr()?
+        );
 
-    axum::serve(listener, app.into_make_service())
-        .await
-        .map_err(|e| anyhow!("Failed to start admin HTTP server: {}", e))
+        axum::serve(listener, app.into_make_service())
+            .await
+            .map_err(|e| anyhow!("Failed to start admin HTTP server: {}", e))
+    }
 }
 
 lazy_static! {
@@ -411,6 +420,32 @@ pub fn grpc_server() -> Server<
         .into_inner();
 
     Server::builder().layer(layer)
+}
+
+pub async fn grpc_server_with_tls(
+    tls_config: &arroyo_rpc::config::TlsConfig,
+) -> anyhow::Result<
+    Server<
+        Stack<
+            Stack<
+                GrpcErrorLogMiddlewareLayer,
+                Stack<
+                    TraceLayer<SharedClassifier<GrpcErrorsAsFailures>>,
+                    tower::layer::util::Identity,
+                >,
+            >,
+            tower::layer::util::Identity,
+        >,
+    >,
+> {
+    let layer = tower::ServiceBuilder::new()
+        .layer(TraceLayer::new_for_grpc().on_failure(DefaultOnFailure::new().level(Level::TRACE)))
+        .layer(GrpcErrorLogMiddlewareLayer)
+        .into_inner();
+
+    let tls = tls::create_grpc_server_tls_config(tls_config).await?;
+
+    Ok(Server::builder().tls_config(tls)?.layer(layer))
 }
 
 pub async fn wrap_start(

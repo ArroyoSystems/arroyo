@@ -10,17 +10,18 @@ use bincode::config;
 use std::net::SocketAddr;
 use std::{collections::HashMap, mem::size_of, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
-    io::{self, BufReader, BufWriter},
+    io::{self, AsyncRead, AsyncWrite, BufReader, BufWriter},
     select,
     sync::Mutex,
 };
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{info, warn};
 
 use bytes::{Buf, BufMut};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use tokio::{
-    io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
@@ -31,6 +32,74 @@ use tokio_stream::StreamExt;
 use arroyo_operator::inq_reader::InQReader;
 use arroyo_rpc::config::config;
 use arroyo_server_common::shutdown::ShutdownGuard;
+
+// Abstraction for stream types that can be either TLS or plain TCP
+#[derive(Debug)]
+enum NetworkStream {
+    Plain(TcpStream),
+    TlsClient(tokio_rustls::client::TlsStream<TcpStream>),
+    TlsServer(tokio_rustls::server::TlsStream<TcpStream>),
+}
+
+impl NetworkStream {
+    fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        match self {
+            NetworkStream::Plain(p) => p.local_addr(),
+            NetworkStream::TlsClient(c) => c.get_ref().0.local_addr(),
+            NetworkStream::TlsServer(s) => s.get_ref().0.local_addr(),
+        }
+    }
+}
+
+impl AsyncRead for NetworkStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        match self.get_mut() {
+            NetworkStream::Plain(stream) => Pin::new(stream).poll_read(cx, buf),
+            NetworkStream::TlsClient(stream) => Pin::new(stream).poll_read(cx, buf),
+            NetworkStream::TlsServer(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for NetworkStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, io::Error>> {
+        match self.get_mut() {
+            NetworkStream::Plain(stream) => Pin::new(stream).poll_write(cx, buf),
+            NetworkStream::TlsClient(stream) => Pin::new(stream).poll_write(cx, buf),
+            NetworkStream::TlsServer(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), io::Error>> {
+        match self.get_mut() {
+            NetworkStream::Plain(stream) => Pin::new(stream).poll_flush(cx),
+            NetworkStream::TlsClient(stream) => Pin::new(stream).poll_flush(cx),
+            NetworkStream::TlsServer(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), io::Error>> {
+        match self.get_mut() {
+            NetworkStream::Plain(stream) => Pin::new(stream).poll_shutdown(cx),
+            NetworkStream::TlsClient(stream) => Pin::new(stream).poll_shutdown(cx),
+            NetworkStream::TlsServer(stream) => Pin::new(stream).poll_shutdown(cx),
+        }
+    }
+}
 
 #[derive(Clone)]
 struct NetworkSender {
@@ -90,7 +159,7 @@ impl Senders {
 
 pub struct InNetworkLink {
     _source: String,
-    stream: BufReader<TcpStream>,
+    stream: BufReader<NetworkStream>,
     senders: Senders,
 }
 
@@ -164,7 +233,7 @@ impl Header {
 }
 
 impl InNetworkLink {
-    pub fn new(source: String, stream: TcpStream, senders: Senders) -> Self {
+    fn new(source: String, stream: NetworkStream, senders: Senders) -> Self {
         InNetworkLink {
             _source: source,
             stream: BufReader::new(stream),
@@ -212,21 +281,39 @@ struct NetworkReceiver {
 
 struct OutNetworkLink {
     _dest: SocketAddr,
-    stream: BufWriter<TcpStream>,
+    stream: BufWriter<NetworkStream>,
     receivers: Vec<NetworkReceiver>,
 }
 
 impl OutNetworkLink {
     pub async fn connect(dest: SocketAddr) -> Self {
+        let config = config();
         let mut rand = StdRng::from_os_rng();
+
         for i in 0..10 {
             match TcpStream::connect(&dest).await {
-                Ok(stream) => {
+                Ok(tcp_stream) => {
+                    let network_stream = if config.is_tls_enabled(&config.worker.tls) {
+                        match Self::connect_tls(tcp_stream, dest).await {
+                            Ok(tls_stream) => NetworkStream::TlsClient(tls_stream),
+                            Err(e) => {
+                                warn!("Failed to establish TLS connection to {dest}: {:?}", e);
+                                tokio::time::sleep(Duration::from_millis(
+                                    (i + 1) * (50 + rand.random_range(1..50)),
+                                ))
+                                .await;
+                                continue;
+                            }
+                        }
+                    } else {
+                        NetworkStream::Plain(tcp_stream)
+                    };
+
                     return Self {
                         _dest: dest,
-                        stream: BufWriter::new(stream),
+                        stream: BufWriter::new(network_stream),
                         receivers: vec![],
-                    }
+                    };
                 }
                 Err(e) => {
                     warn!("Failed to connect to {dest}: {:?}", e);
@@ -238,6 +325,23 @@ impl OutNetworkLink {
             }
         }
         panic!("failed to connect to {dest}");
+    }
+
+    async fn connect_tls(
+        tcp_stream: TcpStream,
+        dest: SocketAddr,
+    ) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
+        let client_config =
+            arroyo_server_common::tls::create_tcp_client_tls_config(Some(&dest.ip().to_string()))
+                .await?;
+        let connector = TlsConnector::from(client_config);
+
+        // Use the hostname from the socket address (IP) for now
+        // TODO: Make this configurable for proper certificate validation
+        let domain = arroyo_server_common::tls::create_server_name(&dest.ip().to_string())?;
+
+        let tls_stream = connector.connect(domain, tcp_stream).await?;
+        Ok(tls_stream)
     }
 
     pub async fn add_receiver(&mut self, quad: Quad, rx: BatchReceiver) {
@@ -300,7 +404,7 @@ impl OutNetworkLink {
 }
 
 enum InStreamsOrSenders {
-    InStreams(Vec<TcpStream>),
+    InStreams(Vec<NetworkStream>),
     Senders(Senders),
 }
 
@@ -308,15 +412,30 @@ pub struct NetworkManager {
     port: u16,
     in_streams: Arc<Mutex<InStreamsOrSenders>>,
     out_streams: Arc<Mutex<HashMap<Quad, OutNetworkLink>>>,
+    tls_acceptor: Option<TlsAcceptor>,
 }
 
 impl NetworkManager {
-    pub fn new(port: u16) -> Self {
-        NetworkManager {
+    pub async fn new(port: u16) -> anyhow::Result<Self> {
+        let config = config();
+        let tls_acceptor = if config.is_tls_enabled(&config.worker.tls) {
+            if let Some(tls_config) = config.get_tls_config(&config.worker.tls) {
+                let server_config =
+                    arroyo_server_common::tls::create_tcp_server_tls_config(tls_config).await?;
+                Some(TlsAcceptor::from(Arc::new(server_config)))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(NetworkManager {
             port,
             in_streams: Arc::new(Mutex::new(InStreamsOrSenders::InStreams(vec![]))),
             out_streams: Arc::new(Mutex::new(HashMap::new())),
-        }
+            tls_acceptor,
+        })
     }
 
     pub async fn open_listener(&mut self, shutdown_guard: ShutdownGuard) -> u16 {
@@ -325,26 +444,44 @@ impl NetworkManager {
         let listener = TcpListener::bind(socket_addr).await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
-        info!("Started worker data listener on {}", socket_addr);
+        info!(
+            "Started worker data listener {} on {}",
+            self.tls_acceptor
+                .as_ref()
+                .map(|_| "with TLS")
+                .unwrap_or_default(),
+            socket_addr
+        );
 
         let streams = Arc::clone(&self.in_streams);
+        let tls_acceptor = self.tls_acceptor.clone();
+
         shutdown_guard.into_spawn_task(async move {
             loop {
-                let (stream, _) = listener.accept().await?;
+                let (tcp_stream, _) = listener.accept().await?;
+                let ip = tcp_stream.local_addr().unwrap().to_string();
+
+                let network_stream = if let Some(ref acceptor) = tls_acceptor {
+                    match acceptor.accept(tcp_stream).await {
+                        Ok(tls_stream) => NetworkStream::TlsServer(tls_stream),
+                        Err(e) => {
+                            warn!("Failed to establish TLS connection: {:?}", e);
+                            continue;
+                        }
+                    }
+                } else {
+                    NetworkStream::Plain(tcp_stream)
+                };
 
                 let mut s = streams.lock().await;
 
                 match &mut *s {
-                    InStreamsOrSenders::InStreams(streams) => streams.push(stream),
+                    InStreamsOrSenders::InStreams(streams) => streams.push(network_stream),
                     InStreamsOrSenders::Senders(ref senders) => {
                         let senders = senders.clone();
+
                         tokio::spawn(async move {
-                            InNetworkLink::new(
-                                stream.local_addr().unwrap().to_string(),
-                                stream,
-                                senders,
-                            )
-                            .start();
+                            InNetworkLink::new(ip, network_stream, senders).start();
                         });
                     }
                 }
@@ -565,7 +702,7 @@ mod test {
         senders.add(quad, schema.clone(), server_tx);
 
         let shutdown = Shutdown::new("test", SignalBehavior::None);
-        let mut nm = NetworkManager::new(0);
+        let mut nm = NetworkManager::new(0).await.unwrap();
         let port = nm.open_listener(shutdown.guard("test")).await;
 
         let (client_tx, client_rx) = batch_bounded(10);

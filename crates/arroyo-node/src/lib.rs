@@ -1,20 +1,10 @@
-use std::env::current_exe;
-use std::net::SocketAddr;
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    str::FromStr,
-    sync::{Arc, Mutex},
-    time::{Duration, SystemTime},
-};
-
 use anyhow::bail;
 use arroyo_rpc::config::config;
+use arroyo_rpc::controller_client;
 use arroyo_rpc::grpc::rpc::{
-    controller_grpc_client::ControllerGrpcClient, node_grpc_server::NodeGrpc,
-    node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp, HeartbeatNodeReq,
-    RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq, StopWorkerResp,
-    StopWorkerStatus, WorkerFinishedReq,
+    node_grpc_server::NodeGrpc, node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp,
+    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq,
+    StopWorkerResp, StopWorkerStatus, WorkerFinishedReq,
 };
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
@@ -22,7 +12,17 @@ use arroyo_types::{to_millis, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use rand::random;
+use std::env::current_exe;
+use std::ffi::OsString;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::exit;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    str::FromStr,
+    sync::{Arc, Mutex},
+    time::{Duration, SystemTime},
+};
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::{process::Command, select};
 use tonic::{Request, Response, Status};
@@ -96,8 +96,23 @@ impl NodeServer {
             command.env(env, value);
         }
 
+        let config = config();
+
+        let mut args = vec![];
+        if let Some(path) = &config.config_path {
+            args.push(OsString::from_str("-c").unwrap());
+            args.push(path.clone().into_os_string());
+        }
+
+        if let Some(path) = &config.config_dir {
+            args.push(OsString::from_str("--config-dir").unwrap());
+            args.push(path.clone().into_os_string());
+        }
+
+        args.push("worker".into());
+
         let mut child = command
-            .arg("worker")
+            .args(args)
             .env("RUST_LOG", "info")
             .env("ARROYO__WORKER__ID", format!("{}", worker_id.0))
             .env(JOB_ID_ENV, req.job_id.clone())
@@ -250,28 +265,42 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
     };
 
     let bind_addr: SocketAddr = SocketAddr::new(config.node.bind_address, config.node.rpc_port);
-    info!(
-        "Starting node server on {} with {} slots",
-        bind_addr, config.node.task_slots
-    );
 
-    guard.spawn_task(
-        "grpc",
-        wrap_start(
-            "node",
-            bind_addr,
-            arroyo_server_common::grpc_server()
-                .max_frame_size(Some((1 << 24) - 1)) // 16MB
-                .add_service(NodeGrpcServer::new(server))
-                .serve(bind_addr),
-        ),
-    );
+    let grpc = if let Some(tls) = config.get_tls_config(&config.node.tls) {
+        info!(
+            "Starting node server on {} with TLS with {} slots",
+            bind_addr, config.node.task_slots
+        );
 
-    let req_addr = format!(
-        "{}:{}",
-        local_ip_address::local_ip().unwrap(),
-        config.node.rpc_port
-    );
+        arroyo_server_common::grpc_server_with_tls(tls)
+            .await
+            .expect("could not create gRPC server with TLS")
+            .max_frame_size(Some((1 << 24) - 1)) // 16MB
+            .add_service(NodeGrpcServer::new(server))
+            .serve(bind_addr)
+    } else {
+        info!(
+            "Starting node server on {} with {} slots",
+            bind_addr, config.node.task_slots
+        );
+
+        arroyo_server_common::grpc_server()
+            .max_frame_size(Some((1 << 24) - 1)) // 16MB
+            .add_service(NodeGrpcServer::new(server))
+            .serve(bind_addr)
+    };
+
+    guard.spawn_task("grpc", wrap_start("node", bind_addr, grpc));
+
+    let local_ip = if config.node.bind_address.is_loopback() {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    } else if config.node.bind_address.is_ipv4() {
+        local_ip_address::local_ip().expect("could not determine node ipv4 address")
+    } else {
+        local_ip_address::local_ipv6().expect("could not determine node ipv6 address")
+    };
+
+    let req_addr = format!("{}:{}", local_ip, config.node.rpc_port);
 
     // TODO: replace this with some sort of hook on server startup
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -285,16 +314,16 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
     guard.into_spawn_task(async move {
         let mut attempts = 0;
         loop {
-            match ControllerGrpcClient::connect(config.controller_endpoint()).await {
+            match controller_client().await {
                 Ok(mut controller) => {
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
                     controller
                         .register_node(Request::new(RegisterNodeReq {
                             node_id: node_id.0,
                             task_slots: config.node.task_slots as u64,
                             addr: req_addr.clone(),
                         }))
-                        .await
-                        .unwrap();
+                        .await?;
 
                     info!("Connected to controller");
                     loop {
