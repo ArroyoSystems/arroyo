@@ -21,8 +21,10 @@ use tracing::{info, warn};
 use crate::send;
 
 mod sink;
+mod source;
 
 use sink::IggySinkFunc;
+use source::IggySourceFunc;
 
 const CONFIG_SCHEMA: &str = include_str!("./profile.json");
 const TABLE_SCHEMA: &str = include_str!("./table.json");
@@ -119,6 +121,7 @@ impl arroyo_operator::connector::Connector for IggyConnector {
 
     fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
         match table.type_ {
+            TableType::Source { .. } => ConnectionType::Source,
             TableType::Sink { .. } => ConnectionType::Sink,
         }
     }
@@ -254,6 +257,54 @@ impl arroyo_operator::connector::Connector for IggyConnector {
         config: OperatorConfig,
     ) -> Result<ConstructedOperator> {
         match &table.type_ {
+            TableType::Source {
+                offset,
+                consumer_id,
+                partition_id,
+                auto_commit,
+            } => {
+                let offset_mode = match offset {
+                    SourceOffset::Earliest => IggySourceOffset::Earliest,
+                    SourceOffset::Latest => IggySourceOffset::Latest,
+                };
+
+                let (username, password) = match &profile.authentication {
+                    IggyConfigAuthentication::None {} => (None, None),
+                    IggyConfigAuthentication::UsernamePassword { username, password } => (
+                        Some(username.clone()),
+                        Some(
+                            password
+                                .sub_env_vars()
+                                .expect("Failed to substitute env vars"),
+                        ),
+                    ),
+                };
+
+                Ok(ConstructedOperator::from_source(Box::new(IggySourceFunc {
+                    stream: table.stream.clone(),
+                    topic: table.topic.clone(),
+                    partition_id: (*partition_id) as u32,
+                    consumer_id: (*consumer_id) as u32,
+                    endpoint: profile.endpoint.clone(),
+                    _transport: profile.transport.to_string(),
+                    username,
+                    password,
+                    offset_mode,
+                    auto_commit: *auto_commit,
+                    format: config.format.expect("Format must be set for Iggy source"),
+                    framing: config.framing,
+                    bad_data: config.bad_data,
+                    client: None,
+                    messages_per_second: std::num::NonZeroU32::new(
+                        config
+                            .rate_limit
+                            .map(|l| l.messages_per_second)
+                            .unwrap_or(u32::MAX),
+                    )
+                    .unwrap(),
+                    metadata_fields: config.metadata_fields,
+                })))
+            }
             TableType::Sink {
                 partitioning,
                 partition_id,

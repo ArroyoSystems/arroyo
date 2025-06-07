@@ -9,7 +9,7 @@ import {
   Stack,
   Text,
 } from '@chakra-ui/react';
-import React, { ChangeEvent, ChangeEventHandler, Dispatch, ReactElement, useState } from 'react';
+import React, { ChangeEvent, ChangeEventHandler, Dispatch, ReactElement, useState, useMemo } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { SchemaEditor } from './SchemaEditor';
 import {
@@ -38,14 +38,26 @@ const SchemaFormatEditor = ({
   format: 'json' | 'avro' | 'protobuf';
 }) => {
   type SchemaTypeOption = { name: string; value: string };
-  let schemaTypeOptions: SchemaTypeOption[] = [
+
+  const baseSchemaTypeOptions: SchemaTypeOption[] = [
     { name: 'Infer schema', value: 'inferred' },
     { name: capitalize(format) + ' schema', value: 'schema' },
   ];
 
-  if (format == 'json') {
-    schemaTypeOptions.push({ name: 'Unstructured JSON', value: 'unstructured' });
-  }
+  const schemaTypeOptions = useMemo(() => {
+    let options = [...baseSchemaTypeOptions];
+
+    if (format == 'json') {
+      options.push({ name: 'Unstructured JSON', value: 'unstructured' });
+    }
+
+    // For Iggy connections, only show Unstructured JSON option
+    if (connector.id === 'iggy' && format === 'json') {
+      return [{ name: 'Unstructured JSON', value: 'unstructured' }];
+    }
+
+    return options;
+  }, [connector.id, format]);
 
   let connectionProfile = null;
   if (state.connectionProfileId != null) {
@@ -320,7 +332,7 @@ export const DefineSchema = ({
     return <></>;
   }
 
-  const formats: DataFormatOption[] = [
+  const allFormats: DataFormatOption[] = [
     {
       name: 'JSON',
       value: 'json',
@@ -377,6 +389,14 @@ export const DefineSchema = ({
       ),
     },
   ];
+
+  // For Iggy connections, only show JSON format option
+  const formats = useMemo(() => {
+    if (connector.id === 'iggy') {
+      return allFormats.filter(format => format.value === 'json');
+    }
+    return allFormats;
+  }, [connector.id, allFormats]);
 
   type FramingOption = {
     name: string;

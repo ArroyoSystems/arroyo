@@ -18,6 +18,42 @@
             "oneOf": [
                 {
                     "type": "object",
+                    "title": "Source",
+                    "properties": {
+                        "offset": {
+                            "type": "string",
+                            "description": "The offset to start reading from",
+                            "enum": [
+                                "latest",
+                                "earliest"
+                            ]
+                        },
+                        "consumer_id": {
+                            "type": "integer",
+                            "title": "Consumer ID",
+                            "description": "The ID of the consumer to use for polling messages"
+                        },
+                        "partition_id": {
+                            "type": "integer",
+                            "title": "Partition ID",
+                            "description": "The ID of the partition to read from"
+                        },
+                        "auto_commit": {
+                            "type": "boolean",
+                            "title": "Auto Commit",
+                            "description": "Whether to automatically commit offsets",
+                            "default": false
+                        }
+                    },
+                    "required": [
+                        "offset",
+                        "consumer_id",
+                        "partition_id"
+                    ],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
                     "title": "Sink",
                     "properties": {
                         "partitioning": {
