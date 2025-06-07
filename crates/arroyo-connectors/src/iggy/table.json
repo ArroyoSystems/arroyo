@@ -1,0 +1,86 @@
+{
+    "type": "object",
+    "title": "IggyTable",
+    "properties": {
+        "stream": {
+            "title": "Stream",
+            "type": "string",
+            "description": "The Iggy stream to use for this table"
+        },
+        "topic": {
+            "title": "Topic",
+            "type": "string",
+            "description": "The Iggy topic to use for this table"
+        },
+        "type": {
+            "type": "object",
+            "title": "Table Type",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Source",
+                    "properties": {
+                        "offset": {
+                            "type": "string",
+                            "description": "The offset to start reading from",
+                            "enum": [
+                                "latest",
+                                "earliest"
+                            ]
+                        },
+                        "consumer_id": {
+                            "type": "integer",
+                            "title": "Consumer ID",
+                            "description": "The ID of the consumer to use for polling messages"
+                        },
+                        "partition_id": {
+                            "type": "integer",
+                            "title": "Partition ID",
+                            "description": "The ID of the partition to read from"
+                        },
+                        "auto_commit": {
+                            "type": "boolean",
+                            "title": "Auto Commit",
+                            "description": "Whether to automatically commit offsets",
+                            "default": false
+                        }
+                    },
+                    "required": [
+                        "offset",
+                        "consumer_id",
+                        "partition_id"
+                    ],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                        "partitioning": {
+                            "type": "string",
+                            "description": "Partitioning strategy for messages",
+                            "enum": [
+                                "partition_id",
+                                "balanced"
+                            ]
+                        },
+                        "partition_id": {
+                            "type": "integer",
+                            "title": "Partition ID",
+                            "description": "The ID of the partition to write to (only used when partitioning is 'partition_id')"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "partitioning"
+                    ]
+                }
+            ]
+        }
+    },
+    "required": [
+        "stream",
+        "topic",
+        "type"
+    ]
+}

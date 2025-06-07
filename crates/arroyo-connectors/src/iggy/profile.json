@@ -1,0 +1,63 @@
+{
+    "type": "object",
+    "title": "IggyConfig",
+    "properties": {
+        "endpoint": {
+            "type": "string",
+            "title": "Endpoint",
+            "description": "The Apache Iggy server endpoint, only HTTP is currently supported",
+            "examples": [
+                "localhost:8090"
+            ]
+        },
+        "transport": {
+            "type": "string",
+            "title": "Transport Protocol",
+            "description": "The transport protocol to use for connecting to Iggy, only HTTP is currently supported",
+            "enum": [
+                "http"
+            ],
+            "default": "http"
+        },
+        "authentication": {
+            "type": "object",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "None",
+                    "properties": {},
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "Username/Password",
+                    "properties": {
+                        "username": {
+                            "title": "Username",
+                            "type": "string",
+                            "description": "Username for authentication"
+                        },
+                        "password": {
+                            "title": "Password",
+                            "type": "string",
+                            "description": "Password for authentication",
+                            "format": "var-str"
+                        }
+                    },
+                    "required": [
+                        "username",
+                        "password"
+                    ],
+                    "sensitive": [
+                        "password"
+                    ]
+                }
+            ]
+        }
+    },
+    "required": [
+        "endpoint",
+        "transport",
+        "authentication"
+    ]
+}
