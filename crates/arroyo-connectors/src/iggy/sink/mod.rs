@@ -122,14 +122,13 @@ impl ArrowOperator for IggySinkFunc {
 
         let mut messages = Vec::new();
         for (i, v) in values.into_iter().enumerate() {
-            let _timestamp = timestamps
-                .and_then(|ts| {
-                    if ts.is_null(i) {
-                        None
-                    } else {
-                        Some(ts.value(i) / 1_000_000)
-                    }
-                });
+            let _timestamp = timestamps.and_then(|ts| {
+                if ts.is_null(i) {
+                    None
+                } else {
+                    Some(ts.value(i) / 1_000_000)
+                }
+            });
 
             let message = Message {
                 id: 0,
