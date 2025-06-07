@@ -18,6 +18,7 @@ pub mod blackhole;
 pub mod confluent;
 pub mod filesystem;
 pub mod fluvio;
+pub mod iggy;
 pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
@@ -56,6 +57,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(stdout::StdoutConnector {}),
         Box::new(webhook::WebhookConnector {}),
         Box::new(websocket::WebsocketConnector {}),
+        Box::new(iggy::IggyConnector {}),
     ];
 
     connectors.into_iter().map(|c| (c.name(), c)).collect()

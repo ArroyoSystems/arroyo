@@ -1,0 +1,50 @@
+{
+    "type": "object",
+    "title": "IggyTable",
+    "properties": {
+        "stream": {
+            "title": "Stream",
+            "type": "string",
+            "description": "The Iggy stream to use for this table"
+        },
+        "topic": {
+            "title": "Topic",
+            "type": "string",
+            "description": "The Iggy topic to use for this table"
+        },
+        "type": {
+            "type": "object",
+            "title": "Table Type",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                        "partitioning": {
+                            "type": "string",
+                            "description": "Partitioning strategy for messages",
+                            "enum": [
+                                "partition_id",
+                                "balanced"
+                            ]
+                        },
+                        "partition_id": {
+                            "type": "integer",
+                            "title": "Partition ID",
+                            "description": "The ID of the partition to write to (only used when partitioning is 'partition_id')"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "partitioning"
+                    ]
+                }
+            ]
+        }
+    },
+    "required": [
+        "stream",
+        "topic",
+        "type"
+    ]
+}
