@@ -479,7 +479,7 @@ impl Engine {
             .count()
     }
 
-    pub fn for_local(program: Program, job_id: String) -> Self {
+    pub async fn for_local(program: Program, job_id: String) -> anyhow::Result<Self> {
         let worker_id = WorkerId(0);
         let assignments = program
             .graph
@@ -499,14 +499,14 @@ impl Engine {
             })
             .collect();
 
-        Self {
+        Ok(Self {
             program,
             worker_id,
             job_id,
             run_id: "0".to_string(),
-            network_manager: NetworkManager::new(0),
+            network_manager: NetworkManager::new(0).await?,
             assignments,
-        }
+        })
     }
 
     pub async fn start(mut self) -> RunningEngine {

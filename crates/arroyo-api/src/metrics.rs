@@ -3,14 +3,15 @@ use axum::Json;
 
 use crate::pipelines::query_job_by_pub_id;
 use crate::rest::AppState;
-use crate::rest_utils::{authenticate, log_and_map, BearerAuth, ErrorResp};
+use crate::rest_utils::{authenticate, log_and_map, service_unavailable, BearerAuth, ErrorResp};
 use arroyo_rpc::api_types::metrics::OperatorMetricGroup;
 use arroyo_rpc::api_types::OperatorMetricGroupCollection;
+use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::rpc::JobMetricsReq;
 use tonic::codec::CompressionEncoding;
-use tonic::transport::Channel;
 use tonic::Code;
+use tracing::error;
 
 /// Get a job's metrics
 #[utoipa::path(
@@ -40,10 +41,13 @@ pub async fn get_operator_metric_groups(
     )
     .await?;
 
-    let channel = Channel::builder(state.controller_addr.parse().unwrap())
-        .connect()
-        .await
-        .map_err(log_and_map)?;
+    let channel =
+        arroyo_rpc::connect_grpc(config().controller_endpoint(), &config().controller.tls)
+            .await
+            .map_err(|e| {
+                error!("Failed to connect to controller service: {}", e);
+                service_unavailable("controller-service")
+            })?;
 
     let mut controller = ControllerGrpcClient::new(channel)
         .accept_compressed(CompressionEncoding::Zstd)

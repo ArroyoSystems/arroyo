@@ -119,21 +119,24 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
 
 pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp> {
     // TODO: cache this
-    CompilerGrpcClient::connect(config().compiler_endpoint().to_string())
+    let config = config();
+    let endpoint = config.compiler_endpoint();
+
+    let channel = arroyo_rpc::connect_grpc(endpoint, &config.compiler.tls)
         .await
         .map_err(|e| {
             error!("Failed to connect to compiler service: {}", e);
             service_unavailable("compiler-service")
-        })
+        })?;
+
+    Ok(CompilerGrpcClient::new(channel))
 }
 
 pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::Result<u16> {
     let config = config();
     let addr = SocketAddr::new(config.api.bind_address, config.api.http_port);
-    let listener = TcpListener::bind(addr).await?;
-    let local_addr = listener.local_addr()?;
 
-    let app = rest::create_rest_app(database, &config.controller_endpoint()).layer(
+    let app = rest::create_rest_app(database).layer(
         CompressionLayer::new().zstd(true).compress_when(
             DefaultPredicate::new()
                 // compression doesn't work for server-sent events
@@ -142,12 +145,28 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
         ),
     );
 
-    info!("Starting API server on {:?}", local_addr);
-    guard.into_spawn_task(wrap_start("api", local_addr, async {
-        axum::serve(listener, app.into_make_service()).await
-    }));
+    if let Some(tls_config) = config.get_tls_config(&config.api.tls) {
+        let tls_config = arroyo_server_common::tls::create_http_tls_config(tls_config).await?;
+        info!("Starting HTTPS API server on {:?}", addr);
 
-    Ok(local_addr.port())
+        guard.into_spawn_task(wrap_start("api", addr, async move {
+            axum_server::bind_rustls(addr, tls_config)
+                .serve(app.into_make_service())
+                .await
+        }));
+    } else {
+        let listener = TcpListener::bind(addr).await?;
+        let local_addr = listener.local_addr()?;
+        info!("Starting HTTP API server on {:?}", local_addr);
+
+        guard.into_spawn_task(wrap_start("api", local_addr, async {
+            axum::serve(listener, app.into_make_service()).await
+        }));
+
+        return Ok(local_addr.port());
+    }
+
+    Ok(addr.port())
 }
 
 #[derive(Debug, Serialize, Deserialize)]

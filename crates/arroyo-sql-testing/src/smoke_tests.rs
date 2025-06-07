@@ -304,7 +304,9 @@ async fn run_and_checkpoint(
     control_rx: &mut Receiver<ControlResp>,
     checkpoint_interval: i32,
 ) {
-    let engine = Engine::for_local(program, job_id.to_string());
+    let engine = Engine::for_local(program, job_id.to_string())
+        .await
+        .unwrap();
     let running_engine = engine.start().await;
     info!("Smoke test checkpointing enabled");
     env::set_var(
@@ -348,7 +350,9 @@ async fn finish_from_checkpoint(
     program: Program,
     control_rx: &mut Receiver<ControlResp>,
 ) {
-    let engine = Engine::for_local(program, job_id.to_string());
+    let engine = Engine::for_local(program, job_id.to_string())
+        .await
+        .unwrap();
     let running_engine = engine.start().await;
 
     info!("Restored engine, running until finished");
@@ -443,7 +447,9 @@ async fn run_completely(
     primary_keys: Option<&[&str]>,
     control_rx: &mut Receiver<ControlResp>,
 ) {
-    let engine = Engine::for_local(program, job_id.to_string());
+    let engine = Engine::for_local(program, job_id.to_string())
+        .await
+        .unwrap();
     let running_engine = engine.start().await;
 
     run_until_finished(&running_engine, control_rx).await;
