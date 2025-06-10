@@ -30,6 +30,7 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::committing_state::CommittingState;
 use arroyo_state::parquet::ParquetBackend;
+use futures::future::try_join_all;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{debug, error, info, warn};
@@ -368,20 +369,18 @@ impl RunningJobModel {
         self.checkpoint_spans.clear();
         self.start_or_get_span(JobCheckpointEventType::Checkpointing);
         self.start_or_get_span(JobCheckpointEventType::CheckpointingOperators);
+        
+        let checkpoints = self.workers.values_mut().map(|worker| {
+            worker.connect.checkpoint(Request::new(CheckpointReq {
+                epoch: self.epoch,
+                timestamp: to_micros(SystemTime::now()),
+                min_epoch: self.min_epoch,
+                then_stop,
+                is_commit: false,
+            }))
+        });
 
-        // TODO: maybe parallelize
-        for worker in self.workers.values_mut() {
-            worker
-                .connect
-                .checkpoint(Request::new(CheckpointReq {
-                    epoch: self.epoch,
-                    timestamp: to_micros(SystemTime::now()),
-                    min_epoch: self.min_epoch,
-                    then_stop,
-                    is_commit: false,
-                }))
-                .await?;
-        }
+        try_join_all(checkpoints).await?;
 
         let checkpoint_id = generate_id(IdTypes::Checkpoint);
 
