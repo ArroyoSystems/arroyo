@@ -1,11 +1,11 @@
 use anyhow::bail;
 use arroyo_rpc::config::config;
-use arroyo_rpc::controller_client;
 use arroyo_rpc::grpc::rpc::{
     node_grpc_server::NodeGrpc, node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp,
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq,
     StopWorkerResp, StopWorkerStatus, WorkerFinishedReq,
 };
+use arroyo_rpc::{controller_client, local_address};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{to_millis, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
@@ -14,7 +14,7 @@ use prometheus::{register_gauge, Gauge};
 use rand::random;
 use std::env::current_exe;
 use std::ffi::OsString;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::process::exit;
 use std::{
     collections::HashMap,
@@ -292,15 +292,11 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
 
     guard.spawn_task("grpc", wrap_start("node", bind_addr, grpc));
 
-    let local_ip = if config.node.bind_address.is_loopback() {
-        IpAddr::V4(Ipv4Addr::LOCALHOST)
-    } else if config.node.bind_address.is_ipv4() {
-        local_ip_address::local_ip().expect("could not determine node ipv4 address")
-    } else {
-        local_ip_address::local_ipv6().expect("could not determine node ipv6 address")
-    };
-
-    let req_addr = format!("{}:{}", local_ip, config.node.rpc_port);
+    let req_addr = format!(
+        "{}:{}",
+        local_address(config.node.bind_address),
+        config.node.rpc_port
+    );
 
     // TODO: replace this with some sort of hook on server startup
     tokio::time::sleep(Duration::from_millis(100)).await;

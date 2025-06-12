@@ -28,7 +28,6 @@ tokio-rustls = { workspace = true }
 async-trait = "0.1.68"
 async-stream = "0.3.4"
 bytes = "1.4"
-local-ip-address = "0.5"
 serde_json = "1.0"
 serde = "1.0"
 ordered-float = "3"

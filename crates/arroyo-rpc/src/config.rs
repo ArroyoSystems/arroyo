@@ -251,6 +251,11 @@ pub struct Config {
     /// process with a non-standard port.
     compiler_endpoint: Option<Url>,
 
+    /// Hostname for this node; if set, this will be used for connections made to this node,
+    /// otherwise we will attempt to determine the local ip address. Setting this will generally
+    /// be useful for TLS.
+    pub hostname: Option<String>,
+
     /// Path to the config file
     pub config_path: Option<PathBuf>,
 
@@ -267,18 +272,22 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn hostname(&self) -> &str {
+        self.hostname.as_deref().unwrap_or("localhost")
+    }
+
     pub fn controller_endpoint(&self) -> String {
         self.controller_endpoint
             .as_ref()
             .map(|t| t.to_string())
-            .unwrap_or_else(|| format!("http://localhost:{}", self.controller.rpc_port))
+            .unwrap_or_else(|| format!("http://{}:{}", self.hostname(), self.controller.rpc_port))
     }
 
     pub fn compiler_endpoint(&self) -> String {
         self.compiler_endpoint
             .as_ref()
             .map(|t| t.to_string())
-            .unwrap_or_else(|| format!("http://localhost:{}", self.compiler.rpc_port))
+            .unwrap_or_else(|| format!("http://{}:{}", self.hostname(), self.compiler.rpc_port))
     }
 
     /// Get effective TLS configuration for a service, falling back to global config

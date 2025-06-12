@@ -27,10 +27,12 @@ use tokio::{
 
 use arroyo_operator::context::{BatchReceiver, BatchSender};
 use tokio::time::{interval, Interval};
+use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_stream::StreamExt;
 
 use arroyo_operator::inq_reader::InQReader;
 use arroyo_rpc::config::config;
+use arroyo_rpc::intern;
 use arroyo_server_common::shutdown::ShutdownGuard;
 
 // Abstraction for stream types that can be either TLS or plain TCP
@@ -280,13 +282,12 @@ struct NetworkReceiver {
 }
 
 struct OutNetworkLink {
-    _dest: SocketAddr,
     stream: BufWriter<NetworkStream>,
     receivers: Vec<NetworkReceiver>,
 }
 
 impl OutNetworkLink {
-    pub async fn connect(dest: SocketAddr) -> Self {
+    pub async fn connect(dest: &str) -> Self {
         let config = config();
         let mut rand = StdRng::from_os_rng();
 
@@ -310,7 +311,6 @@ impl OutNetworkLink {
                     };
 
                     return Self {
-                        _dest: dest,
                         stream: BufWriter::new(network_stream),
                         receivers: vec![],
                     };
@@ -329,16 +329,13 @@ impl OutNetworkLink {
 
     async fn connect_tls(
         tcp_stream: TcpStream,
-        dest: SocketAddr,
+        dest: &str,
     ) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
-        let client_config =
-            arroyo_server_common::tls::create_tcp_client_tls_config(Some(&dest.ip().to_string()))
-                .await?;
+        let client_config = arroyo_server_common::tls::create_tcp_client_tls_config().await?;
         let connector = TlsConnector::from(client_config);
 
-        // Use the hostname from the socket address (IP) for now
-        // TODO: Make this configurable for proper certificate validation
-        let domain = arroyo_server_common::tls::create_server_name(&dest.ip().to_string())?;
+        let hostname = dest.split(':').next().unwrap();
+        let domain = ServerName::try_from(intern(hostname))?;
 
         let tls_stream = connector.connect(domain, tcp_stream).await?;
         Ok(tls_stream)
@@ -519,7 +516,7 @@ impl NetworkManager {
         }
     }
 
-    pub async fn connect(&self, addr: SocketAddr, quad: Quad, rx: BatchReceiver) {
+    pub async fn connect(&self, addr: &str, quad: Quad, rx: BatchReceiver) {
         let link = OutNetworkLink::connect(addr).await;
         let mut ins = self.out_streams.lock().await;
         if let std::collections::hash_map::Entry::Vacant(e) = ins.entry(quad) {
@@ -706,12 +703,8 @@ mod test {
         let port = nm.open_listener(shutdown.guard("test")).await;
 
         let (client_tx, client_rx) = batch_bounded(10);
-        nm.connect(
-            format!("127.0.0.1:{}", port).parse().unwrap(),
-            quad,
-            client_rx,
-        )
-        .await;
+        nm.connect(&format!("127.0.0.1:{port}"), quad, client_rx)
+            .await;
 
         nm.start(senders).await;
 
