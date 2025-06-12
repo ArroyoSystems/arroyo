@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use arroyo_rpc::config::TlsConfig;
 use arroyo_rpc::native_cert_store;
 use axum_server::tls_rustls::RustlsConfig;
-use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use std::sync::Arc;
 use tonic::transport::{Identity, ServerTlsConfig};
@@ -47,7 +46,7 @@ pub async fn create_tcp_server_tls_config(tls_config: &TlsConfig) -> Result<Serv
 }
 
 /// Create TLS configuration for raw TCP clients (workers)
-pub async fn create_tcp_client_tls_config(_server_name: Option<&str>) -> Result<Arc<ClientConfig>> {
+pub async fn create_tcp_client_tls_config() -> Result<Arc<ClientConfig>> {
     use rustls::crypto::aws_lc_rs::default_provider;
 
     let mut root_store = RootCertStore::empty();
@@ -62,9 +61,4 @@ pub async fn create_tcp_client_tls_config(_server_name: Option<&str>) -> Result<
     // TODO: Add support for custom CA certificates and client certificates
 
     Ok(Arc::new(config))
-}
-
-/// Create a ServerName for TLS client connections
-pub fn create_server_name(host: &str) -> Result<ServerName<'static>> {
-    ServerName::try_from(host.to_string()).map_err(|_| anyhow!("Invalid server name: {}", host))
 }

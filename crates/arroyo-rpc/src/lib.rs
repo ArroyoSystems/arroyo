@@ -30,9 +30,10 @@ use log::{debug, warn};
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZero, NonZeroU64};
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 use std::{fs, time::SystemTime};
 use tokio::sync::{
@@ -717,6 +718,19 @@ pub fn parse_expr(sql: &str) -> anyhow::Result<Expr> {
     Ok(parser.parse_expr()?)
 }
 
+static INTERN: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+
+pub fn intern(s: &str) -> &'static str {
+    let boxed = s.to_owned().into_boxed_str(); // one heap alloc
+    let static_ref: &'static str = Box::leak(boxed); // never freed
+    INTERN
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap()
+        .insert(static_ref);
+    static_ref
+}
+
 #[macro_export]
 macro_rules! retry {
     ($e:expr, $max_retries:expr, $base:expr, $max_delay:expr, |$err_var:ident| $error_handler:expr, $retry_if:expr) => {{
@@ -807,6 +821,26 @@ pub async fn controller_client() -> Result<ControllerGrpcClient<Channel>> {
     let endpoint = config().controller_endpoint();
     let channel = connect_grpc(endpoint, &config().controller.tls).await?;
     Ok(ControllerGrpcClient::new(channel))
+}
+
+pub fn local_address(bind_address: IpAddr) -> String {
+    if let Some(hostname) = config().hostname.clone() {
+        hostname
+    } else {
+        let local_ip = if bind_address.is_loopback() {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        } else if bind_address.is_ipv4() {
+            local_ip_address::local_ip().expect("could not determine worker ipv4 address")
+        } else {
+            local_ip_address::local_ipv6().expect("could not determine worker ipv6 address")
+        };
+
+        if local_ip.is_ipv4() {
+            local_ip.to_string()
+        } else {
+            format!("[{local_ip}]")
+        }
+    }
 }
 
 #[cfg(test)]

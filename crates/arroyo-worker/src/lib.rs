@@ -21,7 +21,7 @@ use rand::random;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
@@ -31,7 +31,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
-use arroyo_rpc::{retry, CompactionResult, ControlMessage, ControlResp};
+use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
@@ -218,21 +218,11 @@ impl WorkerServer {
         *self.network.lock().unwrap() = Some(network);
 
         let id = self.id;
-        let local_ip = if config.worker.bind_address.is_loopback() {
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        } else if config.worker.bind_address.is_ipv4() {
-            local_ip_address::local_ip().expect("could not determine worker ipv4 address")
-        } else {
-            local_ip_address::local_ipv6().expect("could not determine worker ipv6 address")
-        };
 
-        let rpc_address = if local_ip.is_ipv4() {
-            format!("http://{}:{}", local_ip, local_addr.port())
-        } else {
-            format!("http://[{}]:{}", local_ip, local_addr.port())
-        };
+        let hostname = local_address(config.worker.bind_address);
+        let rpc_address = format!("http://{}:{}", hostname, local_addr.port());
 
-        let data_address = SocketAddr::new(local_ip, data_port).to_string();
+        let data_address = format!("{hostname}:{data_port}");
         let job_id = self.job_id.clone();
 
         self.shutdown_guard

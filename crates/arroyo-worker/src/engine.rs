@@ -651,11 +651,9 @@ impl Engine {
                 edge.rx.take().unwrap()
             };
 
-            let addr = assignment.worker_addr.parse().unwrap_or_else(|e| {
-                panic!("invalid worker address {}: {}", assignment.worker_addr, e)
-            });
-
-            self.network_manager.connect(addr, quad, rx).await;
+            self.network_manager
+                .connect(&assignment.worker_addr, quad, rx)
+                .await;
         }
 
         info!(
