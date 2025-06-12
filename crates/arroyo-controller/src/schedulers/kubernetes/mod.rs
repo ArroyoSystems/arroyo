@@ -84,6 +84,14 @@ impl KubernetesScheduler {
         labels.insert(RUN_ID_LABEL.to_string(), format!("{}", req.run_id));
         labels.insert(JOB_NAME_LABEL.to_string(), req.name.clone());
 
+        let pod_name = format!(
+            "{}-{}-{}-{}",
+            c.worker.name(),
+            req.job_id.to_ascii_lowercase().replace('_', "-"),
+            req.run_id,
+            number
+        );
+
         let mut env = json!([
             {
                 "name": "PROD", "value": "true",
@@ -108,6 +116,14 @@ impl KubernetesScheduler {
                 "value": req.wasm_path
             }
         ]);
+
+        if config().is_tls_enabled(&config().worker.tls) {
+            // if TLS is enabled, we'll need to refer to the workers by their hostnames
+            env.as_array_mut().unwrap().push(json!({
+                "name": "ARROYO__HOSTNAME",
+                "value": format!("{}.{}.pod.local", pod_name, c.namespace)
+            }));
+        }
 
         for (key, value) in req.env_vars.iter() {
             env.as_array_mut().unwrap().push(json!({
@@ -135,7 +151,7 @@ impl KubernetesScheduler {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-                "name": format!("{}-{}-{}-{}", c.worker.name(), req.job_id.to_ascii_lowercase().replace('_', "-"), req.run_id, number),
+                "name": pod_name,
                 "namespace": c.namespace,
                 "labels": labels,
                 "annotations": c.worker.annotations,
@@ -170,7 +186,8 @@ impl KubernetesScheduler {
                 "nodeSelector": c.worker.node_selector,
                 "tolerations": c.worker.tolerations,
             }
-        })).unwrap()
+        }))
+        .unwrap()
     }
 }
 

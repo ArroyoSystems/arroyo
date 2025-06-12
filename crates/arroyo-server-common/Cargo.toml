@@ -23,6 +23,7 @@ tonic = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 prometheus = {workspace = true, features = ["process"] }
 axum = {workspace = true}
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 http = "1"
 
 lazy_static = "1.4.0"
@@ -35,6 +36,10 @@ anyhow = "1.0.82"
 toml = "0.8.13"
 dirs = "6"
 uuid = { version = "1.8.0", features = ["v4"] }
+url = { version = "2.5" }
+rustls = { workspace = true, features = ["std", "aws_lc_rs"] }
+rustls-pemfile = { workspace = true }
+webpki-roots = { workspace = true }
 
 # profile
 flate2 = "1.0.30"

@@ -16,6 +16,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-state = { path = "../arroyo-state" }
+arroyo-server-common = { path = "../arroyo-server-common" }
 
 arrow = { workspace = true }
 datafusion = { workspace = true }

@@ -40,7 +40,6 @@ struct Assets;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub(crate) controller_addr: String,
     pub(crate) database: DatabaseSource,
 }
 
@@ -117,7 +116,7 @@ async fn index_html() -> Response {
     }
 }
 
-pub fn create_rest_app(database: DatabaseSource, controller_addr: &str) -> Router {
+pub fn create_rest_app(database: DatabaseSource) -> Router {
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()
         .allow_methods(cors::Any)
@@ -180,9 +179,6 @@ pub fn create_rest_app(database: DatabaseSource, controller_addr: &str) -> Route
         )
         .nest("/api/v1", api_routes)
         .fallback(static_handler)
-        .with_state(AppState {
-            controller_addr: controller_addr.to_string(),
-            database,
-        })
+        .with_state(AppState { database })
         .layer(cors)
 }
