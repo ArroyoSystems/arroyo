@@ -9,7 +9,7 @@ use crate::config::{config, TlsConfig};
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
@@ -45,7 +45,7 @@ use tonic::{
     metadata::{Ascii, MetadataValue},
     service::Interceptor,
 };
-use url::Url;
+use url::{Host, Url};
 
 pub mod config;
 pub mod df;
@@ -802,10 +802,18 @@ pub async fn grpc_channel_builder(endpoint: String, tls: &Option<TlsConfig>) -> 
             .map_err(|_| anyhow!("invalid URL for gRPC endpoint: {}", endpoint))?;
         debug!("connecting to grpc endpoint via TLS {endpoint}");
         let b = Channel::from_shared(endpoint.to_string())?;
+        let mut config = ClientTlsConfig::new().with_enabled_roots();
 
-        let config = ClientTlsConfig::new().with_enabled_roots();
+        // Workaround for https://github.com/hyperium/tonic/issues/1696
+        let host = endpoint
+            .host()
+            .ok_or_else(|| anyhow!("invalid host in endpoint {}", endpoint))?;
+        if let Host::Ipv6(ip) = host {
+            // this is an IPv6 address
+            config = config.domain_name(ip.to_string());
+        }
 
-        Ok(b.tls_config(config)?)
+        Ok(b.tls_config(config).context("configuring TLS")?)
     } else {
         debug!("connecting to grpc endpoint {endpoint}");
         Ok(Channel::from_shared(endpoint.to_string())?)

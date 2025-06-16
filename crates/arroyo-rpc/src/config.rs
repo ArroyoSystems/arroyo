@@ -241,7 +241,7 @@ pub struct Config {
     /// The endpoint of the controller, used by other services to connect to it. This must be set
     /// if running the controller on a separate machine from the other services or on a separate
     /// process with a non-standard port.
-    controller_endpoint: Option<Url>,
+    pub controller_endpoint: Option<Url>,
 
     // The endpoint of the API service, used by the Web UI
     pub api_endpoint: Option<Url>,
