@@ -8,6 +8,7 @@
     <link rel="icon" href="/icon.png" type="image/png" />
     <title>Arroyo Console</title>
     <script>
+      window.__ARROYO_BASENAME = "{{BASENAME}}" === "{{" + "BASENAME}}" ? "/" : "{{BASENAME}}";
       const clusterId = "{{CLUSTER_ID}}";
       const disableTelemetry = ("{{DISABLE_TELEMETRY}}" == "true" || "{{DISABLE_TELEMETRY}}" == "{{" + "DISABLE_TELEMETRY" + "}}");
 
