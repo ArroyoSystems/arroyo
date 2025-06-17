@@ -50,13 +50,18 @@ export function Router(): JSX.Element {
 
   addCloudRoutes(routes);
 
-  let router = createBrowserRouter([
+  let router = createBrowserRouter(
+    [
+      {
+        path: '/',
+        element: App(),
+        children: routes,
+      },
+    ],
     {
-      path: '/',
-      element: App(),
-      children: routes,
-    },
-  ]);
+      basename: window.__ARROYO_BASENAME,
+    }
+  );
 
   let orgSetup = needsOrgSetup();
   if (orgSetup) {

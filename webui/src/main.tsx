@@ -7,6 +7,12 @@ import '@fontsource/inter/variable.css';
 import { modalTheme, popoverTheme, tabsTheme } from './theming';
 import { createRoot } from './lib/CloudComponents';
 
+declare global {
+  interface Window {
+    __ARROYO_BASENAME: string;
+  }
+}
+
 const config: ThemeConfig = {
   initialColorMode: 'dark',
   useSystemColorMode: false,

@@ -35,7 +35,9 @@ export type GlobalUdf = schemas['GlobalUdf'];
 export type PipelineLocalUdf = schemas['Udf'];
 export type UdfValidationResult = schemas['UdfValidationResult'];
 
-const BASE_URL = '/api';
+const base = window.__ARROYO_BASENAME.replace(/\/$/, '') || '';
+const BASE_URL = `${base}/api`;
+
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
 
 const processResponse = (data: any | undefined, error: any | undefined) => {
