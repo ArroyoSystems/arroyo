@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "title": "ZmqTable",
+  "properties": {
+    "socket_type": {
+      "title": "Socket Type",
+      "type": "string",
+      "enum": ["push", "pull"]
+    }
+  },
+  "required": ["socket_type"]
+}
