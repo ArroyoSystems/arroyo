@@ -41,17 +41,28 @@ pub async fn start_service() -> anyhow::Result<()> {
     let config = config();
 
     let addr: SocketAddr = SocketAddr::new(config.compiler.bind_address, config.compiler.rpc_port);
+    let grpc_service = CompilerGrpcServer::new(service);
 
-    info!("Starting compiler service at {}", addr);
+    if let Some(tls_config) = config.get_tls_config(&config.compiler.tls) {
+        info!("Starting compiler service with TLS at {}", addr);
 
-    wrap_start(
-        "compiler service",
-        addr,
-        arroyo_server_common::grpc_server()
-            .add_service(CompilerGrpcServer::new(service))
-            .serve(addr),
-    )
-    .await
+        let server = arroyo_server_common::grpc_server_with_tls(tls_config)
+            .await?
+            .add_service(grpc_service);
+
+        wrap_start("compiler service", addr, server.serve(addr)).await
+    } else {
+        info!("Starting compiler service at {}", addr);
+
+        wrap_start(
+            "compiler service",
+            addr,
+            arroyo_server_common::grpc_server()
+                .add_service(grpc_service)
+                .serve(addr),
+        )
+        .await
+    }
 }
 
 pub struct CompileService {

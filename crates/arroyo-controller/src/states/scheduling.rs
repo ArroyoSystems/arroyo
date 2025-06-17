@@ -16,6 +16,7 @@ use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::api;
+use arroyo_rpc::grpc_channel_builder;
 use arroyo_state::{
     committing_state::CommittingState,
     tables::{global_keyed_map::GlobalKeyedTable, ErasedTable},
@@ -118,7 +119,8 @@ async fn handle_worker_connect<'a>(
                 );
 
                 for i in 0..3 {
-                    match Channel::from_shared(rpc_address.clone())
+                    match grpc_channel_builder(rpc_address.clone(), &config().worker.tls)
+                        .await
                         .unwrap()
                         .timeout(Duration::from_secs(90))
                         .connect()
