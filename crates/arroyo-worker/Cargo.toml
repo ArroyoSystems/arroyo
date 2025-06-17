@@ -49,6 +49,7 @@ datafusion = { workspace = true }
 datafusion-proto = { workspace = true }
 itertools = "0.12.0"
 mini-moka = { version = "0.10.3" }
+url = "2.5.4"
 
 
 [dev-dependencies]

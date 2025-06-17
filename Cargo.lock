@@ -1051,6 +1051,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 #![allow(clippy::redundant_slicing)]
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use arrow::buffer::MutableBuffer;
 use arrow::ipc::reader::read_record_batch;
 use arrow::ipc::writer::{DictionaryTracker, EncodedData, IpcDataGenerator, IpcWriteOptions};
@@ -27,13 +27,14 @@ use tokio::{
 
 use arroyo_operator::context::{BatchReceiver, BatchSender};
 use tokio::time::{interval, Interval};
-use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::rustls::pki_types::{IpAddr, ServerName};
 use tokio_stream::StreamExt;
 
 use arroyo_operator::inq_reader::InQReader;
 use arroyo_rpc::config::config;
 use arroyo_rpc::intern;
 use arroyo_server_common::shutdown::ShutdownGuard;
+use url::{Host, Url};
 
 // Abstraction for stream types that can be either TLS or plain TCP
 #[derive(Debug)]
@@ -334,8 +335,16 @@ impl OutNetworkLink {
         let client_config = arroyo_server_common::tls::create_tcp_client_tls_config().await?;
         let connector = TlsConnector::from(client_config);
 
-        let hostname = dest.split(':').next().unwrap();
-        let domain = ServerName::try_from(intern(hostname))?;
+        let endpoint = Url::parse(&format!("tcp://{dest}")).context("invalid endpoint")?;
+
+        let domain = match endpoint
+            .host()
+            .ok_or_else(|| anyhow!("could not get host from endpoint {}", dest))?
+        {
+            Host::Domain(s) => ServerName::try_from(intern(s))?,
+            Host::Ipv4(ip) => ServerName::IpAddress(IpAddr::V4(ip.into())),
+            Host::Ipv6(ip) => ServerName::IpAddress(IpAddr::V6(ip.into())),
+        };
 
         let tls_stream = connector.connect(domain, tcp_stream).await?;
         Ok(tls_stream)
