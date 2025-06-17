@@ -74,12 +74,18 @@ impl MqttConnector {
             None
         };
 
+        let max_packet_size = options
+            .pull_opt_str("maxPacketSize")?
+            .map(|s| s.parse::<u32>())
+            .transpose()?;
+
         Ok(MqttConfig {
             url,
             username,
             password,
             tls,
             client_prefix: options.pull_opt_str("client_prefix")?,
+            max_packet_size,
         })
     }
 
@@ -423,6 +429,14 @@ pub(crate) fn create_connection(
     let mut options = MqttOptions::try_from(url)?;
 
     options.set_keep_alive(Duration::from_secs(10));
+
+    if let Some(max_packet_size) = c.max_packet_size {
+        let max_packet_size: usize = max_packet_size
+            .try_into()
+            .map_err(|_| anyhow!("max_packet_size value {} is too large for this {}-bit platform. Only values up to {} are supported.", max_packet_size, std::mem::size_of::<usize>() * 8, usize::MAX))?;
+        options.set_max_packet_size(max_packet_size, max_packet_size);
+    }
+
     if ssl {
         let mut root_cert_store = RootCertStore::empty();
 

@@ -55,6 +55,7 @@ impl MqttTopicTester {
                 cert: self.cert.as_ref().map(|ca| VarStr::new(ca.clone())),
                 key: self.key.as_ref().map(|ca| VarStr::new(ca.clone())),
             }),
+            max_packet_size: None,
         }
     }
 
