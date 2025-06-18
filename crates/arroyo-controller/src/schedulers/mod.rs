@@ -1,6 +1,7 @@
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
+use arroyo_rpc::connect_grpc;
 use arroyo_rpc::grpc::rpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::rpc::{
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
@@ -11,6 +12,7 @@ use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use std::collections::HashMap;
 use std::env::current_exe;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex};
+use tonic::transport::Channel;
 use tonic::{Request, Status};
 use tracing::{info, warn};
 
@@ -146,15 +149,28 @@ impl Scheduler for ProcessScheduler {
                 for (env, value) in env_map {
                     command.env(env, value);
                 }
+
+                let config = config();
+
+                let mut args = vec![];
+                if let Some(path) = &config.config_path {
+                    args.push(OsString::from_str("-c").unwrap());
+                    args.push(path.clone().into_os_string());
+                }
+
+                if let Some(path) = &config.config_dir {
+                    args.push(OsString::from_str("--config-dir").unwrap());
+                    args.push(path.clone().into_os_string());
+                }
+
+                args.push("worker".into());
+
                 let mut child = command
-                    .arg("worker")
+                    .args(args)
                     .env("ARROYO__ADMIN__HTTP_PORT", "0")
                     .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots_here))
                     .env("ARROYO__WORKER__ID", format!("{}", worker_id)) // start at 100 to make same length
-                    .env(
-                        "ARROYO__CONTROLLER_ENDPOINT",
-                        config().controller_endpoint(),
-                    )
+                    .env("ARROYO__CONTROLLER_ENDPOINT", config.controller_endpoint())
                     .env("UNDER_PROCESS_SCHEDULER", "true")
                     .env(JOB_ID_ENV, &*job_id)
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
@@ -329,6 +345,11 @@ impl NodeScheduler {
         }
     }
 
+    async fn client(node: &NodeStatus) -> anyhow::Result<NodeGrpcClient<Channel>> {
+        let channel = connect_grpc(format!("http://{}", node.addr), &config().node.tls).await?;
+        Ok(NodeGrpcClient::new(channel))
+    }
+
     async fn stop_worker(
         &self,
         job_id: &str,
@@ -362,7 +383,7 @@ impl NodeScheduler {
             worker_id = worker_id.0
         );
 
-        let Ok(mut client) = NodeGrpcClient::connect(format!("http://{}", node.addr)).await else {
+        let Ok(mut client) = Self::client(&node).await else {
             warn!("Failed to connect to worker to stop; this likely means it is dead");
             return Ok(Some(worker_id));
         };
@@ -503,7 +524,7 @@ impl Scheduler for NodeScheduler {
                 slots_for_this_one, node.addr
             );
 
-            let mut client = NodeGrpcClient::connect(format!("http://{}", node.addr))
+            let mut client = Self::client(&node)
                 .await
                 // TODO: handle this issue more gracefully by moving trying other nodes
                 .map_err(|e| {

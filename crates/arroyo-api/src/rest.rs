@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
 };
 
-use http::{header, StatusCode, Uri};
+use http::{header, HeaderMap, HeaderName, StatusCode, Uri};
 use rust_embed::RustEmbed;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
@@ -34,13 +34,14 @@ use crate::ApiDoc;
 use arroyo_rpc::config::config;
 use cornucopia_async::DatabaseSource;
 
+static BASENAME_HEADER: HeaderName = HeaderName::from_static("x-arroyo-basename");
+
 #[derive(RustEmbed)]
 #[folder = "../../webui/dist"]
 struct Assets;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub(crate) controller_addr: String,
     pub(crate) database: DatabaseSource,
 }
 
@@ -65,11 +66,11 @@ async fn not_found_static() -> Response {
     (StatusCode::NOT_FOUND, "404").into_response()
 }
 
-async fn static_handler(uri: Uri) -> impl IntoResponse {
+async fn static_handler(uri: Uri, headers: HeaderMap) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
     if path.is_empty() || path == "index.html" {
-        return index_html().await;
+        return index_html(headers).await;
     }
 
     match Assets::get(path) {
@@ -83,12 +84,17 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
                 return not_found_static().await;
             }
 
-            index_html().await
+            index_html(headers).await
         }
     }
 }
 
-async fn index_html() -> Response {
+async fn index_html(headers: HeaderMap) -> Response {
+    let basename = headers
+        .get(&BASENAME_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("/");
+
     match Assets::get("index.html") {
         Some(content) => {
             let replaced = String::from_utf8(content.data.to_vec())
@@ -109,7 +115,8 @@ async fn index_html() -> Response {
                     } else {
                         "false"
                     },
-                );
+                )
+                .replace("{{BASENAME}}", basename);
 
             Html(replaced).into_response()
         }
@@ -117,7 +124,7 @@ async fn index_html() -> Response {
     }
 }
 
-pub fn create_rest_app(database: DatabaseSource, controller_addr: &str) -> Router {
+pub fn create_rest_app(database: DatabaseSource) -> Router {
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()
         .allow_methods(cors::Any)
@@ -180,9 +187,6 @@ pub fn create_rest_app(database: DatabaseSource, controller_addr: &str) -> Route
         )
         .nest("/api/v1", api_routes)
         .fallback(static_handler)
-        .with_state(AppState {
-            controller_addr: controller_addr.to_string(),
-            database,
-        })
+        .with_state(AppState { database })
         .layer(cors)
 }

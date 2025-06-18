@@ -143,6 +143,11 @@ impl CPService {
 
 #[tokio::main]
 async fn main() {
+    // Initialize RustLS crypto provider for TLS support
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install default crypto provider");
+
     let cli = Cli::parse();
 
     config::initialize_config(

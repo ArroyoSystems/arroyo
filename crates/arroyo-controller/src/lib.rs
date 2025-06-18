@@ -638,32 +638,47 @@ impl ControllerServer {
         //     .build_v1()
         //     .unwrap();
 
-        let addr = SocketAddr::new(
-            config().controller.bind_address,
-            config().controller.rpc_port,
-        );
+        let config = config();
+        let addr = SocketAddr::new(config.controller.bind_address, config.controller.rpc_port);
 
         let listener = TcpListener::bind(addr).await?;
-
         let local_addr = listener.local_addr()?;
 
-        info!("Starting arroyo-controller on {}", local_addr);
+        let service = ControllerGrpcServer::new(self.clone())
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd);
 
         self.start_updater(guard.child("updater"));
-        guard.into_spawn_task(wrap_start(
-            "controller",
-            local_addr,
-            arroyo_server_common::grpc_server()
+
+        if let Some(tls_config) = config.get_tls_config(&config.controller.tls) {
+            info!("Starting arroyo-controller with TLS on {}", local_addr);
+
+            let server = arroyo_server_common::grpc_server_with_tls(tls_config)
+                .await?
                 .accept_http1(true)
-                .add_service(
-                    ControllerGrpcServer::new(self.clone())
-                        .send_compressed(CompressionEncoding::Zstd)
-                        .accept_compressed(CompressionEncoding::Zstd),
-                )
-                // TODO: re-enable once tonic 0.13 is released
-                //.add_service(reflection)
-                .serve_with_incoming(TcpListenerStream::new(listener)),
-        ));
+                .add_service(service);
+            // TODO: re-enable once tonic 0.13 is released
+            //.add_service(reflection);
+
+            guard.into_spawn_task(wrap_start(
+                "controller",
+                local_addr,
+                server.serve_with_incoming(TcpListenerStream::new(listener)),
+            ));
+        } else {
+            info!("Starting arroyo-controller on {}", local_addr);
+
+            guard.into_spawn_task(wrap_start(
+                "controller",
+                local_addr,
+                arroyo_server_common::grpc_server()
+                    .accept_http1(true)
+                    .add_service(service)
+                    // TODO: re-enable once tonic 0.13 is released
+                    //.add_service(reflection)
+                    .serve_with_incoming(TcpListenerStream::new(listener)),
+            ));
+        }
 
         Ok(local_addr.port())
     }

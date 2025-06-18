@@ -5,7 +5,6 @@ use crate::engine::{Engine, Program, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
 
-use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
@@ -22,7 +21,7 @@ use rand::random;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
@@ -32,7 +31,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
-use arroyo_rpc::{retry, CompactionResult, ControlMessage, ControlResp};
+use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
@@ -41,6 +40,7 @@ use crate::utils::to_d2;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
+use arroyo_rpc::controller_client;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 
@@ -110,10 +110,10 @@ impl LocalRunner {
         }
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self) -> anyhow::Result<()> {
         let name = format!("{}-0", self.program.name);
         let total_nodes = self.program.total_nodes();
-        let engine = Engine::for_local(self.program, name);
+        let engine = Engine::for_local(self.program, name).await?;
 
         let _running_engine = engine.start().await;
 
@@ -129,7 +129,7 @@ impl LocalRunner {
                 {
                     finished_nodes.insert((node_id, task_index));
                     if finished_nodes.len() == total_nodes {
-                        return;
+                        return Ok(());
                     }
                 }
             }
@@ -142,7 +142,6 @@ pub struct WorkerServer {
     job_id: String,
     run_id: String,
     name: &'static str,
-    controller_addr: String,
     state: Arc<Mutex<Option<EngineState>>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
     shutdown_guard: ShutdownGuard,
@@ -162,7 +161,6 @@ impl WorkerServer {
             id,
             job_id,
             run_id,
-            config().controller_endpoint(),
             shutdown_guard,
         ))
     }
@@ -172,7 +170,6 @@ impl WorkerServer {
         worker_id: WorkerId,
         job_id: String,
         run_id: String,
-        controller_addr: String,
         shutdown_guard: ShutdownGuard,
     ) -> Self {
         Self {
@@ -180,7 +177,6 @@ impl WorkerServer {
             name,
             job_id,
             run_id,
-            controller_addr,
             state: Arc::new(Mutex::new(None)),
             network: Arc::new(Mutex::new(None)),
             shutdown_guard,
@@ -206,16 +202,15 @@ impl WorkerServer {
         .await?;
         let local_addr = listener.local_addr()?;
 
-        info!("Started worker-rpc for {} on {}", self.name, local_addr);
         let mut client = retry!(
-            ControllerGrpcClient::connect(self.controller_addr.clone()).await,
-            20,
+            controller_client().await,
+            2,
             Duration::from_millis(100),
             Duration::from_secs(2),
             |e| warn!("Failed to connect to controller: {e}, retrying...")
         )?;
 
-        let mut network = NetworkManager::new(0);
+        let mut network = NetworkManager::new(0).await?;
         let data_port = network
             .open_listener(self.shutdown_guard.child("network-manager"))
             .await;
@@ -223,21 +218,11 @@ impl WorkerServer {
         *self.network.lock().unwrap() = Some(network);
 
         let id = self.id;
-        let local_ip = if config.worker.bind_address.is_loopback() {
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        } else if config.worker.bind_address.is_ipv4() {
-            local_ip_address::local_ip().expect("could not determine worker ipv4 address")
-        } else {
-            local_ip_address::local_ipv6().expect("could not determine worker ipv6 address")
-        };
 
-        let rpc_address = if local_ip.is_ipv4() {
-            format!("http://{}:{}", local_ip, local_addr.port())
-        } else {
-            format!("http://[{}]:{}", local_ip, local_addr.port())
-        };
+        let hostname = local_address(config.worker.bind_address);
+        let rpc_address = format!("http://{}:{}", hostname, local_addr.port());
 
-        let data_address = SocketAddr::new(local_ip, data_port).to_string();
+        let data_address = format!("{hostname}:{data_port}");
         let job_id = self.job_id.clone();
 
         self.shutdown_guard
@@ -245,9 +230,21 @@ impl WorkerServer {
             .into_spawn_task(wrap_start(
                 "worker",
                 local_addr,
-                arroyo_server_common::grpc_server()
-                    .add_service(WorkerGrpcServer::new(self))
-                    .serve_with_incoming(TcpListenerStream::new(listener)),
+                if let Some(tls) = config.get_tls_config(&config.worker.tls) {
+                    info!(
+                        "Started worker-rpc with TLS for {} on {}",
+                        self.name, local_addr
+                    );
+                    arroyo_server_common::grpc_server_with_tls(tls)
+                        .await?
+                        .add_service(WorkerGrpcServer::new(self))
+                        .serve_with_incoming(TcpListenerStream::new(listener))
+                } else {
+                    info!("Started worker-rpc for {} on {}", self.name, local_addr);
+                    arroyo_server_common::grpc_server()
+                        .add_service(WorkerGrpcServer::new(self))
+                        .serve_with_incoming(TcpListenerStream::new(listener))
+                },
             ));
 
         // ideally, get a signal when the server is started...
@@ -282,14 +279,13 @@ impl WorkerServer {
         worker_id: WorkerId,
         job_id: String,
     ) -> impl Future<Output = Result<()>> {
-        let addr = self.controller_addr.clone();
-
         let cancel_token = self.shutdown_guard.token();
 
         async move {
-            let mut controller = ControllerGrpcClient::connect(addr.clone())
+            let mut controller = controller_client()
                 .await
                 .expect("Unable to connect to controller");
+
             let mut tick = tokio::time::interval(Duration::from_secs(5));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
