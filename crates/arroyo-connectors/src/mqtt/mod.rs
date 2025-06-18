@@ -75,9 +75,10 @@ impl MqttConnector {
         };
 
         let max_packet_size = options
-            .pull_opt_str("maxPacketSize")?
-            .map(|s| s.parse::<u32>())
-            .transpose()?;
+            .pull_opt_u64("max_packet_size")?
+            .map(|size| size.try_into())
+            .transpose()
+            .map_err(|_| anyhow!("max_packet_size must be <= {}", u32::MAX))?;
 
         Ok(MqttConfig {
             url,
