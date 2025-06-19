@@ -30,7 +30,6 @@ export type ConnectionSchema = schemas['ConnectionSchema'];
 export type SourceField = schemas['SourceField'];
 export type OperatorCheckpointGroup = schemas['OperatorCheckpointGroup'];
 export type SubtaskCheckpointGroup = schemas['SubtaskCheckpointGroup'];
-export type CheckpointSpanType = schemas['CheckpointSpanType'];
 export type GlobalUdf = schemas['GlobalUdf'];
 export type PipelineLocalUdf = schemas['Udf'];
 export type UdfValidationResult = schemas['UdfValidationResult'];

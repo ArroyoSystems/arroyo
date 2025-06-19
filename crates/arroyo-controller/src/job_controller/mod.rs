@@ -369,7 +369,7 @@ impl RunningJobModel {
         self.checkpoint_spans.clear();
         self.start_or_get_span(JobCheckpointEventType::Checkpointing);
         self.start_or_get_span(JobCheckpointEventType::CheckpointingOperators);
-        
+
         let checkpoints = self.workers.values_mut().map(|worker| {
             worker.connect.checkpoint(Request::new(CheckpointReq {
                 epoch: self.epoch,

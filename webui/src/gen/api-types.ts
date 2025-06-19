@@ -148,6 +148,7 @@ export interface components {
       backend: string;
       /** Format: int32 */
       epoch: number;
+      events: (components["schemas"]["CheckpointEventSpan"])[];
       /** Format: int64 */
       finishTime?: number | null;
       /** Format: int64 */
@@ -158,14 +159,12 @@ export interface components {
     };
     CheckpointEventSpan: {
       description: string;
+      event: string;
       /** Format: int64 */
       finishTime: number;
-      spanType: components["schemas"]["CheckpointSpanType"];
       /** Format: int64 */
       startTime: number;
     };
-    /** @enum {string} */
-    CheckpointSpanType: "alignment" | "sync" | "async" | "committing";
     ConnectionAutocompleteResp: {
       values: {
         [key: string]: (string)[] | undefined;
@@ -193,6 +192,7 @@ export interface components {
       format?: components["schemas"]["Format"] | null;
       framing?: components["schemas"]["Framing"] | null;
       inferred?: boolean | null;
+      primaryKeys?: (string)[];
       structName?: string | null;
     };
     ConnectionTable: {
@@ -220,7 +220,7 @@ export interface components {
       schema?: components["schemas"]["ConnectionSchema"] | null;
     };
     /** @enum {string} */
-    ConnectionType: "source" | "sink";
+    ConnectionType: "source" | "sink" | "lookup";
     Connector: {
       connectionConfig?: string | null;
       customSchemas: boolean;
@@ -347,7 +347,11 @@ export interface components {
     OperatorCheckpointGroup: {
       /** Format: int64 */
       bytes: number;
+      /** Format: int64 */
+      finishTime?: number | null;
       operatorId: string;
+      /** Format: int64 */
+      startedMetadataWrite?: number | null;
       subtasks: (components["schemas"]["SubtaskCheckpointGroup"])[];
     };
     OperatorCheckpointGroupCollection: {

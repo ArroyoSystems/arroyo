@@ -1,24 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Box, VStack } from '@chakra-ui/react';
-import { Checkpoint } from '../lib/data_fetching';
+import { Checkpoint, OperatorCheckpointGroup } from '../lib/data_fetching';
 import * as d3 from 'd3';
-
-// Type definitions (assuming these are unchanged)
-interface EventSpan {
-  spanType: 'alignment' | 'sync' | 'async' | 'committing';
-  startTime: number;
-  finishTime: number;
-}
-
-interface SubtaskCheckpointGroup {
-  eventSpans: EventSpan[];
-}
-
-interface OperatorCheckpointGroup {
-  operatorId: string;
-  bytes: number;
-  subtasks: SubtaskCheckpointGroup[];
-}
 
 interface TimelineData {
   operator: string;
@@ -29,6 +12,13 @@ interface TimelineData {
   duration: number;
   row: number;
   bytes: number;
+  lane: number;
+}
+
+interface YLabelInfo {
+  label: string;
+  isOperator: boolean;
+  isGlobal?: boolean;
 }
 
 interface CheckpointTimelineProps {
@@ -40,7 +30,7 @@ export function formatDuration(micros: number): string {
   let millis = micros / 1000;
   let secs = Math.floor(millis / 1000);
   if (millis < 1000) {
-    return `${millis} ms`;
+    return `${millis.toFixed(1)} ms`;
   } else if (millis < 10000) {
     return `${Math.floor(millis)} ms`;
   } else if (secs < 60) {
@@ -65,215 +55,248 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
     if (!operators.length || !checkpoint) return;
 
     const svg = d3.select(svgRef.current!);
-    svg.selectAll("*").remove();
-
+    svg.selectAll('*').remove();
 
     const margin = { top: 30, right: 120, bottom: 50, left: 150 };
-    const width = 800 - margin.left - margin.right;
-    const height = 250 - margin.top - margin.bottom;
+    const width = 1200;
 
-    const tooltip = d3.select(tooltipRef.current!);
-
-    const flatData: TimelineData[] = [];
+    const yLabels: YLabelInfo[] = [];
+    const initialFlatData: Omit<TimelineData, 'lane'>[] = [];
     let rowIndex = 0;
+    const allSpanTypes = new Set<string>();
 
     const checkpointStartTime = checkpoint.startTime;
     let checkpointEndTime = checkpoint.finishTime;
 
+    if (checkpoint.events && checkpoint.events.length > 0) {
+      yLabels.push({ label: 'Global Events', isOperator: true, isGlobal: true });
+      const globalRow = rowIndex;
+      checkpoint.events.forEach(span => {
+        if (!checkpoint.finishTime) {
+          checkpointEndTime = Math.max(checkpointEndTime || 0, span.finishTime);
+        }
+        const spanType = (span as any).event || 'global';
+        allSpanTypes.add(spanType);
+        initialFlatData.push({
+          operator: 'Global',
+          subtaskIndex: -2,
+          spanType: spanType,
+          startTime: span.startTime - checkpointStartTime,
+          finishTime: span.finishTime - checkpointStartTime,
+          duration: span.finishTime - span.startTime,
+          row: globalRow,
+          bytes: 0,
+        });
+      });
+      rowIndex++;
+    }
+
     operators
-      .sort(
-        (a, b) => Number(a.operatorId.split('_').pop()) - Number(b.operatorId.split('_').pop())
-      )
+      .sort((a, b) => Number(a.operatorId.split('_').pop()) - Number(b.operatorId.split('_').pop()))
       .forEach(op => {
+        yLabels.push({ label: op.operatorId, isOperator: true });
+        op.subtasks.forEach((_, subtaskIndex) => {
+          yLabels.push({ label: `[${subtaskIndex}]`, isOperator: false });
+        });
+
+        const operatorRow = rowIndex;
+        if (op.startedMetadataWrite && op.finishTime) {
+          if (!checkpoint.finishTime) {
+            checkpointEndTime = Math.max(checkpointEndTime || 0, op.finishTime);
+          }
+          allSpanTypes.add('metadata');
+          initialFlatData.push({
+            operator: op.operatorId,
+            subtaskIndex: -1,
+            spanType: 'metadata',
+            startTime: op.startedMetadataWrite - checkpointStartTime,
+            finishTime: op.finishTime - checkpointStartTime,
+            duration: op.finishTime - op.startedMetadataWrite,
+            row: operatorRow,
+            bytes: 0,
+          });
+        }
+        rowIndex++;
+
         op.subtasks.forEach((subtask, subtaskIndex) => {
           subtask.eventSpans.forEach(span => {
             if (!checkpoint.finishTime) {
               checkpointEndTime = Math.max(checkpointEndTime || 0, span.finishTime);
             }
-
-            flatData.push({
+            const spanType = (span as any).event || 'unknown';
+            allSpanTypes.add(spanType);
+            initialFlatData.push({
               operator: op.operatorId,
               subtaskIndex,
-              spanType: span.spanType,
+              spanType: spanType,
               startTime: span.startTime - checkpointStartTime,
               finishTime: span.finishTime - checkpointStartTime,
               duration: span.finishTime - span.startTime,
               row: rowIndex,
-              bytes: op.bytes
+              bytes: op.bytes,
             });
           });
           rowIndex++;
         });
       });
 
+    const layoutData: TimelineData[] = [];
+    const rowLaneCounts = new Map<number, number>();
+    const groupedByRow = d3.group(initialFlatData, d => d.row);
+
+    for (const [row, spans] of groupedByRow.entries()) {
+      spans.sort((a, b) => a.startTime - b.startTime);
+      const lanes: number[] = [];
+      for (const span of spans) {
+        let placed = false;
+        for (let i = 0; i < lanes.length; i++) {
+          if (span.startTime >= lanes[i]) {
+            lanes[i] = span.finishTime;
+            layoutData.push({ ...span, lane: i });
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          lanes.push(span.finishTime);
+          const newLaneIndex = lanes.length - 1;
+          layoutData.push({ ...span, lane: newLaneIndex });
+        }
+      }
+      rowLaneCounts.set(row, lanes.length || 1);
+    }
+
+    const laneHeight = 18;
+    const rowPadding = 8;
+    const yPositions = new Map<number, { y: number; height: number }>();
+    let currentY = 0;
+
+    for (let i = 0; i < yLabels.length; i++) {
+      const numLanes = rowLaneCounts.get(i) || 1;
+      const totalRowHeight = numLanes * laneHeight;
+      yPositions.set(i, { y: currentY, height: totalRowHeight });
+      currentY += totalRowHeight + rowPadding;
+    }
+    const height = currentY;
+
+    const tooltip = d3.select(tooltipRef.current!);
     const checkpointDuration = checkpointEndTime! - checkpointStartTime;
-    const xScale = d3.scaleLinear()
+    const xScale = d3
+      .scaleLinear()
       .domain([0, checkpointDuration > 0 ? checkpointDuration : 1])
       .range([0, width]);
 
-    const yScale = d3.scaleBand()
-      .domain(d3.range(rowIndex).map(String))
-      .range([0, height])
-      .padding(0.2);
-
-    const colorScale = d3.scaleOrdinal<string>()
-      .domain(['alignment', 'sync', 'async', 'committing'])
-      .range(['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4']);
+    // Dynamic color scale
+    const colorScale = d3.scaleOrdinal<string>(d3.schemeTableau10).domain(Array.from(allSpanTypes));
 
     const svgElement = svg
-      .attr("width", width + margin.left + margin.right)
-      .attr("height", height + margin.top + margin.bottom);
+      .attr('width', width + margin.left + margin.right)
+      .attr('height', height + margin.top + margin.bottom);
 
-    svgElement.append("rect")
-      .attr("width", "100%")
-      .attr("height", "100%")
-      .attr("fill", "#1A202C");
+    svgElement.append('rect').attr('width', '100%').attr('height', '100%').attr('fill', '#1A202C');
 
-    const g = svgElement.append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
+    const g = svgElement.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-    const xAxis = d3.axisBottom(xScale)
-      .tickFormat(d => formatDuration(d as number));
+    const xAxis = d3.axisBottom(xScale).tickFormat(d => formatDuration(d as number));
 
-    const lightTextColor = "#E2E8F0";
+    const lightTextColor = '#E2E8F0';
 
-    const axisGroup = g.append("g")
-      .attr("transform", `translate(0,${height})`)
-      .call(xAxis);
+    const axisGroup = g.append('g').attr('transform', `translate(0,${height})`).call(xAxis);
 
-    axisGroup.selectAll("text")
-      .style("fill", lightTextColor)
-      .style("font-size", "11px");
-    axisGroup.select(".domain").attr("stroke", lightTextColor);
-    axisGroup.selectAll(".tick line").attr("stroke", lightTextColor);
+    g.append('text')
+      .attr('x', width / 2)
+      .attr('y', height + margin.bottom - 10)
+      .attr('fill', lightTextColor)
+      .style('text-anchor', 'middle')
+      .style('font-size', '12px')
+      .text('Time (relative to checkpoint start)');
 
-    g.append("text")
-      .attr("x", width / 2)
-      .attr("y", height + margin.bottom - 10)
-      .attr("fill", lightTextColor)
-      .style("text-anchor", "middle")
-      .style("font-size", "12px")
-      .text("Time (relative to checkpoint start)");
-
-    const yLabels: string[] = [];
-    operators.forEach(op => {
-      op.subtasks.forEach((_, subtaskIndex) => {
-        yLabels.push(`${op.operatorId} [${subtaskIndex}]`);
-      });
-    });
-
-    let currentRow = 0;
-    operators.forEach(op => {
-      op.subtasks.forEach((subtask, subtaskIndex) => {
-        const labelText = subtaskIndex === 0 ? op.operatorId : `[${subtaskIndex}]`;
-        const isOperatorLabel = subtaskIndex === 0;
-
-        g.append("text")
-          .attr("class", "y-label")
-          .attr("x", -15)
-          .attr("y", (yScale(String(currentRow)) || 0) + yScale.bandwidth() / 2)
-          .attr("dy", "0.35em")
-          .style("text-anchor", "end")
-          .style("font-size", isOperatorLabel ? "12px" : "11px")
-          .style("font-weight", isOperatorLabel ? "bold" : "normal")
-          .style("fill", isOperatorLabel ? lightTextColor : "#A0AEC0")
-          .text(labelText);
-
-        currentRow++;
-      });
-    });
-
-    g.selectAll(".timeline-bar")
-      .data(flatData)
+    g.selectAll('.y-label')
+      .data(yLabels)
       .enter()
-      .append("rect")
-      .attr("class", "timeline-bar")
-      .attr("x", d => xScale(d.startTime))
-      .attr("y", d => yScale(String(d.row)) || 0)
-      .attr("width", d => Math.max(1, xScale(d.finishTime) - xScale(d.startTime)))
-      .attr("height", yScale.bandwidth())
-      .attr("fill", d => colorScale(d.spanType))
-      .attr("opacity", 0.9)
-      .attr("stroke", lightTextColor)
-      .attr("stroke-width", 0.5);
+      .append('text')
+      .attr('class', 'y-label')
+      .attr('x', -15)
+      .attr('y', (d, i) => (yPositions.get(i)?.y || 0) + (yPositions.get(i)?.height || 0) / 2)
+      .attr('dy', '0.35em')
+      .style('text-anchor', 'end')
+      .style('font-size', d => (d.isOperator ? '12px' : '11px'))
+      .style('stroke', lightTextColor)
+      .text(d => d.label);
 
     g.selectAll('.timeline-bar')
-      .on("mouseover", (event: MouseEvent, d: unknown) => {
+      .data(layoutData)
+      .enter()
+      .append('rect')
+      .attr('class', 'timeline-bar')
+      .attr('x', d => xScale(d.startTime))
+      .attr('y', d => (yPositions.get(d.row)?.y || 0) + d.lane * laneHeight)
+      .attr('width', d => Math.max(1, xScale(d.finishTime) - xScale(d.startTime)))
+      .attr('height', laneHeight - 2)
+      .attr('fill', d => colorScale(d.spanType))
+      .attr('opacity', 0.9)
+      .attr('stroke', lightTextColor)
+      .attr('stroke-width', 0.5);
+
+    g.selectAll('.timeline-bar')
+      .on('mouseover', (event: MouseEvent, d: unknown) => {
         const data = d as TimelineData;
-        d3.select(event.currentTarget as SVGRectElement).attr("opacity", 1);
+        d3.select(event.currentTarget as SVGRectElement).attr('opacity', 1);
 
+        let tooltipHtml = '';
+        if (data.subtaskIndex === -2) {
+          tooltipHtml = `
+              <strong>Global Event</strong><br/>
+              Type: ${data.spanType}<br/>
+              Duration: ${formatDuration(data.duration)}
+            `;
+        } else if (data.subtaskIndex === -1) {
+          tooltipHtml = `
+              <strong>${data.operator}</strong><br/>
+              Type: Metadata Write<br/>
+              Duration: ${formatDuration(data.duration)}
+            `;
+        } else {
+          // Subtask span
+          tooltipHtml = `
+              <strong>${data.operator}</strong><br/>
+              Subtask: ${data.subtaskIndex}<br/>
+              Type: ${data.spanType}<br/>
+              Duration: ${formatDuration(data.duration)}
+            `;
+        }
         tooltip
-          .style("opacity", 1)
-          .style("left", `${event.pageX + 10}px`)
-          .style("top", `${event.pageY - 10}px`)
-          .html(`
-            <strong>${data.operator}</strong><br/>
-            Subtask: ${data.subtaskIndex}<br/>
-            Type: ${data.spanType}<br/>
-            Duration: ${formatDuration(data.duration)}<br/>
-            Start: ${formatDuration(data.startTime)} (relative)<br/>
-            End: ${formatDuration(data.finishTime)} (relative)
-          `);
+          .style('opacity', 1)
+          .style('left', `${event.clientX + 10}px`)
+          .style('top', `${event.clientY - 10}px`)
+          .html(tooltipHtml);
       })
-      .on("mouseout", function() {
-        d3.select(this).attr("opacity", 0.9);
-        tooltip.style("opacity", 0);
+      .on('mouseout', function () {
+        d3.select(this).attr('opacity', 0.9);
+        tooltip.style('opacity', 0);
       });
 
-    const legend = g.append("g")
-      .attr("transform", `translate(${width + 20}, 0)`);
-
-    legend.selectAll(".legend-item")
-      .data(colorScale.domain())
-      .enter()
-      .append("g")
-      .attr("class", "legend-item")
-      .attr("transform", (d, i) => `translate(0, ${i * 20})`) // Decreased spacing for compact legend
-      .each(function(d) {
-        const item = d3.select(this);
-        item.append("rect")
-          .attr("width", 12)
-          .attr("height", 12)
-          .attr("fill", colorScale(d));
-        item.append("text")
-          .attr("x", 18)
-          .attr("y", 11)
-          .style("font-size", "11px") // Adjusted font size
-          .style("fill", lightTextColor)
-          .text(d);
-      });
-
-    g.selectAll(".grid-line")
-      .data(xScale.ticks(10))
-      .enter()
-      .append("line")
-      .attr("class", "grid-line")
-      .attr("x1", d => xScale(d))
-      .attr("x2", d => xScale(d))
-      .attr("y1", 0)
-      .attr("y2", height)
-      .attr("stroke", "#4A5568") // Darker grid lines (example: Chakra gray.600)
-      .attr("stroke-width", 0.5);
-
+    g.selectAll('.grid-line').attr('y2', height);
   }, [operators, checkpoint]);
 
   return (
     <VStack spacing={4} align="stretch">
-      <Box style={{ marginTop: '20px' }}>
+      <Box style={{ marginTop: '20px' }} overflowX="auto">
         <svg ref={svgRef}></svg>
         <div
           ref={tooltipRef}
           style={{
-            position: 'absolute',
-            padding: '4px',
-            background: 'rgba(26, 32, 44, 0.9)', // Matched to dark theme
+            position: 'fixed',
+            padding: '8px',
+            background: 'rgba(26, 32, 44, 0.9)',
             color: 'white',
             borderRadius: '4px',
             fontSize: '12px',
             pointerEvents: 'none',
             opacity: 0,
             transition: 'opacity 0.2s',
-            border: '1px solid #E2E8F0'
+            border: '1px solid #E2E8F0',
+            maxWidth: '300px',
           }}
         />
       </Box>
