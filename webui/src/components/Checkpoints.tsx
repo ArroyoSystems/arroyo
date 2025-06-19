@@ -15,24 +15,12 @@ import {
 } from '@chakra-ui/react';
 import { Checkpoint, Job, Pipeline, useCheckpointDetails } from '../lib/data_fetching';
 import { dataFormat } from '../lib/util';
-import CheckpointDetails from './CheckpointDetails';
+import { CheckpointDetails, formatDuration } from './CheckpointDetails';
 
 export interface CheckpointsProps {
   pipeline: Pipeline;
   job: Job;
   checkpoints: Array<Checkpoint>;
-}
-
-function formatDurationHMS(micros: number): string {
-  let millis = micros / 1000;
-  let h = Math.floor(millis / 1000 / 60 / 60);
-  let m = Math.floor((millis - h * 1000 * 60 * 60) / 1000 / 60);
-  let s = Math.floor((millis - h * 1000 * 60 * 60 - m * 1000 * 60) / 1000);
-
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(
-    2,
-    '0'
-  )}`;
 }
 
 const Checkpoints: React.FC<CheckpointsProps> = ({ pipeline, job, checkpoints }) => {
@@ -54,7 +42,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ pipeline, job, checkpoints })
     let checkpointBytes = checkpointDetails.map(d => d.bytes).reduce((a, b) => a + b, 0);
 
     const checkpointStats = (
-      <StatGroup width={718} border="1px solid #666" borderRadius="5px" marginTop={5} padding={3}>
+      <StatGroup width={800} border="1px solid #666" borderRadius="5px" marginTop={5} padding={3}>
         <Stat>
           <StatLabel>Started</StatLabel>
           <StatNumber>
@@ -77,7 +65,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ pipeline, job, checkpoints })
         </Stat>
         <Stat marginLeft={10}>
           <StatLabel>Duration</StatLabel>
-          <StatNumber>{formatDurationHMS(end - start)}</StatNumber>
+          <StatNumber>{formatDuration(end - start)}</StatNumber>
         </Stat>
         <Stat marginLeft={10}>
           <StatLabel>Total Size</StatLabel>
@@ -93,7 +81,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ pipeline, job, checkpoints })
           <Badge marginLeft={2}>{checkpoint.backend}</Badge>
         </Heading>
         {checkpointStats}
-        <CheckpointDetails operators={checkpointDetails} />
+        <CheckpointDetails operators={checkpointDetails} checkpoint={checkpoint} />
       </Flex>
     );
   }
