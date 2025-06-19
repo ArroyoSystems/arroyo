@@ -47,6 +47,13 @@
       "type": "string",
       "description": "The password for your mqtt cluster (if using auth)",
       "format": "var-str"
+    },
+    "maxPacketSize": {
+      "title": "Max Packet Size",
+      "type": "integer",
+      "description": "Maximum size for MQTT packets in bytes. Defaults to 10240.",
+      "minimum": 0,
+      "maximum": 4294967295
     }
   },
   "sensitive": ["password"],
