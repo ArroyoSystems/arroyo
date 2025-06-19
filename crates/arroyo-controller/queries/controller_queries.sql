@@ -59,14 +59,16 @@ UPDATE checkpoints
 SET
     operators = :operators,
     finish_time = :finish_time,
-    state = :state
+    state = :state,
+    event_spans = :event_spans
 WHERE pub_id = :pub_id;
 
 --! commit_checkpoint
 UPDATE checkpoints
 SET
     finish_time = :finish_time,
-    state = 'ready'
+    state = 'ready',
+    event_spans = :event_spans
 WHERE pub_id = :pub_id;
 
 --! mark_compacting

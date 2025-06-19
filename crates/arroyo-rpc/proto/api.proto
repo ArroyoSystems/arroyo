@@ -229,7 +229,7 @@ message ArroyoExecNode {
 enum TaskCheckpointEventType {
   ALIGNMENT_STARTED = 0;
   CHECKPOINT_STARTED = 1;
-  CHECKPOINT_OPERATOR_FINISHED = 2;
+  CHECKPOINT_OPERATOR_SETUP_FINISHED = 2;
   CHECKPOINT_SYNC_FINISHED = 3;
   CHECKPOINT_PRE_COMMIT = 4;
 }
@@ -252,6 +252,7 @@ message OperatorCheckpointDetail {
   uint64 start_time = 2;
   optional uint64 finish_time = 3;
   bool has_state = 4;
+  optional uint64 started_metadata_write = 6;
   map<uint32, TaskCheckpointDetail> tasks = 5;
 }
 

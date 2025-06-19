@@ -4,6 +4,14 @@ use std::{
     time::SystemTime,
 };
 
+use crate::{
+    committing_state::CommittingState,
+    tables::{
+        expiring_time_key_map::ExpiringTimeKeyTable, global_keyed_map::GlobalKeyedTable,
+        ErasedTable,
+    },
+    BackingStore, StateBackend,
+};
 use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::grpc::{
     self,
@@ -17,15 +25,6 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_types::{from_micros, to_micros};
 use tracing::{debug, warn};
-
-use crate::{
-    committing_state::CommittingState,
-    tables::{
-        expiring_time_key_map::ExpiringTimeKeyTable, global_keyed_map::GlobalKeyedTable,
-        ErasedTable,
-    },
-    BackingStore, StateBackend,
-};
 
 #[derive(Debug, Clone)]
 pub struct CheckpointState {
@@ -198,6 +197,7 @@ impl CheckpointState {
                 start_time: c.time,
                 finish_time: None,
                 has_state: false,
+                started_metadata_write: None,
                 tasks: HashMap::new(),
             })
             .tasks
@@ -220,7 +220,7 @@ impl CheckpointState {
                         api::TaskCheckpointEventType::CheckpointStarted
                     }
                     rpc::TaskCheckpointEventType::FinishedOperatorSetup => {
-                        api::TaskCheckpointEventType::CheckpointOperatorFinished
+                        api::TaskCheckpointEventType::CheckpointOperatorSetupFinished
                     }
                     rpc::TaskCheckpointEventType::FinishedSync => {
                         api::TaskCheckpointEventType::CheckpointSyncFinished
@@ -248,7 +248,7 @@ impl CheckpointState {
             .metadata
             .as_ref()
             .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?;
-        let detail = self
+        let operator_detail = self
             .operator_details
             .entry(c.operator_id.clone())
             .or_insert_with(|| OperatorCheckpointDetail {
@@ -256,8 +256,11 @@ impl CheckpointState {
                 start_time: metadata.start_time,
                 finish_time: None,
                 has_state: false,
+                started_metadata_write: None,
                 tasks: HashMap::new(),
-            })
+            });
+
+        let detail = operator_detail
             .tasks
             .entry(metadata.subtask_index)
             .or_insert_with(|| {
@@ -274,6 +277,7 @@ impl CheckpointState {
                 }
             });
         detail.bytes = Some(metadata.bytes);
+        detail.finish_time = Some(c.time);
 
         let operator_state = self
             .operator_state
@@ -325,6 +329,8 @@ impl CheckpointState {
                         .insert(table.clone(), committing_data);
                 }
             }
+
+            operator_detail.started_metadata_write = Some(to_micros(SystemTime::now()));
             StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
                 start_time: to_micros(operator_state.start_time.unwrap()),
                 finish_time: to_micros(operator_state.finish_time.unwrap()),
@@ -341,6 +347,8 @@ impl CheckpointState {
             })
             .await
             .expect("Should be able to write operator checkpoint metadata");
+
+            operator_detail.finish_time = Some(to_micros(SystemTime::now()));
         }
         Ok(())
     }
@@ -357,7 +365,7 @@ impl CheckpointState {
         )
     }
 
-    pub async fn save_state(&self) -> Result<()> {
+    pub async fn write_metadata(&mut self) -> Result<()> {
         let finish_time = SystemTime::now();
         StateBackend::write_checkpoint_metadata(CheckpointMetadata {
             job_id: self.job_id.to_string(),
