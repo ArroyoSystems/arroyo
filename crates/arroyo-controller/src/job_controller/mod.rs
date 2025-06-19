@@ -22,6 +22,7 @@ use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
 use crate::types::public::CheckpointState as DbCheckpointState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
 use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::config::config;
 use arroyo_rpc::notify_db;
@@ -106,6 +107,9 @@ pub struct RunningJobModel {
     metrics: JobMetrics,
     metric_update_task: Option<JoinHandle<()>>,
     last_updated_metrics: Instant,
+
+    // checkpoint-wide events
+    pub checkpoint_spans: Vec<JobCheckpointSpan>,
 }
 
 impl std::fmt::Debug for RunningJobModel {
@@ -122,25 +126,28 @@ impl std::fmt::Debug for RunningJobModel {
 }
 
 impl RunningJobModel {
-    pub async fn update_db(
-        checkpoint_state: &CheckpointState,
-        db: &DatabaseSource,
-    ) -> anyhow::Result<()> {
+    pub async fn update_db(&self, db: &DatabaseSource) -> anyhow::Result<()> {
         let c = db.client().await?;
 
-        controller_queries::execute_update_checkpoint(
-            &c,
-            &serde_json::to_value(&checkpoint_state.operator_details).unwrap(),
-            &None,
-            &DbCheckpointState::inprogress,
-            &checkpoint_state.checkpoint_id(),
-        )
-        .await?;
+        if let Some(CheckpointingOrCommittingState::Checkpointing(checkpoint_state)) =
+            &self.checkpoint_state
+        {
+            controller_queries::execute_update_checkpoint(
+                &c,
+                &serde_json::to_value(&checkpoint_state.operator_details).unwrap(),
+                &None,
+                &DbCheckpointState::inprogress,
+                &serde_json::to_value(&self.checkpoint_spans).unwrap(),
+                &checkpoint_state.checkpoint_id(),
+            )
+            .await?;
+        }
 
         Ok(())
     }
 
     pub async fn update_checkpoint_in_db(
+        &self,
         checkpoint_state: &CheckpointState,
         db: &DatabaseSource,
         db_checkpoint_state: DbCheckpointState,
@@ -157,6 +164,7 @@ impl RunningJobModel {
             &operator_state,
             &finish_time,
             &db_checkpoint_state,
+            &serde_json::to_value(&self.checkpoint_spans).unwrap(),
             &checkpoint_state.checkpoint_id(),
         )
         .await?;
@@ -164,13 +172,22 @@ impl RunningJobModel {
         Ok(())
     }
 
-    pub async fn finish_committing(checkpoint_id: &str, db: &DatabaseSource) -> anyhow::Result<()> {
+    pub async fn finish_committing(
+        &self,
+        checkpoint_id: &str,
+        db: &DatabaseSource,
+    ) -> anyhow::Result<()> {
         info!("finishing committing");
         let finish_time = SystemTime::now();
 
         let c = db.client().await?;
-        controller_queries::execute_commit_checkpoint(&c, &finish_time.into(), &checkpoint_id)
-            .await?;
+        controller_queries::execute_commit_checkpoint(
+            &c,
+            &finish_time.into(),
+            &serde_json::to_value(&self.checkpoint_spans).unwrap(),
+            &checkpoint_id,
+        )
+        .await?;
 
         Ok(())
     }
@@ -194,7 +211,6 @@ impl RunningJobModel {
                         match checkpoint_state {
                             CheckpointingOrCommittingState::Checkpointing(checkpoint_state) => {
                                 checkpoint_state.checkpoint_event(c)?;
-                                Self::update_db(checkpoint_state, db).await?
                             }
                             CheckpointingOrCommittingState::Committing(committing_state) => {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
@@ -207,6 +223,7 @@ impl RunningJobModel {
                                 }
                             }
                         };
+                        self.update_db(db).await?;
                     }
                 } else {
                     debug!(
@@ -232,7 +249,18 @@ impl RunningJobModel {
                             bail!("Received checkpoint finished but not checkpointing");
                         };
                         checkpoint_state.checkpoint_finished(c).await?;
-                        Self::update_db(checkpoint_state, db).await?;
+
+                        if checkpoint_state.done() {
+                            if let Some(e) = self
+                                .checkpoint_spans
+                                .iter_mut()
+                                .find(|e| e.event == JobCheckpointEventType::CheckpointingOperators)
+                            {
+                                e.finish()
+                            }
+                        }
+
+                        self.update_db(db).await?;
                     }
                 } else {
                     warn!(
@@ -337,6 +365,10 @@ impl RunningJobModel {
             then_stop
         );
 
+        self.checkpoint_spans.clear();
+        self.start_or_get_span(JobCheckpointEventType::Checkpointing);
+        self.start_or_get_span(JobCheckpointEventType::CheckpointingOperators);
+
         // TODO: maybe parallelize
         for worker in self.workers.values_mut() {
             worker
@@ -385,6 +417,7 @@ impl RunningJobModel {
             return Ok(());
         }
 
+        self.start_or_get_span(JobCheckpointEventType::Compacting);
         info!(
             message = "Compacting state",
             job_id = *self.job_id,
@@ -419,6 +452,8 @@ impl RunningJobModel {
                 }
             }
         }
+        self.start_or_get_span(JobCheckpointEventType::Compacting)
+            .finish();
 
         info!(
             message = "Finished compaction",
@@ -432,8 +467,11 @@ impl RunningJobModel {
         if self.checkpoint_state.as_ref().unwrap().done() {
             let state = self.checkpoint_state.take().unwrap();
             match state {
-                CheckpointingOrCommittingState::Checkpointing(checkpointing) => {
-                    checkpointing.save_state().await?;
+                CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
+                    let metadata_span =
+                        self.start_or_get_span(JobCheckpointEventType::WritingMetadata);
+                    checkpointing.write_metadata().await?;
+                    metadata_span.finish();
 
                     let committing_state = checkpointing.committing_state();
                     let duration = checkpointing
@@ -443,7 +481,9 @@ impl RunningJobModel {
                         .as_secs_f32();
                     // shortcut if committing is unnecessary
                     if committing_state.done() {
-                        Self::update_checkpoint_in_db(&checkpointing, db, DbCheckpointState::ready)
+                        self.start_or_get_span(JobCheckpointEventType::Checkpointing)
+                            .finish();
+                        self.update_checkpoint_in_db(&checkpointing, db, DbCheckpointState::ready)
                             .await?;
                         self.last_checkpoint = Instant::now();
                         self.checkpoint_state = None;
@@ -458,7 +498,7 @@ impl RunningJobModel {
                         // trigger a DB backup now that we're done checkpointing
                         notify_db();
                     } else {
-                        Self::update_checkpoint_in_db(
+                        self.update_checkpoint_in_db(
                             &checkpointing,
                             db,
                             DbCheckpointState::committing,
@@ -473,6 +513,9 @@ impl RunningJobModel {
                             job_id = *self.job_id,
                             epoch = self.epoch,
                         );
+
+                        self.start_or_get_span(JobCheckpointEventType::Committing);
+
                         for worker in self.workers.values_mut() {
                             worker
                                 .connect
@@ -485,7 +528,12 @@ impl RunningJobModel {
                     }
                 }
                 CheckpointingOrCommittingState::Committing(committing) => {
-                    Self::finish_committing(committing.checkpoint_id(), db).await?;
+                    self.start_or_get_span(JobCheckpointEventType::Committing)
+                        .finish();
+                    self.start_or_get_span(JobCheckpointEventType::Checkpointing)
+                        .finish();
+                    self.finish_committing(committing.checkpoint_id(), db)
+                        .await?;
                     self.last_checkpoint = Instant::now();
                     self.checkpoint_state = None;
                     info!(
@@ -549,6 +597,15 @@ impl RunningJobModel {
         self.tasks
             .iter()
             .all(|(_, t)| t.state == TaskState::Finished)
+    }
+
+    pub fn start_or_get_span(&mut self, event: JobCheckpointEventType) -> &mut JobCheckpointSpan {
+        if let Some(idx) = self.checkpoint_spans.iter().position(|e| e.event == event) {
+            return &mut self.checkpoint_spans[idx];
+        }
+
+        self.checkpoint_spans.push(JobCheckpointSpan::now(event));
+        self.checkpoint_spans.last_mut().unwrap()
     }
 }
 
@@ -633,6 +690,7 @@ impl JobController {
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
                 program,
+                checkpoint_spans: vec![],
             },
             config,
             cleanup_task: None,

@@ -1,0 +1,1 @@
+alter table checkpoints add column event_spans JSONB DEFAULT '[]' NOT NULL;

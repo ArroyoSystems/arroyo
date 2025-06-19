@@ -1,0 +1,1 @@
+alter table checkpoints add column event_spans TEXT DEFAULT '[]' NOT NULL;

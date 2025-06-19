@@ -1,6 +1,6 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use arroyo_rpc::api_types::checkpoints::{
-    Checkpoint, CheckpointEventSpan, CheckpointSpanType, OperatorCheckpointGroup,
+    Checkpoint, CheckpointEventSpan, JobCheckpointSpan, OperatorCheckpointGroup,
     SubtaskCheckpointGroup,
 };
 use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
@@ -268,7 +268,7 @@ pub async fn get_job_checkpoints(
             .await
             .map_err(log_and_map)?
             .into_iter()
-            .map(|m| m.into())
+            .filter_map(|m| m.try_into().ok())
             .collect();
 
     Ok(Json(CheckpointCollection { data: checkpoints }))
@@ -284,11 +284,6 @@ fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEven
         .events
         .iter()
         .find(|e| e.event_type == TaskCheckpointEventType::CheckpointStarted as i32);
-
-    let operator_finished = subtask_details
-        .events
-        .iter()
-        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointOperatorFinished as i32);
 
     let sync_finished = subtask_details
         .events
@@ -306,7 +301,7 @@ fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEven
         (alignment_started, checkpoint_started)
     {
         event_spans.push(CheckpointEventSpan {
-            span_type: CheckpointSpanType::Alignment,
+            event: "Alignment".to_string(),
             description: "Time spent waiting for alignment barriers".to_string(),
             start_time: alignment_started.time,
             finish_time: checkpoint_started.time,
@@ -315,28 +310,28 @@ fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEven
 
     if let (Some(checkpoint_started), Some(sync_finished)) = (checkpoint_started, sync_finished) {
         event_spans.push(CheckpointEventSpan {
-            span_type: CheckpointSpanType::Sync,
-            description: "The synchronous part of checkpointing.".to_string(),
+            event: "Sync".to_string(),
+            description: "The synchronous part of checkpointing".to_string(),
             start_time: checkpoint_started.time,
             finish_time: sync_finished.time,
         });
     }
 
-    if let (Some(checkpoint_started), Some(operator_finished)) =
-        (checkpoint_started, operator_finished)
+    if let (Some(async_started), Some(checkpoint_finished)) =
+        (sync_finished, subtask_details.finish_time)
     {
         event_spans.push(CheckpointEventSpan {
-            span_type: CheckpointSpanType::Async,
-            description: "The asynchronous part of checkpointing.".to_string(),
-            start_time: checkpoint_started.time,
-            finish_time: operator_finished.time,
+            event: "Async".to_string(),
+            description: "The asynchronous part of checkpointing".to_string(),
+            start_time: async_started.time,
+            finish_time: checkpoint_finished,
         });
     };
-    if let (Some(operator_finished), Some(pre_commit)) = (operator_finished, pre_commit) {
+    if let (Some(operator_finished), Some(pre_commit)) = (subtask_details.finish_time, pre_commit) {
         event_spans.push(CheckpointEventSpan {
-            span_type: CheckpointSpanType::Committing,
-            description: "Committing the checkpoint.".to_string(),
-            start_time: operator_finished.time,
+            event: "Committing".to_string(),
+            description: "Committing the checkpoint".to_string(),
+            start_time: operator_finished,
             finish_time: pre_commit.time,
         });
     }
@@ -411,6 +406,8 @@ pub async fn get_checkpoint_details(
             operators.push(OperatorCheckpointGroup {
                 operator_id: operator_id.to_string(),
                 bytes: operator_bytes,
+                started_metadata_write: operator_details.started_metadata_write,
+                finish_time: operator_details.finish_time,
                 subtasks,
             });
         });
@@ -529,13 +526,18 @@ pub async fn get_jobs(
     }))
 }
 
-impl From<DbCheckpoint> for Checkpoint {
-    fn from(val: DbCheckpoint) -> Self {
-        Checkpoint {
+impl TryFrom<DbCheckpoint> for Checkpoint {
+    type Error = anyhow::Error;
+
+    fn try_from(val: DbCheckpoint) -> anyhow::Result<Self> {
+        let events: Vec<JobCheckpointSpan> = serde_json::from_value(val.event_spans)?;
+
+        Ok(Checkpoint {
             epoch: val.epoch as u32,
             backend: val.state_backend,
             start_time: to_micros(val.start_time),
             finish_time: val.finish_time.map(to_micros),
-        }
+            events: events.into_iter().map(|e| e.into()).collect(),
+        })
     }
 }

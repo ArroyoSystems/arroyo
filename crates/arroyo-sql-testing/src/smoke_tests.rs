@@ -176,7 +176,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
         }
     }
 
-    checkpoint_state.save_state().await.unwrap();
+    checkpoint_state.write_metadata().await.unwrap();
 
     info!("Smoke test checkpoint completed");
 }

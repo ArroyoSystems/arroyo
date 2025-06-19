@@ -908,6 +908,7 @@ dependencies = [
  "parquet",
  "prometheus",
  "prost",
+ "serde",
  "tokio",
  "tracing",
 ]

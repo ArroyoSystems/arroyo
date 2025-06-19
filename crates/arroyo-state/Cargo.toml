@@ -28,3 +28,4 @@ prost = {workspace = true}
 prometheus = { workspace = true }
 lazy_static = "1.4.0"
 object_store = { workspace = true }
+serde = { version = "1.0.219", features = ["derive"] }

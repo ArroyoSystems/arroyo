@@ -324,7 +324,6 @@ impl IntoResponse for HttpError {
         NewlineDelimitedFraming,
         PaginationQueryParams,
         CheckpointEventSpan,
-        CheckpointSpanType,
         OperatorCheckpointGroupCollection,
         SubtaskCheckpointGroup,
         OperatorCheckpointGroup,
