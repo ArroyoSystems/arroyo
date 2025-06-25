@@ -96,10 +96,7 @@ const PipelineRow: React.FC<PipelineRowProps> = ({
   return (
     <Tr key={pipeline.id}>
       <Td key={'name'} minWidth={230} maxWidth={'400px'}>
-        <Link
-          href={`/pipelines/${pipeline.id}`}
-          onClick={() => navigate(`/pipelines/${pipeline.id}`)}
-        >
+        <Link onClick={() => navigate(`/pipelines/${pipeline.id}`)}>
           <Indicator content={pipeline.name} label={pipeline.id} />
         </Link>
       </Td>

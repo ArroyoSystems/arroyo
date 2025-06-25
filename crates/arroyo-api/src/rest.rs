@@ -93,7 +93,7 @@ async fn index_html(headers: HeaderMap) -> Response {
     let basename = headers
         .get(&BASENAME_HEADER)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("/");
+        .unwrap_or("");
 
     match Assets::get("index.html") {
         Some(content) => {
@@ -116,7 +116,8 @@ async fn index_html(headers: HeaderMap) -> Response {
                         "false"
                     },
                 )
-                .replace("{{BASENAME}}", basename);
+                .replace("{{BASENAME}}", basename)
+                .replace("/assets", &format!("{basename}/assets"));
 
             Html(replaced).into_response()
         }

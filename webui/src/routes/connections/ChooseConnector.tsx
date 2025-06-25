@@ -72,7 +72,7 @@ export function ChooseConnector() {
       <Stack spacing={6}>
         <Breadcrumb>
           <BreadcrumbItem>
-            <BreadcrumbLink as={Link} href="/connections">
+            <BreadcrumbLink as={Link} onClick={() => navigate('/connections')}>
               Connections
             </BreadcrumbLink>
           </BreadcrumbItem>

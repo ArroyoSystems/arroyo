@@ -94,7 +94,10 @@ const Sidebar = ({
                   <motion.img
                     layout
                     style={{ height: 35 }}
-                    src={collapsed ? '/icon.svg' : '/logo.svg'}
+                    src={
+                      window.__ARROYO_BASENAME +
+                      (collapsed ? '/assets/icon.svg' : '/assets/logo.svg')
+                    }
                   />
                 </Link>
               </Flex>
