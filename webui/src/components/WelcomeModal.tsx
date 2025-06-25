@@ -27,7 +27,7 @@ const WelcomeModal: React.FC = () => {
       <ModalContent padding={8}>
         <ModalCloseButton onClick={disableTour} />
         <ModalBody display={'flex'} gap={6} flexDirection={'column'} alignItems={'center'}>
-          <img width="180" src="/logo.svg" />
+          <img width="180" src={`${window.__ARROYO_BASENAME}/assets/logo.svg`} />
           <Text fontSize={'md'}>
             Welcome! Arroyo is a distributed stream processing engine, designed to efficiently
             perform stateful computations on streams of data.

@@ -542,6 +542,8 @@ impl StorageProvider {
             canonical_url.push_str(key.as_ref());
         }
 
+        println!("ENDPOINT = {:?}", endpoint);
+
         builder = builder
             .with_endpoint(endpoint)
             .with_virtual_hosted_style_request(false);
