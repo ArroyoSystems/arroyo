@@ -310,7 +310,7 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
     guard.into_spawn_task(async move {
         let mut attempts = 0;
         loop {
-            match controller_client().await {
+            match controller_client("node", &config.node.tls).await {
                 Ok(mut controller) => {
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                     controller

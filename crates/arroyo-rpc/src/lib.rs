@@ -40,7 +40,7 @@ use tokio::sync::{
     mpsc::{channel, Receiver, Sender},
     oneshot,
 };
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint, Identity};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     service::Interceptor,
@@ -794,15 +794,21 @@ pub fn native_cert_store() -> Arc<RootCertStore> {
     CERTS.clone()
 }
 
-pub async fn grpc_channel_builder(endpoint: String, tls: &Option<TlsConfig>) -> Result<Endpoint> {
-    if config().is_tls_enabled(tls) {
+pub async fn grpc_channel_builder(
+    our_name: &str,
+    endpoint: String,
+    our_tls: &Option<TlsConfig>,
+    target_tls: &Option<TlsConfig>,
+) -> Result<Endpoint> {
+    let config = config();
+    if let Some(target_tls) = config.get_tls_config(target_tls) {
         let mut endpoint = Url::parse(&endpoint)?;
         endpoint
             .set_scheme("https")
             .map_err(|_| anyhow!("invalid URL for gRPC endpoint: {}", endpoint))?;
         debug!("connecting to grpc endpoint via TLS {endpoint}");
         let b = Channel::from_shared(endpoint.to_string())?;
-        let mut config = ClientTlsConfig::new().with_enabled_roots();
+        let mut config_builder = ClientTlsConfig::new().with_enabled_roots();
 
         // Workaround for https://github.com/hyperium/tonic/issues/1696
         let host = endpoint
@@ -810,10 +816,19 @@ pub async fn grpc_channel_builder(endpoint: String, tls: &Option<TlsConfig>) -> 
             .ok_or_else(|| anyhow!("invalid host in endpoint {}", endpoint))?;
         if let Host::Ipv6(ip) = host {
             // this is an IPv6 address
-            config = config.domain_name(ip.to_string());
+            config_builder = config_builder.domain_name(ip.to_string());
         }
 
-        Ok(b.tls_config(config).context("configuring TLS")?)
+        if target_tls.mtls_ca_file.is_some() {
+            let our_tls = config.get_tls_config(our_tls)
+                .ok_or_else(|| anyhow!("mTLS is enabled for {endpoint}, but {our_name} service is not configured with TLS"))?
+                .load()
+                .await?;
+
+            config_builder = config_builder.identity(Identity::from_pem(our_tls.cert, our_tls.key));
+        }
+
+        Ok(b.tls_config(config_builder).context("configuring TLS")?)
     } else {
         debug!("connecting to grpc endpoint {endpoint}");
         Ok(Channel::from_shared(endpoint.to_string())?)
@@ -821,13 +836,24 @@ pub async fn grpc_channel_builder(endpoint: String, tls: &Option<TlsConfig>) -> 
 }
 
 /// Connect to a gRPC service with optional TLS
-pub async fn connect_grpc(endpoint: String, tls: &Option<TlsConfig>) -> Result<Channel> {
-    Ok(grpc_channel_builder(endpoint, tls).await?.connect().await?)
+pub async fn connect_grpc(
+    our_name: &str,
+    endpoint: String,
+    our_tls: &Option<TlsConfig>,
+    tls: &Option<TlsConfig>,
+) -> Result<Channel> {
+    Ok(grpc_channel_builder(our_name, endpoint, our_tls, tls)
+        .await?
+        .connect()
+        .await?)
 }
 
-pub async fn controller_client() -> Result<ControllerGrpcClient<Channel>> {
+pub async fn controller_client(
+    our_name: &str,
+    our_tls: &Option<TlsConfig>,
+) -> Result<ControllerGrpcClient<Channel>> {
     let endpoint = config().controller_endpoint();
-    let channel = connect_grpc(endpoint, &config().controller.tls).await?;
+    let channel = connect_grpc(our_name, endpoint, our_tls, &config().controller.tls).await?;
     Ok(ControllerGrpcClient::new(channel))
 }
 

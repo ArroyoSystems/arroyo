@@ -31,7 +31,7 @@ use tokio_rustls::rustls::pki_types::{IpAddr, ServerName};
 use tokio_stream::StreamExt;
 
 use arroyo_operator::inq_reader::InQReader;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{config, TlsConfig};
 use arroyo_rpc::intern;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use url::{Host, Url};
@@ -295,21 +295,22 @@ impl OutNetworkLink {
         for i in 0..10 {
             match TcpStream::connect(&dest).await {
                 Ok(tcp_stream) => {
-                    let network_stream = if config.is_tls_enabled(&config.worker.tls) {
-                        match Self::connect_tls(tcp_stream, dest).await {
-                            Ok(tls_stream) => NetworkStream::TlsClient(tls_stream),
-                            Err(e) => {
-                                warn!("Failed to establish TLS connection to {dest}: {:?}", e);
-                                tokio::time::sleep(Duration::from_millis(
-                                    (i + 1) * (50 + rand.random_range(1..50)),
-                                ))
-                                .await;
-                                continue;
+                    let network_stream =
+                        if let Some(tls) = config.get_tls_config(&config.worker.tls) {
+                            match Self::connect_tls(tcp_stream, dest, tls).await {
+                                Ok(tls_stream) => NetworkStream::TlsClient(tls_stream),
+                                Err(e) => {
+                                    warn!("Failed to establish TLS connection to {dest}: {:?}", e);
+                                    tokio::time::sleep(Duration::from_millis(
+                                        (i + 1) * (50 + rand.random_range(1..50)),
+                                    ))
+                                    .await;
+                                    continue;
+                                }
                             }
-                        }
-                    } else {
-                        NetworkStream::Plain(tcp_stream)
-                    };
+                        } else {
+                            NetworkStream::Plain(tcp_stream)
+                        };
 
                     return Self {
                         stream: BufWriter::new(network_stream),
@@ -331,8 +332,9 @@ impl OutNetworkLink {
     async fn connect_tls(
         tcp_stream: TcpStream,
         dest: &str,
+        tls: &TlsConfig,
     ) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
-        let client_config = arroyo_server_common::tls::create_tcp_client_tls_config().await?;
+        let client_config = arroyo_server_common::tls::create_tcp_client_tls_config(tls).await?;
         let connector = TlsConnector::from(client_config);
 
         let endpoint = Url::parse(&format!("tcp://{dest}")).context("invalid endpoint")?;

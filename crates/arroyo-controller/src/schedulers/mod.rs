@@ -346,7 +346,13 @@ impl NodeScheduler {
     }
 
     async fn client(node: &NodeStatus) -> anyhow::Result<NodeGrpcClient<Channel>> {
-        let channel = connect_grpc(format!("http://{}", node.addr), &config().node.tls).await?;
+        let channel = connect_grpc(
+            "controller",
+            format!("http://{}", node.addr),
+            &config().controller.tls,
+            &config().node.tls,
+        )
+        .await?;
         Ok(NodeGrpcClient::new(channel))
     }
 

@@ -119,12 +119,17 @@ async fn handle_worker_connect<'a>(
                 );
 
                 for i in 0..3 {
-                    match grpc_channel_builder(rpc_address.clone(), &config().worker.tls)
-                        .await
-                        .unwrap()
-                        .timeout(Duration::from_secs(90))
-                        .connect()
-                        .await
+                    match grpc_channel_builder(
+                        "controller",
+                        rpc_address.clone(),
+                        &config().controller.tls,
+                        &config().worker.tls,
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(Duration::from_secs(90))
+                    .connect()
+                    .await
                     {
                         Ok(channel) => {
                             {

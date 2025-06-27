@@ -32,7 +32,7 @@ use tower::layer::util::Stack;
 use tower::{Layer, Service};
 use tower_http::classify::{GrpcCode, GrpcErrorsAsFailures, SharedClassifier};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
-
+use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::metadata::LevelFilter;
 use tracing::{debug, info, span, Level};
 use tracing_subscriber::fmt::format::{FmtSpan, Format};
@@ -40,7 +40,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
-use arroyo_rpc::config::{config, LogFormat};
+use arroyo_rpc::config::{config, ApiAuthMode, LogFormat};
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_log::LogTracer;
 use uuid::Uuid;
@@ -285,7 +285,7 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
     let state = Arc::new(AdminState {
         name: format!("arroyo-{}", service),
     });
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/status", get(status))
         .route("/name", get(root))
         .route("/metrics", get(metrics))
@@ -296,8 +296,13 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
         .route("/debug/pprof/profile", get(handle_get_profile))
         .with_state(state);
 
-    if let Some(tls_config) = config.get_tls_config(&config.admin.tls) {
-        let tls_config = tls::create_http_tls_config(tls_config).await?;
+    if let ApiAuthMode::StaticApiKey { api_key } = &config.admin.auth_mode {
+        app = app.layer(ValidateRequestHeaderLayer::bearer(api_key));
+    };
+
+    let tls_config =
+        tls::create_http_tls_config(&config.admin.auth_mode, &config.admin.tls).await?;
+    if let Some(tls_config) = tls_config {
         info!("Starting {} HTTPS admin server on {}", service, addr);
 
         axum_server::bind_rustls(addr, tls_config)

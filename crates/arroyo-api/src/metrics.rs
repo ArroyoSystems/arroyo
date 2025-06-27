@@ -41,13 +41,17 @@ pub async fn get_operator_metric_groups(
     )
     .await?;
 
-    let channel =
-        arroyo_rpc::connect_grpc(config().controller_endpoint(), &config().controller.tls)
-            .await
-            .map_err(|e| {
-                error!("Failed to connect to controller service: {}", e);
-                service_unavailable("controller-service")
-            })?;
+    let channel = arroyo_rpc::connect_grpc(
+        "api",
+        config().controller_endpoint(),
+        &config().api.tls,
+        &config().controller.tls,
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to connect to controller service: {}", e);
+        service_unavailable("controller-service")
+    })?;
 
     let mut controller = ControllerGrpcClient::new(channel)
         .accept_compressed(CompressionEncoding::Zstd)
