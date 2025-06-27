@@ -203,7 +203,7 @@ impl WorkerServer {
         let local_addr = listener.local_addr()?;
 
         let mut client = retry!(
-            controller_client().await,
+            controller_client("worker", &config.worker.tls).await,
             2,
             Duration::from_millis(100),
             Duration::from_secs(2),
@@ -282,7 +282,7 @@ impl WorkerServer {
         let cancel_token = self.shutdown_guard.token();
 
         async move {
-            let mut controller = controller_client()
+            let mut controller = controller_client("worker", &config().worker.tls)
                 .await
                 .expect("Unable to connect to controller");
 

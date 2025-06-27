@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
 use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::rpc::{SinkDataReq, TableConfig};
@@ -37,7 +38,7 @@ impl ArrowOperator for PreviewSink {
         self.row = *table.get(&ctx.task_info.task_index).unwrap_or(&0);
 
         self.client = Some(
-            controller_client()
+            controller_client("worker", &config().worker.tls)
                 .await
                 .expect("could not connect to controller"),
         );

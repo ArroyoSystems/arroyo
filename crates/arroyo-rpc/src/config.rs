@@ -311,6 +311,21 @@ impl Config {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, tag = "type")]
+pub enum ApiAuthMode {
+    #[default]
+    None,
+    Mtls {
+        #[serde(rename = "ca-cert-file")]
+        ca_cert_file: Option<PathBuf>,
+    },
+    StaticApiKey {
+        #[serde(rename = "api-key")]
+        api_key: Sensitive<String>,
+    },
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ApiConfig {
@@ -326,6 +341,9 @@ pub struct ApiConfig {
     /// TLS configuration for API service
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+
+    #[serde(default)]
+    pub auth_mode: ApiAuthMode,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -454,6 +472,9 @@ pub struct AdminConfig {
     /// TLS configuration for admin service
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+
+    #[serde(default)]
+    pub auth_mode: ApiAuthMode,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -790,11 +811,15 @@ pub struct TlsConfig {
 
     /// Path to the private key file (PEM format)
     pub key_file: Option<PathBuf>,
+
+    /// Path to a CA cert; if set mTLS will be enabled on all links
+    pub mtls_ca_file: Option<PathBuf>,
 }
 
 pub struct LoadedTlsConfig {
     pub cert: Vec<u8>,
     pub key: Vec<u8>,
+    pub mtls_ca: Option<Vec<u8>>,
 }
 
 impl TlsConfig {
@@ -809,9 +834,16 @@ impl TlsConfig {
     }
 
     pub async fn load(&self) -> anyhow::Result<LoadedTlsConfig> {
+        let mtls_ca = if let Some(mtls_file) = &self.mtls_ca_file {
+            Some(Self::read("mtls-ca-file", Some(mtls_file)).await?)
+        } else {
+            None
+        };
+
         Ok(LoadedTlsConfig {
             cert: Self::read("cert-file", self.cert_file.as_ref()).await?,
             key: Self::read("key-file", self.key_file.as_ref()).await?,
+            mtls_ca,
         })
     }
 }

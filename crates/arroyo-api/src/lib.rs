@@ -12,6 +12,7 @@ use tokio::net::TcpListener;
 use tonic::transport::Channel;
 use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
+use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::{error, info};
 use utoipa::OpenApi;
 
@@ -40,7 +41,7 @@ use crate::rest::__path_ping;
 use crate::rest_utils::{service_unavailable, ErrorResp};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{config, ApiAuthMode};
 use arroyo_rpc::formats::*;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_server_common::shutdown::ShutdownGuard;
@@ -122,7 +123,7 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
     let config = config();
     let endpoint = config.compiler_endpoint();
 
-    let channel = arroyo_rpc::connect_grpc(endpoint, &config.compiler.tls)
+    let channel = arroyo_rpc::connect_grpc("api", endpoint, &config.api.tls, &config.compiler.tls)
         .await
         .map_err(|e| {
             error!("Failed to connect to compiler service: {}", e);
@@ -136,7 +137,7 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
     let config = config();
     let addr = SocketAddr::new(config.api.bind_address, config.api.http_port);
 
-    let app = rest::create_rest_app(database).layer(
+    let mut app = rest::create_rest_app(database).layer(
         CompressionLayer::new().zstd(true).compress_when(
             DefaultPredicate::new()
                 // compression doesn't work for server-sent events
@@ -145,8 +146,15 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
         ),
     );
 
-    if let Some(tls_config) = config.get_tls_config(&config.api.tls) {
-        let tls_config = arroyo_server_common::tls::create_http_tls_config(tls_config).await?;
+    if let ApiAuthMode::StaticApiKey { api_key } = &config.api.auth_mode {
+        app = app.layer(ValidateRequestHeaderLayer::bearer(api_key));
+    };
+
+    let tls_config =
+        arroyo_server_common::tls::create_http_tls_config(&config.api.auth_mode, &config.api.tls)
+            .await?;
+
+    if let Some(tls_config) = tls_config {
         info!("Starting HTTPS API server on {:?}", addr);
 
         guard.into_spawn_task(wrap_start("api", addr, async move {

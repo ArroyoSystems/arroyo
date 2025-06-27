@@ -34,6 +34,7 @@ use crate::rest_utils::{
 };
 use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
+use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
 use cornucopia_async::DatabaseSource;
 
@@ -452,7 +453,9 @@ pub async fn get_job_output(
     }
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 
-    let mut controller = controller_client().await.map_err(log_and_map)?;
+    let mut controller = controller_client("api", &config().api.tls)
+        .await
+        .map_err(log_and_map)?;
 
     let mut stream = controller
         .subscribe_to_output(Request::new(grpc::rpc::GrpcOutputSubscription {
