@@ -108,7 +108,7 @@ pub struct JobStatus {
 
 impl JobStatus {
     pub async fn update_db(&self, database: &DatabaseSource) -> Result<(), String> {
-        let c = database.client().await.map_err(|e| format!("{:?}", e))?;
+        let c = database.client().await.map_err(|e| format!("{e:?}"))?;
         let res = queries::controller_queries::execute_update_job_status(
             &c,
             &self.state,
@@ -124,7 +124,7 @@ impl JobStatus {
             &*self.id,
         )
         .await
-        .map_err(|e| format!("{:?}", e))?;
+        .map_err(|e| format!("{e:?}"))?;
 
         if res == 0 {
             Err("Job status does not exist".to_string())
@@ -417,7 +417,7 @@ impl ControllerGrpc for ControllerServer {
             .lock()
             .await
             .get(&job_id)
-            .ok_or_else(|| Status::not_found(format!("Job {} does not exist", job_id)))?
+            .ok_or_else(|| Status::not_found(format!("Job {job_id} does not exist")))?
             .state
             .read()
             .unwrap()
@@ -525,8 +525,7 @@ impl ControllerServer {
         if let Some(sm) = jobs.get_mut(job_id) {
             if let Err(e) = sm.send(msg).await {
                 Err(Status::failed_precondition(format!(
-                    "Cannot handle message for {}: {}",
-                    job_id, e
+                    "Cannot handle message for {job_id}: {e}"
                 )))
             } else {
                 Ok(())
@@ -534,8 +533,7 @@ impl ControllerServer {
         } else {
             warn!(message = "Received message for unknown job id", job_id);
             Err(Status::failed_precondition(format!(
-                "No job with id {}",
-                job_id
+                "No job with id {job_id}"
             )))
         }
     }

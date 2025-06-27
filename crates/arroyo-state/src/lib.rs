@@ -178,8 +178,7 @@ pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvide
             StorageProvider::for_url(storage_url)
                 .await
                 .context(format!(
-                    "failed to construct checkpoint backend for URL {}",
-                    storage_url
+                    "failed to construct checkpoint backend for URL {storage_url}"
                 ))
                 .map(Arc::new)
         })

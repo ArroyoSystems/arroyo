@@ -155,7 +155,7 @@ impl KafkaSourceFunc {
         let consumer = self
             .get_consumer(ctx)
             .await
-            .map_err(|e| UserError::new("Could not create Kafka consumer", format!("{:?}", e)))?;
+            .map_err(|e| UserError::new("Could not create Kafka consumer", format!("{e:?}")))?;
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
         let mut offsets = HashMap::new();

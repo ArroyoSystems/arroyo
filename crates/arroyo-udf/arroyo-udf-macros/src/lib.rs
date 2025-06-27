@@ -22,7 +22,7 @@ fn data_type_to_arrow_type_token(data_type: &DataType) -> TokenStream {
         DataType::Float64 => quote!(Float64Type),
         DataType::Binary => quote!(GenericBinaryType<i32>),
         DataType::List(f) => data_type_to_arrow_type_token(f.data_type()),
-        _ => panic!("Unsupported data type: {:?}", data_type),
+        _ => panic!("Unsupported data type: {data_type:?}"),
     }
 }
 
@@ -90,7 +90,7 @@ pub fn local_udf(
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let input_str = input.to_string();
-    let def = format!("#[udf({})]{}", attr, input_str);
+    let def = format!("#[udf({attr})]{input_str}");
     let parsed: ParsedFunction = syn::parse(input).unwrap();
     let name = parsed.0.name.clone();
 

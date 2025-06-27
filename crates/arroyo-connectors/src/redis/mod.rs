@@ -203,7 +203,7 @@ impl Connector for RedisConnector {
             let (itx, _rx) = tokio::sync::mpsc::channel(8);
             let message = match test_inner(profile, itx).await {
                 Ok(_) => TestSourceMessage::done("Successfully connected to Redis"),
-                Err(e) => TestSourceMessage::fail(format!("Failed to connect to Redis: {:?}", e)),
+                Err(e) => TestSourceMessage::fail(format!("Failed to connect to Redis: {e:?}")),
             };
 
             tx.send(message).unwrap();

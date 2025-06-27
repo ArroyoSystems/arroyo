@@ -20,18 +20,17 @@ fn write_op(d2: &mut String, registry: &Arc<Registry>, idx: usize, el: &ChainedL
 
     let mut label = format!("### {} ({})", operator.name(), &display.name);
     for (field, value) in display.fields {
-        label.push_str(&format!("\n## {}\n\n{}", field, value));
+        label.push_str(&format!("\n## {field}\n\n{value}"));
     }
 
     writeln!(
         d2,
-        "{}: {{
+        "{idx}: {{
   label: |markdown
-{}
+{label}
   |
   shape: rectangle
-}}",
-        idx, label
+}}"
     )
     .unwrap();
 }
@@ -44,12 +43,12 @@ fn write_edge(
     edge_type: &LogicalEdgeType,
     schema: &Schema,
 ) {
-    let edge_label = format!("{}", edge_type);
+    let edge_label = format!("{edge_type}");
 
-    let schema_node_name = format!("schema_{}", edge_idx);
+    let schema_node_name = format!("schema_{edge_idx}");
     let schema_fields = format_arrow_schema_fields(schema);
 
-    writeln!(d2, "{}: {{", schema_node_name).unwrap();
+    writeln!(d2, "{schema_node_name}: {{").unwrap();
     writeln!(d2, "  shape: sql_table").unwrap();
 
     for (field_name, field_type) in schema_fields {
@@ -73,7 +72,7 @@ fn write_edge(
     )
     .unwrap();
 
-    writeln!(d2, "{} -> {}", schema_node_name, to).unwrap();
+    writeln!(d2, "{schema_node_name} -> {to}").unwrap();
 }
 
 pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {

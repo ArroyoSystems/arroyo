@@ -24,11 +24,11 @@ pub const GENERATIONS_TO_COMPACT: u32 = 1; // only compact generation 0 files
 pub struct ParquetBackend;
 
 fn base_path(job_id: &str, epoch: u32) -> String {
-    format!("{}/checkpoints/checkpoint-{:0>7}", job_id, epoch)
+    format!("{job_id}/checkpoints/checkpoint-{epoch:0>7}")
 }
 
 fn metadata_path(path: &str) -> String {
-    format!("{}/metadata", path)
+    format!("{path}/metadata")
 }
 
 fn operator_path(job_id: &str, epoch: u32, operator: &str) -> String {

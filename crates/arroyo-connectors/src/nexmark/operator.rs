@@ -328,7 +328,7 @@ impl SourceOperator for NexmarkSourceFunc {
                     }
                     Err(TryRecvError::Empty) => {}
                     x => {
-                        warn!("{:?}", x);
+                        warn!("{x:?}");
                     }
                 }
                 last_check = Instant::now();
@@ -788,11 +788,11 @@ impl ChannelCache {
         );
         if random.random_range(0..10) > 0 {
             return (
-                format!("channel-{}", channel),
-                format!("{}&channel_id={}", url, channel),
+                format!("channel-{channel}"),
+                format!("{url}&channel_id={channel}"),
             );
         }
-        (format!("channel-{}", channel), url)
+        (format!("channel-{channel}"), url)
     }
 }
 

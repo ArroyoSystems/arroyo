@@ -64,7 +64,7 @@ impl Display for LogicalEdge {
         match self {
             LogicalEdge::Forward => write!(f, "→"),
             LogicalEdge::Shuffle => write!(f, "⤨"),
-            LogicalEdge::ShuffleJoin(order) => write!(f, "{}⤨", order),
+            LogicalEdge::ShuffleJoin(order) => write!(f, "{order}⤨"),
         }
     }
 }
@@ -151,10 +151,10 @@ impl WorkerServer {
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
         let id = WorkerId(config().worker.id.unwrap_or_else(random));
         let job_id =
-            std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
+            std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{JOB_ID_ENV} is not set"));
 
         let run_id =
-            std::env::var(RUN_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", RUN_ID_ENV));
+            std::env::var(RUN_ID_ENV).unwrap_or_else(|_| panic!("{RUN_ID_ENV} is not set"));
 
         Ok(WorkerServer::new(
             "program",
@@ -570,9 +570,10 @@ impl WorkerGrpc for WorkerServer {
 
             let mut sender_commit_map_pairs = vec![];
             for (operator_id, commit_operator) in req.committing_data {
-                let node_id = state.operator_to_node.get(&operator_id).unwrap_or_else(|| {
-                    panic!("Could not find node for operator id {}", operator_id)
-                });
+                let node_id = state
+                    .operator_to_node
+                    .get(&operator_id)
+                    .unwrap_or_else(|| panic!("Could not find node for operator id {operator_id}"));
                 let nodes = state.operator_controls.get(node_id).unwrap().clone();
                 let commit_map: HashMap<_, _> = commit_operator
                     .committing_data
@@ -677,7 +678,7 @@ impl WorkerGrpc for WorkerServer {
         let registry = prometheus::default_registry();
         let mut buf = vec![];
         encoder.encode(&registry.gather(), &mut buf).map_err(|e| {
-            Status::failed_precondition(format!("Failed to generate metrics: {:?}", e))
+            Status::failed_precondition(format!("Failed to generate metrics: {e:?}"))
         })?;
 
         let mut metrics = vec![];
@@ -687,8 +688,7 @@ impl WorkerGrpc for WorkerServer {
             metrics.push(
                 MetricFamily::decode_length_delimited(&mut input).map_err(|e| {
                     Status::failed_precondition(format!(
-                        "Incompatible protobuf format for metrics: {:?}",
-                        e
+                        "Incompatible protobuf format for metrics: {e:?}"
                     ))
                 })?,
             );

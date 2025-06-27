@@ -116,12 +116,12 @@ impl NodeServer {
             .env("RUST_LOG", "info")
             .env("ARROYO__WORKER__ID", format!("{}", worker_id.0))
             .env(JOB_ID_ENV, req.job_id.clone())
-            .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots))
+            .env("ARROYO__WORKER__TASK_SLOTS", format!("{slots}"))
             .env(RUN_ID_ENV, format!("{}", req.run_id))
             .env("ARROYO__ADMIN__HTTP_PORT", "0")
             .kill_on_drop(true)
             .spawn()
-            .map_err(|e| Status::internal(format!("Failed to start worker: {:?}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to start worker: {e:?}")))?;
 
         workers.insert(
             worker_id,

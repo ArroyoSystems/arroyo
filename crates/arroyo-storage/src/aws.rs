@@ -144,7 +144,7 @@ impl CredentialProvider for ArroyoCredentialProvider {
                         *task = Some(tokio::spawn(async move {
                             let token = get_token(&our_provider)
                                 .await
-                                .unwrap_or_else(|e| panic!("Failed to refresh AWS token: {:?}", e));
+                                .unwrap_or_else(|e| panic!("Failed to refresh AWS token: {e:?}"));
 
                             let mut lock = our_lock.lock().unwrap();
                             *lock = token;

@@ -147,9 +147,9 @@ impl WebsocketSourceFunc {
         let uri = match Uri::from_str(&self.url.to_string()) {
             Ok(uri) => uri,
             Err(e) => {
-                ctx.report_error("Failed to parse endpoint".to_string(), format!("{:?}", e))
+                ctx.report_error("Failed to parse endpoint".to_string(), format!("{e:?}"))
                     .await;
-                panic!("Failed to parse endpoint: {:?}", e);
+                panic!("Failed to parse endpoint: {e:?}");
             }
         };
 
@@ -178,9 +178,9 @@ impl WebsocketSourceFunc {
         {
             Ok(request) => request,
             Err(e) => {
-                ctx.report_error("Failed to build request".to_string(), format!("{:?}", e))
+                ctx.report_error("Failed to build request".to_string(), format!("{e:?}"))
                     .await;
-                panic!("Failed to build request: {:?}", e);
+                panic!("Failed to build request: {e:?}");
             }
         };
 
@@ -205,10 +205,7 @@ impl WebsocketSourceFunc {
                     e.to_string(),
                 )
                 .await;
-                panic!(
-                    "Failed to send subscription message to websocket server: {:?}",
-                    e
-                );
+                panic!("Failed to send subscription message to websocket server: {e:?}");
             }
         }
 
@@ -247,8 +244,8 @@ impl WebsocketSourceFunc {
                                 };
                             }
                         Some(Err(e)) => {
-                            ctx.report_error("Error while reading from websocket".to_string(), format!("{:?}", e)).await;
-                            panic!("Error while reading from websocket: {:?}", e);
+                            ctx.report_error("Error while reading from websocket".to_string(), format!("{e:?}")).await;
+                            panic!("Error while reading from websocket: {e:?}");
                         }
                         None => {
                             info!("Socket closed");

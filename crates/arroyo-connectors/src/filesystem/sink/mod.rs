@@ -246,9 +246,9 @@ fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]
             .enumerate()
             .flat_map(|(i, (name, expr))| {
                 let preamble = if i == 0 {
-                    format!("{}=", name)
+                    format!("{name}=")
                 } else {
-                    format!("/{}=", name)
+                    format!("/{name}=")
                 };
                 vec![Expr::Literal(ScalarValue::Utf8(Some(preamble))), expr]
             })
@@ -362,8 +362,7 @@ impl std::fmt::Debug for FileCheckpointData {
             } => {
                 write!(
                     f,
-                    "MultiPartInFlight {{ multi_part_upload_id: {}, in_flight_parts: [",
-                    multi_part_upload_id
+                    "MultiPartInFlight {{ multi_part_upload_id: {multi_part_upload_id}, in_flight_parts: ["
                 )?;
                 for part in in_flight_parts {
                     match part {
@@ -389,8 +388,7 @@ impl std::fmt::Debug for FileCheckpointData {
             } => {
                 write!(
                     f,
-                    "MultiPartWriterClosed {{ multi_part_upload_id: {}, in_flight_parts: [",
-                    multi_part_upload_id
+                    "MultiPartWriterClosed {{ multi_part_upload_id: {multi_part_upload_id}, in_flight_parts: ["
                 )?;
                 for part in in_flight_parts {
                     match part {
@@ -408,7 +406,7 @@ impl std::fmt::Debug for FileCheckpointData {
                 multi_part_upload_id,
                 completed_parts,
             } => {
-                write!(f, "MultiPartWriterUploadCompleted {{ multi_part_upload_id: {}, completed_parts: [", multi_part_upload_id)?;
+                write!(f, "MultiPartWriterUploadCompleted {{ multi_part_upload_id: {multi_part_upload_id}, completed_parts: [")?;
                 for part in completed_parts {
                     write!(f, "{} bytes, ", part.len())?;
                 }
@@ -884,7 +882,7 @@ where
         );
 
         let path = match partition {
-            Some(sub_bucket) => format!("{}/{}", sub_bucket, filename),
+            Some(sub_bucket) => format!("{sub_bucket}/{filename}"),
             None => filename.clone(),
         };
 
@@ -1606,7 +1604,7 @@ impl Debug for MultipartCallback {
                 write!(f, "MultipartCallback::InitializedMultipart")
             }
             MultipartCallback::CompletedPart { part_idx, .. } => {
-                write!(f, "MultipartCallback::CompletedPart({})", part_idx)
+                write!(f, "MultipartCallback::CompletedPart({part_idx})")
             }
             MultipartCallback::UploadsFinished => write!(f, "MultipartCallback::UploadsFinished"),
         }
@@ -1794,8 +1792,8 @@ pub(crate) fn add_suffix_prefix(
     suffix: &String,
 ) -> String {
     match prefix {
-        None => format!("{}.{}", filename, suffix),
-        Some(prefix) => format!("{}-{}.{}", prefix, filename, suffix),
+        None => format!("{filename}.{suffix}"),
+        Some(prefix) => format!("{prefix}-{filename}.{suffix}"),
     }
 }
 

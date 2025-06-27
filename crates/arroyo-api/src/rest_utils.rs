@@ -34,7 +34,7 @@ pub enum ApiError {
 
 pub fn map_insert_err(name: &str, error: DbError) -> ErrorResp {
     if error == DbError::DuplicateViolation {
-        bad_request(format!("{} with that name already exists", name))
+        bad_request(format!("{name} with that name already exists"))
     } else {
         error.into()
     }
@@ -43,8 +43,7 @@ pub fn map_insert_err(name: &str, error: DbError) -> ErrorResp {
 pub fn map_delete_err(name: &str, user: &str, error: DbError) -> ErrorResp {
     if error == DbError::ForeignKeyViolation {
         bad_request(format!(
-            "Cannot delete {}; it is still being used by {}",
-            name, user
+            "Cannot delete {name}; it is still being used by {user}"
         ))
     } else {
         error.into()
@@ -122,7 +121,7 @@ pub(crate) fn bad_request(message: impl Into<String>) -> ErrorResp {
 pub(crate) fn service_unavailable(object: &str) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::SERVICE_UNAVAILABLE,
-        message: format!("{} not available", object),
+        message: format!("{object} not available"),
     }
 }
 
@@ -136,12 +135,12 @@ pub(crate) fn internal_server_error(message: impl Into<String>) -> ErrorResp {
 pub(crate) fn not_found(object: &str) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::NOT_FOUND,
-        message: format!("{} not found", object),
+        message: format!("{object} not found"),
     }
 }
 
 pub(crate) fn required_field(field: &str) -> ErrorResp {
-    bad_request(format!("Field {} must be set", field))
+    bad_request(format!("Field {field} must be set"))
 }
 
 pub fn validate_pagination_params(

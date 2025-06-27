@@ -97,7 +97,7 @@ impl ArrowOperator for WebhookSinkFunc {
                                             node_id,
                                             operator_id: operator_id.clone(),
                                             task_index,
-                                            message: format!("webhook failed (retry {})", retries),
+                                            message: format!("webhook failed (retry {retries})"),
                                             details,
                                         })
                                         .await

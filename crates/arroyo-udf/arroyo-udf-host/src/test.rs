@@ -15,7 +15,7 @@ mod test_udf_1 {
         if x < 5 {
             None
         } else {
-            Some(format!("{}-{}-{:?}", x, y, z))
+            Some(format!("{x}-{y}-{z:?}"))
         }
     }
 }

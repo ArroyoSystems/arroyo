@@ -213,7 +213,7 @@ impl Header {
             message_type: match bytes.get_u32_le() {
                 0 => MessageType::Data,
                 1 => MessageType::Signal,
-                b => panic!("invalid message type: {}", b),
+                b => panic!("invalid message type: {b}"),
             },
         }
     }
@@ -596,8 +596,7 @@ pub async fn write_message_and_header<W: AsyncWrite + AsyncWriteExt>(
 
     assert_eq!(
         bytes_written, total_size,
-        "Wrote unexpected number of bytes {} != {}",
-        bytes_written, total_size
+        "Wrote unexpected number of bytes {bytes_written} != {total_size}"
     );
 
     Ok(())

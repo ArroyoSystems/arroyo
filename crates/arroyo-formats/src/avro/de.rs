@@ -21,8 +21,7 @@ pub(crate) async fn avro_messages(
         if magic_byte != 0 {
             return Err(SourceError::bad_data(format!(
                 "data was not encoded with schema registry wire format; \
-                magic byte has unexpected value: {}",
-                magic_byte
+                magic byte has unexpected value: {magic_byte}"
             )));
         }
 
@@ -45,18 +44,14 @@ pub(crate) async fn avro_messages(
                 .map_err(|e| SourceError::other("schema registry error", e))?
                 .ok_or_else(|| {
                     SourceError::bad_data(format!(
-                        "could not resolve schema for message with id {}",
-                        id
+                        "could not resolve schema for message with id {id}"
                     ))
                 })?;
 
             let new_schema = Schema::parse_str(&new_schema).map_err(|e| {
                 SourceError::other(
                     "schema registry error",
-                    format!(
-                        "schema from Confluent Schema registry is not valid: {:?}",
-                        e
-                    ),
+                    format!("schema from Confluent Schema registry is not valid: {e:?}"),
                 )
             })?;
 
@@ -76,7 +71,7 @@ pub(crate) async fn avro_messages(
         )]
     } else {
         Reader::new(msg)
-            .map_err(|e| SourceError::bad_data(format!("invalid Avro schema in message: {:?}", e)))?
+            .map_err(|e| SourceError::bad_data(format!("invalid Avro schema in message: {e:?}")))?
             .collect()
     };
     Ok(messages)

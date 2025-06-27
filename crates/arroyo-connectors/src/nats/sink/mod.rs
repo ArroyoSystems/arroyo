@@ -42,7 +42,7 @@ impl ArrowOperator for NatsSinkFunc {
                 self.publisher = Some(client);
             }
             Err(e) => {
-                panic!("Failed to construct NATS publisher: {:?}", e);
+                panic!("Failed to construct NATS publisher: {e:?}");
             }
         }
     }
@@ -63,7 +63,7 @@ impl ArrowOperator for NatsSinkFunc {
         match publisher.flush().await {
             Ok(_) => {}
             Err(e) => {
-                panic!("Failed to flush NATS publisher: {:?}", e);
+                panic!("Failed to flush NATS publisher: {e:?}");
             }
         }
     }
@@ -85,8 +85,8 @@ impl ArrowOperator for NatsSinkFunc {
             match publisher.publish(nats_subject.clone(), msg.into()).await {
                 Ok(_) => {}
                 Err(e) => {
-                    ctx.report_error(e.to_string(), format!("{:?}", e)).await;
-                    panic!("Panicked while processing element: {}", e);
+                    ctx.report_error(e.to_string(), format!("{e:?}")).await;
+                    panic!("Panicked while processing element: {e}");
                 }
             }
         }

@@ -74,7 +74,7 @@ fn get_client() -> Arc<Client> {
 }
 
 async fn start_pipeline(test_id: u32, query: &str, udfs: &[&str]) -> anyhow::Result<String> {
-    let pipeline_name = format!("pipeline_{}", test_id);
+    let pipeline_name = format!("pipeline_{test_id}");
     info!("Creating pipeline {}", pipeline_name);
 
     let pipeline_id = get_client()
@@ -172,7 +172,7 @@ async fn patch_and_wait(
     body: builder::PipelinePatch,
     expected_state: &str,
 ) -> anyhow::Result<i64> {
-    println!("Patching with {:?}", body);
+    println!("Patching with {body:?}");
     get_client()
         .patch_pipeline()
         .id(pipeline_id)
@@ -180,7 +180,7 @@ async fn patch_and_wait(
         .send()
         .await?;
 
-    println!("Waiting for {}", expected_state);
+    println!("Waiting for {expected_state}");
     wait_for_state(&get_client(), run_id, pipeline_id, expected_state).await
 }
 
@@ -191,7 +191,7 @@ async fn basic_pipeline() {
     // create a source
     println!("Creating source");
     let test_id: u32 = random();
-    let source_name = format!("source_{}", test_id);
+    let source_name = format!("source_{test_id}");
 
     let source_id = api_client
         .create_connection_table()
@@ -210,10 +210,9 @@ async fn basic_pipeline() {
     // create a pipeline
     let query = format!(
         r#"
-    select count(*) from {} where counter % 2 == 0
+    select count(*) from {source_name} where counter % 2 == 0
     group by hop(interval '2 seconds', interval '10 seconds');
-    "#,
-        source_name
+    "#
     );
 
     // validate the pipeline
@@ -504,7 +503,7 @@ async fn connection_table() {
 
     // create a kafka connection
     let profile_post = ConnectionProfilePost::builder()
-        .name(format!("kafka_source_{}", run_id))
+        .name(format!("kafka_source_{run_id}"))
         .connector("kafka")
         .config(json!( {
             "authentication": {},

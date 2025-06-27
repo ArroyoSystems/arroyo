@@ -40,5 +40,5 @@ pub fn generate_id(id_type: IdTypes) -> String {
         IdTypes::Udf => "udf",
     };
     let id = nanoid!(ID_LENGTH, &ALPHABET);
-    format!("{}_{}", prefix, id)
+    format!("{prefix}_{id}")
 }

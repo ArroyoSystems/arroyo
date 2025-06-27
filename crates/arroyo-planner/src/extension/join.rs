@@ -51,7 +51,7 @@ impl ArroyoExtension for JoinExtension {
         };
 
         let config = JoinOperator {
-            name: format!("join_{}", index),
+            name: format!("join_{index}"),
             left_schema: Some(left_schema.as_ref().clone().into()),
             right_schema: Some(right_schema.as_ref().clone().into()),
             output_schema: Some(self.output_schema().into()),
@@ -61,7 +61,7 @@ impl ArroyoExtension for JoinExtension {
 
         let logical_node = LogicalNode::single(
             index as u32,
-            format!("join_{}", index),
+            format!("join_{index}"),
             operator_name,
             config.encode_to_vec(),
             "join".to_string(),

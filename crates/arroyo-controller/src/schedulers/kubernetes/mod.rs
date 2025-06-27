@@ -250,9 +250,9 @@ impl Scheduler for KubernetesScheduler {
     ) -> anyhow::Result<()> {
         let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
-        let mut labels = format!("{}={}", JOB_ID_LABEL, job_id);
+        let mut labels = format!("{JOB_ID_LABEL}={job_id}");
         if let Some(run_id) = run_id {
-            labels.push_str(&format!(",{}={}", RUN_ID_LABEL, run_id));
+            labels.push_str(&format!(",{RUN_ID_LABEL}={run_id}"));
         }
 
         let delete_params = if force {
@@ -293,9 +293,9 @@ impl Scheduler for KubernetesScheduler {
 
         // label selector for job_id and optional run_id
 
-        let mut selector = format!("{}={}", JOB_ID_LABEL, job_id);
+        let mut selector = format!("{JOB_ID_LABEL}={job_id}");
         if let Some(run_id) = run_id {
-            selector.push_str(&format!(",{}={}", RUN_ID_LABEL, run_id));
+            selector.push_str(&format!(",{RUN_ID_LABEL}={run_id}"));
         }
 
         api.list(&ListParams::default().labels(&selector))

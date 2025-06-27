@@ -208,7 +208,7 @@ impl RedisWriter {
                     self.error_reporter
                         .report_error(
                             "Redis error",
-                            format!("Failed to write data to redis: {:?}", e),
+                            format!("Failed to write data to redis: {e:?}"),
                         )
                         .await;
                 }

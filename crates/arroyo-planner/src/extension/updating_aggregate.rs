@@ -147,7 +147,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
 
         let node = LogicalNode::single(
             index as u32,
-            format!("updating_aggregate_{}", index),
+            format!("updating_aggregate_{index}"),
             OperatorName::UpdatingAggregate,
             config.encode_to_vec(),
             "UpdatingAggregate".to_string(),

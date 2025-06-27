@@ -291,7 +291,7 @@ impl Connector for KafkaConnector {
             if !message.error {
                 if let Err(e) = tester.test_schema_registry().await {
                     message.error = true;
-                    message.message = format!("Failed to connect to schema registry: {:?}", e);
+                    message.message = format!("Failed to connect to schema registry: {e:?}");
                 }
             }
 
@@ -485,7 +485,7 @@ impl KafkaTester {
                             },
                         ..
                     }) => {
-                        format!("{}-arroyo-kafka-tester", prefix)
+                        format!("{prefix}-arroyo-kafka-tester")
                     }
                     _ => "arroyo-kafka-tester".to_string(),
                 },
@@ -501,7 +501,7 @@ impl KafkaTester {
         let context = Context::new(Some(self.connection.clone()));
         let client: BaseConsumer = client_config
             .create_with_context(context)
-            .map_err(|e| format!("invalid kafka config: {:?}", e))?;
+            .map_err(|e| format!("invalid kafka config: {e:?}"))?;
 
         // NOTE: this is required to trigger an oauth token refresh (when using
         // OAUTHBEARER auth).
@@ -512,7 +512,7 @@ impl KafkaTester {
         tokio::task::spawn_blocking(move || {
             client
                 .fetch_metadata(None, Duration::from_secs(10))
-                .map_err(|e| format!("Failed to connect to Kafka: {:?}", e))?;
+                .map_err(|e| format!("Failed to connect to Kafka: {e:?}"))?;
 
             Ok(client)
         })
@@ -533,8 +533,7 @@ impl KafkaTester {
                 .fetch_metadata(Some(&topic), Duration::from_secs(5))
                 .map_err(|e| {
                     Status::failed_precondition(format!(
-                        "Failed to read topic metadata from Kafka: {:?}",
-                        e
+                        "Failed to read topic metadata from Kafka: {e:?}"
                     ))
                 })?;
 
@@ -550,7 +549,7 @@ impl KafkaTester {
                     rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART => {
                         "Topic does not exist".to_string()
                     }
-                    _ => format!("Error while fetching topic metadata: {:?}", e),
+                    _ => format!("Error while fetching topic metadata: {e:?}"),
                 };
                 return Err(Status::failed_precondition(err));
             }

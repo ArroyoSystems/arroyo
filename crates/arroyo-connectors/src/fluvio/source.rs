@@ -154,7 +154,7 @@ impl FluvioSourceFunc {
         let mut streams = self
             .get_consumer(ctx)
             .await
-            .map_err(|e| UserError::new("Could not create Fluvio consumer", format!("{:?}", e)))?;
+            .map_err(|e| UserError::new("Could not create Fluvio consumer", format!("{e:?}")))?;
 
         if streams.is_empty() {
             warn!("Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",

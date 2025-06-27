@@ -89,7 +89,7 @@ impl LookupConnector for RedisLookup {
                         .await
                 }
                 v => {
-                    panic!("unexpected type {:?}", v);
+                    panic!("unexpected type {v:?}");
                 }
             };
 

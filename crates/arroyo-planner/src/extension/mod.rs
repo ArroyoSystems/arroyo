@@ -256,7 +256,7 @@ impl ArroyoExtension for AsyncUDFExtension {
 
         let node = LogicalNode::single(
             index as u32,
-            format!("async_udf_{}", index),
+            format!("async_udf_{index}"),
             OperatorName::AsyncUdf,
             config.encode_to_vec(),
             format!("async_udf<{}>", self.name),

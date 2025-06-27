@@ -50,7 +50,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             final_dir = final_dir.trim_start_matches("file://").to_string();
         }
         // TODO: explore configuration options here
-        let tmp_dir = format!("{}/__in_progress", final_dir);
+        let tmp_dir = format!("{final_dir}/__in_progress");
         // make sure final_dir and tmp_dir exists
         create_dir_all(&tmp_dir).unwrap();
 
@@ -119,7 +119,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
                     // make sure the partition directory exists in tmp and final
                     create_dir_all(format!("{}/{}", self.tmp_dir, partition)).unwrap();
                     create_dir_all(format!("{}/{}", self.final_dir, partition)).unwrap();
-                    format!("{}/{}", partition, filename)
+                    format!("{partition}/{filename}")
                 }
                 None => filename,
             };

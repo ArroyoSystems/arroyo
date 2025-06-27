@@ -160,7 +160,7 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
         ("Failed", true) => ("Failed", Option::None, Stable),
         ("Failed", false) => ("Start", Some(None), Stable),
 
-        _ => panic!("unhandled state {}", state),
+        _ => panic!("unhandled state {state}"),
     };
 
     let in_progress = match p {
@@ -376,8 +376,7 @@ pub async fn get_checkpoint_details(
     .next()
     .ok_or_else(|| {
         not_found(&format!(
-            "Checkpoint with epoch {} for job '{}'",
-            epoch, job_pub_id
+            "Checkpoint with epoch {epoch} for job '{job_pub_id}'"
         ))
     })?;
 

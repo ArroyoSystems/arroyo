@@ -52,13 +52,11 @@ async fn validate_query(path: &Path) {
             let err = err.join(" ");
             assert!(
                 err.contains(error_message),
-                "expected error message '{}' not found; instead got '{}'",
-                error_message,
-                err
+                "expected error message '{error_message}' not found; instead got '{err}'"
             );
         }
     } else if let Err(e) = result {
-        println!("{}", e);
+        println!("{e}");
         panic!("{}", e);
     }
 }

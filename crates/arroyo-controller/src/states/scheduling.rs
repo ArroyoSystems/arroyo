@@ -151,7 +151,7 @@ async fn handle_worker_connect<'a>(
                         }
                     }
                 }
-                panic!("Failed to connect to worker {}", rpc_address);
+                panic!("Failed to connect to worker {rpc_address}");
             }));
         }
         other => {
@@ -359,7 +359,7 @@ impl State for Scheduling {
                 .await
                 .map_err(|err| {
                     fatal(
-                        format!("Failed to restore job; checkpoint {} not found.", epoch),
+                        format!("Failed to restore job; checkpoint {epoch} not found."),
                         err,
                     )
                 })?;
@@ -380,8 +380,7 @@ impl State for Scheduling {
                             .map_err(|err| {
                                 fatal(
                                     format!(
-                                "Failed to restore job; operator metadata for {} not found.",
-                                operator_id
+                                "Failed to restore job; operator metadata for {operator_id} not found."
                             ),
                                     err,
                                 )
@@ -405,8 +404,7 @@ impl State for Scheduling {
                                 .ok_or_else(|| {
                                     fatal(
                                         format!(
-                                            "Failed to restore job; table config for {} not found.",
-                                            table_name
+                                            "Failed to restore job; table config for {table_name} not found."
                                         ),
                                         anyhow!("table config for {} not found", table_name),
                                     )
@@ -447,7 +445,7 @@ impl State for Scheduling {
                 .await
                 .map_err(|err| {
                     fatal(
-                        format!("Failed to write checkpoint metadata for epoch {}.", epoch),
+                        format!("Failed to write checkpoint metadata for epoch {epoch}."),
                         err,
                     )
                 })?;
@@ -495,7 +493,7 @@ impl State for Scheduling {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
 
-                    panic!("Failed to start execution on workers {:?}", id);
+                    panic!("Failed to start execution on workers {id:?}");
                 })
             })
             .collect();

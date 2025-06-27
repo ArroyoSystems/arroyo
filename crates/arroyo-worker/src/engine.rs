@@ -219,7 +219,7 @@ impl Program {
                 StateBackend::load_checkpoint_metadata(job_id, epoch)
                     .await
                     .unwrap_or_else(|_| {
-                        panic!("failed to load checkpoint metadata for epoch {}", epoch)
+                        panic!("failed to load checkpoint metadata for epoch {epoch}")
                     }),
             )
         } else {
@@ -875,7 +875,7 @@ pub fn construct_operator(
                 .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
                 .make_operator(
                     serde_json::from_str(&op.config)
-                        .unwrap_or_else(|e| panic!("invalid operator config: {:?}, {:?}", op, e)),
+                        .unwrap_or_else(|e| panic!("invalid operator config: {op:?}, {e:?}")),
                 )
                 .unwrap_or_else(|e| {
                     panic!("Failed to construct connector {}: {:?}", op.connector, e)
@@ -883,10 +883,6 @@ pub fn construct_operator(
         }
     };
 
-    ctor.with_config(config, registry).unwrap_or_else(|e| {
-        panic!(
-            "Failed to construct operator {:?}, with error:\n{:?}",
-            operator, e
-        )
-    })
+    ctor.with_config(config, registry)
+        .unwrap_or_else(|e| panic!("Failed to construct operator {operator:?}, with error:\n{e:?}"))
 }

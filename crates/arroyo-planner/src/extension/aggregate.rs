@@ -107,7 +107,7 @@ impl AggregateExtension {
 
         Ok(LogicalNode::single(
             index as u32,
-            format!("tumbling_{}", index),
+            format!("tumbling_{index}"),
             OperatorName::TumblingWindowAggregate,
             config.encode_to_vec(),
             format!("TumblingWindow<{}>", config.name),
@@ -138,7 +138,7 @@ impl AggregateExtension {
         )?;
 
         let config = SlidingWindowAggregateOperator {
-            name: format!("SlidingWindow<{:?}>", width),
+            name: format!("SlidingWindow<{width:?}>"),
             width_micros: width.as_micros() as u64,
             slide_micros: slide.as_micros() as u64,
             binning_function: binning_function_proto.encode_to_vec(),
@@ -158,7 +158,7 @@ impl AggregateExtension {
 
         Ok(LogicalNode::single(
             index as u32,
-            format!("sliding_window_{}", index),
+            format!("sliding_window_{index}"),
             OperatorName::SlidingWindowAggregate,
             config.encode_to_vec(),
             "sliding window".to_string(),
@@ -209,7 +209,7 @@ impl AggregateExtension {
         )?;
 
         let config = SessionWindowAggregateOperator {
-            name: format!("session_window_{}", index),
+            name: format!("session_window_{index}"),
             gap_micros: gap.as_micros() as u64,
             window_field_name: window_field.name().to_string(),
             window_index: *window_index as u64,
@@ -221,7 +221,7 @@ impl AggregateExtension {
 
         Ok(LogicalNode::single(
             index as u32,
-            format!("SessionWindow<{:?}>", gap),
+            format!("SessionWindow<{gap:?}>"),
             OperatorName::SessionWindowAggregate,
             config.encode_to_vec(),
             config.name.clone(),
@@ -279,7 +279,7 @@ impl AggregateExtension {
 
         Ok(LogicalNode::single(
             index as u32,
-            format!("instant_window_{}", index),
+            format!("instant_window_{index}"),
             OperatorName::TumblingWindowAggregate,
             config.encode_to_vec(),
             "instant window".to_string(),
@@ -461,8 +461,7 @@ impl UserDefinedLogicalNodeCore for AggregateExtension {
             self.schema(),
             match &self.window_behavior {
                 WindowBehavior::InData => "InData".to_string(),
-                WindowBehavior::FromOperator { window, .. } =>
-                    format!("FromOperator({:?})", window),
+                WindowBehavior::FromOperator { window, .. } => format!("FromOperator({window:?})"),
             }
         )
     }

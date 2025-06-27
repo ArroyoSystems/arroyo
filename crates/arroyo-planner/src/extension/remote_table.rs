@@ -75,7 +75,7 @@ impl ArroyoExtension for RemoteTableExtension {
         };
         let node = LogicalNode::single(
             index as u32,
-            format!("value_{}", index),
+            format!("value_{index}"),
             OperatorName::ArrowValue,
             config.encode_to_vec(),
             self.name.to_string(),

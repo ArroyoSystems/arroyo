@@ -97,14 +97,12 @@ async fn run_smoketest(path: &Path) {
             if let Some(error_message) = error_message {
                 assert!(
                     err.to_string().contains(error_message),
-                    "expected error message '{}' not found; instead got '{}'",
-                    error_message,
-                    err
+                    "expected error message '{error_message}' not found; instead got '{err}'"
                 );
             }
         }
         (Err(err), false) => {
-            panic!("Expected pipeline to pass, but it failed: {:?}", err);
+            panic!("Expected pipeline to pass, but it failed: {err:?}");
         }
     }
 }
@@ -497,8 +495,7 @@ fn merge_debezium(rows: Vec<Value>, primary_keys: Option<&[&str]>) -> HashSet<Va
                 let key = get_key(&before.expect("no before for 'u'"), primary_keys);
                 assert!(
                     state.remove(&key).is_some(),
-                    "'u' for non-existent row ({})",
-                    r
+                    "'u' for non-existent row ({r})"
                 );
                 let key = get_key(after.as_ref().expect("no after for 'u'"), primary_keys);
                 assert!(
@@ -512,13 +509,11 @@ fn merge_debezium(rows: Vec<Value>, primary_keys: Option<&[&str]>) -> HashSet<Va
                 let key = get_key(&before.expect("no before for 'd'"), primary_keys);
                 assert!(
                     state.remove(&key).is_some(),
-                    "'d' for non-existent row: {} ({:?})",
-                    r,
-                    primary_keys
+                    "'d' for non-existent row: {r} ({primary_keys:?})"
                 );
             }
             c => {
-                panic!("unknown debezium op '{}'", c);
+                panic!("unknown debezium op '{c}'");
             }
         }
     }
@@ -589,7 +584,7 @@ async fn check_output_files(
 ) {
     let mut output_lines: Vec<Value> = read_to_string(output_location.clone())
         .await
-        .unwrap_or_else(|_| panic!("output file not found at {}", output_location))
+        .unwrap_or_else(|_| panic!("output file not found at {output_location}"))
         .lines()
         .map(|s| serde_json::from_str(s).unwrap())
         .collect();
@@ -598,8 +593,7 @@ async fn check_output_files(
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "golden output file not found at {}, want to compare to {}",
-                golden_output_location, output_location
+                "golden output file not found at {golden_output_location}, want to compare to {output_location}"
             )
         })
         .lines()
@@ -681,21 +675,16 @@ pub async fn correctness_run_codegen(
     };
 
     // replace $input_file with the current directory and then inputs/query_name.json
-    let physical_input_dir = format!("{}/arroyo-sql-testing/inputs/", parent_directory,);
+    let physical_input_dir = format!("{parent_directory}/arroyo-sql-testing/inputs/",);
 
     let query_string = query.into().replace("$input_dir", &physical_input_dir);
 
     // replace $output_file with the current directory and then outputs/query_name.json
-    let physical_output = format!(
-        "{}/arroyo-sql-testing/outputs/{}.json",
-        parent_directory, test_name
-    );
+    let physical_output = format!("{parent_directory}/arroyo-sql-testing/outputs/{test_name}.json");
 
     let query_string = query_string.replace("$output_path", &physical_output);
-    let golden_output_location = format!(
-        "{}/arroyo-sql-testing/golden_outputs/{}.json",
-        parent_directory, test_name
-    );
+    let golden_output_location =
+        format!("{parent_directory}/arroyo-sql-testing/golden_outputs/{test_name}.json");
 
     let udfs = get_udfs();
 

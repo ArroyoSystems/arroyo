@@ -151,8 +151,7 @@ fn serialize_column<T: SerializeTarget>(
             let schema = get_field_schema(schema, name, nullable);
             let Schema::Array(item_schema) = schema else {
                 panic!(
-                    "invalid avro schema -- list field {} should correspond to array schema but is {:?}",
-                    name, schema
+                    "invalid avro schema -- list field {name} should correspond to array schema but is {schema:?}"
                 );
             };
 

@@ -172,7 +172,7 @@ async fn test_mqtt() {
             }
             Ok(_) => (),
             Err(err) => {
-                panic!("Error in mqtt event loop: {:?}", err);
+                panic!("Error in mqtt event loop: {err:?}");
             }
         }
     }

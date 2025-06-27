@@ -161,7 +161,7 @@ impl BufferDecoder {
                     BadData::Fail { .. } => decoder
                         .flush()
                         .map_err(|e| {
-                            SourceError::bad_data(format!("JSON does not match schema: {:?}", e))
+                            SourceError::bad_data(format!("JSON does not match schema: {e:?}"))
                         })
                         .transpose()?
                         .map(|batch| (batch.columns().to_vec(), None)),
@@ -169,8 +169,7 @@ impl BufferDecoder {
                         .flush_with_bad_data()
                         .map_err(|e| {
                             SourceError::bad_data(format!(
-                                "Something went wrong decoding JSON: {:?}",
-                                e
+                                "Something went wrong decoding JSON: {e:?}"
                             ))
                         })
                         .transpose()?
@@ -192,7 +191,7 @@ impl BufferDecoder {
             } => {
                 decoder
                     .decode(msg)
-                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
+                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
 
                 *buffered_count += 1;
 
@@ -572,7 +571,7 @@ impl ArrowDeserializer {
                 } else {
                     self.buffer_decoder
                         .decode_json(json.to_string().as_bytes())
-                        .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
+                        .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
                 }
             }
             Format::Avro(_) => unreachable!("this should not be called for avro"),
@@ -621,7 +620,7 @@ impl ArrowDeserializer {
             .into_iter()
             .map(|record| {
                 let value = record.map_err(|e| {
-                    SourceError::bad_data(format!("failed to deserialize from avro: {:?}", e))
+                    SourceError::bad_data(format!("failed to deserialize from avro: {e:?}"))
                 })?;
 
                 if into_json {
@@ -633,7 +632,7 @@ impl ArrowDeserializer {
 
                     self.buffer_decoder
                         .decode_json(json.as_bytes())
-                        .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
+                        .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
                 }
 
                 count += 1;
@@ -701,7 +700,7 @@ fn add_additional_fields(
 ) {
     let builder = builders
         .get_mut(key)
-        .unwrap_or_else(|| panic!("unexpected additional field '{}'", key))
+        .unwrap_or_else(|| panic!("unexpected additional field '{key}'"))
         .as_any_mut();
 
     match value {
@@ -999,7 +998,7 @@ mod tests {
         assert!(result.is_empty());
 
         let batch = deserializer.flush_buffer().unwrap().unwrap();
-        println!("batch ={:?}", batch);
+        println!("batch ={batch:?}");
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
         assert_eq!(batch.columns()[1].as_primitive::<Int32Type>().value(0), 5);

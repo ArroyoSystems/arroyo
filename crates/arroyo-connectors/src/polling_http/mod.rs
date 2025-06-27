@@ -254,9 +254,9 @@ impl Connector for PollingHTTPConnector {
         .map(|(k, v)| {
             (
                 (&k).try_into()
-                    .unwrap_or_else(|_| panic!("invalid header name {}", k)),
+                    .unwrap_or_else(|_| panic!("invalid header name {k}")),
                 (&v).try_into()
-                    .unwrap_or_else(|_| panic!("invalid header value {}", v)),
+                    .unwrap_or_else(|_| panic!("invalid header value {v}")),
             )
         })
         .collect();
