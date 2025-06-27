@@ -141,7 +141,7 @@ impl PollingHttpSourceFunc {
             .map_err(|e| {
                 UserError::new(
                     "request failed",
-                    format!("failed to execute HTTP request: {}", e),
+                    format!("failed to execute HTTP request: {e}"),
                 )
             })?;
 
@@ -151,8 +151,7 @@ impl PollingHttpSourceFunc {
                 return Err(UserError::new(
                     "error reading from http endpoint",
                     format!(
-                        "content length sent by server exceeds maximum limit ({} > {})",
-                        content_len, MAX_BODY_SIZE
+                        "content length sent by server exceeds maximum limit ({content_len} > {MAX_BODY_SIZE})"
                     ),
                 ));
             }
@@ -162,16 +161,13 @@ impl PollingHttpSourceFunc {
             let mut bytes_stream = resp.bytes_stream();
             while let Some(chunk) = bytes_stream.next().await {
                 buf.extend_from_slice(&chunk.map_err(|e| {
-                    UserError::new(
-                        "request failed",
-                        format!("failed while reading body: {}", e),
-                    )
+                    UserError::new("request failed", format!("failed while reading body: {e}"))
                 })?);
 
                 if buf.len() > MAX_BODY_SIZE {
                     return Err(UserError::new(
                         "error reading from http endpoint",
-                        format!("response body exceeds max length {}", MAX_BODY_SIZE),
+                        format!("response body exceeds max length {MAX_BODY_SIZE}"),
                     ));
                 }
             }

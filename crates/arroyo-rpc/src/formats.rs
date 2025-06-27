@@ -152,7 +152,7 @@ impl<'de> Deserialize<'de> for SerializableAvroSchema {
     {
         Ok(Self(
             apache_avro::Schema::parse_str(&String::deserialize(deserializer)?)
-                .map_err(|e| serde::de::Error::custom(format!("Invalid avro schema: {:?}", e)))?,
+                .map_err(|e| serde::de::Error::custom(format!("Invalid avro schema: {e:?}")))?,
         ))
     }
 }

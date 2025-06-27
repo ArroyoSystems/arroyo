@@ -125,7 +125,7 @@ impl MqttSourceFunc {
             Err(e) => {
                 return Err(UserError {
                     name: "MqttSourceError".to_string(),
-                    details: format!("Failed to create connection: {}", e),
+                    details: format!("Failed to create connection: {e}"),
                 });
             }
         };
@@ -135,7 +135,7 @@ impl MqttSourceFunc {
             Err(e) => {
                 return Err(UserError {
                     name: "MqttSourceError".to_string(),
-                    details: format!("Failed to subscribe to topic: {}", e),
+                    details: format!("Failed to subscribe to topic: {e}"),
                 });
             }
         }
@@ -184,7 +184,7 @@ impl MqttSourceFunc {
                                 .await {
                                     return Err(UserError {
                                         name: "MqttSourceError".to_string(),
-                                        details: format!("Error while subscribing to mqtt topic {}: {:?}", topic, err),
+                                        details: format!("Error while subscribing to mqtt topic {topic}: {err:?}"),
                                     });
                                 }
                         }

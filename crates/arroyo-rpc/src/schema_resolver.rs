@@ -43,8 +43,7 @@ impl FailingSchemaResolver {
 impl SchemaResolver for FailingSchemaResolver {
     async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
         Err(format!(
-            "Schema with id {} not available, and no schema registry configured",
-            id
+            "Schema with id {id} not available, and no schema registry configured"
         ))
     }
 }
@@ -350,7 +349,7 @@ impl ConfluentSchemaRegistry {
         let encoded_subject = percent_encode(subject.as_bytes(), NON_ALPHANUMERIC).to_string();
         self.client
             .endpoint
-            .join(&format!("subjects/{}/versions/", encoded_subject))
+            .join(&format!("subjects/{encoded_subject}/versions/"))
             .map_err(|e| {
                 anyhow!(
                     "'{}' is not a valid schema registry endpoint: {}",
@@ -433,7 +432,7 @@ impl ConfluentSchemaRegistry {
         let url = self
             .client
             .endpoint
-            .join(&format!("/schemas/ids/{}", id))
+            .join(&format!("/schemas/ids/{id}"))
             .unwrap();
 
         self.client.get_schema_for_url(url).await.context(format!(
@@ -447,7 +446,7 @@ impl ConfluentSchemaRegistry {
         version: Option<u32>,
     ) -> anyhow::Result<Option<ConfluentSchemaSubjectResponse>> {
         let version = version
-            .map(|v| format!("{}", v))
+            .map(|v| format!("{v}"))
             .unwrap_or_else(|| "latest".to_string());
 
         let url = self

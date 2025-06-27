@@ -172,7 +172,7 @@ async fn test_kafka_checkpoint_flushes() {
     for message in 1u32..200 {
         let record = get_data(&mut consumer).await;
         let result: TestData = serde_json::from_str(&record).unwrap();
-        assert_eq!(message, result.value, "{} {:?}", message, record);
+        assert_eq!(message, result.value, "{message} {record:?}");
     }
 }
 

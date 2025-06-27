@@ -17,7 +17,7 @@ fn main() -> Result<(), Error> {
 
     let mut client = match std::env::var("DATABASE_URL") {
         Ok(database_url) => Client::connect(&database_url, NoTls)
-            .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e)),
+            .unwrap_or_else(|e| panic!("Failed to connect to database: {e}")),
         Err(_) => Client::configure()
             .dbname("arroyo")
             .host("localhost")
@@ -25,7 +25,7 @@ fn main() -> Result<(), Error> {
             .user("arroyo")
             .password("arroyo")
             .connect(NoTls)
-            .unwrap_or_else(|e| panic!("Failed to connect to default database: {}", e)),
+            .unwrap_or_else(|e| panic!("Failed to connect to default database: {e}")),
     };
 
     let mut sqlite =

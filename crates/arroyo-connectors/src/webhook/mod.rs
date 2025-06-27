@@ -122,7 +122,7 @@ impl Connector for WebhookConnector {
                 Err(err) => TestSourceMessage {
                     error: true,
                     done: true,
-                    message: format!("{:?}", err),
+                    message: format!("{err:?}"),
                 },
             };
 

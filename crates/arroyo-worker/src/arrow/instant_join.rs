@@ -289,7 +289,7 @@ impl ArrowOperator for InstantJoin {
                         collector.collect(batch).await;
                     }
                     Err(err) => {
-                        panic!("error in future: {:?}", err);
+                        panic!("error in future: {err:?}");
                     }
                 }
                 future = new_exec;

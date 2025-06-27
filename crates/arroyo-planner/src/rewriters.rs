@@ -66,7 +66,7 @@ impl SourceRewriter<'_> {
                     None
                 })
                 .ok_or_else(|| {
-                    DataFusionError::Plan(format!("Watermark field {} not found", watermark_field))
+                    DataFusionError::Plan(format!("Watermark field {watermark_field} not found"))
                 })?,
             None => Expr::BinaryExpr(BinaryExpr {
                 left: Box::new(Expr::Column(Column {
@@ -127,10 +127,7 @@ impl SourceRewriter<'_> {
                     None
                 })
                 .ok_or_else(|| {
-                    DataFusionError::Plan(format!(
-                        "Event time field {} not found",
-                        event_time_field
-                    ))
+                    DataFusionError::Plan(format!("Event time field {event_time_field} not found"))
                 })?;
 
             let event_time_field =
@@ -208,7 +205,7 @@ impl SourceRewriter<'_> {
             Self::watermark_expression(table)?,
         )
         .map_err(|err| {
-            DataFusionError::Internal(format!("failed to create watermark expression: {}", err))
+            DataFusionError::Internal(format!("failed to create watermark expression: {err}"))
         })?;
 
         Ok(Transformed::yes(LogicalPlan::Extension(Extension {
@@ -283,7 +280,7 @@ impl TreeNodeRewriter for SourceRewriter<'_> {
         let table = self
             .schema_provider
             .get_table(table_name)
-            .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", table_name)))?;
+            .ok_or_else(|| DataFusionError::Plan(format!("Table {table_name} not found")))?;
 
         match table {
             Table::ConnectorTable(table) => self.mutate_connector_table(&table_scan, table),
@@ -343,10 +340,7 @@ impl UnnestRewriter {
                             ))));
                         }
                         n => {
-                            panic!(
-                                "Unnest has wrong number of arguments (expected 1, found {})",
-                                n
-                            );
+                            panic!("Unnest has wrong number of arguments (expected 1, found {n})");
                         }
                     }
                 }

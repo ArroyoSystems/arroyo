@@ -15,20 +15,20 @@ pub(crate) fn deserialize_proto(
 ) -> Result<serde_json::Value, SourceError> {
     if proto.confluent_schema_registry {
         skip_confluent_header(&mut msg).map_err(|e| {
-            SourceError::bad_data(format!("invalid confluent schema header: {:?}", e))
+            SourceError::bad_data(format!("invalid confluent schema header: {e:?}"))
         })?;
     }
 
     if proto.length_delimited {
         read_varint(&mut msg)
-            .map_err(|e| SourceError::bad_data(format!("invalid protobuf varint: {:?}", e)))?;
+            .map_err(|e| SourceError::bad_data(format!("invalid protobuf varint: {e:?}")))?;
     }
 
     let message = proto.message_name.as_ref().expect("no message name");
     let descriptor = pool.get_message_by_name(message).expect("no descriptor");
 
     let msg = DynamicMessage::decode(descriptor, msg)
-        .map_err(|e| SourceError::bad_data(format!("failed to deserialize protobuf: {:?}", e)))?;
+        .map_err(|e| SourceError::bad_data(format!("failed to deserialize protobuf: {e:?}")))?;
 
     Ok(proto_to_json(&msg))
 }

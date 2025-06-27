@@ -108,10 +108,7 @@ def my_add(x: int, y: float) -> float:
                     if let TypeSignature::Exact(v) = e {
                         v
                     } else {
-                        panic!(
-                            "expected inner typesignature sto be exact, but found {:?}",
-                            e
-                        )
+                        panic!("expected inner typesignature sto be exact, but found {e:?}")
                     }
                 })
                 .collect();

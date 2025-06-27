@@ -115,7 +115,7 @@ impl MqttTopicTester {
                 let event = eventloop.poll().await;
                 if let Err(err) = event {
                     tracing::error!("Error in mqtt event loop: {:?}", err);
-                    panic!("Error in mqtt event loop: {:?}", err);
+                    panic!("Error in mqtt event loop: {err:?}");
                 }
             }
         });

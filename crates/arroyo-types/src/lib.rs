@@ -269,10 +269,7 @@ impl<'de> Deserialize<'de> for DebeziumOp {
             "u" => Ok(DebeziumOp::Update),
             "d" => Ok(DebeziumOp::Delete),
             "r" => Ok(DebeziumOp::Create),
-            _ => Err(serde::de::Error::custom(format!(
-                "Invalid DebeziumOp {}",
-                s
-            ))),
+            _ => Err(serde::de::Error::custom(format!("Invalid DebeziumOp {s}"))),
         }
     }
 }
@@ -451,7 +448,7 @@ impl Display for DisplayAsSql<'_> {
             DataType::List(inner) => {
                 write!(f, "{}[]", DisplayAsSql(inner.data_type()))
             }
-            dt => write!(f, "{}", dt),
+            dt => write!(f, "{dt}"),
         }
     }
 }
@@ -502,7 +499,7 @@ impl TryFrom<&str> for DatePart {
             "nanosecond" => Ok(DatePart::Nanosecond),
             "dow" => Ok(DatePart::DayOfWeek),
             "doy" => Ok(DatePart::DayOfYear),
-            _ => Err(format!("'{}' is not a valid DatePart", value)),
+            _ => Err(format!("'{value}' is not a valid DatePart")),
         }
     }
 }
@@ -553,7 +550,7 @@ impl TryFrom<&str> for DateTruncPrecision {
             "minute" => Ok(DateTruncPrecision::Minute),
             "second" => Ok(DateTruncPrecision::Second),
 
-            _ => Err(format!("'{}' is not a valid DateTruncPrecision", value)),
+            _ => Err(format!("'{value}' is not a valid DateTruncPrecision")),
         }
     }
 }

@@ -98,7 +98,7 @@ impl ArroyoExtension for WindowFunctionExtension {
 
         let logical_node = LogicalNode::single(
             index as u32,
-            format!("window_function_{}", index),
+            format!("window_function_{index}"),
             OperatorName::WindowFunction,
             config.encode_to_vec(),
             "window function".to_string(),

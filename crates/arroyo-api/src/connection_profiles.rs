@@ -35,7 +35,7 @@ impl TryFrom<DbConnectionProfile> for ConnectionProfile {
 
         let description = (*connector)
             .config_description(&val.config)
-            .map_err(|e| format!("Failed to parse config: {:?}", e))?;
+            .map_err(|e| format!("Failed to parse config: {e:?}"))?;
 
         Ok(ConnectionProfile {
             id: val.pub_id,
@@ -69,7 +69,7 @@ pub async fn test_connection_profile(
 
     let Some(rx) = connector
         .test_profile(&req.config)
-        .map_err(|e| bad_request(format!("Invalid config: {:?}", e)))?
+        .map_err(|e| bad_request(format!("Invalid config: {e:?}")))?
     else {
         return Ok(Json(TestSourceMessage::done(
             "This connector does not support testing",
@@ -101,7 +101,7 @@ pub async fn create_connection_profile(
     connector_for_type(&req.connector)
         .ok_or_else(|| bad_request("Unknown connector type".to_string()))?
         .validate_config(&req.config)
-        .map_err(|e| bad_request(format!("Invalid config: {:?}", e)))?;
+        .map_err(|e| bad_request(format!("Invalid config: {e:?}")))?;
 
     let pub_id = generate_id(IdTypes::ConnectionProfile);
     api_queries::execute_create_connection_profile(
@@ -220,7 +220,7 @@ pub(crate) async fn get_connection_profile_autocomplete(
         .unwrap()
         .await
         .map_err(log_and_map)?
-        .map_err(|e| bad_request(format!("Failed to get autocomplete suggestions: {}", e)))?;
+        .map_err(|e| bad_request(format!("Failed to get autocomplete suggestions: {e}")))?;
 
     Ok(Json(ConnectionAutocompleteResp {
         values: BTreeMap::from_iter(result.into_iter()),

@@ -33,7 +33,7 @@ impl TryFrom<api::ArroyoSchema> for ArroyoSchema {
     type Error = DataFusionError;
     fn try_from(schema_proto: api::ArroyoSchema) -> Result<Self, DataFusionError> {
         let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)
-            .map_err(|e| DataFusionError::Plan(format!("Invalid arrow schema: {}", e)))?;
+            .map_err(|e| DataFusionError::Plan(format!("Invalid arrow schema: {e}")))?;
         let timestamp_index = schema_proto.timestamp_index as usize;
 
         let key_indices = schema_proto.has_keys.then(|| {
@@ -137,8 +137,7 @@ impl ArroyoSchema {
             .column_with_name(TIMESTAMP_FIELD)
             .ok_or_else(|| {
                 DataFusionError::Plan(format!(
-                    "no {} field in schema, schema is {:?}",
-                    TIMESTAMP_FIELD, schema
+                    "no {TIMESTAMP_FIELD} field in schema, schema is {schema:?}"
                 ))
             })?
             .0;
@@ -156,8 +155,7 @@ impl ArroyoSchema {
             .column_with_name(TIMESTAMP_FIELD)
             .ok_or_else(|| {
                 DataFusionError::Plan(format!(
-                    "no {} field in schema, schema is {:?}",
-                    TIMESTAMP_FIELD, schema
+                    "no {TIMESTAMP_FIELD} field in schema, schema is {schema:?}"
                 ))
             })?
             .0;

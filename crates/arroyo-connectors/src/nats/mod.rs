@@ -244,11 +244,11 @@ impl Connector for NatsConnector {
         let (connection_type, desc) = match &table.connector_type {
             ConnectorType::Source { .. } => (
                 ConnectionType::Source,
-                format!("NatsSource<{:?}>", stream_or_subject),
+                format!("NatsSource<{stream_or_subject:?}>"),
             ),
             ConnectorType::Sink { .. } => (
                 ConnectionType::Sink,
-                format!("NatsSink<{:?}>", stream_or_subject),
+                format!("NatsSink<{stream_or_subject:?}>"),
             ),
         };
 

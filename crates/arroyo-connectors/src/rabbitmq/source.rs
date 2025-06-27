@@ -102,7 +102,7 @@ impl RabbitmqStreamSourceFunc {
         let mut consumer = self.get_consumer(ctx).await.map_err(|e| {
             UserError::new(
                 "Could not create RabbitMQ Stream consumer",
-                format!("{:?}", e),
+                format!("{e:?}"),
             )
         })?;
 

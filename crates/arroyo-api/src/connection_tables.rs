@@ -74,8 +74,7 @@ async fn get_and_validate_connector(
         .next()
         .ok_or_else(|| {
             bad_request(format!(
-                "No connection profile with id '{}'",
-                connection_profile_id
+                "No connection profile with id '{connection_profile_id}'"
             ))
         })?;
 
@@ -99,7 +98,7 @@ async fn get_and_validate_connector(
 
     connector
         .validate_table(&req.config)
-        .map_err(|e| bad_request(format!("Failed to parse config: {:?}", e)))?;
+        .map_err(|e| bad_request(format!("Failed to parse config: {e:?}")))?;
 
     let schema: Option<ConnectionSchema> = req.schema.clone();
 
@@ -116,7 +115,7 @@ async fn get_and_validate_connector(
             )
             .await?
             .validate()
-            .map_err(|e| bad_request(format!("Invalid schema: {}", e)))?,
+            .map_err(|e| bad_request(format!("Invalid schema: {e}")))?,
         )
     } else {
         None
@@ -184,7 +183,7 @@ pub(crate) async fn test_connection_table(
 
     connector
         .test(&req.name, &profile, &req.config, schema.as_ref(), tx)
-        .map_err(|e| bad_request(format!("Failed to parse config or schema: {:?}", e)))?;
+        .map_err(|e| bad_request(format!("Failed to parse config or schema: {e:?}")))?;
 
     let stream = ReceiverStream::new(rx);
 
@@ -333,8 +332,7 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
             Some(Ok(schema)) => Some(schema),
             Some(Err(err)) => {
                 return Err(format!(
-                    "Error during connection schema deserialization: {:?}",
-                    err
+                    "Error during connection schema deserialization: {err:?}"
                 ));
             }
             None => None,
@@ -533,18 +531,18 @@ async fn expand_avro_schema(
     if let Some(Format::Avro(format)) = &mut schema.format {
         format.add_reader_schema(
             apache_avro::Schema::parse_str(definition)
-                .map_err(|e| bad_request(format!("Avro schema is invalid: {:?}", e)))?,
+                .map_err(|e| bad_request(format!("Avro schema is invalid: {e:?}")))?,
         );
     }
 
     let fields: Result<_, String> = avro::schema::to_arrow(definition)
-        .map_err(|e| bad_request(format!("Invalid avro schema: {}", e)))?
+        .map_err(|e| bad_request(format!("Invalid avro schema: {e}")))?
         .fields
         .into_iter()
         .map(|f| (**f).clone().try_into())
         .collect();
 
-    schema.fields = fields.map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+    schema.fields = fields.map_err(|e| bad_request(format!("Failed to convert schema: {e}")))?;
 
     Ok(schema)
 }
@@ -643,7 +641,7 @@ async fn expand_local_proto_schema(
         .map_err(|e| bad_request(e.to_string()))?;
 
     let pool = proto::schema::get_pool(&encoded)
-        .map_err(|e| bad_request(format!("error handling protobuf: {}", e)))?;
+        .map_err(|e| bad_request(format!("error handling protobuf: {e}")))?;
 
     let descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
         bad_request(format!(
@@ -658,7 +656,7 @@ async fn expand_local_proto_schema(
     })?;
 
     let arrow = protobuf_to_arrow(&descriptor)
-        .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+        .map_err(|e| bad_request(format!("Failed to convert schema: {e}")))?;
 
     let fields: Result<_, String> = arrow
         .fields
@@ -666,7 +664,7 @@ async fn expand_local_proto_schema(
         .map(|f| (**f).clone().try_into())
         .collect();
 
-    let fields = fields.map_err(|e| bad_request(format!("failed to convert schema: {}", e)))?;
+    let fields = fields.map_err(|e| bad_request(format!("failed to convert schema: {e}")))?;
 
     Ok((encoded, fields))
 }
@@ -715,7 +713,7 @@ async fn expand_json_schema(
     if let Some(d) = &schema.definition {
         let arrow = match d {
             SchemaDefinition::JsonSchema(json) => json::schema::to_arrow(name, json)
-                .map_err(|e| bad_request(format!("Invalid json-schema: {}", e)))?,
+                .map_err(|e| bad_request(format!("Invalid json-schema: {e}")))?,
             SchemaDefinition::RawSchema(_) => raw_schema(),
             _ => return Err(bad_request("Invalid schema type for json format")),
         };
@@ -727,7 +725,7 @@ async fn expand_json_schema(
             .collect();
 
         schema.fields =
-            fields.map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+            fields.map_err(|e| bad_request(format!("Failed to convert schema: {e}")))?;
     }
 
     Ok(schema)
@@ -781,12 +779,7 @@ async fn get_schema(
         api_key.clone(),
         api_secret.clone(),
     )
-    .map_err(|e| {
-        bad_request(format!(
-            "failed to fetch schemas from schema registry: {}",
-            e
-        ))
-    })?;
+    .map_err(|e| bad_request(format!("failed to fetch schemas from schema registry: {e}")))?;
 
     let Some(resp) = resolver.get_schema_for_version(None).await.map_err(|e| {
         bad_request(format!(

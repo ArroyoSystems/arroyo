@@ -140,8 +140,7 @@ impl Converter {
             }
             other => {
                 return Err(PyTypeError::new_err(format!(
-                    "Unimplemented datatype {}",
-                    other
+                    "Unimplemented datatype {other}"
                 )))
             }
         })
@@ -250,8 +249,7 @@ impl Converter {
                 )))
             }
             other => Err(PyTypeError::new_err(format!(
-                "Unimplemented datatype {}",
-                other
+                "Unimplemented datatype {other}"
             ))),
         }
     }

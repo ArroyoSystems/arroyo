@@ -420,7 +420,7 @@ impl ContextProvider for ArroyoSchemaProvider {
     ) -> datafusion::common::Result<Arc<dyn TableSource>> {
         let table = self
             .get_table(name.to_string())
-            .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", name)))?;
+            .ok_or_else(|| DataFusionError::Plan(format!("Table {name} not found")))?;
 
         let fields = table.get_fields();
         let schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
@@ -860,7 +860,7 @@ pub async fn parse_and_get_arrow_program(
         let sink = match sink_name {
             Some(sink_name) => {
                 let table = schema_provider.get_table_mut(&sink_name).ok_or_else(|| {
-                    DataFusionError::Plan(format!("Connection {} not found", sink_name))
+                    DataFusionError::Plan(format!("Connection {sink_name} not found"))
                 })?;
                 match table {
                     Table::ConnectorTable(_) => SinkExtension::new(
@@ -1000,8 +1000,7 @@ pub fn schema_with_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> Result<
         .column_with_name(TIMESTAMP_FIELD)
         .ok_or_else(|| {
             DataFusionError::Plan(format!(
-                "no {} field in schema, schema is {:?}",
-                TIMESTAMP_FIELD, schema
+                "no {TIMESTAMP_FIELD} field in schema, schema is {schema:?}"
             ))
         })?
         .0;

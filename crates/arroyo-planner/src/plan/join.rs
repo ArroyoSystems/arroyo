@@ -96,7 +96,7 @@ impl JoinRewriter<'_> {
             .map(|(index, expr)| {
                 expr.alias_qualified(
                     Some(TableReference::bare("_arroyo")),
-                    format!("_key_{}", index),
+                    format!("_key_{index}"),
                 )
             })
             .chain(

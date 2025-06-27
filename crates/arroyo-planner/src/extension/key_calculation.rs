@@ -99,7 +99,7 @@ impl ArroyoExtension for KeyCalculationExtension {
         };
         let node = LogicalNode::single(
             index as u32,
-            format!("key_{}", index),
+            format!("key_{index}"),
             OperatorName::ArrowKey,
             config.encode_to_vec(),
             format!("ArrowKey<{}>", config.name),

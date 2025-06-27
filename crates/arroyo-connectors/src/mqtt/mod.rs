@@ -207,7 +207,7 @@ impl Connector for MqttConnector {
             let (itx, _rx) = tokio::sync::mpsc::channel(8);
             let message = match test_inner(profile, None, itx).await {
                 Ok(_) => TestSourceMessage::done("Successfully connected to Mqtt"),
-                Err(e) => TestSourceMessage::fail(format!("Failed to connect to Mqtt: {:?}", e)),
+                Err(e) => TestSourceMessage::fail(format!("Failed to connect to Mqtt: {e:?}")),
             };
 
             tx.send(message).unwrap();

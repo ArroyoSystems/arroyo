@@ -168,8 +168,8 @@ impl Scheduler for ProcessScheduler {
                 let mut child = command
                     .args(args)
                     .env("ARROYO__ADMIN__HTTP_PORT", "0")
-                    .env("ARROYO__WORKER__TASK_SLOTS", format!("{}", slots_here))
-                    .env("ARROYO__WORKER__ID", format!("{}", worker_id)) // start at 100 to make same length
+                    .env("ARROYO__WORKER__TASK_SLOTS", format!("{slots_here}"))
+                    .env("ARROYO__WORKER__ID", format!("{worker_id}")) // start at 100 to make same length
                     .env("ARROYO__CONTROLLER_ENDPOINT", config.controller_endpoint())
                     .env("UNDER_PROCESS_SCHEDULER", "true")
                     .env(JOB_ID_ENV, &*job_id)
@@ -280,8 +280,7 @@ impl NodeStatus {
     fn release_slots(&mut self, worker_id: WorkerId, slots: usize) {
         if let Some(freed) = self.scheduled_slots.remove(&worker_id) {
             assert_eq!(freed, slots,
-                "Controller and node disagree about how many slots are scheduled for worker {:?} ({} != {})",
-                worker_id, freed, slots);
+                "Controller and node disagree about how many slots are scheduled for worker {worker_id:?} ({freed} != {slots})");
 
             self.free_slots += slots;
 

@@ -241,7 +241,7 @@ impl MaybeLocalDb {
     pub async fn from_dir(s: &str) -> Self {
         let provider = StorageProvider::for_url(s)
             .await
-            .unwrap_or_else(|e| panic!("Provided state dir '{}' is not valid: {}", s, e));
+            .unwrap_or_else(|e| panic!("Provided state dir '{s}' is not valid: {e}"));
 
         let local_path = if !provider.config().is_local() {
             let local_path = temp_dir().join(format!("arroyo-local-{}.sqlite", random::<u32>()));
@@ -249,10 +249,7 @@ impl MaybeLocalDb {
                 .get_if_present(REMOTE_STATE_KEY)
                 .await
                 .unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to fetch database from configured state directory '{}': {}",
-                        s, e
-                    );
+                    panic!("Failed to fetch database from configured state directory '{s}': {e}");
                 });
 
             if let Some(db) = db {

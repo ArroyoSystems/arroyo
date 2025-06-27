@@ -213,7 +213,7 @@ impl FileSystemSourceFunc {
             }
             other => Err(UserError::new(
                 "bad format",
-                format!("newline separated stream not supported for {:?}", other),
+                format!("newline separated stream not supported for {other:?}"),
             )),
         }
     }
@@ -241,7 +241,7 @@ impl FileSystemSourceFunc {
                     .map_err(|err| {
                         UserError::new(
                             "could not create parquet record batch stream builder",
-                            format!("path:{}, err:{}", path, err),
+                            format!("path:{path}, err:{err}"),
                         )
                     })?
                     .with_batch_size(8192);
@@ -269,7 +269,7 @@ impl FileSystemSourceFunc {
                                 out_schema.clone(),
                                 columns
                             ).map_err(|e| UserError::new("data does not match schema",
-                                format!("The parquet file has a schema that does not match the table schema: {:?}", e)))?;
+                                format!("The parquet file has a schema that does not match the table schema: {e:?}")))?;
                                 Ok(out_batch)
                     },
                     Err(err) => Err(UserError::new(
@@ -300,7 +300,7 @@ impl FileSystemSourceFunc {
             FileReadState::Finished => {
                 return Err(UserError::new(
                     "reading finished file",
-                    format!("{} has already been read", obj_key),
+                    format!("{obj_key} has already been read"),
                 ));
             }
         };

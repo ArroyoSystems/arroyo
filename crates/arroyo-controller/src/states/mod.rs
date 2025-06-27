@@ -690,7 +690,7 @@ impl StateMachine {
                 Some(Box::new(Finished {}))
             }
             s => {
-                panic!("Unhandled state {} in recovery", s);
+                panic!("Unhandled state {s} in recovery");
             }
         };
 

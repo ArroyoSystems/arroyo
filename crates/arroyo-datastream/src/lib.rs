@@ -65,7 +65,7 @@ fn format_duration(duration: Duration) -> String {
     if secs < 1.0 {
         format!("{}ms", duration.as_millis())
     } else if secs.floor() != secs {
-        format!("{}s", secs)
+        format!("{secs}s")
     } else if secsi % (60 * 60 * 24) == 0 {
         format!("{}d", secsi / 60 / 60 / 24)
     } else if secsi % (60 * 60) == 0 {
@@ -73,7 +73,7 @@ fn format_duration(duration: Duration) -> String {
     } else if secsi % 60 == 0 {
         format!("{}m", secsi / 60)
     } else {
-        format!("{}s", secsi)
+        format!("{secsi}s")
     }
 }
 
@@ -132,7 +132,7 @@ impl std::fmt::Debug for WindowAgg {
             Self::Max => write!(f, "Max"),
             Self::Min => write!(f, "Min"),
             Self::Sum => write!(f, "Sum"),
-            Self::Expression { name, .. } => write!(f, "{}", name),
+            Self::Expression { name, .. } => write!(f, "{name}"),
         }
     }
 }

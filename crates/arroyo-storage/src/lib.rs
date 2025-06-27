@@ -324,7 +324,7 @@ impl BackendConfig {
             .as_str();
 
         let mut path = if !path.starts_with('/') {
-            PathBuf::from(format!("/{}", path))
+            PathBuf::from(format!("/{path}"))
         } else {
             PathBuf::from(path)
         };
@@ -423,7 +423,7 @@ impl StorageProvider {
 
         for (key, value) in options {
             let s3_config_key = key.parse().map_err(|_| {
-                StorageError::CredentialsError(format!("invalid S3 config key: {}", key))
+                StorageError::CredentialsError(format!("invalid S3 config key: {key}"))
             })?;
             if AmazonS3ConfigKey::AccessKeyId == s3_config_key {
                 aws_key_manually_set = true;
@@ -477,7 +477,7 @@ impl StorageProvider {
             }
         };
         if let Some(key) = &config.key {
-            canonical_url = format!("{}/{}", canonical_url, key);
+            canonical_url = format!("{canonical_url}/{key}");
         }
 
         let object_store = Arc::new(builder.build()?);
@@ -542,7 +542,7 @@ impl StorageProvider {
             canonical_url.push_str(key.as_ref());
         }
 
-        println!("ENDPOINT = {:?}", endpoint);
+        println!("ENDPOINT = {endpoint:?}");
 
         builder = builder
             .with_endpoint(endpoint)
@@ -569,7 +569,7 @@ impl StorageProvider {
 
         let mut canonical_url = format!("https://{}.storage.googleapis.com", config.bucket);
         if let Some(key) = &config.key {
-            canonical_url = format!("{}/{}", canonical_url, key);
+            canonical_url = format!("{canonical_url}/{key}");
         }
 
         let object_store = Arc::new(builder.build()?);
@@ -731,7 +731,7 @@ impl StorageProvider {
     fn get_multipart(&self) -> &Arc<dyn MultipartStore> {
         self.multipart_store
             .as_ref()
-            .unwrap_or_else(|| panic!("Not a multipart store: {:?}", self))
+            .unwrap_or_else(|| panic!("Not a multipart store: {self:?}"))
     }
 
     /// Produces a URL representation of this path that can be read by other systems,
@@ -1033,7 +1033,7 @@ mod tests {
 
         let now = to_nanos(SystemTime::now());
         let data = now.to_le_bytes().to_vec();
-        let key = Path::parse(format!("my-test/{}", now)).unwrap();
+        let key = Path::parse(format!("my-test/{now}")).unwrap();
 
         assert!(storage.put(key.clone(), data.clone()).await.is_ok());
         assert_eq!(storage.get(key.clone()).await.unwrap(), data.clone());
@@ -1048,7 +1048,7 @@ mod tests {
         storage.delete_if_present(key.clone()).await.unwrap();
 
         assert!(
-            !tokio::fs::try_exists(format!("/tmp/arroyo-testing/storage-tests/{}", key))
+            !tokio::fs::try_exists(format!("/tmp/arroyo-testing/storage-tests/{key}"))
                 .await
                 .unwrap()
         );

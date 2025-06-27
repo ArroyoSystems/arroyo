@@ -91,7 +91,7 @@ impl ArroyoExtension for WatermarkNode {
         let expression = serialize_physical_expr(&expression, &DefaultPhysicalExtensionCodec {})?;
         let node = LogicalNode::single(
             index as u32,
-            format!("watermark_{}", index),
+            format!("watermark_{index}"),
             OperatorName::ExpressionWatermark,
             ExpressionWatermarkConfig {
                 period_micros: 1_000_000,

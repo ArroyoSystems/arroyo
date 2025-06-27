@@ -224,7 +224,7 @@ async fn pg_pool() -> Pool {
             arroyo_server_common::set_cluster_id(&uuid.to_string());
         }
         Err(e) => {
-            panic!("Failed to get cluster info {:?}", e);
+            panic!("Failed to get cluster info {e:?}");
         }
     };
 
@@ -247,13 +247,13 @@ fn sqlite_connection() -> rusqlite::Connection {
     let exists = path.exists();
 
     let mut conn = rusqlite::Connection::open(&path)
-        .unwrap_or_else(|e| panic!("Could not open sqlite database at path {:?}: {:?}", path, e));
+        .unwrap_or_else(|e| panic!("Could not open sqlite database at path {path:?}: {e:?}"));
 
     if !exists {
         info!("Creating config database at {}", path.to_string_lossy());
         if let Err(e) = sqlite_migrations::migrations::runner().run(&mut conn) {
             let _ = fs::remove_file(&path);
-            panic!("Failed to set up database: {}", e);
+            panic!("Failed to set up database: {e}");
         }
 
         let uuid = Uuid::new_v4().to_string();
@@ -283,7 +283,7 @@ fn sqlite_connection() -> rusqlite::Connection {
     let uuid: String = results
         .into_iter()
         .next()
-        .unwrap_or_else(|| panic!("Invalid sqlite database at {:?}; delete to recreate", path))
+        .unwrap_or_else(|| panic!("Invalid sqlite database at {path:?}; delete to recreate"))
         .unwrap();
 
     arroyo_server_common::set_cluster_id(&uuid);
@@ -368,7 +368,7 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            eprintln!("connection error: {e}");
         }
     });
 
@@ -527,10 +527,10 @@ async fn visualize(query: Input, open: bool) {
             );
         }
 
-        eprintln!("Wrote svg to {:?}", output);
+        eprintln!("Wrote svg to {output:?}");
 
         let _ = open::that(format!("file://{}", output.to_string_lossy()));
     } else {
-        println!("{}", d2);
+        println!("{d2}");
     }
 }

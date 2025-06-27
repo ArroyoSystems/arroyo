@@ -125,7 +125,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         let mut key_projection_expressions: Vec<_> = additional_keys
             .iter()
             .enumerate()
-            .map(|(index, expression)| expression.clone().alias(format!("_key_{}", index)))
+            .map(|(index, expression)| expression.clone().alias(format!("_key_{index}")))
             .collect();
 
         key_projection_expressions.extend(

@@ -110,9 +110,8 @@ pub fn config() -> Arc<Config> {
 fn add_legacy_str(config: Figment, old: &str, new: &str) -> Figment {
     if let Ok(v) = std::env::var(old) {
         warn!(
-            "Using deprecated config option '{}' -- will be removed in 0.12; \
-        see the config docs to migrate https://doc.arroyo.dev/config",
-            old
+            "Using deprecated config option '{old}' -- will be removed in 0.12; \
+        see the config docs to migrate https://doc.arroyo.dev/config"
         );
         config.merge((new, v))
     } else {
@@ -123,16 +122,15 @@ fn add_legacy_str(config: Figment, old: &str, new: &str) -> Figment {
 fn add_legacy_int(config: Figment, old: &str, new: &str) -> Figment {
     if let Ok(v) = std::env::var(old) {
         warn!(
-            "Using deprecated config option '{}' -- will be removed in 0.12; \
-        see the config docs to migrate https://doc.arroyo.dev/config",
-            old
+            "Using deprecated config option '{old}' -- will be removed in 0.12; \
+        see the config docs to migrate https://doc.arroyo.dev/config"
         );
         match v.parse::<u16>() {
             Ok(v) => {
                 return config.merge((new, v));
             }
             Err(_) => {
-                warn!("Invalid config for {} -- expected a number", old);
+                warn!("Invalid config for {old} -- expected a number");
             }
         }
     }
@@ -694,9 +692,9 @@ impl<'de> Deserialize<'de> for HumanReadableDuration {
         let str = String::deserialize(deserializer)?;
 
         let r = Regex::new(r"^(\d+)\s*([a-zA-Zµ]+)$").unwrap();
-        let captures = r.captures(&str).ok_or_else(|| {
-            de::Error::custom(format!("invalid duration specification '{}'", str))
-        })?;
+        let captures = r
+            .captures(&str)
+            .ok_or_else(|| de::Error::custom(format!("invalid duration specification '{str}'")))?;
         let mut capture = captures.iter();
 
         capture.next();
@@ -711,7 +709,7 @@ impl<'de> Deserialize<'de> for HumanReadableDuration {
             "s" | "secs" | "seconds" => Duration::from_secs(n),
             "m" | "mins" | "minutes" => Duration::from_secs(n * 60),
             "h" | "hrs" | "hours" => Duration::from_secs(n * 60 * 60),
-            x => return Err(de::Error::custom(format!("unknown time unit '{}'", x))),
+            x => return Err(de::Error::custom(format!("unknown time unit '{x}'"))),
         };
 
         Ok(HumanReadableDuration {
@@ -796,7 +794,7 @@ impl<T: Serialize + DeserializeOwned + Debug + Clone> Deref for Sensitive<T> {
 
 impl<T: Serialize + DeserializeOwned + Debug + Clone> std::fmt::Display for Sensitive<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", SENSITIVE_MASK)
+        write!(f, "{SENSITIVE_MASK}")
     }
 }
 

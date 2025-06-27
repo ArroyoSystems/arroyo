@@ -98,7 +98,7 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
     let path = match path {
         ScalarValue::Utf8(Some(s)) => JsonPath::parse(s)
-            .map_err(|e| DataFusionError::Execution(format!("Invalid json path '{s}': {:?}", e)))?,
+            .map_err(|e| DataFusionError::Execution(format!("Invalid json path '{s}': {e:?}")))?,
         ScalarValue::Utf8(None) => {
             return Err(DataFusionError::Execution(format!(
                 "The path argument to {name} cannot be null"

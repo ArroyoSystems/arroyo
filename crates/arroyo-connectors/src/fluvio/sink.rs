@@ -44,7 +44,7 @@ impl ArrowOperator for FluvioSinkFunc {
                         e.to_string(),
                     )
                     .await;
-                panic!("Failed to construct Fluvio producer: {:?}", e);
+                panic!("Failed to construct Fluvio producer: {e:?}");
             }
         }
     }

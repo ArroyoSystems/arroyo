@@ -71,7 +71,7 @@ impl TryFrom<String> for ConnectionType {
         match value.to_lowercase().as_str() {
             "source" => Ok(ConnectionType::Source),
             "sink" => Ok(ConnectionType::Sink),
-            _ => Err(format!("Invalid connection type: {}", value)),
+            _ => Err(format!("Invalid connection type: {value}")),
         }
     }
 }
@@ -208,7 +208,7 @@ impl TryFrom<Field> for SourceField {
             }
             (DataType::List(item), None) => FieldType::List(Box::new((**item).clone().try_into()?)),
             dt => {
-                return Err(format!("Unsupported data type {:?}", dt));
+                return Err(format!("Unsupported data type {dt:?}"));
             }
         };
 

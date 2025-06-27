@@ -240,7 +240,7 @@ fn dylib_path(name: &str, definition: &str) -> String {
     definition.hash(&mut hasher);
     let hash = BASE64_STANDARD_NO_PAD.encode(hasher.finish().to_le_bytes());
 
-    format!("udfs/{}_{}.{}", name, hash, PLATFORM_FILE_EXTENSION)
+    format!("udfs/{name}_{hash}.{PLATFORM_FILE_EXTENSION}")
 }
 
 #[tonic::async_trait]
@@ -281,7 +281,7 @@ impl CompilerGrpc for CompileService {
         let name = udf_crate.name.clone();
         self.write_udf_crate(udf_crate)
             .await
-            .map_err(|e| Status::internal(format!("Writing UDFs failed: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Writing UDFs failed: {e}")))?;
 
         let cargo_command = if req.save { "build" } else { "check" };
 
@@ -314,14 +314,13 @@ impl CompilerGrpc for CompileService {
                     &self
                         .build_dir
                         .join("target/release/")
-                        .join(format!("libudf.{}", PLATFORM_FILE_EXTENSION)),
+                        .join(format!("libudf.{PLATFORM_FILE_EXTENSION}")),
                 )
                 .await?;
 
                 self.storage.put(path.as_str(), dylib).await.map_err(|e| {
                     Status::internal(format!(
-                        "Failed to write UDF library to artifact storage: {}",
-                        e
+                        "Failed to write UDF library to artifact storage: {e}"
                     ))
                 })?;
 
@@ -384,7 +383,7 @@ impl CompilerGrpc for CompileService {
 
         let exists =
             self.storage.exists(path.as_str()).await.map_err(|e| {
-                Status::internal(format!("Failed to read from storage system: {}", e))
+                Status::internal(format!("Failed to read from storage system: {e}"))
             })?;
 
         Ok(Response::new(GetUdfPathResp {

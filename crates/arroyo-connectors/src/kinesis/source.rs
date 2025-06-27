@@ -180,7 +180,7 @@ impl SourceOperator for KinesisSourceFunc {
             Ok(r) => r,
             Err(UserError { name, details, .. }) => {
                 ctx.report_error(name.clone(), details.clone()).await;
-                panic!("{}: {}", name, details);
+                panic!("{name}: {details}");
             }
         }
     }

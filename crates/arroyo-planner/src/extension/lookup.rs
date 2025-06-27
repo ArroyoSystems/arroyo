@@ -131,7 +131,7 @@ impl ArroyoExtension for LookupJoin {
         Ok(NodeWithIncomingEdges {
             node: LogicalNode::single(
                 index as u32,
-                format!("lookupjoin_{}", index),
+                format!("lookupjoin_{index}"),
                 OperatorName::LookupJoin,
                 join_config.encode_to_vec(),
                 format!("LookupJoin<{}>", self.connector.name),

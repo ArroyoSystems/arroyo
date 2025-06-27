@@ -79,7 +79,7 @@ macro_rules! register_log {
 
 pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
     if let Err(e) = LogTracer::init() {
-        eprintln!("Failed to initialize log tracer {:?}", e);
+        eprintln!("Failed to initialize log tracer {e:?}");
     }
 
     let filter = filter
@@ -283,7 +283,7 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
     let addr = SocketAddr::new(config.admin.bind_address, config.admin.http_port);
 
     let state = Arc::new(AdminState {
-        name: format!("arroyo-{}", service),
+        name: format!("arroyo-{service}"),
     });
     let mut app = Router::new()
         .route("/status", get(status))

@@ -209,7 +209,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
         _registry: &dyn datafusion::execution::FunctionRegistry,
     ) -> datafusion::common::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
         let exec: ArroyoExecNode = Message::decode(buf)
-            .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {}", err)))?;
+            .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {err}")))?;
 
         match exec
             .node
@@ -217,7 +217,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
         {
             Node::MemExec(mem_exec) => {
                 let schema: Schema = serde_json::from_str(&mem_exec.schema).map_err(|e| {
-                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
+                    DataFusionError::Internal(format!("invalid schema in exec codec: {e:?}"))
                 })?;
                 let schema = Arc::new(schema);
                 match &self.context {
@@ -271,13 +271,12 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             }
             Node::UnnestExec(unnest) => {
                 let schema: Schema = serde_json::from_str(&unnest.schema).map_err(|e| {
-                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
+                    DataFusionError::Internal(format!("invalid schema in exec codec: {e:?}"))
                 })?;
 
                 let column = schema.index_of(UNNESTED_COL).map_err(|_| {
                     DataFusionError::Internal(format!(
-                        "unnest node schema does not contain {} col",
-                        UNNESTED_COL
+                        "unnest node schema does not contain {UNNESTED_COL} col"
                     ))
                 })?;
 
@@ -299,7 +298,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             }
             Node::DebeziumDecode(debezium) => {
                 let schema = Arc::new(serde_json::from_str::<Schema>(&debezium.schema).map_err(
-                    |e| DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e)),
+                    |e| DataFusionError::Internal(format!("invalid schema in exec codec: {e:?}")),
                 )?);
                 Ok(Arc::new(DebeziumUnrollingExec {
                     input: inputs
@@ -319,7 +318,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             }
             Node::DebeziumEncode(debezium) => {
                 let schema = Arc::new(serde_json::from_str::<Schema>(&debezium.schema).map_err(
-                    |e| DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e)),
+                    |e| DataFusionError::Internal(format!("invalid schema in exec codec: {e:?}")),
                 )?);
                 Ok(Arc::new(ToDebeziumExec {
                     input: inputs
@@ -381,13 +380,12 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
 
         if let Some(node) = proto {
             node.encode(buf).map_err(|err| {
-                DataFusionError::Internal(format!("couldn't serialize exec node {}", err))
+                DataFusionError::Internal(format!("couldn't serialize exec node {err}"))
             })?;
             Ok(())
         } else {
             Err(DataFusionError::Internal(format!(
-                "cannot serialize {:?}",
-                node
+                "cannot serialize {node:?}"
             )))
         }
     }
@@ -909,8 +907,7 @@ impl DebeziumUnrollingStream {
                 }
                 _ => {
                     return Err(DataFusionError::Internal(format!(
-                        "unexpected op value: {}",
-                        op
+                        "unexpected op value: {op}"
                     )));
                 }
             }

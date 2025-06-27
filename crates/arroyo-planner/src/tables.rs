@@ -262,7 +262,7 @@ impl ConnectorTable {
                 .collect();
         }
         let connector = connector_for_type(connector)
-            .ok_or_else(|| DataFusionError::Plan(format!("Unknown connector '{}'", connector)))?;
+            .ok_or_else(|| DataFusionError::Plan(format!("Unknown connector '{connector}'")))?;
 
         let format = Format::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid format: '{e}'")))?;
@@ -333,7 +333,7 @@ impl ConnectorTable {
             Some(fields.is_empty()),
             primary_keys.iter().cloned().collect(),
         )
-        .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {}", e)))?;
+        .map_err(|e| DataFusionError::Plan(format!("could not create connection schema: {e}")))?;
 
         let connection = connector
             .from_options(name, options, Some(&schema), connection_profile)
@@ -416,7 +416,7 @@ impl ConnectorTable {
         table.lookup_cache_ttl = options.pull_opt_duration("lookup.cache.ttl")?;
 
         if !options.is_empty() {
-            let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
+            let keys: Vec<String> = options.keys().map(|s| format!("'{s}'")).collect();
             return plan_err!(
                 "unknown options provided in WITH clause: {}",
                 keys.join(", ")
@@ -470,7 +470,7 @@ impl ConnectorTable {
                     && matches!(f.field().data_type(), DataType::Timestamp(..))
             })
             .ok_or_else(|| {
-                DataFusionError::Plan(format!("field {} not found or not a timestamp", field_name))
+                DataFusionError::Plan(format!("field {field_name} not found or not a timestamp"))
             })?;
         Ok(field)
     }
@@ -582,7 +582,7 @@ fn plan_generating_expr(
     schema: &DFSchema,
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<Expr, DataFusionError> {
-    let sql = format!("SELECT {} from {}", expr, name);
+    let sql = format!("SELECT {expr} from {name}");
     let statement = parse_sql(&sql)
         .expect("generating expression should be valid")
         .into_iter()
@@ -823,9 +823,8 @@ impl Table {
                                     .get(&connection_profile_name)
                                     .ok_or_else(|| {
                                         DataFusionError::Plan(format!(
-                                            "connection profile '{}' not found",
-                                            connection_profile_name
-                                        ))
+                                        "connection profile '{connection_profile_name}' not found"
+                                    ))
                                     })?,
                             ),
                             None => None,
@@ -857,7 +856,7 @@ impl Table {
                         connection_profile,
                         schema_provider,
                     )
-                    .map_err(|e| e.context(format!("Failed to create table {}", name)))?;
+                    .map_err(|e| e.context(format!("Failed to create table {name}")))?;
 
                     Ok(Some(match table.connection_type {
                         ConnectionType::Source | ConnectionType::Sink => {
@@ -998,7 +997,7 @@ fn infer_sink_schema(
         produce_optimized_plan(&Statement::Query(Box::new(source.clone())), schema_provider)?;
     let table = schema_provider
         .get_table_mut(&table_name)
-        .ok_or_else(|| DataFusionError::Plan(format!("table {} not found", table_name)))?;
+        .ok_or_else(|| DataFusionError::Plan(format!("table {table_name} not found")))?;
 
     table.set_inferred_fields(fields_with_qualifiers(plan.schema()))?;
 

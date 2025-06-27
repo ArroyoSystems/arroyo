@@ -103,7 +103,7 @@ async fn compile_sql(
                     schema_provider
                         .add_python_udf(&udf.definition)
                         .await
-                        .map_err(|e| bad_request(format!("invalid Python UDF: {:?}", e)))?;
+                        .map_err(|e| bad_request(format!("invalid Python UDF: {e:?}")))?;
                 }
                 UdfLanguage::Rust => {
                     let parsed = ParsedUdfFile::try_parse(&udf.definition)
@@ -477,7 +477,7 @@ impl TryInto<Pipeline> for DbPipeline {
                 .into_iter()
                 .map(|(k, v)| Ok((u32::from_str(k)?, v.as_u64().unwrap() as usize)))
                 .collect::<Result<HashMap<_, _>, ParseIntError>>()
-                .map_err(|e| bad_request(format!("invalid node_id: {}", e)))?,
+                .map_err(|e| bad_request(format!("invalid node_id: {e}")))?,
         );
 
         let stop = match self.stop {

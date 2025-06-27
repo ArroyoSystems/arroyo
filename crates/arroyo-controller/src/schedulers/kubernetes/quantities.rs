@@ -108,7 +108,7 @@ impl ParsedQuantity {
                 if *i % 1000 == 0 {
                     format!("{}", i / 1000)
                 } else {
-                    format!("{}m", i)
+                    format!("{i}m")
                 }
             }
             ParsedQuantity::Memory(i) => {

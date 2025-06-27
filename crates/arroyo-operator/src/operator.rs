@@ -1033,16 +1033,16 @@ impl Display for AsDisplayable<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             AsDisplayable::Str(s) => {
-                write!(f, "{}", s)
+                write!(f, "{s}")
             }
             AsDisplayable::String(s) => {
-                write!(f, "{}", s)
+                write!(f, "{s}")
             }
             AsDisplayable::Display(d) => {
-                write!(f, "{}", d)
+                write!(f, "{d}")
             }
             AsDisplayable::Debug(d) => {
-                write!(f, "{:?}", d)
+                write!(f, "{d:?}")
             }
             AsDisplayable::Plan(p) => {
                 write!(f, "```\n{}\n```", displayable(*p).indent(false))
@@ -1056,7 +1056,7 @@ impl Display for AsDisplayable<'_> {
             }
             AsDisplayable::List(list) => {
                 for s in list {
-                    write!(f, "\n * {}", s)?;
+                    write!(f, "\n * {s}")?;
                 }
 
                 Ok(())
@@ -1383,7 +1383,7 @@ impl FunctionRegistry for Registry {
         self.udfs
             .get(name)
             .cloned()
-            .ok_or_else(|| DataFusionError::Execution(format!("UDF {} not found", name)))
+            .ok_or_else(|| DataFusionError::Execution(format!("UDF {name} not found")))
     }
 
     fn udaf(&self, name: &str) -> DFResult<Arc<AggregateUDF>> {

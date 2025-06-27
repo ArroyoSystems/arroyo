@@ -174,7 +174,7 @@ impl KafkaSinkFunc {
                 ctx.error_reporter
                     .report_error("Kafka producer shut down", e.to_string())
                     .await;
-                panic!("Kafka producer shut down: {:?}", e);
+                panic!("Kafka producer shut down: {e:?}");
             }
         }
     }
@@ -209,10 +209,10 @@ impl KafkaSinkFunc {
                 }
                 Err((e, _)) => {
                     ctx.error_reporter
-                        .report_error("Could not write to Kafka", format!("{:?}", e))
+                        .report_error("Could not write to Kafka", format!("{e:?}"))
                         .await;
 
-                    panic!("Failed to write to kafka: {:?}", e);
+                    panic!("Failed to write to kafka: {e:?}");
                 }
             }
 

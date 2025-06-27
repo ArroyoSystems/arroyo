@@ -39,7 +39,7 @@ fn operator_path(job_id: &str, epoch: u32, operator: &str) -> String {
 }
 
 fn base_path(job_id: &str, epoch: u32) -> String {
-    format!("{}/checkpoints/checkpoint-{:0>7}", job_id, epoch)
+    format!("{job_id}/checkpoints/checkpoint-{epoch:0>7}")
 }
 
 pub struct DataTuple<K, V> {

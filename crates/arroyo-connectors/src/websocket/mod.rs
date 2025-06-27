@@ -93,7 +93,7 @@ impl Connector for WebsocketConnector {
             {
                 Ok(headers) => headers,
                 Err(e) => {
-                    send(true, true, format!("Failed to parse headers: {:?}", e)).await;
+                    send(true, true, format!("Failed to parse headers: {e:?}")).await;
                     return;
                 }
             };
@@ -101,7 +101,7 @@ impl Connector for WebsocketConnector {
             let uri = match Uri::from_str(&table.endpoint.to_string()) {
                 Ok(uri) => uri,
                 Err(e) => {
-                    send(true, true, format!("Failed to parse endpoint: {:?}", e)).await;
+                    send(true, true, format!("Failed to parse endpoint: {e:?}")).await;
                     return;
                 }
             };
@@ -130,7 +130,7 @@ impl Connector for WebsocketConnector {
             {
                 Ok(request) => request,
                 Err(e) => {
-                    send(true, true, format!("Failed to build request: {:?}", e)).await;
+                    send(true, true, format!("Failed to build request: {e:?}")).await;
                     return;
                 }
             };
@@ -141,7 +141,7 @@ impl Connector for WebsocketConnector {
                     send(
                         true,
                         true,
-                        format!("Failed to connect to websocket server: {:?}", e),
+                        format!("Failed to connect to websocket server: {e:?}"),
                     )
                     .await;
                     return;
@@ -169,7 +169,7 @@ impl Connector for WebsocketConnector {
                         send(
                             true,
                             true,
-                            format!("Failed to send subscription message: {:?}", e),
+                            format!("Failed to send subscription message: {e:?}"),
                         )
                         .await;
                         return;
@@ -184,7 +184,7 @@ impl Connector for WebsocketConnector {
                             send(false, false, "Received message from websocket".to_string()).await;
                         },
                         Some(Err(e)) => {
-                            send(true, true, format!("Received error from websocket: {:?}", e)).await;
+                            send(true, true, format!("Received error from websocket: {e:?}")).await;
                             return;
                         }
                         None => {
@@ -287,7 +287,7 @@ impl Connector for WebsocketConnector {
         // add the indexed subscription messages if they exist
         let mut message_index = 0;
         while let Some(message) =
-            options.pull_opt_str(&format!("subscription_messages.{}", message_index))?
+            options.pull_opt_str(&format!("subscription_messages.{message_index}"))?
         {
             subscription_messages.push(SubscriptionMessage(message));
             message_index += 1;

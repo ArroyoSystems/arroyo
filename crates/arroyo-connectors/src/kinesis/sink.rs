@@ -99,7 +99,7 @@ impl KinesisSinkFunc {
             Duration::from_millis(100),
             Duration::from_secs(2),
             |e| ctx
-                .report_error("failed to write to Kinesis", format!("{:?}", e))
+                .report_error("failed to write to Kinesis", format!("{e:?}"))
                 .await
         )?;
 

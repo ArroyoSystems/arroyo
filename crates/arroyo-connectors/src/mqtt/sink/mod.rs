@@ -108,9 +108,9 @@ impl ArrowOperator for MqttSinkFunc {
             {
                 Ok(_) => (),
                 Err(e) => {
-                    ctx.report_error("Could not write to mqtt", format!("{:?}", e))
+                    ctx.report_error("Could not write to mqtt", format!("{e:?}"))
                         .await;
-                    panic!("Could not write to mqtt: {:?}", e);
+                    panic!("Could not write to mqtt: {e:?}");
                 }
             }
         }

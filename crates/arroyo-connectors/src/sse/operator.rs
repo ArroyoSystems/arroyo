@@ -211,9 +211,9 @@ impl SSESourceFunc {
                             Some(Err(e)) => {
                                 ctx.report_user_error(UserError::new(
                                     "Error while reading from EventSource",
-                                    format!("{:?}", e)
+                                    format!("{e:?}")
                                 )).await;
-                                panic!("Error while reading from EventSource: {:?}", e);
+                                panic!("Error while reading from EventSource: {e:?}");
                             }
                             None => {
                                 info!("Socket closed");

@@ -319,7 +319,7 @@ impl PlanToGraphVisitor<'_> {
 
         let NodeWithIncomingEdges { node, edges } = extension
             .plan_node(&self.planner, self.graph.node_count(), input_schemas)
-            .map_err(|e| e.context(format!("planning operator {:?}", extension)))?;
+            .map_err(|e| e.context(format!("planning operator {extension:?}")))?;
 
         let node_index = self.graph.add_node(node);
         self.add_index_to_traversal(node_index);

@@ -175,7 +175,7 @@ impl FileAuthInterceptor {
     pub fn load() -> Self {
         let path = format!("{}/.arroyo-token", std::env::var("HOME").unwrap());
         let token = fs::read_to_string(&path)
-            .unwrap_or_else(|_| panic!("Expected auth token to be in {}", path));
+            .unwrap_or_else(|_| panic!("Expected auth token to be in {path}"));
 
         Self {
             token: token.trim().parse().unwrap(),
@@ -639,7 +639,7 @@ impl ConnectorOptions {
         match self.options.remove(name) {
             Some(e) => {
                 Ok(Some(duration_from_sql(e).map_err(|e| {
-                    e.context(format!("in with clause '{}'", name))
+                    e.context(format!("in with clause '{name}'"))
                 })?))
             }
             None => Ok(None),
@@ -649,7 +649,7 @@ impl ConnectorOptions {
     pub fn pull_opt_field(&mut self, name: &str) -> DFResult<Option<String>> {
         match self.options.remove(name) {
             Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                warn!("Referred to a field in `{}` with a string—this is deprecated and will be unsupported after Arroyo 0.14", name);
+                warn!("Referred to a field in `{name}` with a string—this is deprecated and will be unsupported after Arroyo 0.14");
                 Ok(Some(s))
             }
             Some(Expr::Identifier(ident)) => Ok(Some(ident.value)),
@@ -779,12 +779,12 @@ pub fn native_cert_store() -> Arc<RootCertStore> {
         let mut roots = RootCertStore::empty();
         let result = rustls_native_certs::load_native_certs();
         for error in result.errors {
-            warn!("Errored while loading native certs: {:?}", error);
+            warn!("Errored while loading native certs: {error:?}");
         }
 
         for cert in result.certs {
             if let Err(e) = roots.add(cert) {
-                warn!("Failed to add cert to store: {:?}", e);
+                warn!("Failed to add cert to store: {e:?}");
             }
         }
 
