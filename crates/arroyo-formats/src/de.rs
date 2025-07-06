@@ -421,6 +421,24 @@ impl ArrowDeserializer {
             .await
     }
 
+    /// Reinitializes the `buffer_decoder` based on the configured input format.
+    ///
+    /// This method is used when the decoder needs to be reset — for example, after encountering
+    /// irrecoverable decode errors from part-way buffered, invalid messages. It rebuilds the internal
+    /// [`BufferDecoder`] variant appropriate to the `Format`:
+    ///
+    /// - For structured `Json`, `Avro`, or `Protobuf` formats (i.e., not unstructured),
+    ///   it constructs a new `JsonDecoder` using the current `decoder_schema`.
+    /// - For all other formats (e.g., `RawString`, `RawBytes`, or unstructured inputs),
+    ///   it falls back to a `ContextBuffer`-based decoder.
+    ///
+    /// Additionally, it clears the `buffered_incomplete` buffer, which holds any partial
+    /// or incomplete messages from previous decoding attempts.
+    ///
+    /// # Panics
+    ///
+    /// If `arrow_json::reader::ReaderBuilder::build_decoder()` panics from an invalid or unsupported schema
+    /// If `ContextBuffer::new(...)` panics due to an unsupported data type in the schema.
     pub fn reset_buffer_decoder(&mut self) {
         self.buffer_decoder = match self.format.as_ref() {
             Format::Json(JsonFormat {
@@ -756,6 +774,25 @@ macro_rules! append_repeated_value {
     }};
 }
 
+/// Checks whether the given byte slice contains a complete and valid JSON value.
+///
+/// This function attempts to deserialize the input as a `serde_json::Value`.
+/// It returns:
+///
+/// - `Ok(true)` if the input is complete and valid JSON
+/// - `Ok(false)` if the input is incomplete (i.e., ends prematurely)
+/// - `Err(e)` if the input is syntactically invalid JSON
+///
+/// This is particularly useful for determining whether partial data (e.g., a streaming buffer)
+/// has accumulated enough bytes to be parsed as a full JSON object.
+///
+/// # Arguments
+///
+/// * `input` – A byte slice that may contain a JSON value
+///
+/// # Errors
+///
+/// Returns a `serde_json::Error` if the input is malformed JSON (but not just incomplete).
 fn is_complete_json(input: &[u8]) -> Result<bool, serde_json::Error> {
     let mut de = serde_json::Deserializer::from_slice(input);
     match Value::deserialize(&mut de) {
