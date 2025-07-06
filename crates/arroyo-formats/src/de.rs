@@ -18,6 +18,7 @@ use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, Sc
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
 use arroyo_types::{to_nanos, SourceError, LOOKUP_KEY_INDEX_FIELD};
 use prost_reflect::DescriptorPool;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -257,6 +258,7 @@ pub struct ArrowDeserializer {
     additional_fields_builder: Option<HashMap<String, Box<dyn ArrayBuilder>>>,
     timestamp_builder: Option<(usize, TimestampNanosecondBuilder)>,
     buffer_decoder: BufferDecoder,
+    buffered_incomplete: Vec<u8>,
 }
 
 impl ArrowDeserializer {
@@ -394,6 +396,7 @@ impl ArrowDeserializer {
             schema_resolver,
             proto_pool,
             additional_fields_builder: None,
+            buffered_incomplete: Vec::new(),
         }
     }
 
@@ -416,6 +419,34 @@ impl ArrowDeserializer {
     ) -> Vec<SourceError> {
         self.deserialize_slice_int(msg, None, additional_fields)
             .await
+    }
+
+    pub fn reset_buffer_decoder(&mut self) {
+        self.buffer_decoder = match self.format.as_ref() {
+            Format::Json(JsonFormat {
+                unstructured: false,
+                ..
+            })
+            | Format::Avro(AvroFormat {
+                into_unstructured_json: false,
+                ..
+            })
+            | Format::Protobuf(ProtobufFormat {
+                into_unstructured_json: false,
+                ..
+            }) => BufferDecoder::JsonDecoder {
+                decoder: arrow_json::reader::ReaderBuilder::new(self.decoder_schema.clone())
+                    .with_limit_to_batch_size(false)
+                    .with_strict_mode(false)
+                    .with_allow_bad_data(matches!(self.bad_data, BadData::Drop { .. }))
+                    .build_decoder()
+                    .unwrap(),
+                buffered_count: 0,
+                buffered_since: Instant::now(),
+            },
+            _ => BufferDecoder::Buffer(ContextBuffer::new(self.decoder_schema.clone())),
+        };
+        self.buffered_incomplete.clear();
     }
 
     pub fn deserialize_null(
@@ -500,7 +531,10 @@ impl ArrowDeserializer {
 
     pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
         let (arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
-            Ok((a, b)) => (a, b),
+            Ok((a, b)) => {
+                self.buffered_incomplete.clear();
+                (a, b)
+            },
             Err(e) => return Some(Err(e)),
         };
 
@@ -561,7 +595,37 @@ impl ArrowDeserializer {
                     msg
                 };
 
-                self.buffer_decoder.decode_json(msg)?;
+                if self.buffered_incomplete.is_empty() {
+                    match is_complete_json(msg) {
+                        Ok(true) => {
+                            self.buffer_decoder.decode_json(msg)?;
+                        }
+                        Ok(false) => {
+                            self.buffer_decoder.decode_json(msg)?;
+                            self.buffered_incomplete.extend_from_slice(msg);
+                        }
+                        Err(e) => {
+                            return Err(SourceError::bad_data(format!("invalid JSON: {e:?}")));
+                        }
+                    }
+                } else {
+                    let combined_msg: Vec<u8> = self.buffered_incomplete.iter().chain(msg).copied().collect();
+
+                    match is_complete_json(&combined_msg) {
+                        Ok(true) => {
+                            self.buffer_decoder.decode_json(msg)?;
+                            self.buffered_incomplete.clear();
+                        }
+                        Ok(false) => {
+                            self.buffer_decoder.decode_json(msg)?;
+                            self.buffered_incomplete.extend_from_slice(msg);
+                        }
+                        Err(e) => {
+                            self.reset_buffer_decoder();
+                            return Err(SourceError::bad_data(format!("resetting buffer poisoned with incomplete and invalid JSON: {e:?}")));
+                        }
+                    }
+                }
             }
             Format::Protobuf(proto) => {
                 let json = proto::de::deserialize_proto(&mut self.proto_pool, proto, msg)?;
@@ -690,6 +754,18 @@ macro_rules! append_repeated_value {
             }
         }
     }};
+}
+
+fn is_complete_json(input: &[u8]) -> Result<bool, serde_json::Error> {
+    let mut de = serde_json::Deserializer::from_slice(input);
+    match Value::deserialize(&mut de) {
+        Ok(_) => {
+            de.end()?;
+            Ok(true)
+        },
+        Err(e) if e.is_eof() => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 fn add_additional_fields(
