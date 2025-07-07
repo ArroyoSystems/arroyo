@@ -550,6 +550,7 @@ impl ArrowDeserializer {
     pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
         let (arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
             Ok((a, b)) => {
+                // All latest incomplete messages buffered need to be cleared when flush succeeds 
                 self.buffered_incomplete.clear();
                 (a, b)
             },
@@ -613,6 +614,7 @@ impl ArrowDeserializer {
                     msg
                 };
 
+                // No previously incomplete buffered data present in the tape decoder
                 if self.buffered_incomplete.is_empty() {
                     match is_complete_json(msg) {
                         Ok(true) => {
@@ -620,27 +622,36 @@ impl ArrowDeserializer {
                         }
                         Ok(false) => {
                             self.buffer_decoder.decode_json(msg)?;
+                            // Begin buffering incomplete data to keep track
                             self.buffered_incomplete.extend_from_slice(msg);
                         }
                         Err(e) => {
+                            // Malformed JSON - don't send to decoder and return error
                             return Err(SourceError::bad_data(format!("invalid JSON: {e:?}")));
                         }
                     }
+                // We have previously buffered incomplete data - combine with current message
                 } else {
                     let combined_msg: Vec<u8> = self.buffered_incomplete.iter().chain(msg).copied().collect();
 
                     match is_complete_json(&combined_msg) {
                         Ok(true) => {
+                            // Combined message is now complete - decode and clear buffer
                             self.buffer_decoder.decode_json(msg)?;
                             self.buffered_incomplete.clear();
                         }
                         Ok(false) => {
+                            // Still incomplete but valid - decode and keep buffering
                             self.buffer_decoder.decode_json(msg)?;
                             self.buffered_incomplete.extend_from_slice(msg);
                         }
                         Err(e) => {
+                            // Combined message is invalid - reset buffer and return error
+                            // All previously complete JSON messages not flushed will be lost
                             self.reset_buffer_decoder();
-                            return Err(SourceError::bad_data(format!("resetting buffer poisoned with incomplete and invalid JSON: {e:?}")));
+                            return Err(SourceError::bad_data(format!(
+                                "resetting buffer poisoned with incomplete and invalid JSON: {e:?}"
+                            )));
                         }
                     }
                 }
