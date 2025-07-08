@@ -550,10 +550,10 @@ impl ArrowDeserializer {
     pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
         let (arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
             Ok((a, b)) => {
-                // All latest incomplete messages buffered need to be cleared when flush succeeds 
+                // All latest incomplete messages buffered need to be cleared when flush succeeds
                 self.buffered_incomplete.clear();
                 (a, b)
-            },
+            }
             Err(e) => return Some(Err(e)),
         };
 
@@ -632,7 +632,12 @@ impl ArrowDeserializer {
                     }
                 // We have previously buffered incomplete data - combine with current message
                 } else {
-                    let combined_msg: Vec<u8> = self.buffered_incomplete.iter().chain(msg).copied().collect();
+                    let combined_msg: Vec<u8> = self
+                        .buffered_incomplete
+                        .iter()
+                        .chain(msg)
+                        .copied()
+                        .collect();
 
                     match is_complete_json(&combined_msg) {
                         Ok(true) => {
@@ -810,7 +815,7 @@ fn is_complete_json(input: &[u8]) -> Result<bool, serde_json::Error> {
         Ok(_) => {
             de.end()?;
             Ok(true)
-        },
+        }
         Err(e) if e.is_eof() => Ok(false),
         Err(e) => Err(e),
     }
