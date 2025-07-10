@@ -14,7 +14,7 @@ use tracing::{error, info};
 
 pub struct EmbeddedWorker {
     job_id: Arc<String>,
-    run_id: i64,
+    run_id: u64,
     shutdown: Shutdown,
     handle: JoinHandle<()>,
 }
@@ -53,13 +53,8 @@ impl Scheduler for EmbeddedScheduler {
         let run_id = req.run_id;
         let worker_id = WorkerId(self.worker_counter.fetch_add(1, Ordering::SeqCst));
         let handle = tokio::task::spawn(async move {
-            let server = WorkerServer::new(
-                "job",
-                worker_id,
-                (*req.job_id).clone(),
-                req.run_id.to_string(),
-                guard,
-            );
+            let server =
+                WorkerServer::new("job", worker_id, (*req.job_id).clone(), req.run_id, guard);
 
             match tokio::task::spawn(async move {
                 if let Err(e) = server.start_async().await {
@@ -98,7 +93,7 @@ impl Scheduler for EmbeddedScheduler {
 
     async fn worker_finished(&self, _: WorkerFinishedReq) {}
 
-    async fn stop_workers(&self, job_id: &str, run_id: Option<i64>, _: bool) -> anyhow::Result<()> {
+    async fn stop_workers(&self, job_id: &str, run_id: Option<u64>, _: bool) -> anyhow::Result<()> {
         for w in self.workers_for_job(job_id, run_id).await? {
             let state = self.tasks.lock().await;
             if let Some(worker) = state.get(&w) {
@@ -112,7 +107,7 @@ impl Scheduler for EmbeddedScheduler {
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         let state = self.tasks.lock().await;
         Ok(state

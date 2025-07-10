@@ -15,3 +15,4 @@ rand = { workspace = true }
 lazy_static = "1.4.0"
 prometheus = { workspace = true }
 anyhow = "1.0.72"
+uuid = { version =  "1.17.0", features = ["v4"] }

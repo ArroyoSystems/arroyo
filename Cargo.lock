@@ -691,6 +691,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1053,6 +1054,7 @@ dependencies = [
  "tonic",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]

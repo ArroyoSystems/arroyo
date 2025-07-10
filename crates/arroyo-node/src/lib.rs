@@ -3,12 +3,12 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{
     node_grpc_server::NodeGrpc, node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp,
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq,
-    StopWorkerResp, StopWorkerStatus, WorkerFinishedReq,
+    StopWorkerResp, StopWorkerStatus, WorkerFinishedReq, WorkerInfo,
 };
 use arroyo_rpc::{controller_client, local_address};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{to_millis, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
+use arroyo_types::{to_millis, MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use rand::random;
@@ -27,6 +27,7 @@ use tokio::sync::mpsc::{channel, Sender};
 use tokio::{process::Command, select};
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 lazy_static! {
     static ref WORKERS: Gauge = register_gauge!(
@@ -45,7 +46,7 @@ pub struct WorkerStatus {
 }
 
 pub struct NodeServer {
-    id: NodeId,
+    id: MachineId,
     worker_finished_tx: Sender<WorkerFinishedReq>,
     workers: Arc<Mutex<HashMap<WorkerId, WorkerStatus>>>,
 }
@@ -63,15 +64,15 @@ async fn signal_process(signal: &str, pid: u32) -> bool {
 
 impl NodeServer {
     async fn start_worker_int(&self, req: StartWorkerReq) -> anyhow::Result<WorkerId> {
-        if req.node_id != self.id.0 {
+        if req.machine_id != *self.id.0 {
             warn!(
                 "incorrect node id for job {}, expected {}, got {}",
-                req.job_id, self.id.0, req.node_id
+                req.job_id, self.id.0, req.machine_id
             );
             bail!(
                 "incorrect node_id, expected {}, got {}",
                 self.id.0,
-                req.node_id
+                req.machine_id
             );
         }
 
@@ -85,7 +86,7 @@ impl NodeServer {
         let slots = req.slots;
         let state = Arc::clone(&self.workers);
         let worker_id = WorkerId(random());
-        let node_id = self.id;
+        let machine_id = self.id.clone();
         let finished_tx = self.worker_finished_tx.clone();
 
         let mut workers = self.workers.lock().unwrap();
@@ -149,10 +150,13 @@ impl NodeServer {
             WORKERS.dec();
             finished_tx
                 .send(WorkerFinishedReq {
-                    node_id: node_id.0,
-                    worker_id: worker_id.0,
+                    worker_info: Some(WorkerInfo {
+                        machine_id: machine_id.0.to_string(),
+                        worker_id: worker_id.0,
+                        job_id,
+                        run_id: req.run_id,
+                    }),
                     slots,
-                    job_id,
                 })
                 .await
                 .unwrap();
@@ -251,15 +255,22 @@ impl NodeGrpc for NodeServer {
     }
 }
 
-pub async fn start_server(guard: ShutdownGuard) -> NodeId {
+pub async fn start_server(guard: ShutdownGuard) -> MachineId {
     let config = config();
 
-    let node_id = NodeId(random());
+    let machine_id = MachineId(
+        config
+            .node
+            .id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string())
+            .into(),
+    );
 
     let (worker_finished_tx, mut worker_finished_rx) = channel(128);
 
     let server = NodeServer {
-        id: node_id,
+        id: machine_id.clone(),
         workers: Arc::new(Mutex::new(HashMap::new())),
         worker_finished_tx,
     };
@@ -304,9 +315,10 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
     if guard.is_cancelled() {
         // don't register if the server failed to bind
         guard.cancel();
-        return node_id;
+        return machine_id;
     }
 
+    let our_machine_id = machine_id.clone();
     guard.into_spawn_task(async move {
         let mut attempts = 0;
         loop {
@@ -315,7 +327,7 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                     controller
                         .register_node(Request::new(RegisterNodeReq {
-                            node_id: node_id.0,
+                            machine_id: our_machine_id.to_string(),
                             task_slots: config.node.task_slots as u64,
                             addr: req_addr.clone(),
                         }))
@@ -336,7 +348,7 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
 
                         if let Err(e) = controller
                             .heartbeat_node(Request::new(HeartbeatNodeReq {
-                                node_id: node_id.0,
+                                machine_id: our_machine_id.to_string(),
                                 time: to_millis(SystemTime::now()),
                             }))
                             .await
@@ -362,5 +374,5 @@ pub async fn start_server(guard: ShutdownGuard) -> NodeId {
         Ok(())
     });
 
-    node_id
+    machine_id
 }

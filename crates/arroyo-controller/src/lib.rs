@@ -22,7 +22,7 @@ use arroyo_rpc::grpc::rpc::{
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{from_micros, NodeId, WorkerId};
+use arroyo_types::{from_micros, MachineId, WorkerId};
 use cornucopia_async::DatabaseSource;
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
@@ -94,7 +94,7 @@ pub struct JobConfig {
 #[derive(Clone, Debug)]
 pub struct JobStatus {
     id: Arc<String>,
-    run_id: i64,
+    run_id: u64,
     state: String,
     start_time: Option<OffsetDateTime>,
     finish_time: Option<OffsetDateTime>,
@@ -119,7 +119,7 @@ impl JobStatus {
             &self.restarts,
             &self.pipeline_path,
             &self.wasm_path,
-            &self.run_id,
+            &(self.run_id as i64),
             &self.restart_nonce,
             &*self.id,
         )
@@ -172,7 +172,8 @@ pub enum JobMessage {
     ConfigUpdate(JobConfig),
     WorkerConnect {
         worker_id: WorkerId,
-        node_id: NodeId,
+        machine_id: MachineId,
+        run_id: u64,
         rpc_address: String,
         data_address: String,
         slots: usize,
@@ -207,12 +208,16 @@ impl ControllerGrpc for ControllerServer {
         );
 
         let req = request.into_inner();
+        let worker = req
+            .worker_info
+            .ok_or_else(|| Status::invalid_argument("missing worker_info"))?;
 
         self.send_to_job_queue(
-            &req.job_id,
+            &worker.job_id,
             JobMessage::WorkerConnect {
-                worker_id: WorkerId(req.worker_id),
-                node_id: NodeId(req.node_id),
+                worker_id: WorkerId(worker.worker_id),
+                machine_id: MachineId(worker.machine_id.into()),
+                run_id: worker.run_id,
                 rpc_address: req.rpc_address,
                 data_address: req.data_address,
                 slots: req.slots as usize,
@@ -343,7 +348,7 @@ impl ControllerGrpc for ControllerServer {
         let req = request.into_inner();
         info!(
             "Received node registration from {} at {} with {} slots",
-            req.node_id, req.addr, req.task_slots
+            req.machine_id, req.addr, req.task_slots
         );
 
         self.scheduler.register_node(req).await;
@@ -582,7 +587,7 @@ impl ControllerServer {
 
                     let status = JobStatus {
                         id: id.clone(),
-                        run_id: p.run_id.unwrap_or(0),
+                        run_id: p.run_id.unwrap_or(0).max(0) as u64,
                         state: p.state.unwrap_or_else(|| Created {}.name().to_string()),
                         start_time: p.start_time,
                         finish_time: p.finish_time,

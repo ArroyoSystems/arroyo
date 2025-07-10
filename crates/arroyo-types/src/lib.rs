@@ -7,6 +7,7 @@ use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // worker configuration
@@ -27,8 +28,14 @@ pub const HASH_SEEDS: [u64; 4] = [
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub struct WorkerId(pub u64);
 
-#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
-pub struct NodeId(pub u64);
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+pub struct MachineId(pub Arc<String>);
+
+impl Display for MachineId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 pub fn to_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64

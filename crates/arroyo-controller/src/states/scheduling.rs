@@ -92,11 +92,25 @@ async fn handle_worker_connect<'a>(
     match msg {
         JobMessage::WorkerConnect {
             worker_id,
+            machine_id,
+            run_id,
             rpc_address,
             data_address,
             slots,
             ..
         } => {
+            let job_id = ctx.config.id.clone();
+
+            if ctx.status.run_id != run_id {
+                info!(
+                    message = "worker connect from wrong run; ignoring",
+                    job_id = *job_id,
+                    worker_id = worker_id.0,
+                    machine_id = *machine_id.0,
+                );
+                return Ok(());
+            }
+
             workers.insert(
                 worker_id,
                 WorkerStatus {
@@ -108,13 +122,12 @@ async fn handle_worker_connect<'a>(
 
             let connects = worker_connects;
 
-            let job_id = ctx.config.id.clone();
-
             handles.push(tokio::spawn(async move {
                 info!(
                     message = "connecting to worker",
                     job_id = *job_id,
                     worker_id = worker_id.0,
+                    machine_id = *machine_id.0,
                     rpc_address
                 );
 
@@ -143,6 +156,7 @@ async fn handle_worker_connect<'a>(
                                 message = "Failed to connect to worker",
                                 job_id = *job_id,
                                 worker_id = worker_id.0,
+                                machine_id = *machine_id.0,
                                 error = format!("{:?}", e),
                                 rpc_address,
                                 retry = i

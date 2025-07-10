@@ -421,6 +421,10 @@ pub struct WorkerConfig {
     #[serde(default)]
     pub id: Option<u64>,
 
+    /// ID for the machine this worker is running on
+    #[serde(default)]
+    pub machine_id: Option<String>,
+
     /// Name to identify this worker (e.g., e.g., its hostname or a pod name)
     pub name: Option<String>,
 
@@ -436,7 +440,7 @@ pub struct WorkerConfig {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct NodeConfig {
     /// ID for this node
-    pub id: Option<u64>,
+    pub id: Option<String>,
 
     /// Bind address for the node service
     pub bind_address: IpAddr,
