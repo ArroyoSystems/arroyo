@@ -940,7 +940,7 @@ async fn operator_run_behavior(
                                 ).await;
                             }
                             ArrowMessage::Signal(signal) => {
-                                match this.handle_control_message(idx,&signal, &mut counter, &mut closed, in_partitions,
+                                match this.handle_control_message(idx, &signal, &mut counter, &mut closed, in_partitions,
                                     &control_tx, chain_info, collector).await {
                                     ControlOutcome::Continue => {}
                                     ControlOutcome::Stop => {

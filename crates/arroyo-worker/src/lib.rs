@@ -11,10 +11,10 @@ use arroyo_rpc::grpc::rpc::{
     JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily, MetricsReq,
     MetricsResp, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq,
     StopExecutionResp, TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq,
-    TaskFinishedReq, TaskStartedReq, WorkerErrorReq, WorkerResources,
+    TaskFinishedReq, TaskStartedReq, WorkerErrorReq, WorkerInfo, WorkerResources,
 };
 use arroyo_types::{
-    from_millis, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, to_micros, CheckpointBarrier, MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
 };
 use rand::random;
 
@@ -31,18 +31,18 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
-use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
-pub use ordered_float::OrderedFloat;
-use prometheus::{Encoder, ProtobufEncoder};
-use prost::Message;
-
 use crate::utils::to_d2;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
+use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
+pub use ordered_float::OrderedFloat;
+use prometheus::{Encoder, ProtobufEncoder};
+use prost::Message;
+use uuid::Uuid;
 
 pub mod arrow;
 
@@ -140,7 +140,7 @@ impl LocalRunner {
 pub struct WorkerServer {
     id: WorkerId,
     job_id: String,
-    run_id: String,
+    run_id: u64,
     name: &'static str,
     state: Arc<Mutex<Option<EngineState>>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
@@ -153,8 +153,10 @@ impl WorkerServer {
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{JOB_ID_ENV} is not set"));
 
-        let run_id =
-            std::env::var(RUN_ID_ENV).unwrap_or_else(|_| panic!("{RUN_ID_ENV} is not set"));
+        let run_id = std::env::var(RUN_ID_ENV)
+            .unwrap_or_else(|_| panic!("{RUN_ID_ENV} is not set"))
+            .parse()
+            .unwrap_or_else(|_| panic!("{RUN_ID_ENV} must be an unsigned int"));
 
         Ok(WorkerServer::new(
             "program",
@@ -169,7 +171,7 @@ impl WorkerServer {
         name: &'static str,
         worker_id: WorkerId,
         job_id: String,
-        run_id: String,
+        run_id: u64,
         shutdown_guard: ShutdownGuard,
     ) -> Self {
         Self {
@@ -192,7 +194,13 @@ impl WorkerServer {
     }
 
     pub async fn start_async(self) -> Result<()> {
-        let node_id = NodeId(config().node.id.unwrap_or(0));
+        let machine_id = MachineId(Arc::new(
+            config()
+                .worker
+                .machine_id
+                .clone()
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        ));
 
         let config = config();
         let listener = TcpListener::bind(SocketAddr::new(
@@ -224,6 +232,7 @@ impl WorkerServer {
 
         let data_address = format!("{hostname}:{data_port}");
         let job_id = self.job_id.clone();
+        let run_id = self.run_id;
 
         self.shutdown_guard
             .child("grpc")
@@ -252,9 +261,12 @@ impl WorkerServer {
 
         client
             .register_worker(Request::new(RegisterWorkerReq {
-                worker_id: id.0,
-                node_id: node_id.0,
-                job_id,
+                worker_info: Some(WorkerInfo {
+                    worker_id: id.0,
+                    machine_id: machine_id.to_string(),
+                    job_id,
+                    run_id,
+                }),
                 rpc_address,
                 data_address,
                 resources: Some(WorkerResources {
@@ -470,7 +482,7 @@ impl WorkerGrpc for WorkerServer {
                 program,
                 self.id,
                 self.job_id.clone(),
-                self.run_id.clone(),
+                self.run_id,
                 network,
                 req.tasks,
             );

@@ -7,7 +7,7 @@ use arroyo_rpc::grpc::rpc::{
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
     WorkerFinishedReq,
 };
-use arroyo_types::{NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
+use arroyo_types::{MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use std::collections::HashMap;
@@ -55,19 +55,19 @@ pub trait Scheduler: Send + Sync {
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
         force: bool,
     ) -> anyhow::Result<()>;
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>>;
 }
 
 pub struct ProcessWorker {
     job_id: Arc<String>,
-    run_id: i64,
+    run_id: u64,
     shutdown_tx: oneshot::Sender<()>,
 }
 
@@ -92,7 +92,7 @@ pub struct StartPipelineReq {
     pub wasm_path: String,
     pub job_id: Arc<String>,
     pub hash: String,
-    pub run_id: i64,
+    pub run_id: u64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
 }
@@ -205,7 +205,7 @@ impl Scheduler for ProcessScheduler {
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         Ok(self
             .workers
@@ -222,7 +222,7 @@ impl Scheduler for ProcessScheduler {
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
         _force: bool,
     ) -> anyhow::Result<()> {
         for worker_id in self.workers_for_job(job_id, run_id).await? {
@@ -243,7 +243,7 @@ impl Scheduler for ProcessScheduler {
 
 #[derive(Debug, Clone)]
 struct NodeStatus {
-    id: NodeId,
+    id: MachineId,
     free_slots: usize,
     scheduled_slots: HashMap<WorkerId, usize>,
     addr: String,
@@ -251,7 +251,7 @@ struct NodeStatus {
 }
 
 impl NodeStatus {
-    fn new(id: NodeId, slots: usize, addr: String) -> NodeStatus {
+    fn new(id: MachineId, slots: usize, addr: String) -> NodeStatus {
         FREE_SLOTS.add(slots as f64);
         REGISTERED_SLOTS.add(slots as f64);
 
@@ -297,14 +297,14 @@ impl NodeStatus {
 #[derive(Clone)]
 struct NodeWorker {
     job_id: Arc<String>,
-    node_id: NodeId,
-    run_id: i64,
+    node_id: MachineId,
+    run_id: u64,
     running: bool,
 }
 
 #[derive(Default)]
 pub struct NodeSchedulerState {
-    nodes: HashMap<NodeId, NodeStatus>,
+    nodes: HashMap<MachineId, NodeStatus>,
     workers: HashMap<WorkerId, NodeWorker>,
 }
 
@@ -317,7 +317,7 @@ impl NodeSchedulerState {
                 if status.last_heartbeat >= expiration_time {
                     None
                 } else {
-                    Some(*node_id)
+                    Some(node_id.clone())
                 }
             })
             .collect();
@@ -371,7 +371,7 @@ impl NodeScheduler {
         let Some(node) = state.nodes.get(&worker.node_id) else {
             warn!(
                 message = "node not found for stop worker",
-                node_id = worker.node_id.0
+                node_id = *worker.node_id.0
             );
             return Ok(Some(worker_id));
         };
@@ -383,7 +383,7 @@ impl NodeScheduler {
         info!(
             message = "stopping worker",
             job_id = *worker.job_id,
-            node_id = worker.node_id.0,
+            node_id = *worker.node_id.0,
             node_addr = node.addr,
             worker_id = worker_id.0
         );
@@ -419,10 +419,11 @@ impl NodeScheduler {
 impl Scheduler for NodeScheduler {
     async fn register_node(&self, req: RegisterNodeReq) {
         let mut state = self.state.lock().await;
-        if let std::collections::hash_map::Entry::Vacant(e) = state.nodes.entry(NodeId(req.node_id))
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            state.nodes.entry(MachineId(req.machine_id.clone().into()))
         {
             e.insert(NodeStatus::new(
-                NodeId(req.node_id),
+                MachineId(req.machine_id.into()),
                 req.task_slots as usize,
                 req.addr,
             ));
@@ -431,31 +432,40 @@ impl Scheduler for NodeScheduler {
 
     async fn heartbeat_node(&self, req: HeartbeatNodeReq) -> Result<(), Status> {
         let mut state = self.state.lock().await;
-        if let Some(node) = state.nodes.get_mut(&NodeId(req.node_id)) {
+        if let Some(node) = state
+            .nodes
+            .get_mut(&MachineId(req.machine_id.clone().into()))
+        {
             node.last_heartbeat = Instant::now();
             Ok(())
         } else {
             warn!(
                 "Received heartbeat for unregistered node {}, failing request",
-                req.node_id
+                req.machine_id
             );
             Err(Status::not_found(format!(
                 "node {} not in scheduler's collection of nodes",
-                req.node_id
+                req.machine_id
             )))
         }
     }
 
     async fn worker_finished(&self, req: WorkerFinishedReq) {
         let mut state = self.state.lock().await;
-        let worker_id = WorkerId(req.worker_id);
+        let Some(worker_info) = req.worker_info else {
+            warn!("Got worker finished with no worker info");
+            return;
+        };
 
-        if let Some(node) = state.nodes.get_mut(&NodeId(req.node_id)) {
+        let worker_id = WorkerId(worker_info.worker_id);
+        let machine_id = MachineId(Arc::new(worker_info.machine_id));
+
+        if let Some(node) = state.nodes.get_mut(&machine_id) {
             node.release_slots(worker_id, req.slots as usize);
         } else {
             warn!(
                 "Got worker finished message for unknown node {}",
-                req.node_id
+                machine_id
             );
         }
 
@@ -470,7 +480,7 @@ impl Scheduler for NodeScheduler {
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         let state = self.state.lock().await;
         Ok(state
@@ -553,8 +563,8 @@ impl Scheduler for NodeScheduler {
                 name: start_pipeline_req.name.clone(),
                 job_id: (*start_pipeline_req.job_id).clone(),
                 slots: slots_for_this_one as u64,
-                node_id: node.id.0,
-                run_id: start_pipeline_req.run_id as u64,
+                machine_id: node.id.to_string(),
+                run_id: start_pipeline_req.run_id,
                 env_vars: start_pipeline_req.env_vars.clone(),
             };
 
@@ -590,7 +600,7 @@ impl Scheduler for NodeScheduler {
                 NodeWorker {
                     job_id: start_pipeline_req.job_id.clone(),
                     run_id: start_pipeline_req.run_id,
-                    node_id: node.id,
+                    node_id: node.id.clone(),
                     running: true,
                 },
             );
@@ -605,7 +615,7 @@ impl Scheduler for NodeScheduler {
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
         force: bool,
     ) -> anyhow::Result<()> {
         // iterate through all of the workers from workers_for_job and stop them in parallel

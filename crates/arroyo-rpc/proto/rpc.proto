@@ -6,14 +6,20 @@ import "api.proto";
 
 // Controller
 
+message WorkerInfo {
+  uint64 worker_id = 1;
+  string job_id = 2;
+  uint64 run_id = 3;
+  string machine_id = 4;
+}
+
+
 message WorkerResources {
   uint64 slots = 1;
 }
 
 message RegisterWorkerReq {
-  uint64 worker_id = 1;
-  uint64 node_id = 2;
-  string job_id = 3;
+  WorkerInfo worker_info = 1;
   string rpc_address = 4;
   string data_address = 5;
   WorkerResources resources = 6;
@@ -109,7 +115,7 @@ message TaskStartedResp {
 }
 
 message RegisterNodeReq {
-  uint64 node_id = 1;
+  string machine_id = 1;
   uint64 task_slots = 2;
   string addr = 3;
 }
@@ -118,7 +124,7 @@ message RegisterNodeResp {
 }
 
 message HeartbeatNodeReq {
-  uint64 node_id = 1;
+  string machine_id = 1;
   uint64 time = 2;
 }
 
@@ -139,10 +145,8 @@ message SinkDataResp {
 }
 
 message WorkerFinishedReq {
-  uint64 node_id = 1;
-  uint64 worker_id = 2;
+  WorkerInfo worker_info = 1;
   uint64 slots = 3;
-  string job_id = 4;
 }
 
 message WorkerFinishedResp {
@@ -410,7 +414,7 @@ message StartWorkerReq {
   string name = 1;
   string job_id = 2;
   uint64 slots = 6;
-  uint64 node_id = 7;
+  string machine_id = 7;
   uint64 run_id = 8;
   map<string, string> env_vars = 10;
 }
@@ -514,9 +518,9 @@ message Quantile {
 }
 
 message Summary {
-  optional uint64   sample_count = 1;
-  optional double   sample_sum   = 2;
-  repeated Quantile quantile     = 3;
+  optional uint64    sample_count = 1;
+  optional double    sample_sum   = 2;
+  repeated Quantile quantile      = 3;
 }
 
 message Untyped {
@@ -535,12 +539,12 @@ message Bucket {
 }
 
 message Metric {
-  repeated LabelPair label        = 1;
-  optional Gauge     gauge        = 2;
-  optional Counter   counter      = 3;
-  optional Summary   summary      = 4;
-  optional Untyped   untyped      = 5;
-  optional Histogram histogram    = 7;
+  repeated LabelPair label       = 1;
+  optional Gauge     gauge       = 2;
+  optional Counter   counter     = 3;
+  optional Summary   summary     = 4;
+  optional Untyped   untyped     = 5;
+  optional Histogram histogram   = 7;
   optional int64     timestamp_ms = 6;
 }
 

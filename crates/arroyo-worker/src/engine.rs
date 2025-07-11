@@ -360,7 +360,7 @@ pub struct Engine {
     program: Program,
     worker_id: WorkerId,
     #[allow(unused)]
-    run_id: String,
+    run_id: u64,
     job_id: String,
     network_manager: NetworkManager,
     assignments: HashMap<(u32, usize), TaskAssignment>,
@@ -453,7 +453,7 @@ impl Engine {
         program: Program,
         worker_id: WorkerId,
         job_id: String,
-        run_id: String,
+        run_id: u64,
         network_manager: NetworkManager,
         assignments: Vec<TaskAssignment>,
     ) -> Self {
@@ -503,7 +503,7 @@ impl Engine {
             program,
             worker_id,
             job_id,
-            run_id: "0".to_string(),
+            run_id: 0,
             network_manager: NetworkManager::new(0).await?,
             assignments,
         })

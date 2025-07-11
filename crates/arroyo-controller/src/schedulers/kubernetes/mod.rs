@@ -106,6 +106,9 @@ impl KubernetesScheduler {
                 "name": RUN_ID_ENV, "value": format!("{}", req.run_id),
             },
             {
+                "name": "ARROYO__WORKER__MACHINE_ID", "value": pod_name,
+            },
+            {
                 "name": "ARROYO__WORKER__RPC_PORT", "value": "6900",
             },
             {
@@ -245,7 +248,7 @@ impl Scheduler for KubernetesScheduler {
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
         force: bool,
     ) -> anyhow::Result<()> {
         let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
@@ -286,7 +289,7 @@ impl Scheduler for KubernetesScheduler {
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<i64>,
+        run_id: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         // get the pods associated with the replica set for the given job_id and run_id
         let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
