@@ -86,7 +86,7 @@ impl ArrowOperator for MqttSinkFunc {
             };
 
             tokio::time::sleep(Duration::from_millis((50 * (1 << attempts)).min(5_000))).await;
-            attempts -= 1;
+            attempts += 1;
         }
 
         panic!("Failed to establish connection to mqtt after 20 retries");
