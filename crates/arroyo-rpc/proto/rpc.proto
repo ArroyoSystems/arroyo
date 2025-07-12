@@ -177,6 +177,34 @@ message WorkerErrorReq {
 message WorkerErrorRes {
 }
 
+enum WorkerPhase {
+  IDLE = 0;
+  INITIALIZING = 1;
+  RUNNING = 2;
+  FAILED = 3;
+}
+
+message GetWorkerPhaseReq {
+  // empty
+}
+
+message GetWorkerPhaseResp {
+  WorkerPhase phase = 1;
+  optional uint64 phase_started_at = 2;  // set for INITIALIZING and FAILED phases
+  optional string error_message = 3;     // only set if phase == FAILED
+}
+
+message WorkerInitializationCompleteReq {
+  uint64 worker_id = 1;
+  string job_id = 2;
+  uint64 time = 3;
+  bool success = 4;
+  optional string error_message = 5;  // only if success == false
+}
+
+message WorkerInitializationCompleteResp {
+}
+
 message JobMetricsReq {
   string job_id = 1;
 }
@@ -199,6 +227,7 @@ service ControllerGrpc {
   rpc SendSinkData(SinkDataReq) returns (SinkDataResp);
   // sent from the node to the controller when a worker process exits
   rpc WorkerFinished(WorkerFinishedReq) returns (WorkerFinishedResp);
+  rpc WorkerInitializationComplete(WorkerInitializationCompleteReq) returns (WorkerInitializationCompleteResp);
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
   rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
@@ -406,6 +435,7 @@ service WorkerGrpc {
   rpc StopExecution(StopExecutionReq) returns (StopExecutionResp);
   rpc JobFinished(JobFinishedReq) returns (JobFinishedResp);
   rpc GetMetrics(MetricsReq) returns (MetricsResp);
+  rpc GetWorkerPhase(GetWorkerPhaseReq) returns (GetWorkerPhaseResp);
 }
 
 // Node
