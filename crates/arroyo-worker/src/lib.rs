@@ -3,15 +3,16 @@
 
 use crate::engine::{Engine, Program, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
-    CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
-    JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily, MetricsReq,
-    MetricsResp, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq,
-    StopExecutionResp, TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq,
-    TaskFinishedReq, TaskStartedReq, WorkerErrorReq, WorkerInfo, WorkerResources,
+    CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq, GetWorkerPhaseResp,
+    HeartbeatReq, JobFinishedReq, JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes,
+    MetricFamily, MetricsReq, MetricsResp, RegisterWorkerReq, StartExecutionReq,
+    StartExecutionResp, StopExecutionReq, StopExecutionResp, TaskCheckpointCompletedReq,
+    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq,
+    WorkerInfo, WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
     from_millis, to_micros, CheckpointBarrier, MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
@@ -20,7 +21,6 @@ use rand::random;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -37,7 +37,7 @@ use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
 use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
-use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
@@ -87,6 +87,18 @@ impl Debug for LogicalNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.id)
     }
+}
+
+enum WorkerExecutionPhase {
+    Idle,
+    Initializing {
+        started_at: SystemTime,
+    },
+    Running(EngineState),
+    Failed {
+        started_at: SystemTime,
+        error_message: String,
+    },
 }
 
 struct EngineState {
@@ -142,7 +154,7 @@ pub struct WorkerServer {
     job_id: String,
     run_id: u64,
     name: &'static str,
-    state: Arc<Mutex<Option<EngineState>>>,
+    phase: Arc<Mutex<WorkerExecutionPhase>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
     shutdown_guard: ShutdownGuard,
 }
@@ -179,7 +191,7 @@ impl WorkerServer {
             name,
             job_id,
             run_id,
-            state: Arc::new(Mutex::new(None)),
+            phase: Arc::new(Mutex::new(WorkerExecutionPhase::Idle)),
             network: Arc::new(Mutex::new(None)),
             shutdown_guard,
         }
@@ -285,150 +297,197 @@ impl WorkerServer {
         self.start_async().await
     }
 
-    fn start_control_thread(
-        &self,
-        mut control_rx: Receiver<ControlResp>,
+    async fn run_control_loop(
+        cancel_token: CancellationToken,
+        control_rx: Receiver<ControlResp>,
         worker_id: WorkerId,
         job_id: String,
-    ) -> impl Future<Output = Result<()>> {
-        let cancel_token = self.shutdown_guard.token();
+    ) -> Result<()> {
+        let mut controller = controller_client("worker", &config().worker.tls)
+            .await
+            .expect("Unable to connect to controller");
 
-        async move {
-            let mut controller = controller_client("worker", &config().worker.tls)
-                .await
-                .expect("Unable to connect to controller");
+        let mut tick = tokio::time::interval(Duration::from_secs(5));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut control_rx = control_rx;
 
-            let mut tick = tokio::time::interval(Duration::from_secs(5));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                select! {
-                    msg = control_rx.recv() => {
-                        let err = match msg {
-                            Some(ControlResp::CheckpointEvent(c)) => {
-                                controller.task_checkpoint_event(Request::new(
-                                    TaskCheckpointEventReq {
-                                        worker_id: worker_id.0,
-                                        time: to_micros(c.time),
-                                        job_id: job_id.clone(),
-                                        node_id: c.node_id,
-                                        operator_id: c.operator_id,
-                                        subtask_index: c.subtask_index,
-                                        epoch: c.checkpoint_epoch,
-                                        event_type: c.event_type as i32,
-                                    }
-                                )).await.err()
-                            }
-                            Some(ControlResp::CheckpointCompleted(c)) => {
-                                controller.task_checkpoint_completed(Request::new(
-                                    TaskCheckpointCompletedReq {
-                                        worker_id: worker_id.0,
-                                        time: c.subtask_metadata.finish_time,
-                                        job_id: job_id.clone(),
-                                        node_id: c.node_id,
-                                        operator_id: c.operator_id,
-                                        epoch: c.checkpoint_epoch,
-                                        needs_commit: false,
-                                        metadata: Some(c.subtask_metadata),
-                                    }
-                                )).await.err()
-                            }
-                            Some(ControlResp::TaskFinished { node_id, task_index }) => {
-                                info!(message = "Task finished", node_id, task_index);
-                                controller.task_finished(Request::new(
-                                    TaskFinishedReq {
-                                        worker_id: worker_id.0,
-                                        job_id: job_id.clone(),
-                                        time: to_micros(SystemTime::now()),
-                                        node_id,
-                                        operator_subtask: task_index as u64,
-                                    }
-                                )).await.err()
-                            }
-                            Some(ControlResp::TaskFailed { node_id, task_index, error }) => {
-                                controller.task_failed(Request::new(
-                                    TaskFailedReq {
-                                        worker_id: worker_id.0,
-                                        job_id: job_id.clone(),
-                                        time: to_micros(SystemTime::now()),
-                                        node_id,
-                                        operator_subtask: task_index as u64,
-                                        error,
-                                    }
-                                )).await.err()
-                            }
-                            Some(ControlResp::Error { node_id, operator_id, task_index, message, details}) => {
-                                controller.worker_error(Request::new(
-                                    WorkerErrorReq {
-                                        job_id: job_id.clone(),
-                                        node_id,
-                                        operator_id,
-                                        task_index: task_index as u32,
-                                        message,
-                                        details
-                                    }
-                                )).await.err()
-                            }
-                            Some(ControlResp::TaskStarted {node_id, task_index, start_time}) => {
-                                controller.task_started(Request::new(
-                                    TaskStartedReq {
-                                        worker_id: worker_id.0,
-                                        job_id: job_id.clone(),
-                                        time: to_micros(start_time),
-                                        node_id,
-                                        operator_subtask: task_index as u64,
-                                    }
-                                )).await.err()
-                            }
-                            None => {
-                                // TODO: remove the control queue from the select at this point
-                                tokio::time::sleep(Duration::from_millis(50)).await;
-                                None
-                            }
-                        };
-                        if let Some(err) = err {
-                            error!("encountered control message failure {}", err);
-                            cancel_token.cancel();
+        loop {
+            select! {
+                msg = control_rx.recv() => {
+                    let err = match msg {
+                        Some(ControlResp::CheckpointEvent(c)) => {
+                            controller.task_checkpoint_event(Request::new(
+                                TaskCheckpointEventReq {
+                                    worker_id: worker_id.0,
+                                    time: to_micros(c.time),
+                                    job_id: job_id.clone(),
+                                    node_id: c.node_id,
+                                    operator_id: c.operator_id,
+                                    subtask_index: c.subtask_index,
+                                    epoch: c.checkpoint_epoch,
+                                    event_type: c.event_type as i32,
+                                }
+                            )).await.err()
                         }
+                        Some(ControlResp::CheckpointCompleted(c)) => {
+                            controller.task_checkpoint_completed(Request::new(
+                                TaskCheckpointCompletedReq {
+                                    worker_id: worker_id.0,
+                                    time: c.subtask_metadata.finish_time,
+                                    job_id: job_id.clone(),
+                                    node_id: c.node_id,
+                                    operator_id: c.operator_id,
+                                    epoch: c.checkpoint_epoch,
+                                    needs_commit: false,
+                                    metadata: Some(c.subtask_metadata),
+                                }
+                            )).await.err()
+                        }
+                        Some(ControlResp::TaskFinished { node_id, task_index }) => {
+                            info!(message = "Task finished", node_id, task_index);
+                            controller.task_finished(Request::new(
+                                TaskFinishedReq {
+                                    worker_id: worker_id.0,
+                                    job_id: job_id.clone(),
+                                    time: to_micros(SystemTime::now()),
+                                    node_id,
+                                    operator_subtask: task_index as u64,
+                                }
+                            )).await.err()
+                        }
+                        Some(ControlResp::TaskFailed { node_id, task_index, error }) => {
+                            controller.task_failed(Request::new(
+                                TaskFailedReq {
+                                    worker_id: worker_id.0,
+                                    job_id: job_id.clone(),
+                                    time: to_micros(SystemTime::now()),
+                                    node_id,
+                                    operator_subtask: task_index as u64,
+                                    error,
+                                }
+                            )).await.err()
+                        }
+                        Some(ControlResp::Error { node_id, operator_id, task_index, message, details}) => {
+                            controller.worker_error(Request::new(
+                                WorkerErrorReq {
+                                    job_id: job_id.clone(),
+                                    node_id,
+                                    operator_id,
+                                    task_index: task_index as u32,
+                                    message,
+                                    details
+                                }
+                            )).await.err()
+                        }
+                        Some(ControlResp::TaskStarted {node_id, task_index, start_time}) => {
+                            controller.task_started(Request::new(
+                                TaskStartedReq {
+                                    worker_id: worker_id.0,
+                                    job_id: job_id.clone(),
+                                    time: to_micros(start_time),
+                                    node_id,
+                                    operator_subtask: task_index as u64,
+                                }
+                            )).await.err()
+                        }
+                        None => {
+                            // TODO: remove the control queue from the select at this point
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            None
+                        }
+                    };
+                    if let Some(err) = err {
+                        error!("encountered control message failure {}", err);
+                        cancel_token.cancel();
                     }
-                    _ = tick.tick() => {
-                        let result = controller.heartbeat(Request::new(HeartbeatReq {
-                            job_id: job_id.clone(),
-                            time: to_micros(SystemTime::now()),
-                            worker_id: worker_id.0,
-                        })).await;
-                        if let Err(err) = result {
-                            error!("heartbeat failed {:?}", err);
-                            break;
-                        }
+                }
+                _ = tick.tick() => {
+                    let result = controller.heartbeat(Request::new(HeartbeatReq {
+                        job_id: job_id.clone(),
+                        time: to_micros(SystemTime::now()),
+                        worker_id: worker_id.0,
+                    })).await;
+                    if let Err(err) = result {
+                        error!("heartbeat failed {:?}", err);
+                        break;
                     }
                 }
             }
-            Ok(())
         }
+        Ok(())
     }
-}
 
-#[tonic::async_trait]
-impl WorkerGrpc for WorkerServer {
-    async fn start_execution(
-        &self,
-        request: Request<StartExecutionReq>,
-    ) -> Result<Response<StartExecutionResp>, Status> {
+    #[allow(clippy::too_many_arguments)]
+    async fn initialize(
+        phase: Arc<Mutex<WorkerExecutionPhase>>,
+        network: Arc<Mutex<Option<NetworkManager>>>,
+        shutdown_guard: ShutdownGuard,
+        worker_id: WorkerId,
+        job_id: String,
+        run_id: u64,
+        name: &'static str,
+        req: StartExecutionReq,
+    ) {
+        let error_message = match Self::initialize_inner(
+            Arc::clone(&network),
+            shutdown_guard,
+            worker_id,
+            &job_id,
+            run_id,
+            name,
+            req,
+        )
+        .await
         {
-            let state = self.state.lock().unwrap();
+            Ok(engine_state) => {
+                let mut phase_guard = phase.lock().unwrap();
+                *phase_guard = WorkerExecutionPhase::Running(engine_state);
 
-            if state.is_some() {
-                return Err(Status::failed_precondition(
-                    "Job is already running on this worker",
-                ));
+                None
+            }
+            Err(e) => {
+                let mut phase_guard = phase.lock().unwrap();
+                *phase_guard = WorkerExecutionPhase::Failed {
+                    started_at: SystemTime::now(),
+                    error_message: e.to_string(),
+                };
+
+                Some(e.to_string())
+            }
+        };
+
+        if let Ok(mut client) = controller_client("worker", &config().worker.tls).await {
+            if let Err(e) = client
+                .worker_initialization_complete(Request::new(WorkerInitializationCompleteReq {
+                    worker_id: worker_id.0,
+                    job_id,
+                    time: to_micros(SystemTime::now()),
+                    success: error_message.is_none(),
+                    error_message,
+                }))
+                .await
+            {
+                error!(
+                    "failed to notify controller of schedule completion: {:?}",
+                    e
+                );
             }
         }
+    }
 
-        let req = request.into_inner();
+    async fn initialize_inner(
+        network: Arc<Mutex<Option<NetworkManager>>>,
+        shutdown_guard: ShutdownGuard,
+        worker_id: WorkerId,
+        job_id: &str,
+        run_id: u64,
+        name: &'static str,
+        req: StartExecutionReq,
+    ) -> Result<EngineState> {
         let mut registry = new_registry();
 
         let logical = LogicalProgram::try_from(req.program.expect("Program is None"))
-            .expect("Failed to create LogicalProgram");
+            .map_err(|e| anyhow::anyhow!("Failed to create LogicalProgram: {}", e))?;
 
         debug!(
             "Starting execution for graph\n{}",
@@ -442,11 +501,7 @@ impl WorkerGrpc for WorkerServer {
             registry
                 .load_dylib(udf_name, dylib_config)
                 .await
-                .map_err(|e| {
-                    Status::failed_precondition(
-                        e.context(format!("loading UDF {udf_name}")).to_string(),
-                    )
-                })?;
+                .with_context(|| format!("loading UDF {udf_name}"))?;
             if dylib_config.is_async {
                 continue;
             }
@@ -454,22 +509,26 @@ impl WorkerGrpc for WorkerServer {
 
         for (udf_name, python_udf) in &logical.program_config.python_udfs {
             info!("Loading Python UDF {}", udf_name);
-            registry.add_python_udf(python_udf).await.map_err(|e| {
-                Status::failed_precondition(
-                    e.context(format!("loading Python UDF {udf_name}"))
-                        .to_string(),
-                )
-            })?;
+            registry
+                .add_python_udf(python_udf)
+                .await
+                .with_context(|| format!("loading Python UDF {udf_name}"))?;
         }
 
         let (control_tx, control_rx) = channel(128);
 
         let engine = {
-            let network = { self.network.lock().unwrap().take().unwrap() };
+            let network_manager = {
+                network
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
+            };
 
             let program = Program::from_logical(
-                self.name.to_string(),
-                &self.job_id,
+                name.to_string(),
+                job_id,
                 &logical.graph,
                 &req.tasks,
                 registry,
@@ -480,36 +539,91 @@ impl WorkerGrpc for WorkerServer {
 
             let engine = Engine::new(
                 program,
-                self.id,
-                self.job_id.clone(),
-                self.run_id,
-                network,
+                worker_id,
+                job_id.to_string(),
+                run_id,
+                network_manager,
                 req.tasks,
             );
             engine.start().await
         };
 
-        self.shutdown_guard
+        let job_id_owned = job_id.to_string();
+        let cancel_token = shutdown_guard.token();
+        shutdown_guard
             .child("control-thread")
-            .into_spawn_task(self.start_control_thread(control_rx, self.id, self.job_id.clone()));
+            .into_spawn_task(async move {
+                Self::run_control_loop(cancel_token, control_rx, worker_id, job_id_owned).await
+            });
 
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
         let operator_controls = engine.operator_controls();
         let operator_to_node = engine.operator_to_node();
 
-        let mut state = self.state.lock().unwrap();
-        *state = Some(EngineState {
+        let engine_state = EngineState {
             sources,
             sinks,
             operator_to_node,
             operator_controls,
-            shutdown_guard: self.shutdown_guard.child("engine-state"),
-        });
+            shutdown_guard: shutdown_guard.child("engine-state"),
+        };
 
-        info!("[{:?}] Started execution", self.id);
+        info!("[{:?}] Initialization completed successfully", worker_id);
+        Ok(engine_state)
+    }
+}
 
-        Ok(Response::new(StartExecutionResp {}))
+#[tonic::async_trait]
+impl WorkerGrpc for WorkerServer {
+    async fn start_execution(
+        &self,
+        request: Request<StartExecutionReq>,
+    ) -> Result<Response<StartExecutionResp>, Status> {
+        let mut phase = self.phase.lock().unwrap();
+
+        match &*phase {
+            WorkerExecutionPhase::Idle => {
+                let started_at = SystemTime::now();
+                *phase = WorkerExecutionPhase::Initializing { started_at };
+
+                // Spawn async initialization
+                let phase = Arc::clone(&self.phase);
+                let network = Arc::clone(&self.network);
+                let shutdown_guard = self.shutdown_guard.clone_temporary();
+                let worker_id = self.id;
+                let job_id = self.job_id.clone();
+                let run_id = self.run_id;
+                let name = self.name;
+                let req = request.into_inner();
+
+                self.shutdown_guard.spawn_temporary(async move {
+                    Self::initialize(
+                        phase,
+                        network,
+                        shutdown_guard,
+                        worker_id,
+                        job_id,
+                        run_id,
+                        name,
+                        req,
+                    )
+                    .await;
+                    Ok(())
+                });
+
+                Ok(Response::new(StartExecutionResp {}))
+            }
+            WorkerExecutionPhase::Initializing { .. } => {
+                Err(Status::unavailable("Worker is initializing"))
+            }
+            WorkerExecutionPhase::Running(_) => {
+                Err(Status::failed_precondition("Worker is already running"))
+            }
+            WorkerExecutionPhase::Failed { .. } => {
+                Err(Status::failed_precondition("Worker is in failed state"))
+            }
+        }
     }
 
     async fn checkpoint(
@@ -518,19 +632,20 @@ impl WorkerGrpc for WorkerServer {
     ) -> Result<Response<CheckpointResp>, Status> {
         let req = request.into_inner();
 
-        if req.is_commit {
-            let senders = {
-                let state = self.state.lock().unwrap();
-
-                if let Some(state) = state.as_ref() {
-                    state.sinks.clone()
-                } else {
-                    return Err(Status::failed_precondition(
-                        "Worker has not yet started execution",
-                    ));
+        let (sinks, sources) = {
+            let phase = self.phase.lock().unwrap();
+            match &*phase {
+                WorkerExecutionPhase::Running(engine_state) => {
+                    (engine_state.sinks.clone(), engine_state.sources.clone())
                 }
-            };
-            for sender in &senders {
+                _ => {
+                    return Err(Status::failed_precondition("Worker not in running phase"));
+                }
+            }
+        };
+
+        if req.is_commit {
+            for sender in &sinks {
                 sender
                     .send(ControlMessage::Commit {
                         epoch: req.epoch,
@@ -542,18 +657,6 @@ impl WorkerGrpc for WorkerServer {
             return Ok(Response::new(CheckpointResp {}));
         }
 
-        let senders = {
-            let state = self.state.lock().unwrap();
-
-            if let Some(state) = state.as_ref() {
-                state.sources.clone()
-            } else {
-                return Err(Status::failed_precondition(
-                    "Worker has not yet started execution",
-                ));
-            }
-        };
-
         let barrier = CheckpointBarrier {
             epoch: req.epoch,
             min_epoch: req.min_epoch,
@@ -561,7 +664,7 @@ impl WorkerGrpc for WorkerServer {
             then_stop: req.then_stop,
         };
 
-        for n in &senders {
+        for n in &sources {
             n.send(ControlMessage::Checkpoint(barrier)).await.unwrap();
         }
 
@@ -573,20 +676,21 @@ impl WorkerGrpc for WorkerServer {
         debug!("received commit request {:?}", req);
 
         let sender_commit_map_pairs = {
-            let state_mutex = self.state.lock().unwrap();
-            let Some(state) = state_mutex.as_ref() else {
-                return Err(Status::failed_precondition(
-                    "Worker has not yet started execution",
-                ));
+            let phase = self.phase.lock().unwrap();
+            let engine_state = match &*phase {
+                WorkerExecutionPhase::Running(engine_state) => engine_state,
+                _ => {
+                    return Err(Status::failed_precondition("Worker not in running phase"));
+                }
             };
 
             let mut sender_commit_map_pairs = vec![];
             for (operator_id, commit_operator) in req.committing_data {
-                let node_id = state
+                let node_id = engine_state
                     .operator_to_node
                     .get(&operator_id)
                     .unwrap_or_else(|| panic!("Could not find node for operator id {operator_id}"));
-                let nodes = state.operator_controls.get(node_id).unwrap().clone();
+                let nodes = engine_state.operator_controls.get(node_id).unwrap().clone();
                 let commit_map: HashMap<_, _> = commit_operator
                     .committing_data
                     .into_iter()
@@ -618,9 +722,18 @@ impl WorkerGrpc for WorkerServer {
         let req = request.into_inner();
 
         let nodes = {
-            let state = self.state.lock().unwrap();
-            let s = state.as_ref().unwrap();
-            s.operator_controls.get(&req.node_id).unwrap().clone()
+            let phase = self.phase.lock().unwrap();
+            let engine_state = match &*phase {
+                WorkerExecutionPhase::Running(engine_state) => engine_state,
+                _ => {
+                    return Err(Status::failed_precondition("Worker not in running phase"));
+                }
+            };
+            engine_state
+                .operator_controls
+                .get(&req.node_id)
+                .unwrap()
+                .clone()
         };
 
         let compacted: CompactionResult = req.into();
@@ -647,8 +760,14 @@ impl WorkerGrpc for WorkerServer {
         request: Request<StopExecutionReq>,
     ) -> Result<Response<StopExecutionResp>, Status> {
         let sources = {
-            let state = self.state.lock().unwrap();
-            state.as_ref().unwrap().sources.clone()
+            let phase = self.phase.lock().unwrap();
+            let engine_state = match &*phase {
+                WorkerExecutionPhase::Running(engine_state) => engine_state,
+                _ => {
+                    return Err(Status::failed_precondition("Worker not in running phase"));
+                }
+            };
+            engine_state.sources.clone()
         };
 
         let req = request.into_inner();
@@ -667,10 +786,11 @@ impl WorkerGrpc for WorkerServer {
         &self,
         _request: Request<JobFinishedReq>,
     ) -> Result<Response<JobFinishedResp>, Status> {
-        let mut state = self.state.lock().unwrap();
-        if let Some(engine) = state.as_mut() {
-            engine.shutdown_guard.cancel();
+        let mut phase = self.phase.lock().unwrap();
+        if let WorkerExecutionPhase::Running(engine_state) = &*phase {
+            engine_state.shutdown_guard.cancel();
         }
+        *phase = WorkerExecutionPhase::Idle;
 
         let token = self.shutdown_guard.token();
         tokio::task::spawn(async move {
@@ -707,5 +827,36 @@ impl WorkerGrpc for WorkerServer {
         }
 
         Ok(Response::new(MetricsResp { metrics }))
+    }
+
+    async fn get_worker_phase(
+        &self,
+        _req: Request<GetWorkerPhaseReq>,
+    ) -> Result<Response<GetWorkerPhaseResp>, Status> {
+        let phase = self.phase.lock().unwrap();
+
+        let (phase_enum, phase_started_at, error_message) = match &*phase {
+            WorkerExecutionPhase::Idle => (WorkerPhase::Idle as i32, None, None),
+            WorkerExecutionPhase::Initializing { started_at } => (
+                WorkerPhase::Initializing as i32,
+                Some(to_micros(*started_at)),
+                None,
+            ),
+            WorkerExecutionPhase::Running(_) => (WorkerPhase::Running as i32, None, None),
+            WorkerExecutionPhase::Failed {
+                started_at,
+                error_message,
+            } => (
+                WorkerPhase::Failed as i32,
+                Some(to_micros(*started_at)),
+                Some(error_message.clone()),
+            ),
+        };
+
+        Ok(Response::new(GetWorkerPhaseResp {
+            phase: phase_enum,
+            phase_started_at,
+            error_message,
+        }))
     }
 }

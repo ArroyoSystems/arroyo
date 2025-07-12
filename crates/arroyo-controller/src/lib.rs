@@ -13,7 +13,8 @@ use arroyo_rpc::grpc::rpc::{
     JobMetricsReq, JobMetricsResp, OutputData, RegisterNodeReq, RegisterNodeResp,
     RegisterWorkerReq, RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
     TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq,
-    TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
+    TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp, WorkerInitializationCompleteReq,
+    WorkerInitializationCompleteResp,
 };
 use arroyo_rpc::grpc::rpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
@@ -177,6 +178,11 @@ pub enum JobMessage {
         rpc_address: String,
         data_address: String,
         slots: usize,
+    },
+    WorkerInitializationComplete {
+        worker_id: WorkerId,
+        success: bool,
+        error_message: Option<String>,
     },
     TaskStarted {
         worker_id: WorkerId,
@@ -491,6 +497,29 @@ impl ControllerGrpc for ControllerServer {
         Ok(Response::new(JobMetricsResp {
             metrics: serde_json::to_string(&metrics.get_groups().await).unwrap(),
         }))
+    }
+
+    async fn worker_initialization_complete(
+        &self,
+        request: Request<WorkerInitializationCompleteReq>,
+    ) -> Result<Response<WorkerInitializationCompleteResp>, Status> {
+        let req = request.into_inner();
+        info!(
+            "Worker {} initialization completed: success={}, error={:?}",
+            req.worker_id, req.success, req.error_message
+        );
+
+        self.send_to_job_queue(
+            &req.job_id,
+            JobMessage::WorkerInitializationComplete {
+                worker_id: WorkerId(req.worker_id),
+                success: req.success,
+                error_message: req.error_message,
+            },
+        )
+        .await?;
+
+        Ok(Response::new(WorkerInitializationCompleteResp {}))
     }
 }
 

@@ -7,10 +7,10 @@ use std::{
 use arroyo_rpc::grpc::rpc::{
     worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment,
 };
-use arroyo_types::WorkerId;
+use arroyo_types::{MachineId, WorkerId};
 use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
@@ -39,8 +39,18 @@ use super::{running::Running, JobContext, State, Transition};
 #[derive(Debug, Clone)]
 struct WorkerStatus {
     id: WorkerId,
+    machine_id: MachineId,
     data_address: String,
     slots: usize,
+    state: WorkerState,
+}
+
+#[derive(Debug, Clone)]
+enum WorkerState {
+    Connected,
+    Initializing,
+    Ready,
+    Failed,
 }
 
 #[derive(Debug)]
@@ -115,8 +125,10 @@ async fn handle_worker_connect<'a>(
                 worker_id,
                 WorkerStatus {
                     id: worker_id,
+                    machine_id: machine_id.clone(),
                     data_address,
                     slots,
+                    state: WorkerState::Connected,
                 },
             );
 
@@ -468,46 +480,52 @@ impl State for Scheduling {
         let assignments = compute_assignments(workers.values().collect(), &*ctx.program);
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();
         let program = api::ArrowProgram::from(ctx.program.clone());
+
         let tasks: Vec<_> = worker_connects
             .into_iter()
             .map(|(id, mut c)| {
                 let assignments = assignments.clone();
-
                 let job_id = ctx.config.id.clone();
                 let restore_epoch = checkpoint_info.as_ref().map(|info| info.epoch);
                 let program = program.clone();
+                let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
+
                 tokio::spawn(async move {
                     info!(
                         message = "starting execution on worker",
                         job_id = *job_id,
-                        worker_id = id.0
+                        worker_id = id.0,
+                        machine_id = *machine_id.0,
                     );
-                    for i in 0..10 {
-                        match c
-                            .start_execution(Request::new(StartExecutionReq {
-                                restore_epoch,
-                                program: Some(program.clone()),
-                                tasks: assignments.clone(),
-                            }))
-                            .await
-                        {
-                            Ok(_) => {
-                                return (id, c);
-                            }
-                            Err(e) => {
-                                error!(
-                                    message = "failed to start execution on worker",
-                                    job_id = *job_id,
-                                    worker_id = id.0,
-                                    attempt = i,
-                                    error = format!("{:?}", e)
-                                );
-                            }
-                        }
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
 
-                    panic!("Failed to start execution on workers {id:?}");
+                    match c
+                        .start_execution(Request::new(StartExecutionReq {
+                            restore_epoch,
+                            program: Some(program.clone()),
+                            tasks: assignments.clone(),
+                        }))
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!(
+                                message = "worker entered initialization phase",
+                                job_id = *job_id,
+                                worker_id = id.0,
+                                machine_id = *machine_id.0,
+                            );
+                            (id, c)
+                        }
+                        Err(e) => {
+                            error!(
+                                message = "failed to start execution on worker",
+                                job_id = *job_id,
+                                worker_id = id.0,
+                                machine_id = *machine_id.0,
+                                error = format!("{:?}", e),
+                            );
+                            panic!("Failed to start execution on worker {id:?}: {e}");
+                        }
+                    }
                 })
             })
             .collect();
@@ -516,15 +534,18 @@ impl State for Scheduling {
         for t in tasks {
             match t.await {
                 Ok((id, c)) => {
+                    if let Some(worker) = workers.get_mut(&id) {
+                        worker.state = WorkerState::Initializing;
+                    }
                     worker_connects.insert(id, c);
                 }
                 Err(e) => {
-                    return Err(fatal("Failed to start cluster for pipeline", e.into()));
+                    return Err(ctx.retryable(self, "failed to initialize workers", e.into(), 10));
                 }
             }
         }
 
-        // wait until all tasks are running
+        // Now wait until all tasks are running
         let start = Instant::now();
         let mut started_tasks = HashSet::new();
         while started_tasks.len() < ctx.program.task_count() {
@@ -537,6 +558,35 @@ impl State for Scheduling {
             select! {
                 v = ctx.rx.recv() => {
                     match v {
+                        Some(JobMessage::WorkerInitializationComplete {
+                            worker_id,
+                            success,
+                            error_message,
+                        }) => {
+                            if let Some(worker) = workers.get_mut(&worker_id) {
+                                if success {
+                                    worker.state = WorkerState::Ready;
+                                    info!(
+                                        message = "worker initialization completed successfully",
+                                        job_id = *ctx.config.id,
+                                        worker_id = worker_id.0,
+                                        machine_id = *worker.machine_id.0,
+                                    );
+                                } else {
+                                    let error = error_message.unwrap_or_else(|| "Unknown error".to_string());
+                                    worker.state = WorkerState::Failed;
+                                    error!(
+                                        message = "worker initialization failed",
+                                        job_id = *ctx.config.id,
+                                        worker_id = worker_id.0,
+                                        machine_id = *worker.machine_id.0,
+                                        error = error
+                                    );
+                                    return Err(ctx.retryable(self, "worker initialization failed",
+                                        anyhow!("worker {} initialization failed: {}", worker_id.0, error), 5));
+                                }
+                            }
+                        }
                         Some(JobMessage::TaskStarted {
                             node_id,
                             operator_subtask,
