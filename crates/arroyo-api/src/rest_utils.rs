@@ -1,5 +1,5 @@
 use crate::{cloud, AuthData};
-use arroyo_server_common::log_event;
+use arroyo_rpc::log_event;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -7,7 +7,6 @@ use axum::Json;
 use axum_extra::headers::authorization::Bearer;
 use axum_extra::headers::Authorization;
 use axum_extra::TypedHeader;
-use serde_json::json;
 use tracing::{error, warn};
 
 use cornucopia_async::{DatabaseSource, DbError};
@@ -89,7 +88,7 @@ where
     E: core::fmt::Debug,
 {
     error!("Error while handling: {:?}", err);
-    log_event("api_error", json!({ "error": format!("{:?}", err) }));
+    log_event!("api_error", { "error": format!("{:?}", err) });
     ErrorResp {
         status_code: StatusCode::INTERNAL_SERVER_ERROR,
         message: "Something went wrong".to_string(),

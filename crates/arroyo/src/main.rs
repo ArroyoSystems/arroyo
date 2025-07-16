@@ -2,16 +2,15 @@ mod run;
 
 use anyhow::{anyhow, bail};
 use arroyo_planner::{ArroyoSchemaProvider, SqlConfig};
-use arroyo_rpc::config;
 use arroyo_rpc::config::{config, DatabaseType};
+use arroyo_rpc::{config, log_event};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
-use arroyo_server_common::{log_event, start_admin_server};
+use arroyo_server_common::start_admin_server;
 use arroyo_worker::{utils, WorkerServer};
 use clap::{Args, Parser, Subcommand};
 use clio::Input;
 use cornucopia_async::DatabaseSource;
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
-use serde_json::json;
 use std::env::temp_dir;
 use std::path::PathBuf;
 use std::process::exit;
@@ -420,12 +419,12 @@ async fn start_control_plane(service: CPService) {
 
     let db = db_source().await;
 
-    log_event(
+    log_event!(
         "service_startup",
-        json!({
+        {
             "service": service.name(),
             "scheduler": config.controller.scheduler,
-        }),
+        }
     );
 
     let shutdown = Shutdown::new(service.name(), SignalBehavior::Handle);

@@ -15,7 +15,7 @@ pub const JOB_ID_ENV: &str = "JOB_ID";
 pub const RUN_ID_ENV: &str = "RUN_ID";
 
 // telemetry configuration
-pub const POSTHOG_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";
+pub const TELEMETRY_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";
 
 // These seeds were randomly generated; changing them will break existing state
 pub const HASH_SEEDS: [u64; 4] = [

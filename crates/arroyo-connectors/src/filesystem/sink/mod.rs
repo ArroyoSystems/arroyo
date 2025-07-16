@@ -16,7 +16,9 @@ use ::arrow::{
 };
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, OperatorConfig, TIMESTAMP_FIELD};
+use arroyo_rpc::{
+    df::ArroyoSchemaRef, formats::Format, log_trace_event, OperatorConfig, TIMESTAMP_FIELD,
+};
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -267,6 +269,26 @@ fn timestamp_logical_expression(time_partition_pattern: String) -> Result<Expr> 
     Ok(function)
 }
 
+pub(crate) fn log_fs_event(
+    task_info: &TaskInfo,
+    bytes: usize,
+    files: u64,
+    write_time: Duration,
+    failures: u64,
+) {
+    log_trace_event!("filesystem_write",
+    {
+        "operator_id": task_info.operator_id,
+        "operator_name": task_info.operator_name,
+        "subtask_idx": task_info.task_index,
+    }, [
+        "bytes_written" => bytes as f64,
+        "files_written" => files as f64,
+        "write_time_ms" => write_time.as_millis() as f64,
+        "write_failures" => failures as f64
+    ]);
+}
+
 #[derive(Debug)]
 enum FileSystemMessages {
     Data {
@@ -275,8 +297,8 @@ enum FileSystemMessages {
     },
     Init {
         max_file_index: usize,
-        subtask_id: usize,
         recovered_files: Vec<InProgressFileCheckpoint>,
+        task_info: Arc<TaskInfo>,
     },
     Checkpoint {
         subtask_id: usize,
@@ -426,7 +448,7 @@ struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
     active_writers: HashMap<Option<String>, String>,
     watermark: Option<SystemTime>,
     max_file_index: usize,
-    subtask_id: usize,
+    task_info: Option<Arc<TaskInfo>>,
     object_store: Arc<StorageProvider>,
     writers: HashMap<String, R>,
     receiver: Receiver<FileSystemMessages>,
@@ -459,6 +481,7 @@ pub trait MultiPartWriter {
         config: &FileSystemTable,
         format: Option<Format>,
         schema: ArroyoSchemaRef,
+        task_info: Arc<TaskInfo>,
     ) -> Self;
 
     fn name(&self) -> String;
@@ -745,7 +768,7 @@ where
             active_writers: HashMap::new(),
             watermark: None,
             max_file_index: 0,
-            subtask_id: 0,
+            task_info: None,
             object_store,
             writers: HashMap::new(),
             receiver,
@@ -776,10 +799,10 @@ where
                                 self.futures.push(future);
                             }
                         },
-                        FileSystemMessages::Init {max_file_index, subtask_id, recovered_files } => {
+                        FileSystemMessages::Init {max_file_index, task_info, recovered_files } => {
                             self.max_file_index = max_file_index;
-                            self.subtask_id = subtask_id;
-                            info!("recovered files: {:?}", recovered_files);
+                                                    info!("recovered files: {:?}", recovered_files);
+                            self.task_info = Some(task_info);
                             for recovered_file in recovered_files {
                                 if let Some(file_to_finish) = from_checkpoint(
                                      &Path::parse(&recovered_file.filename)?, recovered_file.partition.clone(), recovered_file.data, recovered_file.pushed_size, self.object_store.clone()).await? {
@@ -873,7 +896,11 @@ where
         let filename_base = if filename_strategy == FilenameStrategy::Uuid {
             Uuid::new_v4().to_string()
         } else {
-            format!("{:>05}-{:>03}", self.max_file_index, self.subtask_id)
+            format!(
+                "{:>05}-{:>03}",
+                self.max_file_index,
+                self.task_info.as_ref().unwrap().task_index
+            )
         };
         let filename = add_suffix_prefix(
             filename_base,
@@ -893,6 +920,7 @@ where
             &self.properties,
             self.format.clone(),
             self.schema.clone(),
+            self.task_info.clone().unwrap(),
         )
     }
 
@@ -990,17 +1018,25 @@ where
             })
             .collect();
         let location = Path::parse(&filename)?;
+
+        let start = Instant::now();
         match self
             .object_store
             .close_multipart(&location, &multi_part_upload_id, parts)
             .await
         {
-            Ok(_) => Ok(Some(FinishedFile {
-                filename,
-                partition,
-                size,
-            })),
+            Ok(_) => {
+                log_fs_event(self.task_info.as_ref().unwrap(), 0, 1, start.elapsed(), 0);
+
+                Ok(Some(FinishedFile {
+                    filename,
+                    partition,
+                    size,
+                }))
+            }
             Err(err) => {
+                log_fs_event(self.task_info.as_ref().unwrap(), 0, 0, start.elapsed(), 1);
+
                 warn!(
                     "when attempting to complete {}, received an error: {}",
                     filename, err
@@ -1087,10 +1123,16 @@ struct MultipartManager {
     pushed_size: usize,
     parts_to_add: Vec<PartToUpload>,
     closed: bool,
+    task_info: Arc<TaskInfo>,
 }
 
 impl MultipartManager {
-    fn new(object_store: Arc<StorageProvider>, location: Path, partition: Option<String>) -> Self {
+    fn new(
+        object_store: Arc<StorageProvider>,
+        location: Path,
+        partition: Option<String>,
+        task_info: Arc<TaskInfo>,
+    ) -> Self {
         Self {
             storage_provider: object_store,
             location,
@@ -1101,6 +1143,7 @@ impl MultipartManager {
             pushed_size: 0,
             parts_to_add: vec![],
             closed: false,
+            task_info,
         }
     }
 
@@ -1149,7 +1192,11 @@ impl MultipartManager {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("missing multipart id"))?;
         let object_store = self.storage_provider.clone();
+
+        let task_info = self.task_info.clone();
         Ok(Box::pin(async move {
+            let start = Instant::now();
+            let bytes = part_to_upload.byte_data.len();
             let upload_part = object_store
                 .add_multipart(
                     &location,
@@ -1157,12 +1204,20 @@ impl MultipartManager {
                     part_to_upload.part_index,
                     part_to_upload.byte_data,
                 )
-                .await?;
+                .await;
+            let elapsed = start.elapsed();
+
+            if upload_part.is_ok() {
+                log_fs_event(&*task_info, bytes, 0, elapsed, 0);
+            } else {
+                log_fs_event(&*task_info, 0, 0, elapsed, 1);
+            }
+
             Ok(MultipartCallbackWithName {
                 name: location.to_string(),
                 callback: MultipartCallback::CompletedPart {
                     part_idx: part_to_upload.part_index,
-                    upload_part,
+                    upload_part: upload_part?,
                 },
             })
         }))
@@ -1392,6 +1447,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         config: &FileSystemTable,
         format: Option<Format>,
         schema: ArroyoSchemaRef,
+        task_info: Arc<TaskInfo>,
     ) -> Self {
         let batch_buffering_writer = BBW::new(config, format, schema.clone());
 
@@ -1411,7 +1467,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
 
         Self {
             batch_buffering_writer,
-            multipart_manager: MultipartManager::new(object_store, path, partition),
+            multipart_manager: MultipartManager::new(object_store, path, partition, task_info),
             stats: None,
             schema,
             target_part_size_bytes: target_part_size
@@ -1656,7 +1712,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
             .unwrap()
             .send(FileSystemMessages::Init {
                 max_file_index,
-                subtask_id: ctx.task_info.task_index as usize,
+                task_info: ctx.task_info.clone(),
                 recovered_files,
             })
             .await?;

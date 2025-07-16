@@ -3,15 +3,14 @@ use anyhow::{anyhow, bail};
 use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_openapi::Client;
 use arroyo_rpc::config::{config, DatabaseType, DefaultSink, Scheduler};
+use arroyo_rpc::log_event;
 use arroyo_rpc::{config, init_db_notifier, notify_db, retry};
-use arroyo_server_common::log_event;
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
 use arroyo_storage::StorageProvider;
 use arroyo_types::to_millis;
 use async_trait::async_trait;
 use rand::random;
 use rusqlite::{Connection, DatabaseName, OpenFlags};
-use serde_json::json;
 use std::env;
 use std::env::{set_var, temp_dir};
 use std::path::PathBuf;
@@ -435,7 +434,7 @@ pub async fn run(args: RunArgs) {
 
     // check if this is the correct database for this pipeline
 
-    log_event("pipeline_cluster_start", json!({}));
+    log_event!("pipeline_cluster_start", {});
 
     let controller_port = arroyo_controller::ControllerServer::new(db.clone())
         .await

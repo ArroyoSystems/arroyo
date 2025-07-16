@@ -5,8 +5,6 @@ use std::{fmt::Debug, sync::Arc};
 
 use arroyo_rpc::grpc::api::ArrowProgram;
 
-use arroyo_server_common::log_event;
-use serde_json::json;
 use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -16,15 +14,6 @@ use tracing::{debug, error, info, warn};
 use anyhow::{anyhow, Result};
 use cornucopia_async::DatabaseSource;
 
-use crate::job_controller::JobController;
-use crate::queries::controller_queries;
-use crate::types::public::StopMode;
-use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus, RunningMessage};
-use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::config::config;
-use arroyo_server_common::shutdown::ShutdownGuard;
-use prost::Message;
-
 use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
 use self::finishing::Finishing;
@@ -33,6 +22,15 @@ use self::rescaling::Rescaling;
 use self::running::Running;
 use self::scheduling::Scheduling;
 use self::stopping::Stopping;
+use crate::job_controller::JobController;
+use crate::queries::controller_queries;
+use crate::types::public::StopMode;
+use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus, RunningMessage};
+use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::config::config;
+use arroyo_rpc::log_event;
+use arroyo_server_common::shutdown::ShutdownGuard;
+use prost::Message;
 
 mod checkpoint_stopping;
 mod compiling;
@@ -454,16 +452,16 @@ async fn execute_state<'a>(
                 duration_ms = ctx.last_transitioned_at.elapsed().as_millis()
             );
 
-            log_event(
+            log_event!(
                 "state_transition",
-                json!({
+                {
                     "service": "controller",
                     "job_id": ctx.config.id,
                     "from": state_name,
                     "to": s.state.name(),
                     "scheduler": &config().controller.scheduler,
-                    "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
-                }),
+                },
+                ["duration_ms" => ctx.last_transitioned_at.elapsed().as_millis() as f64]
             );
 
             (s.update_fn)(&mut ctx);
@@ -493,16 +491,16 @@ async fn execute_state<'a>(
                 error_message = message,
                 error = format!("{:?}", source)
             );
-            log_event(
+            log_event!(
                 "fatal_state_error",
-                json!({
+                {
                     "service": "controller",
                     "job_id": ctx.config.id,
                     "state": state_name,
                     "error_message": message,
                     "error": format!("{:?}", source),
                     "retries": 0,
-                }),
+                }
             );
             ctx.status.failure_message = Some(message);
             ctx.status.finish_time = Some(OffsetDateTime::now_utc());
@@ -523,16 +521,16 @@ async fn execute_state<'a>(
                 error = format!("{:?}", source),
                 retries,
             );
-            log_event(
+            log_event!(
                 "state_error",
-                json!({
+                {
                     "service": "controller",
                     "job_id": ctx.config.id,
                     "state": state_name,
                     "error_message": message,
                     "error": format!("{:?}", source),
-                    "retries": retries,
-                }),
+                },
+                ["retries" => retries]
             );
 
             tokio::time::sleep(Duration::from_millis(500)).await;

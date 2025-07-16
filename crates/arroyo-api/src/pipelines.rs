@@ -33,8 +33,7 @@ use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
-use arroyo_rpc::{error_chain, OperatorConfig};
-use arroyo_server_common::log_event;
+use arroyo_rpc::{error_chain, log_event, OperatorConfig};
 use arroyo_udf_host::ParsedUdfFile;
 use prost::Message;
 use serde_json::json;
@@ -438,9 +437,9 @@ pub(crate) async fn create_pipeline_int(
     )
     .await?;
 
-    log_event(
+    log_event!(
         "job_created",
-        json!({
+        {
             "service": "api",
             "is_preview": is_preview,
             "job_id": job_id,
@@ -450,7 +449,7 @@ pub(crate) async fn create_pipeline_int(
             "python_udfs": udfs.iter().any(|e| e.language == UdfLanguage::Python),
             // TODO: program features
             "features": compiled.program.features(),
-        }),
+        }
     );
 
     Ok(pub_id)

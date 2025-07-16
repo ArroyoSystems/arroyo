@@ -30,7 +30,7 @@ use log::{debug, warn};
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZero, NonZeroU64};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -89,6 +89,77 @@ pub fn init_db_notifier() -> Receiver<oneshot::Sender<()>> {
 pub fn notify_db() -> Option<oneshot::Receiver<()>> {
     let (tx, rx) = oneshot::channel();
     DB_BACKUP_NOTIFIER.get()?.try_send(tx).ok().map(|_| rx)
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum EventLevel {
+    Trace,
+    Analytics,
+}
+
+pub trait EventLogger: Send + Sync {
+    fn log_event(
+        &self,
+        name: &str,
+        labels: Value,
+        values: BTreeMap<String, f64>,
+        level: EventLevel,
+    );
+    fn trace_enabled(&self) -> bool {
+        false
+    }
+}
+
+static EVENT_LOGGER: OnceLock<Arc<dyn EventLogger>> = OnceLock::new();
+
+pub fn event_logger<'a>() -> Option<&'a Arc<dyn EventLogger>> {
+    EVENT_LOGGER.get()
+}
+
+pub fn init_event_logger(event_logger: Arc<dyn EventLogger>) {
+    let _ = EVENT_LOGGER.set(event_logger);
+}
+
+#[macro_export]
+macro_rules! log_event {
+    ($name:expr, { $($labels:tt)* }, [ $($key:expr => $value:expr),* $(,)? ]) => {
+        if let Some(event_logger) = arroyo_rpc::event_logger() {
+            let labels = serde_json::json!({ $($labels)* });
+            let values = {
+                let mut map = ::std::collections::BTreeMap::new();
+                $(
+                    map.insert($key.to_string(), $value as f64);
+                )*
+                map
+            };
+            event_logger.log_event($name, labels, values, arroyo_rpc::EventLevel::Analytics);
+        }
+    };
+    ($name:expr, { $($labels:tt)* }) => {
+        log_event!($name, { $($labels)* }, []);
+    };
+}
+
+#[macro_export]
+macro_rules! log_trace_event {
+    ($name:expr, { $($labels:tt)* }, [ $($key:expr => $value:expr),* $(,)? ]) => {
+        if let Some(event_logger) = arroyo_rpc::event_logger() {
+            if event_logger.trace_enabled() {
+                let labels = serde_json::json!({ $($labels)* });
+                let values = {
+                    let mut map = ::std::collections::BTreeMap::new();
+                    $(
+                        map.insert($key.to_string(), $value as f64);
+                    )*
+                    map
+                };
+                event_logger.log_event($name, labels, values, arroyo_rpc::EventLevel::Trace);
+            }
+        }
+    };
+    ($name:expr, { $($labels:tt)* }) => {
+        log_trace_event!($name, { $($labels)* }, []);
+    };
 }
 
 #[derive(Debug)]

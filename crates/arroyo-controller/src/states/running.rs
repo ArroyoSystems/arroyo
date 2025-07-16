@@ -13,8 +13,7 @@ use crate::states::{fatal, stop_if_desired_running};
 use crate::JobMessage;
 use crate::{job_controller::ControllerProgress, states::StateError};
 use arroyo_rpc::config::config;
-use arroyo_server_common::log_event;
-use serde_json::json;
+use arroyo_rpc::log_event;
 
 use super::{JobContext, State, Transition};
 
@@ -111,12 +110,12 @@ impl State for Running {
                         },
                         Err(err) => {
                             error!(message = "error while running", error = format!("{:?}", err), job_id = *ctx.config.id);
-                            log_event("running_error", json!({
+                            log_event!("running_error", {
                                 "service": "controller",
                                 "job_id": ctx.config.id,
                                 "error": format!("{:?}", err),
                                 "is_preview": ctx.config.ttl.is_some(),
-                            }));
+                            });
 
                             // only allow one restart for preview pipelines
                             if ctx.config.ttl.is_some() {
@@ -137,14 +136,16 @@ impl State for Running {
                     }
                 }
                 _ = log_interval.tick() => {
-                    log_event(
+                    log_event!(
                         "job_running",
-                        json!({
+                        {
                             "service": "controller",
                             "job_id": ctx.config.id,
                             "scheduler": &config().controller.scheduler,
-                            "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
-                        }),
+                        },
+                        [
+                            "duration_ms" => ctx.last_transitioned_at.elapsed().as_millis() as f64,
+                        ]
                     );
                 }
                 _ = tokio::time::sleep(ttl_end.unwrap_or(Duration::MAX)) => {

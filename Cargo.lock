@@ -896,6 +896,7 @@ dependencies = [
  "arrow-array",
  "arrow-ord",
  "arrow-schema",
+ "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-storage",
  "arroyo-types",
@@ -910,6 +911,7 @@ dependencies = [
  "prometheus",
  "prost",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
