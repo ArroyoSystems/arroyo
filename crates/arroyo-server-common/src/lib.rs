@@ -54,8 +54,6 @@ pub const VERSION: &str = "0.15.0-dev";
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
 pub fn init_logging(name: &str) -> Option<WorkerGuard> {
-    init_event_logger(Arc::new(AnalyticsEventLogger::new()));
-
     init_logging_with_filter(
         name,
         EnvFilter::builder()
@@ -82,6 +80,8 @@ macro_rules! register_log {
 }
 
 pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
+    init_event_logger(Arc::new(AnalyticsEventLogger::new()));
+    
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {e:?}");
     }

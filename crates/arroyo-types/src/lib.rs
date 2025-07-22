@@ -411,15 +411,15 @@ pub fn raw_schema() -> Schema {
     )])
 }
 
-pub static MESSAGES_RECV: &str = "arroyo_worker_messages_recv";
-pub static MESSAGES_SENT: &str = "arroyo_worker_messages_sent";
-pub static BYTES_RECV: &str = "arroyo_worker_bytes_recv";
-pub static BYTES_SENT: &str = "arroyo_worker_bytes_sent";
-pub static BATCHES_RECV: &str = "arroyo_worker_batches_recv";
-pub static BATCHES_SENT: &str = "arroyo_worker_batches_sent";
-pub static TX_QUEUE_SIZE: &str = "arroyo_worker_tx_queue_size";
-pub static TX_QUEUE_REM: &str = "arroyo_worker_tx_queue_rem";
-pub static DESERIALIZATION_ERRORS: &str = "arroyo_worker_deserialization_errors";
+pub const MESSAGES_RECV: &str = "arroyo_worker_messages_recv";
+pub const MESSAGES_SENT: &str = "arroyo_worker_messages_sent";
+pub const BYTES_RECV: &str = "arroyo_worker_bytes_recv";
+pub const BYTES_SENT: &str = "arroyo_worker_bytes_sent";
+pub const BATCHES_RECV: &str = "arroyo_worker_batches_recv";
+pub const BATCHES_SENT: &str = "arroyo_worker_batches_sent";
+pub const TX_QUEUE_SIZE: &str = "arroyo_worker_tx_queue_size";
+pub const TX_QUEUE_REM: &str = "arroyo_worker_tx_queue_rem";
+pub const DESERIALIZATION_ERRORS: &str = "arroyo_worker_deserialization_errors";
 
 #[derive(Debug, Copy, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct CheckpointBarrier {

@@ -1208,9 +1208,9 @@ impl MultipartManager {
             let elapsed = start.elapsed();
 
             if upload_part.is_ok() {
-                log_fs_event(&*task_info, bytes, 0, elapsed, 0);
+                log_fs_event(&task_info, bytes, 0, elapsed, 0);
             } else {
-                log_fs_event(&*task_info, 0, 0, elapsed, 1);
+                log_fs_event(&task_info, 0, 0, elapsed, 1);
             }
 
             Ok(MultipartCallbackWithName {

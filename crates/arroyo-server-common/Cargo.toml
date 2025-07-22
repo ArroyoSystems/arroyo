@@ -18,7 +18,7 @@ tracing-log = "0.2"
 
 # middleware
 tower = { workspace = true }
-tower-http = {workspace = true, features = ["trace", "fs"]}
+tower-http = {workspace = true, features = ["trace", "fs", "validate-request", "auth"]}
 tonic = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 prometheus = {workspace = true, features = ["process"] }
