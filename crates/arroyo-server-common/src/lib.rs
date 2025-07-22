@@ -81,7 +81,7 @@ macro_rules! register_log {
 
 pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
     init_event_logger(Arc::new(AnalyticsEventLogger::new()));
-    
+
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {e:?}");
     }

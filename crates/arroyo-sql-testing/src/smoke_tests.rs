@@ -1,5 +1,8 @@
 use anyhow::Result;
-use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName, ProgramConfig};
+use arroyo_datastream::logical::{
+    LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
+    ProgramConfig,
+};
 use arroyo_planner::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
 use petgraph::algo::has_path_connecting;
@@ -407,7 +410,13 @@ async fn run_pipeline_and_assert_outputs(
     run_and_checkpoint(
         Arc::new(job_id.to_string()),
         Program::local_from_logical(job_id.to_string(), &graph, udfs, None, control_tx).await,
-        Arc::new(LogicalProgram::new(graph.clone(), ProgramConfig { udf_dylibs: Default::default(), python_udfs: Default::default() })),
+        Arc::new(LogicalProgram::new(
+            graph.clone(),
+            ProgramConfig {
+                udf_dylibs: Default::default(),
+                python_udfs: Default::default(),
+            },
+        )),
         tasks_per_operator(&graph),
         &mut control_rx,
         checkpoint_interval,
