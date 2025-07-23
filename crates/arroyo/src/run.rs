@@ -2,16 +2,17 @@ use crate::{db_source, RunArgs};
 use anyhow::{anyhow, bail};
 use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_openapi::Client;
-use arroyo_rpc::config::{config, DatabaseType, DefaultSink, Scheduler};
+use arroyo_rpc::config::{config, ApiAuthMode, DatabaseType, DefaultSink, Scheduler};
+use arroyo_rpc::log_event;
 use arroyo_rpc::{config, init_db_notifier, notify_db, retry};
-use arroyo_server_common::log_event;
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
 use arroyo_storage::StorageProvider;
 use arroyo_types::to_millis;
 use async_trait::async_trait;
 use rand::random;
+use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::{header, ClientBuilder};
 use rusqlite::{Connection, DatabaseName, OpenFlags};
-use serde_json::json;
 use std::env;
 use std::env::{set_var, temp_dir};
 use std::path::PathBuf;
@@ -374,6 +375,25 @@ fn schedule_db_backups(shutdown: &Shutdown, maybe_local_db: MaybeLocalDb) {
     });
 }
 
+pub(crate) fn add_client_auth_headers(mut client_builder: ClientBuilder) -> ClientBuilder {
+    match &config().api.auth_mode {
+        ApiAuthMode::None => {}
+        ApiAuthMode::Mtls { .. } => {
+            panic!("Pipeline clusters are not yet supported with mTLS API authentication");
+        }
+        ApiAuthMode::StaticApiKey { api_key } => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {}", api_key.as_str())).unwrap(),
+            );
+            client_builder = client_builder.default_headers(headers);
+        }
+    }
+
+    client_builder
+}
+
 pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging_with_filter(
         "pipeline",
@@ -435,7 +455,7 @@ pub async fn run(args: RunArgs) {
 
     // check if this is the correct database for this pipeline
 
-    log_event("pipeline_cluster_start", json!({}));
+    log_event!("pipeline_cluster_start", {});
 
     let controller_port = arroyo_controller::ControllerServer::new(db.clone())
         .await
@@ -449,12 +469,12 @@ pub async fn run(args: RunArgs) {
         .await
         .unwrap();
 
+    let client_builder =
+        add_client_auth_headers(ClientBuilder::new().timeout(Duration::from_secs(60)));
+
     let client = Arc::new(Client::new_with_client(
         &format!("http://localhost:{http_port}/api",),
-        reqwest::ClientBuilder::new()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .unwrap(),
+        client_builder.build().unwrap(),
     ));
 
     // start DB backup task

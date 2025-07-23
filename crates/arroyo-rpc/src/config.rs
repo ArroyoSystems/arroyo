@@ -665,6 +665,15 @@ pub struct HumanReadableDuration {
     original: String,
 }
 
+impl From<Duration> for HumanReadableDuration {
+    fn from(value: Duration) -> Self {
+        Self {
+            duration: value,
+            original: format!("{}ns", value.as_nanos()),
+        }
+    }
+}
+
 impl Deref for HumanReadableDuration {
     type Target = Duration;
 

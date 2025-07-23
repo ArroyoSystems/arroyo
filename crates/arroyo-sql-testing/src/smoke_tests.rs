@@ -1,6 +1,7 @@
 use anyhow::Result;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
+    ProgramConfig,
 };
 use arroyo_planner::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
@@ -111,7 +112,7 @@ struct SmokeTestContext<'a> {
     job_id: Arc<String>,
     engine: &'a RunningEngine,
     control_rx: &'a mut Receiver<ControlResp>,
-    tasks_per_operator: HashMap<String, usize>,
+    program: Arc<LogicalProgram>,
 }
 
 async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
@@ -121,7 +122,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
         checkpoint_id.to_string(),
         epoch,
         0,
-        ctx.tasks_per_operator.clone(),
+        ctx.program.clone(),
     );
 
     // trigger a checkpoint, pass the messages to the CheckpointState
@@ -298,6 +299,7 @@ fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, paralle
 async fn run_and_checkpoint(
     job_id: Arc<String>,
     program: Program,
+    logical_program: Arc<LogicalProgram>,
     tasks_per_operator: HashMap<String, usize>,
     control_rx: &mut Receiver<ControlResp>,
     checkpoint_interval: i32,
@@ -316,7 +318,7 @@ async fn run_and_checkpoint(
         job_id: job_id.clone(),
         engine: &running_engine,
         control_rx,
-        tasks_per_operator: tasks_per_operator.clone(),
+        program: logical_program,
     };
 
     // trigger a couple checkpoints
@@ -408,6 +410,13 @@ async fn run_pipeline_and_assert_outputs(
     run_and_checkpoint(
         Arc::new(job_id.to_string()),
         Program::local_from_logical(job_id.to_string(), &graph, udfs, None, control_tx).await,
+        Arc::new(LogicalProgram::new(
+            graph.clone(),
+            ProgramConfig {
+                udf_dylibs: Default::default(),
+                python_udfs: Default::default(),
+            },
+        )),
         tasks_per_operator(&graph),
         &mut control_rx,
         checkpoint_interval,

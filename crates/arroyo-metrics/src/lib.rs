@@ -11,6 +11,10 @@ use prometheus::{
     HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts,
 };
 
+pub const NODE_ID_LABEL: &str = "node_id";
+pub const SUBTASK_IDX_LABEL: &str = "subtask_idx";
+pub const OPERATOR_NAME_LABEL: &str = "operator_name";
+
 pub fn gauge_for_task(
     chain_info: &ChainInfo,
     name: &'static str,
@@ -42,7 +46,7 @@ pub fn histogram_for_task(
 
 lazy_static! {
     pub static ref TASK_METRIC_LABELS: Vec<&'static str> =
-        vec!["node_id", "subtask_idx", "operator_name"];
+        vec![NODE_ID_LABEL, SUBTASK_IDX_LABEL, OPERATOR_NAME_LABEL];
     pub static ref MESSAGE_RECV_COUNTER: IntCounterVec = register_int_counter_vec!(
         MESSAGES_RECV,
         "Count of messages received by this subtask",

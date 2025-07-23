@@ -5,7 +5,7 @@ pub mod shutdown;
 pub mod tls;
 
 use anyhow::anyhow;
-use arroyo_types::POSTHOG_KEY;
+use arroyo_types::TELEMETRY_KEY;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -17,7 +17,8 @@ use once_cell::sync::OnceCell;
 use profile::handle_get_profile;
 use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, TextEncoder};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{json, Number, Value};
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
 use std::future::Future;
@@ -41,6 +42,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use arroyo_rpc::config::{config, ApiAuthMode, LogFormat};
+use arroyo_rpc::{init_event_logger, EventLevel, EventLogger};
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_log::LogTracer;
 use uuid::Uuid;
@@ -78,6 +80,8 @@ macro_rules! register_log {
 }
 
 pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
+    init_event_logger(Arc::new(AnalyticsEventLogger::new()));
+
     if let Err(e) = LogTracer::init() {
         eprintln!("Failed to initialize log tracer {e:?}");
     }
@@ -173,39 +177,72 @@ pub fn get_cluster_id() -> String {
     CLUSTER_ID.get().map(|s| s.to_string()).unwrap()
 }
 
-pub fn log_event(name: &str, mut props: Value) {
-    static CLIENT: OnceCell<Client> = OnceCell::new();
-    let cluster_id = get_cluster_id();
-    if !config().disable_telemetry {
-        let name = name.to_string();
-        tokio::task::spawn(async move {
-            let client = CLIENT.get_or_init(Client::new);
+pub struct AnalyticsEventLogger {
+    client: Client,
+}
 
-            if let Some(props) = props.as_object_mut() {
-                props.insert("distinct_id".to_string(), Value::String(cluster_id));
-                props.insert("git_sha".to_string(), Value::String(GIT_SHA.to_string()));
-                props.insert("version".to_string(), Value::String(VERSION.to_string()));
-                props.insert(
-                    "build_timestamp".to_string(),
-                    Value::String(BUILD_TIMESTAMP.to_string()),
-                );
-            }
+impl Default for AnalyticsEventLogger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-            let obj = json!({
-                "api_key": POSTHOG_KEY,
-                "event": name,
-                "properties": props,
+impl AnalyticsEventLogger {
+    pub fn new() -> Self {
+        Self {
+            client: Client::new(),
+        }
+    }
+}
+
+impl EventLogger for AnalyticsEventLogger {
+    fn log_event(
+        &self,
+        name: &str,
+        mut labels: Value,
+        values: BTreeMap<String, f64>,
+        level: EventLevel,
+    ) {
+        if level != EventLevel::Analytics {
+            return;
+        }
+
+        let cluster_id = get_cluster_id();
+        if !config().disable_telemetry {
+            let name = name.to_string();
+            let client = self.client.clone();
+            tokio::task::spawn(async move {
+                if let Some(props) = labels.as_object_mut() {
+                    props.insert("distinct_id".to_string(), Value::String(cluster_id));
+                    props.insert("git_sha".to_string(), Value::String(GIT_SHA.to_string()));
+                    props.insert("version".to_string(), Value::String(VERSION.to_string()));
+                    props.insert(
+                        "build_timestamp".to_string(),
+                        Value::String(BUILD_TIMESTAMP.to_string()),
+                    );
+                    props.extend(
+                        values
+                            .into_iter()
+                            .filter_map(|(k, v)| Some((k, Value::Number(Number::from_f64(v)?)))),
+                    );
+                }
+
+                let obj = json!({
+                    "api_key": TELEMETRY_KEY,
+                    "event": name,
+                    "properties": labels,
+                });
+
+                if let Err(e) = client
+                    .post("https://events.arroyo.dev/capture")
+                    .json(&obj)
+                    .send()
+                    .await
+                {
+                    debug!("Failed to record event: {}", e);
+                }
             });
-
-            if let Err(e) = client
-                .post("https://events.arroyo.dev/capture")
-                .json(&obj)
-                .send()
-                .await
-            {
-                debug!("Failed to record event: {}", e);
-            }
-        });
+        }
     }
 }
 

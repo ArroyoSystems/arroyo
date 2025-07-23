@@ -402,7 +402,7 @@ impl RunningJobModel {
             checkpoint_id,
             self.epoch,
             self.min_epoch,
-            self.program.tasks_per_operator(),
+            self.program.clone(),
         );
 
         self.checkpoint_state = Some(CheckpointingOrCommittingState::Checkpointing(state));

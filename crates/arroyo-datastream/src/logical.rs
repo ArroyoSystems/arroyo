@@ -364,6 +364,27 @@ impl LogicalProgram {
         tasks_per_operator
     }
 
+    pub fn operator_names_by_id(&self) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        for node in self.graph.node_weights() {
+            for op in &node.operator_chain.operators {
+                m.insert(
+                    op.operator_id.clone(),
+                    match op.operator_name {
+                        OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
+                            let c: api::ConnectorOp =
+                                prost::Message::decode(&op.operator_config[..]).unwrap();
+                            c.connector
+                        }
+                        name => name.to_string(),
+                    },
+                );
+            }
+        }
+
+        m
+    }
+
     pub fn tasks_per_node(&self) -> HashMap<u32, usize> {
         let mut tasks_per_node = HashMap::new();
         for node in self.graph.node_weights() {

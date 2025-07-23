@@ -1,9 +1,3 @@
-use std::sync::Arc;
-use std::{
-    collections::{HashMap, HashSet},
-    time::SystemTime,
-};
-
 use crate::{
     committing_state::CommittingState,
     tables::{
@@ -13,6 +7,7 @@ use crate::{
     BackingStore, StateBackend,
 };
 use anyhow::{anyhow, bail, Result};
+use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::{
     self,
     api::{self, OperatorCheckpointDetail},
@@ -23,7 +18,14 @@ use arroyo_rpc::grpc::{
         TableSubtaskCheckpointMetadata, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
     },
 };
+use arroyo_rpc::log_trace_event;
 use arroyo_types::{from_micros, to_micros};
+use std::sync::Arc;
+use std::time::Duration;
+use std::{
+    collections::{HashMap, HashSet},
+    time::SystemTime,
+};
 use tracing::{debug, warn};
 
 #[derive(Debug, Clone)]
@@ -35,6 +37,7 @@ pub struct CheckpointState {
     start_time: SystemTime,
     operators: usize,
     operators_checkpointed: usize,
+    bytes: u64,
     operator_state: HashMap<String, OperatorState>,
     subtasks_to_commit: HashSet<(String, u32)>,
     // map of operator_id -> table_name -> subtask_index -> Data
@@ -43,12 +46,14 @@ pub struct CheckpointState {
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
     pub operator_details: HashMap<String, OperatorCheckpointDetail>,
+    operator_names: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct OperatorState {
     subtasks: usize,
     subtasks_checkpointed: usize,
+    bytes: usize,
     pub start_time: Option<SystemTime>,
     pub finish_time: Option<SystemTime>,
     table_state: HashMap<String, TableState>,
@@ -60,6 +65,7 @@ impl OperatorState {
         OperatorState {
             subtasks,
             subtasks_checkpointed: 0,
+            bytes: 0,
             start_time: None,
             finish_time: None,
             table_state: HashMap::new(),
@@ -86,6 +92,7 @@ impl OperatorState {
             }
             None => Some(from_micros(c.finish_time)),
         };
+        self.bytes += self.bytes;
         for (table, table_metadata) in c.table_metadata {
             self.table_state
                 .entry(table)
@@ -151,24 +158,45 @@ impl CheckpointState {
         checkpoint_id: String,
         epoch: u32,
         min_epoch: u32,
-        tasks_per_operator: HashMap<String, usize>,
+        program: Arc<LogicalProgram>,
     ) -> Self {
         Self {
             job_id,
             checkpoint_id,
             epoch,
             min_epoch,
+            bytes: 0,
             start_time: SystemTime::now(),
-            operators: tasks_per_operator.len(),
+            operators: program.tasks_per_operator().len(),
             operators_checkpointed: 0,
-            operator_state: tasks_per_operator
+            operator_state: program
+                .tasks_per_operator()
                 .into_iter()
                 .map(|(operator_id, subtasks)| (operator_id, OperatorState::new(subtasks)))
                 .collect(),
             subtasks_to_commit: HashSet::new(),
             commit_data: HashMap::new(),
             operator_details: HashMap::new(),
+            operator_names: program.operator_names_by_id(),
         }
+    }
+
+    fn log_checkpoint_event(
+        operator_names: &HashMap<String, String>,
+        operator_id: Option<&str>,
+        subtask_idx: Option<u64>,
+        size: u64,
+        total_time: Duration,
+    ) {
+        let name = operator_id.and_then(|id| operator_names.get(id));
+        log_trace_event!("checkpoint", {
+            "operator_id": operator_id,
+            "operator_name": name,
+            "subtask_idx": subtask_idx,
+        }, [
+            "size_bytes" => size as f64,
+            "total_time" => total_time.as_millis() as f64,
+        ]);
     }
 
     pub fn checkpoint_id(&self) -> &str {
@@ -234,6 +262,12 @@ impl CheckpointState {
     }
 
     pub async fn checkpoint_finished(&mut self, c: TaskCheckpointCompletedReq) -> Result<()> {
+        // TODO: UI management
+        let metadata = c
+            .metadata
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?;
+
         debug!(
             message = "Checkpoint finished", 
             checkpoint_id = self.checkpoint_id,
@@ -241,13 +275,22 @@ impl CheckpointState {
             epoch = self.epoch,
             min_epoch = self.min_epoch,
             operator_id = %c.operator_id,
-            subtask_index = c.metadata.as_ref().unwrap().subtask_index,
+            subtask_index = metadata.subtask_index,
             time = c.time);
-        // TODO: UI management
-        let metadata = c
-            .metadata
-            .as_ref()
-            .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?;
+
+        Self::log_checkpoint_event(
+            &self.operator_names,
+            Some(&c.operator_id),
+            Some(metadata.subtask_index as u64),
+            metadata.bytes,
+            Duration::from_micros(
+                metadata
+                    .finish_time
+                    .checked_sub(metadata.start_time)
+                    .unwrap_or_default(),
+            ),
+        );
+
         let operator_detail = self
             .operator_details
             .entry(c.operator_id.clone())
@@ -259,6 +302,8 @@ impl CheckpointState {
                 started_metadata_write: None,
                 tasks: HashMap::new(),
             });
+
+        self.bytes += metadata.bytes;
 
         let detail = operator_detail
             .tasks
@@ -288,6 +333,19 @@ impl CheckpointState {
                 .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?,
         ) {
             self.operators_checkpointed += 1;
+
+            Self::log_checkpoint_event(
+                &self.operator_names,
+                Some(&c.operator_id),
+                None,
+                operator_state.bytes as u64,
+                operator_state
+                    .finish_time
+                    .unwrap()
+                    .duration_since(operator_state.start_time.unwrap())
+                    .unwrap_or_default(),
+            );
+
             // watermarks are None if any subtasks are None.
             let (min_watermark, max_watermark) =
                 if operator_state.watermarks.iter().any(|w| w.is_none()) {
@@ -367,6 +425,17 @@ impl CheckpointState {
 
     pub async fn write_metadata(&mut self) -> Result<()> {
         let finish_time = SystemTime::now();
+
+        Self::log_checkpoint_event(
+            &self.operator_names,
+            None,
+            None,
+            self.bytes,
+            finish_time
+                .duration_since(self.start_time)
+                .unwrap_or_default(),
+        );
+
         StateBackend::write_checkpoint_metadata(CheckpointMetadata {
             job_id: self.job_id.to_string(),
             epoch: self.epoch,
