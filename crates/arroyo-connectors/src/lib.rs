@@ -33,6 +33,7 @@ pub mod sse;
 pub mod stdout;
 pub mod webhook;
 pub mod websocket;
+pub mod zmq;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
@@ -56,6 +57,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(stdout::StdoutConnector {}),
         Box::new(webhook::WebhookConnector {}),
         Box::new(websocket::WebsocketConnector {}),
+        Box::new(zmq::ZmqConnector {}),
     ];
 
     connectors.into_iter().map(|c| (c.name(), c)).collect()

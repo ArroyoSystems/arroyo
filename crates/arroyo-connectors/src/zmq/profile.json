@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "title": "ZmqConfig",
+  "properties": {
+    "connectionPattern": {
+      "type": "string",
+      "title": "Connection Pattern",
+      "enum": ["bind", "connect"],
+      "description": "Whether to bind to a socket or connect to an existing socket"
+    },
+    "url": {
+      "title": "Url",
+      "type": "string",
+      "format": "var-str",
+      "description": "The url of the ZMQ socket, e.g. `tcp://*:5555` for bind or `tcp://localhost:5555` for connect."
+    }
+  },
+  "sensitive": [],
+  "required": ["connectionPattern", "url"]
+}
