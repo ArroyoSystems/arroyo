@@ -4,7 +4,7 @@ use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{
     plan_err,
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor},
-    Column, DataFusionError, Result, TableReference,
+    Column, DataFusionError, Result, Spans, TableReference,
 };
 use std::{collections::HashSet, sync::Arc};
 
@@ -280,6 +280,7 @@ impl TreeNodeRewriter for ArroyoRewriter<'_> {
                     projection.expr.push(Expr::Column(Column {
                         relation: timestamp_field.qualifier().cloned(),
                         name: "_timestamp".to_string(),
+                        spans: Spans::default(),
                     }));
                 }
                 if projection
@@ -405,10 +406,6 @@ impl TreeNodeRewriter for ArroyoRewriter<'_> {
             }
             LogicalPlan::Extension(_) => {}
             LogicalPlan::Distinct(_) => {}
-            LogicalPlan::Execute(_) => {}
-            LogicalPlan::Prepare(_) => {
-                return plan_err!("Prepared statements are not supported ({})", node.display())
-            }
             LogicalPlan::Dml(_) => {}
             LogicalPlan::Ddl(_) => {}
             LogicalPlan::Copy(_) => {

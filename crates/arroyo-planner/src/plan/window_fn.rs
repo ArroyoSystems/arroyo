@@ -4,6 +4,7 @@ use arroyo_datastream::WindowType;
 use datafusion::common::tree_node::Transformed;
 use datafusion::common::{plan_err, tree_node::TreeNodeRewriter, Result as DFResult};
 use datafusion::logical_expr;
+use datafusion::logical_expr::expr::WindowFunctionParams;
 use datafusion::logical_expr::{
     expr::WindowFunction, Expr, Extension, LogicalPlan, Projection, Sort, Window,
 };
@@ -27,7 +28,7 @@ fn get_window_and_name(expr: &Expr) -> DFResult<(WindowFunction, String)> {
             Ok((window, alias.name.clone()))
         }
         Expr::WindowFunction(window_function) => {
-            Ok((window_function.clone(), expr.name_for_alias()?))
+            Ok((*window_function.clone(), expr.name_for_alias()?))
         }
         _ => plan_err!("Expect a column or alias expression, not {:?}", expr),
     }
@@ -66,19 +67,10 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
             return plan_err!("Window functions require exactly one window expression");
         }
         // the window_expr can be renamed by optimizers, in which case there will be an alias
-        let (
-            WindowFunction {
-                fun,
-                args,
-                partition_by,
-                order_by,
-                window_frame,
-                null_treatment,
-            },
-            original_name,
-        ) = get_window_and_name(&window_expr[0])?;
+        let (WindowFunction { fun, params }, original_name) = get_window_and_name(&window_expr[0])?;
 
-        let mut window_field: Vec<_> = partition_by
+        let mut window_field: Vec<_> = params
+            .partition_by
             .iter()
             .enumerate()
             .filter_map(|(index, expr)| {
@@ -107,20 +99,21 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         }
 
         let (_window_field, index) = window_field.pop().unwrap();
-        let mut additional_keys = partition_by.clone();
+        let mut additional_keys = params.partition_by.clone();
         // because the operator will have grouped by the timestamp of each row,
         // don't need to shuffle or partition by the window.
         additional_keys.remove(index);
         let key_count = additional_keys.len();
 
-        let new_window_func = WindowFunction {
-            fun,
-            args,
+        let params = WindowFunctionParams {
+            args: params.args,
             partition_by: additional_keys.clone(),
-            order_by,
-            window_frame,
-            null_treatment,
+            order_by: params.order_by,
+            window_frame: params.window_frame,
+            null_treatment: params.null_treatment,
         };
+
+        let new_window_func = WindowFunction { fun, params };
 
         let mut key_projection_expressions: Vec<_> = additional_keys
             .iter()
@@ -165,7 +158,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
                 nulls_first: false,
             })
             .collect();
-        sort_expressions.extend(new_window_func.order_by.clone());
+        sort_expressions.extend(new_window_func.params.order_by.clone());
 
         // This sort seems to be necessary to not fail at execution time.
         let shuffle = LogicalPlan::Sort(Sort {
@@ -174,7 +167,8 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
             fetch: None,
         });
 
-        let window_expr = Expr::WindowFunction(new_window_func).alias_if_changed(original_name)?;
+        let window_expr =
+            Expr::WindowFunction(Box::new(new_window_func)).alias_if_changed(original_name)?;
 
         let rewritten_window_plan =
             LogicalPlan::Window(Window::try_new(vec![window_expr], Arc::new(shuffle))?);

@@ -2,8 +2,8 @@ use crate::{AsyncUdfDylib, AsyncUdfDylibInterface, SyncUdfDylib};
 use arrow::array::{
     Array, ArrayRef, BinaryArray, BinaryBuilder, Int32Array, StringArray, UInt64Array,
 };
-use arrow::datatypes::DataType;
-use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl};
+use arrow::datatypes::{DataType, Field};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl};
 use std::sync::Arc;
 
 mod test_udf_1 {
@@ -46,20 +46,23 @@ mod test_udf_optional_binary_return {
 fn test_udf() {
     let udf = test_udf_1::__local().config;
     let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
-    let result = sync_udf
-        .invoke_batch(
-            &[
-                ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
-                ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
-                ColumnarValue::Array(Arc::new(BinaryArray::from(vec![
-                    b"x".as_ref(),
-                    b"y".as_ref(),
-                    b"z".as_ref(),
-                ]))),
-            ],
-            3,
-        )
-        .unwrap();
+
+    let args = ScalarFunctionArgs {
+        args: vec![
+            ColumnarValue::Array(Arc::new(Int32Array::from(vec![1, 10, 20]))),
+            ColumnarValue::Array(Arc::new(StringArray::from(vec!["a", "b", "c"]))),
+            ColumnarValue::Array(Arc::new(BinaryArray::from(vec![
+                b"x".as_ref(),
+                b"y".as_ref(),
+                b"z".as_ref(),
+            ]))),
+        ],
+        arg_fields: vec![],
+        number_rows: 3,
+        return_field: Field::new("return", (*sync_udf.return_type).clone(), false).into(),
+    };
+
+    let result = sync_udf.invoke_with_args(args).unwrap();
 
     let ColumnarValue::Array(a) = result else {
         panic!("not an array");
@@ -81,9 +84,14 @@ fn test_optional_arg() {
     data.append_option(None::<Vec<u8>>);
     data.append_option(Some(vec![4, 5]));
 
-    let result = sync_udf
-        .invoke_batch(&[ColumnarValue::Array(Arc::new(data.finish()))], 1)
-        .unwrap();
+    let args = ScalarFunctionArgs {
+        args: vec![ColumnarValue::Array(Arc::new(data.finish()))],
+        arg_fields: vec![],
+        number_rows: 1,
+        return_field: Field::new("return", (*sync_udf.return_type).clone(), false).into(),
+    };
+
+    let result = sync_udf.invoke_with_args(args).unwrap();
 
     let ColumnarValue::Array(a) = result else {
         panic!("not an array");

@@ -12,7 +12,7 @@ use datafusion::common::tree_node::{
 };
 use datafusion::common::{
     not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue,
-    TableReference,
+    Spans, TableReference,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::Alias;
@@ -138,6 +138,7 @@ impl JoinRewriter<'_> {
                 Expr::Column(Column {
                     relation: field.qualifier().cloned(),
                     name: field.name().to_string(),
+                    spans: Spans::default(),
                 })
             })
             .collect::<Vec<_>>();
@@ -153,11 +154,13 @@ impl JoinRewriter<'_> {
         let left_column = Expr::Column(Column {
             relation: left_field.qualifier().cloned(),
             name: left_field.name().to_string(),
+            spans: Spans::default(),
         });
         let right_field = &timestamp_fields[1];
         let right_column = Expr::Column(Column {
             relation: right_field.qualifier().cloned(),
             name: right_field.name().to_string(),
+            spans: Spans::default(),
         });
         let max_timestamp = Expr::Case(Case {
             expr: Some(Box::new(Expr::BinaryExpr(BinaryExpr {
@@ -167,11 +170,11 @@ impl JoinRewriter<'_> {
             }))),
             when_then_expr: vec![
                 (
-                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(true)))),
+                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(true)), None)),
                     Box::new(left_column.clone()),
                 ),
                 (
-                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(false)))),
+                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(false)), None)),
                     Box::new(right_column.clone()),
                 ),
             ],
@@ -185,6 +188,7 @@ impl JoinRewriter<'_> {
             expr: Box::new(max_timestamp),
             relation: timestamp_fields[0].qualifier().cloned(),
             name: timestamp_fields[0].name().to_string(),
+            metadata: None,
         }));
         Ok(LogicalPlan::Projection(Projection::try_new_with_schema(
             projection_expr,

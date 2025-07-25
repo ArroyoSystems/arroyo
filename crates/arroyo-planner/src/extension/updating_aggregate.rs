@@ -120,7 +120,7 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             .map(|&i| col(input_schema.schema.field(i).name()))
             .collect();
         let hash_expr = if key_exprs.is_empty() {
-            Expr::Literal(ScalarValue::FixedSizeBinary(16, Some(vec![0; 16])))
+            Expr::Literal(ScalarValue::FixedSizeBinary(16, Some(vec![0; 16])), None)
         } else {
             Expr::ScalarFunction(ScalarFunction {
                 func: multi_hash(),
