@@ -1,16 +1,18 @@
 use arrow::array::{RecordBatch, TimestampNanosecondArray};
 use arrow::json::writer::JsonArray;
 use arrow::json::{Writer, WriterBuilder};
-use std::collections::HashMap;
-
+use arroyo_formats::json::encoders::ArroyoEncoderFactory;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
+use arroyo_rpc::formats::TimestampFormat;
 use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::rpc::{SinkDataReq, TableConfig};
 use arroyo_state::global_table_config;
 use arroyo_types::{from_nanos, to_micros, CheckpointBarrier, SignalMessage};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tonic::transport::Channel;
 
 #[derive(Default)]
@@ -66,7 +68,9 @@ impl ArrowOperator for PreviewSink {
 
         let mut writer: Writer<_, JsonArray> = WriterBuilder::new()
             .with_explicit_nulls(true)
-            .with_timestamp_format(arrow::json::writer::TimestampFormat::RFC3339)
+            .with_encoder_factory(Arc::new(ArroyoEncoderFactory {
+                timestamp_format: TimestampFormat::RFC3339,
+            }))
             .build(&mut buf);
 
         writer.write(&batch).unwrap();

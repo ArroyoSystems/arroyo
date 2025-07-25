@@ -12,7 +12,7 @@ use arrow::datatypes::DataType;
 use arroyo_udf_common::parse::NullableType;
 use datafusion::common::Result as DFResult;
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, Signature};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature};
 use std::any::Any;
 use std::fmt::Debug;
 use std::sync::mpsc::{Receiver, SyncSender};
@@ -54,8 +54,9 @@ impl ScalarUDFImpl for PythonUDF {
         Ok(self.return_type.data_type.clone())
     }
 
-    fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
         let size = args
+            .args
             .iter()
             .map(|e| match e {
                 ColumnarValue::Array(a) => a.len(),
@@ -65,6 +66,7 @@ impl ScalarUDFImpl for PythonUDF {
             .unwrap_or(0);
 
         let args = args
+            .args
             .iter()
             .map(|e| match e {
                 ColumnarValue::Array(a) => a.clone(),

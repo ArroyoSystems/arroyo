@@ -3,6 +3,7 @@ use anyhow::Result;
 use arrow::datatypes::Schema;
 use arroyo_storage::{BackendConfig, R2Config, S3Config, StorageProvider};
 use arroyo_types::to_millis;
+use delta_kernel::engine::arrow_conversion::TryFromArrow;
 use deltalake::aws::storage::S3StorageBackend;
 use deltalake::TableProperty::{MinReaderVersion, MinWriterVersion};
 use deltalake::{
@@ -10,8 +11,10 @@ use deltalake::{
     operations::create::CreateBuilder,
     protocol::SaveMode,
     table::PeekCommit,
-    DeltaTable, DeltaTableBuilder,
+    DeltaTable, DeltaTableBuilder, StructType,
 };
+
+use deltalake::kernel::transaction::CommitBuilder;
 use itertools::Itertools;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -84,7 +87,8 @@ pub(crate) async fn load_or_create_table(
         delta.load().await?;
         Ok(delta)
     } else {
-        let delta_schema: deltalake::kernel::Schema = schema.try_into()?;
+        let delta_schema = StructType::try_from_arrow(schema)?;
+
         Ok(CreateBuilder::new()
             .with_log_store(delta.log_store())
             .with_columns(delta_schema.fields().cloned())
@@ -114,7 +118,7 @@ async fn check_existing_files(
     last_version: i64,
     finished_files: &[FinishedFile],
 ) -> Result<Option<i64>> {
-    if last_version >= table.version() {
+    if last_version >= table.version().unwrap_or_default() {
         return Ok(None);
     }
 
@@ -124,7 +128,10 @@ async fn check_existing_files(
         .collect();
 
     let mut version_to_check = last_version;
-    while let PeekCommit::New(version, actions) = table.peek_next_commit(version_to_check).await? {
+
+    while let PeekCommit::New(version, actions) =
+        table.log_store().peek_next_commit(version_to_check).await?
+    {
         for action in actions {
             if let Action::Add(add) = action {
                 if files.contains(&add.path) {
@@ -138,7 +145,7 @@ async fn check_existing_files(
 }
 
 async fn commit_to_delta(table: &mut DeltaTable, add_actions: Vec<Action>) -> Result<i64> {
-    Ok(deltalake::operations::transaction::CommitBuilder::default()
+    Ok(CommitBuilder::default()
         .with_actions(add_actions)
         .build(
             Some(table.snapshot()?),

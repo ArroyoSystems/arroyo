@@ -43,7 +43,7 @@ webpki-roots = { workspace = true }
 
 # profile
 flate2 = "1.0.30"
-pprof = { version = "0.14.0", features = ["flamegraph", "protobuf-codec"] }
+pprof = { version = "0.15.0", features = ["flamegraph", "protobuf-codec"] }
 serde = { version = "1.0.96", features = ["derive"] }
 
 [build-dependencies]

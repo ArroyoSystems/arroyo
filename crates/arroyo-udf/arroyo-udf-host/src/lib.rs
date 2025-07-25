@@ -10,7 +10,7 @@ use arroyo_udf_common::{FfiArraySchema, FfiArrays, RunResult};
 use async_ffi::FfiFuture;
 use datafusion::common::ScalarValue;
 use datafusion::error::Result as DFResult;
-use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, Signature};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature};
 use dlopen2::wrapper::{Container, WrapperApi};
 use quote::{format_ident, ToTokens};
 use std::any::Any;
@@ -377,8 +377,9 @@ impl ScalarUDFImpl for SyncUdfDylib {
         Ok((*self.return_type).clone())
     }
 
-    fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
         let num_rows = args
+            .args
             .iter()
             .map(|arg| {
                 if let ColumnarValue::Array(array) = arg {
@@ -390,9 +391,13 @@ impl ScalarUDFImpl for SyncUdfDylib {
             .max()
             .unwrap();
 
-        let all_scalars = args.iter().all(|c| matches!(c, ColumnarValue::Scalar(_)));
+        let all_scalars = args
+            .args
+            .iter()
+            .all(|c| matches!(c, ColumnarValue::Scalar(_)));
 
         let args = args
+            .args
             .iter()
             .map(|arg| arg.clone().into_array(num_rows).unwrap().to_data())
             .collect::<Vec<_>>();

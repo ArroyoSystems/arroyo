@@ -1,16 +1,50 @@
 use crate::avro::schema;
+use crate::json::encoders::ArroyoEncoderFactory;
 use crate::{avro, json};
 use arrow_array::cast::AsArray;
 use arrow_array::types::GenericBinaryType;
-use arrow_array::RecordBatch;
-use arrow_json::writer::record_batch_to_vec;
-use arrow_schema::{DataType, Field};
+use arrow_array::{Array, RecordBatch, StructArray};
+use arrow_json::writer::make_encoder;
+use arrow_json::EncoderOptions;
+use arrow_schema::{ArrowError, DataType, Field};
 use arroyo_rpc::formats::{
     AvroFormat, Format, JsonFormat, RawBytesFormat, RawStringFormat, TimestampFormat,
 };
 use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
 use std::sync::Arc;
+
+/// Writes a record batch as a Vec of encoded JSON rows
+pub fn record_batch_to_vec(
+    batch: &RecordBatch,
+    explicit_nulls: bool,
+    timestamp_format: TimestampFormat,
+) -> Result<Vec<Vec<u8>>, ArrowError> {
+    let array = StructArray::from(batch.clone());
+
+    let options = EncoderOptions::default()
+        .with_explicit_nulls(explicit_nulls)
+        .with_encoder_factory(Arc::new(ArroyoEncoderFactory { timestamp_format }));
+
+    let field = Arc::new(Field::new_struct(
+        "",
+        batch.schema().fields().clone(),
+        false,
+    ));
+
+    let mut encoder = make_encoder(&field, &array, &options)?;
+
+    let mut results = Vec::with_capacity(batch.num_rows());
+    for idx in 0..array.len() {
+        let mut buffer = Vec::with_capacity(8);
+        encoder.encode(idx, &mut buffer);
+        if !buffer.is_empty() {
+            results.push(buffer);
+        }
+    }
+
+    Ok(results)
+}
 
 pub struct ArrowSerializer {
     kafka_schema: Option<Value>,
@@ -104,15 +138,7 @@ impl ArrowSerializer {
             v
         });
 
-        let rows = record_batch_to_vec(
-            batch,
-            true,
-            match json.timestamp_format {
-                TimestampFormat::RFC3339 => arrow_json::writer::TimestampFormat::RFC3339,
-                TimestampFormat::UnixMillis => arrow_json::writer::TimestampFormat::UnixMillis,
-            },
-        )
-        .unwrap();
+        let rows = record_batch_to_vec(batch, true, json.timestamp_format).unwrap();
 
         let include_schema = json.include_schema.then(|| self.kafka_schema.clone());
 

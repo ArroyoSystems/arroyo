@@ -4,7 +4,7 @@ mod source;
 
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
-use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value};
+use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use typify::import_types;
@@ -364,7 +364,7 @@ pub fn file_system_sink_from_options(
 
             fields.into_iter().map(|f| {
                 let f = match f {
-                    SqlExpr::Value(Value::SingleQuotedString(s)) => s,
+                    SqlExpr::Value(ValueWithSpan{ value: Value::SingleQuotedString(s), span: _}) => s,
                     SqlExpr::Identifier(ident) => ident.value,
                     expr => {
                         bail!("invalid expression in `partition_fields`: {}; expected a column identifier", expr);
