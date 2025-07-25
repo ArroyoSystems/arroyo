@@ -51,7 +51,7 @@ SELECT
     round(regr_sxy(driver_id, extract(epoch FROM timestamp)), 4) AS regr_sxy,
     round(approx_distinct(driver_id), 4) AS approx_distinct_driver,
     round(approx_median(driver_id), 4) AS approx_median_driver,
-    round(approx_percentile_cont(driver_id, 0.5), 4) AS approx_percentile_cont_driver,
-    round(approx_percentile_cont_with_weight(driver_id, character_length(location), 0.5), 4) AS approx_percentile_cont_weighted_driver
+    round(approx_percentile_cont(0.5) WITHIN GROUP (ORDER BY driver_id), 4) AS approx_percentile_cont_driver,
+    round(approx_percentile_cont_with_weight(character_length(location), 0.5) WITHIN GROUP (ORDER BY driver_id), 4) AS approx_percentile_cont_weighted_driver
 FROM cars
 GROUP BY event_type;
