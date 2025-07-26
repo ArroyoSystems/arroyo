@@ -53,7 +53,7 @@ datafusion-common = { version = "48.0.0" }
 datafusion-proto = { version = "48.0.0" }
 datafusion-functions = { version = "48.0.0", features = ["crypto_expressions"] }
 datafusion-functions-window = {version = "48.0.0"}
-# datafusion-functions-json = { version = "0.48.0" }
+datafusion-functions-json = { version = "0.48.0" }
 deltalake = { version = "0.27.0" }
 delta_kernel = { version = "0.13.0" }
 cornucopia = { version = "0.9.0" }
@@ -100,3 +100,4 @@ sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0
 
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
 cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
+jiter = {git = "https://github.com/ArroyoSystems/jiter", branch = "disable_python" }

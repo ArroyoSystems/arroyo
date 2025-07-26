@@ -126,8 +126,7 @@ pub struct ArroyoSchemaProvider {
 }
 
 pub fn register_functions(registry: &mut dyn FunctionRegistry) {
-    // TODO: re-enable datafusion_functions_json
-    //datafusion_functions_json::register_all(registry).unwrap();
+    datafusion_functions_json::register_all(registry).unwrap();
 
     functions::register_all(registry);
 

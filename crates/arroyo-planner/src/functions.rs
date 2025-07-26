@@ -16,6 +16,7 @@ use datafusion::logical_expr::{
 use datafusion::prelude::{col, Expr};
 use serde_json_path::JsonPath;
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::sync::{Arc, OnceLock};
 
@@ -339,6 +340,8 @@ fn union_fields() -> UnionFields {
     static FIELDS: OnceLock<UnionFields> = OnceLock::new();
     FIELDS
         .get_or_init(|| {
+            let json_metadata: HashMap<String, String> =
+                HashMap::from_iter(vec![("is_json".to_string(), "true".to_string())]);
             UnionFields::from_iter([
                 (
                     TYPE_ID_NULL,
@@ -362,11 +365,17 @@ fn union_fields() -> UnionFields {
                 ),
                 (
                     TYPE_ID_ARRAY,
-                    Arc::new(Field::new("array", DataType::Utf8, false)),
+                    Arc::new(
+                        Field::new("array", DataType::Utf8, false)
+                            .with_metadata(json_metadata.clone()),
+                    ),
                 ),
                 (
                     TYPE_ID_OBJECT,
-                    Arc::new(Field::new("object", DataType::Utf8, false)),
+                    Arc::new(
+                        Field::new("object", DataType::Utf8, false)
+                            .with_metadata(json_metadata.clone()),
+                    ),
                 ),
             ])
         })

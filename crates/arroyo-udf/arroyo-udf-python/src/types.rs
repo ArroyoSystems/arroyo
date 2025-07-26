@@ -85,7 +85,9 @@ fn python_type_to_arrow(
 #[cfg(test)]
 mod test {
     use crate::PythonUDF;
-    use datafusion::logical_expr::{ColumnarValue, ScalarUDFImpl, TypeSignature};
+    use datafusion::logical_expr::{
+        ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, TypeSignature,
+    };
     use std::sync::Arc;
 
     #[tokio::test]
@@ -146,14 +148,24 @@ def my_add(x: int, y: float) -> float:
         );
         assert!(!udf.return_type.nullable);
 
-        let data = vec![
-            ColumnarValue::Array(Arc::new(arrow::array::Int64Array::from(vec![1, 2, 3]))),
-            ColumnarValue::Array(Arc::new(arrow::array::Float64Array::from(vec![
-                1.0, 2.0, 3.0,
-            ]))),
-        ];
+        let args = ScalarFunctionArgs {
+            args: vec![
+                ColumnarValue::Array(Arc::new(arrow::array::Int64Array::from(vec![1, 2, 3]))),
+                ColumnarValue::Array(Arc::new(arrow::array::Float64Array::from(vec![
+                    1.0, 2.0, 3.0,
+                ]))),
+            ],
+            arg_fields: vec![],
+            number_rows: 3,
+            return_field: arrow::datatypes::Field::new(
+                "return",
+                arrow::datatypes::DataType::Float64,
+                false,
+            )
+            .into(),
+        };
 
-        let result = udf.invoke_batch(&data, data.len()).unwrap();
+        let result = udf.invoke_with_args(args).unwrap();
         if let ColumnarValue::Array(a) = result {
             let a = a
                 .as_any()
