@@ -134,7 +134,7 @@ mod tests {
     use crate::ser::record_batch_to_vec;
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
-    use arroyo_rpc::formats::{AvroFormat, BadData, Format, TimestampFormat};
+    use arroyo_rpc::formats::{AvroFormat, BadData, DecimalEncoding, Format, TimestampFormat};
     use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
     use serde_json::json;
     use std::sync::Arc;
@@ -276,18 +276,23 @@ mod tests {
 
         let batch = deserializer.flush_buffer().unwrap().unwrap();
 
-        record_batch_to_vec(&batch, true, TimestampFormat::RFC3339)
-            .unwrap()
-            .iter()
-            .map(|b| {
-                serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(b.as_slice())
-                    .unwrap()
-            })
-            .map(|mut f| {
-                f.remove("_timestamp");
-                f
-            })
-            .collect()
+        record_batch_to_vec(
+            &batch,
+            true,
+            TimestampFormat::RFC3339,
+            DecimalEncoding::Bytes,
+        )
+        .unwrap()
+        .iter()
+        .map(|b| {
+            serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(b.as_slice())
+                .unwrap()
+        })
+        .map(|mut f| {
+            f.remove("_timestamp");
+            f
+        })
+        .collect()
     }
 
     #[tokio::test]

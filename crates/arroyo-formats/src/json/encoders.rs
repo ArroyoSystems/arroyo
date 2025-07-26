@@ -1,21 +1,25 @@
 use arrow_array::cast::AsArray;
 use arrow_array::{
-    Array, Date32Array, Date64Array, GenericStringArray, OffsetSizeTrait,
+    Array, Date32Array, Date64Array, Decimal128Array, GenericStringArray, OffsetSizeTrait,
     TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
     TimestampSecondArray,
 };
 use arrow_json::writer::NullableEncoder;
 use arrow_json::{Encoder, EncoderFactory, EncoderOptions};
 use arrow_schema::{ArrowError, DataType, FieldRef, TimeUnit};
-use arroyo_rpc::formats::TimestampFormat;
+use arroyo_rpc::formats::{DecimalEncoding, TimestampFormat};
 use arroyo_types::ArroyoExtensionType;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 
-/// Custom JSON encoder factory that adds two Arroyo-specific features:
+/// Custom JSON encoder factory that adds some Arroyo-specific features:
 ///   * Customizable time format handling, controlled by the supplied `TimestampFormat`
 ///   * Support for serializing RawJson
+///   * Customizable decimal encoding, to handle writing to Avro and Kafka Connect
 #[derive(Debug)]
 pub struct ArroyoEncoderFactory {
     pub timestamp_format: TimestampFormat,
+    pub decimal_encoding: DecimalEncoding,
 }
 
 impl EncoderFactory for ArroyoEncoderFactory {
@@ -96,6 +100,25 @@ impl EncoderFactory for ArroyoEncoderFactory {
         };
 
         Ok(Some(NullableEncoder::new(encoder, array.nulls().cloned())))
+    }
+}
+
+enum DecimalEncoder {
+    StringEncoder(Decimal128Array),
+    BytesEncoder(Decimal128Array),
+}
+
+impl Encoder for DecimalEncoder {
+    fn encode(&mut self, idx: usize, out: &mut Vec<u8>) {
+        match self {
+            DecimalEncoder::StringEncoder(array) => {
+                out.extend_from_slice(array.value_as_string(idx).as_bytes());
+            }
+            DecimalEncoder::BytesEncoder(array) => {
+                let v = array.value(idx);
+                out.extend_from_slice(&BASE64_STANDARD.encode(&v.to_be_bytes()).as_bytes());
+            }
+        }
     }
 }
 

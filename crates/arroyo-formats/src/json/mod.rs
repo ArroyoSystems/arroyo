@@ -27,7 +27,8 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         }
         arrow::datatypes::DataType::Float16
         | arrow::datatypes::DataType::Float32
-        | arrow::datatypes::DataType::Float64 => {
+        | arrow::datatypes::DataType::Float64
+        | arrow::datatypes::DataType::Decimal128(_, _) => {
             json! {{ "type": "number" }}
         }
         arrow::datatypes::DataType::Timestamp(_, _) => {
@@ -57,7 +58,6 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         arrow::datatypes::DataType::Struct(s) => arrow_to_json_schema(s),
         arrow::datatypes::DataType::Union(_, _) => todo!(),
         arrow::datatypes::DataType::Dictionary(_, _) => todo!(),
-        arrow::datatypes::DataType::Decimal128(_, _) => todo!(),
         arrow::datatypes::DataType::Decimal256(_, _) => todo!(),
         arrow::datatypes::DataType::Map(_, _) => todo!(),
         arrow::datatypes::DataType::RunEndEncoded(_, _) => todo!(),
@@ -139,7 +139,15 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
         }
         Union(_, _) => todo!(),
         Dictionary(_, _) => todo!(),
-        Decimal128(_, _) => todo!(),
+        Decimal128(_, scale) => {
+            return json! {{
+                "type": "bytes",
+                "field": field.name().clone(),
+                "optional": field.is_nullable(),
+                "name": "org.apache.kafka.connect.data.Decimal",
+                "scale": scale
+            }}
+        }
         Decimal256(_, _) => todo!(),
         Map(_, _) => todo!(),
         RunEndEncoded(_, _) => todo!(),

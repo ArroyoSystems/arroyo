@@ -8,7 +8,8 @@ use arrow_json::writer::make_encoder;
 use arrow_json::EncoderOptions;
 use arrow_schema::{ArrowError, DataType, Field};
 use arroyo_rpc::formats::{
-    AvroFormat, Format, JsonFormat, RawBytesFormat, RawStringFormat, TimestampFormat,
+    AvroFormat, DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat,
+    TimestampFormat,
 };
 use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
@@ -19,12 +20,16 @@ pub fn record_batch_to_vec(
     batch: &RecordBatch,
     explicit_nulls: bool,
     timestamp_format: TimestampFormat,
+    decimal_encoding: DecimalEncoding,
 ) -> Result<Vec<Vec<u8>>, ArrowError> {
     let array = StructArray::from(batch.clone());
 
     let options = EncoderOptions::default()
         .with_explicit_nulls(explicit_nulls)
-        .with_encoder_factory(Arc::new(ArroyoEncoderFactory { timestamp_format }));
+        .with_encoder_factory(Arc::new(ArroyoEncoderFactory {
+            timestamp_format,
+            decimal_encoding,
+        }));
 
     let field = Arc::new(Field::new_struct(
         "",
@@ -138,7 +143,7 @@ impl ArrowSerializer {
             v
         });
 
-        let rows = record_batch_to_vec(batch, true, json.timestamp_format).unwrap();
+        let rows = record_batch_to_vec(batch, true, json.timestamp_format, json.decimal_encoding).unwrap();
 
         let include_schema = json.include_schema.then(|| self.kafka_schema.clone());
 
@@ -267,7 +272,7 @@ mod tests {
     use crate::ser::ArrowSerializer;
     use arrow_array::builder::TimestampNanosecondBuilder;
     use arrow_schema::{Schema, TimeUnit};
-    use arroyo_rpc::formats::{Format, RawBytesFormat, RawStringFormat, TimestampFormat};
+    use arroyo_rpc::formats::{DecimalEncoding, Format, RawBytesFormat, RawStringFormat, TimestampFormat};
     use arroyo_types::to_nanos;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
@@ -359,6 +364,7 @@ mod tests {
             debezium: false,
             unstructured: false,
             timestamp_format: Default::default(),
+            decimal_encoding: Default::default(),
         }));
 
         let text: Vec<_> = ["a", "b", "blah", "whatever"]
@@ -411,6 +417,7 @@ mod tests {
             debezium: false,
             unstructured: false,
             timestamp_format: TimestampFormat::UnixMillis,
+            decimal_encoding: Default::default(),
         }));
 
         let mut timestamp_array = TimestampNanosecondBuilder::new();
