@@ -123,7 +123,7 @@ pub struct MultiHashFunction {
 }
 
 impl MultiHashFunction {
-    pub fn invoke(&self, args: &Vec<ColumnarValue>) -> Result<ColumnarValue> {
+    pub fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
         let mut hasher = xxhash_rust::xxh3::Xxh3::new();
 
         let all_scalar = args.iter().all(|a| matches!(a, ColumnarValue::Scalar(_)));

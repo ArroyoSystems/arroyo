@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use arrow::array::builder::{TimestampNanosecondBuilder};
+use arrow::array::builder::TimestampNanosecondBuilder;
 use arrow::array::{Int64Builder, RecordBatch};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::ControlMessage;
