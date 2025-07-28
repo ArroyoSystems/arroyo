@@ -141,7 +141,7 @@ impl Encoder for DecimalEncoder {
             DecimalEncoder::BytesEncoder(array) => {
                 let v = array.value(idx);
                 out.push(b'"');
-                out.extend_from_slice(&BASE64_STANDARD.encode(&v.to_be_bytes()).as_bytes());
+                out.extend_from_slice(BASE64_STANDARD.encode(v.to_be_bytes()).as_bytes());
                 out.push(b'"');
             }
         }

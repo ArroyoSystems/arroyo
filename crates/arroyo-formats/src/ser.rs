@@ -485,8 +485,7 @@ mod tests {
 
         let event_times: Vec<_> = vs
             .iter()
-            .enumerate()
-            .map(|(_, _)| to_nanos(SystemTime::now()) as i64)
+            .map(|_| to_nanos(SystemTime::now()) as i64)
             .collect();
 
         let schema = Arc::new(Schema::new(vec![

@@ -131,7 +131,7 @@ fn serialize_column<T: SerializeTarget>(
             write_arrow_value!(
                 ArrayRef::as_primitive::<Decimal128Type>,
                 Value::Decimal,
-                |v: i128| { v.to_be_bytes().try_into().unwrap() }
+                |v: i128| { v.to_be_bytes().into() }
             );
         }
 
@@ -448,7 +448,7 @@ mod tests {
                     ("favorite_color".to_string(), Union(0, Box::new(Null))),
                     (
                         "favorite_decimal".to_string(),
-                        Decimal(apache_avro::Decimal::try_from(100i128.to_be_bytes()).unwrap())
+                        Decimal(apache_avro::Decimal::from(100i128.to_be_bytes()))
                     ),
                     (
                         "address".to_string(),
@@ -489,7 +489,7 @@ mod tests {
                     ),
                     (
                         "favorite_decimal".to_string(),
-                        Decimal(apache_avro::Decimal::try_from(110i128.to_be_bytes()).unwrap())
+                        Decimal(apache_avro::Decimal::from(110i128.to_be_bytes()))
                     ),
                     (
                         "address".to_string(),
@@ -520,7 +520,7 @@ mod tests {
                     ("favorite_color".to_string(), Union(0, Box::new(Null))),
                     (
                         "favorite_decimal".to_string(),
-                        Decimal(apache_avro::Decimal::try_from((-3099i128).to_be_bytes()).unwrap())
+                        Decimal(apache_avro::Decimal::from((-3099i128).to_be_bytes()))
                     ),
                     (
                         "address".to_string(),
