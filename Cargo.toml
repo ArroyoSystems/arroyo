@@ -48,7 +48,7 @@ arrow-json = { version = "55.2.0" }
 object_store = { version = "0.12.3" }
 parquet = { version = "55.2.0" }
 ahash = { version = "=0.8.7" }
-datafusion = { version = "48.0.0" }
+datafusion = { version = "48.0.1" }
 datafusion-common = { version = "48.0.0" }
 datafusion-proto = { version = "48.0.0" }
 datafusion-functions = { version = "48.0.0", features = ["crypto_expressions"] }
@@ -96,6 +96,17 @@ datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafu
 datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 datafusion-functions = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 datafusion-functions-window = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
+#
+#datafusion = { path = '../arrow-datafusion/datafusion/core'}
+#datafusion-physical-plan = {path = "../arrow-datafusion/datafusion/physical-plan", version = "48.0.1"}
+#datafusion-common = {path = '../arrow-datafusion/datafusion/common'}
+#datafusion-execution = {path = '../arrow-datafusion/datafusion/execution'}
+#datafusion-expr = {path = '../arrow-datafusion/datafusion/expr'}
+#datafusion-physical-expr = {path = '../arrow-datafusion/datafusion/physical-expr'}
+#datafusion-proto = {path = '../arrow-datafusion/datafusion/proto'}
+#datafusion-functions = {path = '../arrow-datafusion/datafusion/functions'}
+#datafusion-functions-window = {path = '../arrow-datafusion/datafusion/functions-window'}
+
 sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0.55.0/arroyo" }
 
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }

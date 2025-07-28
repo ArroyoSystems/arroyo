@@ -20,6 +20,7 @@ CREATE TABLE hourly_aggregates (
   format = 'json',
   type = 'sink'
 );
+
 INSERT INTO hourly_aggregates
 SELECT window.start as hour, dropoff_drivers, pickup_drivers FROM (
 SELECT dropoffs.window as window, dropoff_drivers, pickup_drivers

@@ -18,7 +18,7 @@ fn write_op(d2: &mut String, registry: &Arc<Registry>, idx: usize, el: &ChainedL
     let operator = construct_operator(el.operator_name, &el.operator_config, registry.clone());
     let display = operator.display();
 
-    let mut label = format!("### {} ({})", operator.name(), &display.name);
+    let mut label = format!("### [{}] {} ({})", el.operator_id, operator.name(), &display.name);
     for (field, value) in display.fields {
         label.push_str(&format!("\n## {field}\n\n{value}"));
     }

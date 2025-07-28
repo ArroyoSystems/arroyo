@@ -1,7 +1,7 @@
 CREATE TABLE impulse_source (
       timestamp TIMESTAMP,
-      counter bigint unsigned not null,
-      subtask_index bigint unsigned not null
+      counter bigint not null,
+      subtask_index bigint not null
     ) WITH (
       connector = 'single_file',
       path = '$input_dir/impulse.json',

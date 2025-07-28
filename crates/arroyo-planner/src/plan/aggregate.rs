@@ -14,6 +14,7 @@ use datafusion::logical_expr;
 use datafusion::logical_expr::{Aggregate, Expr, Extension, LogicalPlan};
 use datafusion::prelude::col;
 use std::sync::Arc;
+use itertools::Itertools;
 use tracing::debug;
 
 pub struct AggregateRewriter<'a> {
@@ -37,7 +38,13 @@ impl AggregateRewriter<'_> {
             schema.metadata().clone(),
         )?);
 
-        let mut key_projection_expressions = group_expr.clone();
+        let mut key_projection_expressions = group_expr
+            .iter()
+            .zip(key_fields.iter())
+            .map(|(expr, f)| {
+                expr.clone().alias(f.name().to_string())
+            }).collect_vec();
+
         key_projection_expressions.extend(
             fields_with_qualifiers(input.schema())
                 .iter()
@@ -228,7 +235,13 @@ impl TreeNodeRewriter for AggregateRewriter<'_> {
             schema.metadata().clone(),
         )?);
 
-        let mut key_projection_expressions = group_expr.clone();
+        let mut key_projection_expressions = group_expr
+            .iter()
+            .zip(key_fields.iter())
+            .map(|(expr, f)| {
+                expr.clone().alias(f.name().to_string())
+            }).collect_vec();
+
         key_projection_expressions.extend(
             fields_with_qualifiers(input.schema())
                 .iter()

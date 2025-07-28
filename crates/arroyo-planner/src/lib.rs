@@ -799,6 +799,9 @@ pub async fn parse_and_get_arrow_program(
     config.options_mut().optimizer.repartition_aggregations = false;
     config.options_mut().optimizer.repartition_windows = false;
     config.options_mut().optimizer.repartition_sorts = false;
+    config.options_mut().optimizer.repartition_joins = false;
+    config.options_mut().execution.target_partitions = 1;
+
     let session_state = SessionStateBuilder::new()
         .with_config(config)
         .with_default_features()
