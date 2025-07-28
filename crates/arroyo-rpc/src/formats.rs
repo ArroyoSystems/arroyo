@@ -31,6 +31,34 @@ impl TryFrom<&str> for TimestampFormat {
 }
 
 #[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DecimalEncoding {
+    /// Encode the decimal as a JSON number, possibly losing precision depending on the consumer
+    #[default]
+    Number,
+    /// Encode as a full-precision string
+    String,
+    // Encode as a two's-complement, big-endian unscaled integer binary array, as base64
+    // The scale must be communicated as part of the schema
+    Bytes,
+}
+
+impl TryFrom<&str> for DecimalEncoding {
+    type Error = ();
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "number" => Ok(Self::Number),
+            "string" => Ok(Self::String),
+            "bytes" => Ok(Self::Bytes),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +80,9 @@ pub struct JsonFormat {
 
     #[serde(default)]
     pub timestamp_format: TimestampFormat,
+
+    #[serde(default)]
+    pub decimal_encoding: DecimalEncoding,
 }
 
 impl JsonFormat {
@@ -81,6 +112,19 @@ impl JsonFormat {
                 }
             });
 
+        let decimal_encoding: DecimalEncoding = opts
+            .pull_opt_str("json.decimal_encoding")?
+            .map(|t| t.as_str().try_into())
+            .transpose()
+            .map_err(|_| plan_datafusion_err!("invalid value for `json.decimal_encoding`"))?
+            .unwrap_or_else(|| {
+                if debezium {
+                    DecimalEncoding::Bytes
+                } else {
+                    DecimalEncoding::default()
+                }
+            });
+
         Ok(Self {
             confluent_schema_registry,
             schema_id: None,
@@ -88,6 +132,7 @@ impl JsonFormat {
             debezium,
             unstructured,
             timestamp_format,
+            decimal_encoding,
         })
     }
 }

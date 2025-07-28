@@ -327,6 +327,7 @@ impl IntoResponse for HttpError {
         RawStringFormat,
         RawBytesFormat,
         TimestampFormat,
+        DecimalEncoding,
         Framing,
         FramingMethod,
         NewlineDelimitedFraming,

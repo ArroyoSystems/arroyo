@@ -8,7 +8,8 @@ use arrow_json::writer::make_encoder;
 use arrow_json::EncoderOptions;
 use arrow_schema::{ArrowError, DataType, Field};
 use arroyo_rpc::formats::{
-    AvroFormat, Format, JsonFormat, RawBytesFormat, RawStringFormat, TimestampFormat,
+    AvroFormat, DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat,
+    TimestampFormat,
 };
 use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
@@ -19,12 +20,16 @@ pub fn record_batch_to_vec(
     batch: &RecordBatch,
     explicit_nulls: bool,
     timestamp_format: TimestampFormat,
+    decimal_encoding: DecimalEncoding,
 ) -> Result<Vec<Vec<u8>>, ArrowError> {
     let array = StructArray::from(batch.clone());
 
     let options = EncoderOptions::default()
         .with_explicit_nulls(explicit_nulls)
-        .with_encoder_factory(Arc::new(ArroyoEncoderFactory { timestamp_format }));
+        .with_encoder_factory(Arc::new(ArroyoEncoderFactory {
+            timestamp_format,
+            decimal_encoding,
+        }));
 
     let field = Arc::new(Field::new_struct(
         "",
@@ -138,7 +143,8 @@ impl ArrowSerializer {
             v
         });
 
-        let rows = record_batch_to_vec(batch, true, json.timestamp_format).unwrap();
+        let rows =
+            record_batch_to_vec(batch, true, json.timestamp_format, json.decimal_encoding).unwrap();
 
         let include_schema = json.include_schema.then(|| self.kafka_schema.clone());
 
@@ -265,9 +271,11 @@ impl ArrowSerializer {
 #[cfg(test)]
 mod tests {
     use crate::ser::ArrowSerializer;
-    use arrow_array::builder::TimestampNanosecondBuilder;
+    use arrow_array::builder::{Decimal128Builder, TimestampNanosecondBuilder};
     use arrow_schema::{Schema, TimeUnit};
-    use arroyo_rpc::formats::{Format, RawBytesFormat, RawStringFormat, TimestampFormat};
+    use arroyo_rpc::formats::{
+        DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat, TimestampFormat,
+    };
     use arroyo_types::to_nanos;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
@@ -359,6 +367,7 @@ mod tests {
             debezium: false,
             unstructured: false,
             timestamp_format: Default::default(),
+            decimal_encoding: Default::default(),
         }));
 
         let text: Vec<_> = ["a", "b", "blah", "whatever"]
@@ -411,6 +420,7 @@ mod tests {
             debezium: false,
             unstructured: false,
             timestamp_format: TimestampFormat::UnixMillis,
+            decimal_encoding: Default::default(),
         }));
 
         let mut timestamp_array = TimestampNanosecondBuilder::new();
@@ -451,5 +461,114 @@ mod tests {
         assert_eq!(iter.next().unwrap(), br#"{"value":1612274910045}"#);
         assert_eq!(iter.next().unwrap(), br#"{"value":null}"#);
         assert_eq!(iter.next().unwrap(), br#"{"value":1712274910045}"#);
+    }
+
+    #[test]
+    fn test_json_decimal() {
+        let mut serializer = ArrowSerializer::new(Format::Json(arroyo_rpc::formats::JsonFormat {
+            confluent_schema_registry: false,
+            schema_id: None,
+            include_schema: false,
+            debezium: false,
+            unstructured: false,
+            timestamp_format: TimestampFormat::UnixMillis,
+            decimal_encoding: DecimalEncoding::Number,
+        }));
+
+        let mut decimal_array = Decimal128Builder::new()
+            .with_precision_and_scale(5, 3)
+            .unwrap();
+        decimal_array.append_value(10);
+        decimal_array.append_value(51);
+        decimal_array.append_value(-399);
+        let vs = Arc::new(decimal_array.finish());
+
+        let event_times: Vec<_> = vs
+            .iter()
+            .map(|_| to_nanos(SystemTime::now()) as i64)
+            .collect();
+
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("value", arrow_schema::DataType::Decimal128(5, 3), true),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let batch = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![
+                vs,
+                Arc::new(arrow_array::TimestampNanosecondArray::from(event_times)),
+            ],
+        )
+        .unwrap();
+
+        // number
+        let mut iter = serializer.serialize(&batch);
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":0.010}"#.to_string()
+        );
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":0.051}"#.to_string()
+        );
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":-0.399}"#.to_string()
+        );
+
+        // string
+        match &mut serializer.format {
+            Format::Json(JsonFormat {
+                decimal_encoding, ..
+            }) => {
+                *decimal_encoding = DecimalEncoding::String;
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+        let mut iter = serializer.serialize(&batch);
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":"0.010"}"#.to_string()
+        );
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":"0.051"}"#.to_string()
+        );
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":"-0.399"}"#.to_string()
+        );
+
+        // bytes
+        match &mut serializer.format {
+            Format::Json(JsonFormat {
+                decimal_encoding, ..
+            }) => {
+                *decimal_encoding = DecimalEncoding::Bytes;
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+        let mut iter = serializer.serialize(&batch);
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":"AAAAAAAAAAAAAAAAAAAACg=="}"#.to_string()
+        );
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":"AAAAAAAAAAAAAAAAAAAAMw=="}"#.to_string()
+        );
+        assert_eq!(
+            String::from_utf8(iter.next().unwrap()).unwrap(),
+            r#"{"value":"///////////////////+cQ=="}"#.to_string()
+        );
     }
 }

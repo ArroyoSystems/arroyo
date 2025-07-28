@@ -100,7 +100,14 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         }
         DataType::Union(_, _) => unimplemented!("unions are not supported"),
         DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
-        DataType::Decimal128(_, _) => unimplemented!("decimal128 is not supported"),
+        DataType::Decimal128(precision, scale) => {
+            return json!({
+                "type": "bytes",
+                "logicalType": "decimal",
+                "scale": scale,
+                "precision": precision,
+            })
+        }
         DataType::Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
         DataType::Map(_, _) => unimplemented!("maps are not supported"),
         DataType::RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),

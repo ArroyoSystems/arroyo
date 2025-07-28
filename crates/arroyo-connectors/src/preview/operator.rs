@@ -70,6 +70,7 @@ impl ArrowOperator for PreviewSink {
             .with_explicit_nulls(true)
             .with_encoder_factory(Arc::new(ArroyoEncoderFactory {
                 timestamp_format: TimestampFormat::RFC3339,
+                decimal_encoding: Default::default(),
             }))
             .build(&mut buf);
 

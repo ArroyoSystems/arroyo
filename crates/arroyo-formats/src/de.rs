@@ -830,6 +830,7 @@ mod tests {
                 debezium: false,
                 unstructured: false,
                 timestamp_format: Default::default(),
+                decimal_encoding: Default::default(),
             }),
             schema,
             &[],
@@ -965,6 +966,7 @@ mod tests {
                 debezium: false,
                 unstructured: false,
                 timestamp_format: Default::default(),
+                decimal_encoding: Default::default(),
             }),
             arroyo_schema,
             &[

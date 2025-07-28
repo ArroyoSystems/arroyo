@@ -184,7 +184,7 @@ fn scalar_none(datatype: &DataType) -> ScalarValue {
         DataType::Struct(_) => todo!(),
         DataType::Union(_, _) => todo!(),
         DataType::Dictionary(_, _) => todo!(),
-        DataType::Decimal128(_, _) => todo!(),
+        DataType::Decimal128(precision, scale) => ScalarValue::Decimal128(None, *precision, *scale),
         DataType::Decimal256(_, _) => todo!(),
         DataType::Map(_, _) => todo!(),
         DataType::RunEndEncoded(_, _) => todo!(),
