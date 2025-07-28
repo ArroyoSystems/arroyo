@@ -351,9 +351,12 @@ impl AggregateExtension {
                 Expr::BinaryExpr(BinaryExpr {
                     left: Box::new(Expr::Column(timestamp_column.clone())),
                     op: logical_expr::Operator::Plus,
-                    right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                        IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
-                    )))),
+                    right: Box::new(Expr::Literal(
+                        ScalarValue::IntervalMonthDayNano(Some(
+                            IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
+                        )),
+                        None,
+                    )),
                 }),
             ],
         });
@@ -366,9 +369,14 @@ impl AggregateExtension {
         let bin_end_calculation = Expr::BinaryExpr(BinaryExpr {
             left: Box::new(Expr::Column(timestamp_column.clone())),
             op: logical_expr::Operator::Plus,
-            right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                IntervalMonthDayNanoType::make_value(0, 0, (width.as_nanos() - 1) as i64),
-            )))),
+            right: Box::new(Expr::Literal(
+                ScalarValue::IntervalMonthDayNano(Some(IntervalMonthDayNanoType::make_value(
+                    0,
+                    0,
+                    (width.as_nanos() - 1) as i64,
+                ))),
+                None,
+            )),
         });
         aggregate_expressions.push(bin_end_calculation);
         Ok(LogicalPlan::Projection(
@@ -407,17 +415,23 @@ impl AggregateExtension {
                 Expr::BinaryExpr(BinaryExpr {
                     left: Box::new(Expr::Column(timestamp_column.clone())),
                     op: logical_expr::Operator::Minus,
-                    right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                        IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64 - 1),
-                    )))),
+                    right: Box::new(Expr::Literal(
+                        ScalarValue::IntervalMonthDayNano(Some(
+                            IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64 - 1),
+                        )),
+                        None,
+                    )),
                 }),
                 // add 1 nanosecond to the timestamp
                 Expr::BinaryExpr(BinaryExpr {
                     left: Box::new(Expr::Column(timestamp_column.clone())),
                     op: logical_expr::Operator::Plus,
-                    right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                        IntervalMonthDayNanoType::make_value(0, 0, 1),
-                    )))),
+                    right: Box::new(Expr::Literal(
+                        ScalarValue::IntervalMonthDayNano(Some(
+                            IntervalMonthDayNanoType::make_value(0, 0, 1),
+                        )),
+                        None,
+                    )),
                 }),
             ],
         });

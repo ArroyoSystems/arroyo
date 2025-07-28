@@ -234,8 +234,11 @@ impl FileSystemSourceFunc {
                     .map_err(|err| {
                         UserError::new("could not get object metadata", err.to_string())
                     })?;
-                let object_reader =
-                    ParquetObjectReader::new(storage_provider.get_backing_store(), object_meta);
+                let object_reader = ParquetObjectReader::new(
+                    storage_provider.get_backing_store(),
+                    object_meta.location,
+                )
+                .with_file_size(object_meta.size);
                 let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
                     .await
                     .map_err(|err| {

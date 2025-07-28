@@ -12,9 +12,8 @@ use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream};
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
-        memory::{MemoryExec, MemoryStream},
-        stream::RecordBatchStreamAdapter,
-        DisplayAs, ExecutionPlan, Partitioning,
+        memory::MemoryStream, stream::RecordBatchStreamAdapter, DisplayAs, ExecutionPlan,
+        Partitioning,
     },
 };
 use std::collections::HashMap;
@@ -39,12 +38,15 @@ use arroyo_rpc::{
     grpc::api::{arroyo_exec_node::Node, DebeziumDecodeNode},
     updating_meta_field, updating_meta_fields, TIMESTAMP_FIELD, UPDATING_META_FIELD,
 };
+use datafusion::catalog::memory::MemorySourceConfig;
+use datafusion::datasource::memory::DataSourceExec;
 use datafusion::logical_expr::{
-    ColumnarValue, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
 use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::unnest::{ListUnnest, UnnestExec};
-use datafusion::physical_plan::{ExecutionMode, PlanProperties};
+use datafusion::physical_plan::PlanProperties;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use futures::{
     ready,
@@ -91,7 +93,8 @@ impl ScalarUDFImpl for WindowFunctionUdf {
         Ok(window_arrow_struct())
     }
 
-    fn invoke(&self, columns: &[ColumnarValue]) -> Result<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        let columns = args.args;
         if columns.len() != 2 {
             return plan_err!("window function expected 2 argument, got {}", columns.len());
         }
@@ -197,7 +200,10 @@ fn make_properties(schema: SchemaRef) -> PlanProperties {
     PlanProperties::new(
         EquivalenceProperties::new(schema),
         Partitioning::UnknownPartitioning(1),
-        ExecutionMode::Unbounded,
+        EmissionType::Incremental,
+        Boundedness::Unbounded {
+            requires_infinite_memory: false,
+        },
     )
 }
 
@@ -618,12 +624,13 @@ impl ExecutionPlan for RecordBatchVecReader {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<datafusion::execution::SendableRecordBatchStream> {
-        MemoryExec::try_new(
+        let memory = MemorySourceConfig::try_new(
             &[mem::take(self.receiver.write().unwrap().as_mut())],
             self.schema.clone(),
             None,
-        )?
-        .execute(partition, context)
+        )?;
+
+        DataSourceExec::new(Arc::new(memory)).execute(partition, context)
     }
 
     fn statistics(&self) -> datafusion::common::Result<datafusion::common::Statistics> {
@@ -917,13 +924,12 @@ impl DebeziumUnrollingStream {
 
         let mut columns = unrolled_array.as_struct().columns().to_vec();
 
-        let hash = MultiHashFunction::default().invoke_batch(
+        let hash = MultiHashFunction::default().invoke(
             &self
                 .primary_keys
                 .iter()
                 .map(|i| ColumnarValue::Array(columns[*i].clone()))
                 .collect::<Vec<_>>(),
-            num_rows,
         )?;
 
         let ids = hash.into_array(num_rows)?;

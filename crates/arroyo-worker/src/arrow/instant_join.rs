@@ -14,10 +14,8 @@ use arroyo_rpc::{
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, CheckpointBarrier, Watermark};
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::{
-    runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
-};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -414,7 +412,7 @@ impl OperatorConstructor for InstantJoinConstructor {
         };
         let join_exec = join_physical_plan_node.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new())?,
+            &RuntimeEnvBuilder::new().build()?,
             &codec,
         )?;
 

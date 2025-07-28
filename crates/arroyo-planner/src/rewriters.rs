@@ -58,6 +58,7 @@ impl SourceRewriter<'_> {
                                 Some(Expr::Column(Column {
                                     relation: None,
                                     name: field.name().to_string(),
+                                    spans: Default::default(),
                                 }))
                             }
                             FieldSpec::Virtual { expression, .. } => Some(*expression.clone()),
@@ -72,11 +73,13 @@ impl SourceRewriter<'_> {
                 left: Box::new(Expr::Column(Column {
                     relation: None,
                     name: "_timestamp".to_string(),
+                    spans: Default::default(),
                 })),
                 op: logical_expr::Operator::Minus,
-                right: Box::new(Expr::Literal(ScalarValue::DurationNanosecond(Some(
-                    Duration::from_secs(1).as_nanos() as i64,
-                )))),
+                right: Box::new(Expr::Literal(
+                    ScalarValue::DurationNanosecond(Some(Duration::from_secs(1).as_nanos() as i64)),
+                    None,
+                )),
             }),
         };
         Ok(expr)
@@ -95,6 +98,7 @@ impl SourceRewriter<'_> {
                     Expr::Column(Column {
                         relation: Some(qualifier.clone()),
                         name: field.name().to_string(),
+                        spans: Default::default(),
                     })
                 }
                 FieldSpec::Virtual { field, expression } => expression
@@ -119,6 +123,7 @@ impl SourceRewriter<'_> {
                                 Some(Expr::Column(Column {
                                     relation: Some(qualifier.clone()),
                                     name: field.name().to_string(),
+                                    spans: Default::default(),
                                 }))
                             }
                             FieldSpec::Virtual { expression, .. } => Some(*expression.clone()),
@@ -689,9 +694,10 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         if let Expr::IsNotNull(expr) = &node {
             if is_time_window(expr).is_some() {
-                return Ok(Transformed::yes(Expr::Literal(ScalarValue::Boolean(Some(
-                    true,
-                )))));
+                return Ok(Transformed::yes(Expr::Literal(
+                    ScalarValue::Boolean(Some(true)),
+                    None,
+                )));
             }
         }
 
@@ -709,6 +715,7 @@ impl TreeNodeRewriter for RowTimeRewriter {
                 let transformed = Expr::Column(Column {
                     relation: None,
                     name: "_timestamp".to_string(),
+                    spans: Default::default(),
                 });
                 return Ok(Transformed::yes(transformed));
             }

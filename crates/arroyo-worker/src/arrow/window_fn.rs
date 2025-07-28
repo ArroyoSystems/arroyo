@@ -17,7 +17,7 @@ use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, CheckpointBarrier, Watermark};
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::physical_plan::AsExecutionPlan;
@@ -248,7 +248,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
         };
         let window_exec = window_exec.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new())?,
+            &RuntimeEnvBuilder::new().build()?,
             &codec,
         )?;
         let input_schema_unkeyed = Arc::new(ArroyoSchema::from_schema_unkeyed(

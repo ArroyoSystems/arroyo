@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use arrow::array::builder::{TimestampNanosecondBuilder, UInt64Builder};
-use arrow::array::RecordBatch;
+use arrow::array::builder::TimestampNanosecondBuilder;
+use arrow::array::{Int64Builder, RecordBatch};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::ControlMessage;
 use async_trait::async_trait;
@@ -125,8 +125,8 @@ impl ImpulseSourceFunc {
         let batch_size = self.batch_size(ctx);
 
         let mut items = 0;
-        let mut counter_builder = UInt64Builder::with_capacity(batch_size);
-        let task_index_scalar = ScalarValue::UInt64(Some(ctx.task_info.task_index as u64));
+        let mut counter_builder = Int64Builder::with_capacity(batch_size);
+        let task_index_scalar = ScalarValue::Int64(Some(ctx.task_info.task_index as i64));
         let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(batch_size);
 
         while self.state.counter < self.limit {
@@ -135,7 +135,7 @@ impl ImpulseSourceFunc {
                 .map(|d| self.state.start_time + d * self.state.counter as u32)
                 .unwrap_or_else(SystemTime::now);
 
-            counter_builder.append_value(self.state.counter as u64);
+            counter_builder.append_value(self.state.counter as i64);
             timestamp_builder.append_value(to_nanos(timestamp) as i64);
             items += 1;
             if items == batch_size {

@@ -10,12 +10,13 @@ use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr::{Alias, ScalarFunction};
 use datafusion::logical_expr::{
-    create_udf, ColumnarValue, LogicalPlan, Projection, ScalarUDFImpl, Signature, TypeSignature,
-    Volatility,
+    create_udf, ColumnarValue, LogicalPlan, Projection, ScalarFunctionArgs, ScalarUDFImpl,
+    Signature, TypeSignature, Volatility,
 };
 use datafusion::prelude::{col, Expr};
 use serde_json_path::JsonPath;
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::sync::{Arc, OnceLock};
 
@@ -121,32 +122,8 @@ pub struct MultiHashFunction {
     signature: Signature,
 }
 
-impl Default for MultiHashFunction {
-    fn default() -> Self {
-        Self {
-            signature: Signature::new(TypeSignature::VariadicAny, Volatility::Immutable),
-        }
-    }
-}
-
-impl ScalarUDFImpl for MultiHashFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "multi_hash"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
-        Ok(DataType::FixedSizeBinary(size_of::<u128>() as i32))
-    }
-
-    fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
+impl MultiHashFunction {
+    pub fn invoke(&self, args: &[ColumnarValue]) -> Result<ColumnarValue> {
         let mut hasher = xxhash_rust::xxh3::Xxh3::new();
 
         let all_scalar = args.iter().all(|a| matches!(a, ColumnarValue::Scalar(_)));
@@ -194,6 +171,36 @@ impl ScalarUDFImpl for MultiHashFunction {
 
             Ok(ColumnarValue::Array(Arc::new(builder.finish())))
         }
+    }
+}
+
+impl Default for MultiHashFunction {
+    fn default() -> Self {
+        Self {
+            signature: Signature::new(TypeSignature::VariadicAny, Volatility::Immutable),
+        }
+    }
+}
+
+impl ScalarUDFImpl for MultiHashFunction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        "multi_hash"
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
+        Ok(DataType::FixedSizeBinary(size_of::<u128>() as i32))
+    }
+
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        self.invoke(&args.args)
     }
 }
 
@@ -333,6 +340,8 @@ fn union_fields() -> UnionFields {
     static FIELDS: OnceLock<UnionFields> = OnceLock::new();
     FIELDS
         .get_or_init(|| {
+            let json_metadata: HashMap<String, String> =
+                HashMap::from_iter(vec![("is_json".to_string(), "true".to_string())]);
             UnionFields::from_iter([
                 (
                     TYPE_ID_NULL,
@@ -356,11 +365,17 @@ fn union_fields() -> UnionFields {
                 ),
                 (
                     TYPE_ID_ARRAY,
-                    Arc::new(Field::new("array", DataType::Utf8, false)),
+                    Arc::new(
+                        Field::new("array", DataType::Utf8, false)
+                            .with_metadata(json_metadata.clone()),
+                    ),
                 ),
                 (
                     TYPE_ID_OBJECT,
-                    Arc::new(Field::new("object", DataType::Utf8, false)),
+                    Arc::new(
+                        Field::new("object", DataType::Utf8, false)
+                            .with_metadata(json_metadata.clone()),
+                    ),
                 ),
             ])
         })

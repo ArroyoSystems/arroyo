@@ -10,10 +10,10 @@ use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use async_trait::async_trait;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{
-    plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, TableReference,
+    plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, Spans, TableReference,
 };
 use datafusion::execution::context::SessionState;
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::functions::datetime::date_bin;
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
 use datafusion::physical_expr::PhysicalExpr;
@@ -163,7 +163,7 @@ impl<'a> Planner<'a> {
         // need to convert to ExecutionPlan to get the partial schema.
         let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
             self.schema_provider,
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnvBuilder::new().build().unwrap(),
             &codec,
         )?;
 
@@ -204,12 +204,18 @@ impl<'a> Planner<'a> {
         input_schema: DFSchemaRef,
     ) -> Result<PhysicalExprNode> {
         let date_bin = date_bin().call(vec![
-            Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
-            ))),
+            Expr::Literal(
+                ScalarValue::IntervalMonthDayNano(Some(IntervalMonthDayNanoType::make_value(
+                    0,
+                    0,
+                    width.as_nanos() as i64,
+                ))),
+                None,
+            ),
             Expr::Column(datafusion::common::Column {
                 relation: None,
                 name: "_timestamp".into(),
+                spans: Spans::new(),
             }),
         ]);
 

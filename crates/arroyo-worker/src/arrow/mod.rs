@@ -11,8 +11,7 @@ use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
 use datafusion::common::{internal_err, DataFusionError};
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::RuntimeConfig;
-use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::{FunctionRegistry, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
 use datafusion::physical_expr::{LexOrdering, PhysicalExpr};
@@ -242,11 +241,8 @@ impl StatelessPhysicalExecutor {
             context: DecodingContext::SingleLockedBatch(batch.clone()),
         };
 
-        let plan = plan.try_into_physical_plan(
-            registry,
-            &RuntimeEnv::try_new(RuntimeConfig::new())?,
-            &codec,
-        )?;
+        let plan =
+            plan.try_into_physical_plan(registry, &RuntimeEnvBuilder::new().build()?, &codec)?;
 
         Ok(Self {
             batch,

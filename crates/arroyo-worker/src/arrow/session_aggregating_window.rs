@@ -36,10 +36,8 @@ use arroyo_operator::context::Collector;
 use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion::execution::{
-    runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
-};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 use std::time::Duration;
@@ -720,7 +718,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         let final_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
         let final_execution_plan = final_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnvBuilder::new().build()?,
             &codec,
         )?;
 

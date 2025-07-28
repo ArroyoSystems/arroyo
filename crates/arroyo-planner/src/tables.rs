@@ -26,6 +26,7 @@ use datafusion::logical_expr::{
     LogicalPlan, WriteOp,
 };
 use datafusion::optimizer::common_subexpr_eliminate::CommonSubexprEliminate;
+use datafusion::optimizer::decorrelate_lateral_join::DecorrelateLateralJoin;
 use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery;
 use datafusion::optimizer::eliminate_cross_join::EliminateCrossJoin;
 use datafusion::optimizer::eliminate_duplicated_expr::EliminateDuplicatedExpr;
@@ -44,7 +45,6 @@ use datafusion::optimizer::push_down_limit::PushDownLimit;
 use datafusion::optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggregate;
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
-use datafusion::optimizer::unwrap_cast_in_comparison::UnwrapCastInComparison;
 use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::{CreateTable, Query};
@@ -152,16 +152,15 @@ fn produce_optimized_plan(
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
         Arc::new(EliminateNestedUnion::new()),
         Arc::new(SimplifyExpressions::new()),
-        Arc::new(UnwrapCastInComparison::new()),
         Arc::new(ReplaceDistinctWithAggregate::new()),
         Arc::new(EliminateJoin::new()),
         Arc::new(DecorrelatePredicateSubquery::new()),
         Arc::new(ScalarSubqueryToJoin::new()),
+        Arc::new(DecorrelateLateralJoin::new()),
         Arc::new(ExtractEquijoinPredicate::new()),
         Arc::new(EliminateDuplicatedExpr::new()),
         Arc::new(EliminateFilter::new()),
         Arc::new(EliminateCrossJoin::new()),
-        Arc::new(CommonSubexprEliminate::new()),
         Arc::new(EliminateLimit::new()),
         Arc::new(PropagateEmptyRelation::new()),
         // Must be after PropagateEmptyRelation
@@ -176,10 +175,8 @@ fn produce_optimized_plan(
 
         // The previous optimizations added expressions and projections,
         // that might benefit from the following rules
-        Arc::new(SimplifyExpressions::new()),
-        Arc::new(UnwrapCastInComparison::new()),
-        Arc::new(CommonSubexprEliminate::new()),
         Arc::new(EliminateGroupByConstant::new()),
+        Arc::new(CommonSubexprEliminate::new()),
         // This rule can drop event time calculation fields if they aren't used elsewhere.
         //Arc::new(OptimizeProjections::new()),
     ];
@@ -628,7 +625,7 @@ impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
                 }
 
                 return if let &[arg] = &func.args.as_slice() {
-                    if let Expr::Literal(ScalarValue::Utf8(Some(key))) = &arg {
+                    if let Expr::Literal(ScalarValue::Utf8(Some(key)), _) = &arg {
                         self.key = Some(key.clone());
                         Ok(TreeNodeRecursion::Stop)
                     } else {
@@ -681,7 +678,7 @@ impl Table {
                 });
 
                 let metadata = column.options.iter().find_map(|option| {
-                    if let ColumnOption::MetadataField(field) = &option.option {
+                    if let ColumnOption::MetadataField(field, _) = &option.option {
                         Some(field.clone())
                     } else {
                         None
@@ -1012,7 +1009,7 @@ impl Insert {
         if let Statement::Insert(insert) = statement {
             infer_sink_schema(
                 insert.source.as_ref().unwrap(),
-                insert.table_name.to_string(),
+                insert.table.to_string(),
                 schema_provider,
             )?;
         }

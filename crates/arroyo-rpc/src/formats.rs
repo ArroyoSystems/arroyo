@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use utoipa::ToSchema;
 
 #[derive(
-    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TimestampFormat {

@@ -11,7 +11,7 @@ use arrow_array::types::UInt64Type;
 use arrow_array::{
     Array, ArrayRef, BinaryArray, BooleanArray, RecordBatch, StructArray, UInt32Array, UInt64Array,
 };
-use arrow_schema::{DataType, Field, Schema, SchemaBuilder, TimeUnit};
+use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaBuilder, TimeUnit};
 use arroyo_operator::context::Collector;
 use arroyo_operator::{
     context::OperatorContext,
@@ -179,7 +179,7 @@ enum AccumulatorType {
 }
 
 impl AccumulatorType {
-    fn state_fields(&self, agg: &AggregateFunctionExpr) -> DFResult<Vec<Field>> {
+    fn state_fields(&self, agg: &AggregateFunctionExpr) -> DFResult<Vec<FieldRef>> {
         Ok(match self {
             AccumulatorType::Sliding => agg.sliding_state_fields()?,
             // state for batch tables is handled separately
@@ -1112,7 +1112,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 let fields = t.state_fields(&agg)?;
 
                 let field_names = fields.iter().map(|f| f.name().to_string()).collect_vec();
-                sliding_state_fields.extend(fields.into_iter());
+                sliding_state_fields.extend(fields.into_iter().map(|f| (*f).clone()));
 
                 Ok::<_, anyhow::Error>((agg, t, row_converter, field_names))
             })

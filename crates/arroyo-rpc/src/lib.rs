@@ -15,16 +15,18 @@ use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
-use datafusion::catalog_common::TableReference;
 use datafusion::common::{
     not_impl_err, plan_datafusion_err, plan_err, DFSchema, Result as DFResult, ScalarValue,
+    TableReference,
 };
 use datafusion::config::ConfigOptions;
+use datafusion::logical_expr::sqlparser::ast::ValueWithSpan;
 use datafusion::logical_expr::{AggregateUDF, ScalarUDF, TableSource, WindowUDF};
 use datafusion::sql::planner::{ContextProvider, PlannerContext, SqlToRel};
 use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value as SqlValue};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
+use datafusion::sql::sqlparser::tokenizer::Span;
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use log::{debug, warn};
 use rustls::RootCertStore;
@@ -498,12 +500,16 @@ pub fn contextless_sql_to_expr(
 
 pub fn duration_from_sql(expr: Expr) -> DFResult<Duration> {
     let interval = match expr {
-        Expr::Value(SqlValue::SingleQuotedString(s)) => {
+        Expr::Value(ValueWithSpan {
+            value: SqlValue::SingleQuotedString(s),
+            span: _,
+        }) => {
             warn!(
                 "Intervals in options should now be expressed with SQL interval syntax, but \
                 used deprecated string syntax; this will be unsupported after Arroyo 0.14"
             );
             parse_interval_day_time(&s)
+                // TODO: add diagnostic
                 .map_err(|_| plan_datafusion_err!("expected an interval, but found `{}`", s))?
         }
         expr => {
@@ -511,9 +517,10 @@ pub fn duration_from_sql(expr: Expr) -> DFResult<Duration> {
                 .map_err(|e| plan_datafusion_err!("invalid expression: {}", e))?;
 
             match expr {
-                datafusion::logical_expr::Expr::Literal(ScalarValue::IntervalMonthDayNano(
-                    Some(m),
-                )) => {
+                datafusion::logical_expr::Expr::Literal(
+                    ScalarValue::IntervalMonthDayNano(Some(m)),
+                    _,
+                ) => {
                     if m.months != 0 {
                         return plan_err!("months are not supported in this interval");
                     }
@@ -523,7 +530,10 @@ pub fn duration_from_sql(expr: Expr) -> DFResult<Duration> {
                     return Ok(Duration::from_secs(m.days as u64 * 60 * 60 * 24)
                         + Duration::from_nanos(m.nanoseconds as u64));
                 }
-                datafusion::logical_expr::Expr::Literal(ScalarValue::IntervalDayTime(Some(m))) => m,
+                datafusion::logical_expr::Expr::Literal(
+                    ScalarValue::IntervalDayTime(Some(m)),
+                    _,
+                ) => m,
                 e => {
                     return plan_err!("expected an interval, but found '{}'", e);
                 }
@@ -567,7 +577,10 @@ impl TryFrom<&Vec<SqlOption>> for ConnectorOptions {
 impl ConnectorOptions {
     pub fn pull_opt_str(&mut self, name: &str) -> DFResult<Option<String>> {
         match self.options.remove(name) {
-            Some(Expr::Value(SqlValue::SingleQuotedString(s))) => Ok(Some(s)),
+            Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(s),
+                span: _,
+            })) => Ok(Some(s)),
             Some(e) => {
                 plan_err!(
                     "expected with option '{}' to be a single-quoted string, but it was `{:?}`",
@@ -586,8 +599,14 @@ impl ConnectorOptions {
 
     pub fn pull_opt_bool(&mut self, name: &str) -> DFResult<Option<bool>> {
         match self.options.remove(name) {
-            Some(Expr::Value(SqlValue::Boolean(b))) => Ok(Some(b)),
-            Some(Expr::Value(SqlValue::SingleQuotedString(s))) => match s.as_str() {
+            Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::Boolean(b),
+                span: _,
+            })) => Ok(Some(b)),
+            Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(s),
+                span: _,
+            })) => match s.as_str() {
                 "true" | "yes" => Ok(Some(true)),
                 "false" | "no" => Ok(Some(false)),
                 _ => plan_err!(
@@ -609,16 +628,20 @@ impl ConnectorOptions {
 
     pub fn pull_opt_u64(&mut self, name: &str) -> DFResult<Option<u64>> {
         match self.options.remove(name) {
-            Some(Expr::Value(SqlValue::Number(s, _)))
-            | Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                s.parse::<u64>().map(Some).map_err(|_| {
-                    plan_datafusion_err!(
-                        "expected with option '{}' to be an unsigned integer, but it was `{}`",
-                        name,
-                        s
-                    )
-                })
-            }
+            Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::Number(s, _),
+                span: _,
+            }))
+            | Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(s),
+                span: _,
+            })) => s.parse::<u64>().map(Some).map_err(|_| {
+                plan_datafusion_err!(
+                    "expected with option '{}' to be an unsigned integer, but it was `{}`",
+                    name,
+                    s
+                )
+            }),
             Some(e) => {
                 plan_err!(
                     "expected with option '{}' to be an unsigned integer, but it was `{:?}`",
@@ -642,16 +665,20 @@ impl ConnectorOptions {
 
     pub fn pull_opt_i64(&mut self, name: &str) -> DFResult<Option<i64>> {
         match self.options.remove(name) {
-            Some(Expr::Value(SqlValue::Number(s, _)))
-            | Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                s.parse::<i64>().map(Some).map_err(|_| {
-                    plan_datafusion_err!(
-                        "expected with option '{}' to be an integer, but it was `{}`",
-                        name,
-                        s
-                    )
-                })
-            }
+            Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::Number(s, _),
+                span: _,
+            }))
+            | Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(s),
+                span: _,
+            })) => s.parse::<i64>().map(Some).map_err(|_| {
+                plan_datafusion_err!(
+                    "expected with option '{}' to be an integer, but it was `{}`",
+                    name,
+                    s
+                )
+            }),
             Some(e) => {
                 plan_err!(
                     "expected with option '{}' to be an integer, but it was `{:?}`",
@@ -675,16 +702,20 @@ impl ConnectorOptions {
 
     pub fn pull_opt_f64(&mut self, name: &str) -> DFResult<Option<f64>> {
         match self.options.remove(name) {
-            Some(Expr::Value(SqlValue::Number(s, _)))
-            | Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                s.parse::<f64>().map(Some).map_err(|_| {
-                    plan_datafusion_err!(
-                        "expected with option '{}' to be a double, but it was `{}`",
-                        name,
-                        s
-                    )
-                })
-            }
+            Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::Number(s, _),
+                span: _,
+            }))
+            | Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(s),
+                span: _,
+            })) => s.parse::<f64>().map(Some).map_err(|_| {
+                plan_datafusion_err!(
+                    "expected with option '{}' to be a double, but it was `{}`",
+                    name,
+                    s
+                )
+            }),
             Some(e) => {
                 plan_err!(
                     "expected with option '{}' to be an double, but it was `{:?}`",
@@ -719,7 +750,10 @@ impl ConnectorOptions {
 
     pub fn pull_opt_field(&mut self, name: &str) -> DFResult<Option<String>> {
         match self.options.remove(name) {
-            Some(Expr::Value(SqlValue::SingleQuotedString(s))) => {
+            Some(Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(s),
+                span: _,
+            })) => {
                 warn!("Referred to a field in `{name}` with a string—this is deprecated and will be unsupported after Arroyo 0.14");
                 Ok(Some(s))
             }
@@ -737,9 +771,17 @@ impl ConnectorOptions {
 
     pub fn pull_opt_array(&mut self, name: &str) -> Option<Vec<Expr>> {
         Some(match self.options.remove(name)? {
-            Expr::Value(SqlValue::SingleQuotedString(s)) => s
+            Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(s),
+                span,
+            }) => s
                 .split(",")
-                .map(|p| Expr::Value(SqlValue::SingleQuotedString(p.to_string())))
+                .map(|p| {
+                    Expr::Value(ValueWithSpan {
+                        value: SqlValue::SingleQuotedString(p.to_string()),
+                        span,
+                    })
+                })
                 .collect(),
             Expr::Array(a) => a.elem,
             e => vec![e],
@@ -768,8 +810,13 @@ impl ConnectorOptions {
         let name = name.into();
         let value = value.into();
         let existing = self.pull_opt_str(&name)?;
-        self.options
-            .insert(name, Expr::Value(SqlValue::SingleQuotedString(value)));
+        self.options.insert(
+            name,
+            Expr::Value(ValueWithSpan {
+                value: SqlValue::SingleQuotedString(value),
+                span: Span::empty(),
+            }),
+        );
         Ok(existing)
     }
 

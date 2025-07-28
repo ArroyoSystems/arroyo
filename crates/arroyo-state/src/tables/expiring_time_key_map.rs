@@ -123,8 +123,11 @@ impl ExpiringTimeKeyTable {
         let mut result = vec![];
         for (file, needs_filtering) in files {
             let object_meta = self.storage_provider.head(file.as_str()).await?;
-            let object_reader =
-                ParquetObjectReader::new(self.storage_provider.get_backing_store(), object_meta);
+            let object_reader = ParquetObjectReader::new(
+                self.storage_provider.get_backing_store(),
+                object_meta.location,
+            )
+            .with_file_size(object_meta.size);
             let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
             let mut stream = reader_builder.build()?;
             // projection to trim the metadata fields. Should probably be factored out.
@@ -464,10 +467,12 @@ impl TimeTableCompactor {
                 continue;
             }
 
+            let meta = compactor.storage_provider.head(file_name.as_str()).await?;
             let reader = ParquetObjectReader::new(
                 compactor.storage_provider.get_backing_store(),
-                compactor.storage_provider.head(file_name.as_str()).await?,
-            );
+                meta.location,
+            )
+            .with_file_size(meta.size);
 
             let first_partition =
                 server_for_hash(file.min_routing_key, operator_metadata.parallelism as usize);
@@ -719,7 +724,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
                     watermark: checkpoint.watermark.map(to_micros),
                     files,
                 },
-                bytes,
+                bytes as usize,
             )))
         }
     }
@@ -1046,8 +1051,9 @@ impl UncachedKeyValueView {
                     let object_meta = parent.storage_provider.head(file.as_str()).await?;
                     let object_reader = ParquetObjectReader::new(
                         parent.storage_provider.get_backing_store(),
-                        object_meta,
-                    );
+                        object_meta.location,
+                    )
+                    .with_file_size(object_meta.size);
                     let reader_builder =
                         ParquetRecordBatchStreamBuilder::new(object_reader).await?;
                     let stream = reader_builder.build()?;

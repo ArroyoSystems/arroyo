@@ -35,8 +35,8 @@ use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    create_udaf, Expr, Extension, LogicalPlan, ScalarUDF, ScalarUDFImpl, Signature,
-    UserDefinedLogicalNode, Volatility, WindowUDF,
+    create_udaf, ColumnarValue, Expr, Extension, LogicalPlan, ScalarFunctionArgs, ScalarUDF,
+    ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF,
 };
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
@@ -127,6 +127,7 @@ pub struct ArroyoSchemaProvider {
 
 pub fn register_functions(registry: &mut dyn FunctionRegistry) {
     datafusion_functions_json::register_all(registry).unwrap();
+
     functions::register_all(registry);
 
     for p in SessionStateDefaults::default_scalar_functions() {
@@ -179,6 +180,10 @@ impl ScalarUDFImpl for PlaceholderUdf {
 
     fn return_type(&self, args: &[DataType]) -> Result<DataType> {
         (self.return_type)(args)
+    }
+
+    fn invoke_with_args(&self, _args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        unimplemented!("PlaceholderUdf should never be called");
     }
 }
 
@@ -564,11 +569,11 @@ enum WindowBehavior {
 
 fn get_duration(expression: &Expr) -> Result<Duration> {
     match expression {
-        Expr::Literal(ScalarValue::IntervalDayTime(Some(val))) => {
+        Expr::Literal(ScalarValue::IntervalDayTime(Some(val)), _) => {
             Ok(Duration::from_secs((val.days as u64) * 24 * 60 * 60)
                 + Duration::from_millis(val.milliseconds as u64))
         }
-        Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(val))) => {
+        Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(val)), _) => {
             // If interval is months, its origin must be midnight of first date of the month
             if val.months != 0 {
                 return not_impl_err!("Windows do not support durations specified as months");
@@ -623,11 +628,7 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
             }
             _ => Ok(None),
         },
-        Expr::Alias(logical_expr::expr::Alias {
-            expr,
-            name: _,
-            relation: _,
-        }) => find_window(expr),
+        Expr::Alias(logical_expr::expr::Alias { expr, .. }) => find_window(expr),
         _ => Ok(None),
     }
 }
@@ -798,6 +799,9 @@ pub async fn parse_and_get_arrow_program(
     config.options_mut().optimizer.repartition_aggregations = false;
     config.options_mut().optimizer.repartition_windows = false;
     config.options_mut().optimizer.repartition_sorts = false;
+    config.options_mut().optimizer.repartition_joins = false;
+    config.options_mut().execution.target_partitions = 1;
+
     let session_state = SessionStateBuilder::new()
         .with_config(config)
         .with_default_features()
@@ -1116,6 +1120,7 @@ impl DFField {
         Column {
             relation: self.qualifier.clone(),
             name: self.field.name().to_string(),
+            spans: Default::default(),
         }
     }
 
@@ -1124,6 +1129,7 @@ impl DFField {
         Column {
             relation: None,
             name: self.field.name().to_string(),
+            spans: Default::default(),
         }
     }
 

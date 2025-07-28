@@ -27,10 +27,8 @@ use std::{
 
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
-use datafusion::execution::{
-    runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
-};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
@@ -144,7 +142,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         // for each bin.
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnvBuilder::new().build()?,
             &codec,
         )?;
 
@@ -162,7 +160,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         // deserialize the finish plan to read directly from a Vec<RecordBatch> behind a RWLock.
         let finish_execution_plan = finish_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnvBuilder::new().build().unwrap(),
             &final_codec,
         )?;
         let finish_projection = config
@@ -174,7 +172,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
             .map(|finish_projection| {
                 finish_projection.try_into_physical_plan(
                     registry.as_ref(),
-                    &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+                    &RuntimeEnvBuilder::new().build().unwrap(),
                     &final_codec,
                 )
             })

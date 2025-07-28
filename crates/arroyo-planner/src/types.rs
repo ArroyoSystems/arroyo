@@ -48,15 +48,15 @@ fn convert_simple_data_type(
         SQLDataType::SmallInt(_) | SQLDataType::Int2(_) => Ok(DataType::Int16),
         SQLDataType::Int(_) | SQLDataType::Integer(_) | SQLDataType::Int4(_) => Ok(DataType::Int32),
         SQLDataType::BigInt(_) | SQLDataType::Int8(_) => Ok(DataType::Int64),
-        SQLDataType::UnsignedTinyInt(_) => Ok(DataType::UInt8),
-        SQLDataType::UnsignedSmallInt(_) | SQLDataType::UnsignedInt2(_) => Ok(DataType::UInt16),
-        SQLDataType::UnsignedInt(_)
-        | SQLDataType::UnsignedInteger(_)
-        | SQLDataType::UnsignedInt4(_) => Ok(DataType::UInt32),
-        SQLDataType::UnsignedBigInt(_) | SQLDataType::UnsignedInt8(_) => Ok(DataType::UInt64),
+        SQLDataType::TinyIntUnsigned(_) => Ok(DataType::UInt8),
+        SQLDataType::SmallIntUnsigned(_) | SQLDataType::Int2Unsigned(_) => Ok(DataType::UInt16),
+        SQLDataType::IntUnsigned(_)
+        | SQLDataType::UnsignedInteger
+        | SQLDataType::Int4Unsigned(_) => Ok(DataType::UInt32),
+        SQLDataType::BigIntUnsigned(_) | SQLDataType::Int8Unsigned(_) => Ok(DataType::UInt64),
         SQLDataType::Float(_) => Ok(DataType::Float32),
         SQLDataType::Real | SQLDataType::Float4 => Ok(DataType::Float32),
-        SQLDataType::Double | SQLDataType::DoublePrecision | SQLDataType::Float8 => {
+        SQLDataType::Double(_) | SQLDataType::DoublePrecision | SQLDataType::Float8 => {
             Ok(DataType::Float64)
         }
         SQLDataType::Char(_)

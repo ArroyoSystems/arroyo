@@ -13,7 +13,7 @@ use arroyo_rpc::{
 };
 use arroyo_state::timestamp_table_config;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -240,7 +240,7 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
         let join_execution_plan = join_physical_plan_node.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new())?,
+            &RuntimeEnvBuilder::new().build()?,
             &codec,
         )?;
 

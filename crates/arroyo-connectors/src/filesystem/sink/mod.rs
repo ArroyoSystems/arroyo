@@ -25,6 +25,7 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use datafusion::execution::SessionStateBuilder;
+use datafusion::logical_expr::ScalarFunctionArgs;
 use datafusion::prelude::concat;
 use datafusion::{
     common::{Column, Result as DFResult},
@@ -208,7 +209,7 @@ fn partition_string_for_fields_and_time(
     let time_function = timestamp_logical_expression(time_partition_pattern)?;
     let function = concat(vec![
         time_function,
-        Expr::Literal(ScalarValue::Utf8(Some("/".to_string()))),
+        Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
         field_function,
     ]);
     compile_expression(&function, schema)
@@ -252,7 +253,7 @@ fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]
                 } else {
                     format!("/{name}=")
                 };
-                vec![Expr::Literal(ScalarValue::Utf8(Some(preamble))), expr]
+                vec![Expr::Literal(ScalarValue::Utf8(Some(preamble)), None), expr]
             })
             .collect(),
     );
@@ -1890,7 +1891,8 @@ impl ScalarUDFImpl for TimestampFormattingUDF {
         Ok(DataType::Utf8)
     }
 
-    fn invoke(&self, args: &[ColumnarValue]) -> DFResult<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
+        let args = args.args;
         let (array, scalar) = match &args[0] {
             ColumnarValue::Array(array) => (array.clone(), false),
             ColumnarValue::Scalar(scalar) => (scalar.to_array_of_size(1)?, true),

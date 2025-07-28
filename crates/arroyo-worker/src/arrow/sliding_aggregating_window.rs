@@ -26,10 +26,8 @@ use arroyo_operator::context::Collector;
 use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
-use datafusion::execution::{
-    runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
-};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
@@ -483,7 +481,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
 
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnvBuilder::new().build()?,
             &codec,
         )?;
 
@@ -498,14 +496,14 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         };
         let finish_execution_plan = finish_plan.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnvBuilder::new().build().unwrap(),
             &final_codec,
         )?;
 
         let final_projection = PhysicalPlanNode::decode(&mut config.final_projection.as_slice())?;
         let final_projection = final_projection.try_into_physical_plan(
             registry.as_ref(),
-            &RuntimeEnv::try_new(RuntimeConfig::new()).unwrap(),
+            &RuntimeEnvBuilder::new().build().unwrap(),
             &final_codec,
         )?;
 

@@ -3,6 +3,7 @@ use arrow_schema::DataType;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+pub mod encoders;
 pub mod schema;
 
 pub fn field_to_json_schema(field: &Field) -> Value {

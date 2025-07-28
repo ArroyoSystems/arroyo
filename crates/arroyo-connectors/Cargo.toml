@@ -53,7 +53,7 @@ sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 # SSE
 eventsource-client = "0.13.0"
 
-# Websocket
+# Websocket\
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 
 # Webhook
@@ -77,6 +77,7 @@ uuid = { version = "1.7.0", features = ["v4"] }
 parquet = { workspace = true, features = ["async"]}
 object_store = { workspace = true }
 deltalake = { workspace = true, features = ["s3", "gcs"] }
+delta_kernel = {workspace =  true, features = ["arrow-55", "arrow-conversion"]}
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 
 # MQTT
