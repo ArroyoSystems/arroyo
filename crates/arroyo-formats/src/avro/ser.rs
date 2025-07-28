@@ -2,8 +2,8 @@ use apache_avro::types::{Record, Value};
 use apache_avro::Schema;
 use arrow_array::cast::AsArray;
 use arrow_array::types::{
-    Float16Type, Float32Type, Float64Type, Int32Type, Int64Type, Int8Type, TimestampNanosecondType,
-    UInt32Type, UInt64Type, UInt8Type,
+    Decimal128Type, Float16Type, Float32Type, Float64Type, Int32Type, Int64Type, Int8Type,
+    TimestampNanosecondType, UInt32Type, UInt64Type, UInt8Type,
 };
 use arrow_array::{Array, ArrayRef, RecordBatch};
 use arrow_schema::{DataType, TimeUnit};
@@ -126,6 +126,14 @@ fn serialize_column<T: SerializeTarget>(
         DataType::Float16 => write_primitive!(Float16Type, f32, Value::Float),
         DataType::Float32 => write_primitive!(Float32Type, f32, Value::Float),
         DataType::Float64 => write_primitive!(Float64Type, f64, Value::Double),
+
+        DataType::Decimal128(_, _) => {
+            write_arrow_value!(
+                ArrayRef::as_primitive::<Decimal128Type>,
+                Value::Decimal,
+                |v: i128| { v.to_be_bytes().try_into().unwrap() }
+            );
+        }
 
         DataType::Timestamp(TimeUnit::Nanosecond, _) => write_arrow_value!(
             ArrayRef::as_primitive::<TimestampNanosecondType>,
@@ -309,6 +317,7 @@ mod tests {
             Field::new("name", DataType::Utf8, false),
             Field::new("favorite_number", DataType::Int32, false),
             Field::new("favorite_color", DataType::Utf8, true),
+            Field::new("favorite_decimal", DataType::Decimal128(10, 5), false),
             Field::new(
                 "address",
                 DataType::Struct(address_fields.clone().into()),
@@ -329,6 +338,7 @@ mod tests {
         let names = vec!["Alyssa", "Ben", "Charlie"];
         let favorite_numbers = vec![256, 7, 0];
         let favorite_colors = vec![None, Some("red"), None];
+        let favorite_decimals = vec![100, 110, -3099];
 
         let mut address_builder = StructBuilder::from_fields(address_fields, 3);
         let mut second_address_builder = StructBuilder::from_fields(second_address_fields, 3);
@@ -415,6 +425,11 @@ mod tests {
                 Arc::new(arrow_array::StringArray::from(names)),
                 Arc::new(arrow_array::Int32Array::from(favorite_numbers)),
                 Arc::new(arrow_array::StringArray::from(favorite_colors)),
+                Arc::new(
+                    arrow_array::Decimal128Array::from(favorite_decimals)
+                        .with_precision_and_scale(10, 5)
+                        .unwrap(),
+                ),
                 Arc::new(address_builder.finish()),
                 Arc::new(second_address_builder.finish()),
                 Arc::new(numbers.finish()),
@@ -431,6 +446,10 @@ mod tests {
                     ("name".to_string(), String("Alyssa".to_string())),
                     ("favorite_number".to_string(), Int(256)),
                     ("favorite_color".to_string(), Union(0, Box::new(Null))),
+                    (
+                        "favorite_decimal".to_string(),
+                        Decimal(apache_avro::Decimal::try_from(100i128.to_be_bytes()).unwrap())
+                    ),
                     (
                         "address".to_string(),
                         Record(vec![
@@ -469,6 +488,10 @@ mod tests {
                         Union(1, Box::new(String("red".to_string())))
                     ),
                     (
+                        "favorite_decimal".to_string(),
+                        Decimal(apache_avro::Decimal::try_from(110i128.to_be_bytes()).unwrap())
+                    ),
+                    (
                         "address".to_string(),
                         Record(vec![
                             ("street".to_string(), String("456 Oak St".to_string())),
@@ -495,6 +518,10 @@ mod tests {
                     ("name".to_string(), String("Charlie".to_string())),
                     ("favorite_number".to_string(), Int(0)),
                     ("favorite_color".to_string(), Union(0, Box::new(Null))),
+                    (
+                        "favorite_decimal".to_string(),
+                        Decimal(apache_avro::Decimal::try_from((-3099i128).to_be_bytes()).unwrap())
+                    ),
                     (
                         "address".to_string(),
                         Record(vec![

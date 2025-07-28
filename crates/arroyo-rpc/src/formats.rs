@@ -53,7 +53,7 @@ impl TryFrom<&str> for DecimalEncoding {
             "number" => Ok(Self::Number),
             "string" => Ok(Self::String),
             "bytes" => Ok(Self::Bytes),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }

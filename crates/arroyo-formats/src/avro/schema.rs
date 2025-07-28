@@ -102,7 +102,7 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
         DataType::Decimal128(precision, scale) => {
             return json!({
-                "types": "bytes",
+                "type": "bytes",
                 "logicalType": "decimal",
                 "scale": scale,
                 "precision": precision,

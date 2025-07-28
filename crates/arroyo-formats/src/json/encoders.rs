@@ -29,8 +29,12 @@ impl EncoderFactory for ArroyoEncoderFactory {
         array: &'a dyn Array,
         _options: &'a EncoderOptions,
     ) -> Result<Option<NullableEncoder<'a>>, ArrowError> {
-        let encoder: Box<dyn Encoder> = match (self.timestamp_format, array.data_type()) {
-            (TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Second, _)) => {
+        let encoder: Box<dyn Encoder> = match (
+            self.decimal_encoding,
+            self.timestamp_format,
+            array.data_type(),
+        ) {
+            (_, TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Second, _)) => {
                 Box::new(UnixMillisTimeEncoder::TimestampSeconds(
                     array
                         .as_any()
@@ -39,7 +43,7 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
-            (TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Millisecond, _)) => {
+            (_, TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Millisecond, _)) => {
                 Box::new(UnixMillisTimeEncoder::TimestampMillis(
                     array
                         .as_any()
@@ -48,7 +52,7 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
-            (TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Microsecond, _)) => {
+            (_, TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Microsecond, _)) => {
                 Box::new(UnixMillisTimeEncoder::TimestampMicros(
                     array
                         .as_any()
@@ -57,7 +61,7 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
-            (TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Nanosecond, _)) => {
+            (_, TimestampFormat::UnixMillis, DataType::Timestamp(TimeUnit::Nanosecond, _)) => {
                 Box::new(UnixMillisTimeEncoder::TimestampNanos(
                     array
                         .as_any()
@@ -66,7 +70,7 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
-            (TimestampFormat::UnixMillis, DataType::Date32) => {
+            (_, TimestampFormat::UnixMillis, DataType::Date32) => {
                 Box::new(UnixMillisTimeEncoder::Date32(
                     array
                         .as_any()
@@ -75,7 +79,7 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
-            (TimestampFormat::UnixMillis, DataType::Date64) => {
+            (_, TimestampFormat::UnixMillis, DataType::Date64) => {
                 Box::new(UnixMillisTimeEncoder::Date64(
                     array
                         .as_any()
@@ -84,7 +88,7 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
-            (_, DataType::Utf8) => {
+            (_, _, DataType::Utf8) => {
                 if matches!(
                     ArroyoExtensionType::from_map(field.metadata()),
                     Some(ArroyoExtensionType::JSON)
@@ -93,6 +97,24 @@ impl EncoderFactory for ArroyoEncoderFactory {
                 } else {
                     return Ok(None);
                 }
+            }
+            (DecimalEncoding::Bytes, _, DataType::Decimal128(_, _)) => {
+                Box::new(DecimalEncoder::BytesEncoder(
+                    array
+                        .as_any()
+                        .downcast_ref::<Decimal128Array>()
+                        .unwrap()
+                        .clone(),
+                ))
+            }
+            (DecimalEncoding::String, _, DataType::Decimal128(_, _)) => {
+                Box::new(DecimalEncoder::StringEncoder(
+                    array
+                        .as_any()
+                        .downcast_ref::<Decimal128Array>()
+                        .unwrap()
+                        .clone(),
+                ))
             }
             _ => {
                 return Ok(None);
@@ -112,11 +134,15 @@ impl Encoder for DecimalEncoder {
     fn encode(&mut self, idx: usize, out: &mut Vec<u8>) {
         match self {
             DecimalEncoder::StringEncoder(array) => {
+                out.push(b'"');
                 out.extend_from_slice(array.value_as_string(idx).as_bytes());
+                out.push(b'"');
             }
             DecimalEncoder::BytesEncoder(array) => {
                 let v = array.value(idx);
+                out.push(b'"');
                 out.extend_from_slice(&BASE64_STANDARD.encode(&v.to_be_bytes()).as_bytes());
+                out.push(b'"');
             }
         }
     }
