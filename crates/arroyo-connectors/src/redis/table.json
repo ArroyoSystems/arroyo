@@ -3,7 +3,6 @@
     "title": "RedisTable",
     "properties": {
         "connectorType": {
-            "type": "object",
             "title": "Table Type",
             "oneOf": [
                 {
@@ -11,7 +10,6 @@
                     "title": "Sink",
                     "properties": {
                         "target": {
-                            "type": "object",
                             "title": "Target",
                             "description": "Configures how data is written to Redis",
                             "oneOf": [

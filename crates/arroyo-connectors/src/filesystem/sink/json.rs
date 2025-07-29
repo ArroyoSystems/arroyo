@@ -1,15 +1,15 @@
 use std::{fs::File, io::Write, time::Instant};
 
-use arrow::record_batch::RecordBatch;
-use arroyo_formats::ser::ArrowSerializer;
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
-use bytes::{Bytes, BytesMut};
-
 use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
     BatchBufferingWriter, MultiPartWriterStats,
 };
+use crate::filesystem::config;
+use arrow::record_batch::RecordBatch;
+use arroyo_formats::ser::ArrowSerializer;
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
+use bytes::{Bytes, BytesMut};
 
 pub struct JsonWriter {
     current_buffer: BytesMut,
@@ -17,10 +17,10 @@ pub struct JsonWriter {
 }
 
 impl BatchBufferingWriter for JsonWriter {
-    fn new(_: &super::FileSystemTable, format: Option<Format>, _schema: ArroyoSchemaRef) -> Self {
+    fn new(_: &config::FileSystemSink, format: Format, _schema: ArroyoSchemaRef) -> Self {
         Self {
             current_buffer: BytesMut::new(),
-            serializer: ArrowSerializer::new(format.expect("should have format")),
+            serializer: ArrowSerializer::new(format),
         }
     }
     fn suffix() -> String {
@@ -76,15 +76,15 @@ impl LocalWriter for JsonLocalWriter {
     fn new(
         tmp_path: String,
         final_path: String,
-        _table_properties: &super::FileSystemTable,
-        format: Option<Format>,
+        _table_properties: &config::FileSystemSink,
+        format: Format,
         schema: ArroyoSchemaRef,
     ) -> Self {
         let file = File::create(&tmp_path).unwrap();
         JsonLocalWriter {
             tmp_path,
             final_path,
-            serializer: ArrowSerializer::new(format.expect("should have format")),
+            serializer: ArrowSerializer::new(format),
             file,
             stats: None,
             schema,

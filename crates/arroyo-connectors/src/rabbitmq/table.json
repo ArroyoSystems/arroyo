@@ -8,7 +8,6 @@
       "description": "The RabbitMQ stream to use for this table"
     },
     "type": {
-      "type": "object",
       "title": "Table Type",
       "oneOf": [
         {

@@ -202,11 +202,11 @@ function BooleanWidget({
   readonly?: boolean;
 }) {
   useEffect(() => {
-    if (!value) {
+    if (value === undefined) { 
       // @ts-ignore
       onChange({ target: { name: path, value: false } });
     }
-  }, [path]);
+  }, [value, path]);
 
   return (
     <FormControl isInvalid={errors[path]}>
@@ -396,7 +396,7 @@ function SelectWidget({
   resetField: (field: string) => any;
   readonly?: boolean;
 }) {
-  useEffect(() => {
+   useEffect(() => {
     if (!value) {
       if (defaultValue) {
         // @ts-ignore
@@ -406,7 +406,7 @@ function SelectWidget({
         onChange({ target: { name: path, value: options[0].value } });
       }
     }
-  });
+  }, [value]);
 
   const onChangeWrapper = (e: React.ChangeEvent<any>) => {
     resetField(valuePath);
@@ -859,58 +859,7 @@ export function FormInner({
                 );
               }
               case 'object': {
-                if (property.oneOf) {
-                  const typeKey = '__meta.' + nextPath + '.type';
-                  let value = traversePath(values, typeKey);
-
-                  // @ts-ignore
-                  const inSchema = property.oneOf.find(x => x.title == value) || property.oneOf[0];
-                  return (
-                    <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
-                      <legend
-                        style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
-                      >
-                        {property.title || key}
-                      </legend>
-                      <Stack p={4}>
-                        <SelectWidget
-                          path={typeKey}
-                          valuePath={nextPath}
-                          description={property.description}
-                          options={property.oneOf.map(oneOf => ({
-                            // @ts-ignore
-                            value: oneOf.title!,
-                            // @ts-ignore
-                            label:
-                              // @ts-ignore
-                              oneOf.title! +
-                              // @ts-ignore
-                              (oneOf.description ? ` — ${oneOf.description.toLowerCase()}` : ''),
-                          }))}
-                          value={value}
-                          onChange={onChange}
-                          resetField={resetField}
-                          readonly={readonly}
-                        />
-                        {value != undefined && (
-                          <Box p={4}>
-                            <FormInner
-                              path={nextPath}
-                              key={value}
-                              // @ts-ignore
-                              schema={inSchema}
-                              errors={errors}
-                              onChange={onChange}
-                              values={values}
-                              resetField={resetField}
-                              readonly={readonly}
-                            />
-                          </Box>
-                        )}
-                      </Stack>
-                    </fieldset>
-                  );
-                } else if (property.properties != undefined) {
+                if (property.properties != undefined) {
                   return (
                     <FormControl isInvalid={errors[nextPath]}>
                       <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
@@ -954,8 +903,61 @@ export function FormInner({
                   return <></>;
                 }
               }
+              case undefined: {
+                if (property.oneOf) {
+                  const typeKey = '__meta.' + nextPath + '.type';
+                  let value = traversePath(values, typeKey);
+                  
+                  // @ts-ignore
+                  const inSchema = property.oneOf.find(x => x.title == value) || property.oneOf[0];
+                  return (
+                    <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
+                      <legend
+                        style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
+                      >
+                        {property.title || key}
+                      </legend>
+                      <Stack p={4}>
+                        <SelectWidget
+                          path={typeKey}
+                          valuePath={nextPath}
+                          description={property.description}
+                          options={property.oneOf!.map(oneOf => ({
+                            // @ts-ignore
+                            value: oneOf.title!,
+                            // @ts-ignore
+                            label:
+                            // @ts-ignore
+                              oneOf.title! +
+                              // @ts-ignore
+                              (oneOf.description ? ` — ${oneOf.description.toLowerCase()}` : ''),
+                          }))}
+                          value={value}
+                          onChange={onChange}
+                          resetField={resetField}
+                          readonly={readonly}
+                        />
+                        {value != undefined && (
+                          <Box p={4}>
+                            <FormInner
+                              path={nextPath}
+                              key={value}
+                              // @ts-ignore
+                              schema={inSchema}
+                              errors={errors}
+                              onChange={onChange}
+                              values={values}
+                              resetField={resetField}
+                              readonly={readonly}
+                            />
+                          </Box>
+                        )}
+                      </Stack>
+                    </fieldset>);
+                }
+              }
               default: {
-                console.warn('Unsupported field type', property.type);
+                console.warn('Unsupported field type', property);
               }
             }
           }
@@ -999,6 +1001,7 @@ export function JsonForm({
   ajv.addKeyword('sensitive');
   ajv.addFormat('var-str', { validate: () => true });
   ajv.addFormat('autocomplete', { validate: () => true });
+  ajv.addFormat('uint64', { validate: () => true});
   const memoAjv = useMemo(() => addFormats(ajv), [schema]);
 
   const formik = useFormik({

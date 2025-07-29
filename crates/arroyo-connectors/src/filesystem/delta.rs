@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use arroyo_operator::connector::Connection;
 use arroyo_storage::BackendConfig;
 
@@ -7,16 +7,14 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
-use crate::filesystem::{
-    file_system_sink_from_options, CommitStyle, FileSettings, FileSystemTable, FormatSettings,
-    PartitionShuffleSettings, Partitioning, TableType,
-};
 use crate::EmptyConfig;
 
+use crate::filesystem::config::{
+    DeltaLakeSink, DeltaLakeTable, DeltaLakeTableType, FileSystemSink,
+};
+use crate::filesystem::{make_sink, TableFormat};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
-
-use super::sink::{LocalParquetFileSystemSink, ParquetFileSystemSink};
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
@@ -25,7 +23,7 @@ pub struct DeltaLakeConnector {}
 impl Connector for DeltaLakeConnector {
     type ProfileT = EmptyConfig;
 
-    type TableT = FileSystemTable;
+    type TableT = DeltaLakeTable;
 
     fn name(&self) -> &'static str {
         "delta"
@@ -78,62 +76,35 @@ impl Connector for DeltaLakeConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
-        let TableType::Sink {
-            write_path,
-            file_settings,
-            format_settings,
-            shuffle_by_partition,
-            ..
-        } = &table.table_type
-        else {
-            bail!("Delta Lake connector only supports sink tables");
-        };
-        // confirm commit style is DeltaLake
-        if let Some(CommitStyle::DeltaLake) = file_settings
-            .as_ref()
-            .ok_or_else(|| anyhow!("no file_settings"))?
-            .commit_style
-        {
-            // ok
-        } else {
-            bail!("commit_style must be DeltaLake");
-        }
-
-        let backend_config = BackendConfig::parse_url(write_path, true)?;
-        let is_local = backend_config.is_local();
-
-        let partition_fields = match (shuffle_by_partition, file_settings) {
-            (
-                Some(PartitionShuffleSettings {
-                    enabled: Some(true),
-                    ..
-                }),
-                Some(FileSettings {
-                    partitioning:
-                        Some(Partitioning {
-                            partition_fields, ..
-                        }),
-                    ..
-                }),
-            ) => Some(partition_fields.clone()),
-            _ => None,
-        };
-
-        let description = match (&format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => "LocalDeltaLake<Parquet>".to_string(),
-            (Some(FormatSettings::Parquet { .. }), false) => "DeltaLake<Parquet>".to_string(),
-            _ => bail!("Delta Lake sink only supports Parquet format"),
-        };
-
         let schema = schema
             .map(|s| s.to_owned())
-            .ok_or_else(|| anyhow!("no schema defined for Delta Lake sink"))?;
+            .ok_or_else(|| anyhow!("no schema defined for DeltaLake connection"))?;
 
         let format = schema
             .format
             .as_ref()
             .map(|t| t.to_owned())
-            .ok_or_else(|| anyhow!("'format' must be set for Delta Lake connection"))?;
+            .ok_or_else(|| anyhow!("'format' must be set for DeltaLake connection"))?;
+
+        let (description, connection_type, partition_fields) = match &table.table_type {
+            DeltaLakeTableType::Sink(DeltaLakeSink {
+                path, partitioning, ..
+            }) => {
+                BackendConfig::parse_url(path, true)?;
+
+                let partition_fields = match (
+                    partitioning.shuffle_by_partition.enabled,
+                    &partitioning.partition_fields.is_empty(),
+                ) {
+                    (true, false) => Some(partitioning.partition_fields.clone()),
+                    _ => None,
+                };
+
+                let description = format!("DeltaLakeSink<{format}, {path}>");
+
+                (description, ConnectionType::Sink, partition_fields)
+            }
+        };
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -149,7 +120,7 @@ impl Connector for DeltaLakeConnector {
             id,
             self.name(),
             name.to_string(),
-            ConnectionType::Sink,
+            connection_type,
             schema,
             &config,
             description,
@@ -164,9 +135,7 @@ impl Connector for DeltaLakeConnector {
         schema: Option<&ConnectionSchema>,
         _: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
-
-        self.from_config(None, name, EmptyConfig {}, table, schema)
+        self.from_config(None, name, EmptyConfig {}, options.pull_struct()?, schema)
     }
 
     fn make_operator(
@@ -175,40 +144,19 @@ impl Connector for DeltaLakeConnector {
         table: Self::TableT,
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
-        let TableType::Sink {
-            write_path,
-            file_settings,
-            format_settings,
-            ..
-        } = &table.table_type
-        else {
-            bail!("Delta Lake connector only supports sink tables");
-        };
-        // confirm commit style is DeltaLake
-        if let Some(CommitStyle::DeltaLake) = file_settings
-            .as_ref()
-            .ok_or_else(|| anyhow!("no file_settings"))?
-            .commit_style
-        {
-            // ok
-        } else {
-            bail!("commit_style must be DeltaLake");
-        }
-
-        let backend_config = BackendConfig::parse_url(write_path, true)?;
-        let is_local = backend_config.is_local();
-        match (&format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => {
-                Ok(ConstructedOperator::from_operator(Box::new(
-                    LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
-                )))
-            }
-            (Some(FormatSettings::Parquet { .. }), false) => {
-                Ok(ConstructedOperator::from_operator(Box::new(
-                    ParquetFileSystemSink::new(table, config),
-                )))
-            }
-            _ => bail!("Delta Lake sink only supports Parquet format"),
+        match table.table_type {
+            DeltaLakeTableType::Sink(sink) => make_sink(
+                FileSystemSink {
+                    path: sink.path,
+                    storage_options: sink.storage_options,
+                    rolling_policy: sink.rolling_policy,
+                    file_naming: sink.file_naming,
+                    partitioning: sink.partitioning,
+                    multipart: sink.multipart,
+                },
+                config,
+                TableFormat::Delta,
+            ),
         }
     }
 }

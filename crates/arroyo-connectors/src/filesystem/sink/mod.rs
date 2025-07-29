@@ -1,13 +1,3 @@
-use std::{
-    any::Any,
-    collections::HashMap,
-    fmt::{Debug, Formatter},
-    marker::PhantomData,
-    pin::Pin,
-    sync::Arc,
-    time::{Duration, Instant, SystemTime},
-};
-
 use ::arrow::{
     array::StringBuilder,
     datatypes::{DataType, TimeUnit},
@@ -16,9 +6,7 @@ use ::arrow::{
 };
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{
-    df::ArroyoSchemaRef, formats::Format, log_trace_event, OperatorConfig, TIMESTAMP_FIELD,
-};
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -40,6 +28,15 @@ use deltalake::DeltaTable;
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+    pin::Pin,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime},
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
@@ -57,101 +54,77 @@ use self::{
     json::{JsonLocalWriter, JsonWriter},
     local::LocalFileSystemWriter,
     parquet::{
-        batches_by_partition, representitive_timestamp, ParquetLocalWriter,
-        RecordBatchBufferingWriter,
+        batches_by_partition, representitive_timestamp, ParquetBatchBufferingWriter,
+        ParquetLocalWriter,
     },
 };
 
+use crate::filesystem::config::{NamingConfig, PartitioningConfig};
 use crate::filesystem::sink::delta::load_or_create_table;
-use crate::filesystem::{
-    CommitStyle, FileNaming, FileSettings, FileSystemTable, FilenameStrategy, TableType,
-};
+use crate::filesystem::{config, FilenameStrategy, TableFormat};
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
 
 const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
 
-pub struct FileSystemSink<R: MultiPartWriter + Send + 'static> {
+pub struct FileSystemSink<BBW: BatchBufferingWriter> {
     sender: Option<Sender<FileSystemMessages>>,
     partitioner: Option<Arc<dyn PhysicalExpr>>,
     checkpoint_receiver: Option<Receiver<CheckpointData>>,
-    table: FileSystemTable,
-    format: Option<Format>,
-    commit_strategy: CommitStrategy,
-    _ts: PhantomData<R>,
+    table: config::FileSystemSink,
+    format: Format,
+    table_format: TableFormat,
+    _ts: PhantomData<BBW>,
 }
 
-pub type ParquetFileSystemSink = FileSystemSink<BatchMultipartWriter<RecordBatchBufferingWriter>>;
+pub type ParquetFileSystemSink = FileSystemSink<ParquetBatchBufferingWriter>;
 
-pub type JsonFileSystemSink = FileSystemSink<BatchMultipartWriter<JsonWriter>>;
+pub type JsonFileSystemSink = FileSystemSink<JsonWriter>;
 
 pub type LocalParquetFileSystemSink = LocalFileSystemWriter<ParquetLocalWriter>;
 
 pub type LocalJsonFileSystemSink = LocalFileSystemWriter<JsonLocalWriter>;
 
-impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
+impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
     pub fn create_and_start(
-        table: FileSystemTable,
-        format: Option<Format>,
+        config: config::FileSystemSink,
+        table_format: TableFormat,
+        format: Format,
     ) -> TwoPhaseCommitterOperator<Self> {
-        let TableType::Sink { file_settings, .. } = table.clone().table_type else {
-            unreachable!("multi-part writer can only be used as sink");
-        };
-        let commit_strategy = match file_settings.as_ref().unwrap().commit_style.unwrap() {
-            CommitStyle::Direct => CommitStrategy::PerSubtask,
-            CommitStyle::DeltaLake => CommitStrategy::PerOperator,
-        };
-
         TwoPhaseCommitterOperator::new(Self {
             sender: None,
             checkpoint_receiver: None,
-            table,
+            table: config,
             format,
-            commit_strategy,
+            table_format,
             partitioner: None,
-            _ts: PhantomData,
+            _ts: Default::default(),
         })
-    }
-    pub fn new(
-        table_properties: FileSystemTable,
-        config: OperatorConfig,
-    ) -> TwoPhaseCommitterOperator<Self> {
-        Self::create_and_start(table_properties, config.format)
     }
 
     pub async fn start(&mut self, schema: ArroyoSchemaRef) -> Result<()> {
-        let TableType::Sink {
-            write_path,
-            file_settings,
-            format_settings: _,
-            storage_options,
-            ..
-        } = self.table.clone().table_type
-        else {
-            unreachable!("multi-part writer can only be used as sink");
-        };
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
 
         self.sender = Some(sender);
         self.checkpoint_receiver = Some(checkpoint_receiver);
 
-        let partition_func = get_partitioner_from_file_settings(
-            file_settings.as_ref().unwrap().clone(),
-            schema.clone(),
-        );
+        let partition_func =
+            get_partitioner_from_file_settings(&self.table.partitioning, schema.clone());
         self.partitioner = partition_func;
         let table = self.table.clone();
         let format = self.format.clone();
 
-        let provider = StorageProvider::for_url_with_options(&write_path, storage_options.clone())
-            .await
-            .unwrap();
+        let provider =
+            StorageProvider::for_url_with_options(&table.path, table.storage_options.clone())
+                .await
+                .unwrap();
 
         let mut writer = AsyncMultipartFileSystemWriter::<R>::new(
             Arc::new(provider),
             receiver,
             checkpoint_sender,
             table,
+            &self.table_format,
             format,
             schema,
         )
@@ -165,23 +138,21 @@ impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
 }
 
 fn get_partitioner_from_file_settings(
-    file_settings: FileSettings,
+    partitioning: &PartitioningConfig,
     schema: ArroyoSchemaRef,
 ) -> Option<Arc<dyn PhysicalExpr>> {
-    let partitions = file_settings.partitioning?;
     match (
-        partitions.time_partition_pattern,
-        partitions.partition_fields.is_empty(),
+        &partitioning.time_partition_pattern,
+        &partitioning.partition_fields,
     ) {
-        (None, false) => {
-            Some(partition_string_for_fields(schema, &partitions.partition_fields).unwrap())
+        (None, fields) if !fields.is_empty() => {
+            Some(partition_string_for_fields(schema, fields).unwrap())
         }
-        (None, true) => None,
-        (Some(pattern), false) => Some(
-            partition_string_for_fields_and_time(schema, &partitions.partition_fields, pattern)
-                .unwrap(),
-        ),
-        (Some(pattern), true) => Some(partition_string_for_time(schema, pattern).unwrap()),
+        (None, _) => None,
+        (Some(pattern), fields) if !fields.is_empty() => {
+            Some(partition_string_for_fields_and_time(schema, fields, pattern).unwrap())
+        }
+        (Some(pattern), _) => Some(partition_string_for_time(schema, pattern).unwrap()),
     }
 }
 
@@ -195,7 +166,7 @@ fn partition_string_for_fields(
 
 fn partition_string_for_time(
     schema: ArroyoSchemaRef,
-    time_partition_pattern: String,
+    time_partition_pattern: &str,
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let function = timestamp_logical_expression(time_partition_pattern)?;
     compile_expression(&function, schema)
@@ -204,7 +175,7 @@ fn partition_string_for_time(
 fn partition_string_for_fields_and_time(
     schema: ArroyoSchemaRef,
     partition_fields: &[String],
-    time_partition_pattern: String,
+    time_partition_pattern: &str,
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let field_function = field_logical_expression(schema.clone(), partition_fields)?;
     let time_function = timestamp_logical_expression(time_partition_pattern)?;
@@ -261,8 +232,8 @@ fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]
     Ok(function)
 }
 
-fn timestamp_logical_expression(time_partition_pattern: String) -> Result<Expr> {
-    let udf = TimestampFormattingUDF::new(time_partition_pattern);
+fn timestamp_logical_expression(time_partition_pattern: &str) -> Result<Expr> {
+    let udf = TimestampFormattingUDF::new(time_partition_pattern.to_string());
     let scalar_function = ScalarFunction::new_udf(
         Arc::new(ScalarUDF::new_from_impl(udf)),
         vec![Expr::Column(Column::from_name(TIMESTAMP_FIELD))],
@@ -446,22 +417,22 @@ pub enum InFlightPartCheckpoint {
     InProgressPart { part: usize, data: Vec<u8> },
 }
 
-struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
+struct AsyncMultipartFileSystemWriter<BBW: BatchBufferingWriter> {
     active_writers: HashMap<Option<String>, String>,
     watermark: Option<SystemTime>,
     max_file_index: usize,
     task_info: Option<Arc<TaskInfo>>,
     object_store: Arc<StorageProvider>,
-    writers: HashMap<String, R>,
+    writers: HashMap<String, BatchMultipartWriter<BBW>>,
     receiver: Receiver<FileSystemMessages>,
     checkpoint_sender: Sender<CheckpointData>,
     futures: FuturesUnordered<BoxedTryFuture<MultipartCallbackWithName>>,
     files_to_finish: Vec<FileToFinish>,
-    properties: FileSystemTable,
+    properties: config::FileSystemSink,
     rolling_policies: Vec<RollingPolicy>,
     commit_state: CommitState,
-    file_naming: FileNaming,
-    format: Option<Format>,
+    file_naming: NamingConfig,
+    format: Format,
     schema: ArroyoSchemaRef,
 }
 
@@ -471,50 +442,8 @@ pub enum CommitState {
         last_version: i64,
         table: Box<DeltaTable>,
     },
+    Iceberg {},
     VanillaParquet,
-}
-
-#[async_trait]
-pub trait MultiPartWriter {
-    fn new(
-        object_store: Arc<StorageProvider>,
-        path: Path,
-        partition: Option<String>,
-        config: &FileSystemTable,
-        format: Option<Format>,
-        schema: ArroyoSchemaRef,
-        task_info: Arc<TaskInfo>,
-    ) -> Self;
-
-    fn name(&self) -> String;
-
-    fn suffix() -> String;
-
-    fn partition(&self) -> Option<String>;
-
-    async fn insert_batch(
-        &mut self,
-        value: RecordBatch,
-    ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>>;
-
-    fn handle_initialization(
-        &mut self,
-        multipart_id: String,
-    ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>>;
-
-    fn handle_completed_part(
-        &mut self,
-        part_idx: usize,
-        upload_part: PartId,
-    ) -> Result<Option<FileToFinish>>;
-
-    fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData;
-
-    fn close(&mut self) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>>;
-
-    fn stats(&self) -> Option<MultiPartWriterStats>;
-
-    fn get_finished_file(&mut self) -> FileToFinish;
 }
 
 async fn from_checkpoint(
@@ -689,30 +618,30 @@ impl RollingPolicy {
         }
     }
 
-    fn from_file_settings(file_settings: &FileSettings) -> Vec<RollingPolicy> {
+    fn from_file_settings(table: &config::FileSystemSink) -> Vec<RollingPolicy> {
         let mut policies = vec![];
-        let part_size_limit = file_settings.max_parts.unwrap_or(1000) as usize;
+        let part_size_limit = table.multipart.max_parts.map(|d| d.get()).unwrap_or(1000) as usize;
+
         // this is a hard limit, so will always be present.
         policies.push(RollingPolicy::PartLimit(part_size_limit));
-        if let Some(file_size_target) = file_settings.target_file_size {
+        if let Some(file_size_target) = table.rolling_policy.file_size_bytes {
             policies.push(RollingPolicy::SizeLimit(file_size_target as usize))
         }
-        if let Some(inactivity_timeout) = file_settings
-            .inactivity_rollover_seconds
-            .map(|seconds| Duration::from_secs(seconds as u64))
-        {
-            policies.push(RollingPolicy::InactivityDuration(inactivity_timeout))
+
+        if let Some(s) = table.rolling_policy.inactivity_seconds {
+            policies.push(RollingPolicy::InactivityDuration(Duration::from_secs(s)))
         }
-        let rollover_timeout =
-            Duration::from_secs(file_settings.rollover_seconds.unwrap_or(30) as u64);
-        policies.push(RollingPolicy::RolloverDuration(rollover_timeout));
-        if let Some(partitioning) = &file_settings.partitioning {
-            if let Some(pattern) = &partitioning.time_partition_pattern {
-                policies.push(RollingPolicy::WatermarkExpiration {
-                    pattern: pattern.clone(),
-                });
-            }
+
+        if let Some(s) = table.rolling_policy.interval_seconds {
+            policies.push(RollingPolicy::RolloverDuration(Duration::from_secs(s)));
         }
+
+        if let Some(pattern) = &table.partitioning.time_partition_pattern {
+            policies.push(RollingPolicy::WatermarkExpiration {
+                pattern: pattern.clone(),
+            });
+        }
+
         policies
     }
 }
@@ -727,43 +656,33 @@ pub struct MultiPartWriterStats {
     representative_timestamp: SystemTime,
 }
 
-impl<R> AsyncMultipartFileSystemWriter<R>
+impl<BBW> AsyncMultipartFileSystemWriter<BBW>
 where
-    R: MultiPartWriter,
+    BBW: BatchBufferingWriter,
 {
     async fn new(
         object_store: Arc<StorageProvider>,
         receiver: Receiver<FileSystemMessages>,
         checkpoint_sender: Sender<CheckpointData>,
-        writer_properties: FileSystemTable,
-        format: Option<Format>,
+        sink_config: config::FileSystemSink,
+        table_format: &TableFormat,
+        format: Format,
         schema: ArroyoSchemaRef,
     ) -> Result<Self> {
-        let file_settings = if let TableType::Sink {
-            ref file_settings, ..
-        } = writer_properties.table_type
-        {
-            file_settings.as_ref().unwrap()
-        } else {
-            unreachable!("AsyncMultipartFileSystemWriter can only be used as a sink");
-        };
-
-        let commit_state = match file_settings.commit_style.unwrap() {
-            CommitStyle::DeltaLake => CommitState::DeltaLake {
+        let commit_state = match table_format {
+            TableFormat::Delta => CommitState::DeltaLake {
                 last_version: -1,
                 table: Box::new(
                     load_or_create_table(&object_store, &schema.schema_without_timestamp()).await?,
                 ),
             },
-            CommitStyle::Direct => CommitState::VanillaParquet,
+            TableFormat::None => CommitState::VanillaParquet,
+            TableFormat::Iceberg { .. } => todo!(),
         };
-        let mut file_naming = file_settings.file_naming.clone().unwrap_or(FileNaming {
-            strategy: Some(FilenameStrategy::Serial),
-            prefix: None,
-            suffix: None,
-        });
+        let mut file_naming = sink_config.file_naming.clone();
+
         if file_naming.suffix.is_none() {
-            file_naming.suffix = Some(R::suffix());
+            file_naming.suffix = Some(BBW::suffix());
         }
 
         Ok(Self {
@@ -777,8 +696,8 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
-            rolling_policies: RollingPolicy::from_file_settings(file_settings),
-            properties: writer_properties,
+            rolling_policies: RollingPolicy::from_file_settings(&sink_config),
+            properties: sink_config.clone(),
             commit_state,
             file_naming,
             format,
@@ -875,7 +794,10 @@ where
         Ok(())
     }
 
-    fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut R {
+    fn get_or_insert_writer(
+        &mut self,
+        partition: &Option<String>,
+    ) -> &mut BatchMultipartWriter<BBW> {
         if !self.active_writers.contains_key(partition) {
             let new_writer = self.new_writer(partition);
             self.active_writers
@@ -887,11 +809,8 @@ where
             .unwrap()
     }
 
-    fn new_writer(&mut self, partition: &Option<String>) -> R {
-        let filename_strategy = &self
-            .file_naming
-            .strategy
-            .map_or(FilenameStrategy::Serial, |v| v); // Default to serial
+    fn new_writer(&mut self, partition: &Option<String>) -> BatchMultipartWriter<BBW> {
+        let filename_strategy =  self.file_naming.strategy.unwrap_or_default();
 
         // This forms the base for naming files depending on strategy
         let filename_base = match filename_strategy {
@@ -904,7 +823,7 @@ where
             }
             FilenameStrategy::Ulid => Ulid::new().to_string(),
             FilenameStrategy::Uuid => Uuid::new_v4().to_string(),
-            FilenameStrategy::Uuidv7 => Uuid::now_v7().to_string(),
+            FilenameStrategy::UuidV7 => Uuid::now_v7().to_string(),
         };
 
         let filename = add_suffix_prefix(
@@ -918,7 +837,7 @@ where
             None => filename.clone(),
         };
 
-        R::new(
+        BatchMultipartWriter::new(
             self.object_store.clone(),
             path.into(),
             partition.clone(),
@@ -977,17 +896,24 @@ where
                 finished_files.push(file);
             }
         }
-        if let CommitState::DeltaLake {
-            last_version,
-            table,
-        } = &mut self.commit_state
-        {
-            if let Some(new_version) =
-                delta::commit_files_to_delta(&finished_files, table, *last_version).await?
-            {
-                *last_version = new_version;
+
+        match &mut self.commit_state {
+            CommitState::DeltaLake {
+                last_version,
+                table,
+            } => {
+                if let Some(new_version) =
+                    delta::commit_files_to_delta(&finished_files, table, *last_version).await?
+                {
+                    *last_version = new_version;
+                }
+            }
+            CommitState::Iceberg { .. } => {}
+            CommitState::VanillaParquet => {
+                // nothing to do
             }
         }
+
         let finished_message = CheckpointData::Finished {
             max_file_index: self.max_file_index,
             delta_version: self.delta_version(),
@@ -1000,6 +926,9 @@ where
         match &self.commit_state {
             CommitState::DeltaLake { last_version, .. } => *last_version,
             CommitState::VanillaParquet => 0,
+            CommitState::Iceberg { .. } => {
+                todo!()
+            }
         }
     }
 
@@ -1422,7 +1351,7 @@ impl MultipartManager {
 }
 
 pub trait BatchBufferingWriter: Send {
-    fn new(config: &FileSystemTable, format: Option<Format>, schema: ArroyoSchemaRef) -> Self;
+    fn new(config: &config::FileSystemSink, format: Format, schema: ArroyoSchemaRef) -> Self;
     fn suffix() -> String;
     fn add_batch_data(&mut self, data: RecordBatch);
     fn buffered_bytes(&self) -> usize;
@@ -1436,6 +1365,7 @@ pub trait BatchBufferingWriter: Send {
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
     fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes>;
 }
+
 pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     batch_buffering_writer: BBW,
     multipart_manager: MultipartManager,
@@ -1443,39 +1373,26 @@ pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     schema: ArroyoSchemaRef,
     target_part_size_bytes: usize,
 }
-#[async_trait]
-impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
+impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     fn new(
         object_store: Arc<StorageProvider>,
         path: Path,
         partition: Option<String>,
-        config: &FileSystemTable,
-        format: Option<Format>,
+        config: &config::FileSystemSink,
+        format: Format,
         schema: ArroyoSchemaRef,
         task_info: Arc<TaskInfo>,
     ) -> Self {
         let batch_buffering_writer = BBW::new(config, format, schema.clone());
-
-        let FileSystemTable {
-            table_type:
-                TableType::Sink {
-                    file_settings:
-                        Some(FileSettings {
-                            target_part_size, ..
-                        }),
-                    ..
-                },
-        } = config
-        else {
-            panic!("FileSystem source configuration in sink");
-        };
 
         Self {
             batch_buffering_writer,
             multipart_manager: MultipartManager::new(object_store, path, partition, task_info),
             stats: None,
             schema,
-            target_part_size_bytes: target_part_size
+            target_part_size_bytes: config
+                .multipart
+                .target_part_size_bytes
                 .map(|t| t as usize)
                 .unwrap_or(DEFAULT_TARGET_PART_SIZE),
         }
@@ -1483,10 +1400,6 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
 
     fn name(&self) -> String {
         self.multipart_manager.name()
-    }
-
-    fn suffix() -> String {
-        BBW::suffix()
     }
 
     fn partition(&self) -> Option<String> {
@@ -1680,7 +1593,7 @@ pub struct FileSystemDataRecovery {
 }
 
 #[async_trait]
-impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R> {
+impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R> {
     type DataRecovery = FileSystemDataRecovery;
 
     type PreCommit = FileToFinish;
@@ -1690,7 +1603,11 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
     }
 
     fn commit_strategy(&self) -> CommitStrategy {
-        self.commit_strategy
+        match &self.table_format {
+            TableFormat::None => CommitStrategy::PerSubtask,
+            TableFormat::Delta => CommitStrategy::PerOperator,
+            TableFormat::Iceberg { .. } => CommitStrategy::PerOperator,
+        }
     }
 
     async fn init(

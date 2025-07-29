@@ -10,7 +10,6 @@
             "pattern": "^(([\\w\\.\\-]+:\\d+),)*([\\w\\.\\-]+:\\d+)$"
         },
         "authentication": {
-            "type": "object",
             "oneOf": [
                 {
                     "type": "object",
@@ -65,7 +64,6 @@
             ]
         },
         "schemaRegistryEnum": {
-            "type": "object",
             "title": "Schema Registry",
             "oneOf": [
                 {

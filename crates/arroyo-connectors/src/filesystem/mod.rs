@@ -1,37 +1,59 @@
+mod config;
 pub mod delta;
+// mod iceberg;
 mod sink;
 mod source;
 
+use self::sink::{
+    JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
+};
+use crate::filesystem::config::*;
+use crate::filesystem::source::FileSystemSourceFunc;
+use crate::{render_schema, EmptyConfig};
 use anyhow::{anyhow, bail, Result};
-use arroyo_storage::BackendConfig;
-use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
-use regex::Regex;
-use std::collections::{HashMap, HashSet};
-use typify::import_types;
-
-use crate::EmptyConfig;
 use arroyo_operator::connector::Connection;
+use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
-use serde::{Deserialize, Serialize};
+use arroyo_storage::BackendConfig;
+use std::collections::HashMap;
 
-use crate::filesystem::source::FileSystemSourceFunc;
-use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::ConstructedOperator;
-
-use self::sink::{
-    JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
-};
-
-const MINIMUM_PART_SIZE: i64 = 5 * 1024 * 1024;
-
-const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./filesystem.svg");
 
-import_types!(schema = "src/filesystem/table.json");
+pub enum TableFormat {
+    None,
+    Delta,
+    Iceberg {},
+}
+
+pub fn make_sink(
+    sink: FileSystemSink,
+    config: OperatorConfig,
+    table_format: TableFormat,
+) -> Result<ConstructedOperator> {
+    let backend_config = BackendConfig::parse_url(&sink.path, true)?;
+    let format = config.format.expect("must have format for FileSystemSink");
+
+    match (&format, backend_config.is_local()) {
+        (Format::Parquet { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
+            LocalParquetFileSystemSink::new(sink, table_format, format),
+        ))),
+        (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
+            ParquetFileSystemSink::create_and_start(sink, table_format, format),
+        ))),
+        (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
+            LocalJsonFileSystemSink::new(sink, table_format, format),
+        ))),
+        (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
+            JsonFileSystemSink::create_and_start(sink, table_format, format),
+        ))),
+        (f, _) => bail!("unsupported format {f}"),
+    }
+}
 
 pub struct FileSystemConnector {}
 
@@ -57,7 +79,7 @@ impl Connector for FileSystemConnector {
             hidden: false,
             custom_schemas: true,
             connection_config: None,
-            table_config: TABLE_SCHEMA.to_owned(),
+            table_config: render_schema::<Self::TableT>(),
         }
     }
 
@@ -65,37 +87,15 @@ impl Connector for FileSystemConnector {
         &self,
         _: &str,
         _: Self::ProfileT,
-        table: Self::TableT,
+        _: Self::TableT,
         _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
-        let mut failed = false;
-        let mut message = "Successfully validated connection".to_string();
-        match table.table_type {
-            TableType::Source { regex_pattern, .. } => {
-                let r = regex_pattern
-                    .as_ref()
-                    .map(|pattern| Regex::new(pattern))
-                    .transpose();
-                if let Err(e) = r {
-                    failed = true;
-                    message = format!(
-                        "Invalid regex pattern: {}, {}",
-                        regex_pattern.as_ref().unwrap(),
-                        e
-                    );
-                }
-            }
-            TableType::Sink { .. } => {
-                // TODO: implement sink testing
-            }
-        }
-
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
-                error: failed,
+                error: false,
                 done: true,
-                message,
+                message: "Successfully validated connection".to_string(),
             };
             tx.send(message).await.unwrap();
         });
@@ -103,8 +103,8 @@ impl Connector for FileSystemConnector {
 
     fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
         match table.table_type {
-            TableType::Source { .. } => ConnectionType::Source,
-            TableType::Sink { .. } => ConnectionType::Sink,
+            FileSystemTableType::Source { .. } => ConnectionType::Source,
+            FileSystemTableType::Sink { .. } => ConnectionType::Sink,
         }
     }
 
@@ -116,61 +116,6 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        let (description, connection_type, partition_fields) = match &table.table_type {
-            TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source, None),
-            TableType::Sink {
-                write_path,
-                format_settings,
-                file_settings,
-                shuffle_by_partition,
-                ..
-            } => {
-                // confirm commit style is Direct
-                let Some(CommitStyle::Direct) = file_settings
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("no file_settings"))?
-                    .commit_style
-                else {
-                    bail!("commit_style must be Direct");
-                };
-
-                let backend_config = BackendConfig::parse_url(write_path, true)?;
-                let is_local = backend_config.is_local();
-
-                let partition_fields = match (shuffle_by_partition, file_settings) {
-                    (
-                        Some(PartitionShuffleSettings {
-                            enabled: Some(true),
-                            ..
-                        }),
-                        Some(FileSettings {
-                            partitioning:
-                                Some(Partitioning {
-                                    partition_fields, ..
-                                }),
-                            ..
-                        }),
-                    ) => Some(partition_fields.clone()),
-                    _ => None,
-                };
-
-                let description = match (format_settings, is_local) {
-                    (Some(FormatSettings::Parquet { .. }), true) => {
-                        "LocalFileSystem<Parquet>".to_string()
-                    }
-                    (Some(FormatSettings::Parquet { .. }), false) => {
-                        "FileSystem<Parquet>".to_string()
-                    }
-                    (Some(FormatSettings::Json { .. }), true) => {
-                        "LocalFileSystem<JSON>".to_string()
-                    }
-                    (Some(FormatSettings::Json { .. }), false) => "FileSystem<JSON>".to_string(),
-                    (None, _) => bail!("have to have some format settings"),
-                };
-                (description, ConnectionType::Sink, partition_fields)
-            }
-        };
-
         let schema = schema
             .map(|s| s.to_owned())
             .ok_or_else(|| anyhow!("no schema defined for FileSystem connection"))?;
@@ -180,6 +125,29 @@ impl Connector for FileSystemConnector {
             .as_ref()
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for FileSystem connection"))?;
+
+        let (description, connection_type, partition_fields) = match &table.table_type {
+            FileSystemTableType::Source { .. } => {
+                ("FileSystem".to_string(), ConnectionType::Source, None)
+            }
+            FileSystemTableType::Sink(FileSystemSink {
+                path, partitioning, ..
+            }) => {
+                BackendConfig::parse_url(path, true)?;
+
+                let partition_fields = match (
+                    partitioning.shuffle_by_partition.enabled,
+                    &partitioning.partition_fields.is_empty(),
+                ) {
+                    (true, false) => Some(partitioning.partition_fields.clone()),
+                    _ => None,
+                };
+
+                let description = format!("FileSystemSink<{format}, {path}>");
+
+                (description, ConnectionType::Sink, partition_fields)
+            }
+        };
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -209,39 +177,8 @@ impl Connector for FileSystemConnector {
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
         _: Option<&ConnectionProfile>,
-    ) -> anyhow::Result<Connection> {
-        match options.pull_opt_str("type")? {
-            Some(t) if t == "source" => {
-                let (storage_url, storage_options) = get_storage_url_and_options(options)?;
-                let compression_format = options
-                    .pull_opt_str("compression_format")?
-                    .map(|format| format.as_str().try_into().map_err(|err: &str| anyhow!(err)))
-                    .transpose()?
-                    .unwrap_or(CompressionFormat::None);
-                let matching_pattern = options.pull_opt_str("source.regex-pattern")?;
-                self.from_config(
-                    None,
-                    name,
-                    EmptyConfig {},
-                    FileSystemTable {
-                        table_type: TableType::Source {
-                            path: storage_url,
-                            storage_options,
-                            compression_format: Some(compression_format),
-                            regex_pattern: matching_pattern,
-                        },
-                    },
-                    schema,
-                )
-            }
-            Some(t) if t == "sink" => {
-                let table = file_system_sink_from_options(options, schema, CommitStyle::Direct)?;
-
-                self.from_config(None, name, EmptyConfig {}, table, schema)
-            }
-            Some(t) => bail!("unknown type: {}", t),
-            None => bail!("must have type set"),
-        }
+    ) -> Result<Connection> {
+        self.from_config(None, name, EmptyConfig {}, options.pull_struct()?, schema)
     }
 
     fn make_operator(
@@ -250,205 +187,19 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         config: OperatorConfig,
     ) -> Result<ConstructedOperator> {
-        match &table.table_type {
-            TableType::Source { .. } => Ok(ConstructedOperator::from_source(Box::new(
+        match table.table_type {
+            FileSystemTableType::Source(source) => Ok(ConstructedOperator::from_source(Box::new(
                 FileSystemSourceFunc {
-                    table: table.table_type.clone(),
+                    source,
                     format: config
                         .format
                         .ok_or_else(|| anyhow!("format required for FileSystem source"))?,
-                    framing: config.framing.clone(),
-                    bad_data: config.bad_data.clone(),
+                    framing: config.framing,
+                    bad_data: config.bad_data,
                     file_states: HashMap::new(),
                 },
             ))),
-            TableType::Sink {
-                file_settings: _,
-                format_settings,
-                storage_options: _,
-                write_path,
-                ..
-            } => {
-                let backend_config = BackendConfig::parse_url(write_path, true)?;
-                match (format_settings, backend_config.is_local()) {
-                    (Some(FormatSettings::Parquet { .. }), true) => {
-                        Ok(ConstructedOperator::from_operator(Box::new(
-                            LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
-                        )))
-                    }
-                    (Some(FormatSettings::Parquet { .. }), false) => {
-                        Ok(ConstructedOperator::from_operator(Box::new(
-                            ParquetFileSystemSink::new(table, config),
-                        )))
-                    }
-                    (Some(FormatSettings::Json { .. }), true) => {
-                        Ok(ConstructedOperator::from_operator(Box::new(
-                            LocalJsonFileSystemSink::new(write_path.to_string(), table, config),
-                        )))
-                    }
-                    (Some(FormatSettings::Json { .. }), false) => {
-                        Ok(ConstructedOperator::from_operator(Box::new(
-                            JsonFileSystemSink::new(table, config),
-                        )))
-                    }
-                    (None, _) => bail!("have to have some format settings"),
-                }
-            }
+            FileSystemTableType::Sink(sink) => make_sink(sink, config, TableFormat::None),
         }
     }
-}
-
-fn get_storage_url_and_options(
-    opts: &mut ConnectorOptions,
-) -> Result<(String, HashMap<String, String>)> {
-    let storage_url = opts.pull_str("path")?;
-    let storage_keys: Vec<_> = opts.keys_with_prefix("storage.").cloned().collect();
-
-    let storage_options = storage_keys
-        .iter()
-        .map(|k| {
-            Ok((
-                k.trim_start_matches("storage.").to_string(),
-                opts.pull_str(k)?,
-            ))
-        })
-        .collect::<Result<HashMap<String, String>>>()?;
-
-    BackendConfig::parse_url(&storage_url, true)?;
-    Ok((storage_url, storage_options))
-}
-
-pub fn file_system_sink_from_options(
-    opts: &mut ConnectorOptions,
-    schema: Option<&ConnectionSchema>,
-    commit_style: CommitStyle,
-) -> Result<FileSystemTable> {
-    let schema = schema.ok_or_else(|| anyhow!("FileSystem connector requires a schema"))?;
-
-    let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
-
-    let inactivity_rollover_seconds = opts.pull_opt_i64("inactivity_rollover_seconds")?;
-    let max_parts = opts.pull_opt_i64("max_parts")?;
-    let rollover_seconds = opts.pull_opt_i64("rollover_seconds")?;
-    let target_file_size = opts.pull_opt_i64("target_file_size")?;
-    let target_part_size = opts.pull_opt_i64("target_part_size")?;
-
-    if let Some(target_part_size) = target_part_size {
-        if target_part_size < MINIMUM_PART_SIZE {
-            bail!("target_part_size must be at least {}", MINIMUM_PART_SIZE);
-        }
-    }
-
-    let prefix = opts.pull_opt_str("filename.prefix")?;
-    let suffix = opts.pull_opt_str("filename.suffix")?;
-    let strategy = opts
-        .pull_opt_str("filename.strategy")?
-        .map(|value| {
-            FilenameStrategy::try_from(&value)
-                .map_err(|_err| anyhow!("{} is not a valid Filenaming Strategy", value))
-        })
-        .transpose()?;
-
-    let schema_fields: HashSet<_> = schema
-        .fields
-        .iter()
-        .map(|f| f.field_name.as_str())
-        .collect();
-
-    let partition_fields: Option<Vec<_>> = opts
-        .pull_opt_array("partition_fields")
-        .map(|fields| {
-            if !fields.is_empty() && schema.inferred.unwrap_or_default() {
-                bail!("cannot use `partition_fields` option for an inferred schema; supply the fields of the sink within the CREATE TABLE statement");
-            }
-
-            fields.into_iter().map(|f| {
-                let f = match f {
-                    SqlExpr::Value(ValueWithSpan{ value: Value::SingleQuotedString(s), span: _}) => s,
-                    SqlExpr::Identifier(ident) => ident.value,
-                    expr => {
-                        bail!("invalid expression in `partition_fields`: {}; expected a column identifier", expr);
-                    }
-                };
-
-                if !schema_fields.contains(f.as_str()) {
-                    bail!("partition field '{}' does not exist in the schema", f);
-                }
-                Ok(f)
-            }).collect::<Result<_>>()
-        })
-        .transpose()?;
-
-    let time_partition_pattern = opts.pull_opt_str("time_partition_pattern")?;
-
-    let partitioning = if time_partition_pattern.is_some() || partition_fields.is_some() {
-        Some(Partitioning {
-            time_partition_pattern,
-            partition_fields: partition_fields.unwrap_or_default(),
-        })
-    } else {
-        None
-    };
-
-    let file_naming = if prefix.is_some() || suffix.is_some() || strategy.is_some() {
-        Some(FileNaming {
-            prefix,
-            suffix,
-            strategy,
-        })
-    } else {
-        None
-    };
-
-    let file_settings = Some(FileSettings {
-        inactivity_rollover_seconds,
-        max_parts,
-        rollover_seconds,
-        target_file_size,
-        target_part_size,
-        partitioning,
-        commit_style: Some(commit_style),
-        file_naming,
-    });
-
-    let shuffle_by_partition = opts
-        .pull_opt_bool("shuffle_by_partition.enabled")?
-        .unwrap_or_default();
-
-    let format_settings = match schema.format.as_ref().ok_or(anyhow!(
-        "filesystem sink requires a format, such as json or parquet"
-    ))? {
-        Format::Parquet(..) => {
-            let compression = opts
-                .pull_opt_str("parquet.compression")?
-                .map(|value| {
-                    Compression::try_from(&value).map_err(|_err| {
-                        anyhow!("{} is not a valid parquet.compression argument", value)
-                    })
-                })
-                .transpose()?;
-            let row_group_size_bytes = opts.pull_opt_nonzero_u64("parquet.row_group_size_bytes")?;
-            Some(FormatSettings::Parquet {
-                compression,
-                row_batch_size: None,
-                row_group_size: None,
-                row_group_size_bytes,
-            })
-        }
-        Format::Json(..) => Some(FormatSettings::Json {
-            json_format: JsonFormat::Json,
-        }),
-        other => bail!("Unsupported format: {:?}", other),
-    };
-    Ok(FileSystemTable {
-        table_type: TableType::Sink {
-            file_settings,
-            format_settings,
-            write_path: storage_url,
-            storage_options,
-            shuffle_by_partition: Some(PartitionShuffleSettings {
-                enabled: Some(shuffle_by_partition),
-            }),
-        },
-    })
 }

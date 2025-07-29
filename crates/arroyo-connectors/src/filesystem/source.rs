@@ -26,7 +26,8 @@ use tokio_stream::wrappers::LinesStream;
 use tokio_stream::Stream;
 use tracing::info;
 
-use crate::filesystem::{CompressionFormat, TableType};
+use crate::filesystem::config;
+use crate::filesystem::config::SourceFileCompressionFormat;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -37,7 +38,7 @@ use arroyo_types::{to_nanos, UserError};
 
 #[allow(unused)]
 pub struct FileSystemSourceFunc {
-    pub table: TableType,
+    pub source: config::FileSystemSource,
     pub format: Format,
     pub framing: Option<Framing>,
     pub bad_data: Option<BadData>,
@@ -77,53 +78,34 @@ impl SourceOperator for FileSystemSourceFunc {
 }
 
 impl FileSystemSourceFunc {
-    #[allow(unused)]
-    fn get_compression_format(&self) -> CompressionFormat {
-        match &self.table {
-            TableType::Source {
-                compression_format, ..
-            } => (*compression_format).unwrap_or(CompressionFormat::None),
-            TableType::Sink { .. } => unreachable!(),
-        }
-    }
-
     async fn run_int(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> Result<SourceFinishType, UserError> {
-        let (storage_provider, regex_pattern) = match &self.table {
-            TableType::Source {
-                path,
-                storage_options,
-                compression_format: _,
-                regex_pattern,
-            } => {
-                let storage_provider =
-                    StorageProvider::for_url_with_options(path, storage_options.clone())
-                        .await
-                        .map_err(|err| {
-                            UserError::new("failed to create storage provider", err.to_string())
-                        })?;
-                let matcher = regex_pattern
-                    .as_ref()
-                    .map(|pattern| Regex::new(pattern))
-                    .transpose()
-                    .map_err(|err| {
-                        UserError::new(
-                            format!("invalid regex pattern {}", regex_pattern.as_ref().unwrap()),
-                            err.to_string(),
-                        )
-                    })?;
-                (storage_provider, matcher)
-            }
-            TableType::Sink { .. } => {
-                return Err(UserError::new(
-                    "invalid table config",
-                    "filesystem source cannot be used as a sink".to_string(),
-                ))
-            }
-        };
+        let storage_provider = StorageProvider::for_url_with_options(
+            &self.source.path,
+            self.source.storage_options.clone(),
+        )
+        .await
+        .map_err(|err| UserError::new("failed to create storage provider", err.to_string()))?;
+
+        let regex_pattern = self
+            .source
+            .regex_pattern
+            .as_ref()
+            .map(|pattern| Regex::new(pattern))
+            .transpose()
+            .map_err(|err| {
+                UserError::new(
+                    format!(
+                        "invalid regex pattern {}",
+                        self.source.regex_pattern.as_ref().unwrap()
+                    ),
+                    err.to_string(),
+                )
+            })?;
+
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -193,16 +175,18 @@ impl FileSystemSourceFunc {
             Format::Json(_) => {
                 let stream_reader = storage_provider.get_as_stream(path).await.unwrap();
 
-                let compression_reader: Box<dyn AsyncRead + Unpin + Send> =
-                    match self.get_compression_format() {
-                        CompressionFormat::Zstd => {
-                            Box::new(ZstdDecoder::new(BufReader::new(stream_reader)))
-                        }
-                        CompressionFormat::Gzip => {
-                            Box::new(GzipDecoder::new(BufReader::new(stream_reader)))
-                        }
-                        CompressionFormat::None => Box::new(BufReader::new(stream_reader)),
-                    };
+                let compression_reader: Box<dyn AsyncRead + Unpin + Send> = match self
+                    .source
+                    .compression_format
+                {
+                    SourceFileCompressionFormat::Zstd => {
+                        Box::new(ZstdDecoder::new(BufReader::new(stream_reader)))
+                    }
+                    SourceFileCompressionFormat::Gzip => {
+                        Box::new(GzipDecoder::new(BufReader::new(stream_reader)))
+                    }
+                    SourceFileCompressionFormat::None => Box::new(BufReader::new(stream_reader)),
+                };
                 // use line iterators
                 let lines = LinesStream::new(BufReader::new(compression_reader).lines());
                 Ok(Box::new(lines.map(|string_result| {

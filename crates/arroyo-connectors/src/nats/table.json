@@ -3,7 +3,6 @@
     "title": "NatsTable",
     "properties": {
         "connectorType": {
-            "type": "object",
             "title": "Connector Type",
             "oneOf": [
                 {
@@ -11,7 +10,6 @@
                     "title": "Source",
                     "properties": {
                         "sourceType": {
-                            "type": "object",
                             "title": "Source Type",
                             "oneOf": [
                                 {
@@ -151,7 +149,6 @@
                     "title": "Sink",
                     "properties": {
                         "sinkType": {
-                            "type": "object",
                             "title": "Sink Type",
                             "oneOf": [
                                 {

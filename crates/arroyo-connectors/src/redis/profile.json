@@ -3,7 +3,6 @@
     "title": "RedisConfig",
     "properties": {
         "connection": {
-            "type": "object",
             "oneOf": [
                 {
                     "type": "object",

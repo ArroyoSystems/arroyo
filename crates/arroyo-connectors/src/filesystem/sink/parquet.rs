@@ -1,13 +1,14 @@
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, FileSystemTable, MultiPartWriterStats, TableType,
+    BatchBufferingWriter, MultiPartWriterStats,
 };
-use crate::filesystem::{Compression, FormatSettings};
+use crate::filesystem::config;
 use anyhow::Result;
 use arrow::{
     array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
     compute::{sort_to_indices, take},
 };
+use arroyo_rpc::formats::{ParquetCompression, ParquetFormat};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -26,41 +27,22 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-const DEFAULT_ROW_GROUP_BYTES: usize = 1024 * 1024 * 128; // 128MB
+const DEFAULT_ROW_GROUP_BYTES: u64 = 1024 * 1024 * 128; // 128MB
 
-fn writer_properties_from_table(table: &FileSystemTable) -> (WriterProperties, usize) {
+fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, usize) {
     let mut parquet_writer_options = WriterProperties::builder();
 
-    let TableType::Sink {
-        format_settings:
-            Some(FormatSettings::Parquet {
-                compression,
-                row_batch_size: _,
-                row_group_size: _,
-                row_group_size_bytes,
-            }),
-        ..
-    } = table.table_type
-    else {
-        panic!("FileSystem source configuration in sink");
-    };
-
-    if let Some(compression) = compression {
-        let compression = match compression {
-            Compression::None => parquet::basic::Compression::UNCOMPRESSED,
-            Compression::Snappy => parquet::basic::Compression::SNAPPY,
-            Compression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
-            Compression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
-            Compression::Lz4 => parquet::basic::Compression::LZ4,
-        };
-        parquet_writer_options = parquet_writer_options.set_compression(compression);
-    }
+    parquet_writer_options = parquet_writer_options.set_compression(match format.compression {
+        ParquetCompression::Uncompressed => parquet::basic::Compression::UNCOMPRESSED,
+        ParquetCompression::Snappy => parquet::basic::Compression::SNAPPY,
+        ParquetCompression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
+        ParquetCompression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
+        ParquetCompression::Lz4 => parquet::basic::Compression::LZ4,
+    });
 
     (
         parquet_writer_options.build(),
-        row_group_size_bytes
-            .map(|i| i.get() as usize)
-            .unwrap_or(DEFAULT_ROW_GROUP_BYTES),
+        format.row_group_bytes.unwrap_or(DEFAULT_ROW_GROUP_BYTES) as usize,
     )
 }
 
@@ -102,16 +84,20 @@ impl Write for SharedBuffer {
     }
 }
 
-pub struct RecordBatchBufferingWriter {
+pub struct ParquetBatchBufferingWriter {
     writer: Option<ArrowWriter<SharedBuffer>>,
     buffer: SharedBuffer,
     row_group_size_bytes: usize,
     schema: ArroyoSchemaRef,
 }
 
-impl BatchBufferingWriter for RecordBatchBufferingWriter {
-    fn new(config: &FileSystemTable, _format: Option<Format>, schema: ArroyoSchemaRef) -> Self {
-        let (writer_properties, row_group_size_bytes) = writer_properties_from_table(config);
+impl BatchBufferingWriter for ParquetBatchBufferingWriter {
+    fn new(_config: &config::FileSystemSink, format: Format, schema: ArroyoSchemaRef) -> Self {
+        let Format::Parquet(parquet) = format else {
+            panic!("ParquetBatchBufferingWriter configured with non-parquet format {format:?}");
+        };
+
+        let (writer_properties, row_group_size_bytes) = writer_properties_from_format(&parquet);
 
         let buffer = SharedBuffer::new(row_group_size_bytes);
 
@@ -202,13 +188,16 @@ impl LocalWriter for ParquetLocalWriter {
     fn new(
         tmp_path: String,
         final_path: String,
-        table_properties: &FileSystemTable,
-        _format: Option<Format>,
+        _table_properties: &config::FileSystemSink,
+        format: Format,
         schema: ArroyoSchemaRef,
     ) -> Self {
+        let Format::Parquet(parquet) = format else {
+            panic!("ParquetLocalWriter configured with non-parquet format {format:?}");
+        };
+
         let shared_buffer = SharedBuffer::new(0);
-        let (writer_properties, row_group_size_bytes) =
-            writer_properties_from_table(table_properties);
+        let (writer_properties, row_group_size_bytes) = writer_properties_from_format(&parquet);
         let writer = ArrowWriter::try_new(
             shared_buffer.clone(),
             Arc::new(schema.schema_without_timestamp()),
