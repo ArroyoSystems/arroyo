@@ -42,6 +42,7 @@ use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
+use ulid::Ulid;
 use uuid::Uuid;
 
 use arroyo_types::*;
@@ -887,22 +888,25 @@ where
     }
 
     fn new_writer(&mut self, partition: &Option<String>) -> R {
-        let filename_strategy = match self.file_naming.strategy {
-            Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
-            Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
-            None => FilenameStrategy::Serial,
-        };
+        let filename_strategy = &self
+            .file_naming
+            .strategy
+            .map_or(FilenameStrategy::Serial, |v| v); // Default to serial
 
         // This forms the base for naming files depending on strategy
-        let filename_base = if filename_strategy == FilenameStrategy::Uuid {
-            Uuid::new_v4().to_string()
-        } else {
-            format!(
-                "{:>05}-{:>03}",
-                self.max_file_index,
-                self.task_info.as_ref().unwrap().task_index
-            )
+        let filename_base = match filename_strategy {
+            FilenameStrategy::Serial => {
+                format!(
+                    "{:>05}-{:>03}",
+                    self.max_file_index,
+                    self.task_info.as_ref().unwrap().task_index
+                )
+            }
+            FilenameStrategy::Ulid => Ulid::new().to_string(),
+            FilenameStrategy::Uuid => Uuid::new_v4().to_string(),
+            FilenameStrategy::Uuidv7 => Uuid::now_v7().to_string(),
         };
+
         let filename = add_suffix_prefix(
             filename_base,
             self.file_naming.prefix.as_ref(),
