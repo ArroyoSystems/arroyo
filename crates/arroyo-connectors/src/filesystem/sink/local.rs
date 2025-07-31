@@ -10,6 +10,7 @@ use bincode::{Decode, Encode};
 use datafusion::physical_plan::PhysicalExpr;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::debug;
+use ulid::Ulid;
 use uuid::Uuid;
 
 use super::{
@@ -95,19 +96,22 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
     }
 
     fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
-        let filename_strategy = match self.filenaming.strategy {
-            Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
-            Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
-            None => FilenameStrategy::Serial,
-        };
+        let filename_strategy = self
+            .filenaming
+            .strategy
+            .map_or(FilenameStrategy::Serial, |v| v); // Default to serial
 
         if !self.writers.contains_key(partition) {
             // This forms the base for naming files depending on strategy
-            let filename_base = if filename_strategy == FilenameStrategy::Uuid {
-                Uuid::new_v4().to_string()
-            } else {
-                format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id)
+            let filename_base = match filename_strategy {
+                FilenameStrategy::Serial => {
+                    format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id)
+                }
+                FilenameStrategy::Ulid => Ulid::new().to_string(),
+                FilenameStrategy::Uuid => Uuid::new_v4().to_string(),
+                FilenameStrategy::Uuidv7 => Uuid::now_v7().to_string(),
             };
+
             let filename = add_suffix_prefix(
                 filename_base,
                 self.filenaming.prefix.as_ref(),

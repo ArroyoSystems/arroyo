@@ -28,8 +28,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 typify = "0.0.13"
-prost = {workspace = true}
-tonic = {workspace = true}
+prost = { workspace = true }
+tonic = { workspace = true }
 governor = "0.8.0"
 anyhow = "1.0.71"
 tracing = "0.1.37"
@@ -40,6 +40,8 @@ bytes = "1.5.0"
 url = "2.5.0"
 itertools = "0.14.0"
 regex = "1"
+uuid = { version = "1.17.0", features = ["v4", "v7"] }
+ulid = "1.2.1"
 
 ##########################
 # connector dependencies #
@@ -47,7 +49,13 @@ regex = "1"
 
 # Kafka
 aws-msk-iam-sasl-signer = "1.0.0"
-rdkafka = { version = "0.37", features = ["cmake-build", "tracing", "sasl", "ssl-vendored", "zstd"] }
+rdkafka = { version = "0.37", features = [
+    "cmake-build",
+    "tracing",
+    "sasl",
+    "ssl-vendored",
+    "zstd",
+] }
 sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 
 # SSE
@@ -63,26 +71,30 @@ reqwest = { workspace = true, features = ["stream"] }
 rabbitmq-stream-client = "0.7"
 
 # Redis
-redis = { version = "0.28", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
+redis = { version = "0.28", features = [
+    "default",
+    "tokio-rustls-comp",
+    "cluster-async",
+    "connection-manager",
+] }
 
 # Fluvio
-fluvio = {version = "0.24", features = ["openssl"]}
+fluvio = { version = "0.24", features = ["openssl"] }
 
 # Kinesis
 aws-sdk-kinesis = { version = "1.44" }
 aws-config = { workspace = true }
-uuid = { version = "1.7.0", features = ["v4"] }
 
 # Filesystem
-parquet = { workspace = true, features = ["async"]}
+parquet = { workspace = true, features = ["async"] }
 object_store = { workspace = true }
 deltalake = { workspace = true, features = ["s3", "gcs"] }
-delta_kernel = {workspace =  true, features = ["arrow-55", "arrow-conversion"]}
+delta_kernel = { workspace = true, features = ["arrow-55", "arrow-conversion"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 
 # MQTT
 rumqttc = { version = "0.24.0", features = ["url"] }
-rustls-native-certs =  "0.8"
+rustls-native-certs = "0.8"
 rustls-pemfile = "2"
 tokio-rustls = "0.25"
 rustls = "0.22"

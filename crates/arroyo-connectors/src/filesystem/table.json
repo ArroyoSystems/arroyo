@@ -19,11 +19,7 @@
               "title": "Compression format",
               "type": "string",
               "description": "Compression format of the files in the source path",
-              "enum": [
-                "none",
-                "zstd",
-                "gzip"
-              ]
+              "enum": ["none", "zstd", "gzip"]
             },
             "regexPattern": {
               "title": "File Regex Pattern",
@@ -39,9 +35,7 @@
               }
             }
           },
-          "required": [
-            "path"
-          ]
+          "required": ["path"]
         },
         {
           "type": "object",
@@ -71,13 +65,7 @@
                     "compression": {
                       "title": "Compression",
                       "type": "string",
-                      "enum": [
-                        "none",
-                        "snappy",
-                        "gzip",
-                        "zstd",
-                        "lz4"
-                      ]
+                      "enum": ["none", "snappy", "gzip", "zstd", "lz4"]
                     },
                     "rowBatchSize": {
                       "title": "Row Batch Size",
@@ -105,9 +93,7 @@
                     "json_format": {
                       "title": "JSON Format",
                       "type": "string",
-                      "enum": [
-                        "json"
-                      ],
+                      "enum": ["json"],
                       "default": "json"
                     }
                   },
@@ -170,10 +156,7 @@
                 "commitStyle": {
                   "title": "Commit Style",
                   "type": "string",
-                  "enum": [
-                    "direct",
-                    "delta_lake"
-                  ]
+                  "enum": ["direct", "delta_lake"]
                 },
                 "fileNaming": {
                   "title": "File naming",
@@ -192,10 +175,7 @@
                     "strategy": {
                       "title": "Filename Strategy",
                       "type": "string",
-                      "enum": [
-                        "serial",
-                        "uuid"
-                      ]
+                      "enum": ["serial", "uuid", "uuidv7", "ulid"]
                     }
                   }
                 }
@@ -212,16 +192,12 @@
                   "description": "If enabled, we will shuffle by the partition keys, which can reduce the number of file sink produces; however this may cause backlog if data is skewed"
                 }
               }
-            } 
+            }
           },
-          "required": [
-            "writePath"
-          ]
+          "required": ["writePath"]
         }
       ]
     }
   },
-  "required": [
-    "tableType"
-  ]
+  "required": ["tableType"]
 }
