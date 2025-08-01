@@ -77,7 +77,7 @@ const S3_ENDPOINT_URL: &str = r"^[sS]3[aA]?::(?<protocol>https?)://(?P<endpoint>
 const R2_URL: &str =
     r"^[rR]2://((?P<account_id>[a-zA-Z0-9]+)@)?(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 const R2_ENDPOINT: &str = r"^https://(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
-const R2_VIRTUAL: &str = r"^https://(?P<bucket>[a-z0-9\-]+).(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com(/(?P<key>.+))?$";
+const R2_VIRTUAL: &str = r"^https://(?P<bucket>[a-z0-9\-]+)\.(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com(/(?P<key>.+))?$";
 
 // file:///my/path/directory
 const FILE_URI: &str = r"^file://(?P<path>.*)$";
@@ -929,6 +929,19 @@ mod tests {
 
     #[test]
     fn test_r2_configs() {
+        // Fully qualified R2 scheme without path
+        assert_eq!(
+            BackendConfig::parse_url("r2://97493190cfb48832a99ee97a7637ff6a@my-bucket1", false)
+                .unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "97493190cfb48832a99ee97a7637ff6a".to_string(),
+                bucket: "my-bucket1".to_string(),
+                jurisdiction: None,
+                key: None,
+            })
+        );
+
+        // Fully qualified R2 scheme with path
         assert_eq!(
             BackendConfig::parse_url(
                 "r2://97493190cfb48832a99ee97a7637ff6a@my-bucket1/puppy.jpg",
@@ -947,6 +960,7 @@ mod tests {
             std::env::set_var("CLOUDFLARE_ACCOUNT_ID", "4bed8261ff878a81208da2fface71221");
         }
 
+        // R2 scheme with account ID from env
         assert_eq!(
             BackendConfig::parse_url("r2://mybucket/puppy.jpg", false).unwrap(),
             BackendConfig::R2(crate::R2Config {
@@ -957,6 +971,22 @@ mod tests {
             })
         );
 
+        // Path-style without prefix
+        assert_eq!(
+            BackendConfig::parse_url(
+                "https://266035a37ceb5d774c51af1272485f1f.r2.cloudflarestorage.com/mybucket",
+                false
+            )
+            .unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "266035a37ceb5d774c51af1272485f1f".to_string(),
+                bucket: "mybucket".to_string(),
+                jurisdiction: None,
+                key: None,
+            })
+        );
+
+        // Path-style with prefix
         assert_eq!(
             BackendConfig::parse_url("https://266035a37ceb5d774c51af1272485f1f.r2.cloudflarestorage.com/mybucket/my/key/path", false).unwrap(),
             BackendConfig::R2(crate::R2Config {
@@ -977,6 +1007,22 @@ mod tests {
             })
         );
 
+        // Virtual style
+        assert_eq!(
+            BackendConfig::parse_url(
+                "https://my-bucket.266035a37ceb5d774c51af1272485f1f.eu.r2.cloudflarestorage.com",
+                false
+            )
+            .unwrap(),
+            BackendConfig::R2(crate::R2Config {
+                account_id: "266035a37ceb5d774c51af1272485f1f".to_string(),
+                bucket: "my-bucket".to_string(),
+                jurisdiction: Some("eu".to_string()),
+                key: None,
+            })
+        );
+
+        // Virtual style with path
         assert_eq!(
             BackendConfig::parse_url("https://my-bucket.266035a37ceb5d774c51af1272485f1f.eu.r2.cloudflarestorage.com/my/key/path", false).unwrap(),
             BackendConfig::R2(crate::R2Config {
