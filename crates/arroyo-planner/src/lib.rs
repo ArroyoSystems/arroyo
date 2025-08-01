@@ -867,13 +867,19 @@ pub async fn parse_and_get_arrow_program(
                     DataFusionError::Plan(format!("Connection {sink_name} not found"))
                 })?;
                 match table {
-                    Table::ConnectorTable(_) => SinkExtension::new(
-                        TableReference::bare(sink_name),
-                        table.clone(),
-                        plan_rewrite.schema().clone(),
-                        Arc::new(plan_rewrite),
-                        false,
-                    ),
+                    Table::ConnectorTable(c) => {
+                        if let Some(id) = c.id {
+                            used_connections.insert(id);
+                        }
+
+                        SinkExtension::new(
+                            TableReference::bare(sink_name),
+                            table.clone(),
+                            plan_rewrite.schema().clone(),
+                            Arc::new(plan_rewrite),
+                            false,
+                        )
+                    }
                     Table::MemoryTable { logical_plan, .. } => {
                         if logical_plan.is_some() {
                             return plan_err!("Can only insert into a memory table once");
