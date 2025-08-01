@@ -76,6 +76,14 @@ pub(crate) async fn load_or_create_table(
                 storage_provider.qualify_path(empty_path)
             ),
         ),
+        BackendConfig::Azure(azure) => (
+            storage_provider.get_backing_store(),
+            format!(
+                "abfs://{}/{}",
+                azure.container,
+                storage_provider.qualify_path(empty_path)
+            ),
+        ),
         BackendConfig::Local(_) => (storage_provider.get_backing_store(), "/".to_string()),
     };
 
