@@ -3,6 +3,7 @@ use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use object_store::aws::AmazonS3ConfigKey;
+use object_store::azure::MicrosoftAzureBuilder;
 use object_store::buffered::BufWriter;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
@@ -96,12 +97,18 @@ const GCS_PATH: &str =
     r"^https://storage\.googleapis\.com/(?P<bucket>[a-z\d\-_\.]+)(/(?P<key>.+))?$";
 const GCS_URL: &str = r"^[gG][sS]://(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 
+// abfs[s]://CONTAINER_NAME@STORAGE_ACCOUNT_NAME.dfs.core.windows.net/OBJECT_NAME
+const ABFS_URL: &str = r"^abfss?://(?P<container>[a-z0-9\-]+)@(?P<account>[a-z0-9]+)\.dfs\.core\.windows\.net(/(?P<key>.+))?$";
+// https://STORAGE_ACCOUNT_NAME.dfs.core.windows.net/CONTAINER_NAME/OBJECT_NAME
+const AZURE_HTTPS: &str = r"^https://(?P<account>[a-z0-9]+)\.(blob|dfs)\.core\.windows\.net/(?P<container>[a-z0-9\-]+)(/(?P<key>.+))?$";
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
 enum Backend {
     S3,
     R2,
     #[allow(clippy::upper_case_acronyms)]
     GCS,
+    Azure,
     Local,
 }
 
@@ -135,6 +142,14 @@ fn matchers() -> &'static HashMap<Backend, Vec<Regex>> {
                 Regex::new(GCS_PATH).unwrap(),
                 Regex::new(GCS_VIRTUAL).unwrap(),
                 Regex::new(GCS_URL).unwrap(),
+            ],
+        );
+
+        m.insert(
+            Backend::Azure,
+            vec![
+                Regex::new(ABFS_URL).unwrap(),
+                Regex::new(AZURE_HTTPS).unwrap(),
             ],
         );
 
@@ -197,6 +212,13 @@ pub struct GCSConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AzureConfig {
+    pub account: String,
+    pub container: String,
+    key: Option<Path>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalConfig {
     pub path: String,
     pub key: Option<Path>,
@@ -207,6 +229,7 @@ pub enum BackendConfig {
     S3(S3Config),
     R2(R2Config),
     GCS(GCSConfig),
+    Azure(AzureConfig),
     Local(LocalConfig),
 }
 
@@ -218,6 +241,7 @@ impl BackendConfig {
                     Backend::S3 => Self::parse_s3(matches),
                     Backend::R2 => Ok(Self::R2(Self::parse_r2(url, matches, None, None)?)),
                     Backend::GCS => Self::parse_gcs(matches),
+                    Backend::Azure => Self::parse_azure(matches),
                     Backend::Local => Self::parse_local(matches, with_key),
                 };
             }
@@ -324,6 +348,28 @@ impl BackendConfig {
         Ok(BackendConfig::GCS(GCSConfig { bucket, key }))
     }
 
+    fn parse_azure(matches: Captures) -> Result<Self, StorageError> {
+        let container = matches
+            .name("container")
+            .expect("container should always be available")
+            .as_str()
+            .to_string();
+
+        let account = matches
+            .name("account")
+            .expect("account should always be available")
+            .as_str()
+            .to_string();
+
+        let key = matches.name("key").map(|r| r.as_str().into());
+
+        Ok(BackendConfig::Azure(AzureConfig {
+            account,
+            container,
+            key,
+        }))
+    }
+
     fn parse_local(matches: Captures, with_key: bool) -> Result<Self, StorageError> {
         let path = matches
             .name("path")
@@ -357,6 +403,7 @@ impl BackendConfig {
             BackendConfig::S3(s3) => s3.key.as_ref(),
             BackendConfig::R2(r2) => r2.key.as_ref(),
             BackendConfig::GCS(gcs) => gcs.key.as_ref(),
+            BackendConfig::Azure(azure) => azure.key.as_ref(),
             BackendConfig::Local(local) => local.key.as_ref(),
         }
     }
@@ -384,6 +431,7 @@ impl StorageProvider {
             BackendConfig::R2(config) => Self::construct_r2(config, options).await,
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
             BackendConfig::GCS(config) => Self::construct_gcs(config).await,
+            BackendConfig::Azure(config) => Self::construct_azure(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }
     }
@@ -402,6 +450,7 @@ impl StorageProvider {
             BackendConfig::S3(config) => Self::construct_s3(config, options).await,
             BackendConfig::R2(config) => Self::construct_r2(config, options).await,
             BackendConfig::GCS(config) => Self::construct_gcs(config).await,
+            BackendConfig::Azure(config) => Self::construct_azure(config).await,
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
 
@@ -414,6 +463,7 @@ impl StorageProvider {
             BackendConfig::S3(s3) => s3.key.as_ref(),
             BackendConfig::R2(r2) => r2.key.as_ref(),
             BackendConfig::GCS(gcs) => gcs.key.as_ref(),
+            BackendConfig::Azure(azure) => azure.key.as_ref(),
             BackendConfig::Local(local) => local.key.as_ref(),
         }
         .ok_or_else(|| StorageError::NoKeyInUrl)?;
@@ -594,6 +644,26 @@ impl StorageProvider {
 
         Ok(Self {
             config: BackendConfig::GCS(config),
+            object_store: object_store.clone(),
+            multipart_store: Some(object_store),
+            canonical_url,
+            storage_options: HashMap::new(),
+        })
+    }
+
+    async fn construct_azure(config: AzureConfig) -> Result<Self, StorageError> {
+        let builder: MicrosoftAzureBuilder =
+            MicrosoftAzureBuilder::from_env().with_container_name(&config.container);
+
+        let canonical_url = format!(
+            "https://{}.blob.core.windows.net/{}",
+            config.account, config.container
+        );
+
+        let object_store = Arc::new(builder.build()?);
+
+        Ok(Self {
+            config: BackendConfig::Azure(config),
             object_store: object_store.clone(),
             multipart_store: Some(object_store),
             canonical_url,
@@ -943,6 +1013,61 @@ mod tests {
                 region: None,
                 bucket: "my-bucket".to_string(),
                 key: Some("path/test.pdf".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_azure_configs() {
+        assert_eq!(
+            BackendConfig::parse_url(
+                "https://mystorageaccount.blob.core.windows.net/my-container/puppy.jpg",
+                false
+            )
+            .unwrap(),
+            BackendConfig::Azure(crate::AzureConfig {
+                account: "mystorageaccount".to_string(),
+                container: "my-container".to_string(),
+                key: Some("puppy.jpg".into()),
+            })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url(
+                "https://mystorageaccount.dfs.core.windows.net/my-container/some/puppy.jpg",
+                false
+            )
+            .unwrap(),
+            BackendConfig::Azure(crate::AzureConfig {
+                account: "mystorageaccount".to_string(),
+                container: "my-container".to_string(),
+                key: Some("some/puppy.jpg".into()),
+            })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url(
+                "abfs://my-container@mystorageaccount.dfs.core.windows.net/puppy.jpg",
+                false
+            )
+            .unwrap(),
+            BackendConfig::Azure(crate::AzureConfig {
+                account: "mystorageaccount".to_string(),
+                container: "my-container".to_string(),
+                key: Some("puppy.jpg".into()),
+            })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url(
+                "abfss://my-container@mystorageaccount.dfs.core.windows.net/some/puppy.jpg",
+                false
+            )
+            .unwrap(),
+            BackendConfig::Azure(crate::AzureConfig {
+                account: "mystorageaccount".to_string(),
+                container: "my-container".to_string(),
+                key: Some("some/puppy.jpg".into()),
             })
         );
     }
