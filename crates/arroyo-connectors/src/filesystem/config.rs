@@ -46,10 +46,10 @@ impl FromOpts for RollingPolicy {
         Ok(Self {
             file_size_bytes: opts.pull_opt_data_size_bytes("rolling_policy.file_size")?,
             interval_seconds: opts
-                .pull_opt_duration("policy_policy.interval")?
+                .pull_opt_duration("rolling_policy.interval")?
                 .map(|f| f.as_secs()),
             inactivity_seconds: opts
-                .pull_opt_duration("policy_policy.inactivity_interval")?
+                .pull_opt_duration("rolling_policy.inactivity_interval")?
                 .map(|f| f.as_secs()),
         })
     }
@@ -531,6 +531,13 @@ pub struct IcebergSink {
     #[schemars(title = "Location Path", description = "Data file location")]
     pub location_path: Option<String>,
 
+    #[schemars(
+        title = "Storage Options",
+        description = "See the FileSystem connector docs for the full list of options"
+    )]
+    #[serde(default)]
+    pub storage_options: HashMap<String, String>,
+
     #[serde(default)]
     pub rolling_policy: RollingPolicy,
 
@@ -552,6 +559,7 @@ impl FromOpts for IcebergSink {
                 .unwrap_or_else(|| "default".to_string()),
             table_name: opts.pull_str("table_name")?,
             location_path: opts.pull_opt_str("location_path")?,
+            storage_options: pull_storage_options(opts)?,
             rolling_policy: opts.pull_struct()?,
             file_naming: opts.pull_struct()?,
             partitioning: opts.pull_struct()?,

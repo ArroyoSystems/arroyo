@@ -74,6 +74,8 @@ const S3_URL: &str = r"^[sS]3[aA]?://(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 const S3_ENDPOINT_URL: &str = r"^[sS]3[aA]?::(?<protocol>https?)://(?P<endpoint>[^:/]+):(?<port>\d+)/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 
 // Cloudflare R2
+const R2_CONFIGURED_VIA_ENDPOINT: &str =
+    r"^https://(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com";
 const R2_URL: &str =
     r"^[rR]2://((?P<account_id>[a-zA-Z0-9]+)@)?(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 const R2_ENDPOINT: &str = r"^https://(?P<account_id>[a-zA-Z0-9]+)(\.(?P<jurisdiction>\w+))?\.[rR]2.cloudflarestorage.com/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
@@ -214,7 +216,7 @@ impl BackendConfig {
             if let Some(matches) = v.iter().filter_map(|r| r.captures(url)).next() {
                 return match k {
                     Backend::S3 => Self::parse_s3(matches),
-                    Backend::R2 => Self::parse_r2(url, matches),
+                    Backend::R2 => Ok(Self::R2(Self::parse_r2(url, matches, None, None)?)),
                     Backend::GCS => Self::parse_gcs(matches),
                     Backend::Local => Self::parse_local(matches, with_key),
                 };
@@ -270,7 +272,12 @@ impl BackendConfig {
         }))
     }
 
-    fn parse_r2(url: &str, matches: Captures) -> Result<Self, StorageError> {
+    fn parse_r2(
+        url: &str,
+        matches: Captures,
+        bucket: Option<String>,
+        key: Option<Path>,
+    ) -> Result<R2Config, StorageError> {
         let account_id = last([
             std::env::var("CLOUDFLARE_ACCOUNT_ID").ok(),
             matches
@@ -291,18 +298,18 @@ impl BackendConfig {
 
         let bucket = matches
             .name("bucket")
-            .expect("bucket should always be available")
-            .as_str()
-            .to_string();
+            .map(|s| s.as_str().to_string())
+            .or(bucket)
+            .expect("bucket should always be available");
 
-        let key = matches.name("key").map(|m| m.as_str().into());
+        let key = matches.name("key").map(|m| m.as_str().into()).or(key);
 
-        Ok(Self::R2(R2Config {
+        Ok(R2Config {
             account_id,
             bucket,
             jurisdiction,
             key,
-        }))
+        })
     }
 
     fn parse_gcs(matches: Captures) -> Result<Self, StorageError> {
@@ -421,7 +428,7 @@ impl StorageProvider {
         let mut aws_key_manually_set = false;
         let mut s3_options = HashMap::new();
 
-        for (key, value) in options {
+        for (key, value) in options.clone() {
             let s3_config_key = key.parse().map_err(|_| {
                 StorageError::CredentialsError(format!("invalid S3 config key: {key}"))
             })?;
@@ -430,6 +437,19 @@ impl StorageProvider {
             }
             s3_options.insert(s3_config_key, value.clone());
             builder = builder.with_config(s3_config_key, value);
+        }
+
+        let endpoint = config
+            .endpoint
+            .as_ref()
+            .or(s3_options.get(&AmazonS3ConfigKey::Endpoint));
+
+        // is this actually r2 configured via AWS_ENDPOINT_URL?
+        let r2_endpoint_regex = Regex::new(R2_CONFIGURED_VIA_ENDPOINT).unwrap();
+        if let Some((url, Some(captures))) = endpoint.map(|e| (e, r2_endpoint_regex.captures(e))) {
+            let config = BackendConfig::parse_r2(url, captures, Some(config.bucket), config.key)?;
+
+            return Self::construct_r2(config, options).await;
         }
 
         if !aws_key_manually_set {

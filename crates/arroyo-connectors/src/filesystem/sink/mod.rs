@@ -966,9 +966,7 @@ where
         match &self.commit_state {
             CommitState::DeltaLake { last_version, .. } => *last_version,
             CommitState::VanillaParquet => 0,
-            CommitState::Iceberg { .. } => {
-                todo!()
-            }
+            CommitState::Iceberg { .. } => 0,
         }
     }
 

@@ -42,11 +42,7 @@ impl TableFormat {
                 StorageProvider::for_url_with_options(&config.path, config.storage_options.clone())
                     .await?
             }
-            TableFormat::Iceberg(table) => {
-                let table = table.load_or_create(schema).await?;
-                let (_, config) = table.file_io().clone().into_builder().into_parts();
-                StorageProvider::for_url_with_options(&table.metadata().location(), config).await?
-            }
+            TableFormat::Iceberg(table) => table.get_storage_provider(schema).await?,
         })
     }
 }
