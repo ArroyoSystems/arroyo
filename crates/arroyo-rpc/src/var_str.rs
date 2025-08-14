@@ -1,13 +1,28 @@
 use anyhow::bail;
 use regex::Regex;
+use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::de::Visitor;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use std::borrow::Cow;
 use std::sync::OnceLock;
 use std::{env, fmt};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VarStr {
     raw_val: String,
+}
+
+impl JsonSchema for VarStr {
+    fn schema_name() -> Cow<'static, str> {
+        "VarStr".into()
+    }
+
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "string",
+            "format": "var-str"
+        })
+    }
 }
 
 impl Serialize for VarStr {

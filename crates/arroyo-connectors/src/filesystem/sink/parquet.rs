@@ -120,10 +120,11 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         "parquet".to_string()
     }
 
-    fn add_batch_data(&mut self, mut data: RecordBatch) {
+    fn add_batch_data(&mut self, data: &RecordBatch) {
         let writer = self.writer.as_mut().unwrap();
 
         // remove timestamp column
+        let mut data = data.clone();
         self.schema.remove_timestamp_column(&mut data);
         writer.write(&data).unwrap();
 
@@ -221,7 +222,7 @@ impl LocalWriter for ParquetLocalWriter {
         "parquet"
     }
 
-    fn write_batch(&mut self, mut batch: RecordBatch) -> anyhow::Result<()> {
+    fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize> {
         if self.stats.is_none() {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
@@ -236,13 +237,15 @@ impl LocalWriter for ParquetLocalWriter {
         } else {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
         }
+        let mut batch = batch.clone();
         self.schema.remove_timestamp_column(&mut batch);
         let writer = self.writer.as_mut().unwrap();
+
         writer.write(&batch)?;
         if writer.in_progress_size() >= self.row_group_size_bytes {
             writer.flush()?;
         }
-        Ok(())
+        Ok(0)
     }
 
     fn sync(&mut self) -> anyhow::Result<usize> {

@@ -11,6 +11,7 @@ use crate::filesystem::config::*;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{render_schema, EmptyConfig};
 use anyhow::{anyhow, bail, Result};
+use arrow::datatypes::Schema;
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
@@ -19,7 +20,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
-use arroyo_storage::BackendConfig;
+use arroyo_storage::{BackendConfig, StorageProvider};
 use std::collections::HashMap;
 
 const ICON: &str = include_str!("./filesystem.svg");
@@ -27,7 +28,27 @@ const ICON: &str = include_str!("./filesystem.svg");
 pub enum TableFormat {
     None,
     Delta,
-    Iceberg {},
+    Iceberg(sink::iceberg::IcebergTable),
+}
+
+impl TableFormat {
+    pub async fn get_storage_provider(
+        &mut self,
+        config: &FileSystemSink,
+        schema: &Schema,
+    ) -> anyhow::Result<StorageProvider> {
+        Ok(match self {
+            TableFormat::None | TableFormat::Delta { .. } => {
+                StorageProvider::for_url_with_options(&config.path, config.storage_options.clone())
+                    .await?
+            }
+            TableFormat::Iceberg(table) => {
+                let table = table.load_or_create(schema).await?;
+                let (_, config) = table.file_io().clone().into_builder().into_parts();
+                StorageProvider::for_url_with_options(&table.metadata().location(), config).await?
+            }
+        })
+    }
 }
 
 pub fn make_sink(
@@ -35,10 +56,23 @@ pub fn make_sink(
     config: OperatorConfig,
     table_format: TableFormat,
 ) -> Result<ConstructedOperator> {
-    let backend_config = BackendConfig::parse_url(&sink.path, true)?;
+    let is_local = match table_format {
+        TableFormat::None | TableFormat::Delta { .. } => {
+            let backend_config = BackendConfig::parse_url(&sink.path, true)?;
+            backend_config.is_local()
+        }
+        TableFormat::Iceberg { .. } => {
+            // for iceberg, there's no way for us to know the path (and whether it's local or not
+            // until we connect to the catalog, which we can't do until in a non-async context
+            // so for now we'll just support object storage
+            // TODO: support local paths for iceberg
+            false
+        }
+    };
+
     let format = config.format.expect("must have format for FileSystemSink");
 
-    match (&format, backend_config.is_local()) {
+    match (&format, is_local) {
         (Format::Parquet { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalParquetFileSystemSink::new(sink, table_format, format),
         ))),

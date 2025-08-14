@@ -9,15 +9,11 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
-use crate::filesystem::{
-    file_system_sink_from_options, FileSettings, FileSystemTable, FormatSettings,
-    PartitionShuffleSettings, Partitioning, TableType,
-};
 use crate::EmptyConfig;
 
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
-
+use crate::filesystem::config::FileSystemTable;
 use super::sink::{LocalParquetFileSystemSink, ParquetFileSystemSink};
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");

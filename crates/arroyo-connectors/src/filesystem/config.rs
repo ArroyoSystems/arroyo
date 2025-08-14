@@ -1,3 +1,4 @@
+use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts};
 use arroyo_storage::BackendConfig;
 use datafusion::common::{plan_err, DataFusionError, Result};
@@ -173,7 +174,9 @@ impl FromOpts for PartitioningConfig {
 }
 
 /// Filename generation strategy.
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default, EnumString)]
+#[derive(
+    Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default, EnumString,
+)]
 #[strum(serialize_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
 #[schemars(title = "Filename Strategy")]
@@ -182,7 +185,7 @@ pub enum FilenameStrategy {
     Serial,
     Uuid,
     UuidV7,
-    Ulid
+    Ulid,
 }
 
 /// Controls filename prefix/suffix and strategy.
@@ -469,6 +472,10 @@ pub struct IcebergRestCatalog {
         example = "16ba210d70caae96ecb1f6e17afe6f3b_my-bucket"
     )]
     pub warehouse: Option<String>,
+
+    /// Token to use for auth against the REST catalog
+    #[schemars(description = "Authentication token", example = "\"asdfkj2h34kjhkj\"")]
+    pub token: Option<VarStr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -484,19 +491,26 @@ pub struct IcebergProfile {
     pub catalog: IcebergCatalog,
 }
 
+fn default_namespace() -> String {
+    "default".into()
+}
+
 /// Iceberg sink definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct IcebergSink {
-    /// URI of the DeltaLake Table (sic – matches schema).
-    #[schemars(title = "Path", description = "URI of the DeltaLake Table")]
-    pub path: String,
+    /// Table namespace, optionally dot-separated
+    #[schemars(title = "Namespace", description = "Table namespace")]
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
 
-    #[schemars(
-        title = "Storage Options",
-        description = "See the FileSystem connector docs for the full list of options"
-    )]
-    pub storage_options: Option<HashMap<String, String>>,
+    /// Table identifier
+    #[schemars(title = "Table Name", description = "Table name")]
+    pub table_name: String,
+
+    /// Optional path controlling where parquet files will be written, if creating the table
+    #[schemars(title = "Location Path", description = "Data file location")]
+    pub location_path: Option<String>,
 
     pub rolling_policy: Option<RollingPolicy>,
 

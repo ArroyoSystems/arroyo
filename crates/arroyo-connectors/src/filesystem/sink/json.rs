@@ -27,8 +27,8 @@ impl BatchBufferingWriter for JsonWriter {
         "json".to_string()
     }
 
-    fn add_batch_data(&mut self, batch: RecordBatch) {
-        for k in self.serializer.serialize(&batch) {
+    fn add_batch_data(&mut self, batch: &RecordBatch) {
+        for k in self.serializer.serialize(batch) {
             self.current_buffer.extend(k);
             self.current_buffer.extend(b"\n");
         }
@@ -52,7 +52,7 @@ impl BatchBufferingWriter for JsonWriter {
 
     fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes> {
         if let Some(final_batch) = final_batch {
-            self.add_batch_data(final_batch);
+            self.add_batch_data(&final_batch);
         }
 
         if self.current_buffer.is_empty() {
@@ -95,7 +95,7 @@ impl LocalWriter for JsonLocalWriter {
         "json"
     }
 
-    fn write_batch(&mut self, batch: RecordBatch) -> anyhow::Result<()> {
+    fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize> {
         if self.stats.is_none() {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
@@ -110,11 +110,14 @@ impl LocalWriter for JsonLocalWriter {
         } else {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
         }
+
+        let mut size = 0;
         for data in self.serializer.serialize(&batch) {
+            size += data.len() + 1;
             self.file.write_all(data.as_slice())?;
             self.file.write_all(b"\n")?;
         }
-        Ok(())
+        Ok(size)
     }
 
     fn sync(&mut self) -> anyhow::Result<usize> {

@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use super::{
     add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
-    two_phase_committer::TwoPhaseCommitterOperator, CommitState, FilenameStrategy, FinishedFile,
-    MultiPartWriterStats, RollingPolicy,
+    two_phase_committer::TwoPhaseCommitterOperator, CommitState, FileMetadata, FilenameStrategy,
+    FinishedFile, MultiPartWriterStats, RollingPolicy,
 };
 use crate::filesystem::config::NamingConfig;
 use crate::filesystem::sink::delta::load_or_create_table;
@@ -39,6 +39,7 @@ pub struct LocalFileSystemWriter<V: LocalWriter> {
     commit_state: Option<CommitState>,
     file_naming: NamingConfig,
     table_format: TableFormat,
+    metadata: FileMetadata,
 }
 
 impl<V: LocalWriter> LocalFileSystemWriter<V> {
@@ -76,6 +77,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             commit_state: None,
             file_naming,
             table_format,
+            metadata: FileMetadata::default(),
         };
         TwoPhaseCommitterOperator::new(writer)
     }
@@ -134,7 +136,7 @@ pub trait LocalWriter: Send + 'static {
         schema: ArroyoSchemaRef,
     ) -> Self;
     fn file_suffix() -> &'static str;
-    fn write_batch(&mut self, batch: RecordBatch) -> Result<()>;
+    fn write_batch(&mut self, batch: &RecordBatch) -> Result<usize>;
     // returns the total size of the file
     fn sync(&mut self) -> Result<usize>;
     fn close(&mut self) -> Result<FilePreCommit>;
@@ -245,12 +247,15 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         if let Some(partitioner) = self.partitioner.as_ref() {
             for (batch, partition) in batches_by_partition(batch, partitioner.clone())? {
                 let writer = self.get_or_insert_writer(&partition);
-                writer.write_batch(batch)?;
+                let size = writer.write_batch(&batch)?;
+                self.metadata.record_batch(&batch, size);
             }
         } else {
             let writer = self.get_or_insert_writer(&None);
-            writer.write_batch(batch)?;
+            let size = writer.write_batch(&batch)?;
+            self.metadata.record_batch(&batch, size);
         }
+
         Ok(())
     }
 
@@ -303,6 +308,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 filename,
                 partition: None,
                 size: destination.metadata()?.len() as usize,
+                metadata: self.metadata,
             });
         }
 
@@ -317,6 +323,8 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 *last_version = version;
             }
         }
+
+        self.metadata = FileMetadata::default();
         Ok(())
     }
 
