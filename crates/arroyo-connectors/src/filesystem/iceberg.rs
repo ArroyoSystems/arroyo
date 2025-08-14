@@ -1,29 +1,28 @@
-use anyhow::{anyhow, bail};
-use arrow::datatypes::Schema;
-use iceberg_catalog_rest::RestCatalogConfig;
+use anyhow::anyhow;
 use arroyo_operator::connector::Connection;
-use arroyo_storage::{BackendConfig, StorageProvider};
+use datafusion::common::plan_datafusion_err;
+use std::collections::HashMap;
 
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
-use crate::EmptyConfig;
-
+use crate::filesystem::config::{
+    FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, IcebergTableType,
+};
+use crate::filesystem::{make_sink, sink, TableFormat};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
-use crate::filesystem::config::FileSystemTable;
-use super::sink::{LocalParquetFileSystemSink, ParquetFileSystemSink};
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
 pub struct IcebergConnector {}
 
 impl Connector for IcebergConnector {
-    type ProfileT = EmptyConfig;
+    type ProfileT = IcebergProfile;
 
-    type TableT = FileSystemTable;
+    type TableT = IcebergTable;
 
     fn name(&self) -> &'static str {
         "iceberg"
@@ -39,7 +38,7 @@ impl Connector for IcebergConnector {
             source: false,
             sink: true,
             testing: false,
-            hidden: true,
+            hidden: false,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_owned(),
@@ -65,7 +64,7 @@ impl Connector for IcebergConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        ConnectionType::Source
+        ConnectionType::Sink
     }
 
     fn from_config(
@@ -76,62 +75,36 @@ impl Connector for IcebergConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
-        let TableType::Sink {
-            write_path,
-            file_settings,
-            format_settings,
-            shuffle_by_partition,
-            ..
-        } = &table.table_type
-        else {
-            bail!("Iceberg connector only supports sink tables");
-        };
-        // confirm commit style is DeltaLake
-        if let Some(CommitStyle::DeltaLake) = file_settings
-            .as_ref()
-            .ok_or_else(|| anyhow!("no file_settings"))?
-            .commit_style
-        {
-            // ok
-        } else {
-            bail!("commit_style must be DeltaLake");
-        }
-
-        let backend_config = BackendConfig::parse_url(write_path, true)?;
-        let is_local = backend_config.is_local();
-
-        let partition_fields = match (shuffle_by_partition, file_settings) {
-            (
-                Some(PartitionShuffleSettings {
-                         enabled: Some(true),
-                         ..
-                     }),
-                Some(FileSettings {
-                         partitioning:
-                         Some(Partitioning {
-                                  partition_fields, ..
-                              }),
-                         ..
-                     }),
-            ) => Some(partition_fields.clone()),
-            _ => None,
-        };
-
-        let description = match (&format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => "LocalDeltaLake<Parquet>".to_string(),
-            (Some(FormatSettings::Parquet { .. }), false) => "DeltaLake<Parquet>".to_string(),
-            _ => bail!("Delta Lake sink only supports Parquet format"),
-        };
-
         let schema = schema
             .map(|s| s.to_owned())
-            .ok_or_else(|| anyhow!("no schema defined for Delta Lake sink"))?;
+            .ok_or_else(|| anyhow!("no schema defined for DeltaLake connection"))?;
 
         let format = schema
             .format
             .as_ref()
             .map(|t| t.to_owned())
-            .ok_or_else(|| anyhow!("'format' must be set for Delta Lake connection"))?;
+            .ok_or_else(|| anyhow!("'format' must be set for DeltaLake connection"))?;
+
+        let (description, connection_type, partition_fields) = match &table.table_type {
+            IcebergTableType::Sink(IcebergSink {
+                namespace,
+                table_name,
+                partitioning,
+                ..
+            }) => {
+                let partition_fields = match (
+                    partitioning.shuffle_by_partition.enabled,
+                    &partitioning.partition_fields.is_empty(),
+                ) {
+                    (true, false) => Some(partitioning.partition_fields.clone()),
+                    _ => None,
+                };
+
+                let description = format!("IcebergSink<{}, {}.{}>", format, namespace, table_name);
+
+                (description, ConnectionType::Sink, partition_fields)
+            }
+        };
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -147,12 +120,12 @@ impl Connector for IcebergConnector {
             id,
             self.name(),
             name.to_string(),
-            ConnectionType::Sink,
+            connection_type,
             schema,
             &config,
             description,
         )
-            .with_partition_fields(partition_fields))
+        .with_partition_fields(partition_fields))
     }
 
     fn from_options(
@@ -160,64 +133,42 @@ impl Connector for IcebergConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
+        let profile = profile
+            .map(|p| {
+                serde_json::from_value(p.config.clone()).map_err(|e| {
+                    plan_datafusion_err!("invalid config for profile '{}' in database: {}", p.id, e)
+                })
+            })
+            .unwrap_or_else(|| options.pull_struct())?;
 
-        self.from_config(None, name, EmptyConfig {}, table, schema)
+        self.from_config(None, name, profile, options.pull_struct()?, schema)
     }
 
     fn make_operator(
         &self,
-        _: Self::ProfileT,
+        profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
-        let TableType::Sink {
-            write_path,
-            file_settings,
-            format_settings,
-            ..
-        } = &table.table_type
-        else {
-            bail!("Delta Lake connector only supports sink tables");
-        };
-        // confirm commit style is DeltaLake
-        if let Some(CommitStyle::DeltaLake) = file_settings
-            .as_ref()
-            .ok_or_else(|| anyhow!("no file_settings"))?
-            .commit_style
-        {
-            // ok
-        } else {
-            bail!("commit_style must be DeltaLake");
-        }
-
-        let backend_config = BackendConfig::parse_url(write_path, true)?;
-        let is_local = backend_config.is_local();
-        match (&format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => {
-                Ok(ConstructedOperator::from_operator(Box::new(
-                    LocalParquetFileSystemSink::new(write_path.to_string(), table, config),
-                )))
+        match table.table_type {
+            IcebergTableType::Sink(sink) => {
+                let tf = sink::iceberg::IcebergTable::new(&profile.catalog, &sink)?;
+                make_sink(
+                    FileSystemSink {
+                        // in iceberg, the path and storage options come from the catalog
+                        path: "".to_string(),
+                        storage_options: HashMap::new(),
+                        rolling_policy: sink.rolling_policy,
+                        file_naming: sink.file_naming,
+                        partitioning: sink.partitioning,
+                        multipart: sink.multipart,
+                    },
+                    config,
+                    TableFormat::Iceberg(tf),
+                )
             }
-            (Some(FormatSettings::Parquet { .. }), false) => {
-                Ok(ConstructedOperator::from_operator(Box::new(
-                    ParquetFileSystemSink::new(table, config),
-                )))
-            }
-            _ => bail!("Delta Lake sink only supports Parquet format"),
         }
     }
-}
-
-pub(crate) async fn load_or_create_table(
-    storage_provider: &StorageProvider,
-    schema: &Schema,
-) {
-    let config = RestCatalogConfig::builder()
-        .uri(REST_URI.to_string())
-        .build();
-    let catalog = RestCatalog::new(config);
-
 }

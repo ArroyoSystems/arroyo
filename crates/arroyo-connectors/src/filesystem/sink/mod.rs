@@ -710,7 +710,7 @@ where
                 ),
             },
             TableFormat::None => CommitState::VanillaParquet,
-            TableFormat::Iceberg { .. } => todo!(),
+            TableFormat::Iceberg { .. } => CommitState::Iceberg {},
         };
         let mut file_naming = sink_config.file_naming.clone();
 

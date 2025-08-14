@@ -8,10 +8,10 @@ use std::iter::once;
 
 #[derive(Debug)]
 pub struct IcebergTable {
-    catalog: RestCatalog,
-    table_ident: TableIdent,
-    location_path: Option<String>,
-    table: Option<Table>,
+    pub catalog: RestCatalog,
+    pub table_ident: TableIdent,
+    pub location_path: Option<String>,
+    pub table: Option<Table>,
 }
 
 impl IcebergTable {
@@ -53,39 +53,49 @@ impl IcebergTable {
             return Ok(self.table.as_ref().unwrap());
         }
 
-        match self.catalog.load_table(&self.table_ident).await {
-            Ok(table) => {
-                self.table = Some(table);
-                return Ok(self.table.as_ref().unwrap());
-            }
-            Err(e) if e.kind() == iceberg::ErrorKind::NamespaceNotFound => {
-                self.catalog
-                    .create_namespace(self.table_ident.namespace(), HashMap::new())
-                    .await?;
-                // continue to table creation
-            }
-            Err(e) if e.kind() == iceberg::ErrorKind::TableNotFound => {
-                // continue to table creation
-            }
-            Err(e) => {
-                return Err(e.into());
+        if !self
+            .catalog
+            .namespace_exists(self.table_ident.namespace())
+            .await?
+        {
+            if let Err(e) = self
+                .catalog
+                .create_namespace(self.table_ident.namespace(), HashMap::new())
+                .await
+            {
+                if e.kind() != iceberg::ErrorKind::NamespaceAlreadyExists {
+                    return Err(e.into());
+                }
             }
         }
 
-        let schema = iceberg::arrow::arrow_schema_to_schema(schema)?;
+        let table = if !self.catalog.table_exists(&self.table_ident).await? {
+            let schema = iceberg::arrow::arrow_schema_to_schema(schema)?;
 
-        let table = self
-            .catalog
-            .create_table(
-                self.table_ident.namespace(),
-                TableCreation::builder()
-                    .location_opt(self.location_path.clone())
-                    .schema(schema)
-                    // TODO: partitioning
-                    .name(self.table_ident.name.clone())
-                    .build(),
-            )
-            .await?;
+            match self
+                .catalog
+                .create_table(
+                    self.table_ident.namespace(),
+                    TableCreation::builder()
+                        .location_opt(self.location_path.clone())
+                        .schema(schema)
+                        // TODO: partitioning
+                        .name(self.table_ident.name.clone())
+                        .build(),
+                )
+                .await
+            {
+                Ok(table) => table,
+                Err(e) if e.kind() == iceberg::ErrorKind::TableAlreadyExists => {
+                    self.catalog.load_table(&self.table_ident).await?
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        } else {
+            self.catalog.load_table(&self.table_ident).await?
+        };
 
         self.table = Some(table);
 

@@ -65,7 +65,7 @@ impl Connector for DeltaLakeConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        ConnectionType::Source
+        ConnectionType::Sink
     }
 
     fn from_config(

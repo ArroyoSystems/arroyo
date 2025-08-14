@@ -491,6 +491,25 @@ pub struct IcebergProfile {
     pub catalog: IcebergCatalog,
 }
 
+impl FromOpts for IcebergProfile {
+    fn from_opts(opts: &mut ConnectorOptions) -> std::result::Result<Self, DataFusionError> {
+        let catalog_type = opts.pull_str("catalog.type")?;
+        let warehouse = opts.pull_opt_str("catalog.warehouse")?;
+        match catalog_type.as_str() {
+            "rest" => Ok(Self {
+                catalog: IcebergCatalog::Rest(IcebergRestCatalog {
+                    url: opts.pull_str("catalog.rest.url")?,
+                    warehouse,
+                    token: opts.pull_opt_str("catalog.rest.token")?.map(VarStr::new),
+                }),
+            }),
+            s => {
+                plan_err!("unsupported Iceberg catalog.type '{}'", s)
+            }
+        }
+    }
+}
+
 fn default_namespace() -> String {
     "default".into()
 }
@@ -512,13 +531,33 @@ pub struct IcebergSink {
     #[schemars(title = "Location Path", description = "Data file location")]
     pub location_path: Option<String>,
 
-    pub rolling_policy: Option<RollingPolicy>,
+    #[serde(default)]
+    pub rolling_policy: RollingPolicy,
 
-    pub file_naming: Option<NamingConfig>,
+    #[serde(default)]
+    pub file_naming: NamingConfig,
 
-    pub partitioning: Option<PartitioningConfig>,
+    #[serde(default)]
+    pub partitioning: PartitioningConfig,
 
-    pub multipart: Option<MultipartConfig>,
+    #[serde(default)]
+    pub multipart: MultipartConfig,
+}
+
+impl FromOpts for IcebergSink {
+    fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
+        Ok(Self {
+            namespace: opts
+                .pull_opt_str("namespace")?
+                .unwrap_or_else(|| "default".to_string()),
+            table_name: opts.pull_str("table_name")?,
+            location_path: opts.pull_opt_str("location_path")?,
+            rolling_policy: opts.pull_struct()?,
+            file_naming: opts.pull_struct()?,
+            partitioning: opts.pull_struct()?,
+            multipart: opts.pull_struct()?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -532,4 +571,20 @@ pub enum IcebergTableType {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct IcebergTable {
     pub table_type: IcebergTableType,
+}
+
+impl FromOpts for IcebergTable {
+    fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
+        Ok(Self {
+            table_type: match opts.pull_str("type")?.as_str() {
+                "source" => {
+                    return plan_err!("DeltaLake sources are not yet supported");
+                }
+                "sink" => IcebergTableType::Sink(opts.pull_struct()?),
+                _ => {
+                    return plan_err!("type must be one of 'source' or 'sink'");
+                }
+            },
+        })
+    }
 }

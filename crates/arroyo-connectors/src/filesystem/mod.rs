@@ -1,6 +1,6 @@
 mod config;
 pub mod delta;
-// mod iceberg;
+pub(crate) mod iceberg;
 mod sink;
 mod source;
 
