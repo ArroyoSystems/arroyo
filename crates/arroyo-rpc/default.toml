@@ -63,7 +63,7 @@ resource-mode = "per-slot"
 
 [kubernetes-scheduler.worker]
 name-prefix = "arroyo"
-image = "ghcr.io/arroyosystems/arroyo:latest"
+image = "ghcr.io/boittega/arroyo:latest"
 image-pull-policy = "IfNotPresent"
 service-account-name = "default"
 resources = { requests = { cpu = "900m",  memory = "500Mi" } }

@@ -5,7 +5,7 @@ fullnameOverride: ""
 clusterDomain: cluster.local
 
 image:
-  repository: ghcr.io/arroyosystems/arroyo
+  repository: ghcr.io/boittega/arroyo
   tag: "tip"
 imagePullPolicy: IfNotPresent
 imagePullSecrets: []

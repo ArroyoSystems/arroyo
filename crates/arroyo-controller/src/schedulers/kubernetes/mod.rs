@@ -188,6 +188,28 @@ impl KubernetesScheduler {
                 "serviceAccountName": c.worker.service_account_name,
                 "nodeSelector": c.worker.node_selector,
                 "tolerations": c.worker.tolerations,
+                "livenessProbe": {
+                    "httpGet": {
+                        "path": "/health",
+                        "port": 6901
+                    },
+                    "initialDelaySeconds": 5,
+                    "periodSeconds": 10,
+                    "timeoutSeconds": 5,
+                    "successThreshold": 1,
+                    "failureThreshold": 3
+                },
+                "readinessProbe": {
+                    "httpGet": {
+                        "path": "/health",
+                        "port": 6901
+                    },
+                    "initialDelaySeconds": 5,
+                    "periodSeconds": 10,
+                    "timeoutSeconds": 5,
+                    "successThreshold": 1,
+                    "failureThreshold": 3
+                }
             }
         }))
         .unwrap()
