@@ -1,10 +1,6 @@
 use std::{fs::File, io::Write, time::Instant};
 
-use super::{
-    local::{CurrentFileRecovery, LocalWriter},
-    parquet::representitive_timestamp,
-    BatchBufferingWriter, MultiPartWriterStats,
-};
+use super::{local::{CurrentFileRecovery, LocalWriter}, parquet::representitive_timestamp, BatchBufferingWriter, FileMetadata, MultiPartWriterStats};
 use crate::filesystem::config;
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
@@ -50,7 +46,7 @@ impl BatchBufferingWriter for JsonWriter {
         }
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes> {
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)> {
         if let Some(final_batch) = final_batch {
             self.add_batch_data(&final_batch);
         }
@@ -58,7 +54,7 @@ impl BatchBufferingWriter for JsonWriter {
         if self.current_buffer.is_empty() {
             None
         } else {
-            Some(self.current_buffer.split().freeze())
+            Some((self.current_buffer.split().freeze(), None))
         }
     }
 }

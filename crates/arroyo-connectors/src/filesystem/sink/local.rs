@@ -39,7 +39,6 @@ pub struct LocalFileSystemWriter<V: LocalWriter> {
     commit_state: Option<CommitState>,
     file_naming: NamingConfig,
     table_format: TableFormat,
-    metadata: FileMetadata,
 }
 
 impl<V: LocalWriter> LocalFileSystemWriter<V> {
@@ -77,7 +76,6 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             commit_state: None,
             file_naming,
             table_format,
-            metadata: FileMetadata::default(),
         };
         TwoPhaseCommitterOperator::new(writer)
     }
@@ -248,12 +246,10 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             for (batch, partition) in batches_by_partition(batch, partitioner.clone())? {
                 let writer = self.get_or_insert_writer(&partition);
                 let size = writer.write_batch(&batch)?;
-                self.metadata.record_batch(&batch, size);
             }
         } else {
             let writer = self.get_or_insert_writer(&None);
             let size = writer.write_batch(&batch)?;
-            self.metadata.record_batch(&batch, size);
         }
 
         Ok(())
@@ -308,23 +304,27 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 filename,
                 partition: None,
                 size: destination.metadata()?.len() as usize,
-                metadata: self.metadata,
+                // TODO: this breaks iceberg, but we don't support iceberg on local filesystem anyways
+                metadata: None,
             });
         }
-
-        if let CommitState::DeltaLake {
-            last_version,
-            table,
-        } = self.commit_state.as_mut().unwrap()
-        {
-            if let Some(version) =
-                delta::commit_files_to_delta(&finished_files, table, *last_version).await?
-            {
-                *last_version = version;
+        
+        match self.commit_state.as_mut().unwrap() {
+            CommitState::DeltaLake { last_version, table } => {
+                if let Some(version) =
+                    delta::commit_files_to_delta(&finished_files, table, *last_version).await?
+                {
+                    *last_version = version;
+                }
+            }
+            CommitState::Iceberg(_) => {
+                unreachable!("Iceberg is not supported for local filesystems");
+            }
+            CommitState::VanillaParquet => {
+                // nothing to do
             }
         }
-
-        self.metadata = FileMetadata::default();
+        
         Ok(())
     }
 

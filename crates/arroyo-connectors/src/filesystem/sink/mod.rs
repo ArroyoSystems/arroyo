@@ -39,6 +39,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
+use ::parquet::format::FileMetaData;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
@@ -76,7 +77,8 @@ pub struct FileSystemSink<BBW: BatchBufferingWriter> {
     checkpoint_receiver: Option<Receiver<CheckpointData>>,
     table: config::FileSystemSink,
     format: Format,
-    table_format: TableFormat,
+    table_format: Option<TableFormat>,
+    commit_strategy: CommitStrategy,
     _ts: PhantomData<BBW>,
 }
 
@@ -99,7 +101,12 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             checkpoint_receiver: None,
             table: config,
             format,
-            table_format,
+            commit_strategy: match &table_format {
+                TableFormat::None => CommitStrategy::PerSubtask,
+                TableFormat::Delta | TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
+            },
+            table_format: Some(table_format),
+
             partitioner: None,
             _ts: Default::default(),
         })
@@ -118,8 +125,9 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         let table = self.table.clone();
         let format = self.format.clone();
 
-        let provider = self
-            .table_format
+        let mut table_format = self.table_format.take().expect("table format must be set");
+
+        let provider = table_format
             .get_storage_provider(&self.table, &schema.schema_without_timestamp())
             .await?;
 
@@ -128,7 +136,7 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             receiver,
             checkpoint_sender,
             table,
-            &self.table_format,
+            table_format,
             format,
             schema,
         )
@@ -294,9 +302,8 @@ enum CheckpointData {
     },
 }
 
-#[derive(Debug, Decode, Encode, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Decode, Encode, Clone, PartialEq, Eq, Default, PartialOrd)]
 pub struct FileMetadata {
-    size_bytes: usize,
     row_count: usize,
 }
 
@@ -305,15 +312,21 @@ impl Add<FileMetadata> for FileMetadata {
 
     fn add(self, rhs: FileMetadata) -> Self::Output {
         FileMetadata {
-            size_bytes: self.size_bytes + rhs.size_bytes,
             row_count: self.row_count + rhs.row_count,
         }
     }
 }
 
+impl From<::parquet::format::FileMetaData> for FileMetadata {
+    fn from(value: FileMetaData) -> Self {
+        Self {
+            row_count: value.num_rows as usize,
+        }
+    }
+}
+
 impl FileMetadata {
-    pub fn record_batch(&mut self, batch: &RecordBatch, size_bytes: usize) {
-        self.size_bytes += size_bytes;
+    pub fn record_batch(&mut self, batch: &RecordBatch) {
         self.row_count += batch.num_rows();
     }
 }
@@ -324,7 +337,6 @@ struct InProgressFileCheckpoint {
     partition: Option<String>,
     data: FileCheckpointData,
     pushed_size: usize,
-    metadata: FileMetadata,
 }
 
 impl std::fmt::Debug for InProgressFileCheckpoint {
@@ -352,10 +364,12 @@ pub enum FileCheckpointData {
     MultiPartWriterClosed {
         multi_part_upload_id: String,
         in_flight_parts: Vec<InFlightPartCheckpoint>,
+        metadata: Option<FileMetadata>,
     },
     MultiPartWriterUploadCompleted {
         multi_part_upload_id: String,
         completed_parts: Vec<String>,
+        metadata: Option<FileMetadata>,
     },
 }
 
@@ -409,6 +423,7 @@ impl std::fmt::Debug for FileCheckpointData {
             FileCheckpointData::MultiPartWriterClosed {
                 multi_part_upload_id,
                 in_flight_parts,
+                ..
             } => {
                 write!(
                     f,
@@ -429,6 +444,7 @@ impl std::fmt::Debug for FileCheckpointData {
             FileCheckpointData::MultiPartWriterUploadCompleted {
                 multi_part_upload_id,
                 completed_parts,
+                ..
             } => {
                 write!(f, "MultiPartWriterUploadCompleted {{ multi_part_upload_id: {multi_part_upload_id}, completed_parts: [")?;
                 for part in completed_parts {
@@ -471,7 +487,7 @@ pub enum CommitState {
         last_version: i64,
         table: Box<DeltaTable>,
     },
-    Iceberg {},
+    Iceberg(IcebergTable),
     VanillaParquet,
 }
 
@@ -480,11 +496,10 @@ async fn from_checkpoint(
     partition: Option<String>,
     checkpoint_data: FileCheckpointData,
     mut pushed_size: usize,
-    metadata: FileMetadata,
     object_store: Arc<StorageProvider>,
 ) -> Result<Option<FileToFinish>> {
     let mut parts = vec![];
-    let multipart_id = match checkpoint_data {
+    let (multipart_id, metadata) = match checkpoint_data {
         FileCheckpointData::Empty => {
             return Ok(None);
         }
@@ -516,7 +531,7 @@ async fn from_checkpoint(
                 "parts: {:?}, pushed_size: {:?}, multipart id: {:?}",
                 parts, pushed_size, multipart_id
             );
-            multipart_id
+            (multipart_id, None)
         }
         FileCheckpointData::MultiPartInFlight {
             multi_part_upload_id,
@@ -550,11 +565,12 @@ async fn from_checkpoint(
                     .await?;
                 parts.push(upload_part);
             }
-            multi_part_upload_id
+            (multi_part_upload_id, None)
         }
         FileCheckpointData::MultiPartWriterClosed {
             multi_part_upload_id,
             in_flight_parts,
+            metadata,
         } => {
             for (part_index, data) in in_flight_parts.into_iter().enumerate() {
                 match data {
@@ -571,16 +587,17 @@ async fn from_checkpoint(
                     }
                 }
             }
-            multi_part_upload_id
+            (multi_part_upload_id, metadata)
         }
         FileCheckpointData::MultiPartWriterUploadCompleted {
             multi_part_upload_id,
             completed_parts,
+            metadata,
         } => {
             for content_id in completed_parts {
                 parts.push(PartId { content_id })
             }
-            multi_part_upload_id
+            (multi_part_upload_id, metadata)
         }
     };
     Ok(Some(FileToFinish {
@@ -600,7 +617,7 @@ pub struct FileToFinish {
     multi_part_upload_id: String,
     completed_parts: Vec<String>,
     size: usize,
-    metadata: FileMetadata,
+    metadata: Option<FileMetadata>,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
@@ -608,7 +625,7 @@ pub struct FinishedFile {
     filename: String,
     partition: Option<String>,
     size: usize,
-    metadata: FileMetadata,
+    metadata: Option<FileMetadata>,
 }
 
 #[derive(Debug)]
@@ -698,7 +715,7 @@ where
         receiver: Receiver<FileSystemMessages>,
         checkpoint_sender: Sender<CheckpointData>,
         sink_config: config::FileSystemSink,
-        table_format: &TableFormat,
+        table_format: TableFormat,
         format: Format,
         schema: ArroyoSchemaRef,
     ) -> Result<Self> {
@@ -710,7 +727,7 @@ where
                 ),
             },
             TableFormat::None => CommitState::VanillaParquet,
-            TableFormat::Iceberg { .. } => CommitState::Iceberg {},
+            TableFormat::Iceberg(table) => CommitState::Iceberg(table),
         };
         let mut file_naming = sink_config.file_naming.clone();
 
@@ -755,7 +772,7 @@ where
                         },
                         FileSystemMessages::Init {max_file_index, task_info, recovered_files } => {
                             self.max_file_index = max_file_index;
-                                                    info!("recovered files: {:?}", recovered_files);
+                            info!("recovered files: {:?}", recovered_files);
                             self.task_info = Some(task_info);
                             for recovered_file in recovered_files {
                                 let file_to_finish = from_checkpoint(
@@ -763,7 +780,6 @@ where
                                     recovered_file.partition.clone(),
                                     recovered_file.data,
                                     recovered_file.pushed_size,
-                                    recovered_file.metadata,
                                     self.object_store.clone()).await?;
 
                                 if let Some(file_to_finish) = file_to_finish {
@@ -948,7 +964,9 @@ where
                     *last_version = new_version;
                 }
             }
-            CommitState::Iceberg { .. } => {}
+            CommitState::Iceberg(table) => {
+                table.commit(&*self.object_store, &finished_files).await?;
+            }
             CommitState::VanillaParquet => {
                 // nothing to do
             }
@@ -1056,27 +1074,26 @@ where
                     partition: writer.partition(),
                     data,
                     pushed_size: writer.stats().as_ref().unwrap().bytes_written,
-                    metadata: writer.metadata,
                 });
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
         }
-        for file_to_finish in &self.files_to_finish {
+        for file_to_finish in self.files_to_finish.drain(..) {
             self.checkpoint_sender
                 .send(CheckpointData::InProgressFileCheckpoint(
                     InProgressFileCheckpoint {
-                        filename: file_to_finish.filename.clone(),
-                        partition: file_to_finish.partition.clone(),
+                        filename: file_to_finish.filename,
+                        partition: file_to_finish.partition,
                         data: FileCheckpointData::MultiPartWriterUploadCompleted {
-                            multi_part_upload_id: file_to_finish.multi_part_upload_id.clone(),
-                            completed_parts: file_to_finish.completed_parts.clone(),
+                            multi_part_upload_id: file_to_finish.multi_part_upload_id,
+                            completed_parts: file_to_finish.completed_parts,
+                            metadata: file_to_finish.metadata,
                         },
                         pushed_size: file_to_finish.size,
-                        metadata: file_to_finish.metadata,
                     },
                 ))
                 .await?;
         }
-        self.files_to_finish.clear();
+
         Ok(())
     }
 }
@@ -1223,7 +1240,7 @@ impl MultipartManager {
         &mut self,
         part_idx: usize,
         upload_part: PartId,
-        metadata: FileMetadata,
+        metadata: &Option<FileMetadata>,
     ) -> Result<Option<FileToFinish>> {
         self.pushed_parts[part_idx] = PartIdOrBufferedData::PartId(upload_part);
         self.uploaded_parts += 1;
@@ -1252,7 +1269,7 @@ impl MultipartManager {
                     })
                     .collect::<Result<Vec<_>>>()?,
                 size: self.pushed_size,
-                metadata,
+                metadata: metadata.clone(),
             }))
         }
     }
@@ -1260,7 +1277,7 @@ impl MultipartManager {
         self.closed && self.uploaded_parts == self.pushed_parts.len()
     }
 
-    fn get_closed_file_checkpoint_data(&mut self) -> FileCheckpointData {
+    fn get_closed_file_checkpoint_data(&mut self, metadata: &Option<FileMetadata>) -> FileCheckpointData {
         if !self.closed {
             unreachable!("get_closed_file_checkpoint_data called on open file");
         }
@@ -1291,6 +1308,7 @@ impl MultipartManager {
                         }
                     })
                     .collect(),
+                metadata: metadata.clone(),
             }
         } else {
             let in_flight_parts = self
@@ -1315,6 +1333,7 @@ impl MultipartManager {
             FileCheckpointData::MultiPartWriterClosed {
                 multi_part_upload_id: multipart_id.clone(),
                 in_flight_parts,
+                metadata: metadata.clone(),
             }
         }
     }
@@ -1361,7 +1380,7 @@ impl MultipartManager {
         }
     }
 
-    fn get_finished_file(&mut self, metadata: FileMetadata) -> FileToFinish {
+    fn get_finished_file(&mut self, metadata: &Option<FileMetadata>) -> FileToFinish {
         if !self.closed {
             unreachable!("get_finished_file called on open file");
         }
@@ -1384,7 +1403,7 @@ impl MultipartManager {
                 })
                 .collect(),
             size: self.pushed_size,
-            metadata,
+            metadata: metadata.clone(),
         }
     }
 }
@@ -1402,7 +1421,7 @@ pub trait BatchBufferingWriter: Send {
     /// Panics if pos > `self.buffered_bytes()`
     fn split_to(&mut self, pos: usize) -> Bytes;
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes>;
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)>;
 }
 
 pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
@@ -1411,7 +1430,7 @@ pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     stats: Option<MultiPartWriterStats>,
     schema: ArroyoSchemaRef,
     target_part_size_bytes: usize,
-    pub metadata: FileMetadata,
+    pub metadata: Option<FileMetadata>,
 }
 impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     fn new(
@@ -1435,7 +1454,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
                 .target_part_size_bytes
                 .map(|t| t as usize)
                 .unwrap_or(DEFAULT_TARGET_PART_SIZE),
-            metadata: FileMetadata::default(),
+            metadata: None,
         }
     }
 
@@ -1489,7 +1508,6 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
         if let Some(bytes) = bytes {
             stats.bytes_written += bytes.len();
             stats.parts_written += 1;
-            self.metadata.record_batch(&batch, bytes.len());
             self.multipart_manager.write_next_part(bytes)
         } else {
             Ok(None)
@@ -1509,12 +1527,12 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
         upload_part: PartId,
     ) -> Result<Option<FileToFinish>> {
         self.multipart_manager
-            .handle_completed_part(part_idx, upload_part, self.metadata)
+            .handle_completed_part(part_idx, upload_part, &self.metadata)
     }
 
     fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData {
         if self.multipart_manager.closed {
-            self.multipart_manager.get_closed_file_checkpoint_data()
+            self.multipart_manager.get_closed_file_checkpoint_data(&self.metadata)
         } else {
             self.multipart_manager.get_in_progress_checkpoint(
                 self.batch_buffering_writer
@@ -1533,7 +1551,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     }
 
     fn get_finished_file(&mut self) -> FileToFinish {
-        self.multipart_manager.get_finished_file(self.metadata)
+        self.multipart_manager.get_finished_file(&self.metadata)
     }
 }
 
@@ -1543,7 +1561,8 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
 
-        if let Some(bytes) = self.batch_buffering_writer.close(None) {
+        if let Some((bytes, metadata)) = self.batch_buffering_writer.close(None) {
+            self.metadata = metadata;
             let existing_part_size = self.stats.as_ref().and_then(|s| s.part_size);
 
             if self
@@ -1645,11 +1664,7 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
     }
 
     fn commit_strategy(&self) -> CommitStrategy {
-        match &self.table_format {
-            TableFormat::None => CommitStrategy::PerSubtask,
-            TableFormat::Delta => CommitStrategy::PerOperator,
-            TableFormat::Iceberg { .. } => CommitStrategy::PerOperator,
-        }
+        self.commit_strategy
     }
 
     async fn init(
@@ -1775,11 +1790,11 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                     partition,
                     data,
                     pushed_size,
-                    metadata,
                 }) => {
                     if let FileCheckpointData::MultiPartWriterUploadCompleted {
                         multi_part_upload_id,
                         completed_parts,
+                        metadata,
                     } = data
                     {
                         pre_commit_messages.insert(
@@ -1799,7 +1814,6 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                             partition,
                             data,
                             pushed_size,
-                            metadata,
                         })
                     }
                 }

@@ -1,7 +1,4 @@
-use super::{
-    local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, MultiPartWriterStats,
-};
+use super::{local::{CurrentFileRecovery, FilePreCommit, LocalWriter}, BatchBufferingWriter, FileMetadata, MultiPartWriterStats};
 use crate::filesystem::config;
 use anyhow::Result;
 use arrow::{
@@ -161,16 +158,17 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         Some(copied_bytes)
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes> {
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)> {
         let mut writer = self.writer.take().unwrap();
         if let Some(batch) = final_batch {
             writer.write(&batch).unwrap();
         }
-        writer.close().unwrap();
+        let metadata: FileMetadata = writer.close().unwrap().into();
+
         let mut buffer = SharedBuffer::new(self.row_group_size_bytes);
         mem::swap(&mut buffer, &mut self.buffer);
 
-        Some(buffer.into_inner().freeze())
+        Some((buffer.into_inner().freeze(), Some(metadata)))
     }
 }
 
@@ -264,6 +262,7 @@ impl LocalWriter for ParquetLocalWriter {
         let writer = self.writer.take();
         let writer = writer.unwrap();
         writer.close()?;
+
         self.sync()?;
         Ok(FilePreCommit {
             tmp_file: self.tmp_path.clone(),
@@ -285,6 +284,7 @@ impl LocalWriter for ParquetLocalWriter {
             .unwrap()
             .get_ref()
             .to_vec();
+
         Ok(Some(CurrentFileRecovery {
             tmp_file: self.tmp_path.clone(),
             bytes_written,

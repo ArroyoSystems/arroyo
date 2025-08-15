@@ -1,9 +1,7 @@
 use crate::filesystem::config::{IcebergCatalog, IcebergSink};
-use anyhow::anyhow;
 use arrow::datatypes::Schema;
 use arrow::datatypes::{DataType, Field, Fields, UnionFields};
 use arroyo_storage::StorageProvider;
-use datafusion::logical_expr::Operator::HashMinus;
 use iceberg::table::Table;
 use iceberg::{Catalog, TableCreation, TableIdent};
 use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
@@ -11,7 +9,10 @@ use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use std::collections::HashMap;
 use std::iter::once;
 use std::sync::Arc;
-use url::Url;
+use iceberg::spec::{DataFile, DataFileBuilder, DataFileFormat};
+use iceberg::transaction::{ApplyTransactionAction, Transaction};
+use itertools::Itertools;
+use crate::filesystem::sink::FinishedFile;
 
 const CONFIG_MAPPINGS: [(&str, &str); 4] = [
     ("s3.region", "aws_region"),
@@ -154,6 +155,40 @@ impl IcebergTable {
         location.push_str("data/");
 
         Ok(StorageProvider::for_url_with_options(&location, our_config).await?)
+    }
+
+    fn data_file_from_file(f: &FinishedFile) -> anyhow::Result<DataFile> {
+        let metadata = f.metadata.as_ref()
+            // this should never happen, implies a bug somewhere
+            .expect("metadata was not recorded in file; cannot create iceberg commit");
+
+        Ok(DataFileBuilder::default()
+            .file_path(f.filename.clone())
+            .file_format(DataFileFormat::Parquet)
+            .record_count(metadata.row_count as u64)
+            .file_size_in_bytes(f.size as u64)
+            .build()?)
+    }
+
+    pub async fn commit(&mut self, storage_provider: &StorageProvider, finished_files: &[FinishedFile]) -> anyhow::Result<()> {
+        let table = self.table.as_ref().expect("table must have been initialized");
+
+        //
+
+        // commit the transaction in the rest catalog
+        let files: Vec<_> = finished_files.iter().map(|f| Self::data_file_from_file(f))
+            .try_collect()?;
+
+        let tx = Transaction::new(table);
+        let tx = tx
+            .fast_append()
+            .add_data_files(files)
+            .apply(tx)?;
+
+        self.table = Some(tx.commit(&self.catalog)
+            .await?);
+
+        Ok(())
     }
 }
 
