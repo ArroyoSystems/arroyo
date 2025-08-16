@@ -4,6 +4,7 @@ use ::arrow::{
     record_batch::RecordBatch,
     util::display::{ArrayFormatter, FormatOptions},
 };
+use ::parquet::format::FileMetaData;
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
@@ -39,7 +40,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
-use ::parquet::format::FileMetaData;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
@@ -53,7 +53,6 @@ pub mod json;
 pub mod local;
 pub mod parquet;
 mod two_phase_committer;
-
 use self::{
     json::{JsonLocalWriter, JsonWriter},
     local::LocalFileSystemWriter,
@@ -965,7 +964,7 @@ where
                 }
             }
             CommitState::Iceberg(table) => {
-                table.commit(&*self.object_store, &finished_files).await?;
+                table.commit(&finished_files).await?;
             }
             CommitState::VanillaParquet => {
                 // nothing to do
@@ -1277,7 +1276,10 @@ impl MultipartManager {
         self.closed && self.uploaded_parts == self.pushed_parts.len()
     }
 
-    fn get_closed_file_checkpoint_data(&mut self, metadata: &Option<FileMetadata>) -> FileCheckpointData {
+    fn get_closed_file_checkpoint_data(
+        &mut self,
+        metadata: &Option<FileMetadata>,
+    ) -> FileCheckpointData {
         if !self.closed {
             unreachable!("get_closed_file_checkpoint_data called on open file");
         }
@@ -1532,7 +1534,8 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
     fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData {
         if self.multipart_manager.closed {
-            self.multipart_manager.get_closed_file_checkpoint_data(&self.metadata)
+            self.multipart_manager
+                .get_closed_file_checkpoint_data(&self.metadata)
         } else {
             self.multipart_manager.get_in_progress_checkpoint(
                 self.batch_buffering_writer

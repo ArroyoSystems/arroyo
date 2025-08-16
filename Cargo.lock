@@ -567,6 +567,7 @@ name = "arroyo-connectors"
 version = "0.15.0-dev"
 dependencies = [
  "anyhow",
+ "apache-avro 0.18.0",
  "arrow",
  "arroyo-formats",
  "arroyo-operator",

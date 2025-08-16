@@ -308,9 +308,12 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 metadata: None,
             });
         }
-        
+
         match self.commit_state.as_mut().unwrap() {
-            CommitState::DeltaLake { last_version, table } => {
+            CommitState::DeltaLake {
+                last_version,
+                table,
+            } => {
                 if let Some(version) =
                     delta::commit_files_to_delta(&finished_files, table, *last_version).await?
                 {
@@ -324,7 +327,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 // nothing to do
             }
         }
-        
+
         Ok(())
     }
 

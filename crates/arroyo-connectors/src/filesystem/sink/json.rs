@@ -1,6 +1,10 @@
 use std::{fs::File, io::Write, time::Instant};
 
-use super::{local::{CurrentFileRecovery, LocalWriter}, parquet::representitive_timestamp, BatchBufferingWriter, FileMetadata, MultiPartWriterStats};
+use super::{
+    local::{CurrentFileRecovery, LocalWriter},
+    parquet::representitive_timestamp,
+    BatchBufferingWriter, FileMetadata, MultiPartWriterStats,
+};
 use crate::filesystem::config;
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;

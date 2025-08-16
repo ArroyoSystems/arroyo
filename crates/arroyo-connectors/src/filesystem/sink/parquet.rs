@@ -1,5 +1,9 @@
-use super::{local::{CurrentFileRecovery, FilePreCommit, LocalWriter}, BatchBufferingWriter, FileMetadata, MultiPartWriterStats};
+use super::{
+    local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
+    BatchBufferingWriter, FileMetadata, MultiPartWriterStats,
+};
 use crate::filesystem::config;
+use crate::filesystem::sink::iceberg::add_parquet_field_ids;
 use anyhow::Result;
 use arrow::{
     array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
@@ -100,7 +104,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
 
         let writer = ArrowWriter::try_new(
             buffer.clone(),
-            Arc::new(schema.schema_without_timestamp()),
+            Arc::new(add_parquet_field_ids(&schema.schema_without_timestamp())),
             Some(writer_properties),
         )
         .unwrap();

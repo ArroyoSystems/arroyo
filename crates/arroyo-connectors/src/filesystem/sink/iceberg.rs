@@ -1,18 +1,26 @@
 use crate::filesystem::config::{IcebergCatalog, IcebergSink};
+use crate::filesystem::sink::FinishedFile;
 use arrow::datatypes::Schema;
 use arrow::datatypes::{DataType, Field, Fields, UnionFields};
 use arroyo_storage::StorageProvider;
+use iceberg::spec::{
+    DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, FieldSummary, FormatVersion,
+    Literal, ManifestContentType, ManifestEntry, ManifestFile, ManifestMetadata, ManifestStatus,
+    ManifestWriterBuilder, PartitionSpec, PrimitiveLiteral, PrimitiveType, Struct, StructType,
+};
 use iceberg::table::Table;
+use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::{Catalog, TableCreation, TableIdent};
 use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
+use itertools::Itertools;
 use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use std::collections::HashMap;
 use std::iter::once;
+use std::ops::RangeFrom;
 use std::sync::Arc;
-use iceberg::spec::{DataFile, DataFileBuilder, DataFileFormat};
-use iceberg::transaction::{ApplyTransactionAction, Transaction};
-use itertools::Itertools;
-use crate::filesystem::sink::FinishedFile;
+use uuid::Uuid;
+
+const META_ROOT_PATH: &str = "metadata";
 
 const CONFIG_MAPPINGS: [(&str, &str); 4] = [
     ("s3.region", "aws_region"),
@@ -28,6 +36,10 @@ pub struct IcebergTable {
     pub table_ident: TableIdent,
     pub location_path: Option<String>,
     pub table: Option<Table>,
+    pub commit_uuid: Uuid,
+    pub manifest_counter: RangeFrom<u64>,
+    pub snapshot_id: i64,
+    pub manifest_files: Vec<ManifestFile>,
 }
 
 impl IcebergTable {
@@ -60,6 +72,10 @@ impl IcebergTable {
                     storage_options: sink.storage_options.clone(),
                     table_ident,
                     table: None,
+                    commit_uuid: Default::default(),
+                    manifest_counter: (0..),
+                    snapshot_id: 0,
+                    manifest_files: vec![],
                 })
             }
         }
@@ -157,36 +173,124 @@ impl IcebergTable {
         Ok(StorageProvider::for_url_with_options(&location, our_config).await?)
     }
 
-    fn data_file_from_file(f: &FinishedFile) -> anyhow::Result<DataFile> {
-        let metadata = f.metadata.as_ref()
+    fn data_file_from_file(
+        base_path: &str,
+        partition_spec_id: i32,
+        f: &FinishedFile,
+    ) -> anyhow::Result<DataFile> {
+        let metadata = f
+            .metadata
+            .as_ref()
             // this should never happen, implies a bug somewhere
             .expect("metadata was not recorded in file; cannot create iceberg commit");
 
         Ok(DataFileBuilder::default()
-            .file_path(f.filename.clone())
+            .file_path(format!("{}/data/{}", base_path, f.filename.clone()))
             .file_format(DataFileFormat::Parquet)
             .record_count(metadata.row_count as u64)
             .file_size_in_bytes(f.size as u64)
+            .content(DataContentType::Data)
+            .partition(Struct::empty())
+            .partition_spec_id(partition_spec_id)
             .build()?)
     }
 
-    pub async fn commit(&mut self, storage_provider: &StorageProvider, finished_files: &[FinishedFile]) -> anyhow::Result<()> {
-        let table = self.table.as_ref().expect("table must have been initialized");
+    fn generate_unique_snapshot_id(table: &Table) -> i64 {
+        let generate_random_id = || -> i64 {
+            let (lhs, rhs) = Uuid::new_v4().as_u64_pair();
+            let snapshot_id = (lhs ^ rhs) as i64;
+            if snapshot_id < 0 {
+                -snapshot_id
+            } else {
+                snapshot_id
+            }
+        };
+        let mut snapshot_id = generate_random_id();
 
+        while table
+            .metadata()
+            .snapshots()
+            .any(|s| s.snapshot_id() == snapshot_id)
+        {
+            snapshot_id = generate_random_id();
+        }
+        snapshot_id
+    }
+
+    pub async fn write_manifest_v2(
+        &mut self,
+        data_files: &[DataFile],
+        partition_spec: PartitionSpec,
+    ) -> anyhow::Result<ManifestFile> {
+        let table = self.table.as_ref().expect("table must have been loaded");
+
+        let new_manifest_path = format!(
+            "{}/{}/{}-m{}.{}",
+            table.metadata().location(),
+            META_ROOT_PATH,
+            self.commit_uuid,
+            self.manifest_counter.next().unwrap(),
+            DataFileFormat::Avro
+        );
+
+        let file = table.file_io().new_output(new_manifest_path)?;
+
+        let mut writer = ManifestWriterBuilder::new(
+            file,
+            Some(self.snapshot_id),
+            None,
+            table.metadata().current_schema().clone(),
+            partition_spec,
+        )
+        .build_v2_data();
+
+        for f in data_files {
+            writer.add_file(f.clone(), table.metadata().next_sequence_number())?;
+        }
+
+        Ok(writer.write_manifest_file().await?)
+    }
+
+    pub async fn commit(&mut self, finished_files: &[FinishedFile]) -> anyhow::Result<()> {
+        if finished_files.is_empty() {
+            return Ok(());
+        }
+
+        let table = self.table.as_ref().expect("table must have been loaded");
+
+        let partition_spec_id = table.metadata().default_partition_spec_id();
+        let files: Vec<_> = finished_files
+            .iter()
+            .map(|f| Self::data_file_from_file(table.metadata().location(), partition_spec_id, f))
+            .try_collect()?;
+
+        println!("Committing data files {:?}", files);
+        //
+        // self.manifest_files.push(self.write_manifest_v2(
+        //     &files, PartitionSpec::unpartition_spec(),
+        // ).await?);
+        //
         //
 
         // commit the transaction in the rest catalog
-        let files: Vec<_> = finished_files.iter().map(|f| Self::data_file_from_file(f))
-            .try_collect()?;
-
         let tx = Transaction::new(table);
-        let tx = tx
-            .fast_append()
-            .add_data_files(files)
-            .apply(tx)?;
+        let tx = tx.fast_append().add_data_files(files).apply(tx)?;
 
-        self.table = Some(tx.commit(&self.catalog)
-            .await?);
+        Some(tx.commit(&self.catalog).await?);
+        // the tx.commit call returns the table but the FileIO somehow ends up misconfigured in such
+        // a way that breaks future IO operations
+        self.table = Some(self.catalog.load_table(&self.table_ident).await?);
+
+        println!(
+            "config = {:?}",
+            self.table
+                .as_ref()
+                .unwrap()
+                .file_io()
+                .clone()
+                .into_builder()
+                .into_parts()
+        );
 
         Ok(())
     }
@@ -194,7 +298,7 @@ impl IcebergTable {
 
 /// Add metadata "PARQUET:field_id" to every field, which is required by the arrow -> iceberg
 /// schema conversion code from iceberg-rust
-fn add_parquet_field_ids(schema: &Schema) -> Schema {
+pub fn add_parquet_field_ids(schema: &Schema) -> Schema {
     let mut next_id: i32 = 1;
     let new_fields: Fields = schema
         .fields()
@@ -202,7 +306,6 @@ fn add_parquet_field_ids(schema: &Schema) -> Schema {
         .map(|f| annotate_field(f, &mut next_id))
         .collect();
 
-    // preserve top-level schema metadata
     Schema::new_with_metadata(new_fields, schema.metadata().clone())
 }
 
@@ -248,4 +351,29 @@ fn annotate_field(field: &Field, next_id: &mut i32) -> Field {
     *next_id += 1;
 
     Field::new(field.name(), new_dt, field.is_nullable()).with_metadata(md)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::filesystem::sink::iceberg::IcebergTable;
+    use crate::filesystem::sink::{FileMetadata, FinishedFile};
+
+    #[test]
+    fn test_datafile_creation() {
+        let file = FinishedFile {
+            filename: "00001-000.parquet".to_string(),
+            partition: None,
+            size: 9788,
+            metadata: Some(FileMetadata { row_count: 100 }),
+        };
+
+        let df = IcebergTable::data_file_from_file("s3://my-bucket/catalog", 1, &file).unwrap();
+
+        assert_eq!(df.file_size_in_bytes(), 9788);
+        assert_eq!(df.record_count(), 100);
+        assert_eq!(
+            df.file_path(),
+            "s3://my-bucket/catalog/data/00001-000.parquet"
+        );
+    }
 }
