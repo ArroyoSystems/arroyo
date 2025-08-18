@@ -154,6 +154,7 @@ pub struct CurrentFileRecovery {
     pub bytes_written: usize,
     pub suffix: Option<Vec<u8>>,
     pub destination: String,
+    pub metadata: Option<FileMetadata>,
 }
 
 #[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
@@ -195,6 +196,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 bytes_written,
                 suffix,
                 destination,
+                ..
             } in current_files
             {
                 let mut file = OpenOptions::new()

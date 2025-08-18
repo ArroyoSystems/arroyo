@@ -36,9 +36,6 @@ pub struct IcebergTable {
     pub table_ident: TableIdent,
     pub location_path: Option<String>,
     pub table: Option<Table>,
-    pub commit_uuid: Uuid,
-    pub manifest_counter: RangeFrom<u64>,
-    pub snapshot_id: i64,
     pub manifest_files: Vec<ManifestFile>,
 }
 
@@ -72,9 +69,6 @@ impl IcebergTable {
                     storage_options: sink.storage_options.clone(),
                     table_ident,
                     table: None,
-                    commit_uuid: Default::default(),
-                    manifest_counter: (0..),
-                    snapshot_id: 0,
                     manifest_files: vec![],
                 })
             }
@@ -195,62 +189,6 @@ impl IcebergTable {
             .build()?)
     }
 
-    fn generate_unique_snapshot_id(table: &Table) -> i64 {
-        let generate_random_id = || -> i64 {
-            let (lhs, rhs) = Uuid::new_v4().as_u64_pair();
-            let snapshot_id = (lhs ^ rhs) as i64;
-            if snapshot_id < 0 {
-                -snapshot_id
-            } else {
-                snapshot_id
-            }
-        };
-        let mut snapshot_id = generate_random_id();
-
-        while table
-            .metadata()
-            .snapshots()
-            .any(|s| s.snapshot_id() == snapshot_id)
-        {
-            snapshot_id = generate_random_id();
-        }
-        snapshot_id
-    }
-
-    pub async fn write_manifest_v2(
-        &mut self,
-        data_files: &[DataFile],
-        partition_spec: PartitionSpec,
-    ) -> anyhow::Result<ManifestFile> {
-        let table = self.table.as_ref().expect("table must have been loaded");
-
-        let new_manifest_path = format!(
-            "{}/{}/{}-m{}.{}",
-            table.metadata().location(),
-            META_ROOT_PATH,
-            self.commit_uuid,
-            self.manifest_counter.next().unwrap(),
-            DataFileFormat::Avro
-        );
-
-        let file = table.file_io().new_output(new_manifest_path)?;
-
-        let mut writer = ManifestWriterBuilder::new(
-            file,
-            Some(self.snapshot_id),
-            None,
-            table.metadata().current_schema().clone(),
-            partition_spec,
-        )
-        .build_v2_data();
-
-        for f in data_files {
-            writer.add_file(f.clone(), table.metadata().next_sequence_number())?;
-        }
-
-        Ok(writer.write_manifest_file().await?)
-    }
-
     pub async fn commit(&mut self, finished_files: &[FinishedFile]) -> anyhow::Result<()> {
         if finished_files.is_empty() {
             return Ok(());
@@ -264,14 +202,6 @@ impl IcebergTable {
             .map(|f| Self::data_file_from_file(table.metadata().location(), partition_spec_id, f))
             .try_collect()?;
 
-        println!("Committing data files {:?}", files);
-        //
-        // self.manifest_files.push(self.write_manifest_v2(
-        //     &files, PartitionSpec::unpartition_spec(),
-        // ).await?);
-        //
-        //
-
         // commit the transaction in the rest catalog
         let tx = Transaction::new(table);
         let tx = tx.fast_append().add_data_files(files).apply(tx)?;
@@ -281,22 +211,11 @@ impl IcebergTable {
         // a way that breaks future IO operations
         self.table = Some(self.catalog.load_table(&self.table_ident).await?);
 
-        println!(
-            "config = {:?}",
-            self.table
-                .as_ref()
-                .unwrap()
-                .file_io()
-                .clone()
-                .into_builder()
-                .into_parts()
-        );
-
         Ok(())
     }
 }
 
-/// Add metadata "PARQUET:field_id" to every field, which is required by the arrow -> iceberg
+/// Add metadata "PARQUET:field_id" to every field , which is required by the arrow -> iceberg
 /// schema conversion code from iceberg-rust
 pub fn add_parquet_field_ids(schema: &Schema) -> Schema {
     let mut next_id: i32 = 1;
@@ -355,8 +274,11 @@ fn annotate_field(field: &Field, next_id: &mut i32) -> Field {
 
 #[cfg(test)]
 mod tests {
+    use super::add_parquet_field_ids;
     use crate::filesystem::sink::iceberg::IcebergTable;
     use crate::filesystem::sink::{FileMetadata, FinishedFile};
+    use arrow::datatypes::{DataType, Field, Schema, TimeUnit, UnionMode};
+    use std::sync::Arc;
 
     #[test]
     fn test_datafile_creation() {
@@ -375,5 +297,77 @@ mod tests {
             df.file_path(),
             "s3://my-bucket/catalog/data/00001-000.parquet"
         );
+    }
+
+    #[test]
+    fn test_adds_parquet_field_ids_recursively() {
+        let struct_field = Field::new(
+            "props",
+            DataType::Struct(
+                vec![
+                    Field::new("k", DataType::Utf8, true),
+                    Field::new("v", DataType::Utf8, true),
+                ]
+                .into(),
+            ),
+            true,
+        );
+
+        let list_field = Field::new(
+            "tags",
+            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+            true,
+        );
+
+        let id_field = Field::new("id", DataType::Int64, false);
+        let price_field = Field::new("price", DataType::Decimal128(10, 2), true);
+        let active_field = Field::new("active", DataType::Boolean, true);
+        let ts_field = Field::new(
+            "ts",
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+            false,
+        );
+
+        let schema = Schema::new(vec![
+            id_field,
+            price_field,
+            active_field,
+            ts_field,
+            list_field,
+            struct_field,
+        ]);
+
+        let out = add_parquet_field_ids(&schema);
+
+        let has_id = |f: &Field| {
+            f.metadata()
+                .get("PARQUET:field_id")
+                .map(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+                .unwrap_or(false)
+        };
+
+        let fields = out.fields();
+        assert!(has_id(&fields[0]), "id missing PARQUET:field_id");
+        assert!(has_id(&fields[1]), "price missing PARQUET:field_id");
+        assert!(has_id(&fields[2]), "active missing PARQUET:field_id");
+        assert!(has_id(&fields[3]), "ts missing PARQUET:field_id");
+        assert!(has_id(&fields[4]), "tags (list) missing PARQUET:field_id");
+        assert!(
+            has_id(&fields[5]),
+            "props (struct) missing PARQUET:field_id"
+        );
+
+        if let DataType::List(inner) = fields[4].data_type() {
+            assert!(has_id(inner), "list inner field missing PARQUET:field_id");
+        } else {
+            panic!("tags not a List");
+        }
+
+        if let DataType::Struct(children) = fields[5].data_type() {
+            assert!(has_id(&children[0]), "struct.k missing PARQUET:field_id");
+            assert!(has_id(&children[1]), "struct.v missing PARQUET:field_id");
+        } else {
+            panic!("props not a Struct");
+        }
     }
 }

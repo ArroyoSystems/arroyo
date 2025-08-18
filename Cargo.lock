@@ -6983,7 +6983,6 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "55.2.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=55.2.0%2Fparquet#d00f572b226edab8089f61a1b71c7690800b1541"
 dependencies = [
  "ahash 0.8.7",
  "arrow-array",

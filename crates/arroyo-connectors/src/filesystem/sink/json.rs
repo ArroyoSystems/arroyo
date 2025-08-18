@@ -42,11 +42,11 @@ impl BatchBufferingWriter for JsonWriter {
         self.current_buffer.split_to(pos).freeze()
     }
 
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
+    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Option<Vec<u8>>, Option<FileMetadata>) {
         if self.current_buffer.is_empty() {
-            None
+            (None, None)
         } else {
-            Some(self.current_buffer.to_vec())
+            (Some(self.current_buffer.to_vec()), None)
         }
     }
 
@@ -143,6 +143,7 @@ impl LocalWriter for JsonLocalWriter {
                 bytes_written,
                 suffix: None,
                 destination: self.final_path.clone(),
+                metadata: None,
             }))
         } else {
             Ok(None)

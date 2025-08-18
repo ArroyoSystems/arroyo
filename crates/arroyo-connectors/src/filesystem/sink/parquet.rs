@@ -143,23 +143,22 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         buf.get_mut().split_to(pos).freeze()
     }
 
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
+    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Option<Vec<u8>>, Option<FileMetadata>) {
         let writer: &mut ArrowWriter<SharedBuffer> = self.writer.as_mut().unwrap();
         writer.flush().unwrap();
 
-        let trailing_bytes = self
+        let (trailing_bytes, metadata) = self
             .writer
             .as_mut()
             .unwrap()
             .get_trailing_bytes(SharedBuffer::new(0))
-            .unwrap()
-            .into_inner();
+            .unwrap();
 
         // TODO: this copy can likely be avoided, as the section we are copying is immutable
         // copy out the current bytes in the shared buffer, plus the trailing bytes
         let mut copied_bytes = self.buffer.buffer.lock().unwrap().get_ref().to_vec();
-        copied_bytes.extend_from_slice(&trailing_bytes);
-        Some(copied_bytes)
+        copied_bytes.extend_from_slice(&trailing_bytes.into_inner());
+        (Some(copied_bytes), Some(metadata.into()))
     }
 
     fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)> {
@@ -278,22 +277,20 @@ impl LocalWriter for ParquetLocalWriter {
         let writer = self.writer.as_mut().unwrap();
         writer.flush()?;
         let bytes_written = self.sync()?;
-        let trailing_bytes = self
+        let (buffer, metadata) = self
             .writer
             .as_mut()
             .unwrap()
-            .get_trailing_bytes(SharedBuffer::new(0))?
-            .buffer
-            .try_lock()
-            .unwrap()
-            .get_ref()
-            .to_vec();
+            .get_trailing_bytes(SharedBuffer::new(0))?;
+
+        let trailing_bytes = buffer.buffer.try_lock().unwrap().get_ref().to_vec();
 
         Ok(Some(CurrentFileRecovery {
             tmp_file: self.tmp_path.clone(),
             bytes_written,
             suffix: Some(trailing_bytes),
             destination: self.destination_path.clone(),
+            metadata: Some(metadata.into()),
         }))
     }
 

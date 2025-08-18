@@ -354,11 +354,13 @@ pub enum FileCheckpointData {
     MultiPartNotCreated {
         parts_to_add: Vec<Vec<u8>>,
         trailing_bytes: Option<Vec<u8>>,
+        metadata: Option<FileMetadata>,
     },
     MultiPartInFlight {
         multi_part_upload_id: String,
         in_flight_parts: Vec<InFlightPartCheckpoint>,
         trailing_bytes: Option<Vec<u8>>,
+        metadata: Option<FileMetadata>,
     },
     MultiPartWriterClosed {
         multi_part_upload_id: String,
@@ -379,6 +381,7 @@ impl std::fmt::Debug for FileCheckpointData {
             FileCheckpointData::MultiPartNotCreated {
                 parts_to_add,
                 trailing_bytes,
+                ..
             } => {
                 write!(f, "MultiPartNotCreated {{ parts_to_add: [")?;
                 for part in parts_to_add {
@@ -396,6 +399,7 @@ impl std::fmt::Debug for FileCheckpointData {
                 multi_part_upload_id,
                 in_flight_parts,
                 trailing_bytes,
+                ..
             } => {
                 write!(
                     f,
@@ -505,6 +509,7 @@ async fn from_checkpoint(
         FileCheckpointData::MultiPartNotCreated {
             parts_to_add,
             trailing_bytes,
+            metadata,
         } => {
             debug!("finishing file for path {:?}", path);
             let multipart_id = object_store
@@ -515,8 +520,7 @@ async fn from_checkpoint(
                 pushed_size += data.len();
                 let upload_part = object_store
                     .add_multipart(path, &multipart_id, part_index, data.into())
-                    .await
-                    .unwrap();
+                    .await?;
                 parts.push(upload_part);
             }
             if let Some(trailing_bytes) = trailing_bytes {
@@ -530,12 +534,13 @@ async fn from_checkpoint(
                 "parts: {:?}, pushed_size: {:?}, multipart id: {:?}",
                 parts, pushed_size, multipart_id
             );
-            (multipart_id, None)
+            (multipart_id, metadata)
         }
         FileCheckpointData::MultiPartInFlight {
             multi_part_upload_id,
             in_flight_parts,
             trailing_bytes,
+            metadata,
         } => {
             for data in in_flight_parts.into_iter() {
                 match data {
@@ -546,8 +551,7 @@ async fn from_checkpoint(
                     InFlightPartCheckpoint::InProgressPart { part, data } => {
                         let upload_part = object_store
                             .add_multipart(path, &multi_part_upload_id, part, data.into())
-                            .await
-                            .unwrap();
+                            .await?;
                         parts.push(upload_part);
                     }
                 }
@@ -564,7 +568,7 @@ async fn from_checkpoint(
                     .await?;
                 parts.push(upload_part);
             }
-            (multi_part_upload_id, None)
+            (multi_part_upload_id, metadata)
         }
         FileCheckpointData::MultiPartWriterClosed {
             multi_part_upload_id,
@@ -1294,6 +1298,7 @@ impl MultipartManager {
                         .map(|val| val.byte_data.to_vec())
                         .collect(),
                     trailing_bytes: None,
+                    metadata: None,
                 };
             }
         };
@@ -1343,6 +1348,7 @@ impl MultipartManager {
     fn get_in_progress_checkpoint(
         &mut self,
         trailing_bytes: Option<Vec<u8>>,
+        metadata: Option<FileMetadata>,
     ) -> FileCheckpointData {
         if self.closed {
             unreachable!("get_in_progress_checkpoint called on closed file");
@@ -1355,6 +1361,7 @@ impl MultipartManager {
                     .map(|val| val.byte_data.to_vec())
                     .collect(),
                 trailing_bytes,
+                metadata,
             };
         }
         let multi_part_id = self.multipart_id.as_ref().unwrap().clone();
@@ -1379,6 +1386,7 @@ impl MultipartManager {
             multi_part_upload_id: multi_part_id,
             in_flight_parts,
             trailing_bytes,
+            metadata,
         }
     }
 
@@ -1422,7 +1430,7 @@ pub trait BatchBufferingWriter: Send {
     ///
     /// Panics if pos > `self.buffered_bytes()`
     fn split_to(&mut self, pos: usize) -> Bytes;
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
+    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Option<Vec<u8>>, Option<FileMetadata>);
     fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)>;
 }
 
@@ -1537,10 +1545,12 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
             self.multipart_manager
                 .get_closed_file_checkpoint_data(&self.metadata)
         } else {
-            self.multipart_manager.get_in_progress_checkpoint(
-                self.batch_buffering_writer
-                    .get_trailing_bytes_for_checkpoint(),
-            )
+            let (bytes, metadata) = self
+                .batch_buffering_writer
+                .get_trailing_bytes_for_checkpoint();
+
+            self.multipart_manager
+                .get_in_progress_checkpoint(bytes, metadata)
         }
     }
 

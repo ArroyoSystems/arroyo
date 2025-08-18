@@ -181,8 +181,8 @@ impl FromOpts for PartitioningConfig {
 #[serde(rename_all = "camelCase")]
 #[schemars(title = "Filename Strategy")]
 pub enum FilenameStrategy {
-    #[default]
     Serial,
+    #[default]
     Uuid,
     UuidV7,
     Ulid,
