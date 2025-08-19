@@ -545,9 +545,6 @@ pub struct IcebergSink {
     pub file_naming: NamingConfig,
 
     #[serde(default)]
-    pub partitioning: PartitioningConfig,
-
-    #[serde(default)]
     pub multipart: MultipartConfig,
 }
 
@@ -562,7 +559,6 @@ impl FromOpts for IcebergSink {
             storage_options: pull_storage_options(opts)?,
             rolling_policy: opts.pull_struct()?,
             file_naming: opts.pull_struct()?,
-            partitioning: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
         })
     }

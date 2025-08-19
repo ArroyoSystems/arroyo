@@ -1,15 +1,16 @@
 use anyhow::anyhow;
+use arrow::datatypes::Schema;
 use arroyo_operator::connector::Connection;
-use datafusion::common::plan_datafusion_err;
-use std::collections::HashMap;
-
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
+use datafusion::common::plan_datafusion_err;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::filesystem::config::{
-    FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, IcebergTableType,
+    FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, IcebergTableType, PartitioningConfig,
 };
 use crate::filesystem::{make_sink, sink, TableFormat};
 use arroyo_operator::connector::Connector;
@@ -38,7 +39,7 @@ impl Connector for IcebergConnector {
             source: false,
             sink: true,
             testing: false,
-            hidden: false,
+            hidden: true,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_owned(),
@@ -74,7 +75,7 @@ impl Connector for IcebergConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
+    ) -> anyhow::Result<Connection> {
         let schema = schema
             .map(|s| s.to_owned())
             .ok_or_else(|| anyhow!("no schema defined for DeltaLake connection"))?;
@@ -89,20 +90,11 @@ impl Connector for IcebergConnector {
             IcebergTableType::Sink(IcebergSink {
                 namespace,
                 table_name,
-                partitioning,
                 ..
             }) => {
-                let partition_fields = match (
-                    partitioning.shuffle_by_partition.enabled,
-                    &partitioning.partition_fields.is_empty(),
-                ) {
-                    (true, false) => Some(partitioning.partition_fields.clone()),
-                    _ => None,
-                };
-
                 let description = format!("IcebergSink<{}, {}.{}>", format, namespace, table_name);
 
-                (description, ConnectionType::Sink, partition_fields)
+                (description, ConnectionType::Sink, None)
             }
         };
 
@@ -162,7 +154,7 @@ impl Connector for IcebergConnector {
                         storage_options: HashMap::new(),
                         rolling_policy: sink.rolling_policy,
                         file_naming: sink.file_naming,
-                        partitioning: sink.partitioning,
+                        partitioning: PartitioningConfig::default(),
                         multipart: sink.multipart,
                     },
                     config,

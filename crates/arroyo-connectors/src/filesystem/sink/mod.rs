@@ -41,7 +41,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
-use thrift::protocol::TOutputProtocol;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
@@ -67,7 +66,6 @@ use self::{
 use self::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::config::{NamingConfig, PartitioningConfig};
 use crate::filesystem::sink::delta::load_or_create_table;
-use crate::filesystem::sink::iceberg::metadata::get_parquet_stat_min_as_datum;
 use crate::filesystem::sink::iceberg::IcebergTable;
 use crate::filesystem::{config, FilenameStrategy, TableFormat};
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
