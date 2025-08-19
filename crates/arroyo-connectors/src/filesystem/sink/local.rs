@@ -248,11 +248,11 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         if let Some(partitioner) = self.partitioner.as_ref() {
             for (batch, partition) in batches_by_partition(batch, partitioner.clone())? {
                 let writer = self.get_or_insert_writer(&partition);
-                let size = writer.write_batch(&batch)?;
+                writer.write_batch(&batch)?;
             }
         } else {
             let writer = self.get_or_insert_writer(&None);
-            let size = writer.write_batch(&batch)?;
+            writer.write_batch(&batch)?;
         }
 
         Ok(())

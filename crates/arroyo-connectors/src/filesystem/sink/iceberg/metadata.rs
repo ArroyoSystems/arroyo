@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use bincode::{Decode, Encode};
 use iceberg::spec::{
     visit_schema, DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType,
-    MapType, NestedFieldRef, PrimitiveLiteral, PrimitiveType as IcePrim, PrimitiveType,
-    Schema as IceSchema, Schema as IcebergSchema, SchemaVisitor, StructType, Type as IceType, Type,
+    MapType, NestedFieldRef, PrimitiveType,
+    Schema as IceSchema, Schema as IcebergSchema, SchemaVisitor, StructType, Type,
 };
 use itertools::Itertools;
 use parquet::file::metadata::ParquetMetaDataReader;
@@ -57,7 +57,7 @@ impl IcebergFileMetadata {
 
         let index_by_parquet_path = {
             let mut visitor = IndexByParquetPathName::new();
-            visit_schema(&iceberg_schema, &mut visitor).expect("unable to traverse Iceberg schema");
+            visit_schema(iceberg_schema, &mut visitor).expect("unable to traverse Iceberg schema");
             visitor
         };
 
@@ -74,7 +74,7 @@ impl IcebergFileMetadata {
             if let Some(off) = rg.file_offset() {
                 split_offsets.push(off);
             }
-            for (i, col) in rg.columns().iter().enumerate() {
+            for col in rg.columns().iter() {
                 let Some(&field_id) =
                     index_by_parquet_path.get(&col.column_descr().path().string())
                 else {
@@ -89,7 +89,7 @@ impl IcebergFileMetadata {
                 if let Some(statistics) = col.statistics() {
                     acc.null_values += statistics.null_count_opt().unwrap_or(0);
 
-                    if let Err(e) = min_max_agg.update(field_id, &statistics) {
+                    if let Err(e) = min_max_agg.update(field_id, statistics) {
                         warn!("unable to compute iceberg statistics for column: {:?}", e);
                     }
                 }
@@ -230,7 +230,7 @@ impl<'a> MinMaxColAggregator<'a> {
         };
 
         if value.min_is_exact() {
-            let Some(min_datum) = get_parquet_stat_min_as_datum(&ty, &value)? else {
+            let Some(min_datum) = get_parquet_stat_min_as_datum(&ty, value)? else {
                 bail!("Statistics {} is not match with field type {}.", value, ty);
             };
 
@@ -238,7 +238,7 @@ impl<'a> MinMaxColAggregator<'a> {
         }
 
         if value.max_is_exact() {
-            let Some(max_datum) = get_parquet_stat_max_as_datum(&ty, &value)? else {
+            let Some(max_datum) = get_parquet_stat_max_as_datum(&ty, value)? else {
                 bail!("Statistics {} is not match with field type {}.", value, ty);
             };
 
@@ -550,7 +550,7 @@ impl SchemaVisitor for IndexByParquetPathName {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{ArrayRef, Decimal128Array, Int32Array, Int64Array};
+    use arrow::array::{Int32Array, Int64Array};
     use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
     use arrow::record_batch::RecordBatch;
     use std::io::Cursor;
@@ -559,9 +559,8 @@ mod tests {
     use parquet::arrow::arrow_writer::ArrowWriter;
     use parquet::basic::Compression;
     use parquet::file::properties::WriterProperties;
-    use parquet::file::reader::{FileReader, SerializedFileReader};
 
-    use iceberg::spec::{Datum, NestedField, PrimitiveType as PT, Schema, Type as IT};
+    use iceberg::spec::{NestedField, PrimitiveLiteral, PrimitiveType as PT, Schema, Type as IT};
 
     fn iceberg_schema() -> Schema {
         let id = NestedField::required(1, "id", IT::Primitive(PT::Long));
@@ -619,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn from_parquet_and_build_datafile_smoke() {
+    fn test_parquet_to_data_file() {
         let metadata = write_parquet();
 
         let ice_schema = iceberg_schema();

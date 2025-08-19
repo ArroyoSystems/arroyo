@@ -123,7 +123,7 @@ impl LocalWriter for JsonLocalWriter {
         }
 
         let mut size = 0;
-        for data in self.serializer.serialize(&batch) {
+        for data in self.serializer.serialize(batch) {
             size += data.len() + 1;
             self.file.write_all(data.as_slice())?;
             self.file.write_all(b"\n")?;

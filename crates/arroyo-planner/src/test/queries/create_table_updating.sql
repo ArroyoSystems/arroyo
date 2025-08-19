@@ -11,7 +11,7 @@ CREATE TABLE nexmark (
     format = 'parquet', 
     type = 'source',
     path = '/home/data',
-    'source.regex-pattern' = '00001-000.parquet',
+    'source.regex_pattern' = '00001-000.parquet',
     event_time_field = datetime
 );
 

@@ -12,7 +12,7 @@ use crate::EmptyConfig;
 use crate::filesystem::config::{
     DeltaLakeSink, DeltaLakeTable, DeltaLakeTableType, FileSystemSink,
 };
-use crate::filesystem::{make_sink, TableFormat};
+use crate::filesystem::{make_sink, validate_partitioning_fields, TableFormat};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
@@ -94,11 +94,13 @@ impl Connector for DeltaLakeConnector {
 
                 let partition_fields = match (
                     partitioning.shuffle_by_partition.enabled,
-                    &partitioning.partition_fields.is_empty(),
+                    &partitioning.fields.is_empty(),
                 ) {
-                    (true, false) => Some(partitioning.partition_fields.clone()),
+                    (true, false) => Some(partitioning.fields.clone()),
                     _ => None,
                 };
+
+                validate_partitioning_fields(&schema, &partitioning.fields)?;                
 
                 let description = format!("DeltaLakeSink<{format}, {path}>");
 

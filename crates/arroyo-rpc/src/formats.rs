@@ -307,13 +307,13 @@ pub struct ParquetFormat {
 impl ParquetFormat {
     pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
         let compression = opts
-            .pull_opt_str("compression")?
+            .pull_opt_str("parquet.compression")?
             .map(|c| ParquetCompression::from_str(&c))
             .transpose()?
             .unwrap_or_default();
 
         let row_group_bytes = opts
-            .pull_opt_data_size_bytes("row_group_size")?
+            .pull_opt_data_size_bytes("parquet.row_group_size")?
             .map(|s| {
                 NonZeroU64::new(s).ok_or_else(|| plan_datafusion_err!("row_group_size must be > 0"))
             })

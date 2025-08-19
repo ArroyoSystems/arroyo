@@ -4,10 +4,6 @@ use ::arrow::{
     record_batch::RecordBatch,
     util::display::{ArrayFormatter, FormatOptions},
 };
-use ::iceberg::spec::Schema as IcebergSchema;
-use ::parquet::file::metadata::ParquetMetaDataReader;
-use ::parquet::format::FileMetaData;
-use ::parquet::thrift::{TCompactOutputProtocol, TSerializable};
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
@@ -155,8 +151,8 @@ fn get_partitioner_from_file_settings(
     schema: ArroyoSchemaRef,
 ) -> Option<Arc<dyn PhysicalExpr>> {
     match (
-        &partitioning.time_partition_pattern,
-        &partitioning.partition_fields,
+        &partitioning.time_pattern,
+        &partitioning.fields,
     ) {
         (None, fields) if !fields.is_empty() => {
             Some(partition_string_for_fields(schema, fields).unwrap())
@@ -464,7 +460,7 @@ pub enum CommitState {
         last_version: i64,
         table: Box<DeltaTable>,
     },
-    Iceberg(IcebergTable),
+    Iceberg(Box<IcebergTable>),
     VanillaParquet,
 }
 
@@ -663,7 +659,7 @@ impl RollingPolicy {
             policies.push(RollingPolicy::RolloverDuration(Duration::from_secs(s)));
         }
 
-        if let Some(pattern) = &table.partitioning.time_partition_pattern {
+        if let Some(pattern) = &table.partitioning.time_pattern {
             policies.push(RollingPolicy::WatermarkExpiration {
                 pattern: pattern.clone(),
             });
@@ -706,9 +702,9 @@ where
             },
             TableFormat::None => CommitState::VanillaParquet,
             TableFormat::Iceberg(mut table) => {
-                let t = table.load_or_create(&*schema.schema).await?;
+                let t = table.load_or_create(&schema.schema).await?;
                 iceberg_schema = Some(t.metadata().current_schema().clone());
-                CommitState::Iceberg(table)
+                CommitState::Iceberg(Box::new(table))
             }
         };
         let mut file_naming = sink_config.file_naming.clone();

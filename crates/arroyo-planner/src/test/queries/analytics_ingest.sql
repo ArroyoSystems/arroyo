@@ -22,8 +22,9 @@ create table account_created_sink with (
     format = 'parquet',
     'filename.strategy' = 'uuid',
     'parquet.compression' = 'zstd',
-    time_partition_pattern = '%Y/%m/%d/%H',
-    rollover_seconds = 6000
+    'partitioning.time_pattern' = '%Y/%m/%d/%H',
+    'rolling_policy.interval' = interval '10 minutes',
+    type = 'sink'
 );
 
 INSERT INTO account_created_sink

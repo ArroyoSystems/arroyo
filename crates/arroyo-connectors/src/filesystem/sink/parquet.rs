@@ -172,7 +172,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         let metadata = self
             .iceberg_schema
             .as_ref()
-            .map(|s| IcebergFileMetadata::from_parquet(metadata, &*s));
+            .map(|s| IcebergFileMetadata::from_parquet(metadata, s));
 
         (Some(copied_bytes), metadata)
     }
@@ -190,7 +190,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         let metadata = self
             .iceberg_schema
             .as_ref()
-            .map(|s| IcebergFileMetadata::from_parquet(metadata, &*s));
+            .map(|s| IcebergFileMetadata::from_parquet(metadata, s));
 
         let mut buffer = SharedBuffer::new(self.row_group_size_bytes);
         mem::swap(&mut buffer, &mut self.buffer);
@@ -301,7 +301,7 @@ impl LocalWriter for ParquetLocalWriter {
         let writer = self.writer.as_mut().unwrap();
         writer.flush()?;
         let bytes_written = self.sync()?;
-        let (buffer, metadata) = self
+        let (buffer, _) = self
             .writer
             .as_mut()
             .unwrap()

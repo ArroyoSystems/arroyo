@@ -129,7 +129,7 @@ pub struct PartitioningConfig {
         title = "Time Partition Pattern",
         description = "The pattern of the date string"
     )]
-    pub time_partition_pattern: Option<String>,
+    pub time_pattern: Option<String>,
 
     /// Field names used for partitioning (bucketed layout).
     #[schemars(
@@ -137,7 +137,7 @@ pub struct PartitioningConfig {
         description = "Fields to partition the data by"
     )]
     #[serde(default)]
-    pub partition_fields: Vec<String>,
+    pub fields: Vec<String>,
 
     /// Partition shuffle settings (see [`PartitionShuffle`]).
     #[schemars(
@@ -149,15 +149,15 @@ pub struct PartitioningConfig {
 
 impl FromOpts for PartitioningConfig {
     fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
-        let partition_fields = opts
-            .pull_opt_array("partition_fields")
+        let fields = opts
+            .pull_opt_array("partitioning.fields")
             .map(|fields| {
                 fields.into_iter().map(|f| {
                     Ok(match f {
                         SqlExpr::Value(ValueWithSpan{ value: Value::SingleQuotedString(s), span: _}) => s,
                         SqlExpr::Identifier(ident) => ident.value,
                         expr => {
-                            return plan_err!("invalid expression in `partition_fields`: {}; expected a column identifier", expr);
+                            return plan_err!("invalid expression in `partitioning.fields`: {}; expected a column identifier", expr);
                         }
                     })
                 }).collect::<Result<_>>()
@@ -166,8 +166,8 @@ impl FromOpts for PartitioningConfig {
             .unwrap_or_default();
 
         Ok(Self {
-            time_partition_pattern: opts.pull_opt_str("time_partition_pattern")?,
-            partition_fields,
+            time_pattern: opts.pull_opt_str("partitioning.time_pattern")?,
+            fields,
             shuffle_by_partition: opts.pull_struct()?,
         })
     }
@@ -290,7 +290,7 @@ fn pull_path(opts: &mut ConnectorOptions) -> Result<String, DataFusionError> {
 
 impl FromOpts for FileSystemSource {
     fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
-        let regex_pattern = opts.pull_opt_str("regex_pattern")?;
+        let regex_pattern = opts.pull_opt_str("source.regex_pattern")?;
 
         if let Some(regex) = &regex_pattern {
             if let Err(e) = Regex::new(regex) {
@@ -300,7 +300,7 @@ impl FromOpts for FileSystemSource {
 
         Ok(Self {
             path: pull_path(opts)?,
-            compression_format: opts.pull_opt_parsed("compression")?.unwrap_or_default(),
+            compression_format: opts.pull_opt_parsed("source.compression")?.unwrap_or_default(),
             regex_pattern,
             storage_options: pull_storage_options(opts)?,
         })

@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use arrow::datatypes::Schema;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -7,7 +6,6 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use datafusion::common::plan_datafusion_err;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::filesystem::config::{
     FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, IcebergTableType, PartitioningConfig,
@@ -92,7 +90,7 @@ impl Connector for IcebergConnector {
                 table_name,
                 ..
             }) => {
-                let description = format!("IcebergSink<{}, {}.{}>", format, namespace, table_name);
+                let description = format!("IcebergSink<{format}, {namespace}.{table_name}>");
 
                 (description, ConnectionType::Sink, None)
             }

@@ -6,9 +6,7 @@ use crate::filesystem::sink::FinishedFile;
 use arrow::datatypes::Schema;
 use arrow::datatypes::{DataType, Field, Fields, UnionFields};
 use arroyo_storage::StorageProvider;
-use iceberg::spec::{
-    DataContentType, DataFile, DataFileBuilder, DataFileFormat, ManifestFile, Struct,
-};
+use iceberg::spec::ManifestFile;
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::{Catalog, TableCreation, TableIdent};
@@ -18,8 +16,6 @@ use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use std::collections::{HashMap, HashSet};
 use std::iter::once;
 use std::sync::Arc;
-
-const META_ROOT_PATH: &str = "metadata";
 
 const CONFIG_MAPPINGS: [(&str, &str); 4] = [
     ("s3.region", "aws_region"),
@@ -215,7 +211,7 @@ impl IcebergTable {
             .with_check_duplicate(false)
             .apply(tx)?;
 
-        Some(tx.commit(&self.catalog).await?);
+        tx.commit(&self.catalog).await?;
         // the tx.commit call returns the table but the FileIO somehow ends up misconfigured in such
         // a way that breaks future IO operations
         self.table = Some(self.catalog.load_table(&self.table_ident).await?);

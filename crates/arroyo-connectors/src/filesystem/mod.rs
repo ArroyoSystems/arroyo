@@ -21,7 +21,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_storage::{BackendConfig, StorageProvider};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const ICON: &str = include_str!("./filesystem.svg");
 
@@ -38,7 +38,7 @@ impl TableFormat {
         schema: &Schema,
     ) -> anyhow::Result<StorageProvider> {
         Ok(match self {
-            TableFormat::None | TableFormat::Delta { .. } => {
+            TableFormat::None | TableFormat::Delta => {
                 StorageProvider::for_url_with_options(&config.path, config.storage_options.clone())
                     .await?
             }
@@ -53,7 +53,7 @@ pub fn make_sink(
     table_format: TableFormat,
 ) -> Result<ConstructedOperator> {
     let is_local = match table_format {
-        TableFormat::None | TableFormat::Delta { .. } => {
+        TableFormat::None | TableFormat::Delta => {
             let backend_config = BackendConfig::parse_url(&sink.path, true)?;
             backend_config.is_local()
         }
@@ -83,6 +83,22 @@ pub fn make_sink(
         ))),
         (f, _) => bail!("unsupported format {f}"),
     }
+}
+
+pub(crate) fn validate_partitioning_fields(schema: &ConnectionSchema, fields: &[String]) -> anyhow::Result<()> {
+    let schema_fields: HashSet<_> = schema
+        .fields
+        .iter()
+        .map(|f| f.field_name.as_str())
+        .collect();
+
+    for field in fields {
+        if !schema_fields.contains(field.as_str()) {
+            bail!("partition field '{}' does not exist in the schema", field);
+        }
+    }
+
+    Ok(())
 }
 
 pub struct FileSystemConnector {}
@@ -167,11 +183,13 @@ impl Connector for FileSystemConnector {
 
                 let partition_fields = match (
                     partitioning.shuffle_by_partition.enabled,
-                    &partitioning.partition_fields.is_empty(),
+                    &partitioning.fields.is_empty(),
                 ) {
-                    (true, false) => Some(partitioning.partition_fields.clone()),
+                    (true, false) => Some(partitioning.fields.clone()),
                     _ => None,
                 };
+
+                validate_partitioning_fields(&schema, &partitioning.fields)?;
 
                 let description = format!("FileSystemSink<{format}, {path}>");
 

@@ -28,11 +28,12 @@ create table events_sink (
     connector = 'delta',
     path = 's3://my-s3-bucket/data/events',
     format = 'parquet',
+    type = 'sink',
     'filename.strategy' = 'uuid',
     'parquet.compression' = 'zstd',
-    time_partition_pattern = '%Y/%m/%d/%H',
-    partition_fields = [type, app_version],
-    rollover_seconds = 6000
+    'partitioning.time_pattern' = '%Y/%m/%d/%H',
+    'partitioning.fields' = [type, app_version],
+    'rolling_policy.interval' = interval '6000 seconds'
 );
 
 INSERT INTO events

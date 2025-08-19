@@ -31,9 +31,10 @@ create table events_sink (
     format = 'parquet',
     'filename.strategy' = 'uuid',
     'parquet.compression' = 'zstd',
-    time_partition_pattern = '%Y/%m/%d/%H',
-    partition_fields = [type, not_a_real_field],
-    rollover_seconds = 6000
+    'partitioning.time_pattern' = '%Y/%m/%d/%H',
+    'partitioning.fields' = [type, not_a_real_field],
+    'rolling_policy.interval' = interval '6000 seconds',
+    type = 'sink'
 );
 
 INSERT INTO events
