@@ -1,9 +1,10 @@
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, FileMetadata, MultiPartWriterStats,
+    BatchBufferingWriter, MultiPartWriterStats,
 };
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::add_parquet_field_ids;
+use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use anyhow::Result;
 use arrow::{
     array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
@@ -90,10 +91,16 @@ pub struct ParquetBatchBufferingWriter {
     buffer: SharedBuffer,
     row_group_size_bytes: usize,
     schema: ArroyoSchemaRef,
+    iceberg_schema: Option<iceberg::spec::SchemaRef>,
 }
 
 impl BatchBufferingWriter for ParquetBatchBufferingWriter {
-    fn new(_config: &config::FileSystemSink, format: Format, schema: ArroyoSchemaRef) -> Self {
+    fn new(
+        _config: &config::FileSystemSink,
+        format: Format,
+        schema: ArroyoSchemaRef,
+        iceberg_schema: Option<iceberg::spec::SchemaRef>,
+    ) -> Self {
         let Format::Parquet(parquet) = format else {
             panic!("ParquetBatchBufferingWriter configured with non-parquet format {format:?}");
         };
@@ -114,6 +121,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
             buffer,
             row_group_size_bytes,
             schema,
+            iceberg_schema,
         }
     }
 
@@ -143,7 +151,9 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         buf.get_mut().split_to(pos).freeze()
     }
 
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Option<Vec<u8>>, Option<FileMetadata>) {
+    fn get_trailing_bytes_for_checkpoint(
+        &mut self,
+    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>) {
         let writer: &mut ArrowWriter<SharedBuffer> = self.writer.as_mut().unwrap();
         writer.flush().unwrap();
 
@@ -158,20 +168,34 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         // copy out the current bytes in the shared buffer, plus the trailing bytes
         let mut copied_bytes = self.buffer.buffer.lock().unwrap().get_ref().to_vec();
         copied_bytes.extend_from_slice(&trailing_bytes.into_inner());
-        (Some(copied_bytes), Some(metadata.into()))
+
+        let metadata = self
+            .iceberg_schema
+            .as_ref()
+            .map(|s| IcebergFileMetadata::from_parquet(metadata, &*s));
+
+        (Some(copied_bytes), metadata)
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)> {
+    fn close(
+        &mut self,
+        final_batch: Option<RecordBatch>,
+    ) -> Option<(Bytes, Option<IcebergFileMetadata>)> {
         let mut writer = self.writer.take().unwrap();
         if let Some(batch) = final_batch {
             writer.write(&batch).unwrap();
         }
-        let metadata: FileMetadata = writer.close().unwrap().into();
+
+        let metadata = writer.close().unwrap();
+        let metadata = self
+            .iceberg_schema
+            .as_ref()
+            .map(|s| IcebergFileMetadata::from_parquet(metadata, &*s));
 
         let mut buffer = SharedBuffer::new(self.row_group_size_bytes);
         mem::swap(&mut buffer, &mut self.buffer);
 
-        Some((buffer.into_inner().freeze(), Some(metadata)))
+        Some((buffer.into_inner().freeze(), metadata))
     }
 }
 
@@ -290,7 +314,7 @@ impl LocalWriter for ParquetLocalWriter {
             bytes_written,
             suffix: Some(trailing_bytes),
             destination: self.destination_path.clone(),
-            metadata: Some(metadata.into()),
+            metadata: None,
         }))
     }
 

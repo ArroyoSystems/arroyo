@@ -15,11 +15,12 @@ use uuid::Uuid;
 
 use super::{
     add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
-    two_phase_committer::TwoPhaseCommitterOperator, CommitState, FileMetadata, FilenameStrategy,
-    FinishedFile, MultiPartWriterStats, RollingPolicy,
+    two_phase_committer::TwoPhaseCommitterOperator, CommitState, FilenameStrategy, FinishedFile,
+    MultiPartWriterStats, RollingPolicy,
 };
 use crate::filesystem::config::NamingConfig;
 use crate::filesystem::sink::delta::load_or_create_table;
+use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::{config, sink::two_phase_committer::TwoPhaseCommitter, TableFormat};
 use anyhow::{bail, Result};
 
@@ -142,22 +143,22 @@ pub trait LocalWriter: Send + 'static {
     fn stats(&self) -> MultiPartWriterStats;
 }
 
-#[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq)]
 pub struct LocalFileDataRecovery {
     next_file_index: usize,
     current_files: Vec<CurrentFileRecovery>,
 }
 
-#[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq)]
 pub struct CurrentFileRecovery {
     pub tmp_file: String,
     pub bytes_written: usize,
     pub suffix: Option<Vec<u8>>,
     pub destination: String,
-    pub metadata: Option<FileMetadata>,
+    pub metadata: Option<IcebergFileMetadata>,
 }
 
-#[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq)]
 pub struct FilePreCommit {
     pub tmp_file: String,
     pub destination: String,

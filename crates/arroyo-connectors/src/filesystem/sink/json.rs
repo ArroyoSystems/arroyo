@@ -3,9 +3,10 @@ use std::{fs::File, io::Write, time::Instant};
 use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
-    BatchBufferingWriter, FileMetadata, MultiPartWriterStats,
+    BatchBufferingWriter, MultiPartWriterStats,
 };
 use crate::filesystem::config;
+use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
@@ -17,7 +18,12 @@ pub struct JsonWriter {
 }
 
 impl BatchBufferingWriter for JsonWriter {
-    fn new(_: &config::FileSystemSink, format: Format, _schema: ArroyoSchemaRef) -> Self {
+    fn new(
+        _: &config::FileSystemSink,
+        format: Format,
+        _schema: ArroyoSchemaRef,
+        _: Option<::iceberg::spec::SchemaRef>,
+    ) -> Self {
         Self {
             current_buffer: BytesMut::new(),
             serializer: ArrowSerializer::new(format),
@@ -42,7 +48,9 @@ impl BatchBufferingWriter for JsonWriter {
         self.current_buffer.split_to(pos).freeze()
     }
 
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Option<Vec<u8>>, Option<FileMetadata>) {
+    fn get_trailing_bytes_for_checkpoint(
+        &mut self,
+    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>) {
         if self.current_buffer.is_empty() {
             (None, None)
         } else {
@@ -50,7 +58,10 @@ impl BatchBufferingWriter for JsonWriter {
         }
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)> {
+    fn close(
+        &mut self,
+        final_batch: Option<RecordBatch>,
+    ) -> Option<(Bytes, Option<IcebergFileMetadata>)> {
         if let Some(final_batch) = final_batch {
             self.add_batch_data(&final_batch);
         }

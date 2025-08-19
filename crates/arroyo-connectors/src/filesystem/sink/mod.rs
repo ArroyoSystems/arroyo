@@ -4,7 +4,10 @@ use ::arrow::{
     record_batch::RecordBatch,
     util::display::{ArrayFormatter, FormatOptions},
 };
+use ::iceberg::spec::Schema as IcebergSchema;
+use ::parquet::file::metadata::ParquetMetaDataReader;
 use ::parquet::format::FileMetaData;
+use ::parquet::thrift::{TCompactOutputProtocol, TSerializable};
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
@@ -29,8 +32,6 @@ use deltalake::DeltaTable;
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
-use rdkafka::bindings::rd_kafka_event_message_count;
-use std::ops::Add;
 use std::{
     any::Any,
     collections::HashMap,
@@ -40,6 +41,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
+use thrift::protocol::TOutputProtocol;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
@@ -62,8 +64,10 @@ use self::{
     },
 };
 
+use self::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::config::{NamingConfig, PartitioningConfig};
 use crate::filesystem::sink::delta::load_or_create_table;
+use crate::filesystem::sink::iceberg::metadata::get_parquet_stat_min_as_datum;
 use crate::filesystem::sink::iceberg::IcebergTable;
 use crate::filesystem::{config, FilenameStrategy, TableFormat};
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
@@ -301,35 +305,6 @@ enum CheckpointData {
     },
 }
 
-#[derive(Debug, Decode, Encode, Clone, PartialEq, Eq, Default, PartialOrd)]
-pub struct FileMetadata {
-    row_count: usize,
-}
-
-impl Add<FileMetadata> for FileMetadata {
-    type Output = FileMetadata;
-
-    fn add(self, rhs: FileMetadata) -> Self::Output {
-        FileMetadata {
-            row_count: self.row_count + rhs.row_count,
-        }
-    }
-}
-
-impl From<::parquet::format::FileMetaData> for FileMetadata {
-    fn from(value: FileMetaData) -> Self {
-        Self {
-            row_count: value.num_rows as usize,
-        }
-    }
-}
-
-impl FileMetadata {
-    pub fn record_batch(&mut self, batch: &RecordBatch) {
-        self.row_count += batch.num_rows();
-    }
-}
-
 #[derive(Decode, Encode, Clone, PartialEq, Eq)]
 struct InProgressFileCheckpoint {
     filename: String,
@@ -354,23 +329,23 @@ pub enum FileCheckpointData {
     MultiPartNotCreated {
         parts_to_add: Vec<Vec<u8>>,
         trailing_bytes: Option<Vec<u8>>,
-        metadata: Option<FileMetadata>,
+        metadata: Option<IcebergFileMetadata>,
     },
     MultiPartInFlight {
         multi_part_upload_id: String,
         in_flight_parts: Vec<InFlightPartCheckpoint>,
         trailing_bytes: Option<Vec<u8>>,
-        metadata: Option<FileMetadata>,
+        metadata: Option<IcebergFileMetadata>,
     },
     MultiPartWriterClosed {
         multi_part_upload_id: String,
         in_flight_parts: Vec<InFlightPartCheckpoint>,
-        metadata: Option<FileMetadata>,
+        metadata: Option<IcebergFileMetadata>,
     },
     MultiPartWriterUploadCompleted {
         multi_part_upload_id: String,
         completed_parts: Vec<String>,
-        metadata: Option<FileMetadata>,
+        metadata: Option<IcebergFileMetadata>,
     },
 }
 
@@ -482,6 +457,7 @@ struct AsyncMultipartFileSystemWriter<BBW: BatchBufferingWriter> {
     file_naming: NamingConfig,
     format: Format,
     schema: ArroyoSchemaRef,
+    iceberg_schema: Option<::iceberg::spec::SchemaRef>,
 }
 
 #[derive(Debug)]
@@ -620,7 +596,7 @@ pub struct FileToFinish {
     multi_part_upload_id: String,
     completed_parts: Vec<String>,
     size: usize,
-    metadata: Option<FileMetadata>,
+    metadata: Option<IcebergFileMetadata>,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
@@ -628,7 +604,7 @@ pub struct FinishedFile {
     filename: String,
     partition: Option<String>,
     size: usize,
-    metadata: Option<FileMetadata>,
+    metadata: Option<IcebergFileMetadata>,
 }
 
 #[derive(Debug)]
@@ -722,6 +698,7 @@ where
         format: Format,
         schema: ArroyoSchemaRef,
     ) -> Result<Self> {
+        let mut iceberg_schema = None;
         let commit_state = match table_format {
             TableFormat::Delta => CommitState::DeltaLake {
                 last_version: -1,
@@ -730,7 +707,11 @@ where
                 ),
             },
             TableFormat::None => CommitState::VanillaParquet,
-            TableFormat::Iceberg(table) => CommitState::Iceberg(table),
+            TableFormat::Iceberg(mut table) => {
+                let t = table.load_or_create(&*schema.schema).await?;
+                iceberg_schema = Some(t.metadata().current_schema().clone());
+                CommitState::Iceberg(table)
+            }
         };
         let mut file_naming = sink_config.file_naming.clone();
 
@@ -755,6 +736,7 @@ where
             file_naming,
             format,
             schema,
+            iceberg_schema,
         })
     }
 
@@ -786,7 +768,7 @@ where
                                     self.object_store.clone()).await?;
 
                                 if let Some(file_to_finish) = file_to_finish {
-                                    info!("adding file to finish: {:?}", file_to_finish);
+                                    debug!("adding file to finish: {:?}", file_to_finish);
                                     self.add_part_to_finish(file_to_finish);
                                  }
                             }
@@ -904,6 +886,7 @@ where
             self.format.clone(),
             self.schema.clone(),
             self.task_info.clone().unwrap(),
+            self.iceberg_schema.clone(),
         )
     }
 
@@ -1025,25 +1008,28 @@ where
             Err(err) => {
                 log_fs_event(self.task_info.as_ref().unwrap(), 0, 0, start.elapsed(), 1);
 
-                warn!(
-                    "when attempting to complete {}, received an error: {}",
-                    file.filename, err
-                );
                 // check if the file is already there with the correct size.
-                let contents = self.object_store.get(location).await?;
-                if contents.len() == file.size {
-                    Ok(Some(FinishedFile {
-                        filename: file.filename,
-                        partition: file.partition,
-                        size: file.size,
-                        metadata: file.metadata,
-                    }))
+                if let Some(contents) = self.object_store.get_if_present(location).await? {
+                    if contents.len() == file.size {
+                        Ok(Some(FinishedFile {
+                            filename: file.filename,
+                            partition: file.partition,
+                            size: file.size,
+                            metadata: file.metadata,
+                        }))
+                    } else {
+                        bail!(
+                            "file written to {} should have length of {}, not {}",
+                            file.filename,
+                            file.size,
+                            contents.len()
+                        );
+                    }
                 } else {
                     bail!(
-                        "file written to {} should have length of {}, not {}",
+                        "failed to complete file {}, received an error: {}",
                         file.filename,
-                        file.size,
-                        contents.len()
+                        err
                     );
                 }
             }
@@ -1243,7 +1229,7 @@ impl MultipartManager {
         &mut self,
         part_idx: usize,
         upload_part: PartId,
-        metadata: &Option<FileMetadata>,
+        metadata: &Option<IcebergFileMetadata>,
     ) -> Result<Option<FileToFinish>> {
         self.pushed_parts[part_idx] = PartIdOrBufferedData::PartId(upload_part);
         self.uploaded_parts += 1;
@@ -1282,7 +1268,7 @@ impl MultipartManager {
 
     fn get_closed_file_checkpoint_data(
         &mut self,
-        metadata: &Option<FileMetadata>,
+        metadata: &Option<IcebergFileMetadata>,
     ) -> FileCheckpointData {
         if !self.closed {
             unreachable!("get_closed_file_checkpoint_data called on open file");
@@ -1348,7 +1334,7 @@ impl MultipartManager {
     fn get_in_progress_checkpoint(
         &mut self,
         trailing_bytes: Option<Vec<u8>>,
-        metadata: Option<FileMetadata>,
+        metadata: Option<IcebergFileMetadata>,
     ) -> FileCheckpointData {
         if self.closed {
             unreachable!("get_in_progress_checkpoint called on closed file");
@@ -1390,7 +1376,7 @@ impl MultipartManager {
         }
     }
 
-    fn get_finished_file(&mut self, metadata: &Option<FileMetadata>) -> FileToFinish {
+    fn get_finished_file(&mut self, metadata: &Option<IcebergFileMetadata>) -> FileToFinish {
         if !self.closed {
             unreachable!("get_finished_file called on open file");
         }
@@ -1419,7 +1405,12 @@ impl MultipartManager {
 }
 
 pub trait BatchBufferingWriter: Send {
-    fn new(config: &config::FileSystemSink, format: Format, schema: ArroyoSchemaRef) -> Self;
+    fn new(
+        config: &config::FileSystemSink,
+        format: Format,
+        schema: ArroyoSchemaRef,
+        iceberg_schema: Option<::iceberg::spec::SchemaRef>,
+    ) -> Self;
     fn suffix() -> String;
     fn add_batch_data(&mut self, data: &RecordBatch);
     fn buffered_bytes(&self) -> usize;
@@ -1430,8 +1421,13 @@ pub trait BatchBufferingWriter: Send {
     ///
     /// Panics if pos > `self.buffered_bytes()`
     fn split_to(&mut self, pos: usize) -> Bytes;
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Option<Vec<u8>>, Option<FileMetadata>);
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<(Bytes, Option<FileMetadata>)>;
+    fn get_trailing_bytes_for_checkpoint(
+        &mut self,
+    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>);
+    fn close(
+        &mut self,
+        final_batch: Option<RecordBatch>,
+    ) -> Option<(Bytes, Option<IcebergFileMetadata>)>;
 }
 
 pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
@@ -1440,7 +1436,7 @@ pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     stats: Option<MultiPartWriterStats>,
     schema: ArroyoSchemaRef,
     target_part_size_bytes: usize,
-    pub metadata: Option<FileMetadata>,
+    pub metadata: Option<IcebergFileMetadata>,
 }
 impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     fn new(
@@ -1451,8 +1447,9 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
         format: Format,
         schema: ArroyoSchemaRef,
         task_info: Arc<TaskInfo>,
+        iceberg_schema: Option<::iceberg::spec::SchemaRef>,
     ) -> Self {
-        let batch_buffering_writer = BBW::new(config, format, schema.clone());
+        let batch_buffering_writer = BBW::new(config, format, schema.clone(), iceberg_schema);
 
         Self {
             batch_buffering_writer,
