@@ -202,7 +202,7 @@ function BooleanWidget({
   readonly?: boolean;
 }) {
   useEffect(() => {
-    if (value === undefined) { 
+    if (value === undefined) {
       // @ts-ignore
       onChange({ target: { name: path, value: false } });
     }
@@ -396,7 +396,7 @@ function SelectWidget({
   resetField: (field: string) => any;
   readonly?: boolean;
 }) {
-   useEffect(() => {
+  useEffect(() => {
     if (!value) {
       if (defaultValue) {
         // @ts-ignore
@@ -907,7 +907,7 @@ export function FormInner({
                 if (property.oneOf) {
                   const typeKey = '__meta.' + nextPath + '.type';
                   let value = traversePath(values, typeKey);
-                  
+
                   // @ts-ignore
                   const inSchema = property.oneOf.find(x => x.title == value) || property.oneOf[0];
                   return (
@@ -927,7 +927,7 @@ export function FormInner({
                             value: oneOf.title!,
                             // @ts-ignore
                             label:
-                            // @ts-ignore
+                              // @ts-ignore
                               oneOf.title! +
                               // @ts-ignore
                               (oneOf.description ? ` — ${oneOf.description.toLowerCase()}` : ''),
@@ -953,7 +953,8 @@ export function FormInner({
                           </Box>
                         )}
                       </Stack>
-                    </fieldset>);
+                    </fieldset>
+                  );
                 }
               }
               default: {
@@ -1001,7 +1002,7 @@ export function JsonForm({
   ajv.addKeyword('sensitive');
   ajv.addFormat('var-str', { validate: () => true });
   ajv.addFormat('autocomplete', { validate: () => true });
-  ajv.addFormat('uint64', { validate: () => true});
+  ajv.addFormat('uint64', { validate: () => true });
   const memoAjv = useMemo(() => addFormats(ajv), [schema]);
 
   const formik = useFormik({
