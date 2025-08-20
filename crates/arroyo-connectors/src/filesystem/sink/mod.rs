@@ -150,10 +150,7 @@ fn get_partitioner_from_file_settings(
     partitioning: &PartitioningConfig,
     schema: ArroyoSchemaRef,
 ) -> Option<Arc<dyn PhysicalExpr>> {
-    match (
-        &partitioning.time_pattern,
-        &partitioning.fields,
-    ) {
+    match (&partitioning.time_pattern, &partitioning.fields) {
         (None, fields) if !fields.is_empty() => {
             Some(partition_string_for_fields(schema, fields).unwrap())
         }
@@ -704,7 +701,7 @@ where
             TableFormat::Iceberg(mut table) => {
                 let t = table.load_or_create(&schema.schema).await?;
                 iceberg_schema = Some(t.metadata().current_schema().clone());
-                CommitState::Iceberg(Box::new(table))
+                CommitState::Iceberg(table)
             }
         };
         let mut file_naming = sink_config.file_naming.clone();
@@ -1433,6 +1430,7 @@ pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     pub metadata: Option<IcebergFileMetadata>,
 }
 impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         object_store: Arc<StorageProvider>,
         path: Path,

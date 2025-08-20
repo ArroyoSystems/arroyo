@@ -81,7 +81,6 @@ pub fn nexmark_schema() -> ConnectionSchema {
         format: None,
         bad_data: None,
         framing: None,
-        struct_name: None,
         fields: arrow_schema()
             .fields
             .iter()

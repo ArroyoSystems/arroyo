@@ -325,7 +325,6 @@ impl ConnectorTable {
             format,
             bad_data,
             framing,
-            None,
             schema_fields,
             None,
             Some(fields.is_empty()),

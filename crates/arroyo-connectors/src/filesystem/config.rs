@@ -300,7 +300,9 @@ impl FromOpts for FileSystemSource {
 
         Ok(Self {
             path: pull_path(opts)?,
-            compression_format: opts.pull_opt_parsed("source.compression")?.unwrap_or_default(),
+            compression_format: opts
+                .pull_opt_parsed("source.compression")?
+                .unwrap_or_default(),
             regex_pattern,
             storage_options: pull_storage_options(opts)?,
         })
@@ -479,7 +481,7 @@ pub struct IcebergRestCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum IcebergCatalog {
     Rest(IcebergRestCatalog),
 }
@@ -564,31 +566,23 @@ impl FromOpts for IcebergSink {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum IcebergTableType {
-    Sink(IcebergSink),
-}
-
 /// Wrapper allowing future extension of Iceberg table types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct IcebergTable {
-    pub table_type: IcebergTableType,
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum IcebergTable {
+    Sink(IcebergSink),
 }
 
 impl FromOpts for IcebergTable {
     fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
-        Ok(Self {
-            table_type: match opts.pull_str("type")?.as_str() {
-                "source" => {
-                    return plan_err!("DeltaLake sources are not yet supported");
-                }
-                "sink" => IcebergTableType::Sink(opts.pull_struct()?),
-                _ => {
-                    return plan_err!("type must be one of 'source' or 'sink'");
-                }
-            },
+        Ok(match opts.pull_str("type")?.as_str() {
+            "source" => {
+                return plan_err!("Iceberg sources are not yet supported");
+            }
+            "sink" => IcebergTable::Sink(opts.pull_struct()?),
+            _ => {
+                return plan_err!("type must be 'sink'");
+            }
         })
     }
 }

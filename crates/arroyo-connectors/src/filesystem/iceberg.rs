@@ -1,20 +1,18 @@
+use crate::filesystem::config::{
+    FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, PartitioningConfig,
+};
+use crate::filesystem::{make_sink, sink, TableFormat};
+use crate::render_schema;
 use anyhow::anyhow;
 use arroyo_operator::connector::Connection;
+use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use datafusion::common::plan_datafusion_err;
 use std::collections::HashMap;
-
-use crate::filesystem::config::{
-    FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, IcebergTableType, PartitioningConfig,
-};
-use crate::filesystem::{make_sink, sink, TableFormat};
-use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::ConstructedOperator;
-
-const TABLE_SCHEMA: &str = include_str!("./table.json");
 
 pub struct IcebergConnector {}
 
@@ -37,10 +35,10 @@ impl Connector for IcebergConnector {
             source: false,
             sink: true,
             testing: false,
-            hidden: true,
+            hidden: false,
             custom_schemas: true,
-            connection_config: None,
-            table_config: TABLE_SCHEMA.to_owned(),
+            connection_config: Some(render_schema::<Self::ProfileT>()),
+            table_config: render_schema::<Self::TableT>(),
         }
     }
 
@@ -84,8 +82,8 @@ impl Connector for IcebergConnector {
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for DeltaLake connection"))?;
 
-        let (description, connection_type, partition_fields) = match &table.table_type {
-            IcebergTableType::Sink(IcebergSink {
+        let (description, connection_type, partition_fields) = match &table {
+            IcebergTable::Sink(IcebergSink {
                 namespace,
                 table_name,
                 ..
@@ -142,8 +140,8 @@ impl Connector for IcebergConnector {
         table: Self::TableT,
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
-        match table.table_type {
-            IcebergTableType::Sink(sink) => {
+        match table {
+            IcebergTable::Sink(sink) => {
                 let tf = sink::iceberg::IcebergTable::new(&profile.catalog, &sink)?;
                 make_sink(
                     FileSystemSink {
@@ -156,7 +154,7 @@ impl Connector for IcebergConnector {
                         multipart: sink.multipart,
                     },
                     config,
-                    TableFormat::Iceberg(tf),
+                    TableFormat::Iceberg(Box::new(tf)),
                 )
             }
         }

@@ -7,7 +7,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
-use crate::EmptyConfig;
+use crate::{render_schema, EmptyConfig};
 
 use crate::filesystem::config::{
     DeltaLakeSink, DeltaLakeTable, DeltaLakeTableType, FileSystemSink,
@@ -15,8 +15,6 @@ use crate::filesystem::config::{
 use crate::filesystem::{make_sink, validate_partitioning_fields, TableFormat};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
-
-const TABLE_SCHEMA: &str = include_str!("./table.json");
 
 pub struct DeltaLakeConnector {}
 
@@ -42,7 +40,7 @@ impl Connector for DeltaLakeConnector {
             hidden: true,
             custom_schemas: true,
             connection_config: None,
-            table_config: TABLE_SCHEMA.to_owned(),
+            table_config: render_schema::<Self::TableT>(),
         }
     }
 
@@ -100,7 +98,7 @@ impl Connector for DeltaLakeConnector {
                     _ => None,
                 };
 
-                validate_partitioning_fields(&schema, &partitioning.fields)?;                
+                validate_partitioning_fields(&schema, &partitioning.fields)?;
 
                 let description = format!("DeltaLakeSink<{format}, {path}>");
 

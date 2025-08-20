@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use bincode::{Decode, Encode};
 use iceberg::spec::{
     visit_schema, DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType,
-    MapType, NestedFieldRef, PrimitiveType,
-    Schema as IceSchema, Schema as IcebergSchema, SchemaVisitor, StructType, Type,
+    MapType, NestedFieldRef, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema,
+    SchemaVisitor, StructType, Type,
 };
 use itertools::Itertools;
 use parquet::file::metadata::ParquetMetaDataReader;
@@ -657,20 +657,20 @@ mod tests {
 
         match lb.get(&1).expect("id lb").literal() {
             PrimitiveLiteral::Long(v) => assert_eq!(*v, 1),
-            other => panic!("unexpected id lower bound: {:?}", other),
+            other => panic!("unexpected id lower bound: {other:?}"),
         }
         match ub.get(&1).expect("id ub").literal() {
             PrimitiveLiteral::Long(v) => assert_eq!(*v, 200),
-            other => panic!("unexpected id upper bound: {:?}", other),
+            other => panic!("unexpected id upper bound: {other:?}"),
         }
 
         match lb.get(&2).expect("price lb").literal() {
             PrimitiveLiteral::Int(d) => assert_eq!(*d, -2000),
-            other => panic!("unexpected price lower bound: {:?}", other),
+            other => panic!("unexpected price lower bound: {other:?}"),
         }
         match ub.get(&2).expect("price ub").literal() {
             PrimitiveLiteral::Int(d) => assert_eq!(*d, 8000),
-            other => panic!("unexpected price upper bound: {:?}", other),
+            other => panic!("unexpected price upper bound: {other:?}"),
         }
     }
 }

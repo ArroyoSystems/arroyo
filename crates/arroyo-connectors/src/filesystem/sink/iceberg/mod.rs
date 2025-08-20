@@ -43,6 +43,8 @@ impl IcebergTable {
                     props.insert("token".to_string(), token.sub_env_vars()?);
                 }
 
+                println!("props {:?}", props);
+
                 let config = RestCatalogConfig::builder()
                     .uri(rest.url.clone())
                     .warehouse_opt(rest.warehouse.clone())

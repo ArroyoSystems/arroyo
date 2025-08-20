@@ -28,7 +28,7 @@ const ICON: &str = include_str!("./filesystem.svg");
 pub enum TableFormat {
     None,
     Delta,
-    Iceberg(sink::iceberg::IcebergTable),
+    Iceberg(Box<sink::iceberg::IcebergTable>),
 }
 
 impl TableFormat {
@@ -85,7 +85,10 @@ pub fn make_sink(
     }
 }
 
-pub(crate) fn validate_partitioning_fields(schema: &ConnectionSchema, fields: &[String]) -> anyhow::Result<()> {
+pub(crate) fn validate_partitioning_fields(
+    schema: &ConnectionSchema,
+    fields: &[String],
+) -> anyhow::Result<()> {
     let schema_fields: HashSet<_> = schema
         .fields
         .iter()
