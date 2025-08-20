@@ -74,13 +74,13 @@ impl Connector for IcebergConnector {
     ) -> anyhow::Result<Connection> {
         let schema = schema
             .map(|s| s.to_owned())
-            .ok_or_else(|| anyhow!("no schema defined for DeltaLake connection"))?;
+            .ok_or_else(|| anyhow!("no schema defined for Iceberg connection"))?;
 
         let format = schema
             .format
             .as_ref()
             .map(|t| t.to_owned())
-            .ok_or_else(|| anyhow!("'format' must be set for DeltaLake connection"))?;
+            .ok_or_else(|| anyhow!("'format' must be set for Iceberg connection"))?;
 
         let (description, connection_type, partition_fields) = match &table {
             IcebergTable::Sink(IcebergSink {

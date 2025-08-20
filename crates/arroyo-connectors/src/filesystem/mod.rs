@@ -58,8 +58,8 @@ pub fn make_sink(
             backend_config.is_local()
         }
         TableFormat::Iceberg { .. } => {
-            // for iceberg, there's no way for us to know the path (and whether it's local or not
-            // until we connect to the catalog, which we can't do until in a non-async context
+            // for iceberg, there's no way for us to know the path (and whether it's local or not)
+            // until we connect to the catalog, which we can't do in a non-async context
             // so for now we'll just support object storage
             // TODO: support local paths for iceberg
             false
