@@ -1,9 +1,13 @@
 use crate::ConnectorOptions;
 use datafusion::common::{plan_datafusion_err, plan_err, Result as DFResult};
+use datafusion::error::DataFusionError;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::OnceLock;
 use utoipa::ToSchema;
 
@@ -260,9 +264,67 @@ impl AvroFormat {
     }
 }
 
+#[derive(
+    Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Default, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ParquetCompression {
+    #[default]
+    Uncompressed,
+    Snappy,
+    Gzip,
+    Zstd,
+    Lz4,
+}
+
+impl FromStr for ParquetCompression {
+    type Err = DataFusionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "uncompressed" => ParquetCompression::Uncompressed,
+            "snappy" => ParquetCompression::Snappy,
+            "gzip" => ParquetCompression::Gzip,
+            "zstd" => ParquetCompression::Zstd,
+            "lz4" => ParquetCompression::Lz4,
+            _ => {
+                return plan_err!("invalid parquet compression '{s}'");
+            }
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ParquetFormat {}
+pub struct ParquetFormat {
+    #[serde(default)]
+    pub compression: ParquetCompression,
+
+    #[serde(default)]
+    pub row_group_bytes: Option<u64>,
+}
+
+impl ParquetFormat {
+    pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
+        let compression = opts
+            .pull_opt_str("parquet.compression")?
+            .map(|c| ParquetCompression::from_str(&c))
+            .transpose()?
+            .unwrap_or_default();
+
+        let row_group_bytes = opts
+            .pull_opt_data_size_bytes("parquet.row_group_size")?
+            .map(|s| {
+                NonZeroU64::new(s).ok_or_else(|| plan_datafusion_err!("row_group_size must be > 0"))
+            })
+            .transpose()?;
+
+        Ok(ParquetFormat {
+            compression,
+            row_group_bytes: row_group_bytes.map(|r| r.get()),
+        })
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -300,6 +362,23 @@ pub enum Format {
     RawBytes(RawBytesFormat),
 }
 
+impl Display for Format {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Format::Json(_) => "json",
+                Format::Avro(_) => "avro",
+                Format::Protobuf(_) => "protobuf",
+                Format::Parquet(_) => "parquet",
+                Format::RawString(_) => "raw_string",
+                Format::RawBytes(_) => "raw_bytes",
+            }
+        )
+    }
+}
+
 impl Format {
     pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Option<Self>> {
         let Some(name) = opts.pull_opt_str("format")? else {
@@ -313,7 +392,7 @@ impl Format {
             "avro" => Format::Avro(AvroFormat::from_opts(opts)?),
             "raw_string" => Format::RawString(RawStringFormat {}),
             "raw_bytes" => Format::RawBytes(RawBytesFormat {}),
-            "parquet" => Format::Parquet(ParquetFormat {}),
+            "parquet" => Format::Parquet(ParquetFormat::from_opts(opts)?),
             f => return plan_err!("unknown format '{}'", f),
         }))
     }

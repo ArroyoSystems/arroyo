@@ -42,6 +42,9 @@ itertools = "0.14.0"
 regex = "1"
 uuid = { version = "1.17.0", features = ["v4", "v7"] }
 ulid = "1.2.1"
+schemars = "1.0.4"
+strum = "0.27"
+strum_macros = "0.27"
 
 ##########################
 # connector dependencies #
@@ -61,7 +64,7 @@ sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 # SSE
 eventsource-client = "0.13.0"
 
-# Websocket\
+# Websocket
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 
 # Webhook
@@ -91,6 +94,14 @@ object_store = { workspace = true }
 deltalake = { workspace = true, features = ["s3", "gcs"] }
 delta_kernel = { workspace = true, features = ["arrow-55", "arrow-conversion"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
+iceberg = { version = "0.6.0" }
+iceberg-catalog-rest = "0.6.0"
+apache-avro = {workspace = true}
+num-bigint = "0.4.6"
+rust_decimal = "1"
+
+# for parquet metadata
+thrift = { version = "0.17", default-features = false }
 
 # MQTT
 rumqttc = { version = "0.24.0", features = ["url"] }

@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs::create_dir_all, path::Path, sync::Arc, time:
 
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, OperatorConfig};
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use async_trait::async_trait;
@@ -15,12 +15,13 @@ use uuid::Uuid;
 
 use super::{
     add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
-    two_phase_committer::TwoPhaseCommitterOperator, CommitState, CommitStyle, FileNaming,
-    FileSystemTable, FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
-    TableType,
+    two_phase_committer::TwoPhaseCommitterOperator, CommitState, FilenameStrategy, FinishedFile,
+    MultiPartWriterStats, RollingPolicy,
 };
+use crate::filesystem::config::NamingConfig;
 use crate::filesystem::sink::delta::load_or_create_table;
-use crate::filesystem::{sink::two_phase_committer::TwoPhaseCommitter, FileSettings};
+use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::filesystem::{config, sink::two_phase_committer::TwoPhaseCommitter, TableFormat};
 use anyhow::{bail, Result};
 
 pub struct LocalFileSystemWriter<V: LocalWriter> {
@@ -33,20 +34,21 @@ pub struct LocalFileSystemWriter<V: LocalWriter> {
     partitioner: Option<Arc<dyn PhysicalExpr>>,
     finished_files: Vec<FilePreCommit>,
     rolling_policies: Vec<RollingPolicy>,
-    table_properties: FileSystemTable,
-    file_settings: FileSettings,
-    format: Option<Format>,
+    table_properties: config::FileSystemSink,
+    format: Format,
     schema: Option<ArroyoSchemaRef>,
     commit_state: Option<CommitState>,
-    filenaming: FileNaming,
+    file_naming: NamingConfig,
+    table_format: TableFormat,
 }
 
 impl<V: LocalWriter> LocalFileSystemWriter<V> {
     pub fn new(
-        mut final_dir: String,
-        table_properties: FileSystemTable,
-        config: OperatorConfig,
+        table_properties: config::FileSystemSink,
+        table_format: TableFormat,
+        format: Format,
     ) -> TwoPhaseCommitterOperator<Self> {
+        let mut final_dir = table_properties.path.clone();
         if final_dir.starts_with("file://") {
             final_dir = final_dir.trim_start_matches("file://").to_string();
         }
@@ -55,25 +57,9 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
         // make sure final_dir and tmp_dir exists
         create_dir_all(&tmp_dir).unwrap();
 
-        let TableType::Sink {
-            ref file_settings, ..
-        } = table_properties.table_type
-        else {
-            unreachable!("LocalFileSystemWriter can only be used as a sink")
-        };
-
-        let mut filenaming = file_settings
-            .clone()
-            .unwrap()
-            .file_naming
-            .unwrap_or(FileNaming {
-                strategy: Some(FilenameStrategy::Serial),
-                prefix: None,
-                suffix: None,
-            });
-
-        if filenaming.suffix.is_none() {
-            filenaming.suffix = Some(V::file_suffix().to_string());
+        let mut file_naming = table_properties.file_naming.clone();
+        if file_naming.suffix.is_none() {
+            file_naming.suffix = Some(V::file_suffix().to_string());
         }
 
         let writer = Self {
@@ -84,22 +70,19 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             subtask_id: 0,
             partitioner: None,
             finished_files: Vec::new(),
-            file_settings: file_settings.clone().unwrap(),
-            format: config.format,
-            rolling_policies: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
+            format,
+            rolling_policies: RollingPolicy::from_file_settings(&table_properties),
             table_properties,
             schema: None,
             commit_state: None,
-            filenaming,
+            file_naming,
+            table_format,
         };
         TwoPhaseCommitterOperator::new(writer)
     }
 
     fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
-        let filename_strategy = self
-            .filenaming
-            .strategy
-            .map_or(FilenameStrategy::Serial, |v| v); // Default to serial
+        let filename_strategy = self.file_naming.strategy.unwrap_or_default();
 
         if !self.writers.contains_key(partition) {
             // This forms the base for naming files depending on strategy
@@ -109,13 +92,13 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
                 }
                 FilenameStrategy::Ulid => Ulid::new().to_string(),
                 FilenameStrategy::Uuid => Uuid::new_v4().to_string(),
-                FilenameStrategy::Uuidv7 => Uuid::now_v7().to_string(),
+                FilenameStrategy::UuidV7 => Uuid::now_v7().to_string(),
             };
 
             let filename = add_suffix_prefix(
                 filename_base,
-                self.filenaming.prefix.as_ref(),
-                self.filenaming.suffix.as_ref().unwrap(),
+                self.file_naming.prefix.as_ref(),
+                self.file_naming.suffix.as_ref().unwrap(),
             );
 
             let filename = match partition {
@@ -147,12 +130,12 @@ pub trait LocalWriter: Send + 'static {
     fn new(
         tmp_path: String,
         final_path: String,
-        table_properties: &FileSystemTable,
-        format: Option<Format>,
+        table_properties: &config::FileSystemSink,
+        format: Format,
         schema: ArroyoSchemaRef,
     ) -> Self;
     fn file_suffix() -> &'static str;
-    fn write_batch(&mut self, batch: RecordBatch) -> Result<()>;
+    fn write_batch(&mut self, batch: &RecordBatch) -> Result<usize>;
     // returns the total size of the file
     fn sync(&mut self) -> Result<usize>;
     fn close(&mut self) -> Result<FilePreCommit>;
@@ -160,21 +143,22 @@ pub trait LocalWriter: Send + 'static {
     fn stats(&self) -> MultiPartWriterStats;
 }
 
-#[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq)]
 pub struct LocalFileDataRecovery {
     next_file_index: usize,
     current_files: Vec<CurrentFileRecovery>,
 }
 
-#[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq)]
 pub struct CurrentFileRecovery {
     pub tmp_file: String,
     pub bytes_written: usize,
     pub suffix: Option<Vec<u8>>,
     pub destination: String,
+    pub metadata: Option<IcebergFileMetadata>,
 }
 
-#[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq)]
 pub struct FilePreCommit {
     pub tmp_file: String,
     pub destination: String,
@@ -213,6 +197,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 bytes_written,
                 suffix,
                 destination,
+                ..
             } in current_files
             {
                 let mut file = OpenOptions::new()
@@ -239,19 +224,20 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
 
         let schema = ctx.in_schemas[0].clone();
 
-        self.commit_state = Some(match self.file_settings.commit_style.unwrap() {
-            CommitStyle::DeltaLake => CommitState::DeltaLake {
+        self.commit_state = Some(match self.table_format {
+            TableFormat::Delta => CommitState::DeltaLake {
                 last_version: -1,
                 table: Box::new(
                     load_or_create_table(&storage_provider, &schema.schema_without_timestamp())
                         .await?,
                 ),
             },
-            CommitStyle::Direct => CommitState::VanillaParquet,
+            TableFormat::None => CommitState::VanillaParquet,
+            TableFormat::Iceberg { .. } => todo!(),
         });
 
         self.partitioner =
-            get_partitioner_from_file_settings(self.file_settings.clone(), schema.clone());
+            get_partitioner_from_file_settings(&self.table_properties.partitioning, schema.clone());
 
         self.schema = Some(schema);
 
@@ -262,12 +248,13 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         if let Some(partitioner) = self.partitioner.as_ref() {
             for (batch, partition) in batches_by_partition(batch, partitioner.clone())? {
                 let writer = self.get_or_insert_writer(&partition);
-                writer.write_batch(batch)?;
+                writer.write_batch(&batch)?;
             }
         } else {
             let writer = self.get_or_insert_writer(&None);
-            writer.write_batch(batch)?;
+            writer.write_batch(&batch)?;
         }
+
         Ok(())
     }
 
@@ -320,20 +307,30 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 filename,
                 partition: None,
                 size: destination.metadata()?.len() as usize,
+                // TODO: this breaks iceberg, but we don't support iceberg on local filesystem anyways
+                metadata: None,
             });
         }
 
-        if let CommitState::DeltaLake {
-            last_version,
-            table,
-        } = self.commit_state.as_mut().unwrap()
-        {
-            if let Some(version) =
-                delta::commit_files_to_delta(&finished_files, table, *last_version).await?
-            {
-                *last_version = version;
+        match self.commit_state.as_mut().unwrap() {
+            CommitState::DeltaLake {
+                last_version,
+                table,
+            } => {
+                if let Some(version) =
+                    delta::commit_files_to_delta(&finished_files, table, *last_version).await?
+                {
+                    *last_version = version;
+                }
+            }
+            CommitState::Iceberg(_) => {
+                unreachable!("Iceberg is not supported for local filesystems");
+            }
+            CommitState::VanillaParquet => {
+                // nothing to do
             }
         }
+
         Ok(())
     }
 

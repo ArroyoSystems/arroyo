@@ -1,13 +1,3 @@
-use std::{
-    any::Any,
-    collections::HashMap,
-    fmt::{Debug, Formatter},
-    marker::PhantomData,
-    pin::Pin,
-    sync::Arc,
-    time::{Duration, Instant, SystemTime},
-};
-
 use ::arrow::{
     array::StringBuilder,
     datatypes::{DataType, TimeUnit},
@@ -16,9 +6,7 @@ use ::arrow::{
 };
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{
-    df::ArroyoSchemaRef, formats::Format, log_trace_event, OperatorConfig, TIMESTAMP_FIELD,
-};
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -40,6 +28,15 @@ use deltalake::DeltaTable;
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+    pin::Pin,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime},
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
@@ -48,110 +45,95 @@ use uuid::Uuid;
 use arroyo_types::*;
 pub mod arrow;
 mod delta;
+pub(crate) mod iceberg;
 pub mod json;
 pub mod local;
 pub mod parquet;
 mod two_phase_committer;
-
 use self::{
     json::{JsonLocalWriter, JsonWriter},
     local::LocalFileSystemWriter,
     parquet::{
-        batches_by_partition, representitive_timestamp, ParquetLocalWriter,
-        RecordBatchBufferingWriter,
+        batches_by_partition, representitive_timestamp, ParquetBatchBufferingWriter,
+        ParquetLocalWriter,
     },
 };
 
+use self::iceberg::metadata::IcebergFileMetadata;
+use crate::filesystem::config::{NamingConfig, PartitioningConfig};
 use crate::filesystem::sink::delta::load_or_create_table;
-use crate::filesystem::{
-    CommitStyle, FileNaming, FileSettings, FileSystemTable, FilenameStrategy, TableType,
-};
+use crate::filesystem::sink::iceberg::IcebergTable;
+use crate::filesystem::{config, FilenameStrategy, TableFormat};
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
 
 const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
 
-pub struct FileSystemSink<R: MultiPartWriter + Send + 'static> {
+pub struct FileSystemSink<BBW: BatchBufferingWriter> {
     sender: Option<Sender<FileSystemMessages>>,
     partitioner: Option<Arc<dyn PhysicalExpr>>,
     checkpoint_receiver: Option<Receiver<CheckpointData>>,
-    table: FileSystemTable,
-    format: Option<Format>,
+    table: config::FileSystemSink,
+    format: Format,
+    table_format: Option<TableFormat>,
     commit_strategy: CommitStrategy,
-    _ts: PhantomData<R>,
+    _ts: PhantomData<BBW>,
 }
 
-pub type ParquetFileSystemSink = FileSystemSink<BatchMultipartWriter<RecordBatchBufferingWriter>>;
+pub type ParquetFileSystemSink = FileSystemSink<ParquetBatchBufferingWriter>;
 
-pub type JsonFileSystemSink = FileSystemSink<BatchMultipartWriter<JsonWriter>>;
+pub type JsonFileSystemSink = FileSystemSink<JsonWriter>;
 
 pub type LocalParquetFileSystemSink = LocalFileSystemWriter<ParquetLocalWriter>;
 
 pub type LocalJsonFileSystemSink = LocalFileSystemWriter<JsonLocalWriter>;
 
-impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
+impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
     pub fn create_and_start(
-        table: FileSystemTable,
-        format: Option<Format>,
+        config: config::FileSystemSink,
+        table_format: TableFormat,
+        format: Format,
     ) -> TwoPhaseCommitterOperator<Self> {
-        let TableType::Sink { file_settings, .. } = table.clone().table_type else {
-            unreachable!("multi-part writer can only be used as sink");
-        };
-        let commit_strategy = match file_settings.as_ref().unwrap().commit_style.unwrap() {
-            CommitStyle::Direct => CommitStrategy::PerSubtask,
-            CommitStyle::DeltaLake => CommitStrategy::PerOperator,
-        };
-
         TwoPhaseCommitterOperator::new(Self {
             sender: None,
             checkpoint_receiver: None,
-            table,
+            table: config,
             format,
-            commit_strategy,
+            commit_strategy: match &table_format {
+                TableFormat::None => CommitStrategy::PerSubtask,
+                TableFormat::Delta | TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
+            },
+            table_format: Some(table_format),
+
             partitioner: None,
-            _ts: PhantomData,
+            _ts: Default::default(),
         })
-    }
-    pub fn new(
-        table_properties: FileSystemTable,
-        config: OperatorConfig,
-    ) -> TwoPhaseCommitterOperator<Self> {
-        Self::create_and_start(table_properties, config.format)
     }
 
     pub async fn start(&mut self, schema: ArroyoSchemaRef) -> Result<()> {
-        let TableType::Sink {
-            write_path,
-            file_settings,
-            format_settings: _,
-            storage_options,
-            ..
-        } = self.table.clone().table_type
-        else {
-            unreachable!("multi-part writer can only be used as sink");
-        };
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
 
         self.sender = Some(sender);
         self.checkpoint_receiver = Some(checkpoint_receiver);
 
-        let partition_func = get_partitioner_from_file_settings(
-            file_settings.as_ref().unwrap().clone(),
-            schema.clone(),
-        );
+        let partition_func =
+            get_partitioner_from_file_settings(&self.table.partitioning, schema.clone());
         self.partitioner = partition_func;
         let table = self.table.clone();
         let format = self.format.clone();
 
-        let provider = StorageProvider::for_url_with_options(&write_path, storage_options.clone())
-            .await
-            .unwrap();
+        let mut table_format = self.table_format.take().expect("table format must be set");
+
+        let provider = table_format
+            .get_storage_provider(&self.table, &schema.schema_without_timestamp())
+            .await?;
 
         let mut writer = AsyncMultipartFileSystemWriter::<R>::new(
             Arc::new(provider),
             receiver,
             checkpoint_sender,
             table,
+            table_format,
             format,
             schema,
         )
@@ -165,23 +147,18 @@ impl<R: MultiPartWriter + Send + 'static> FileSystemSink<R> {
 }
 
 fn get_partitioner_from_file_settings(
-    file_settings: FileSettings,
+    partitioning: &PartitioningConfig,
     schema: ArroyoSchemaRef,
 ) -> Option<Arc<dyn PhysicalExpr>> {
-    let partitions = file_settings.partitioning?;
-    match (
-        partitions.time_partition_pattern,
-        partitions.partition_fields.is_empty(),
-    ) {
-        (None, false) => {
-            Some(partition_string_for_fields(schema, &partitions.partition_fields).unwrap())
+    match (&partitioning.time_pattern, &partitioning.fields) {
+        (None, fields) if !fields.is_empty() => {
+            Some(partition_string_for_fields(schema, fields).unwrap())
         }
-        (None, true) => None,
-        (Some(pattern), false) => Some(
-            partition_string_for_fields_and_time(schema, &partitions.partition_fields, pattern)
-                .unwrap(),
-        ),
-        (Some(pattern), true) => Some(partition_string_for_time(schema, pattern).unwrap()),
+        (None, _) => None,
+        (Some(pattern), fields) if !fields.is_empty() => {
+            Some(partition_string_for_fields_and_time(schema, fields, pattern).unwrap())
+        }
+        (Some(pattern), _) => Some(partition_string_for_time(schema, pattern).unwrap()),
     }
 }
 
@@ -195,7 +172,7 @@ fn partition_string_for_fields(
 
 fn partition_string_for_time(
     schema: ArroyoSchemaRef,
-    time_partition_pattern: String,
+    time_partition_pattern: &str,
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let function = timestamp_logical_expression(time_partition_pattern)?;
     compile_expression(&function, schema)
@@ -204,7 +181,7 @@ fn partition_string_for_time(
 fn partition_string_for_fields_and_time(
     schema: ArroyoSchemaRef,
     partition_fields: &[String],
-    time_partition_pattern: String,
+    time_partition_pattern: &str,
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let field_function = field_logical_expression(schema.clone(), partition_fields)?;
     let time_function = timestamp_logical_expression(time_partition_pattern)?;
@@ -261,8 +238,8 @@ fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]
     Ok(function)
 }
 
-fn timestamp_logical_expression(time_partition_pattern: String) -> Result<Expr> {
-    let udf = TimestampFormattingUDF::new(time_partition_pattern);
+fn timestamp_logical_expression(time_partition_pattern: &str) -> Result<Expr> {
+    let udf = TimestampFormattingUDF::new(time_partition_pattern.to_string());
     let scalar_function = ScalarFunction::new_udf(
         Arc::new(ScalarUDF::new_from_impl(udf)),
         vec![Expr::Column(Column::from_name(TIMESTAMP_FIELD))],
@@ -343,19 +320,23 @@ pub enum FileCheckpointData {
     MultiPartNotCreated {
         parts_to_add: Vec<Vec<u8>>,
         trailing_bytes: Option<Vec<u8>>,
+        metadata: Option<IcebergFileMetadata>,
     },
     MultiPartInFlight {
         multi_part_upload_id: String,
         in_flight_parts: Vec<InFlightPartCheckpoint>,
         trailing_bytes: Option<Vec<u8>>,
+        metadata: Option<IcebergFileMetadata>,
     },
     MultiPartWriterClosed {
         multi_part_upload_id: String,
         in_flight_parts: Vec<InFlightPartCheckpoint>,
+        metadata: Option<IcebergFileMetadata>,
     },
     MultiPartWriterUploadCompleted {
         multi_part_upload_id: String,
         completed_parts: Vec<String>,
+        metadata: Option<IcebergFileMetadata>,
     },
 }
 
@@ -366,6 +347,7 @@ impl std::fmt::Debug for FileCheckpointData {
             FileCheckpointData::MultiPartNotCreated {
                 parts_to_add,
                 trailing_bytes,
+                ..
             } => {
                 write!(f, "MultiPartNotCreated {{ parts_to_add: [")?;
                 for part in parts_to_add {
@@ -383,6 +365,7 @@ impl std::fmt::Debug for FileCheckpointData {
                 multi_part_upload_id,
                 in_flight_parts,
                 trailing_bytes,
+                ..
             } => {
                 write!(
                     f,
@@ -409,6 +392,7 @@ impl std::fmt::Debug for FileCheckpointData {
             FileCheckpointData::MultiPartWriterClosed {
                 multi_part_upload_id,
                 in_flight_parts,
+                ..
             } => {
                 write!(
                     f,
@@ -429,6 +413,7 @@ impl std::fmt::Debug for FileCheckpointData {
             FileCheckpointData::MultiPartWriterUploadCompleted {
                 multi_part_upload_id,
                 completed_parts,
+                ..
             } => {
                 write!(f, "MultiPartWriterUploadCompleted {{ multi_part_upload_id: {multi_part_upload_id}, completed_parts: [")?;
                 for part in completed_parts {
@@ -446,23 +431,24 @@ pub enum InFlightPartCheckpoint {
     InProgressPart { part: usize, data: Vec<u8> },
 }
 
-struct AsyncMultipartFileSystemWriter<R: MultiPartWriter> {
+struct AsyncMultipartFileSystemWriter<BBW: BatchBufferingWriter> {
     active_writers: HashMap<Option<String>, String>,
     watermark: Option<SystemTime>,
     max_file_index: usize,
     task_info: Option<Arc<TaskInfo>>,
     object_store: Arc<StorageProvider>,
-    writers: HashMap<String, R>,
+    writers: HashMap<String, BatchMultipartWriter<BBW>>,
     receiver: Receiver<FileSystemMessages>,
     checkpoint_sender: Sender<CheckpointData>,
     futures: FuturesUnordered<BoxedTryFuture<MultipartCallbackWithName>>,
     files_to_finish: Vec<FileToFinish>,
-    properties: FileSystemTable,
+    properties: config::FileSystemSink,
     rolling_policies: Vec<RollingPolicy>,
     commit_state: CommitState,
-    file_naming: FileNaming,
-    format: Option<Format>,
+    file_naming: NamingConfig,
+    format: Format,
     schema: ArroyoSchemaRef,
+    iceberg_schema: Option<::iceberg::spec::SchemaRef>,
 }
 
 #[derive(Debug)]
@@ -471,50 +457,8 @@ pub enum CommitState {
         last_version: i64,
         table: Box<DeltaTable>,
     },
+    Iceberg(Box<IcebergTable>),
     VanillaParquet,
-}
-
-#[async_trait]
-pub trait MultiPartWriter {
-    fn new(
-        object_store: Arc<StorageProvider>,
-        path: Path,
-        partition: Option<String>,
-        config: &FileSystemTable,
-        format: Option<Format>,
-        schema: ArroyoSchemaRef,
-        task_info: Arc<TaskInfo>,
-    ) -> Self;
-
-    fn name(&self) -> String;
-
-    fn suffix() -> String;
-
-    fn partition(&self) -> Option<String>;
-
-    async fn insert_batch(
-        &mut self,
-        value: RecordBatch,
-    ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>>;
-
-    fn handle_initialization(
-        &mut self,
-        multipart_id: String,
-    ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>>;
-
-    fn handle_completed_part(
-        &mut self,
-        part_idx: usize,
-        upload_part: PartId,
-    ) -> Result<Option<FileToFinish>>;
-
-    fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData;
-
-    fn close(&mut self) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>>;
-
-    fn stats(&self) -> Option<MultiPartWriterStats>;
-
-    fn get_finished_file(&mut self) -> FileToFinish;
 }
 
 async fn from_checkpoint(
@@ -525,13 +469,14 @@ async fn from_checkpoint(
     object_store: Arc<StorageProvider>,
 ) -> Result<Option<FileToFinish>> {
     let mut parts = vec![];
-    let multipart_id = match checkpoint_data {
+    let (multipart_id, metadata) = match checkpoint_data {
         FileCheckpointData::Empty => {
             return Ok(None);
         }
         FileCheckpointData::MultiPartNotCreated {
             parts_to_add,
             trailing_bytes,
+            metadata,
         } => {
             debug!("finishing file for path {:?}", path);
             let multipart_id = object_store
@@ -542,8 +487,7 @@ async fn from_checkpoint(
                 pushed_size += data.len();
                 let upload_part = object_store
                     .add_multipart(path, &multipart_id, part_index, data.into())
-                    .await
-                    .unwrap();
+                    .await?;
                 parts.push(upload_part);
             }
             if let Some(trailing_bytes) = trailing_bytes {
@@ -557,12 +501,13 @@ async fn from_checkpoint(
                 "parts: {:?}, pushed_size: {:?}, multipart id: {:?}",
                 parts, pushed_size, multipart_id
             );
-            multipart_id
+            (multipart_id, metadata)
         }
         FileCheckpointData::MultiPartInFlight {
             multi_part_upload_id,
             in_flight_parts,
             trailing_bytes,
+            metadata,
         } => {
             for data in in_flight_parts.into_iter() {
                 match data {
@@ -573,8 +518,7 @@ async fn from_checkpoint(
                     InFlightPartCheckpoint::InProgressPart { part, data } => {
                         let upload_part = object_store
                             .add_multipart(path, &multi_part_upload_id, part, data.into())
-                            .await
-                            .unwrap();
+                            .await?;
                         parts.push(upload_part);
                     }
                 }
@@ -591,11 +535,12 @@ async fn from_checkpoint(
                     .await?;
                 parts.push(upload_part);
             }
-            multi_part_upload_id
+            (multi_part_upload_id, metadata)
         }
         FileCheckpointData::MultiPartWriterClosed {
             multi_part_upload_id,
             in_flight_parts,
+            metadata,
         } => {
             for (part_index, data) in in_flight_parts.into_iter().enumerate() {
                 match data {
@@ -612,16 +557,17 @@ async fn from_checkpoint(
                     }
                 }
             }
-            multi_part_upload_id
+            (multi_part_upload_id, metadata)
         }
         FileCheckpointData::MultiPartWriterUploadCompleted {
             multi_part_upload_id,
             completed_parts,
+            metadata,
         } => {
             for content_id in completed_parts {
                 parts.push(PartId { content_id })
             }
-            multi_part_upload_id
+            (multi_part_upload_id, metadata)
         }
     };
     Ok(Some(FileToFinish {
@@ -630,6 +576,7 @@ async fn from_checkpoint(
         multi_part_upload_id: multipart_id,
         completed_parts: parts.into_iter().map(|p| p.content_id).collect(),
         size: pushed_size,
+        metadata,
     }))
 }
 
@@ -640,6 +587,7 @@ pub struct FileToFinish {
     multi_part_upload_id: String,
     completed_parts: Vec<String>,
     size: usize,
+    metadata: Option<IcebergFileMetadata>,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
@@ -647,6 +595,7 @@ pub struct FinishedFile {
     filename: String,
     partition: Option<String>,
     size: usize,
+    metadata: Option<IcebergFileMetadata>,
 }
 
 #[derive(Debug)]
@@ -689,30 +638,30 @@ impl RollingPolicy {
         }
     }
 
-    fn from_file_settings(file_settings: &FileSettings) -> Vec<RollingPolicy> {
+    fn from_file_settings(table: &config::FileSystemSink) -> Vec<RollingPolicy> {
         let mut policies = vec![];
-        let part_size_limit = file_settings.max_parts.unwrap_or(1000) as usize;
+        let part_size_limit = table.multipart.max_parts.map(|d| d.get()).unwrap_or(1000) as usize;
+
         // this is a hard limit, so will always be present.
         policies.push(RollingPolicy::PartLimit(part_size_limit));
-        if let Some(file_size_target) = file_settings.target_file_size {
+        if let Some(file_size_target) = table.rolling_policy.file_size_bytes {
             policies.push(RollingPolicy::SizeLimit(file_size_target as usize))
         }
-        if let Some(inactivity_timeout) = file_settings
-            .inactivity_rollover_seconds
-            .map(|seconds| Duration::from_secs(seconds as u64))
-        {
-            policies.push(RollingPolicy::InactivityDuration(inactivity_timeout))
+
+        if let Some(s) = table.rolling_policy.inactivity_seconds {
+            policies.push(RollingPolicy::InactivityDuration(Duration::from_secs(s)))
         }
-        let rollover_timeout =
-            Duration::from_secs(file_settings.rollover_seconds.unwrap_or(30) as u64);
-        policies.push(RollingPolicy::RolloverDuration(rollover_timeout));
-        if let Some(partitioning) = &file_settings.partitioning {
-            if let Some(pattern) = &partitioning.time_partition_pattern {
-                policies.push(RollingPolicy::WatermarkExpiration {
-                    pattern: pattern.clone(),
-                });
-            }
+
+        if let Some(s) = table.rolling_policy.interval_seconds {
+            policies.push(RollingPolicy::RolloverDuration(Duration::from_secs(s)));
         }
+
+        if let Some(pattern) = &table.partitioning.time_pattern {
+            policies.push(RollingPolicy::WatermarkExpiration {
+                pattern: pattern.clone(),
+            });
+        }
+
         policies
     }
 }
@@ -727,43 +676,38 @@ pub struct MultiPartWriterStats {
     representative_timestamp: SystemTime,
 }
 
-impl<R> AsyncMultipartFileSystemWriter<R>
+impl<BBW> AsyncMultipartFileSystemWriter<BBW>
 where
-    R: MultiPartWriter,
+    BBW: BatchBufferingWriter,
 {
     async fn new(
         object_store: Arc<StorageProvider>,
         receiver: Receiver<FileSystemMessages>,
         checkpoint_sender: Sender<CheckpointData>,
-        writer_properties: FileSystemTable,
-        format: Option<Format>,
+        sink_config: config::FileSystemSink,
+        table_format: TableFormat,
+        format: Format,
         schema: ArroyoSchemaRef,
     ) -> Result<Self> {
-        let file_settings = if let TableType::Sink {
-            ref file_settings, ..
-        } = writer_properties.table_type
-        {
-            file_settings.as_ref().unwrap()
-        } else {
-            unreachable!("AsyncMultipartFileSystemWriter can only be used as a sink");
-        };
-
-        let commit_state = match file_settings.commit_style.unwrap() {
-            CommitStyle::DeltaLake => CommitState::DeltaLake {
+        let mut iceberg_schema = None;
+        let commit_state = match table_format {
+            TableFormat::Delta => CommitState::DeltaLake {
                 last_version: -1,
                 table: Box::new(
                     load_or_create_table(&object_store, &schema.schema_without_timestamp()).await?,
                 ),
             },
-            CommitStyle::Direct => CommitState::VanillaParquet,
+            TableFormat::None => CommitState::VanillaParquet,
+            TableFormat::Iceberg(mut table) => {
+                let t = table.load_or_create(&schema.schema).await?;
+                iceberg_schema = Some(t.metadata().current_schema().clone());
+                CommitState::Iceberg(table)
+            }
         };
-        let mut file_naming = file_settings.file_naming.clone().unwrap_or(FileNaming {
-            strategy: Some(FilenameStrategy::Serial),
-            prefix: None,
-            suffix: None,
-        });
+        let mut file_naming = sink_config.file_naming.clone();
+
         if file_naming.suffix.is_none() {
-            file_naming.suffix = Some(R::suffix());
+            file_naming.suffix = Some(BBW::suffix());
         }
 
         Ok(Self {
@@ -777,12 +721,13 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
-            rolling_policies: RollingPolicy::from_file_settings(file_settings),
-            properties: writer_properties,
+            rolling_policies: RollingPolicy::from_file_settings(&sink_config),
+            properties: sink_config.clone(),
             commit_state,
             file_naming,
             format,
             schema,
+            iceberg_schema,
         })
     }
 
@@ -803,14 +748,20 @@ where
                         },
                         FileSystemMessages::Init {max_file_index, task_info, recovered_files } => {
                             self.max_file_index = max_file_index;
-                                                    info!("recovered files: {:?}", recovered_files);
+                            info!("recovered files: {:?}", recovered_files);
                             self.task_info = Some(task_info);
                             for recovered_file in recovered_files {
-                                if let Some(file_to_finish) = from_checkpoint(
-                                     &Path::parse(&recovered_file.filename)?, recovered_file.partition.clone(), recovered_file.data, recovered_file.pushed_size, self.object_store.clone()).await? {
-                                        info!("adding file to finish: {:?}", file_to_finish);
-                                        self.add_part_to_finish(file_to_finish);
-                                     }
+                                let file_to_finish = from_checkpoint(
+                                    &Path::parse(&recovered_file.filename)?,
+                                    recovered_file.partition.clone(),
+                                    recovered_file.data,
+                                    recovered_file.pushed_size,
+                                    self.object_store.clone()).await?;
+
+                                if let Some(file_to_finish) = file_to_finish {
+                                    debug!("adding file to finish: {:?}", file_to_finish);
+                                    self.add_part_to_finish(file_to_finish);
+                                 }
                             }
                         },
                         FileSystemMessages::Checkpoint { subtask_id, watermark, then_stop } => {
@@ -875,7 +826,10 @@ where
         Ok(())
     }
 
-    fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut R {
+    fn get_or_insert_writer(
+        &mut self,
+        partition: &Option<String>,
+    ) -> &mut BatchMultipartWriter<BBW> {
         if !self.active_writers.contains_key(partition) {
             let new_writer = self.new_writer(partition);
             self.active_writers
@@ -887,11 +841,8 @@ where
             .unwrap()
     }
 
-    fn new_writer(&mut self, partition: &Option<String>) -> R {
-        let filename_strategy = &self
-            .file_naming
-            .strategy
-            .map_or(FilenameStrategy::Serial, |v| v); // Default to serial
+    fn new_writer(&mut self, partition: &Option<String>) -> BatchMultipartWriter<BBW> {
+        let filename_strategy = self.file_naming.strategy.unwrap_or_default();
 
         // This forms the base for naming files depending on strategy
         let filename_base = match filename_strategy {
@@ -904,7 +855,7 @@ where
             }
             FilenameStrategy::Ulid => Ulid::new().to_string(),
             FilenameStrategy::Uuid => Uuid::new_v4().to_string(),
-            FilenameStrategy::Uuidv7 => Uuid::now_v7().to_string(),
+            FilenameStrategy::UuidV7 => Uuid::now_v7().to_string(),
         };
 
         let filename = add_suffix_prefix(
@@ -918,7 +869,7 @@ where
             None => filename.clone(),
         };
 
-        R::new(
+        BatchMultipartWriter::new(
             self.object_store.clone(),
             path.into(),
             partition.clone(),
@@ -926,6 +877,7 @@ where
             self.format.clone(),
             self.schema.clone(),
             self.task_info.clone().unwrap(),
+            self.iceberg_schema.clone(),
         )
     }
 
@@ -977,17 +929,26 @@ where
                 finished_files.push(file);
             }
         }
-        if let CommitState::DeltaLake {
-            last_version,
-            table,
-        } = &mut self.commit_state
-        {
-            if let Some(new_version) =
-                delta::commit_files_to_delta(&finished_files, table, *last_version).await?
-            {
-                *last_version = new_version;
+
+        match &mut self.commit_state {
+            CommitState::DeltaLake {
+                last_version,
+                table,
+            } => {
+                if let Some(new_version) =
+                    delta::commit_files_to_delta(&finished_files, table, *last_version).await?
+                {
+                    *last_version = new_version;
+                }
+            }
+            CommitState::Iceberg(table) => {
+                table.commit(&finished_files).await?;
+            }
+            CommitState::VanillaParquet => {
+                // nothing to do
             }
         }
+
         let finished_message = CheckpointData::Finished {
             max_file_index: self.max_file_index,
             delta_version: self.delta_version(),
@@ -1000,66 +961,66 @@ where
         match &self.commit_state {
             CommitState::DeltaLake { last_version, .. } => *last_version,
             CommitState::VanillaParquet => 0,
+            CommitState::Iceberg { .. } => 0,
         }
     }
 
-    async fn finish_file(&mut self, file_to_finish: FileToFinish) -> Result<Option<FinishedFile>> {
-        let FileToFinish {
-            filename,
-            partition,
-            multi_part_upload_id,
-            completed_parts,
-            size,
-        } = file_to_finish;
-        if completed_parts.is_empty() {
-            warn!("no parts to finish for file {}", filename);
+    async fn finish_file(&mut self, file: FileToFinish) -> Result<Option<FinishedFile>> {
+        if file.completed_parts.is_empty() {
+            warn!("no parts to finish for file {}", file.filename);
             return Ok(None);
         }
 
-        let parts: Vec<_> = completed_parts
+        let parts: Vec<_> = file
+            .completed_parts
             .into_iter()
             .map(|content_id| PartId {
                 content_id: content_id.clone(),
             })
             .collect();
-        let location = Path::parse(&filename)?;
+        let location = Path::parse(&file.filename)?;
 
         let start = Instant::now();
         match self
             .object_store
-            .close_multipart(&location, &multi_part_upload_id, parts)
+            .close_multipart(&location, &file.multi_part_upload_id, parts)
             .await
         {
             Ok(_) => {
                 log_fs_event(self.task_info.as_ref().unwrap(), 0, 1, start.elapsed(), 0);
 
                 Ok(Some(FinishedFile {
-                    filename,
-                    partition,
-                    size,
+                    filename: file.filename,
+                    partition: file.partition,
+                    size: file.size,
+                    metadata: file.metadata,
                 }))
             }
             Err(err) => {
                 log_fs_event(self.task_info.as_ref().unwrap(), 0, 0, start.elapsed(), 1);
 
-                warn!(
-                    "when attempting to complete {}, received an error: {}",
-                    filename, err
-                );
                 // check if the file is already there with the correct size.
-                let contents = self.object_store.get(location).await?;
-                if contents.len() == size {
-                    Ok(Some(FinishedFile {
-                        filename,
-                        partition,
-                        size,
-                    }))
+                if let Some(contents) = self.object_store.get_if_present(location).await? {
+                    if contents.len() == file.size {
+                        Ok(Some(FinishedFile {
+                            filename: file.filename,
+                            partition: file.partition,
+                            size: file.size,
+                            metadata: file.metadata,
+                        }))
+                    } else {
+                        bail!(
+                            "file written to {} should have length of {}, not {}",
+                            file.filename,
+                            file.size,
+                            contents.len()
+                        );
+                    }
                 } else {
                     bail!(
-                        "file written to {} should have length of {}, not {}",
-                        filename,
-                        size,
-                        contents.len()
+                        "failed to complete file {}, received an error: {}",
+                        file.filename,
+                        err
                     );
                 }
             }
@@ -1096,22 +1057,23 @@ where
                 });
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
         }
-        for file_to_finish in &self.files_to_finish {
+        for file_to_finish in self.files_to_finish.drain(..) {
             self.checkpoint_sender
                 .send(CheckpointData::InProgressFileCheckpoint(
                     InProgressFileCheckpoint {
-                        filename: file_to_finish.filename.clone(),
-                        partition: file_to_finish.partition.clone(),
+                        filename: file_to_finish.filename,
+                        partition: file_to_finish.partition,
                         data: FileCheckpointData::MultiPartWriterUploadCompleted {
-                            multi_part_upload_id: file_to_finish.multi_part_upload_id.clone(),
-                            completed_parts: file_to_finish.completed_parts.clone(),
+                            multi_part_upload_id: file_to_finish.multi_part_upload_id,
+                            completed_parts: file_to_finish.completed_parts,
+                            metadata: file_to_finish.metadata,
                         },
                         pushed_size: file_to_finish.size,
                     },
                 ))
                 .await?;
         }
-        self.files_to_finish.clear();
+
         Ok(())
     }
 }
@@ -1258,6 +1220,7 @@ impl MultipartManager {
         &mut self,
         part_idx: usize,
         upload_part: PartId,
+        metadata: &Option<IcebergFileMetadata>,
     ) -> Result<Option<FileToFinish>> {
         self.pushed_parts[part_idx] = PartIdOrBufferedData::PartId(upload_part);
         self.uploaded_parts += 1;
@@ -1286,6 +1249,7 @@ impl MultipartManager {
                     })
                     .collect::<Result<Vec<_>>>()?,
                 size: self.pushed_size,
+                metadata: metadata.clone(),
             }))
         }
     }
@@ -1293,7 +1257,10 @@ impl MultipartManager {
         self.closed && self.uploaded_parts == self.pushed_parts.len()
     }
 
-    fn get_closed_file_checkpoint_data(&mut self) -> FileCheckpointData {
+    fn get_closed_file_checkpoint_data(
+        &mut self,
+        metadata: &Option<IcebergFileMetadata>,
+    ) -> FileCheckpointData {
         if !self.closed {
             unreachable!("get_closed_file_checkpoint_data called on open file");
         }
@@ -1308,6 +1275,7 @@ impl MultipartManager {
                         .map(|val| val.byte_data.to_vec())
                         .collect(),
                     trailing_bytes: None,
+                    metadata: None,
                 };
             }
         };
@@ -1324,6 +1292,7 @@ impl MultipartManager {
                         }
                     })
                     .collect(),
+                metadata: metadata.clone(),
             }
         } else {
             let in_flight_parts = self
@@ -1348,6 +1317,7 @@ impl MultipartManager {
             FileCheckpointData::MultiPartWriterClosed {
                 multi_part_upload_id: multipart_id.clone(),
                 in_flight_parts,
+                metadata: metadata.clone(),
             }
         }
     }
@@ -1355,6 +1325,7 @@ impl MultipartManager {
     fn get_in_progress_checkpoint(
         &mut self,
         trailing_bytes: Option<Vec<u8>>,
+        metadata: Option<IcebergFileMetadata>,
     ) -> FileCheckpointData {
         if self.closed {
             unreachable!("get_in_progress_checkpoint called on closed file");
@@ -1367,6 +1338,7 @@ impl MultipartManager {
                     .map(|val| val.byte_data.to_vec())
                     .collect(),
                 trailing_bytes,
+                metadata,
             };
         }
         let multi_part_id = self.multipart_id.as_ref().unwrap().clone();
@@ -1391,10 +1363,11 @@ impl MultipartManager {
             multi_part_upload_id: multi_part_id,
             in_flight_parts,
             trailing_bytes,
+            metadata,
         }
     }
 
-    fn get_finished_file(&mut self) -> FileToFinish {
+    fn get_finished_file(&mut self, metadata: &Option<IcebergFileMetadata>) -> FileToFinish {
         if !self.closed {
             unreachable!("get_finished_file called on open file");
         }
@@ -1417,14 +1390,20 @@ impl MultipartManager {
                 })
                 .collect(),
             size: self.pushed_size,
+            metadata: metadata.clone(),
         }
     }
 }
 
 pub trait BatchBufferingWriter: Send {
-    fn new(config: &FileSystemTable, format: Option<Format>, schema: ArroyoSchemaRef) -> Self;
+    fn new(
+        config: &config::FileSystemSink,
+        format: Format,
+        schema: ArroyoSchemaRef,
+        iceberg_schema: Option<::iceberg::spec::SchemaRef>,
+    ) -> Self;
     fn suffix() -> String;
-    fn add_batch_data(&mut self, data: RecordBatch);
+    fn add_batch_data(&mut self, data: &RecordBatch);
     fn buffered_bytes(&self) -> usize;
     /// Splits currently written data from the buffer (up to pos) and returns it. Note there may
     /// still be additional interally-buffered data that has not been written out into the
@@ -1433,60 +1412,53 @@ pub trait BatchBufferingWriter: Send {
     ///
     /// Panics if pos > `self.buffered_bytes()`
     fn split_to(&mut self, pos: usize) -> Bytes;
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes>;
+    fn get_trailing_bytes_for_checkpoint(
+        &mut self,
+    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>);
+    fn close(
+        &mut self,
+        final_batch: Option<RecordBatch>,
+    ) -> Option<(Bytes, Option<IcebergFileMetadata>)>;
 }
+
 pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
     batch_buffering_writer: BBW,
     multipart_manager: MultipartManager,
     stats: Option<MultiPartWriterStats>,
     schema: ArroyoSchemaRef,
     target_part_size_bytes: usize,
+    pub metadata: Option<IcebergFileMetadata>,
 }
-#[async_trait]
-impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
+impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         object_store: Arc<StorageProvider>,
         path: Path,
         partition: Option<String>,
-        config: &FileSystemTable,
-        format: Option<Format>,
+        config: &config::FileSystemSink,
+        format: Format,
         schema: ArroyoSchemaRef,
         task_info: Arc<TaskInfo>,
+        iceberg_schema: Option<::iceberg::spec::SchemaRef>,
     ) -> Self {
-        let batch_buffering_writer = BBW::new(config, format, schema.clone());
-
-        let FileSystemTable {
-            table_type:
-                TableType::Sink {
-                    file_settings:
-                        Some(FileSettings {
-                            target_part_size, ..
-                        }),
-                    ..
-                },
-        } = config
-        else {
-            panic!("FileSystem source configuration in sink");
-        };
+        let batch_buffering_writer = BBW::new(config, format, schema.clone(), iceberg_schema);
 
         Self {
             batch_buffering_writer,
             multipart_manager: MultipartManager::new(object_store, path, partition, task_info),
             stats: None,
             schema,
-            target_part_size_bytes: target_part_size
+            target_part_size_bytes: config
+                .multipart
+                .target_part_size_bytes
                 .map(|t| t as usize)
                 .unwrap_or(DEFAULT_TARGET_PART_SIZE),
+            metadata: None,
         }
     }
 
     fn name(&self) -> String {
         self.multipart_manager.name()
-    }
-
-    fn suffix() -> String {
-        BBW::suffix()
     }
 
     fn partition(&self) -> Option<String> {
@@ -1513,7 +1485,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         let stats = self.stats.as_mut().unwrap();
         stats.last_write_at = Instant::now();
 
-        self.batch_buffering_writer.add_batch_data(batch);
+        self.batch_buffering_writer.add_batch_data(&batch);
 
         let bytes = match stats.part_size {
             None => {
@@ -1554,17 +1526,20 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
         upload_part: PartId,
     ) -> Result<Option<FileToFinish>> {
         self.multipart_manager
-            .handle_completed_part(part_idx, upload_part)
+            .handle_completed_part(part_idx, upload_part, &self.metadata)
     }
 
     fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData {
         if self.multipart_manager.closed {
-            self.multipart_manager.get_closed_file_checkpoint_data()
+            self.multipart_manager
+                .get_closed_file_checkpoint_data(&self.metadata)
         } else {
-            self.multipart_manager.get_in_progress_checkpoint(
-                self.batch_buffering_writer
-                    .get_trailing_bytes_for_checkpoint(),
-            )
+            let (bytes, metadata) = self
+                .batch_buffering_writer
+                .get_trailing_bytes_for_checkpoint();
+
+            self.multipart_manager
+                .get_in_progress_checkpoint(bytes, metadata)
         }
     }
 
@@ -1578,7 +1553,7 @@ impl<BBW: BatchBufferingWriter> MultiPartWriter for BatchMultipartWriter<BBW> {
     }
 
     fn get_finished_file(&mut self) -> FileToFinish {
-        self.multipart_manager.get_finished_file()
+        self.multipart_manager.get_finished_file(&self.metadata)
     }
 }
 
@@ -1588,7 +1563,8 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
 
-        if let Some(bytes) = self.batch_buffering_writer.close(None) {
+        if let Some((bytes, metadata)) = self.batch_buffering_writer.close(None) {
+            self.metadata = metadata;
             let existing_part_size = self.stats.as_ref().and_then(|s| s.part_size);
 
             if self
@@ -1680,7 +1656,7 @@ pub struct FileSystemDataRecovery {
 }
 
 #[async_trait]
-impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R> {
+impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R> {
     type DataRecovery = FileSystemDataRecovery;
 
     type PreCommit = FileToFinish;
@@ -1820,6 +1796,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
                     if let FileCheckpointData::MultiPartWriterUploadCompleted {
                         multi_part_upload_id,
                         completed_parts,
+                        metadata,
                     } = data
                     {
                         pre_commit_messages.insert(
@@ -1830,6 +1807,7 @@ impl<R: MultiPartWriter + Send + 'static> TwoPhaseCommitter for FileSystemSink<R
                                 multi_part_upload_id,
                                 completed_parts,
                                 size: pushed_size,
+                                metadata,
                             },
                         );
                     } else {

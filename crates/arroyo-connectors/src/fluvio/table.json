@@ -13,7 +13,6 @@
             "description": "The Fluvio topic to use for this table"
         },
         "type": {
-            "type": "object",
             "title": "Table Type",
             "oneOf": [
                 {

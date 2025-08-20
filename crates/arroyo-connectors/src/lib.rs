@@ -8,7 +8,10 @@ use arroyo_rpc::var_str::VarStr;
 use arroyo_types::string_to_map;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
+use schemars::generate::SchemaSettings;
+use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
@@ -41,6 +44,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(filesystem::delta::DeltaLakeConnector {}),
         Box::new(filesystem::FileSystemConnector {}),
         Box::new(fluvio::FluvioConnector {}),
+        Box::new(filesystem::iceberg::IcebergConnector {}),
         Box::new(impulse::ImpulseConnector {}),
         Box::new(kafka::KafkaConnector {}),
         Box::new(kinesis::KinesisConnector {}),
@@ -125,6 +129,62 @@ pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
         ':',
     )
     .expect("Invalid header map")
+}
+
+/// Rewrite the schema to be compatible with our hand-written schemas and JsonForm.tsx
+fn sanitize_schema(mut schema: Value) -> Value {
+    fn walk(v: &mut Value) {
+        match v {
+            Value::Object(obj) => {
+                obj.remove("default");
+
+                // collapse schemars's type | null types
+                if let Some(Value::Array(types)) = obj.get_mut("type") {
+                    if types.len() == 2
+                        && types.iter().any(|t| t == "null")
+                        && types.iter().all(|t| t.is_string())
+                    {
+                        let non_null = types
+                            .iter()
+                            .find_map(|t| t.as_str().filter(|s| *s != "null"))
+                            .unwrap()
+                            .to_owned();
+                        *obj.get_mut("type").unwrap() = Value::String(non_null);
+                    }
+                }
+
+                // remove null from enums
+                if let Some(Value::Array(values)) = obj.get_mut("enum") {
+                    if let Some(i) = values.iter().position(|v| v.is_null()) {
+                        values.remove(i);
+                    }
+                }
+
+                // change anyOf to oneOf
+                if let Some(any_of) = obj.remove("anyOf") {
+                    obj.insert("oneOf".to_string(), any_of);
+                }
+
+                // recurse
+                for value in obj.values_mut() {
+                    walk(value);
+                }
+            }
+            Value::Array(arr) => arr.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+
+    walk(&mut schema);
+    schema
+}
+
+pub fn render_schema<T: ?Sized + JsonSchema>() -> String {
+    let mut schema_settings = SchemaSettings::draft2019_09();
+    schema_settings.inline_subschemas = true;
+    //schema_settings.contract = Contract::Serialize;
+    let schema = SchemaGenerator::new(schema_settings).into_root_schema_for::<T>();
+    serde_json::to_string(&sanitize_schema(schema.to_value())).unwrap()
 }
 
 #[cfg(test)]

@@ -1,45 +1,43 @@
+use crate::filesystem::config::{
+    FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, PartitioningConfig,
+};
+use crate::filesystem::{make_sink, sink, TableFormat};
+use crate::render_schema;
 use anyhow::anyhow;
 use arroyo_operator::connector::Connection;
-use arroyo_storage::BackendConfig;
-
+use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
+use datafusion::common::plan_datafusion_err;
+use std::collections::HashMap;
 
-use crate::{render_schema, EmptyConfig};
+pub struct IcebergConnector {}
 
-use crate::filesystem::config::{
-    DeltaLakeSink, DeltaLakeTable, DeltaLakeTableType, FileSystemSink,
-};
-use crate::filesystem::{make_sink, validate_partitioning_fields, TableFormat};
-use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::ConstructedOperator;
+impl Connector for IcebergConnector {
+    type ProfileT = IcebergProfile;
 
-pub struct DeltaLakeConnector {}
-
-impl Connector for DeltaLakeConnector {
-    type ProfileT = EmptyConfig;
-
-    type TableT = DeltaLakeTable;
+    type TableT = IcebergTable;
 
     fn name(&self) -> &'static str {
-        "delta"
+        "iceberg"
     }
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
         arroyo_rpc::api_types::connections::Connector {
-            id: "delta".to_string(),
-            name: "Delta Lake".to_string(),
+            id: "iceberg".to_string(),
+            name: "Iceberg".to_string(),
             icon: "".to_string(),
-            description: "Write to a Delta Lake table".to_string(),
+            description: "Write to an Iceberg table".to_string(),
             enabled: true,
             source: false,
             sink: true,
             testing: false,
-            hidden: true,
+            hidden: false,
             custom_schemas: true,
-            connection_config: None,
+            connection_config: Some(render_schema::<Self::ProfileT>()),
             table_config: render_schema::<Self::TableT>(),
         }
     }
@@ -73,36 +71,26 @@ impl Connector for DeltaLakeConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
+    ) -> anyhow::Result<Connection> {
         let schema = schema
             .map(|s| s.to_owned())
-            .ok_or_else(|| anyhow!("no schema defined for DeltaLake connection"))?;
+            .ok_or_else(|| anyhow!("no schema defined for Iceberg connection"))?;
 
         let format = schema
             .format
             .as_ref()
             .map(|t| t.to_owned())
-            .ok_or_else(|| anyhow!("'format' must be set for DeltaLake connection"))?;
+            .ok_or_else(|| anyhow!("'format' must be set for Iceberg connection"))?;
 
-        let (description, connection_type, partition_fields) = match &table.table_type {
-            DeltaLakeTableType::Sink(DeltaLakeSink {
-                path, partitioning, ..
+        let (description, connection_type, partition_fields) = match &table {
+            IcebergTable::Sink(IcebergSink {
+                namespace,
+                table_name,
+                ..
             }) => {
-                BackendConfig::parse_url(path, true)?;
+                let description = format!("IcebergSink<{format}, {namespace}.{table_name}>");
 
-                let partition_fields = match (
-                    partitioning.shuffle_by_partition.enabled,
-                    &partitioning.fields.is_empty(),
-                ) {
-                    (true, false) => Some(partitioning.fields.clone()),
-                    _ => None,
-                };
-
-                validate_partitioning_fields(&schema, &partitioning.fields)?;
-
-                let description = format!("DeltaLakeSink<{format}, {path}>");
-
-                (description, ConnectionType::Sink, partition_fields)
+                (description, ConnectionType::Sink, None)
             }
         };
 
@@ -133,30 +121,42 @@ impl Connector for DeltaLakeConnector {
         name: &str,
         options: &mut ConnectorOptions,
         schema: Option<&ConnectionSchema>,
-        _: Option<&ConnectionProfile>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        self.from_config(None, name, EmptyConfig {}, options.pull_struct()?, schema)
+        let profile = profile
+            .map(|p| {
+                serde_json::from_value(p.config.clone()).map_err(|e| {
+                    plan_datafusion_err!("invalid config for profile '{}' in database: {}", p.id, e)
+                })
+            })
+            .unwrap_or_else(|| options.pull_struct())?;
+
+        self.from_config(None, name, profile, options.pull_struct()?, schema)
     }
 
     fn make_operator(
         &self,
-        _: Self::ProfileT,
+        profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
-        match table.table_type {
-            DeltaLakeTableType::Sink(sink) => make_sink(
-                FileSystemSink {
-                    path: sink.path,
-                    storage_options: sink.storage_options,
-                    rolling_policy: sink.rolling_policy,
-                    file_naming: sink.file_naming,
-                    partitioning: sink.partitioning,
-                    multipart: sink.multipart,
-                },
-                config,
-                TableFormat::Delta,
-            ),
+        match table {
+            IcebergTable::Sink(sink) => {
+                let tf = sink::iceberg::IcebergTable::new(&profile.catalog, &sink)?;
+                make_sink(
+                    FileSystemSink {
+                        // in iceberg, the path and storage options come from the catalog
+                        path: "".to_string(),
+                        storage_options: HashMap::new(),
+                        rolling_policy: sink.rolling_policy,
+                        file_naming: sink.file_naming,
+                        partitioning: PartitioningConfig::default(),
+                        multipart: sink.multipart,
+                    },
+                    config,
+                    TableFormat::Iceberg(Box::new(tf)),
+                )
+            }
         }
     }
 }

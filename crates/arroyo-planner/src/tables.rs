@@ -240,7 +240,7 @@ impl ConnectorTable {
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
-        if "delta" == connector {
+        if connector == "delta" || connector == "iceberg" {
             fields = fields
                 .into_iter()
                 .map(|field_spec| match &field_spec {
@@ -253,11 +253,12 @@ impl ConnectorTable {
                         _ => field_spec,
                     },
                     FieldSpec::Metadata { .. } | FieldSpec::Virtual { .. } => {
-                        unreachable!("delta lake is only a sink, can't have virtual fields")
+                        unreachable!("{} is only a sink, can't have virtual fields", connector)
                     }
                 })
                 .collect();
         }
+
         let connector = connector_for_type(connector)
             .ok_or_else(|| DataFusionError::Plan(format!("Unknown connector '{connector}'")))?;
 
@@ -324,7 +325,6 @@ impl ConnectorTable {
             format,
             bad_data,
             framing,
-            None,
             schema_fields,
             None,
             Some(fields.is_empty()),

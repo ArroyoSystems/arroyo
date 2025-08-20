@@ -246,11 +246,15 @@ pub enum SchemaDefinition {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSchema {
     pub format: Option<Format>,
+    #[serde(default)]
     pub bad_data: Option<BadData>,
+    #[serde(default)]
     pub framing: Option<Framing>,
-    pub struct_name: Option<String>,
+    #[serde(default)]
     pub fields: Vec<SourceField>,
+    #[serde(default)]
     pub definition: Option<SchemaDefinition>,
+    #[serde(default)]
     pub inferred: Option<bool>,
     #[serde(default)]
     pub primary_keys: HashSet<String>,
@@ -262,7 +266,6 @@ impl ConnectionSchema {
         format: Option<Format>,
         bad_data: Option<BadData>,
         framing: Option<Framing>,
-        struct_name: Option<String>,
         fields: Vec<SourceField>,
         definition: Option<SchemaDefinition>,
         inferred: Option<bool>,
@@ -272,7 +275,6 @@ impl ConnectionSchema {
             format,
             bad_data,
             framing,
-            struct_name,
             fields,
             definition,
             inferred,

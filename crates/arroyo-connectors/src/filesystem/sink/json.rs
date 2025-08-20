@@ -1,15 +1,16 @@
 use std::{fs::File, io::Write, time::Instant};
 
-use arrow::record_batch::RecordBatch;
-use arroyo_formats::ser::ArrowSerializer;
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
-use bytes::{Bytes, BytesMut};
-
 use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
     BatchBufferingWriter, MultiPartWriterStats,
 };
+use crate::filesystem::config;
+use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use arrow::record_batch::RecordBatch;
+use arroyo_formats::ser::ArrowSerializer;
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
+use bytes::{Bytes, BytesMut};
 
 pub struct JsonWriter {
     current_buffer: BytesMut,
@@ -17,18 +18,23 @@ pub struct JsonWriter {
 }
 
 impl BatchBufferingWriter for JsonWriter {
-    fn new(_: &super::FileSystemTable, format: Option<Format>, _schema: ArroyoSchemaRef) -> Self {
+    fn new(
+        _: &config::FileSystemSink,
+        format: Format,
+        _schema: ArroyoSchemaRef,
+        _: Option<::iceberg::spec::SchemaRef>,
+    ) -> Self {
         Self {
             current_buffer: BytesMut::new(),
-            serializer: ArrowSerializer::new(format.expect("should have format")),
+            serializer: ArrowSerializer::new(format),
         }
     }
     fn suffix() -> String {
         "json".to_string()
     }
 
-    fn add_batch_data(&mut self, batch: RecordBatch) {
-        for k in self.serializer.serialize(&batch) {
+    fn add_batch_data(&mut self, batch: &RecordBatch) {
+        for k in self.serializer.serialize(batch) {
             self.current_buffer.extend(k);
             self.current_buffer.extend(b"\n");
         }
@@ -42,23 +48,28 @@ impl BatchBufferingWriter for JsonWriter {
         self.current_buffer.split_to(pos).freeze()
     }
 
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
+    fn get_trailing_bytes_for_checkpoint(
+        &mut self,
+    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>) {
         if self.current_buffer.is_empty() {
-            None
+            (None, None)
         } else {
-            Some(self.current_buffer.to_vec())
+            (Some(self.current_buffer.to_vec()), None)
         }
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes> {
+    fn close(
+        &mut self,
+        final_batch: Option<RecordBatch>,
+    ) -> Option<(Bytes, Option<IcebergFileMetadata>)> {
         if let Some(final_batch) = final_batch {
-            self.add_batch_data(final_batch);
+            self.add_batch_data(&final_batch);
         }
 
         if self.current_buffer.is_empty() {
             None
         } else {
-            Some(self.current_buffer.split().freeze())
+            Some((self.current_buffer.split().freeze(), None))
         }
     }
 }
@@ -76,15 +87,15 @@ impl LocalWriter for JsonLocalWriter {
     fn new(
         tmp_path: String,
         final_path: String,
-        _table_properties: &super::FileSystemTable,
-        format: Option<Format>,
+        _table_properties: &config::FileSystemSink,
+        format: Format,
         schema: ArroyoSchemaRef,
     ) -> Self {
         let file = File::create(&tmp_path).unwrap();
         JsonLocalWriter {
             tmp_path,
             final_path,
-            serializer: ArrowSerializer::new(format.expect("should have format")),
+            serializer: ArrowSerializer::new(format),
             file,
             stats: None,
             schema,
@@ -95,7 +106,7 @@ impl LocalWriter for JsonLocalWriter {
         "json"
     }
 
-    fn write_batch(&mut self, batch: RecordBatch) -> anyhow::Result<()> {
+    fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize> {
         if self.stats.is_none() {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
@@ -110,11 +121,14 @@ impl LocalWriter for JsonLocalWriter {
         } else {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
         }
-        for data in self.serializer.serialize(&batch) {
+
+        let mut size = 0;
+        for data in self.serializer.serialize(batch) {
+            size += data.len() + 1;
             self.file.write_all(data.as_slice())?;
             self.file.write_all(b"\n")?;
         }
-        Ok(())
+        Ok(size)
     }
 
     fn sync(&mut self) -> anyhow::Result<usize> {
@@ -140,6 +154,7 @@ impl LocalWriter for JsonLocalWriter {
                 bytes_written,
                 suffix: None,
                 destination: self.final_path.clone(),
+                metadata: None,
             }))
         } else {
             Ok(None)

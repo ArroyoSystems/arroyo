@@ -20,6 +20,7 @@ use datafusion::common::{
     TableReference,
 };
 use datafusion::config::ConfigOptions;
+use datafusion::error::DataFusionError;
 use datafusion::logical_expr::sqlparser::ast::ValueWithSpan;
 use datafusion::logical_expr::{AggregateUDF, ScalarUDF, TableSource, WindowUDF};
 use datafusion::sql::planner::{ContextProvider, PlannerContext, SqlToRel};
@@ -29,12 +30,14 @@ use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::sqlparser::tokenizer::Span;
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use log::{debug, warn};
+use regex::Regex;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZero, NonZeroU64};
+use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 use std::{fs, time::SystemTime};
@@ -549,6 +552,66 @@ pub fn duration_from_sql(expr: Expr) -> DFResult<Duration> {
         + Duration::from_millis(interval.milliseconds as u64))
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum DataSizeUnit {
+    Bytes,
+    Kilobytes,
+    Megabytes,
+    Gigabytes,
+    Terabytes,
+    Petabytes,
+    Exabytes,
+}
+
+impl FromStr for DataSizeUnit {
+    type Err = DataFusionError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
+            "" | "b" => Self::Bytes,
+            "k" | "kb" => Self::Kilobytes,
+            "m" | "mb" => Self::Megabytes,
+            "g" | "gb" => Self::Gigabytes,
+            "t" | "tb" => Self::Terabytes,
+            "p" | "pb" => Self::Petabytes,
+            "e" | "eb" => Self::Exabytes,
+            _ => {
+                return plan_err!("invalid data size unit '{s}'");
+            }
+        })
+    }
+}
+
+const REGEX: &str = r"^(\d+)([a-zA-Z]*)$";
+
+impl DataSizeUnit {
+    pub fn parse(s: &str) -> DFResult<(Self, u64)> {
+        let regex = Regex::new(REGEX).unwrap();
+        let captures = regex
+            .captures(s)
+            .ok_or_else(|| plan_datafusion_err!("invalid data size {}", s))?;
+        let quantity: u64 = captures.get(1).unwrap().as_str().parse().unwrap();
+        let unit = captures.get(2).unwrap().as_str();
+        Ok((DataSizeUnit::from_str(unit)?, quantity))
+    }
+
+    pub fn multiplier(&self) -> u64 {
+        match self {
+            DataSizeUnit::Bytes => 1,
+            DataSizeUnit::Kilobytes => 1024,
+            DataSizeUnit::Megabytes => 1024 * 1024,
+            DataSizeUnit::Gigabytes => 1024 * 1024 * 1024,
+            DataSizeUnit::Terabytes => 1024 * 1024 * 1024 * 1024,
+            DataSizeUnit::Petabytes => 1024 * 1024 * 1024 * 1024 * 1024,
+            DataSizeUnit::Exabytes => 1024 * 1024 * 1024 * 1024 * 1024 * 1024,
+        }
+    }
+
+    pub fn as_bytes(&self, value: u64) -> u64 {
+        value * self.multiplier()
+    }
+}
+
 pub struct ConnectorOptions {
     options: HashMap<String, Expr>,
 }
@@ -575,6 +638,10 @@ impl TryFrom<&Vec<SqlOption>> for ConnectorOptions {
 }
 
 impl ConnectorOptions {
+    pub fn pull_struct<T: FromOpts>(&mut self) -> DFResult<T> {
+        T::from_opts(self)
+    }
+
     pub fn pull_opt_str(&mut self, name: &str) -> DFResult<Option<String>> {
         match self.options.remove(name) {
             Some(Expr::Value(ValueWithSpan {
@@ -661,6 +728,15 @@ impl ConnectorOptions {
             Some(i) => Ok(Some(NonZeroU64::new(i).unwrap())),
             None => Ok(None),
         }
+    }
+
+    pub fn pull_opt_data_size_bytes(&mut self, name: &str) -> DFResult<Option<u64>> {
+        self.pull_opt_str(name)?
+            .map(|s| {
+                let (unit, q) = DataSizeUnit::parse(&s)?;
+                Ok(unit.as_bytes(q))
+            })
+            .transpose()
     }
 
     pub fn pull_opt_i64(&mut self, name: &str) -> DFResult<Option<i64>> {
@@ -785,6 +861,16 @@ impl ConnectorOptions {
                 .collect(),
             Expr::Array(a) => a.elem,
             e => vec![e],
+        })
+    }
+
+    pub fn pull_opt_parsed<T: FromStr>(&mut self, name: &str) -> DFResult<Option<T>> {
+        Ok(match self.pull_opt_str(name)? {
+            Some(s) => Some(
+                s.parse()
+                    .map_err(|_| plan_datafusion_err!("invalid value '{s}' for {name}"))?,
+            ),
+            None => None,
         })
     }
 
@@ -995,14 +1081,37 @@ pub fn local_address(bind_address: IpAddr) -> String {
     }
 }
 
+pub trait FromOpts: Sized {
+    fn from_opts(opts: &mut ConnectorOptions) -> std::result::Result<Self, DataFusionError>;
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::parse_expr;
+    use crate::{parse_expr, DataSizeUnit};
 
     #[test]
     fn test_parse_expr() {
         let sql = "concat(1 + hello, 'blah')";
         let parsed = parse_expr(sql).unwrap();
         assert_eq!(parsed.to_string(), sql);
+    }
+
+    #[test]
+    fn test_data_size_parser() {
+        assert_eq!(
+            (DataSizeUnit::Bytes, 10),
+            DataSizeUnit::parse("10").unwrap()
+        );
+        assert_eq!(
+            (DataSizeUnit::Kilobytes, 54),
+            DataSizeUnit::parse("54K").unwrap()
+        );
+        assert_eq!(
+            (DataSizeUnit::Gigabytes, 999921),
+            DataSizeUnit::parse("999921gb").unwrap()
+        );
+
+        assert!(DataSizeUnit::parse("-14G").is_err());
+        assert!(DataSizeUnit::parse("G").is_err());
     }
 }

@@ -9,7 +9,6 @@
             "format": "autocomplete"
         },
         "type": {
-            "type": "object",
             "title": "Table Type",
             "oneOf": [
                 {

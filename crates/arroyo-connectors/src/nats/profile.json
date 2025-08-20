@@ -10,7 +10,6 @@
       "examples": ["nats-1:4222,nats-2:4222"]
     },
     "authentication": {
-      "type": "object",
       "oneOf": [
         {
           "type": "object",

@@ -13,7 +13,6 @@
             "description": "The AWS region for this table"
         },
         "type": {
-            "type": "object",
             "title": "Table Type",
             "oneOf": [
                 {

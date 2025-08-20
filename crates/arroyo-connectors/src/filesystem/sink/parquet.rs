@@ -1,13 +1,16 @@
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, FileSystemTable, MultiPartWriterStats, TableType,
+    BatchBufferingWriter, MultiPartWriterStats,
 };
-use crate::filesystem::{Compression, FormatSettings};
+use crate::filesystem::config;
+use crate::filesystem::sink::iceberg::add_parquet_field_ids;
+use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use anyhow::Result;
 use arrow::{
     array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
     compute::{sort_to_indices, take},
 };
+use arroyo_rpc::formats::{ParquetCompression, ParquetFormat};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -26,41 +29,22 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-const DEFAULT_ROW_GROUP_BYTES: usize = 1024 * 1024 * 128; // 128MB
+const DEFAULT_ROW_GROUP_BYTES: u64 = 1024 * 1024 * 128; // 128MB
 
-fn writer_properties_from_table(table: &FileSystemTable) -> (WriterProperties, usize) {
+fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, usize) {
     let mut parquet_writer_options = WriterProperties::builder();
 
-    let TableType::Sink {
-        format_settings:
-            Some(FormatSettings::Parquet {
-                compression,
-                row_batch_size: _,
-                row_group_size: _,
-                row_group_size_bytes,
-            }),
-        ..
-    } = table.table_type
-    else {
-        panic!("FileSystem source configuration in sink");
-    };
-
-    if let Some(compression) = compression {
-        let compression = match compression {
-            Compression::None => parquet::basic::Compression::UNCOMPRESSED,
-            Compression::Snappy => parquet::basic::Compression::SNAPPY,
-            Compression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
-            Compression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
-            Compression::Lz4 => parquet::basic::Compression::LZ4,
-        };
-        parquet_writer_options = parquet_writer_options.set_compression(compression);
-    }
+    parquet_writer_options = parquet_writer_options.set_compression(match format.compression {
+        ParquetCompression::Uncompressed => parquet::basic::Compression::UNCOMPRESSED,
+        ParquetCompression::Snappy => parquet::basic::Compression::SNAPPY,
+        ParquetCompression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
+        ParquetCompression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
+        ParquetCompression::Lz4 => parquet::basic::Compression::LZ4,
+    });
 
     (
         parquet_writer_options.build(),
-        row_group_size_bytes
-            .map(|i| i.get() as usize)
-            .unwrap_or(DEFAULT_ROW_GROUP_BYTES),
+        format.row_group_bytes.unwrap_or(DEFAULT_ROW_GROUP_BYTES) as usize,
     )
 }
 
@@ -102,22 +86,32 @@ impl Write for SharedBuffer {
     }
 }
 
-pub struct RecordBatchBufferingWriter {
+pub struct ParquetBatchBufferingWriter {
     writer: Option<ArrowWriter<SharedBuffer>>,
     buffer: SharedBuffer,
     row_group_size_bytes: usize,
     schema: ArroyoSchemaRef,
+    iceberg_schema: Option<iceberg::spec::SchemaRef>,
 }
 
-impl BatchBufferingWriter for RecordBatchBufferingWriter {
-    fn new(config: &FileSystemTable, _format: Option<Format>, schema: ArroyoSchemaRef) -> Self {
-        let (writer_properties, row_group_size_bytes) = writer_properties_from_table(config);
+impl BatchBufferingWriter for ParquetBatchBufferingWriter {
+    fn new(
+        _config: &config::FileSystemSink,
+        format: Format,
+        schema: ArroyoSchemaRef,
+        iceberg_schema: Option<iceberg::spec::SchemaRef>,
+    ) -> Self {
+        let Format::Parquet(parquet) = format else {
+            panic!("ParquetBatchBufferingWriter configured with non-parquet format {format:?}");
+        };
+
+        let (writer_properties, row_group_size_bytes) = writer_properties_from_format(&parquet);
 
         let buffer = SharedBuffer::new(row_group_size_bytes);
 
         let writer = ArrowWriter::try_new(
             buffer.clone(),
-            Arc::new(schema.schema_without_timestamp()),
+            Arc::new(add_parquet_field_ids(&schema.schema_without_timestamp())),
             Some(writer_properties),
         )
         .unwrap();
@@ -127,6 +121,7 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
             buffer,
             row_group_size_bytes,
             schema,
+            iceberg_schema,
         }
     }
 
@@ -134,10 +129,11 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
         "parquet".to_string()
     }
 
-    fn add_batch_data(&mut self, mut data: RecordBatch) {
+    fn add_batch_data(&mut self, data: &RecordBatch) {
         let writer = self.writer.as_mut().unwrap();
 
         // remove timestamp column
+        let mut data = data.clone();
         self.schema.remove_timestamp_column(&mut data);
         writer.write(&data).unwrap();
 
@@ -155,35 +151,51 @@ impl BatchBufferingWriter for RecordBatchBufferingWriter {
         buf.get_mut().split_to(pos).freeze()
     }
 
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
+    fn get_trailing_bytes_for_checkpoint(
+        &mut self,
+    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>) {
         let writer: &mut ArrowWriter<SharedBuffer> = self.writer.as_mut().unwrap();
         writer.flush().unwrap();
 
-        let trailing_bytes = self
+        let (trailing_bytes, metadata) = self
             .writer
             .as_mut()
             .unwrap()
             .get_trailing_bytes(SharedBuffer::new(0))
-            .unwrap()
-            .into_inner();
+            .unwrap();
 
         // TODO: this copy can likely be avoided, as the section we are copying is immutable
         // copy out the current bytes in the shared buffer, plus the trailing bytes
         let mut copied_bytes = self.buffer.buffer.lock().unwrap().get_ref().to_vec();
-        copied_bytes.extend_from_slice(&trailing_bytes);
-        Some(copied_bytes)
+        copied_bytes.extend_from_slice(&trailing_bytes.into_inner());
+
+        let metadata = self
+            .iceberg_schema
+            .as_ref()
+            .map(|s| IcebergFileMetadata::from_parquet(metadata, s));
+
+        (Some(copied_bytes), metadata)
     }
 
-    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Bytes> {
+    fn close(
+        &mut self,
+        final_batch: Option<RecordBatch>,
+    ) -> Option<(Bytes, Option<IcebergFileMetadata>)> {
         let mut writer = self.writer.take().unwrap();
         if let Some(batch) = final_batch {
             writer.write(&batch).unwrap();
         }
-        writer.close().unwrap();
+
+        let metadata = writer.close().unwrap();
+        let metadata = self
+            .iceberg_schema
+            .as_ref()
+            .map(|s| IcebergFileMetadata::from_parquet(metadata, s));
+
         let mut buffer = SharedBuffer::new(self.row_group_size_bytes);
         mem::swap(&mut buffer, &mut self.buffer);
 
-        Some(buffer.into_inner().freeze())
+        Some((buffer.into_inner().freeze(), metadata))
     }
 }
 
@@ -202,13 +214,16 @@ impl LocalWriter for ParquetLocalWriter {
     fn new(
         tmp_path: String,
         final_path: String,
-        table_properties: &FileSystemTable,
-        _format: Option<Format>,
+        _table_properties: &config::FileSystemSink,
+        format: Format,
         schema: ArroyoSchemaRef,
     ) -> Self {
+        let Format::Parquet(parquet) = format else {
+            panic!("ParquetLocalWriter configured with non-parquet format {format:?}");
+        };
+
         let shared_buffer = SharedBuffer::new(0);
-        let (writer_properties, row_group_size_bytes) =
-            writer_properties_from_table(table_properties);
+        let (writer_properties, row_group_size_bytes) = writer_properties_from_format(&parquet);
         let writer = ArrowWriter::try_new(
             shared_buffer.clone(),
             Arc::new(schema.schema_without_timestamp()),
@@ -232,7 +247,7 @@ impl LocalWriter for ParquetLocalWriter {
         "parquet"
     }
 
-    fn write_batch(&mut self, mut batch: RecordBatch) -> anyhow::Result<()> {
+    fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize> {
         if self.stats.is_none() {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
@@ -247,13 +262,15 @@ impl LocalWriter for ParquetLocalWriter {
         } else {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
         }
+        let mut batch = batch.clone();
         self.schema.remove_timestamp_column(&mut batch);
         let writer = self.writer.as_mut().unwrap();
+
         writer.write(&batch)?;
         if writer.in_progress_size() >= self.row_group_size_bytes {
             writer.flush()?;
         }
-        Ok(())
+        Ok(0)
     }
 
     fn sync(&mut self) -> anyhow::Result<usize> {
@@ -272,6 +289,7 @@ impl LocalWriter for ParquetLocalWriter {
         let writer = self.writer.take();
         let writer = writer.unwrap();
         writer.close()?;
+
         self.sync()?;
         Ok(FilePreCommit {
             tmp_file: self.tmp_path.clone(),
@@ -283,21 +301,20 @@ impl LocalWriter for ParquetLocalWriter {
         let writer = self.writer.as_mut().unwrap();
         writer.flush()?;
         let bytes_written = self.sync()?;
-        let trailing_bytes = self
+        let (buffer, _) = self
             .writer
             .as_mut()
             .unwrap()
-            .get_trailing_bytes(SharedBuffer::new(0))?
-            .buffer
-            .try_lock()
-            .unwrap()
-            .get_ref()
-            .to_vec();
+            .get_trailing_bytes(SharedBuffer::new(0))?;
+
+        let trailing_bytes = buffer.buffer.try_lock().unwrap().get_ref().to_vec();
+
         Ok(Some(CurrentFileRecovery {
             tmp_file: self.tmp_path.clone(),
             bytes_written,
             suffix: Some(trailing_bytes),
             destination: self.destination_path.clone(),
+            metadata: None,
         }))
     }
 
