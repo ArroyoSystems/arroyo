@@ -1,6 +1,6 @@
 use crate::df::{ArroyoSchema, ArroyoSchemaRef};
 use crate::formats::{BadData, Format, Framing};
-use crate::{primitive_to_sql, MetadataField};
+use crate::MetadataField;
 use ahash::HashSet;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
@@ -47,7 +47,7 @@ pub struct ConnectionProfilePost {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Hash, PartialOrd)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum ConnectionType {
     Source,
     Sink,
@@ -76,79 +76,156 @@ impl TryFrom<String> for ConnectionType {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, ToSchema, PartialEq, Eq)]
-pub enum PrimitiveType {
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum FieldType {
+    #[schema(title = "Int32")]
     Int32,
+    #[schema(title = "Int64")]
     Int64,
+    #[schema(title = "UInt32")]
     UInt32,
+    #[schema(title = "UInt64")]
     UInt64,
+    #[schema(title = "F32")]
     F32,
+    #[schema(title = "F64")]
     F64,
+    #[schema(title = "Bool")]
     Bool,
+    #[serde(alias = "utf8")]
+    #[schema(title = "String")]
     String,
+    #[serde(alias = "binary")]
+    #[schema(title = "Bytes")]
     Bytes,
-    UnixMillis,
-    UnixMicros,
-    UnixNanos,
-    DateTime,
+    #[schema(title = "Timestamp")]
+    Timestamp(TimestampField),
+    #[schema(title = "Json")]
     Json,
+    #[schema(title = "Struct")]
+    Struct(StructField),
+    #[schema(title = "List")]
+    List(ListField),
+}
+
+impl FieldType {
+    pub fn sql_type(&self) -> String {
+        match self {
+            FieldType::Int32 => "INTEGER".into(),
+            FieldType::Int64 => "BIGINT".into(),
+            FieldType::UInt32 => "INTEGER UNSIGNED".into(),
+            FieldType::UInt64 => "BIGINT UNSIGNED".into(),
+            FieldType::F32 => "FLOAT".into(),
+            FieldType::F64 => "DOUBLE".into(),
+            FieldType::Bool => "BOOLEAN".into(),
+            FieldType::String => "TEXT".into(),
+            FieldType::Bytes => "BINARY".into(),
+            FieldType::Timestamp(t) => format!("TIMESTAMP({})", t.unit.precision()),
+            FieldType::Json => "JSON".into(),
+            FieldType::List(item) => {
+                format!("{}[]", item.items.field_type.sql_type())
+            }
+            FieldType::Struct(StructField { fields, .. }) => {
+                format!(
+                    "STRUCT <{}>",
+                    fields
+                        .iter()
+                        .map(|f| format!("{} {}", f.name, f.field_type.sql_type()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TimestampUnit {
+    #[serde(alias = "s")]
+    Second,
+
+    #[default]
+    #[serde(alias = "ms")]
+    Millisecond,
+
+    #[serde(alias = "µs", alias = "us")]
+    Microsecond,
+
+    #[serde(alias = "ns")]
+    Nanosecond,
+}
+
+impl TimestampUnit {
+    pub fn precision(&self) -> u8 {
+        match self {
+            TimestampUnit::Second => 0,
+            TimestampUnit::Millisecond => 3,
+            TimestampUnit::Microsecond => 6,
+            TimestampUnit::Nanosecond => 9,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StructType {
+pub struct TimestampField {
+    #[serde(default)]
+    pub unit: TimestampUnit,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StructField {
     pub name: Option<String>,
     pub fields: Vec<SourceField>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum FieldType {
-    Primitive(PrimitiveType),
-    Struct(StructType),
-    List(Box<SourceField>),
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceFieldType {
-    pub r#type: FieldType,
-    pub sql_name: Option<String>,
+pub struct ListField {
+    pub items: Box<SourceField>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceField {
-    pub field_name: String,
-    pub field_type: SourceFieldType,
-    pub nullable: bool,
+    pub name: String,
+    #[serde(flatten)]
+    pub field_type: FieldType,
+    pub required: bool,
+    #[serde(default)]
+    pub sql_name: String,
     #[serde(default)]
     pub metadata_key: Option<String>,
 }
 
 impl From<SourceField> for Field {
     fn from(f: SourceField) -> Self {
-        let (t, ext) = match f.field_type.r#type {
-            FieldType::Primitive(pt) => match pt {
-                PrimitiveType::Int32 => (DataType::Int32, None),
-                PrimitiveType::Int64 => (DataType::Int64, None),
-                PrimitiveType::UInt32 => (DataType::UInt32, None),
-                PrimitiveType::UInt64 => (DataType::UInt64, None),
-                PrimitiveType::F32 => (DataType::Float32, None),
-                PrimitiveType::F64 => (DataType::Float64, None),
-                PrimitiveType::Bool => (DataType::Boolean, None),
-                PrimitiveType::String => (DataType::Utf8, None),
-                PrimitiveType::Bytes => (DataType::Binary, None),
-                PrimitiveType::UnixMillis => {
-                    (DataType::Timestamp(TimeUnit::Millisecond, None), None)
-                }
-                PrimitiveType::UnixMicros => {
-                    (DataType::Timestamp(TimeUnit::Microsecond, None), None)
-                }
-                PrimitiveType::UnixNanos => (DataType::Timestamp(TimeUnit::Nanosecond, None), None),
-                PrimitiveType::DateTime => (DataType::Timestamp(TimeUnit::Microsecond, None), None),
-                PrimitiveType::Json => (DataType::Utf8, Some(ArroyoExtensionType::JSON)),
-            },
+        let (t, ext) = match f.field_type {
+            FieldType::Int32 => (DataType::Int32, None),
+            FieldType::Int64 => (DataType::Int64, None),
+            FieldType::UInt32 => (DataType::UInt32, None),
+            FieldType::UInt64 => (DataType::UInt64, None),
+            FieldType::F32 => (DataType::Float32, None),
+            FieldType::F64 => (DataType::Float64, None),
+            FieldType::Bool => (DataType::Boolean, None),
+            FieldType::String => (DataType::Utf8, None),
+            FieldType::Bytes => (DataType::Binary, None),
+            FieldType::Timestamp(TimestampField {
+                unit: TimestampUnit::Second,
+            }) => (DataType::Timestamp(TimeUnit::Second, None), None),
+            FieldType::Timestamp(TimestampField {
+                unit: TimestampUnit::Millisecond,
+            }) => (DataType::Timestamp(TimeUnit::Millisecond, None), None),
+            FieldType::Timestamp(TimestampField {
+                unit: TimestampUnit::Microsecond,
+            }) => (DataType::Timestamp(TimeUnit::Microsecond, None), None),
+            FieldType::Timestamp(TimestampField {
+                unit: TimestampUnit::Nanosecond,
+            }) => (DataType::Timestamp(TimeUnit::Nanosecond, None), None),
+            FieldType::Json => (DataType::Utf8, Some(ArroyoExtensionType::JSON)),
             FieldType::Struct(s) => (
                 DataType::Struct(Fields::from(
                     s.fields
@@ -158,10 +235,10 @@ impl From<SourceField> for Field {
                 )),
                 None,
             ),
-            FieldType::List(t) => (DataType::List(Arc::new((*t).into())), None),
+            FieldType::List(t) => (DataType::List(Arc::new((*t.items).into())), None),
         };
 
-        ArroyoExtensionType::add_metadata(ext, Field::new(f.field_name, t, f.nullable))
+        ArroyoExtensionType::add_metadata(ext, Field::new(f.name, t, !f.required))
     }
 }
 
@@ -170,76 +247,81 @@ impl TryFrom<Field> for SourceField {
 
     fn try_from(f: Field) -> Result<Self, Self::Error> {
         let field_type = match (f.data_type(), ArroyoExtensionType::from_map(f.metadata())) {
-            (DataType::Boolean, None) => FieldType::Primitive(PrimitiveType::Bool),
-            (DataType::Int32, None) => FieldType::Primitive(PrimitiveType::Int32),
-            (DataType::Int64, None) => FieldType::Primitive(PrimitiveType::Int64),
-            (DataType::UInt32, None) => FieldType::Primitive(PrimitiveType::UInt32),
-            (DataType::UInt64, None) => FieldType::Primitive(PrimitiveType::UInt64),
-            (DataType::Float32, None) => FieldType::Primitive(PrimitiveType::F32),
-            (DataType::Float64, None) => FieldType::Primitive(PrimitiveType::F64),
-            (DataType::Binary, None) | (DataType::LargeBinary, None) => {
-                FieldType::Primitive(PrimitiveType::Bytes)
+            (DataType::Boolean, None) => FieldType::Bool,
+            (DataType::Int32, None) => FieldType::Int32,
+            (DataType::Int64, None) => FieldType::Int64,
+            (DataType::UInt32, None) => FieldType::UInt32,
+            (DataType::UInt64, None) => FieldType::UInt64,
+            (DataType::Float32, None) => FieldType::F32,
+            (DataType::Float64, None) => FieldType::F64,
+            (DataType::Binary, None) | (DataType::LargeBinary, None) => FieldType::Bytes,
+            (DataType::Timestamp(TimeUnit::Second, _), None) => {
+                FieldType::Timestamp(TimestampField {
+                    unit: TimestampUnit::Second,
+                })
             }
             (DataType::Timestamp(TimeUnit::Millisecond, _), None) => {
-                FieldType::Primitive(PrimitiveType::UnixMillis)
+                FieldType::Timestamp(TimestampField {
+                    unit: TimestampUnit::Millisecond,
+                })
             }
             (DataType::Timestamp(TimeUnit::Microsecond, _), None) => {
-                FieldType::Primitive(PrimitiveType::UnixMicros)
+                FieldType::Timestamp(TimestampField {
+                    unit: TimestampUnit::Microsecond,
+                })
             }
             (DataType::Timestamp(TimeUnit::Nanosecond, _), None) => {
-                FieldType::Primitive(PrimitiveType::UnixNanos)
+                FieldType::Timestamp(TimestampField {
+                    unit: TimestampUnit::Nanosecond,
+                })
             }
-            (DataType::Utf8, None) => FieldType::Primitive(PrimitiveType::String),
-            (DataType::Utf8, Some(ArroyoExtensionType::JSON)) => {
-                FieldType::Primitive(PrimitiveType::Json)
-            }
+            (DataType::Utf8, None) => FieldType::String,
+            (DataType::Utf8, Some(ArroyoExtensionType::JSON)) => FieldType::Json,
             (DataType::Struct(fields), None) => {
                 let fields: Result<_, String> = fields
                     .into_iter()
                     .map(|f| (**f).clone().try_into())
                     .collect();
 
-                let st = StructType {
+                let st = StructField {
                     name: None,
                     fields: fields?,
                 };
 
                 FieldType::Struct(st)
             }
-            (DataType::List(item), None) => FieldType::List(Box::new((**item).clone().try_into()?)),
+            (DataType::List(item), None) => FieldType::List(ListField {
+                items: Box::new((**item).clone().try_into()?),
+            }),
             dt => {
                 return Err(format!("Unsupported data type {dt:?}"));
             }
         };
 
-        let sql_name = match &field_type {
-            FieldType::Primitive(pt) => Some(primitive_to_sql(*pt).to_string()),
-            _ => None,
-        };
-
+        let sql_name = field_type.sql_type();
         Ok(SourceField {
-            field_name: f.name().clone(),
-            field_type: SourceFieldType {
-                r#type: field_type,
-                sql_name,
-            },
-            nullable: f.is_nullable(),
+            name: f.name().clone(),
+            field_type,
+            required: !f.is_nullable(),
             metadata_key: None,
+            sql_name,
         })
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase", tag = "type")]
 pub enum SchemaDefinition {
-    JsonSchema(String),
+    #[schema(title = "JsonSchema")]
+    JsonSchema { schema: String },
+    #[schema(title = "Protobuf")]
     ProtobufSchema {
         schema: String,
         #[serde(default)]
         dependencies: HashMap<String, String>,
     },
-    AvroSchema(String),
-    RawSchema(String),
+    #[schema(title = "Avro")]
+    AvroSchema { schema: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
@@ -294,9 +376,8 @@ impl ConnectionSchema {
         match &self.format {
             Some(Format::RawString(_)) => {
                 if non_metadata_fields.len() != 1
-                    || non_metadata_fields.first().unwrap().field_type.r#type
-                        != FieldType::Primitive(PrimitiveType::String)
-                    || non_metadata_fields.first().unwrap().field_name != "value"
+                    || non_metadata_fields.first().unwrap().field_type != FieldType::String
+                    || non_metadata_fields.first().unwrap().name != "value"
                 {
                     bail!("raw_string format requires a schema with a single field called `value` of type TEXT");
                 }
@@ -304,9 +385,8 @@ impl ConnectionSchema {
             Some(Format::Json(json_format)) => {
                 if json_format.unstructured
                     && (non_metadata_fields.len() != 1
-                        || non_metadata_fields.first().unwrap().field_type.r#type
-                            != FieldType::Primitive(PrimitiveType::Json)
-                        || non_metadata_fields.first().unwrap().field_name != "value")
+                        || non_metadata_fields.first().unwrap().field_type != FieldType::Json
+                        || non_metadata_fields.first().unwrap().name != "value")
                 {
                     bail!("json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON");
                 }
@@ -328,7 +408,7 @@ impl ConnectionSchema {
             .iter()
             .filter_map(|f| {
                 Some(MetadataField {
-                    field_name: f.field_name.clone(),
+                    field_name: f.name.clone(),
                     key: f.metadata_key.clone()?,
                     data_type: Some(Field::from(f.clone()).data_type().clone()),
                 })

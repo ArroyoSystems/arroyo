@@ -45,7 +45,7 @@ export function SchemaEditor({
     // if avro and raw datum, then we need to add the raw datum encoding
     if (format == 'avro' && rawDatum) {
       // @ts-ignore
-      state.schema!.format['avro']!.rawDatums = rawDatum;
+      state.schema!.format!.rawDatums = rawDatum;
       // update the state
       setState({
         ...state,
@@ -56,9 +56,9 @@ export function SchemaEditor({
     // if protobuf, then we need to add the message name
     if (format == 'protobuf') {
       // @ts-ignore
-      state.schema!.format['protobuf']!.messageName = messageName;
+      state.schema!.format!.messageName = messageName;
       // @ts-ignore
-      state.schema!.format['protobuf']!.lengthDelimited = lengthDelimited;
+      state.schema!.format!.lengthDelimited = lengthDelimited;
       // update the state
       setState({
         ...state,
@@ -178,21 +178,16 @@ export function SchemaEditor({
         let schema: ConnectionSchema = {
           ...state.schema,
           fields: [],
-          // @ts-ignore
-          format: {},
-          // @ts-ignore
-          definition: {},
+          format: {
+            // @ts-ignore
+            type: format,
+          },
+          definition: {
+            schema: e.getValue(),
+            // @ts-ignore
+            type: `${format}Schema`,
+          },
         };
-
-        // @ts-ignore
-        schema.format![format] = {};
-
-        if (format == 'protobuf') {
-          schema.definition!['protobuf_schema'] = { schema: e.getValue() };
-        } else {
-          // @ts-ignore
-          schema.definition![format + '_schema'] = e.getValue();
-        }
 
         setState({
           ...state,

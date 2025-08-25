@@ -22,15 +22,13 @@ export function ConfluentSchemaEditor({
 }) {
   let formatEl = null;
 
-  // @ts-ignore
   if (state.schema!.format!.protobuf !== undefined) {
     formatEl = (
       <Box maxW={'lg'}>
         <FormControl>
           <FormLabel>Message name</FormLabel>
           <Input
-            // @ts-ignore
-            value={state.schema!.format.protobuf!.messageName}
+            value={state.schema!.format!.messageName}
             onChange={e => {
               setState({
                 ...state,
@@ -38,12 +36,8 @@ export function ConfluentSchemaEditor({
                   ...state.schema!,
                   format: {
                     ...state.schema!.format,
-                    // @ts-ignore
-                    protobuf: {
-                      // @ts-ignore
-                      ...state.schema!.format.protobuf,
-                      messageName: e.target.value,
-                    },
+                    //@ts-ignore
+                    messageName: e.target.value,
                   },
                 },
               });

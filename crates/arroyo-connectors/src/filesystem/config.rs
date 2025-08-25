@@ -351,7 +351,7 @@ impl FromOpts for FileSystemSink {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
+#[serde(tag = "type", rename_all = "camelCase")]
 #[schemars(title = "Table Type")]
 pub enum FileSystemTableType {
     Source(FileSystemSource),
@@ -424,7 +424,7 @@ impl FromOpts for DeltaLakeSink {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum DeltaLakeTableType {
     Sink(DeltaLakeSink),
 }

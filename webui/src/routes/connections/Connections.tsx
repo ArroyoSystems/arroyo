@@ -29,7 +29,7 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
 import { FiInfo, FiXCircle } from 'react-icons/fi';
-import { ConnectionTable, del, Format, useConnectionTables } from '../../lib/data_fetching';
+import { ConnectionTable, del, useConnectionTables } from '../../lib/data_fetching';
 import { useNavigate } from 'react-router-dom';
 import { formatError } from '../../lib/util';
 import { formatDate } from '../../lib/util';
@@ -40,20 +40,6 @@ interface ColumnDef {
   name: string;
   accessor: (s: ConnectionTable) => JSX.Element;
 }
-
-const format = (f: Format | undefined) => {
-  if (f?.json) {
-    return 'JSON';
-  } else if (f?.raw_string) {
-    return 'RawString';
-  } else if (f?.parquet) {
-    return 'Parquet';
-  } else if (f?.avro) {
-    return 'Avro';
-  } else {
-    return 'Unknown';
-  }
-};
 
 const columns: Array<ColumnDef> = [
   {
@@ -74,7 +60,7 @@ const columns: Array<ColumnDef> = [
   },
   {
     name: 'format',
-    accessor: s => <Text>{s.schema?.format ? format(s.schema.format!) : 'Built-in'}</Text>,
+    accessor: s => <Text>{s.schema?.format ? s.schema.format.type : 'Built-in'}</Text>,
   },
   {
     name: 'pipelines',

@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use arroyo_openapi::types::{
     builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonFormat,
-    MetricName, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
-    ValidateUdfPost,
+    JsonType, MetricName, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf,
+    ValidateQueryPost, ValidateUdfPost,
 };
 use arroyo_openapi::Client;
 use rand::random;
@@ -142,7 +142,7 @@ async fn start_and_monitor(
         if let Some(checkpoint) = checkpoints
             .data
             .iter()
-            .find(|c| c.epoch == checkpoints_to_wait as i64)
+            .find(|c| c.epoch == checkpoints_to_wait as i32)
         {
             if checkpoint.finish_time.is_some() {
                 // get details
@@ -498,8 +498,19 @@ async fn connection_table() {
 
     let connection_schema = ConnectionSchema::builder()
         .fields(vec![])
-        .format(Format::Json(JsonFormat::builder().try_into().unwrap()))
-        .definition(SchemaDefinition::JsonSchema(schema.to_string()));
+        .format(Format::Json {
+            confluent_schema_registry: None,
+            debezium: None,
+            decimal_encoding: None,
+            include_schema: None,
+            schema_id: None,
+            timestamp_format: None,
+            type_: JsonType::Json,
+            unstructured: None,
+        })
+        .definition(SchemaDefinition::JsonSchema {
+            schema: schema.to_string(),
+        });
 
     // create a kafka connection
     let profile_post = ConnectionProfilePost::builder()
@@ -564,7 +575,7 @@ async fn connection_table() {
         }))
         .connection_profile_id(Some(profile.id.clone()));
 
-    let mut connection_table = api_client
+    let connection_table = api_client
         .create_connection_table()
         .body(connection_table)
         .send()
@@ -572,51 +583,36 @@ async fn connection_table() {
         .expect("failed to create table")
         .into_inner();
 
-    connection_table
-        .schema
-        .fields
-        .sort_by_key(|f| f.field_name.clone());
+    let mut v = serde_json::to_value(connection_table.schema.fields).unwrap();
+    let a = v.as_array_mut().unwrap();
+    a.sort_by_key(|v| v.get("name").unwrap().as_str().unwrap().to_string());
 
     assert_eq!(
-        serde_json::to_value(connection_table.schema.fields).unwrap(),
+        v,
         json!([
             {
-                "fieldName": "a",
-                "fieldType": {
+                "name": "a",
+                "type": "string",
+                "sqlName": "TEXT",
+                "required": true
+            },
+            {
+                "name": "b",
+                "type": "f64",
+                "sqlName": "DOUBLE",
+                "required": false,
+            },
+            {
+                "name": "c",
+                "type": "list",
+                "sqlName": "TEXT[]",
+                "items": {
+                    "name": "item",
+                    "type": "string",
                     "sqlName": "TEXT",
-                    "type": {
-                        "primitive": "String",
-                    },
+                    "required": true
                 },
-                "nullable": false
-            },
-            {
-                "fieldName": "b",
-                "fieldType": {
-                   "sqlName": "DOUBLE",
-                    "type": {
-                        "primitive": "F64",
-                    },
-                },
-               "nullable": true,
-            },
-            {
-                "fieldName": "c",
-                "fieldType": {
-                    "type": {
-                        "list": {
-                            "fieldName": "item",
-                            "fieldType": {
-                                "sqlName": "TEXT",
-                                "type": {
-                                    "primitive": "String",
-                                }
-                            },
-                            "nullable": false
-                        },
-                    },
-                },
-                "nullable": true,
+                "required": false,
             }
         ])
     );
