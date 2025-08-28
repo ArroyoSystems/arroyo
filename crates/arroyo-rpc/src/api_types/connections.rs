@@ -194,6 +194,7 @@ pub struct SourceField {
     pub name: String,
     #[serde(flatten)]
     pub field_type: FieldType,
+    #[serde(default)]
     pub required: bool,
     #[serde(default)]
     pub sql_name: String,

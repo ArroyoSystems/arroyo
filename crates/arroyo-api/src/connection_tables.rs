@@ -32,7 +32,7 @@ use arroyo_rpc::schema_resolver::{
 use crate::rest::AppState;
 use crate::rest_utils::{
     authenticate, bad_request, internal_server_error, log_and_map, map_delete_err, map_insert_err,
-    not_found, paginate_results, required_field, validate_pagination_params, ApiError, BearerAuth,
+    not_found, paginate_results, validate_pagination_params, ApiError, BearerAuth,
     ErrorResp,
 };
 use crate::{
@@ -272,7 +272,6 @@ pub async fn create_connection_table(
         get_and_validate_connector(&req, &auth_data, &state.database).await?;
 
     let table_type = connector.table_type(&profile, &req.config).unwrap();
-
 
     let schema: Option<serde_json::Value> = schema.map(|s| serde_json::to_value(s).unwrap());
 

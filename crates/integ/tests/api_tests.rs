@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use arroyo_openapi::types::{
-    builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonFormat,
+    builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format,
     JsonType, MetricName, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf,
     ValidateQueryPost, ValidateUdfPost,
 };
