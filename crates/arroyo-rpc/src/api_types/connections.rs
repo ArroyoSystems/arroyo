@@ -12,7 +12,7 @@ use std::sync::Arc;
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Connector {
     pub id: String,
     pub name: String,
@@ -29,7 +29,7 @@ pub struct Connector {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConnectionProfile {
     pub id: String,
     pub name: String,
@@ -39,7 +39,7 @@ pub struct ConnectionProfile {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConnectionProfilePost {
     pub name: String,
     pub connector: String,
@@ -47,7 +47,7 @@ pub struct ConnectionProfilePost {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Hash, PartialOrd)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum ConnectionType {
     Source,
     Sink,
@@ -77,7 +77,7 @@ impl TryFrom<String> for ConnectionType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum FieldType {
     #[schema(title = "Int32")]
     Int32,
@@ -141,7 +141,7 @@ impl FieldType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum TimestampUnit {
     #[serde(alias = "s")]
     Second,
@@ -169,27 +169,27 @@ impl TimestampUnit {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TimestampField {
     #[serde(default)]
     pub unit: TimestampUnit,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct StructField {
     pub name: Option<String>,
     pub fields: Vec<SourceField>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ListField {
     pub items: Box<SourceField>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SourceField {
     pub name: String,
     #[serde(flatten)]
@@ -311,7 +311,7 @@ impl TryFrom<Field> for SourceField {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum SchemaDefinition {
     #[schema(title = "JsonSchema")]
     JsonSchema { schema: String },
@@ -326,7 +326,7 @@ pub enum SchemaDefinition {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConnectionSchema {
     pub format: Option<Format>,
     #[serde(default)]
@@ -426,7 +426,7 @@ impl From<ConnectionSchema> for ArroyoSchema {
 }
 
 #[derive(Serialize, Clone, Debug, ToSchema, IntoParams)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConnectionTable {
     #[serde(skip_serializing)]
     pub id: i64,
@@ -443,7 +443,7 @@ pub struct ConnectionTable {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConnectionTablePost {
     pub name: String,
     pub connector: String,
@@ -453,13 +453,13 @@ pub struct ConnectionTablePost {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConnectionAutocompleteResp {
     pub values: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TestSourceMessage {
     pub error: bool,
     pub done: bool,
@@ -500,13 +500,13 @@ impl TestSourceMessage {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConfluentSchema {
     pub schema: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, IntoParams)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConfluentSchemaQueryParams {
     pub endpoint: String,
     pub topic: String,

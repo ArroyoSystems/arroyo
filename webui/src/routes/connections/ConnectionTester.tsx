@@ -65,7 +65,7 @@ export function ConnectionTester({
   const createRequest: ConnectionTablePost = {
     name: state.name!,
     connector: connector.id,
-    connectionProfileId: state.connectionProfileId,
+    connection_profile_id: state.connectionProfileId,
     config: config,
     schema: state.schema || undefined,
   };

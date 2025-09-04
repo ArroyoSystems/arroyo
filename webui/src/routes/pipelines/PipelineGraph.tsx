@@ -16,7 +16,7 @@ function PipelineGraphNode({
   };
 }) {
   function handleClick(click: any) {
-    data.setActiveOperator(data.node.nodeId);
+    data.setActiveOperator(data.node.node_id);
   }
 
   let className = 'pipelineGraphNode';
@@ -55,25 +55,25 @@ export function PipelineGraphViewer({
   const nodes = graph.nodes.map(node => {
     let backpressure = 0;
     if (operatorMetricGroups && operatorMetricGroups.length > 0) {
-      const operatorMetricGroup = operatorMetricGroups.find(o => o.nodeId == node.nodeId);
+      const operatorMetricGroup = operatorMetricGroups.find(o => o.node_id == node.node_id);
       if (operatorMetricGroup) {
-        const metricGroups = operatorMetricGroup.metricGroups;
+        const metricGroups = operatorMetricGroup.metric_groups;
         const backpressureMetrics = metricGroups.find(m => m.name == 'backpressure');
         backpressure = backpressureMetrics ? getCurrentMaxMetric(backpressureMetrics) : 0;
       }
     }
 
     return {
-      id: String(node.nodeId),
+      id: String(node.node_id),
       type: 'pipelineNode',
       data: {
         label: node.description,
         node: node,
         setActiveOperator: () => {
           console.log(node);
-          return setActiveOperator(node.nodeId);
+          return setActiveOperator(node.node_id);
         },
-        isActive: node.nodeId == activeOperator,
+        isActive: node.node_id == activeOperator,
         operatorBackpressure: backpressure,
       },
       position: {
@@ -89,9 +89,9 @@ export function PipelineGraphViewer({
 
   const edges = graph.edges.map(edge => {
     return {
-      id: `${edge.srcId}-${edge.destId}`,
-      source: String(edge.srcId),
-      target: String(edge.destId),
+      id: `${edge.src_id}-${edge.dest_id}`,
+      source: String(edge.src_id),
+      target: String(edge.dest_id),
       type: 'step',
     };
   });

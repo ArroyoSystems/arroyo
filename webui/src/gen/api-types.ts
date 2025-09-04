@@ -443,12 +443,12 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         AvroFormat: {
-            confluentSchemaRegistry?: boolean;
-            intoUnstructuredJson?: boolean;
-            rawDatums?: boolean;
-            readonly readerSchema?: string;
+            confluent_schema_registry?: boolean;
+            into_unstructured_json?: boolean;
+            raw_datums?: boolean;
+            readonly reader_schema?: string;
             /** Format: int32 */
-            readonly schemaId?: number | null;
+            readonly schema_id?: number | null;
         };
         BadData: {
             /** @enum {string} */
@@ -463,9 +463,9 @@ export interface components {
             epoch: number;
             events: components["schemas"]["CheckpointEventSpan"][];
             /** Format: int64 */
-            finishTime?: number | null;
+            finish_time?: number | null;
             /** Format: int64 */
-            startTime: number;
+            start_time: number;
         };
         CheckpointCollection: {
             data: components["schemas"]["Checkpoint"][];
@@ -474,9 +474,9 @@ export interface components {
             description: string;
             event: string;
             /** Format: int64 */
-            finishTime: number;
+            finish_time: number;
             /** Format: int64 */
-            startTime: number;
+            start_time: number;
         };
         ConnectionAutocompleteResp: {
             values: {
@@ -499,26 +499,26 @@ export interface components {
             name: string;
         };
         ConnectionSchema: {
-            badData?: Omit<components["schemas"]["BadData"], "behavior"> | null;
+            bad_data?: Omit<components["schemas"]["BadData"], "behavior"> | null;
             definition?: Omit<components["schemas"]["SchemaDefinition"], "type"> | null;
             fields?: components["schemas"]["SourceField"][];
             format?: Omit<components["schemas"]["Format"], "type"> | null;
             framing?: Omit<components["schemas"]["Framing"], "method"> | null;
             inferred?: boolean | null;
-            primaryKeys?: string[];
+            primary_keys?: string[];
         };
         ConnectionTable: {
             config: unknown;
-            connectionProfile?: components["schemas"]["ConnectionProfile"] | null;
+            connection_profile?: components["schemas"]["ConnectionProfile"] | null;
             connector: string;
             /** Format: int32 */
             consumers: number;
             /** Format: int64 */
-            createdAt: number;
+            created_at: number;
             id: string;
             name: string;
             schema: components["schemas"]["ConnectionSchema"];
-            tableType: components["schemas"]["ConnectionType"];
+            table_type: components["schemas"]["ConnectionType"];
         };
         ConnectionTableCollection: {
             data: components["schemas"]["ConnectionTable"][];
@@ -526,7 +526,7 @@ export interface components {
         };
         ConnectionTablePost: {
             config: unknown;
-            connectionProfileId?: string | null;
+            connection_profile_id?: string | null;
             connector: string;
             name: string;
             schema?: components["schemas"]["ConnectionSchema"] | null;
@@ -534,8 +534,8 @@ export interface components {
         /** @enum {string} */
         ConnectionType: "source" | "sink" | "lookup";
         Connector: {
-            connectionConfig?: string | null;
-            customSchemas: boolean;
+            connection_config?: string | null;
+            custom_schemas: boolean;
             description: string;
             enabled: boolean;
             hidden: boolean;
@@ -544,7 +544,7 @@ export interface components {
             name: string;
             sink: boolean;
             source: boolean;
-            tableConfig: string;
+            table_config: string;
             testing: boolean;
         };
         ConnectorCollection: {
@@ -563,10 +563,10 @@ export interface components {
             type: "int64";
         } | {
             /** @enum {string} */
-            type: "uInt32";
+            type: "u_int32";
         } | {
             /** @enum {string} */
-            type: "uInt64";
+            type: "u_int64";
         } | {
             /** @enum {string} */
             type: "f32";
@@ -625,12 +625,12 @@ export interface components {
             type: "Format";
         } & (components["schemas"]["RawStringFormat"] & {
             /** @enum {string} */
-            type: "rawString";
+            type: "raw_string";
         })) | ({
             type: "Format";
         } & (components["schemas"]["RawBytesFormat"] & {
             /** @enum {string} */
-            type: "rawBytes";
+            type: "raw_bytes";
         }));
         Framing: {
             method: "Framing";
@@ -640,32 +640,32 @@ export interface components {
         });
         GlobalUdf: {
             /** Format: int64 */
-            createdAt: number;
+            created_at: number;
             definition: string;
             description?: string | null;
-            dylibUrl?: string | null;
+            dylib_url?: string | null;
             id: string;
             language: components["schemas"]["UdfLanguage"];
             name: string;
             prefix: string;
             /** Format: int64 */
-            updatedAt: number;
+            updated_at: number;
         };
         GlobalUdfCollection: {
             data: components["schemas"]["GlobalUdf"][];
         };
         Job: {
             /** Format: int64 */
-            createdAt: number;
-            failureMessage?: string | null;
+            created_at: number;
+            failure_message?: string | null;
             /** Format: int64 */
-            finishTime?: number | null;
+            finish_time?: number | null;
             id: string;
             /** Format: int64 */
-            runId: number;
-            runningDesired: boolean;
+            run_id: number;
+            running_desired: boolean;
             /** Format: int64 */
-            startTime?: number | null;
+            start_time?: number | null;
             state: string;
             /** Format: int64 */
             tasks?: number | null;
@@ -677,27 +677,27 @@ export interface components {
         JobLogLevel: "info" | "warn" | "error";
         JobLogMessage: {
             /** Format: int64 */
-            createdAt: number;
+            created_at: number;
             details: string;
             id: string;
             level: components["schemas"]["JobLogLevel"];
             message: string;
-            operatorId?: string | null;
+            operator_id?: string | null;
             /** Format: int64 */
-            taskIndex?: number | null;
+            task_index?: number | null;
         };
         JobLogMessageCollection: {
             data: components["schemas"]["JobLogMessage"][];
             hasMore: boolean;
         };
         JsonFormat: {
-            confluentSchemaRegistry?: boolean;
+            confluent_schema_registry?: boolean;
             debezium?: boolean;
-            decimalEncoding?: components["schemas"]["DecimalEncoding"];
-            includeSchema?: boolean;
+            decimal_encoding?: components["schemas"]["DecimalEncoding"];
+            include_schema?: boolean;
             /** Format: int32 */
-            schemaId?: number | null;
-            timestampFormat?: components["schemas"]["TimestampFormat"];
+            schema_id?: number | null;
+            timestamp_format?: components["schemas"]["TimestampFormat"];
             unstructured?: boolean;
         };
         ListField: {
@@ -717,36 +717,36 @@ export interface components {
         MetricName: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure" | "tx_queue_size" | "tx_queue_rem";
         NewlineDelimitedFraming: {
             /** Format: int64 */
-            maxLineLength?: number | null;
+            max_line_length?: number | null;
         };
         OperatorCheckpointGroup: {
             /** Format: int64 */
             bytes: number;
             /** Format: int64 */
-            finishTime?: number | null;
-            operatorId: string;
+            finish_time?: number | null;
+            operator_id: string;
             /** Format: int64 */
-            startedMetadataWrite?: number | null;
+            started_metadata_write?: number | null;
             subtasks: components["schemas"]["SubtaskCheckpointGroup"][];
         };
         OperatorCheckpointGroupCollection: {
             data: components["schemas"]["OperatorCheckpointGroup"][];
         };
         OperatorMetricGroup: {
-            metricGroups: components["schemas"]["MetricGroup"][];
+            metric_groups: components["schemas"]["MetricGroup"][];
             /** Format: int32 */
-            nodeId: number;
+            node_id: number;
         };
         OperatorMetricGroupCollection: {
             data: components["schemas"]["OperatorMetricGroup"][];
         };
         OutputData: {
             batch: string;
-            operatorId: string;
+            operator_id: string;
             /** Format: int64 */
-            startId: number;
+            start_id: number;
             /** Format: int32 */
-            subtaskIdx: number;
+            subtask_idx: number;
             timestamps: number[];
         };
         PaginationQueryParams: {
@@ -759,16 +759,16 @@ export interface components {
         ParquetFormat: {
             compression?: components["schemas"]["ParquetCompression"];
             /** Format: int64 */
-            rowGroupBytes?: number | null;
+            row_group_bytes?: number | null;
         };
         Pipeline: {
             action?: components["schemas"]["StopType"] | null;
-            actionInProgress: boolean;
-            actionText: string;
+            action_in_progress: boolean;
+            action_text: string;
             /** Format: int64 */
-            checkpointIntervalMicros: number;
+            checkpoint_interval_micros: number;
             /** Format: int64 */
-            createdAt: number;
+            created_at: number;
             graph: components["schemas"]["PipelineGraph"];
             id: string;
             name: string;
@@ -783,12 +783,12 @@ export interface components {
         };
         PipelineEdge: {
             /** Format: int32 */
-            destId: number;
-            edgeType: string;
-            keyType: string;
+            dest_id: number;
+            edge_type: string;
+            key_type: string;
             /** Format: int32 */
-            srcId: number;
-            valueType: string;
+            src_id: number;
+            value_type: string;
         };
         PipelineGraph: {
             edges: components["schemas"]["PipelineEdge"][];
@@ -797,21 +797,21 @@ export interface components {
         PipelineNode: {
             description: string;
             /** Format: int32 */
-            nodeId: number;
+            node_id: number;
             operator: string;
             /** Format: int32 */
             parallelism: number;
         };
         PipelinePatch: {
             /** Format: int64 */
-            checkpointIntervalMicros?: number | null;
+            checkpoint_interval_micros?: number | null;
             /** Format: int64 */
             parallelism?: number | null;
             stop?: components["schemas"]["StopType"] | null;
         };
         PipelinePost: {
             /** Format: int64 */
-            checkpointIntervalMicros?: number | null;
+            checkpoint_interval_micros?: number | null;
             name: string;
             /** Format: int64 */
             parallelism: number;
@@ -822,17 +822,17 @@ export interface components {
             force?: boolean | null;
         };
         PreviewPost: {
-            enableSinks?: boolean;
+            enable_sinks?: boolean;
             query: string;
             udfs?: components["schemas"]["Udf"][] | null;
         };
         ProtobufFormat: {
             /** Format: binary */
-            compiledSchema?: string | null;
-            confluentSchemaRegistry?: boolean;
-            intoUnstructuredJson?: boolean;
-            lengthDelimited?: boolean;
-            messageName?: string | null;
+            compiled_schema?: string | null;
+            confluent_schema_registry?: boolean;
+            into_unstructured_json?: boolean;
+            length_delimited?: boolean;
+            message_name?: string | null;
         };
         QueryValidationResult: {
             errors: string[];
@@ -843,26 +843,26 @@ export interface components {
         SchemaDefinition: {
             schema: string;
             /** @enum {string} */
-            type: "jsonSchema";
+            type: "json_schema";
         } | {
             dependencies?: {
                 [key: string]: string;
             };
             schema: string;
             /** @enum {string} */
-            type: "protobufSchema";
+            type: "protobuf_schema";
         } | {
             schema: string;
             /** @enum {string} */
-            type: "avroSchema";
+            type: "avro_schema";
         };
         SourceField: {
             type: "SourceField";
         } & (Omit<components["schemas"]["FieldType"], "type"> & {
-            metadataKey?: string | null;
+            metadata_key?: string | null;
             name: string;
-            required: boolean;
-            sqlName?: string;
+            required?: boolean;
+            sql_name?: string;
         });
         /** @enum {string} */
         StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
@@ -873,7 +873,7 @@ export interface components {
         SubtaskCheckpointGroup: {
             /** Format: int64 */
             bytes: number;
-            eventSpans: components["schemas"]["CheckpointEventSpan"][];
+            event_spans: components["schemas"]["CheckpointEventSpan"][];
             /** Format: int32 */
             index: number;
         };
@@ -891,7 +891,7 @@ export interface components {
             unit?: components["schemas"]["TimestampUnit"];
         };
         /** @enum {string} */
-        TimestampFormat: "rfc3339" | "unixMillis";
+        TimestampFormat: "rfc3339" | "unix_millis";
         /** @enum {string} */
         TimestampUnit: "second" | "millisecond" | "microsecond" | "nanosecond";
         Udf: {
@@ -908,7 +908,7 @@ export interface components {
         };
         UdfValidationResult: {
             errors: string[];
-            udfName?: string | null;
+            udf_name?: string | null;
         };
         ValidateQueryPost: {
             query: string;

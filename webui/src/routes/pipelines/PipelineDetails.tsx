@@ -120,12 +120,12 @@ export function PipelineDetails() {
         />
       </Flex>
       <Stack w="500px" className="pipelineInfo" spacing={2} overflow={'auto'}>
-        {job?.failureMessage ? (
+        {job?.failure_message ? (
           <Box>
             <Alert status="error" marginBottom={5}>
               <Box>
                 <AlertTitle>Job Failed</AlertTitle>
-                <AlertDescription>{job?.failureMessage}</AlertDescription>
+                <AlertDescription>{job?.failure_message}</AlertDescription>
               </Box>
               <Spacer />
               <AlertIcon alignSelf="flex-start" />
@@ -269,8 +269,8 @@ export function PipelineDetails() {
             await updateJobState(pipeline.action!);
           }}
         >
-          {pipeline.actionInProgress ? <Spinner size="xs" mr={2} /> : null}
-          {pipeline.actionText}
+          {pipeline.action_in_progress ? <Spinner size="xs" mr={2} /> : null}
+          {pipeline.action_text}
         </Button>
       );
     }

@@ -4,21 +4,21 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ValidateQueryPost {
     pub query: String,
     pub udfs: Option<Vec<Udf>>, // needed for query validation but are not themselves validated
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct QueryValidationResult {
     pub graph: Option<PipelineGraph>,
     pub errors: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PipelinePost {
     pub name: String,
     pub query: String,
@@ -28,7 +28,7 @@ pub struct PipelinePost {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PreviewPost {
     pub query: String,
     pub udfs: Option<Vec<Udf>>,
@@ -37,7 +37,7 @@ pub struct PreviewPost {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PipelinePatch {
     pub parallelism: Option<u64>,
     pub checkpoint_interval_micros: Option<u64>,
@@ -45,13 +45,13 @@ pub struct PipelinePatch {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PipelineRestart {
     pub force: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Pipeline {
     pub id: String,
     pub name: String,
@@ -68,14 +68,14 @@ pub struct Pipeline {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PipelineGraph {
     pub nodes: Vec<PipelineNode>,
     pub edges: Vec<PipelineEdge>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PipelineNode {
     pub node_id: u32,
     pub operator: String,
@@ -84,7 +84,7 @@ pub struct PipelineNode {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PipelineEdge {
     pub src_id: u32,
     pub dest_id: u32,
@@ -94,7 +94,7 @@ pub struct PipelineEdge {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum StopType {
     None,
     Checkpoint,
@@ -104,7 +104,7 @@ pub enum StopType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Job {
     pub id: String,
     pub running_desired: bool,
@@ -118,7 +118,7 @@ pub struct Job {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum JobLogLevel {
     Info,
     Warn,
@@ -126,7 +126,7 @@ pub enum JobLogLevel {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct JobLogMessage {
     pub id: String,
     pub created_at: u64,
@@ -138,7 +138,7 @@ pub struct JobLogMessage {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct OutputData {
     pub operator_id: String,
     pub subtask_idx: u32,

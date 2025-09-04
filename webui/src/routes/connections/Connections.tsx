@@ -48,7 +48,7 @@ const columns: Array<ColumnDef> = [
   },
   {
     name: 'created at',
-    accessor: s => <Text>{formatDate(BigInt(s.createdAt))}</Text>,
+    accessor: s => <Text>{formatDate(BigInt(s.created_at))}</Text>,
   },
   {
     name: 'connector',
@@ -56,7 +56,7 @@ const columns: Array<ColumnDef> = [
   },
   {
     name: 'table type',
-    accessor: s => <Text>{s.tableType}</Text>,
+    accessor: s => <Text>{s.table_type}</Text>,
   },
   {
     name: 'format',

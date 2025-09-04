@@ -35,12 +35,12 @@ export interface JobCardProps {
 }
 
 const jobDuration = (job: Job) => {
-  if (job.startTime == null) {
+  if (job.start_time == null) {
     return 0;
-  } else if (job.finishTime == null) {
-    return Date.now() * 1000 - Number(job.startTime);
+  } else if (job.finish_time == null) {
+    return Date.now() * 1000 - Number(job.start_time);
   } else {
-    return job.finishTime - job.startTime;
+    return job.finish_time - job.start_time;
   }
 };
 
@@ -102,8 +102,8 @@ const PipelineRow: React.FC<PipelineRowProps> = ({
       </Td>
       <Td key={'created_at'} minWidth={230}>
         <Indicator
-          content={formatDate(BigInt(pipeline.createdAt))}
-          label={relativeTime(pipeline.createdAt)}
+          content={formatDate(BigInt(pipeline.created_at))}
+          label={relativeTime(pipeline.created_at)}
         />
       </Td>
       <Td key={'state'}>

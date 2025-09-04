@@ -29,7 +29,7 @@ export function PipelineOutputs({
 
   const sseHandler = (event: MessageEvent) => {
     const record = JSON.parse(event.data) as OutputData;
-    const id = record.startId;
+    const id = record.start_id;
     const batch: any[] = JSON.parse(record.batch);
 
     if (cols == undefined && batch.length > 0) {

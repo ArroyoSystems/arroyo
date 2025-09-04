@@ -61,16 +61,16 @@ const SchemaFormatEditor = ({
     schemaTypeOptions.push({ name: 'Confluent Schema Registry', value: 'confluent' });
   }
 
-  let schemaType: 'jsonSchema' | 'avroSchema' | 'protobufSchema';
+  let schemaType: 'json_schema' | 'avro_schema' | 'protobuf_schema';
   switch (format) {
     case 'json': {
-      schemaType = 'jsonSchema';
+      schemaType = 'json_schema';
     }
     case 'avro': {
-      schemaType = 'avroSchema';
+      schemaType = 'avro_schema';
     }
     case 'protobuf': {
-      schemaType = 'protobufSchema';
+      schemaType = 'protobuf_schema';
     }
   }
 
@@ -78,7 +78,7 @@ const SchemaFormatEditor = ({
   let value;
   if (
     state.schema?.format?.type == 'json' &&
-    state.schema?.format?.confluentSchemaRegistry == true
+    state.schema?.format?.confluent_schema_registry == true
   ) {
     editor = <ConfluentSchemaEditor state={state} setState={setState} next={next} />;
     value = 'confluent';
@@ -144,7 +144,7 @@ const SchemaFormatEditor = ({
             ...state.schema,
             fields: [],
             // @ts-ignore
-            format: { type: format, confluentSchemaRegistry: true },
+            format: { type: format, confluent_schema_registry: true },
           },
         });
         break;
@@ -162,7 +162,7 @@ const SchemaFormatEditor = ({
               },
             ],
             // @ts-ignore
-            format: { type: 'json', unstructured: true, confluentSchemaRegistry: false },
+            format: { type: 'json', unstructured: true, confluent_schema_registry: false },
           },
         });
         break;
@@ -173,7 +173,7 @@ const SchemaFormatEditor = ({
             ...state.schema,
             fields: [],
             // @ts-ignore
-            format: { type: 'json', unstructured: false, confluentSchemaRegistry: false },
+            format: { type: 'json', unstructured: false, confluent_schema_registry: false },
             inferred: true,
           },
         });
@@ -237,7 +237,7 @@ const RawStringEditor = ({
         ],
         format: {
           // @ts-ignore
-          type: 'rawString',
+          type: 'raw_string',
         },
       },
     });
@@ -284,7 +284,7 @@ const RawBytesEditor = ({
         ],
         format: {
           // @ts-ignore
-          type: 'rawBytes',
+          type: 'raw_bytes',
         },
       },
     });
@@ -463,7 +463,7 @@ export const DefineSchema = ({
       schema: {
         ...state.schema,
         fields: [],
-        badData: badDataOptions.find(f => f.name == e.target.value)?.value,
+        bad_data: badDataOptions.find(f => f.name == e.target.value)?.value,
       },
     });
   };

@@ -36,8 +36,8 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ pipeline, job, checkpoints })
   let checkpoint: Checkpoint | undefined = checkpoints.find(c => c.epoch == epoch);
 
   if (checkpoint && checkpointDetails) {
-    let start = Number(checkpoint.startTime);
-    let end = Number(checkpoint.finishTime ?? new Date().getTime() * 1000);
+    let start = Number(checkpoint.start_time);
+    let end = Number(checkpoint.finish_time ?? new Date().getTime() * 1000);
 
     let checkpointBytes = checkpointDetails.map(d => d.bytes).reduce((a, b) => a + b, 0);
 
@@ -49,17 +49,17 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ pipeline, job, checkpoints })
             {new Intl.DateTimeFormat('en-us', {
               dateStyle: undefined,
               timeStyle: 'medium',
-            }).format(new Date(Number(checkpoint.startTime) / 1000))}
+            }).format(new Date(Number(checkpoint.start_time) / 1000))}
           </StatNumber>
         </Stat>
         <Stat marginLeft={10}>
           <StatLabel>Finished</StatLabel>
           <StatNumber>
-            {checkpoint.finishTime != null
+            {checkpoint.finish_time != null
               ? new Intl.DateTimeFormat('en-us', {
                   dateStyle: undefined,
                   timeStyle: 'medium',
-                }).format(new Date(Number(checkpoint.finishTime) / 1000))
+                }).format(new Date(Number(checkpoint.finish_time) / 1000))
               : '-'}
           </StatNumber>
         </Stat>

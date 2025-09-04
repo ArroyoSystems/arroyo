@@ -39,14 +39,14 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, node
     return <Loading size={'lg'} />;
   }
 
-  const node = pipeline.graph.nodes.find(n => n.nodeId == nodeId);
-  const operatorMetricGroup = operatorMetricGroups.find(o => o.nodeId == nodeId);
+  const node = pipeline.graph.nodes.find(n => n.node_id == nodeId);
+  const operatorMetricGroup = operatorMetricGroups.find(o => o.node_id == nodeId);
 
   if (!operatorMetricGroup) {
     return <Loading size={'lg'} />;
   }
 
-  const metricGroups = operatorMetricGroup.metricGroups;
+  const metricGroups = operatorMetricGroup.metric_groups;
 
   const backpressureGroup = metricGroups.find(m => m.name == 'backpressure');
   const backpressure = backpressureGroup ? getCurrentMaxMetric(backpressureGroup) : 0;
@@ -117,7 +117,7 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, node
           mr={2}
           title={'ID of this node'}
         >
-          {node?.nodeId}
+          {node?.node_id}
         </Box>
         {node?.description}
       </Box>
