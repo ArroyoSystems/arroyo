@@ -43,12 +43,12 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
 
   const { activeStep, setActiveStep } = useSteps({
     index: 0,
-    count: connector.customSchemas ? 3 : 2,
+    count: connector.custom_schemas ? 3 : 2,
   });
 
   let steps = [];
 
-  if (connector.connectionConfig) {
+  if (connector.connection_config) {
     let next = steps.length + 1;
     steps.push({
       title: 'Configure profile',
@@ -80,7 +80,7 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
     ),
   });
 
-  if (connector.customSchemas) {
+  if (connector.custom_schemas) {
     let next = steps.length + 1;
 
     steps.push({

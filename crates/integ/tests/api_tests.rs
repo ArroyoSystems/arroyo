@@ -593,23 +593,23 @@ async fn connection_table() {
             {
                 "name": "a",
                 "type": "string",
-                "sqlName": "TEXT",
+                "sql_name": "TEXT",
                 "required": true
             },
             {
                 "name": "b",
                 "type": "f64",
-                "sqlName": "DOUBLE",
+                "sql_name": "DOUBLE",
                 "required": false,
             },
             {
                 "name": "c",
                 "type": "list",
-                "sqlName": "TEXT[]",
+                "sql_name": "TEXT[]",
                 "items": {
                     "name": "item",
                     "type": "string",
-                    "sqlName": "TEXT",
+                    "sql_name": "TEXT",
                     "required": true
                 },
                 "required": false,

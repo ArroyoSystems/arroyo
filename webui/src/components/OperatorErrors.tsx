@@ -21,10 +21,10 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
     <Tbody>
       {operatorErrors.map(m => {
         return (
-          <Tr key={String(m.createdAt)}>
-            <Td>{formatDate(BigInt(m.createdAt))}</Td>
-            <Td>{m.operatorId}</Td>
-            <Td>{m.taskIndex?.toString()}</Td>
+          <Tr key={String(m.created_at)}>
+            <Td>{formatDate(BigInt(m.created_at))}</Td>
+            <Td>{m.operator_id}</Td>
+            <Td>{m.task_index?.toString()}</Td>
             <Td>{m.message}</Td>
             <Td>{m.details}</Td>
           </Tr>

@@ -14,8 +14,8 @@ const CatalogTab: React.FC = () => {
     catalogTruncated = connectionTablePages[0].hasMore;
   }
 
-  const sources = connectionTables.filter(s => s.tableType == 'source');
-  const sinks = connectionTables.filter(s => s.tableType == 'sink');
+  const sources = connectionTables.filter(s => s.table_type == 'source');
+  const sinks = connectionTables.filter(s => s.table_type == 'sink');
 
   // Since we only fetch the first page of connection tables,
   // display a warning if there are too many to be shown.

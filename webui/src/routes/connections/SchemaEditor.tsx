@@ -45,7 +45,7 @@ export function SchemaEditor({
     // if avro and raw datum, then we need to add the raw datum encoding
     if (format == 'avro' && rawDatum) {
       // @ts-ignore
-      state.schema!.format!.rawDatums = rawDatum;
+      state.schema!.format!.raw_datums = rawDatum;
       // update the state
       setState({
         ...state,
@@ -56,9 +56,9 @@ export function SchemaEditor({
     // if protobuf, then we need to add the message name
     if (format == 'protobuf') {
       // @ts-ignore
-      state.schema!.format!.messageName = messageName;
+      state.schema!.format!.message_name = messageName;
       // @ts-ignore
-      state.schema!.format!.lengthDelimited = lengthDelimited;
+      state.schema!.format!.length_delimited = lengthDelimited;
       // update the state
       setState({
         ...state,
@@ -185,7 +185,7 @@ export function SchemaEditor({
           definition: {
             schema: e.getValue(),
             // @ts-ignore
-            type: `${format}Schema`,
+            type: `${format}_schema`,
           },
         };
 

@@ -14,7 +14,7 @@ use utoipa::ToSchema;
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum TimestampFormat {
     #[default]
     #[serde(rename = "rfc3339")]
@@ -37,7 +37,7 @@ impl TryFrom<&str> for TimestampFormat {
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum DecimalEncoding {
     /// Encode the decimal as a JSON number, possibly losing precision depending on the consumer
     #[default]
@@ -65,7 +65,7 @@ impl TryFrom<&str> for DecimalEncoding {
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct JsonFormat {
     #[serde(default)]
     pub confluent_schema_registry: bool,
@@ -142,11 +142,11 @@ impl JsonFormat {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RawStringFormat {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RawBytesFormat {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
@@ -207,7 +207,7 @@ impl<'de> Deserialize<'de> for SerializableAvroSchema {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AvroFormat {
     #[serde(default)]
     pub confluent_schema_registry: bool,
@@ -267,7 +267,7 @@ impl AvroFormat {
 #[derive(
     Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Default, ToSchema,
 )]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum ParquetCompression {
     #[default]
     Uncompressed,
@@ -295,7 +295,7 @@ impl FromStr for ParquetCompression {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ParquetFormat {
     #[serde(default)]
     pub compression: ParquetCompression,
@@ -327,7 +327,7 @@ impl ParquetFormat {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ProtobufFormat {
     #[serde(default)]
     pub into_unstructured_json: bool,
@@ -352,7 +352,7 @@ impl ProtobufFormat {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum Format {
     #[schema(title = "Json")]
     Json(JsonFormat),
@@ -417,7 +417,7 @@ impl Format {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase", tag = "behavior")]
+#[serde(rename_all = "snake_case", tag = "behavior")]
 pub enum BadData {
     #[schema(title = "Fail")]
     Fail {},
@@ -453,7 +453,7 @@ impl BadData {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase", tag = "method")]
+#[serde(rename_all = "snake_case", tag = "method")]
 pub enum Framing {
     #[schema(title = "Newline")]
     Newline(NewlineDelimitedFraming),
@@ -473,7 +473,7 @@ impl Framing {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct NewlineDelimitedFraming {
     pub max_line_length: Option<u64>,
 }

@@ -22,8 +22,8 @@ const UdfEditor: React.FC<UdfEditorProps> = ({ udf }) => {
   );
 
   const updateName = (data: UdfValidationResult, key: any, config: any) => {
-    if (data.udfName) {
-      updateLocalUdf(udf as LocalUdf, { name: data.udfName });
+    if (data.udf_name) {
+      updateLocalUdf(udf as LocalUdf, { name: data.udf_name });
     }
   };
 

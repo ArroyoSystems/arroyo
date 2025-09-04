@@ -3,7 +3,7 @@ use strum_macros::{Display, EnumString};
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Udf {
     pub definition: String,
     #[serde(default)]
@@ -11,7 +11,7 @@ pub struct Udf {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ValidateUdfPost {
     pub definition: String,
     #[serde(default)]
@@ -19,7 +19,7 @@ pub struct ValidateUdfPost {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct UdfValidationResult {
     pub udf_name: Option<String>,
     pub errors: Vec<String>,
@@ -38,7 +38,7 @@ pub struct UdfValidationResult {
     Eq,
     PartialEq,
 )]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum UdfLanguage {
     Python,
     #[default]
@@ -46,7 +46,7 @@ pub enum UdfLanguage {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct UdfPost {
     pub prefix: String,
     #[serde(default)]
@@ -56,7 +56,7 @@ pub struct UdfPost {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct GlobalUdf {
     pub id: String,
     pub prefix: String,

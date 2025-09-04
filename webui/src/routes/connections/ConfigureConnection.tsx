@@ -22,7 +22,7 @@ export const ConfigureConnection = ({
     <Stack spacing={8}>
       <Stack spacing="4" maxW={800}>
         <JsonForm
-          schema={JSON.parse(connector.tableConfig)}
+          schema={JSON.parse(connector.table_config)}
           initial={state.table || {}}
           onSubmit={async table => {
             setState({ ...state, table: table });
