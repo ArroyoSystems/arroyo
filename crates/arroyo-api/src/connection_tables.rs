@@ -32,8 +32,7 @@ use arroyo_rpc::schema_resolver::{
 use crate::rest::AppState;
 use crate::rest_utils::{
     authenticate, bad_request, internal_server_error, log_and_map, map_delete_err, map_insert_err,
-    not_found, paginate_results, validate_pagination_params, ApiError, BearerAuth,
-    ErrorResp,
+    not_found, paginate_results, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::{
     queries::api_queries::{self, DbConnectionTable},
