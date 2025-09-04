@@ -89,11 +89,7 @@ pub(crate) fn validate_partitioning_fields(
     schema: &ConnectionSchema,
     fields: &[String],
 ) -> anyhow::Result<()> {
-    let schema_fields: HashSet<_> = schema
-        .fields
-        .iter()
-        .map(|f| f.field_name.as_str())
-        .collect();
+    let schema_fields: HashSet<_> = schema.fields.iter().map(|f| f.name.as_str()).collect();
 
     for field in fields {
         if !schema_fields.contains(field.as_str()) {

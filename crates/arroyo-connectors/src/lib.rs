@@ -1,9 +1,8 @@
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
-    ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
+    ConnectionSchema, ConnectionType, FieldType, SourceField, TestSourceMessage,
 };
-use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::var_str::VarStr;
 use arroyo_types::string_to_map;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -79,18 +78,13 @@ pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
 }
 
 pub(crate) fn source_field(name: &str, field_type: FieldType) -> SourceField {
+    let sql_name = field_type.sql_type();
     SourceField {
-        field_name: name.to_string(),
-        field_type: SourceFieldType {
-            sql_name: match field_type.clone() {
-                FieldType::Primitive(p) => Some(primitive_to_sql(p).to_string()),
-                FieldType::Struct(_) => None,
-                FieldType::List(_) => None,
-            },
-            r#type: field_type,
-        },
-        nullable: false,
+        name: name.to_string(),
+        field_type,
+        required: true,
         metadata_key: None,
+        sql_name,
     }
 }
 

@@ -14,7 +14,7 @@ use utoipa::ToSchema;
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum TimestampFormat {
     #[default]
     #[serde(rename = "rfc3339")]
@@ -37,7 +37,7 @@ impl TryFrom<&str> for TimestampFormat {
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum DecimalEncoding {
     /// Encode the decimal as a JSON number, possibly losing precision depending on the consumer
     #[default]
@@ -267,7 +267,7 @@ impl AvroFormat {
 #[derive(
     Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Default, ToSchema,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum ParquetCompression {
     #[default]
     Uncompressed,
@@ -352,13 +352,19 @@ impl ProtobufFormat {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase", tag = "type")]
 pub enum Format {
+    #[schema(title = "Json")]
     Json(JsonFormat),
+    #[schema(title = "Avro")]
     Avro(AvroFormat),
+    #[schema(title = "Protobuf")]
     Protobuf(ProtobufFormat),
+    #[schema(title = "Parquet")]
     Parquet(ParquetFormat),
+    #[schema(title = "RawString")]
     RawString(RawStringFormat),
+    #[schema(title = "RawBytes")]
     RawBytes(RawBytesFormat),
 }
 
@@ -411,9 +417,11 @@ impl Format {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase", tag = "behavior")]
 pub enum BadData {
+    #[schema(title = "Fail")]
     Fail {},
+    #[schema(title = "Drop")]
     Drop {},
 }
 
@@ -445,9 +453,10 @@ impl BadData {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Framing {
-    pub method: FramingMethod,
+#[serde(rename_all = "camelCase", tag = "method")]
+pub enum Framing {
+    #[schema(title = "Newline")]
+    Newline(NewlineDelimitedFraming),
 }
 
 impl Framing {
@@ -456,12 +465,10 @@ impl Framing {
             return Ok(None);
         };
 
-        let method = match method.as_str() {
-            "newline" => FramingMethod::Newline(NewlineDelimitedFraming::from_opts(opts)?),
+        Ok(Some(match method.as_str() {
+            "newline" => Framing::Newline(NewlineDelimitedFraming::from_opts(opts)?),
             f => return plan_err!("Unknown framing method '{}'", f),
-        };
-
-        Ok(Some(Framing { method }))
+        }))
     }
 }
 
@@ -477,10 +484,4 @@ impl NewlineDelimitedFraming {
 
         Ok(NewlineDelimitedFraming { max_line_length })
     }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum FramingMethod {
-    Newline(NewlineDelimitedFraming),
 }

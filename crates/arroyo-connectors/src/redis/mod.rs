@@ -10,8 +10,7 @@ use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector, LookupConnector, MetadataDef};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
-    ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
-    TestSourceMessage,
+    ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, TestSourceMessage,
 };
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::var_str::VarStr;
@@ -284,11 +283,11 @@ impl Connector for RedisConnector {
             column: String,
             sql: &str,
         ) -> anyhow::Result<String> {
-            if !schema.fields.iter().any(|f| {
-                f.field_name == column
-                    && f.field_type.r#type == FieldType::Primitive(PrimitiveType::String)
-                    && !f.nullable
-            }) {
+            if !schema
+                .fields
+                .iter()
+                .any(|f| f.name == column && f.field_type == FieldType::String && f.required)
+            {
                 bail!("invalid value '{}' for {}, must be the name of a non-nullable TEXT column on the table", column, sql);
             };
 
@@ -299,7 +298,7 @@ impl Connector for RedisConnector {
             "lookup" => {
                 // for look-up tables, we require that there's a primary key metadata field
                 for f in &schema.fields {
-                    if schema.primary_keys.contains(&f.field_name)
+                    if schema.primary_keys.contains(&f.name)
                         && f.metadata_key.as_ref().map(|k| k != "key").unwrap_or(true)
                     {
                         bail!(

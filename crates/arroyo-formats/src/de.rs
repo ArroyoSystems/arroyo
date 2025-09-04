@@ -11,9 +11,7 @@ use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Schema, SchemaRef};
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::formats::{
-    AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat, ProtobufFormat,
-};
+use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
 use arroyo_types::{to_nanos, SourceError, LOOKUP_KEY_INDEX_FIELD};
@@ -91,8 +89,8 @@ impl<'a> Iterator for FramingIterator<'a> {
 
         match &self.framing {
             Some(framing) => {
-                match &framing.method {
-                    FramingMethod::Newline(newline) => {
+                match &**framing {
+                    Framing::Newline(newline) => {
                         let end = memchr::memchr(b'\n', &self.buf[self.offset..])
                             .map(|i| self.offset + i)
                             .unwrap_or(self.buf.len());
@@ -731,8 +729,7 @@ mod tests {
     use arrow_schema::{DataType, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{
-        BadData, Format, Framing, FramingMethod, JsonFormat, NewlineDelimitedFraming,
-        RawBytesFormat,
+        BadData, Format, Framing, JsonFormat, NewlineDelimitedFraming, RawBytesFormat,
     };
     use arroyo_rpc::MetadataField;
     use arroyo_types::{to_nanos, SourceError};
@@ -742,11 +739,9 @@ mod tests {
 
     #[test]
     fn test_line_framing() {
-        let framing = Some(Arc::new(Framing {
-            method: FramingMethod::Newline(NewlineDelimitedFraming {
-                max_line_length: None,
-            }),
-        }));
+        let framing = Some(Arc::new(Framing::Newline(NewlineDelimitedFraming {
+            max_line_length: None,
+        })));
 
         let result: Vec<_> = FramingIterator::new(framing.clone(), "one block".as_bytes())
             .map(|t| String::from_utf8(t.to_vec()).unwrap())
@@ -789,11 +784,9 @@ mod tests {
 
     #[test]
     fn test_max_line_length() {
-        let framing = Some(Arc::new(Framing {
-            method: FramingMethod::Newline(NewlineDelimitedFraming {
-                max_line_length: Some(5),
-            }),
-        }));
+        let framing = Some(Arc::new(Framing::Newline(NewlineDelimitedFraming {
+            max_line_length: Some(5),
+        })));
 
         let result: Vec<_> =
             FramingIterator::new(framing, "one block\ntwo block\nwhole".as_bytes())

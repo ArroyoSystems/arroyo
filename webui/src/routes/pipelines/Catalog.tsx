@@ -14,34 +14,35 @@ import { ConnectionTable, SourceField } from '../../lib/data_fetching';
 import { BiTable } from 'react-icons/bi';
 
 function CatalogField({ field, nesting }: { field: SourceField; nesting: number }) {
-  if (field.fieldType!.type.primitive) {
-    return (
-      <Flex>
-        <Box flex="1" textAlign="left">
-          {field.fieldName}
-        </Box>
-        <Box flex="1" textAlign="right" color={'pink.300'}>
-          {field.fieldType.sqlName}
-        </Box>
-      </Flex>
-    );
-  }
-  if (field.fieldType!.type.struct) {
+  // @ts-ignore
+  if (field.type == 'struct') {
     return (
       <Box mr={1} mb={2}>
-        <Box>{field.fieldName}</Box>
-        {field.fieldType.type.struct.fields.map(f => {
-          return (
-            <Box pl={(nesting + 1) * 4} key={f.fieldName} fontFamily="monospace">
-              <CatalogField field={f} nesting={nesting + 1} />
-            </Box>
-          );
-        })}
+        <Box>{field.name}</Box>
+        {
+          // @ts-ignore
+          field.fields.map(f => {
+            return (
+              <Box pl={(nesting + 1) * 4} key={f.fieldName} fontFamily="monospace">
+                <CatalogField field={f} nesting={nesting + 1} />
+              </Box>
+            );
+          })
+        }
       </Box>
     );
-  } else {
-    return <Box></Box>;
   }
+
+  return (
+    <Flex>
+      <Box flex="1" textAlign="left">
+        {field.name}
+      </Box>
+      <Box flex="1" textAlign="right" color={'pink.300'}>
+        {field.sqlName}
+      </Box>
+    </Flex>
+  );
 }
 
 export function Catalog({ tables }: { tables: Array<ConnectionTable> }) {
@@ -70,8 +71,8 @@ export function Catalog({ tables }: { tables: Array<ConnectionTable> }) {
               </AccordionButton>
             </Box>
             <AccordionPanel padding={0} pl={3}>
-              {table.schema!.fields.map(f => (
-                <CatalogField key={f.fieldName} field={f} nesting={0} />
+              {table.schema!.fields?.map(f => (
+                <CatalogField key={f.name} field={f} nesting={0} />
               ))}
             </AccordionPanel>
           </AccordionItem>

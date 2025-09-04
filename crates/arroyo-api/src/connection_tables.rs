@@ -28,13 +28,11 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
 };
-use arroyo_types::raw_schema;
 
 use crate::rest::AppState;
 use crate::rest_utils::{
     authenticate, bad_request, internal_server_error, log_and_map, map_delete_err, map_insert_err,
-    not_found, paginate_results, required_field, validate_pagination_params, ApiError, BearerAuth,
-    ErrorResp,
+    not_found, paginate_results, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::{
     queries::api_queries::{self, DbConnectionTable},
@@ -274,12 +272,6 @@ pub async fn create_connection_table(
 
     let table_type = connector.table_type(&profile, &req.config).unwrap();
 
-    if let Some(schema) = &schema {
-        if schema.definition.is_none() && schema.inferred != Some(true) {
-            return Err(required_field("schema.definition"));
-        }
-    }
-
     let schema: Option<serde_json::Value> = schema.map(|s| serde_json::to_value(s).unwrap());
 
     let pub_id = generate_id(IdTypes::ConnectionTable);
@@ -502,7 +494,9 @@ async fn expand_avro_schema(
                     )));
                 }
 
-                schema.definition = Some(SchemaDefinition::AvroSchema(schema_response.schema));
+                schema.definition = Some(SchemaDefinition::AvroSchema {
+                    schema: schema_response.schema,
+                });
             }
             ConnectionType::Sink => {
                 // don't fetch schemas for sinks for now
@@ -513,7 +507,8 @@ async fn expand_avro_schema(
         }
     }
 
-    let Some(SchemaDefinition::AvroSchema(definition)) = schema.definition.as_ref() else {
+    let Some(SchemaDefinition::AvroSchema { schema: definition }) = schema.definition.as_ref()
+    else {
         return match connection_type {
             ConnectionType::Source => Err(bad_request(
                 "avro format requires an avro schema be set for sources",
@@ -698,7 +693,9 @@ async fn expand_json_schema(
                 }
                 confluent_schema_id.replace(schema_response.0.version);
 
-                schema.definition = Some(SchemaDefinition::JsonSchema(schema_response.0.schema));
+                schema.definition = Some(SchemaDefinition::JsonSchema {
+                    schema: schema_response.0.schema,
+                });
             }
             ConnectionType::Sink => {
                 // don't fetch schemas for sinks for now until we're better able to conform our output to the schema
@@ -712,9 +709,8 @@ async fn expand_json_schema(
 
     if let Some(d) = &schema.definition {
         let arrow = match d {
-            SchemaDefinition::JsonSchema(json) => json::schema::to_arrow(name, json)
+            SchemaDefinition::JsonSchema { schema } => json::schema::to_arrow(name, schema)
                 .map_err(|e| bad_request(format!("Invalid json-schema: {e}")))?,
-            SchemaDefinition::RawSchema(_) => raw_schema(),
             _ => return Err(bad_request("Invalid schema type for json format")),
         };
 
@@ -823,7 +819,7 @@ pub(crate) async fn test_schema(
     };
 
     match schema_def {
-        SchemaDefinition::JsonSchema(schema) => {
+        SchemaDefinition::JsonSchema { schema } => {
             if let Err(e) = json::schema::to_arrow("test", schema) {
                 Err(bad_request(e.to_string()))
             } else {

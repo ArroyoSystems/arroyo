@@ -61,27 +61,28 @@ const SchemaFormatEditor = ({
     schemaTypeOptions.push({ name: 'Confluent Schema Registry', value: 'confluent' });
   }
 
-  let def_name: 'json_schema' | 'avro_schema' | 'protobuf_schema';
+  let schemaType: 'jsonSchema' | 'avroSchema' | 'protobufSchema';
   switch (format) {
-    case 'json':
-      def_name = 'json_schema';
-      break;
-    case 'avro':
-      def_name = 'avro_schema';
-      break;
-    case 'protobuf':
-      def_name = 'protobuf_schema';
-      break;
-    default:
-      throw new Error('unknown format: ' + format);
+    case 'json': {
+      schemaType = 'jsonSchema';
+    }
+    case 'avro': {
+      schemaType = 'avroSchema';
+    }
+    case 'protobuf': {
+      schemaType = 'protobufSchema';
+    }
   }
 
   let editor;
   let value;
-  if ((state.schema?.format![format] || {})['confluentSchemaRegistry']) {
+  if (
+    state.schema?.format?.type == 'json' &&
+    state.schema?.format?.confluentSchemaRegistry == true
+  ) {
     editor = <ConfluentSchemaEditor state={state} setState={setState} next={next} />;
     value = 'confluent';
-  } else if (state.schema?.format?.json?.unstructured) {
+  } else if (state.schema?.format?.type == 'json' && state.schema?.format?.unstructured) {
     editor = (
       <Stack spacing={4} maxW={'lg'}>
         <Text>
@@ -96,7 +97,7 @@ const SchemaFormatEditor = ({
       </Stack>
     );
     value = 'unstructured';
-  } else if ((state.schema?.definition || {})[def_name] != undefined) {
+  } else if (state.schema?.definition?.schema != undefined) {
     editor = <SchemaEditor state={state} setState={setState} next={next} format={format} />;
     value = 'schema';
   } else if (state.schema?.inferred) {
@@ -122,13 +123,16 @@ const SchemaFormatEditor = ({
           ...state,
           schema: {
             ...state.schema,
-            // @ts-ignore
             definition: {
-              [def_name]: '',
+              // @ts-ignore
+              type: schemaType,
+              schema: '',
             },
             fields: [],
-            // @ts-ignore
-            format: { [format]: {} },
+            format: {
+              // @ts-ignore
+              type: format,
+            },
           },
         });
         break;
@@ -138,10 +142,9 @@ const SchemaFormatEditor = ({
           ...state,
           schema: {
             ...state.schema,
-            definition: null,
             fields: [],
             // @ts-ignore
-            format: { [format]: { confluentSchemaRegistry: true } },
+            format: { type: format, confluentSchemaRegistry: true },
           },
         });
         break;
@@ -150,9 +153,16 @@ const SchemaFormatEditor = ({
           ...state,
           schema: {
             ...state.schema,
-            definition: { raw_schema: 'value' },
-            fields: [],
-            format: { json: { unstructured: true, confluentSchemaRegistry: false } },
+            fields: [
+              {
+                // @ts-ignore
+                type: 'json',
+                name: 'value',
+                required: true,
+              },
+            ],
+            // @ts-ignore
+            format: { type: 'json', unstructured: true, confluentSchemaRegistry: false },
           },
         });
         break;
@@ -161,9 +171,9 @@ const SchemaFormatEditor = ({
           ...state,
           schema: {
             ...state.schema,
-            definition: null,
             fields: [],
-            format: { json: { unstructured: false, confluentSchemaRegistry: false } },
+            // @ts-ignore
+            format: { type: 'json', unstructured: false, confluentSchemaRegistry: false },
             inferred: true,
           },
         });
@@ -177,7 +187,7 @@ const SchemaFormatEditor = ({
             definition: undefined,
             fields: [],
             // @ts-ignore
-            format: { [format]: {} },
+            format: { type: format },
           },
         });
     }
@@ -217,19 +227,18 @@ const RawStringEditor = ({
       ...state,
       schema: {
         ...state.schema,
-        definition: { raw_schema: 'value' },
         fields: [
           {
-            fieldName: 'value',
-            fieldType: {
-              type: {
-                primitive: 'String',
-              },
-            },
-            nullable: false,
+            name: 'value',
+            // @ts-ignore
+            type: 'string',
+            required: true,
           },
         ],
-        format: { raw_string: {} },
+        format: {
+          // @ts-ignore
+          type: 'rawString',
+        },
       },
     });
     next();
@@ -265,19 +274,18 @@ const RawBytesEditor = ({
       ...state,
       schema: {
         ...state.schema,
-        definition: { raw_schema: 'value' },
         fields: [
           {
-            fieldName: 'value',
-            fieldType: {
-              type: {
-                primitive: 'Bytes',
-              },
-            },
-            nullable: false,
+            name: 'value',
+            // @ts-ignore
+            type: 'bytes',
+            required: true,
           },
         ],
-        format: { raw_bytes: {} },
+        format: {
+          // @ts-ignore
+          type: 'rawBytes',
+        },
       },
     });
     next();
@@ -380,7 +388,7 @@ export const DefineSchema = ({
 
   type FramingOption = {
     name: string;
-    value?: { method: components['schemas']['FramingMethod'] };
+    value?: { method: components['schemas']['Framing'] };
     el?: ReactElement;
     disabled?: boolean;
   };
@@ -391,11 +399,8 @@ export const DefineSchema = ({
     {
       name: 'Newline',
       value: {
-        method: {
-          newline: {
-            maxLineLength: null,
-          },
-        },
+        // @ts-ignore
+        method: 'newline',
       },
     },
   ];
@@ -406,8 +411,18 @@ export const DefineSchema = ({
   };
 
   const badDataOptions: BadDataOption[] = [
-    { name: 'Fail', value: { fail: {} } },
-    { name: 'Drop', value: { drop: {} } },
+    {
+      name: 'Fail',
+      value: {
+        behavior: 'fail',
+      },
+    },
+    {
+      name: 'Drop',
+      value: {
+        behavior: 'drop',
+      },
+    },
   ];
 
   const onFormatChange = (e: ChangeEvent<DataFormatOption>) => {
@@ -416,11 +431,8 @@ export const DefineSchema = ({
 
     let schema: ConnectionSchema = {
       ...state.schema,
-      // @ts-ignore
       format: {},
       fields: [],
-      // @ts-ignore
-      definition: {},
     };
 
     // @ts-ignore

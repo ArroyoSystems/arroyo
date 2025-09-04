@@ -3,1045 +3,1663 @@
  * Do not make direct changes to the file.
  */
 
-
-/** OneOf type helpers */
-type Without<T, U> = { [P in Exclude<keyof T, keyof U>]?: never };
-type XOR<T, U> = (T | U) extends object ? (Without<T, U> & U) | (Without<U, T> & T) : T | U;
-type OneOf<T extends any[]> = T extends [infer Only] ? Only : T extends [infer A, infer B, ...infer Rest] ? OneOf<[XOR<A, B>, ...Rest]> : never;
-
 export interface paths {
-  "/v1/connection_profiles": {
-    /** List all connection profiles */
-    get: operations["get_connection_profiles"];
-    /** Create connection profile */
-    post: operations["create_connection_profile"];
-  };
-  "/v1/connection_profiles/test": {
-    /** Test connection profile */
-    post: operations["test_connection_profile"];
-  };
-  "/v1/connection_profiles/{id}": {
-    /** Delete a Connection Profile */
-    delete: operations["delete_connection_profile"];
-  };
-  "/v1/connection_profiles/{id}/autocomplete": {
-    /** Get autocomplete suggestions for a connection profile */
-    get: operations["get_connection_profile_autocomplete"];
-  };
-  "/v1/connection_tables": {
-    /** List all connection tables */
-    get: operations["get_connection_tables"];
-    /** Create a new connection table */
-    post: operations["create_connection_table"];
-  };
-  "/v1/connection_tables/schemas/test": {
-    /** Test a Connection Schema */
-    post: operations["test_schema"];
-  };
-  "/v1/connection_tables/test": {
-    /** Test a Connection Table */
-    post: operations["test_connection_table"];
-  };
-  "/v1/connection_tables/{id}": {
-    /** Delete a Connection Table */
-    delete: operations["delete_connection_table"];
-  };
-  "/v1/connectors": {
-    /** List all connectors */
-    get: operations["get_connectors"];
-  };
-  "/v1/jobs": {
-    /** Get all jobs */
-    get: operations["get_jobs"];
-  };
-  "/v1/ping": {
-    /** Ping endpoint */
-    get: operations["ping"];
-  };
-  "/v1/pipelines": {
-    /** List all pipelines */
-    get: operations["get_pipelines"];
-    /**
-     * Create a new pipeline 
-     * @description The API will create a single job for the pipeline.
-     */
-    post: operations["create_pipeline"];
-  };
-  "/v1/pipelines/preview": {
-    /** Create a new preview pipeline */
-    post: operations["create_preview_pipeline"];
-  };
-  "/v1/pipelines/validate_query": {
-    /** Validate a query and return pipeline graph */
-    post: operations["validate_query"];
-  };
-  "/v1/pipelines/{id}": {
-    /** Get a single pipeline */
-    get: operations["get_pipeline"];
-    /** Delete a pipeline */
-    delete: operations["delete_pipeline"];
-    /** Update a pipeline */
-    patch: operations["patch_pipeline"];
-  };
-  "/v1/pipelines/{id}/jobs": {
-    /** List a pipeline's jobs */
-    get: operations["get_pipeline_jobs"];
-  };
-  "/v1/pipelines/{id}/restart": {
-    /** Restart a pipeline */
-    post: operations["restart_pipeline"];
-  };
-  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints": {
-    /** List a job's checkpoints */
-    get: operations["get_job_checkpoints"];
-  };
-  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints/{epoch}/operator_checkpoint_groups": {
-    /** Get a checkpoint's details */
-    get: operations["get_checkpoint_details"];
-  };
-  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors": {
-    /** List a job's error messages */
-    get: operations["get_job_errors"];
-  };
-  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/operator_metric_groups": {
-    /** Get a job's metrics */
-    get: operations["get_operator_metric_groups"];
-  };
-  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output": {
-    /** Subscribe to a job's output */
-    get: operations["get_job_output"];
-  };
-  "/v1/udfs": {
-    /** Get Global UDFs */
-    get: operations["get_udfs"];
-    /** Create a global UDF */
-    post: operations["create_udf"];
-  };
-  "/v1/udfs/validate": {
-    /** Validate UDFs */
-    post: operations["validate_udf"];
-  };
-  "/v1/udfs/{id}": {
-    /** Delete UDF */
-    delete: operations["delete_udf"];
-  };
+    "/v1/connection_profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all connection profiles */
+        get: operations["get_connection_profiles"];
+        put?: never;
+        /** Create connection profile */
+        post: operations["create_connection_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection_profiles/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test connection profile */
+        post: operations["test_connection_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection_profiles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a Connection Profile */
+        delete: operations["delete_connection_profile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection_profiles/{id}/autocomplete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get autocomplete suggestions for a connection profile */
+        get: operations["get_connection_profile_autocomplete"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection_tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all connection tables */
+        get: operations["get_connection_tables"];
+        put?: never;
+        /** Create a new connection table */
+        post: operations["create_connection_table"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection_tables/schemas/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test a Connection Schema */
+        post: operations["test_schema"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection_tables/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test a Connection Table */
+        post: operations["test_connection_table"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection_tables/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a Connection Table */
+        delete: operations["delete_connection_table"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all connectors */
+        get: operations["get_connectors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get all jobs */
+        get: operations["get_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ping endpoint */
+        get: operations["ping"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all pipelines */
+        get: operations["get_pipelines"];
+        put?: never;
+        /**
+         * Create a new pipeline
+         * @description The API will create a single job for the pipeline.
+         */
+        post: operations["create_pipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a new preview pipeline */
+        post: operations["create_preview_pipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/validate_query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate a query and return pipeline graph */
+        post: operations["validate_query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a single pipeline */
+        get: operations["get_pipeline"];
+        put?: never;
+        post?: never;
+        /** Delete a pipeline */
+        delete: operations["delete_pipeline"];
+        options?: never;
+        head?: never;
+        /** Update a pipeline */
+        patch: operations["patch_pipeline"];
+        trace?: never;
+    };
+    "/v1/pipelines/{id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a pipeline's jobs */
+        get: operations["get_pipeline_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/{id}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restart a pipeline */
+        post: operations["restart_pipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a job's checkpoints */
+        get: operations["get_job_checkpoints"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints/{epoch}/operator_checkpoint_groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a checkpoint's details */
+        get: operations["get_checkpoint_details"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a job's error messages */
+        get: operations["get_job_errors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/{pipeline_id}/jobs/{job_id}/operator_metric_groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a job's metrics */
+        get: operations["get_operator_metric_groups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Subscribe to a job's output */
+        get: operations["get_job_output"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/udfs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Global UDFs */
+        get: operations["get_udfs"];
+        put?: never;
+        /** Create a global UDF */
+        post: operations["create_udf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/udfs/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate UDFs */
+        post: operations["validate_udf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/udfs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete UDF */
+        delete: operations["delete_udf"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
-
 export type webhooks = Record<string, never>;
-
 export interface components {
-  schemas: {
-    AvroFormat: {
-      confluentSchemaRegistry?: boolean;
-      intoUnstructuredJson?: boolean;
-      rawDatums?: boolean;
-      readerSchema?: string;
-      /** Format: int32 */
-      schemaId?: number | null;
-    };
-    BadData: OneOf<[{
-      fail: Record<string, never>;
-    }, {
-      drop: Record<string, never>;
-    }]>;
-    Checkpoint: {
-      backend: string;
-      /** Format: int32 */
-      epoch: number;
-      events: (components["schemas"]["CheckpointEventSpan"])[];
-      /** Format: int64 */
-      finishTime?: number | null;
-      /** Format: int64 */
-      startTime: number;
-    };
-    CheckpointCollection: {
-      data: (components["schemas"]["Checkpoint"])[];
-    };
-    CheckpointEventSpan: {
-      description: string;
-      event: string;
-      /** Format: int64 */
-      finishTime: number;
-      /** Format: int64 */
-      startTime: number;
-    };
-    ConnectionAutocompleteResp: {
-      values: {
-        [key: string]: (string)[] | undefined;
-      };
-    };
-    ConnectionProfile: {
-      config: unknown;
-      connector: string;
-      description: string;
-      id: string;
-      name: string;
-    };
-    ConnectionProfileCollection: {
-      data: (components["schemas"]["ConnectionProfile"])[];
-    };
-    ConnectionProfilePost: {
-      config: unknown;
-      connector: string;
-      name: string;
-    };
-    ConnectionSchema: {
-      badData?: components["schemas"]["BadData"] | null;
-      definition?: components["schemas"]["SchemaDefinition"] | null;
-      fields: (components["schemas"]["SourceField"])[];
-      format?: components["schemas"]["Format"] | null;
-      framing?: components["schemas"]["Framing"] | null;
-      inferred?: boolean | null;
-      primaryKeys?: (string)[];
-      structName?: string | null;
-    };
-    ConnectionTable: {
-      config: unknown;
-      connectionProfile?: components["schemas"]["ConnectionProfile"] | null;
-      connector: string;
-      /** Format: int32 */
-      consumers: number;
-      /** Format: int64 */
-      createdAt: number;
-      id: string;
-      name: string;
-      schema: components["schemas"]["ConnectionSchema"];
-      tableType: components["schemas"]["ConnectionType"];
-    };
-    ConnectionTableCollection: {
-      data: (components["schemas"]["ConnectionTable"])[];
-      hasMore: boolean;
-    };
-    ConnectionTablePost: {
-      config: unknown;
-      connectionProfileId?: string | null;
-      connector: string;
-      name: string;
-      schema?: components["schemas"]["ConnectionSchema"] | null;
-    };
-    /** @enum {string} */
-    ConnectionType: "source" | "sink" | "lookup";
-    Connector: {
-      connectionConfig?: string | null;
-      customSchemas: boolean;
-      description: string;
-      enabled: boolean;
-      hidden: boolean;
-      icon: string;
-      id: string;
-      name: string;
-      sink: boolean;
-      source: boolean;
-      tableConfig: string;
-      testing: boolean;
-    };
-    ConnectorCollection: {
-      data: (components["schemas"]["Connector"])[];
-    };
-    ErrorResp: {
-      error: string;
-    };
-    FieldType: OneOf<[{
-      primitive: components["schemas"]["PrimitiveType"];
-    }, {
-      struct: components["schemas"]["StructType"];
-    }, {
-      list: components["schemas"]["SourceField"];
-    }]>;
-    Format: OneOf<[{
-      json: components["schemas"]["JsonFormat"];
-    }, {
-      avro: components["schemas"]["AvroFormat"];
-    }, {
-      protobuf: components["schemas"]["ProtobufFormat"];
-    }, {
-      parquet: components["schemas"]["ParquetFormat"];
-    }, {
-      raw_string: components["schemas"]["RawStringFormat"];
-    }, {
-      raw_bytes: components["schemas"]["RawBytesFormat"];
-    }]>;
-    Framing: {
-      method: components["schemas"]["FramingMethod"];
-    };
-    FramingMethod: {
-      newline: components["schemas"]["NewlineDelimitedFraming"];
-    };
-    GlobalUdf: {
-      /** Format: int64 */
-      createdAt: number;
-      definition: string;
-      description?: string | null;
-      dylibUrl?: string | null;
-      id: string;
-      language: components["schemas"]["UdfLanguage"];
-      name: string;
-      prefix: string;
-      /** Format: int64 */
-      updatedAt: number;
-    };
-    GlobalUdfCollection: {
-      data: (components["schemas"]["GlobalUdf"])[];
-    };
-    Job: {
-      /** Format: int64 */
-      createdAt: number;
-      failureMessage?: string | null;
-      /** Format: int64 */
-      finishTime?: number | null;
-      id: string;
-      /** Format: int64 */
-      runId: number;
-      runningDesired: boolean;
-      /** Format: int64 */
-      startTime?: number | null;
-      state: string;
-      /** Format: int64 */
-      tasks?: number | null;
-    };
-    JobCollection: {
-      data: (components["schemas"]["Job"])[];
-    };
-    /** @enum {string} */
-    JobLogLevel: "info" | "warn" | "error";
-    JobLogMessage: {
-      /** Format: int64 */
-      createdAt: number;
-      details: string;
-      id: string;
-      level: components["schemas"]["JobLogLevel"];
-      message: string;
-      operatorId?: string | null;
-      /** Format: int64 */
-      taskIndex?: number | null;
-    };
-    JobLogMessageCollection: {
-      data: (components["schemas"]["JobLogMessage"])[];
-      hasMore: boolean;
-    };
-    JsonFormat: {
-      confluentSchemaRegistry?: boolean;
-      debezium?: boolean;
-      includeSchema?: boolean;
-      /** Format: int32 */
-      schemaId?: number | null;
-      timestampFormat?: components["schemas"]["TimestampFormat"];
-      unstructured?: boolean;
-    };
-    Metric: {
-      /** Format: int64 */
-      time: number;
-      /** Format: double */
-      value: number;
-    };
-    MetricGroup: {
-      name: components["schemas"]["MetricName"];
-      subtasks: (components["schemas"]["SubtaskMetrics"])[];
-    };
-    /** @enum {string} */
-    MetricName: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure" | "tx_queue_size" | "tx_queue_rem";
-    NewlineDelimitedFraming: {
-      /** Format: int64 */
-      maxLineLength?: number | null;
-    };
-    OperatorCheckpointGroup: {
-      /** Format: int64 */
-      bytes: number;
-      /** Format: int64 */
-      finishTime?: number | null;
-      operatorId: string;
-      /** Format: int64 */
-      startedMetadataWrite?: number | null;
-      subtasks: (components["schemas"]["SubtaskCheckpointGroup"])[];
-    };
-    OperatorCheckpointGroupCollection: {
-      data: (components["schemas"]["OperatorCheckpointGroup"])[];
-    };
-    OperatorMetricGroup: {
-      metricGroups: (components["schemas"]["MetricGroup"])[];
-      /** Format: int32 */
-      nodeId: number;
-    };
-    OperatorMetricGroupCollection: {
-      data: (components["schemas"]["OperatorMetricGroup"])[];
-    };
-    OutputData: {
-      batch: string;
-      operatorId: string;
-      /** Format: int64 */
-      startId: number;
-      /** Format: int32 */
-      subtaskIdx: number;
-      timestamps: (number)[];
-    };
-    PaginationQueryParams: {
-      /** Format: int32 */
-      limit?: number | null;
-      starting_after?: string | null;
-    };
-    ParquetFormat: Record<string, never>;
-    Pipeline: {
-      action?: components["schemas"]["StopType"] | null;
-      actionInProgress: boolean;
-      actionText: string;
-      /** Format: int64 */
-      checkpointIntervalMicros: number;
-      /** Format: int64 */
-      createdAt: number;
-      graph: components["schemas"]["PipelineGraph"];
-      id: string;
-      name: string;
-      preview: boolean;
-      query: string;
-      stop: components["schemas"]["StopType"];
-      udfs: (components["schemas"]["Udf"])[];
-    };
-    PipelineCollection: {
-      data: (components["schemas"]["Pipeline"])[];
-      hasMore: boolean;
-    };
-    PipelineEdge: {
-      /** Format: int32 */
-      destId: number;
-      edgeType: string;
-      keyType: string;
-      /** Format: int32 */
-      srcId: number;
-      valueType: string;
-    };
-    PipelineGraph: {
-      edges: (components["schemas"]["PipelineEdge"])[];
-      nodes: (components["schemas"]["PipelineNode"])[];
-    };
-    PipelineNode: {
-      description: string;
-      /** Format: int32 */
-      nodeId: number;
-      operator: string;
-      /** Format: int32 */
-      parallelism: number;
-    };
-    PipelinePatch: {
-      /** Format: int64 */
-      checkpointIntervalMicros?: number | null;
-      /** Format: int64 */
-      parallelism?: number | null;
-      stop?: components["schemas"]["StopType"] | null;
-    };
-    PipelinePost: {
-      /** Format: int64 */
-      checkpointIntervalMicros?: number | null;
-      name: string;
-      /** Format: int64 */
-      parallelism: number;
-      query: string;
-      udfs?: (components["schemas"]["Udf"])[] | null;
-    };
-    PipelineRestart: {
-      force?: boolean | null;
-    };
-    PreviewPost: {
-      enableSinks?: boolean;
-      query: string;
-      udfs?: (components["schemas"]["Udf"])[] | null;
-    };
-    /** @enum {string} */
-    PrimitiveType: "Int32" | "Int64" | "UInt32" | "UInt64" | "F32" | "F64" | "Bool" | "String" | "Bytes" | "UnixMillis" | "UnixMicros" | "UnixNanos" | "DateTime" | "Json";
-    ProtobufFormat: {
-      /** Format: binary */
-      compiledSchema?: string | null;
-      confluentSchemaRegistry?: boolean;
-      intoUnstructuredJson?: boolean;
-      lengthDelimited?: boolean;
-      messageName?: string | null;
-    };
-    QueryValidationResult: {
-      errors: (string)[];
-      graph?: components["schemas"]["PipelineGraph"] | null;
-    };
-    RawBytesFormat: Record<string, never>;
-    RawStringFormat: Record<string, never>;
-    SchemaDefinition: OneOf<[{
-      json_schema: string;
-    }, {
-      protobuf_schema: {
-        dependencies?: {
-          [key: string]: string | undefined;
+    schemas: {
+        AvroFormat: {
+            confluentSchemaRegistry?: boolean;
+            intoUnstructuredJson?: boolean;
+            rawDatums?: boolean;
+            readonly readerSchema?: string;
+            /** Format: int32 */
+            readonly schemaId?: number | null;
         };
-        schema: string;
-      };
-    }, {
-      avro_schema: string;
-    }, {
-      raw_schema: string;
-    }]>;
-    SourceField: {
-      fieldName: string;
-      fieldType: components["schemas"]["SourceFieldType"];
-      metadataKey?: string | null;
-      nullable: boolean;
+        BadData: {
+            /** @enum {string} */
+            behavior: "fail";
+        } | {
+            /** @enum {string} */
+            behavior: "drop";
+        };
+        Checkpoint: {
+            backend: string;
+            /** Format: int32 */
+            epoch: number;
+            events: components["schemas"]["CheckpointEventSpan"][];
+            /** Format: int64 */
+            finishTime?: number | null;
+            /** Format: int64 */
+            startTime: number;
+        };
+        CheckpointCollection: {
+            data: components["schemas"]["Checkpoint"][];
+        };
+        CheckpointEventSpan: {
+            description: string;
+            event: string;
+            /** Format: int64 */
+            finishTime: number;
+            /** Format: int64 */
+            startTime: number;
+        };
+        ConnectionAutocompleteResp: {
+            values: {
+                [key: string]: string[];
+            };
+        };
+        ConnectionProfile: {
+            config: unknown;
+            connector: string;
+            description: string;
+            id: string;
+            name: string;
+        };
+        ConnectionProfileCollection: {
+            data: components["schemas"]["ConnectionProfile"][];
+        };
+        ConnectionProfilePost: {
+            config: unknown;
+            connector: string;
+            name: string;
+        };
+        ConnectionSchema: {
+            badData?: Omit<components["schemas"]["BadData"], "behavior"> | null;
+            definition?: Omit<components["schemas"]["SchemaDefinition"], "type"> | null;
+            fields?: components["schemas"]["SourceField"][];
+            format?: Omit<components["schemas"]["Format"], "type"> | null;
+            framing?: Omit<components["schemas"]["Framing"], "method"> | null;
+            inferred?: boolean | null;
+            primaryKeys?: string[];
+        };
+        ConnectionTable: {
+            config: unknown;
+            connectionProfile?: components["schemas"]["ConnectionProfile"] | null;
+            connector: string;
+            /** Format: int32 */
+            consumers: number;
+            /** Format: int64 */
+            createdAt: number;
+            id: string;
+            name: string;
+            schema: components["schemas"]["ConnectionSchema"];
+            tableType: components["schemas"]["ConnectionType"];
+        };
+        ConnectionTableCollection: {
+            data: components["schemas"]["ConnectionTable"][];
+            hasMore: boolean;
+        };
+        ConnectionTablePost: {
+            config: unknown;
+            connectionProfileId?: string | null;
+            connector: string;
+            name: string;
+            schema?: components["schemas"]["ConnectionSchema"] | null;
+        };
+        /** @enum {string} */
+        ConnectionType: "source" | "sink" | "lookup";
+        Connector: {
+            connectionConfig?: string | null;
+            customSchemas: boolean;
+            description: string;
+            enabled: boolean;
+            hidden: boolean;
+            icon: string;
+            id: string;
+            name: string;
+            sink: boolean;
+            source: boolean;
+            tableConfig: string;
+            testing: boolean;
+        };
+        ConnectorCollection: {
+            data: components["schemas"]["Connector"][];
+        };
+        /** @enum {string} */
+        DecimalEncoding: "number" | "string" | "bytes";
+        ErrorResp: {
+            error: string;
+        };
+        FieldType: {
+            /** @enum {string} */
+            type: "int32";
+        } | {
+            /** @enum {string} */
+            type: "int64";
+        } | {
+            /** @enum {string} */
+            type: "uInt32";
+        } | {
+            /** @enum {string} */
+            type: "uInt64";
+        } | {
+            /** @enum {string} */
+            type: "f32";
+        } | {
+            /** @enum {string} */
+            type: "f64";
+        } | {
+            /** @enum {string} */
+            type: "bool";
+        } | {
+            /** @enum {string} */
+            type: "string";
+        } | {
+            /** @enum {string} */
+            type: "bytes";
+        } | ({
+            type: "FieldType";
+        } & (components["schemas"]["TimestampField"] & {
+            /** @enum {string} */
+            type: "timestamp";
+        })) | {
+            /** @enum {string} */
+            type: "json";
+        } | ({
+            type: "FieldType";
+        } & (components["schemas"]["StructField"] & {
+            /** @enum {string} */
+            type: "struct";
+        })) | ({
+            type: "FieldType";
+        } & (components["schemas"]["ListField"] & {
+            /** @enum {string} */
+            type: "list";
+        }));
+        Format: ({
+            type: "Format";
+        } & (components["schemas"]["JsonFormat"] & {
+            /** @enum {string} */
+            type: "json";
+        })) | ({
+            type: "Format";
+        } & (components["schemas"]["AvroFormat"] & {
+            /** @enum {string} */
+            type: "avro";
+        })) | ({
+            type: "Format";
+        } & (components["schemas"]["ProtobufFormat"] & {
+            /** @enum {string} */
+            type: "protobuf";
+        })) | ({
+            type: "Format";
+        } & (components["schemas"]["ParquetFormat"] & {
+            /** @enum {string} */
+            type: "parquet";
+        })) | ({
+            type: "Format";
+        } & (components["schemas"]["RawStringFormat"] & {
+            /** @enum {string} */
+            type: "rawString";
+        })) | ({
+            type: "Format";
+        } & (components["schemas"]["RawBytesFormat"] & {
+            /** @enum {string} */
+            type: "rawBytes";
+        }));
+        Framing: {
+            method: "Framing";
+        } & (components["schemas"]["NewlineDelimitedFraming"] & {
+            /** @enum {string} */
+            method: "newline";
+        });
+        GlobalUdf: {
+            /** Format: int64 */
+            createdAt: number;
+            definition: string;
+            description?: string | null;
+            dylibUrl?: string | null;
+            id: string;
+            language: components["schemas"]["UdfLanguage"];
+            name: string;
+            prefix: string;
+            /** Format: int64 */
+            updatedAt: number;
+        };
+        GlobalUdfCollection: {
+            data: components["schemas"]["GlobalUdf"][];
+        };
+        Job: {
+            /** Format: int64 */
+            createdAt: number;
+            failureMessage?: string | null;
+            /** Format: int64 */
+            finishTime?: number | null;
+            id: string;
+            /** Format: int64 */
+            runId: number;
+            runningDesired: boolean;
+            /** Format: int64 */
+            startTime?: number | null;
+            state: string;
+            /** Format: int64 */
+            tasks?: number | null;
+        };
+        JobCollection: {
+            data: components["schemas"]["Job"][];
+        };
+        /** @enum {string} */
+        JobLogLevel: "info" | "warn" | "error";
+        JobLogMessage: {
+            /** Format: int64 */
+            createdAt: number;
+            details: string;
+            id: string;
+            level: components["schemas"]["JobLogLevel"];
+            message: string;
+            operatorId?: string | null;
+            /** Format: int64 */
+            taskIndex?: number | null;
+        };
+        JobLogMessageCollection: {
+            data: components["schemas"]["JobLogMessage"][];
+            hasMore: boolean;
+        };
+        JsonFormat: {
+            confluentSchemaRegistry?: boolean;
+            debezium?: boolean;
+            decimalEncoding?: components["schemas"]["DecimalEncoding"];
+            includeSchema?: boolean;
+            /** Format: int32 */
+            schemaId?: number | null;
+            timestampFormat?: components["schemas"]["TimestampFormat"];
+            unstructured?: boolean;
+        };
+        ListField: {
+            items: components["schemas"]["SourceField"];
+        };
+        Metric: {
+            /** Format: int64 */
+            time: number;
+            /** Format: double */
+            value: number;
+        };
+        MetricGroup: {
+            name: components["schemas"]["MetricName"];
+            subtasks: components["schemas"]["SubtaskMetrics"][];
+        };
+        /** @enum {string} */
+        MetricName: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure" | "tx_queue_size" | "tx_queue_rem";
+        NewlineDelimitedFraming: {
+            /** Format: int64 */
+            maxLineLength?: number | null;
+        };
+        OperatorCheckpointGroup: {
+            /** Format: int64 */
+            bytes: number;
+            /** Format: int64 */
+            finishTime?: number | null;
+            operatorId: string;
+            /** Format: int64 */
+            startedMetadataWrite?: number | null;
+            subtasks: components["schemas"]["SubtaskCheckpointGroup"][];
+        };
+        OperatorCheckpointGroupCollection: {
+            data: components["schemas"]["OperatorCheckpointGroup"][];
+        };
+        OperatorMetricGroup: {
+            metricGroups: components["schemas"]["MetricGroup"][];
+            /** Format: int32 */
+            nodeId: number;
+        };
+        OperatorMetricGroupCollection: {
+            data: components["schemas"]["OperatorMetricGroup"][];
+        };
+        OutputData: {
+            batch: string;
+            operatorId: string;
+            /** Format: int64 */
+            startId: number;
+            /** Format: int32 */
+            subtaskIdx: number;
+            timestamps: number[];
+        };
+        PaginationQueryParams: {
+            /** Format: int32 */
+            limit?: number | null;
+            starting_after?: string | null;
+        };
+        /** @enum {string} */
+        ParquetCompression: "uncompressed" | "snappy" | "gzip" | "zstd" | "lz4";
+        ParquetFormat: {
+            compression?: components["schemas"]["ParquetCompression"];
+            /** Format: int64 */
+            rowGroupBytes?: number | null;
+        };
+        Pipeline: {
+            action?: components["schemas"]["StopType"] | null;
+            actionInProgress: boolean;
+            actionText: string;
+            /** Format: int64 */
+            checkpointIntervalMicros: number;
+            /** Format: int64 */
+            createdAt: number;
+            graph: components["schemas"]["PipelineGraph"];
+            id: string;
+            name: string;
+            preview: boolean;
+            query: string;
+            stop: components["schemas"]["StopType"];
+            udfs: components["schemas"]["Udf"][];
+        };
+        PipelineCollection: {
+            data: components["schemas"]["Pipeline"][];
+            hasMore: boolean;
+        };
+        PipelineEdge: {
+            /** Format: int32 */
+            destId: number;
+            edgeType: string;
+            keyType: string;
+            /** Format: int32 */
+            srcId: number;
+            valueType: string;
+        };
+        PipelineGraph: {
+            edges: components["schemas"]["PipelineEdge"][];
+            nodes: components["schemas"]["PipelineNode"][];
+        };
+        PipelineNode: {
+            description: string;
+            /** Format: int32 */
+            nodeId: number;
+            operator: string;
+            /** Format: int32 */
+            parallelism: number;
+        };
+        PipelinePatch: {
+            /** Format: int64 */
+            checkpointIntervalMicros?: number | null;
+            /** Format: int64 */
+            parallelism?: number | null;
+            stop?: components["schemas"]["StopType"] | null;
+        };
+        PipelinePost: {
+            /** Format: int64 */
+            checkpointIntervalMicros?: number | null;
+            name: string;
+            /** Format: int64 */
+            parallelism: number;
+            query: string;
+            udfs?: components["schemas"]["Udf"][] | null;
+        };
+        PipelineRestart: {
+            force?: boolean | null;
+        };
+        PreviewPost: {
+            enableSinks?: boolean;
+            query: string;
+            udfs?: components["schemas"]["Udf"][] | null;
+        };
+        ProtobufFormat: {
+            /** Format: binary */
+            compiledSchema?: string | null;
+            confluentSchemaRegistry?: boolean;
+            intoUnstructuredJson?: boolean;
+            lengthDelimited?: boolean;
+            messageName?: string | null;
+        };
+        QueryValidationResult: {
+            errors: string[];
+            graph?: components["schemas"]["PipelineGraph"] | null;
+        };
+        RawBytesFormat: Record<string, never>;
+        RawStringFormat: Record<string, never>;
+        SchemaDefinition: {
+            schema: string;
+            /** @enum {string} */
+            type: "jsonSchema";
+        } | {
+            dependencies?: {
+                [key: string]: string;
+            };
+            schema: string;
+            /** @enum {string} */
+            type: "protobufSchema";
+        } | {
+            schema: string;
+            /** @enum {string} */
+            type: "avroSchema";
+        };
+        SourceField: {
+            type: "SourceField";
+        } & (Omit<components["schemas"]["FieldType"], "type"> & {
+            metadataKey?: string | null;
+            name: string;
+            required: boolean;
+            sqlName?: string;
+        });
+        /** @enum {string} */
+        StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
+        StructField: {
+            fields: components["schemas"]["SourceField"][];
+            name?: string | null;
+        };
+        SubtaskCheckpointGroup: {
+            /** Format: int64 */
+            bytes: number;
+            eventSpans: components["schemas"]["CheckpointEventSpan"][];
+            /** Format: int32 */
+            index: number;
+        };
+        SubtaskMetrics: {
+            /** Format: int32 */
+            index: number;
+            metrics: components["schemas"]["Metric"][];
+        };
+        TestSourceMessage: {
+            done: boolean;
+            error: boolean;
+            message: string;
+        };
+        TimestampField: {
+            unit?: components["schemas"]["TimestampUnit"];
+        };
+        /** @enum {string} */
+        TimestampFormat: "rfc3339" | "unixMillis";
+        /** @enum {string} */
+        TimestampUnit: "second" | "millisecond" | "microsecond" | "nanosecond";
+        Udf: {
+            definition: string;
+            language?: components["schemas"]["UdfLanguage"];
+        };
+        /** @enum {string} */
+        UdfLanguage: "python" | "rust";
+        UdfPost: {
+            definition: string;
+            description?: string | null;
+            language?: components["schemas"]["UdfLanguage"];
+            prefix: string;
+        };
+        UdfValidationResult: {
+            errors: string[];
+            udfName?: string | null;
+        };
+        ValidateQueryPost: {
+            query: string;
+            udfs?: components["schemas"]["Udf"][] | null;
+        };
+        ValidateUdfPost: {
+            definition: string;
+            language?: components["schemas"]["UdfLanguage"];
+        };
     };
-    SourceFieldType: {
-      sqlName?: string | null;
-      type: components["schemas"]["FieldType"];
-    };
-    /** @enum {string} */
-    StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
-    StructType: {
-      fields: (components["schemas"]["SourceField"])[];
-      name?: string | null;
-    };
-    SubtaskCheckpointGroup: {
-      /** Format: int64 */
-      bytes: number;
-      eventSpans: (components["schemas"]["CheckpointEventSpan"])[];
-      /** Format: int32 */
-      index: number;
-    };
-    SubtaskMetrics: {
-      /** Format: int32 */
-      index: number;
-      metrics: (components["schemas"]["Metric"])[];
-    };
-    TestSourceMessage: {
-      done: boolean;
-      error: boolean;
-      message: string;
-    };
-    /** @enum {string} */
-    TimestampFormat: "rfc3339" | "unix_millis";
-    Udf: {
-      definition: string;
-      language?: components["schemas"]["UdfLanguage"];
-    };
-    /** @enum {string} */
-    UdfLanguage: "python" | "rust";
-    UdfPost: {
-      definition: string;
-      description?: string | null;
-      language?: components["schemas"]["UdfLanguage"];
-      prefix: string;
-    };
-    UdfValidationResult: {
-      errors: (string)[];
-      udfName?: string | null;
-    };
-    ValidateQueryPost: {
-      query: string;
-      udfs?: (components["schemas"]["Udf"])[] | null;
-    };
-    ValidateUdfPost: {
-      definition: string;
-      language?: components["schemas"]["UdfLanguage"];
-    };
-  };
-  responses: never;
-  parameters: never;
-  requestBodies: never;
-  headers: never;
-  pathItems: never;
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
 }
-
-export type external = Record<string, never>;
-
+export type $defs = Record<string, never>;
 export interface operations {
-
-  /** List all connection profiles */
-  get_connection_profiles: {
-    responses: {
-      /** @description Got connections collection */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ConnectionProfileCollection"];
+    get_connection_profiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Create connection profile */
-  create_connection_profile: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConnectionProfilePost"];
-      };
-    };
-    responses: {
-      /** @description Created connection profile */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ConnectionProfile"];
+        requestBody?: never;
+        responses: {
+            /** @description Got connections collection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionProfileCollection"];
+                };
+            };
         };
-      };
     };
-  };
-  /** Test connection profile */
-  test_connection_profile: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConnectionProfilePost"];
-      };
-    };
-    responses: {
-      /** @description Result of testing connection profile */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TestSourceMessage"];
+    create_connection_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Delete a Connection Profile */
-  delete_connection_profile: {
-    parameters: {
-      path: {
-        /** @description Connection Profile id */
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Deleted connection profile */
-      200: never;
-    };
-  };
-  /** Get autocomplete suggestions for a connection profile */
-  get_connection_profile_autocomplete: {
-    parameters: {
-      path: {
-        /** @description Connection Profile id */
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Autocomplete suggestions for connection profile */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ConnectionAutocompleteResp"];
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionProfilePost"];
+            };
         };
-      };
-    };
-  };
-  /** List all connection tables */
-  get_connection_tables: {
-    parameters: {
-      query?: {
-        starting_after?: string | null;
-        limit?: number | null;
-      };
-    };
-    responses: {
-      /** @description Got connection table collection */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ConnectionTableCollection"];
+        responses: {
+            /** @description Created connection profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionProfile"];
+                };
+            };
         };
-      };
     };
-  };
-  /** Create a new connection table */
-  create_connection_table: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConnectionTablePost"];
-      };
-    };
-    responses: {
-      /** @description Created connection table */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ConnectionTable"];
+    test_connection_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Test a Connection Schema */
-  test_schema: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConnectionSchema"];
-      };
-    };
-    responses: {
-      /** @description Schema is valid */
-      200: never;
-    };
-  };
-  /** Test a Connection Table */
-  test_connection_table: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConnectionTablePost"];
-      };
-    };
-    responses: {
-      /** @description Job output as 'text/event-stream' */
-      200: never;
-    };
-  };
-  /** Delete a Connection Table */
-  delete_connection_table: {
-    parameters: {
-      path: {
-        /** @description Connection Table id */
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Deleted connection table */
-      200: never;
-    };
-  };
-  /** List all connectors */
-  get_connectors: {
-    responses: {
-      /** @description Got connectors collection */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ConnectorCollection"];
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionProfilePost"];
+            };
         };
-      };
-    };
-  };
-  /** Get all jobs */
-  get_jobs: {
-    responses: {
-      /** @description Get all jobs */
-      200: {
-        content: {
-          "application/json": components["schemas"]["JobCollection"];
+        responses: {
+            /** @description Result of testing connection profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestSourceMessage"];
+                };
+            };
         };
-      };
     };
-  };
-  /** Ping endpoint */
-  ping: {
-    responses: {
-      /** @description Ping endpoint */
-      200: never;
-    };
-  };
-  /** List all pipelines */
-  get_pipelines: {
-    parameters: {
-      query?: {
-        starting_after?: string | null;
-        limit?: number | null;
-      };
-    };
-    responses: {
-      /** @description Got pipelines collection */
-      200: {
-        content: {
-          "application/json": components["schemas"]["PipelineCollection"];
+    delete_connection_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connection Profile id */
+                id: string;
+            };
+            cookie?: never;
         };
-      };
-    };
-  };
-  /**
-   * Create a new pipeline 
-   * @description The API will create a single job for the pipeline.
-   */
-  create_pipeline: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PipelinePost"];
-      };
-    };
-    responses: {
-      /** @description Created pipeline and job */
-      200: {
-        content: {
-          "application/json": components["schemas"]["Pipeline"];
+        requestBody?: never;
+        responses: {
+            /** @description Deleted connection profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
-      };
-      /** @description Bad request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ErrorResp"];
+    };
+    get_connection_profile_autocomplete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connection Profile id */
+                id: string;
+            };
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Create a new preview pipeline */
-  create_preview_pipeline: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PreviewPost"];
-      };
-    };
-    responses: {
-      /** @description Created pipeline and job */
-      200: {
-        content: {
-          "application/json": components["schemas"]["Pipeline"];
+        requestBody?: never;
+        responses: {
+            /** @description Autocomplete suggestions for connection profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionAutocompleteResp"];
+                };
+            };
         };
-      };
-      /** @description Bad request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ErrorResp"];
+    };
+    get_connection_tables: {
+        parameters: {
+            query?: {
+                starting_after?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Validate a query and return pipeline graph */
-  validate_query: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ValidateQueryPost"];
-      };
-    };
-    responses: {
-      /** @description Validated query */
-      200: {
-        content: {
-          "application/json": components["schemas"]["QueryValidationResult"];
+        requestBody?: never;
+        responses: {
+            /** @description Got connection table collection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTableCollection"];
+                };
+            };
         };
-      };
     };
-  };
-  /** Get a single pipeline */
-  get_pipeline: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Got pipeline */
-      200: {
-        content: {
-          "application/json": components["schemas"]["Pipeline"];
+    create_connection_table: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Delete a pipeline */
-  delete_pipeline: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Deleted pipeline */
-      200: never;
-    };
-  };
-  /** Update a pipeline */
-  patch_pipeline: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PipelinePatch"];
-      };
-    };
-    responses: {
-      /** @description Updated pipeline */
-      200: {
-        content: {
-          "application/json": components["schemas"]["Pipeline"];
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionTablePost"];
+            };
         };
-      };
-    };
-  };
-  /** List a pipeline's jobs */
-  get_pipeline_jobs: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Got jobs collection */
-      200: {
-        content: {
-          "application/json": components["schemas"]["JobCollection"];
+        responses: {
+            /** @description Created connection table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTable"];
+                };
+            };
         };
-      };
     };
-  };
-  /** Restart a pipeline */
-  restart_pipeline: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PipelineRestart"];
-      };
-    };
-    responses: {
-      /** @description Updated pipeline */
-      200: {
-        content: {
-          "application/json": components["schemas"]["Pipeline"];
+    test_schema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** List a job's checkpoints */
-  get_job_checkpoints: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        pipeline_id: string;
-        /** @description Job id */
-        job_id: string;
-      };
-    };
-    responses: {
-      /** @description Got job's checkpoints */
-      200: {
-        content: {
-          "application/json": components["schemas"]["CheckpointCollection"];
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionSchema"];
+            };
         };
-      };
-    };
-  };
-  /** Get a checkpoint's details */
-  get_checkpoint_details: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        pipeline_id: string;
-        /** @description Job id */
-        job_id: string;
-        /** @description Epoch */
-        epoch: number;
-      };
-    };
-    responses: {
-      /** @description Got checkpoint's details */
-      200: {
-        content: {
-          "application/json": components["schemas"]["OperatorCheckpointGroupCollection"];
+        responses: {
+            /** @description Schema is valid */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
-      };
     };
-  };
-  /** List a job's error messages */
-  get_job_errors: {
-    parameters: {
-      query?: {
-        /** @description Starting after */
-        starting_after?: string | null;
-        /** @description Limit */
-        limit?: number | null;
-      };
-      path: {
-        /** @description Pipeline id */
-        pipeline_id: string;
-        /** @description Job id */
-        job_id: string;
-      };
-    };
-    responses: {
-      /** @description Got job's error messages */
-      200: {
-        content: {
-          "application/json": components["schemas"]["JobLogMessageCollection"];
+    test_connection_table: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Get a job's metrics */
-  get_operator_metric_groups: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        pipeline_id: string;
-        /** @description Job id */
-        job_id: string;
-      };
-    };
-    responses: {
-      /** @description Got metric groups */
-      200: {
-        content: {
-          "application/json": components["schemas"]["OperatorMetricGroupCollection"];
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionTablePost"];
+            };
         };
-      };
-    };
-  };
-  /** Subscribe to a job's output */
-  get_job_output: {
-    parameters: {
-      path: {
-        /** @description Pipeline id */
-        pipeline_id: string;
-        /** @description Job id */
-        job_id: string;
-      };
-    };
-    responses: {
-      /** @description Job output as 'text/event-stream' */
-      200: never;
-    };
-  };
-  /** Get Global UDFs */
-  get_udfs: {
-    responses: {
-      /** @description List of UDFs */
-      200: {
-        content: {
-          "application/json": components["schemas"]["GlobalUdfCollection"];
+        responses: {
+            /** @description Job output as 'text/event-stream' */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
-      };
     };
-  };
-  /** Create a global UDF */
-  create_udf: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["UdfPost"];
-      };
-    };
-    responses: {
-      /** @description Created UDF */
-      200: {
-        content: {
-          "application/json": components["schemas"]["Udf"];
+    delete_connection_table: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connection Table id */
+                id: string;
+            };
+            cookie?: never;
         };
-      };
-    };
-  };
-  /** Validate UDFs */
-  validate_udf: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ValidateUdfPost"];
-      };
-    };
-    responses: {
-      /** @description Validated query */
-      200: {
-        content: {
-          "application/json": components["schemas"]["UdfValidationResult"];
+        requestBody?: never;
+        responses: {
+            /** @description Deleted connection table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
-      };
     };
-  };
-  /** Delete UDF */
-  delete_udf: {
-    parameters: {
-      path: {
-        /** @description UDF id */
-        id: string;
-      };
+    get_connectors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got connectors collection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorCollection"];
+                };
+            };
+        };
     };
-    responses: {
-      /** @description Deleted UDF */
-      200: never;
+    get_jobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Get all jobs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCollection"];
+                };
+            };
+        };
     };
-  };
+    ping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ping endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_pipelines: {
+        parameters: {
+            query?: {
+                starting_after?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got pipelines collection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineCollection"];
+                };
+            };
+        };
+    };
+    create_pipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelinePost"];
+            };
+        };
+        responses: {
+            /** @description Created pipeline and job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+        };
+    };
+    create_preview_pipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewPost"];
+            };
+        };
+        responses: {
+            /** @description Created pipeline and job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+        };
+    };
+    validate_query: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateQueryPost"];
+            };
+        };
+        responses: {
+            /** @description Validated query */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryValidationResult"];
+                };
+            };
+        };
+    };
+    get_pipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got pipeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+        };
+    };
+    delete_pipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted pipeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    patch_pipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelinePatch"];
+            };
+        };
+        responses: {
+            /** @description Updated pipeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+        };
+    };
+    get_pipeline_jobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got jobs collection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCollection"];
+                };
+            };
+        };
+    };
+    restart_pipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineRestart"];
+            };
+        };
+        responses: {
+            /** @description Updated pipeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+        };
+    };
+    get_job_checkpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                pipeline_id: string;
+                /** @description Job id */
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got job's checkpoints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckpointCollection"];
+                };
+            };
+        };
+    };
+    get_checkpoint_details: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                pipeline_id: string;
+                /** @description Job id */
+                job_id: string;
+                /** @description Epoch */
+                epoch: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got checkpoint's details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCheckpointGroupCollection"];
+                };
+            };
+        };
+    };
+    get_job_errors: {
+        parameters: {
+            query?: {
+                /** @description Starting after */
+                starting_after?: string | null;
+                /** @description Limit */
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                pipeline_id: string;
+                /** @description Job id */
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got job's error messages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobLogMessageCollection"];
+                };
+            };
+        };
+    };
+    get_operator_metric_groups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                pipeline_id: string;
+                /** @description Job id */
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Got metric groups */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorMetricGroupCollection"];
+                };
+            };
+        };
+    };
+    get_job_output: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                pipeline_id: string;
+                /** @description Job id */
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job output as 'text/event-stream' */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_udfs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of UDFs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalUdfCollection"];
+                };
+            };
+        };
+    };
+    create_udf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UdfPost"];
+            };
+        };
+        responses: {
+            /** @description Created UDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Udf"];
+                };
+            };
+        };
+    };
+    validate_udf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateUdfPost"];
+            };
+        };
+        responses: {
+            /** @description Validated query */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UdfValidationResult"];
+                };
+            };
+        };
+    };
+    delete_udf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UDF id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted UDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
 }

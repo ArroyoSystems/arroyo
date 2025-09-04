@@ -3,9 +3,8 @@ mod operator;
 use anyhow::bail;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
-use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
-    ConnectionProfile, ConnectionSchema, PrimitiveType, TestSourceMessage,
+    ConnectionProfile, ConnectionSchema, FieldType, TestSourceMessage,
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
@@ -26,8 +25,8 @@ pub fn impulse_schema() -> ConnectionSchema {
         framing: None,
         bad_data: None,
         fields: vec![
-            source_field("counter", Primitive(PrimitiveType::Int64)),
-            source_field("subtask_index", Primitive(PrimitiveType::Int64)),
+            source_field("counter", FieldType::Int64),
+            source_field("subtask_index", FieldType::Int64),
         ],
         definition: None,
         inferred: None,
