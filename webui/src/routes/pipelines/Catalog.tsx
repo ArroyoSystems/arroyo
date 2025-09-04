@@ -39,7 +39,7 @@ function CatalogField({ field, nesting }: { field: SourceField; nesting: number 
         {field.name}
       </Box>
       <Box flex="1" textAlign="right" color={'pink.300'}>
-        {field.sqlName}
+        {field.sql_name}
       </Box>
     </Flex>
   );

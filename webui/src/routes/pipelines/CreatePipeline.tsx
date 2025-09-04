@@ -168,7 +168,7 @@ export function CreatePipeline() {
             });
 
             if (udfValidation) {
-              udf.name = udfValidation.udfName ?? udf.name;
+              udf.name = udfValidation.udf_name ?? udf.name;
               udf.errors = udfValidation.errors ?? [];
             }
 
@@ -233,7 +233,7 @@ export function CreatePipeline() {
       if (udfsValiation) {
         newUdfs.push({
           ...udf,
-          name: udfsValiation.udfName ?? udf.name,
+          name: udfsValiation.udf_name ?? udf.name,
           errors: udfsValiation.errors ?? [],
         });
       } else {
@@ -306,7 +306,7 @@ export function CreatePipeline() {
       body: {
         query: queryInput,
         udfs,
-        enableSinks: previewOptions.enableSinks,
+        enable_sinks: previewOptions.enableSinks,
       },
     });
 
@@ -395,7 +395,7 @@ export function CreatePipeline() {
   }
 
   let previewResultsTabContent = <Text>Preview your SQL to see outputs.</Text>;
-  const previewing = job?.runningDesired && job?.state != 'Failed' && !job?.finishTime;
+  const previewing = job?.running_desired && job?.state != 'Failed' && !job?.finish_time;
 
   if (pipelineId != null && jobs != null && jobs[0] != null) {
     setTourStep(TourSteps.TourCompleted);
@@ -545,7 +545,7 @@ export function CreatePipeline() {
   } else if (udfValidationApiError) {
     errorMessage = formatError(udfValidationApiError);
   } else if (job?.state == 'Failed') {
-    errorMessage = job.failureMessage ?? 'Job failed.';
+    errorMessage = job.failure_message ?? 'Job failed.';
   } else if (previewError) {
     errorMessage = (
       <Code backgroundColor={'transparent'}>
@@ -571,7 +571,7 @@ export function CreatePipeline() {
   }
 
   let previewCompletedComponent = <></>;
-  if (job?.finishTime && !job?.failureMessage) {
+  if (job?.finish_time && !job?.failure_message) {
     previewCompletedComponent = (
       <Alert status="success" h={8}>
         <AlertIcon boxSize={4} />

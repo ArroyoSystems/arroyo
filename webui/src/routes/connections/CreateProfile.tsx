@@ -32,7 +32,7 @@ export const CreateProfile = ({
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<any>();
 
-  const schema = JSON.parse(connector.connectionConfig!) as JSONSchema7;
+  const schema = JSON.parse(connector.connection_config!) as JSONSchema7;
   const validate = async (d: any) => {
     setValidating(true);
     const { data, error } = await post('/v1/connection_profiles/test', {

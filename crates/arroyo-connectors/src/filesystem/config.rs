@@ -14,7 +14,7 @@ const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
 
 /// Rolling policy for file sinks (when & why to close a file and open a new one).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(title = "File Rolling Policy")]
 pub struct RollingPolicy {
     /// Files will be rolled after reaching this number of bytes.
@@ -57,7 +57,7 @@ impl FromOpts for RollingPolicy {
 
 /// Multipart‑upload tuning for object stores that need it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(title = "Multipart Upload Settings")]
 pub struct MultipartConfig {
     /// Target size for each part of the multipart upload, in bytes.
@@ -96,7 +96,7 @@ impl FromOpts for MultipartConfig {
 
 /// Enable / disable hash‑shuffle on partition keys.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct PartitionShuffle {
     /// If enabled, shuffle by partition keys to reduce the number of files;
     /// may cause backlog on skewed data.
@@ -122,7 +122,7 @@ impl FromOpts for PartitionShuffle {
 
 /// Data‑layout partitioning for sinks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct PartitioningConfig {
     /// Date / time format string (e.g. `%Y/%m/%d`).
     #[schemars(
@@ -177,8 +177,8 @@ impl FromOpts for PartitioningConfig {
 #[derive(
     Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default, EnumString,
 )]
-#[strum(serialize_all = "camelCase")]
-#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 #[schemars(title = "Filename Strategy")]
 pub enum FilenameStrategy {
     Serial,
@@ -190,7 +190,7 @@ pub enum FilenameStrategy {
 
 /// Controls filename prefix/suffix and strategy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(title = "File Naming")]
 pub struct NamingConfig {
     /// The prefix to use in file names (e.g. `prefix-<uuid>.parquet`).
@@ -226,8 +226,8 @@ impl FromOpts for NamingConfig {
 
 /// Compression methods recognised by the FileSystem source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, EnumString, Default)]
-#[strum(serialize_all = "camelCase")]
-#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 #[schemars(title = "Compression format")]
 pub enum SourceFileCompressionFormat {
     #[default]
@@ -237,7 +237,7 @@ pub enum SourceFileCompressionFormat {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(title = "Source")]
 pub struct FileSystemSource {
     /// URI of the folder to read from.
@@ -310,7 +310,7 @@ impl FromOpts for FileSystemSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(title = "Sink")]
 pub struct FileSystemSink {
     /// URI of the folder to write to.
@@ -351,7 +351,7 @@ impl FromOpts for FileSystemSink {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "snake_case")]
 #[schemars(title = "Table Type")]
 pub enum FileSystemTableType {
     Source(FileSystemSource),
@@ -360,7 +360,7 @@ pub enum FileSystemTableType {
 
 /// Top‑level FileSystem table definition (source or sink).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct FileSystemTable {
     pub table_type: FileSystemTableType,
 }
@@ -385,7 +385,7 @@ impl FromOpts for FileSystemTable {
 
 /// Delta‑Lake sink definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct DeltaLakeSink {
     #[schemars(title = "Path", description = "URI of the DeltaLake table to write to")]
     pub path: String,
@@ -424,14 +424,14 @@ impl FromOpts for DeltaLakeSink {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DeltaLakeTableType {
     Sink(DeltaLakeSink),
 }
 
 /// Wrapper allowing future extension of Delta‑Lake table types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct DeltaLakeTable {
     pub table_type: DeltaLakeTableType,
 }
@@ -458,7 +458,7 @@ impl FromOpts for DeltaLakeTable {
 
 /// REST catalog connector for Apache Iceberg.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IcebergRestCatalog {
     /// Base URL for the REST catalog.
     #[schemars(
@@ -481,14 +481,14 @@ pub struct IcebergRestCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum IcebergCatalog {
     Rest(IcebergRestCatalog),
 }
 
 /// Main Iceberg profile (wraps the catalog).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IcebergProfile {
     pub catalog: IcebergCatalog,
 }
@@ -518,7 +518,7 @@ fn default_namespace() -> String {
 
 /// Iceberg sink definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IcebergSink {
     /// Table namespace, optionally dot-separated
     #[schemars(title = "Namespace", description = "Table namespace")]
@@ -568,7 +568,7 @@ impl FromOpts for IcebergSink {
 
 /// Wrapper allowing future extension of Iceberg table types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum IcebergTable {
     Sink(IcebergSink),
 }

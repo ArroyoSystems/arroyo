@@ -264,7 +264,7 @@ export const ConfigureProfile = ({
         }}
         connector={connector.id}
         connections={connectionProfiles!}
-        schema={JSON.parse(connector.connectionConfig!)}
+        schema={JSON.parse(connector.connection_config!)}
         setCreatingCluster={setCreatingCluster}
       />
     );

@@ -7,8 +7,8 @@ interface TimelineData {
   operator: string;
   subtaskIndex: number;
   spanType: string;
-  startTime: number;
-  finishTime: number;
+  start_time: number;
+  finish_time: number;
   duration: number;
   row: number;
   bytes: number;
@@ -65,15 +65,15 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
     let rowIndex = 0;
     const allSpanTypes = new Set<string>();
 
-    const checkpointStartTime = checkpoint.startTime;
-    let checkpointEndTime = checkpoint.finishTime;
+    const checkpointStartTime = checkpoint.start_time;
+    let checkpointEndTime = checkpoint.finish_time;
 
     if (checkpoint.events && checkpoint.events.length > 0) {
       yLabels.push({ label: 'Global Events', isOperator: true, isGlobal: true });
       const globalRow = rowIndex;
       checkpoint.events.forEach(span => {
-        if (!checkpoint.finishTime) {
-          checkpointEndTime = Math.max(checkpointEndTime || 0, span.finishTime);
+        if (!checkpoint.finish_time) {
+          checkpointEndTime = Math.max(checkpointEndTime || 0, span.finish_time);
         }
         const spanType = (span as any).event || 'global';
         allSpanTypes.add(spanType);
@@ -81,9 +81,9 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
           operator: 'Global',
           subtaskIndex: -2,
           spanType: spanType,
-          startTime: span.startTime - checkpointStartTime,
-          finishTime: span.finishTime - checkpointStartTime,
-          duration: span.finishTime - span.startTime,
+          start_time: span.start_time - checkpointStartTime,
+          finish_time: span.finish_time - checkpointStartTime,
+          duration: span.finish_time - span.start_time,
           row: globalRow,
           bytes: 0,
         });
@@ -92,26 +92,26 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
     }
 
     operators
-      .sort((a, b) => Number(a.operatorId.split('_').pop()) - Number(b.operatorId.split('_').pop()))
+      .sort((a, b) => Number(a.operator_id.split('_').pop()) - Number(b.operator_id.split('_').pop()))
       .forEach(op => {
-        yLabels.push({ label: op.operatorId, isOperator: true });
+        yLabels.push({ label: op.operator_id, isOperator: true });
         op.subtasks.forEach((_, subtaskIndex) => {
           yLabels.push({ label: `[${subtaskIndex}]`, isOperator: false });
         });
 
         const operatorRow = rowIndex;
-        if (op.startedMetadataWrite && op.finishTime) {
-          if (!checkpoint.finishTime) {
-            checkpointEndTime = Math.max(checkpointEndTime || 0, op.finishTime);
+        if (op.started_metadata_write && op.finish_time) {
+          if (!checkpoint.finish_time) {
+            checkpointEndTime = Math.max(checkpointEndTime || 0, op.finish_time);
           }
           allSpanTypes.add('metadata');
           initialFlatData.push({
-            operator: op.operatorId,
+            operator: op.operator_id,
             subtaskIndex: -1,
             spanType: 'metadata',
-            startTime: op.startedMetadataWrite - checkpointStartTime,
-            finishTime: op.finishTime - checkpointStartTime,
-            duration: op.finishTime - op.startedMetadataWrite,
+            start_time: op.started_metadata_write - checkpointStartTime,
+            finish_time: op.finish_time - checkpointStartTime,
+            duration: op.finish_time - op.started_metadata_write,
             row: operatorRow,
             bytes: 0,
           });
@@ -119,19 +119,19 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
         rowIndex++;
 
         op.subtasks.forEach((subtask, subtaskIndex) => {
-          subtask.eventSpans.forEach(span => {
-            if (!checkpoint.finishTime) {
-              checkpointEndTime = Math.max(checkpointEndTime || 0, span.finishTime);
+          subtask.event_spans.forEach(span => {
+            if (!checkpoint.finish_time) {
+              checkpointEndTime = Math.max(checkpointEndTime || 0, span.finish_time);
             }
             const spanType = (span as any).event || 'unknown';
             allSpanTypes.add(spanType);
             initialFlatData.push({
-              operator: op.operatorId,
+              operator: op.operator_id,
               subtaskIndex,
               spanType: spanType,
-              startTime: span.startTime - checkpointStartTime,
-              finishTime: span.finishTime - checkpointStartTime,
-              duration: span.finishTime - span.startTime,
+              start_time: span.start_time - checkpointStartTime,
+              finish_time: span.finish_time - checkpointStartTime,
+              duration: span.finish_time - span.start_time,
               row: rowIndex,
               bytes: op.bytes,
             });
@@ -145,20 +145,20 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
     const groupedByRow = d3.group(initialFlatData, d => d.row);
 
     for (const [row, spans] of groupedByRow.entries()) {
-      spans.sort((a, b) => a.startTime - b.startTime);
+      spans.sort((a, b) => a.start_time - b.start_time);
       const lanes: number[] = [];
       for (const span of spans) {
         let placed = false;
         for (let i = 0; i < lanes.length; i++) {
-          if (span.startTime >= lanes[i]) {
-            lanes[i] = span.finishTime;
+          if (span.start_time >= lanes[i]) {
+            lanes[i] = span.finish_time;
             layoutData.push({ ...span, lane: i });
             placed = true;
             break;
           }
         }
         if (!placed) {
-          lanes.push(span.finishTime);
+          lanes.push(span.finish_time);
           const newLaneIndex = lanes.length - 1;
           layoutData.push({ ...span, lane: newLaneIndex });
         }
@@ -229,9 +229,9 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
       .enter()
       .append('rect')
       .attr('class', 'timeline-bar')
-      .attr('x', d => xScale(d.startTime))
+      .attr('x', d => xScale(d.start_time))
       .attr('y', d => (yPositions.get(d.row)?.y || 0) + d.lane * laneHeight)
-      .attr('width', d => Math.max(1, xScale(d.finishTime) - xScale(d.startTime)))
+      .attr('width', d => Math.max(1, xScale(d.finish_time) - xScale(d.start_time)))
       .attr('height', laneHeight - 2)
       .attr('fill', d => colorScale(d.spanType))
       .attr('opacity', 0.9)

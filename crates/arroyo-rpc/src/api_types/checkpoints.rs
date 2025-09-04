@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Checkpoint {
     pub epoch: u32,
     pub backend: String,
@@ -14,7 +14,7 @@ pub struct Checkpoint {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CheckpointEventSpan {
     pub start_time: u64,
     pub finish_time: u64,
@@ -23,7 +23,7 @@ pub struct CheckpointEventSpan {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SubtaskCheckpointGroup {
     pub index: u32,
     pub bytes: u64,
@@ -31,7 +31,7 @@ pub struct SubtaskCheckpointGroup {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct OperatorCheckpointGroup {
     pub operator_id: String,
     pub bytes: u64,
