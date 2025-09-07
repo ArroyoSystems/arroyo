@@ -76,6 +76,7 @@ pub struct FileSystemSink<BBW: BatchBufferingWriter> {
     format: Format,
     table_format: Option<TableFormat>,
     commit_strategy: CommitStrategy,
+    event_logger: FsEventLogger,
     _ts: PhantomData<BBW>,
 }
 
@@ -92,6 +93,7 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         config: config::FileSystemSink,
         table_format: TableFormat,
         format: Format,
+        connection_id: Option<String>,
     ) -> TwoPhaseCommitterOperator<Self> {
         TwoPhaseCommitterOperator::new(Self {
             sender: None,
@@ -105,14 +107,19 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             table_format: Some(table_format),
 
             partitioner: None,
+            event_logger: FsEventLogger {
+                task_info: None,
+                connection_id: connection_id.unwrap_or_default().into(),
+            },
             _ts: Default::default(),
         })
     }
 
-    pub async fn start(&mut self, schema: ArroyoSchemaRef) -> Result<()> {
+    pub async fn start(&mut self, task_info: Arc<TaskInfo>, schema: ArroyoSchemaRef) -> Result<()> {
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
 
+        self.event_logger.task_info = Some(task_info);
         self.sender = Some(sender);
         self.checkpoint_receiver = Some(checkpoint_receiver);
 
@@ -136,6 +143,7 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             table_format,
             format,
             schema,
+            self.event_logger.clone(),
         )
         .await?;
 
@@ -248,24 +256,43 @@ fn timestamp_logical_expression(time_partition_pattern: &str) -> Result<Expr> {
     Ok(function)
 }
 
-pub(crate) fn log_fs_event(
-    task_info: &TaskInfo,
-    bytes: usize,
-    files: u64,
-    write_time: Duration,
-    failures: u64,
-) {
-    log_trace_event!("filesystem_write",
-    {
-        "operator_id": task_info.operator_id,
-        "operator_name": task_info.operator_name,
-        "subtask_idx": task_info.task_index,
-    }, [
-        "bytes_written" => bytes as f64,
-        "files_written" => files as f64,
-        "write_time_ms" => write_time.as_millis() as f64,
-        "write_failures" => failures as f64
-    ]);
+#[derive(Clone)]
+pub(crate) struct FsEventLogger {
+    task_info: Option<Arc<TaskInfo>>,
+    connection_id: Arc<String>,
+}
+
+impl FsEventLogger {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn log_fs_event(
+        &self,
+        bytes: usize,
+        files: u64,
+        write_time: Duration,
+        failures: u64,
+        failure_message: Option<String>,
+        row_groups_written: u64,
+        uncompressed_bytes_written: u64,
+        rows_written: u64,
+    ) {
+        let task_info = self.task_info.as_ref().unwrap();
+        log_trace_event!("filesystem_write",
+        {
+            "operator_id": task_info.operator_id,
+            "operator_name": task_info.operator_name,
+            "connection_id": self.connection_id.as_str(),
+            "write_error_reason": failure_message.as_deref().unwrap_or(""),
+            "subtask_idx": task_info.task_index,
+        }, [
+            "bytes_written" => bytes as f64,
+            "files_written" => files as f64,
+            "write_time_ms" => write_time.as_millis() as f64,
+            "write_failures" => failures as f64,
+            "row_groups_written" => row_groups_written as f64,
+            "uncompressed_bytes_written" => uncompressed_bytes_written as f64,
+            "rows_written" => rows_written as f64,
+        ]);
+    }
 }
 
 #[derive(Debug)]
@@ -449,6 +476,7 @@ struct AsyncMultipartFileSystemWriter<BBW: BatchBufferingWriter> {
     format: Format,
     schema: ArroyoSchemaRef,
     iceberg_schema: Option<::iceberg::spec::SchemaRef>,
+    event_logger: FsEventLogger,
 }
 
 #[derive(Debug)]
@@ -680,6 +708,7 @@ impl<BBW> AsyncMultipartFileSystemWriter<BBW>
 where
     BBW: BatchBufferingWriter,
 {
+    #[allow(clippy::too_many_arguments)]
     async fn new(
         object_store: Arc<StorageProvider>,
         receiver: Receiver<FileSystemMessages>,
@@ -688,6 +717,7 @@ where
         table_format: TableFormat,
         format: Format,
         schema: ArroyoSchemaRef,
+        event_logger: FsEventLogger,
     ) -> Result<Self> {
         let mut iceberg_schema = None;
         let commit_state = match table_format {
@@ -728,6 +758,7 @@ where
             format,
             schema,
             iceberg_schema,
+            event_logger,
         })
     }
 
@@ -876,8 +907,8 @@ where
             &self.properties,
             self.format.clone(),
             self.schema.clone(),
-            self.task_info.clone().unwrap(),
             self.iceberg_schema.clone(),
+            self.event_logger.clone(),
         )
     }
 
@@ -987,7 +1018,8 @@ where
             .await
         {
             Ok(_) => {
-                log_fs_event(self.task_info.as_ref().unwrap(), 0, 1, start.elapsed(), 0);
+                self.event_logger
+                    .log_fs_event(0, 1, start.elapsed(), 0, None, 0, 0, 0);
 
                 Ok(Some(FinishedFile {
                     filename: file.filename,
@@ -997,7 +1029,16 @@ where
                 }))
             }
             Err(err) => {
-                log_fs_event(self.task_info.as_ref().unwrap(), 0, 0, start.elapsed(), 1);
+                self.event_logger.log_fs_event(
+                    0,
+                    0,
+                    start.elapsed(),
+                    1,
+                    Some(err.to_string()),
+                    0,
+                    0,
+                    0,
+                );
 
                 // check if the file is already there with the correct size.
                 if let Some(contents) = self.object_store.get_if_present(location).await? {
@@ -1090,7 +1131,7 @@ struct MultipartManager {
     pushed_size: usize,
     parts_to_add: Vec<PartToUpload>,
     closed: bool,
-    task_info: Arc<TaskInfo>,
+    event_logger: FsEventLogger,
 }
 
 impl MultipartManager {
@@ -1098,7 +1139,7 @@ impl MultipartManager {
         object_store: Arc<StorageProvider>,
         location: Path,
         partition: Option<String>,
-        task_info: Arc<TaskInfo>,
+        event_logger: FsEventLogger,
     ) -> Self {
         Self {
             storage_provider: object_store,
@@ -1110,7 +1151,7 @@ impl MultipartManager {
             pushed_size: 0,
             parts_to_add: vec![],
             closed: false,
-            task_info,
+            event_logger,
         }
     }
 
@@ -1160,7 +1201,7 @@ impl MultipartManager {
             .ok_or_else(|| anyhow::anyhow!("missing multipart id"))?;
         let object_store = self.storage_provider.clone();
 
-        let task_info = self.task_info.clone();
+        let event_logger = self.event_logger.clone();
         Ok(Box::pin(async move {
             let start = Instant::now();
             let bytes = part_to_upload.byte_data.len();
@@ -1174,11 +1215,10 @@ impl MultipartManager {
                 .await;
             let elapsed = start.elapsed();
 
-            if upload_part.is_ok() {
-                log_fs_event(&task_info, bytes, 0, elapsed, 0);
-            } else {
-                log_fs_event(&task_info, 0, 0, elapsed, 1);
-            }
+            match &upload_part {
+                Ok(_) => event_logger.log_fs_event(bytes, 0, elapsed, 0, None, 0, 0, 0),
+                Err(e) => event_logger.log_fs_event(0, 0, elapsed, 1, Some(e.to_string()), 0, 0, 0),
+            };
 
             Ok(MultipartCallbackWithName {
                 name: location.to_string(),
@@ -1401,6 +1441,7 @@ pub trait BatchBufferingWriter: Send {
         format: Format,
         schema: ArroyoSchemaRef,
         iceberg_schema: Option<::iceberg::spec::SchemaRef>,
+        event_logger: FsEventLogger,
     ) -> Self;
     fn suffix() -> String;
     fn add_batch_data(&mut self, data: &RecordBatch);
@@ -1438,14 +1479,20 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
         config: &config::FileSystemSink,
         format: Format,
         schema: ArroyoSchemaRef,
-        task_info: Arc<TaskInfo>,
         iceberg_schema: Option<::iceberg::spec::SchemaRef>,
+        event_logger: FsEventLogger,
     ) -> Self {
-        let batch_buffering_writer = BBW::new(config, format, schema.clone(), iceberg_schema);
+        let batch_buffering_writer = BBW::new(
+            config,
+            format,
+            schema.clone(),
+            iceberg_schema,
+            event_logger.clone(),
+        );
 
         Self {
             batch_buffering_writer,
-            multipart_manager: MultipartManager::new(object_store, path, partition, task_info),
+            multipart_manager: MultipartManager::new(object_store, path, partition, event_logger),
             stats: None,
             schema,
             target_part_size_bytes: config
@@ -1674,7 +1721,11 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
         ctx: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
     ) -> Result<()> {
-        self.start(ctx.in_schemas.first().unwrap().clone()).await?;
+        self.start(
+            ctx.task_info.clone(),
+            ctx.in_schemas.first().unwrap().clone(),
+        )
+        .await?;
 
         let mut max_file_index = 0;
         let mut recovered_files = Vec::new();

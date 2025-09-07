@@ -18,7 +18,6 @@ use profile::handle_get_profile;
 use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, TextEncoder};
 use reqwest::Client;
 use serde_json::{json, Number, Value};
-use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
 use std::future::Future;
@@ -200,7 +199,7 @@ impl EventLogger for AnalyticsEventLogger {
         &self,
         name: &str,
         mut labels: Value,
-        values: BTreeMap<String, f64>,
+        values: Vec<(String, f64)>,
         level: EventLevel,
     ) {
         if level != EventLevel::Analytics {

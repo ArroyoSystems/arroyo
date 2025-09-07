@@ -271,6 +271,7 @@ pub struct SourceCollector {
     control_tx: Sender<ControlResp>,
     chain_info: Arc<ChainInfo>,
     task_info: Arc<TaskInfo>,
+    connection_id: Option<String>,
 }
 
 impl SourceCollector {
@@ -290,7 +291,12 @@ impl SourceCollector {
             deserializer: None,
             buffered_error: None,
             error_rate_limiter: RateLimiter::new(),
+            connection_id: None,
         }
+    }
+
+    pub fn set_connection_id(&mut self, connection_id: String) {
+        self.connection_id = Some(connection_id);
     }
 
     pub async fn collect(&mut self, record: RecordBatch) {
@@ -371,24 +377,28 @@ impl SourceCollector {
             .bad_data();
         for error in errors {
             match error {
-                SourceError::BadData { details } => match bad_data {
+                SourceError::BadData { count, details } => match bad_data {
                     BadData::Drop {} => {
                         self.error_rate_limiter
                             .rate_limit(|| async {
-                                warn!("Dropping invalid data: {}", details.clone());
+                                warn!("Dropping invalid data ({count}): {details}");
                                 self.control_tx
                                     .send(ControlResp::Error {
                                         node_id: self.task_info.node_id,
                                         operator_id: self.task_info.operator_id.clone(),
                                         task_index: self.task_info.task_index as usize,
-                                        message: "Dropping invalid data".to_string(),
+                                        message: format!("Dropping invalid data ({count})"),
                                         details,
                                     })
                                     .await
                                     .unwrap();
                             })
                             .await;
-                        TaskCounters::DeserializationErrors.for_task(&self.chain_info, |c| c.inc())
+                        TaskCounters::DeserializationErrors.for_connection(
+                            &self.chain_info,
+                            self.connection_id.as_deref().unwrap_or_default(),
+                            |c| c.inc_by(count as u64),
+                        )
                     }
                     BadData::Fail {} => {
                         return Err(UserError::new("Deserialization error", details));
@@ -405,15 +415,13 @@ impl SourceCollector {
 
     pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
         if let Some(deserializer) = self.deserializer.as_mut() {
-            if let Some(buffer) = deserializer.flush_buffer() {
-                match buffer {
-                    Ok(batch) => {
-                        self.collector.collect(batch).await;
-                    }
-                    Err(e) => {
-                        self.collect_source_errors(vec![e]).await?;
-                    }
-                }
+            let (batch, errors) = deserializer.flush_buffer();
+            if !errors.is_empty() {
+                self.collect_source_errors(errors).await?;
+            }
+
+            if let Some(batch) = batch {
+                self.collector.collect(batch).await;
             }
         }
 

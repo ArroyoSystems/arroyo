@@ -14,6 +14,7 @@ use prometheus::{
 pub const NODE_ID_LABEL: &str = "node_id";
 pub const SUBTASK_IDX_LABEL: &str = "subtask_idx";
 pub const OPERATOR_NAME_LABEL: &str = "operator_name";
+pub const CONNECTION_ID_LABEL: &str = "connection_id";
 
 pub fn gauge_for_task(
     chain_info: &ChainInfo,
@@ -45,8 +46,12 @@ pub fn histogram_for_task(
 }
 
 lazy_static! {
-    pub static ref TASK_METRIC_LABELS: Vec<&'static str> =
-        vec![NODE_ID_LABEL, SUBTASK_IDX_LABEL, OPERATOR_NAME_LABEL];
+    pub static ref TASK_METRIC_LABELS: Vec<&'static str> = vec![
+        NODE_ID_LABEL,
+        SUBTASK_IDX_LABEL,
+        OPERATOR_NAME_LABEL,
+        CONNECTION_ID_LABEL
+    ];
     pub static ref MESSAGE_RECV_COUNTER: IntCounterVec = register_int_counter_vec!(
         MESSAGES_RECV,
         "Count of messages received by this subtask",
@@ -91,7 +96,7 @@ lazy_static! {
     .unwrap();
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum TaskCounters {
     MessagesReceived,
     MessagesSent,
@@ -132,33 +137,46 @@ impl TaskCounters {
         }
     }
 
-    pub fn for_task<F>(&self, chain_info: &Arc<ChainInfo>, f: F)
+    pub fn for_connection<F>(&self, chain_info: &Arc<ChainInfo>, connection_id: &str, f: F)
     where
         F: Fn(&IntCounter),
     {
-        static CACHE: OnceLock<Arc<RwLock<HashMap<(TaskCounters, Arc<ChainInfo>), IntCounter>>>> =
-            OnceLock::new();
+        static CACHE: OnceLock<
+            Arc<RwLock<HashMap<(TaskCounters, Arc<ChainInfo>), (IntCounter, bool)>>>,
+        > = OnceLock::new();
         let cache = CACHE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())));
 
         {
-            if let Some(counter) = cache.read().unwrap().get(&(*self, chain_info.clone())) {
-                f(counter);
-                return;
+            if let Some((counter, has_connection_id)) =
+                cache.read().unwrap().get(&(*self, chain_info.clone()))
+            {
+                if *has_connection_id || connection_id.is_empty() {
+                    f(counter);
+                    return;
+                }
             }
         }
 
         let counter = self.metric().with_label_values(&[
-            &chain_info.node_id.to_string(),
-            &chain_info.task_index.to_string(),
-            &chain_info.description.to_string(),
+            chain_info.node_id.to_string().as_str(),
+            chain_info.task_index.to_string().as_str(),
+            chain_info.description.as_str(),
+            connection_id,
         ]);
 
         f(&counter);
 
-        cache
-            .write()
-            .unwrap()
-            .insert((*self, chain_info.clone()), counter);
+        cache.write().unwrap().insert(
+            (*self, chain_info.clone()),
+            (counter, !connection_id.is_empty()),
+        );
+    }
+
+    pub fn for_task<F>(&self, chain_info: &Arc<ChainInfo>, f: F)
+    where
+        F: Fn(&IntCounter),
+    {
+        self.for_connection(chain_info, "", f)
     }
 }
 
