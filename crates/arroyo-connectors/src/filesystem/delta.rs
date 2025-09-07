@@ -156,6 +156,7 @@ impl Connector for DeltaLakeConnector {
                 },
                 config,
                 TableFormat::Delta,
+                None,
             ),
         }
     }

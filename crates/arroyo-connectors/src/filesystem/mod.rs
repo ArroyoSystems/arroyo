@@ -51,6 +51,7 @@ pub fn make_sink(
     sink: FileSystemSink,
     config: OperatorConfig,
     table_format: TableFormat,
+    connection_id: Option<String>,
 ) -> Result<ConstructedOperator> {
     let is_local = match table_format {
         TableFormat::None | TableFormat::Delta => {
@@ -73,13 +74,13 @@ pub fn make_sink(
             LocalParquetFileSystemSink::new(sink, table_format, format),
         ))),
         (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            ParquetFileSystemSink::create_and_start(sink, table_format, format),
+            ParquetFileSystemSink::create_and_start(sink, table_format, format, connection_id),
         ))),
         (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalJsonFileSystemSink::new(sink, table_format, format),
         ))),
         (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            JsonFileSystemSink::create_and_start(sink, table_format, format),
+            JsonFileSystemSink::create_and_start(sink, table_format, format, connection_id),
         ))),
         (f, _) => bail!("unsupported format {f}"),
     }
@@ -246,7 +247,7 @@ impl Connector for FileSystemConnector {
                     file_states: HashMap::new(),
                 },
             ))),
-            FileSystemTableType::Sink(sink) => make_sink(sink, config, TableFormat::None),
+            FileSystemTableType::Sink(sink) => make_sink(sink, config, TableFormat::None, None),
         }
     }
 }

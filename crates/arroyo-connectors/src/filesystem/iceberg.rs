@@ -155,6 +155,7 @@ impl Connector for IcebergConnector {
                     },
                     config,
                     TableFormat::Iceberg(Box::new(tf)),
+                    None,
                 )
             }
         }

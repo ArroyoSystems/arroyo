@@ -1,6 +1,6 @@
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, MultiPartWriterStats,
+    BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
 };
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::add_parquet_field_ids;
@@ -21,6 +21,7 @@ use parquet::{
     file::properties::WriterProperties,
 };
 use std::sync::Mutex;
+use std::time::Duration;
 use std::{
     fs::File,
     io::Write,
@@ -92,6 +93,7 @@ pub struct ParquetBatchBufferingWriter {
     row_group_size_bytes: usize,
     schema: ArroyoSchemaRef,
     iceberg_schema: Option<iceberg::spec::SchemaRef>,
+    event_logger: FsEventLogger,
 }
 
 impl BatchBufferingWriter for ParquetBatchBufferingWriter {
@@ -100,6 +102,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         format: Format,
         schema: ArroyoSchemaRef,
         iceberg_schema: Option<iceberg::spec::SchemaRef>,
+        event_logger: FsEventLogger,
     ) -> Self {
         let Format::Parquet(parquet) = format else {
             panic!("ParquetBatchBufferingWriter configured with non-parquet format {format:?}");
@@ -122,6 +125,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
             row_group_size_bytes,
             schema,
             iceberg_schema,
+            event_logger,
         }
     }
 
@@ -135,11 +139,31 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         // remove timestamp column
         let mut data = data.clone();
         self.schema.remove_timestamp_column(&mut data);
-        writer.write(&data).unwrap();
 
-        if writer.in_progress_size() > self.row_group_size_bytes {
+        let prev_size = writer.in_progress_size();
+        writer.write(&data).unwrap();
+        let uncompressed_bytes = writer
+            .in_progress_size()
+            .checked_sub(prev_size)
+            .unwrap_or_default();
+
+        let row_groups = if writer.in_progress_size() > self.row_group_size_bytes {
             writer.flush().unwrap();
-        }
+            1
+        } else {
+            0
+        };
+
+        self.event_logger.log_fs_event(
+            0,
+            0,
+            Duration::ZERO,
+            0,
+            None,
+            row_groups,
+            uncompressed_bytes as u64,
+            data.num_rows() as u64,
+        );
     }
 
     fn buffered_bytes(&self) -> usize {

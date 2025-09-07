@@ -496,10 +496,11 @@ impl ArrowDeserializer {
         self.buffer_decoder.should_flush()
     }
 
-    pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
-        let (arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data)? {
-            Ok((a, b)) => (a, b),
-            Err(e) => return Some(Err(e)),
+    pub fn flush_buffer(&mut self) -> (Option<RecordBatch>, Vec<SourceError>) {
+        let (arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data) {
+            Some(Ok((a, b))) => (a, b),
+            Some(Err(e)) => return (None, vec![e]),
+            None => return (None, vec![]),
         };
 
         let mut arrays: HashMap<_, _> = arrays
@@ -519,8 +520,18 @@ impl ArrowDeserializer {
             }
         };
 
+        let mut source_errors = vec![];
+
         if let Some((_, timestamp)) = &mut self.timestamp_builder {
             let array = if let Some(error_mask) = &error_mask {
+                let errors = error_mask.false_count();
+                if errors > 0 {
+                    source_errors.push(SourceError::bad_data_count(
+                        "Some records could not be deserialized from JSON",
+                        errors,
+                    ));
+                }
+
                 kernels::filter::filter(&timestamp.finish(), error_mask).unwrap()
             } else {
                 Arc::new(timestamp.finish())
@@ -536,9 +547,10 @@ impl ArrowDeserializer {
             .map(|f| arrays.get(f.name().as_str()).unwrap().clone())
             .collect();
 
-        Some(Ok(
-            RecordBatch::try_new(self.final_schema.clone(), arrays).unwrap()
-        ))
+        (
+            Some(RecordBatch::try_new(self.final_schema.clone(), arrays).unwrap()),
+            source_errors,
+        )
     }
 
     fn deserialize_single(&mut self, msg: &[u8]) -> Result<(), SourceError> {
@@ -851,7 +863,7 @@ mod tests {
             vec![]
         );
 
-        let batch = deserializer.flush_buffer().unwrap().unwrap();
+        let batch = deserializer.flush_buffer().0.unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
         assert_eq!(
@@ -887,7 +899,7 @@ mod tests {
             vec![]
         );
 
-        let err = deserializer.flush_buffer().unwrap().unwrap_err();
+        let err = deserializer.flush_buffer().1.remove(0);
 
         assert!(matches!(err, SourceError::BadData { .. }));
     }
@@ -919,7 +931,7 @@ mod tests {
             .await;
         assert!(result.is_empty());
 
-        let batch = deserializer.flush_buffer().unwrap().unwrap();
+        let batch = deserializer.flush_buffer().0.unwrap();
 
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(
@@ -992,7 +1004,7 @@ mod tests {
             .await;
         assert!(result.is_empty());
 
-        let batch = deserializer.flush_buffer().unwrap().unwrap();
+        let batch = deserializer.flush_buffer().0.unwrap();
         println!("batch ={batch:?}");
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);

@@ -274,7 +274,7 @@ mod tests {
             .await;
         assert_eq!(errors, vec![]);
 
-        let batch = deserializer.flush_buffer().unwrap().unwrap();
+        let batch = deserializer.flush_buffer().0.unwrap();
 
         record_batch_to_vec(
             &batch,

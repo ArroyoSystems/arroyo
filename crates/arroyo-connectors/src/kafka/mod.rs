@@ -659,7 +659,7 @@ impl KafkaTester {
                         .await
                         .into_iter()
                         .next();
-                    if let Some(Err(e)) = deserializer.flush_buffer() {
+                    if let Some(e) = deserializer.flush_buffer().1.pop() {
                         error.replace(e);
                     }
 
@@ -681,7 +681,7 @@ impl KafkaTester {
                         .await
                         .into_iter()
                         .next();
-                    if let Some(Err(e)) = deserializer.flush_buffer() {
+                    if let Some(e) = deserializer.flush_buffer().1.pop() {
                         error.replace(e);
                     }
 
@@ -719,7 +719,7 @@ impl KafkaTester {
                     .await
                     .into_iter()
                     .next();
-                if let Some(Err(e)) = deserializer.flush_buffer() {
+                if let Some(e) = deserializer.flush_buffer().1.pop() {
                     error.replace(e);
                 }
 
