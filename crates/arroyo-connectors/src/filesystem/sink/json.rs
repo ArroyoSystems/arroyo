@@ -1,9 +1,7 @@
-use std::{fs::File, io::Write, time::Instant};
-
 use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
-    BatchBufferingWriter, MultiPartWriterStats,
+    BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
 };
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
@@ -11,10 +9,13 @@ use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use bytes::{Bytes, BytesMut};
+use std::time::Duration;
+use std::{fs::File, io::Write, time::Instant};
 
 pub struct JsonWriter {
     current_buffer: BytesMut,
     serializer: ArrowSerializer,
+    event_logger: FsEventLogger,
 }
 
 impl BatchBufferingWriter for JsonWriter {
@@ -23,10 +24,12 @@ impl BatchBufferingWriter for JsonWriter {
         format: Format,
         _schema: ArroyoSchemaRef,
         _: Option<::iceberg::spec::SchemaRef>,
+        event_logger: FsEventLogger,
     ) -> Self {
         Self {
             current_buffer: BytesMut::new(),
             serializer: ArrowSerializer::new(format),
+            event_logger,
         }
     }
     fn suffix() -> String {
@@ -34,10 +37,22 @@ impl BatchBufferingWriter for JsonWriter {
     }
 
     fn add_batch_data(&mut self, batch: &RecordBatch) {
+        let mut size = 0;
         for k in self.serializer.serialize(batch) {
+            size += k.len() + 1;
             self.current_buffer.extend(k);
             self.current_buffer.extend(b"\n");
         }
+        self.event_logger.log_fs_event(
+            0,
+            0,
+            Duration::ZERO,
+            0,
+            None,
+            0,
+            size as u64,
+            batch.num_rows() as u64,
+        );
     }
 
     fn buffered_bytes(&self) -> usize {

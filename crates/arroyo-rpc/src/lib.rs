@@ -33,7 +33,7 @@ use regex::Regex;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZero, NonZeroU64};
 use std::str::FromStr;
@@ -102,13 +102,7 @@ pub enum EventLevel {
 }
 
 pub trait EventLogger: Send + Sync {
-    fn log_event(
-        &self,
-        name: &str,
-        labels: Value,
-        values: BTreeMap<String, f64>,
-        level: EventLevel,
-    );
+    fn log_event(&self, name: &str, labels: Value, values: Vec<(String, f64)>, level: EventLevel);
     fn trace_enabled(&self) -> bool {
         false
     }
@@ -130,9 +124,9 @@ macro_rules! log_event {
         if let Some(event_logger) = arroyo_rpc::event_logger() {
             let labels = serde_json::json!({ $($labels)* });
             let values = {
-                let mut map = ::std::collections::BTreeMap::new();
+                let mut map = vec![];
                 $(
-                    map.insert($key.to_string(), $value as f64);
+                    map.push(($key.to_string(), $value as f64));
                 )*
                 map
             };
@@ -151,11 +145,11 @@ macro_rules! log_trace_event {
             if event_logger.trace_enabled() {
                 let labels = serde_json::json!({ $($labels)* });
                 let values = {
-                    let mut map = ::std::collections::BTreeMap::new();
+                    let mut fields = vec![];
                     $(
-                        map.insert($key.to_string(), $value as f64);
+                        fields.push(($key.to_string(), $value as f64));
                     )*
-                    map
+                    fields
                 };
                 event_logger.log_event($name, labels, values, arroyo_rpc::EventLevel::Trace);
             }

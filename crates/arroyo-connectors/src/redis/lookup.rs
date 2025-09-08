@@ -98,6 +98,11 @@ impl LookupConnector for RedisLookup {
             }
         }
 
-        self.deserializer.flush_buffer()
+        let (batch, mut errors) = self.deserializer.flush_buffer();
+        if let Some(error) = errors.pop() {
+            Some(Err(error))
+        } else {
+            batch.map(Ok)
+        }
     }
 }
