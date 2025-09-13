@@ -895,9 +895,13 @@ where
             self.file_naming.suffix.as_ref().unwrap(),
         );
 
-        let path = match partition {
-            Some(sub_bucket) => format!("{sub_bucket}/{filename}"),
-            None => filename.clone(),
+        let path = if self.iceberg_schema.is_none() {
+            match partition {
+                Some(sub_bucket) => format!("{sub_bucket}/{filename}"),
+                None => filename,
+            }
+        } else {
+            filename
         };
 
         BatchMultipartWriter::new(
