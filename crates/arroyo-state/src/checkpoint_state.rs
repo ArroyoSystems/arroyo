@@ -18,7 +18,7 @@ use arroyo_rpc::grpc::{
         TableSubtaskCheckpointMetadata, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
     },
 };
-use arroyo_rpc::log_trace_event;
+use arroyo_rpc::{get_event_spans, log_trace_event, TaskEventSpans};
 use arroyo_types::{from_micros, to_micros};
 use std::sync::Arc;
 use std::time::Duration;
@@ -185,17 +185,34 @@ impl CheckpointState {
         operator_names: &HashMap<String, String>,
         operator_id: Option<&str>,
         subtask_idx: Option<u64>,
+        epoch: u32,
         size: u64,
         total_time: Duration,
+        spans: TaskEventSpans,
     ) {
+        fn to_duration(s: Option<(u64, u64)>) -> f64 {
+            match s {
+                Some((start, end)) => from_micros(end)
+                    .duration_since(from_micros(start))
+                    .unwrap_or_default()
+                    .as_millis() as f64,
+                None => 0.0,
+            }
+        }
+
         let name = operator_id.and_then(|id| operator_names.get(id));
         log_trace_event!("checkpoint", {
             "operator_id": operator_id,
             "operator_name": name,
-            "subtask_idx": subtask_idx,
+            "subtask_idx": subtask_idx.map(|i| i.to_string()).unwrap_or_default(),
+            "epoch": epoch.to_string(),
         }, [
             "size_bytes" => size as f64,
             "total_time" => total_time.as_millis() as f64,
+            "alignment_time" => to_duration(spans.alignment),
+            "sync_time" => to_duration(spans.sync),
+            "async_time" => to_duration(spans.r#async),
+            "commit_time" => to_duration(spans.committing),
         ]);
     }
 
@@ -278,19 +295,6 @@ impl CheckpointState {
             subtask_index = metadata.subtask_index,
             time = c.time);
 
-        Self::log_checkpoint_event(
-            &self.operator_names,
-            Some(&c.operator_id),
-            Some(metadata.subtask_index as u64),
-            metadata.bytes,
-            Duration::from_micros(
-                metadata
-                    .finish_time
-                    .checked_sub(metadata.start_time)
-                    .unwrap_or_default(),
-            ),
-        );
-
         let operator_detail = self
             .operator_details
             .entry(c.operator_id.clone())
@@ -338,12 +342,14 @@ impl CheckpointState {
                 &self.operator_names,
                 Some(&c.operator_id),
                 None,
+                self.epoch,
                 operator_state.bytes as u64,
                 operator_state
                     .finish_time
                     .unwrap()
                     .duration_since(operator_state.start_time.unwrap())
                     .unwrap_or_default(),
+                Default::default(),
             );
 
             // watermarks are None if any subtasks are None.
@@ -426,14 +432,43 @@ impl CheckpointState {
     pub async fn write_metadata(&mut self) -> Result<()> {
         let finish_time = SystemTime::now();
 
+        for (op, details) in &self.operator_details {
+            for (subtask_index, task_details) in &details.tasks {
+                let spans = self
+                    .operator_details
+                    .get(op)
+                    .and_then(|c| c.tasks.get(subtask_index))
+                    .map(get_event_spans)
+                    .unwrap_or_default();
+
+                Self::log_checkpoint_event(
+                    &self.operator_names,
+                    Some(op),
+                    Some(*subtask_index as u64),
+                    self.epoch,
+                    task_details.bytes.unwrap_or_default(),
+                    Duration::from_micros(
+                        task_details
+                            .finish_time
+                            .unwrap_or_default()
+                            .checked_sub(task_details.start_time)
+                            .unwrap_or_default(),
+                    ),
+                    spans,
+                );
+            }
+        }
+
         Self::log_checkpoint_event(
             &self.operator_names,
             None,
             None,
+            self.epoch,
             self.bytes,
             finish_time
                 .duration_since(self.start_time)
                 .unwrap_or_default(),
+            Default::default(),
         );
 
         StateBackend::write_checkpoint_metadata(CheckpointMetadata {
