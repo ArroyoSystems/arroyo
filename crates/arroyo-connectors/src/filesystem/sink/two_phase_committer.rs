@@ -51,6 +51,7 @@ pub trait TwoPhaseCommitter: Send + 'static {
     // TODO: figure out how to have the relevant vectors be of pointers across async boundaries.
     async fn commit(
         &mut self,
+        epoch: u32,
         task_info: &TaskInfo,
         pre_commit: Vec<Self::PreCommit>,
     ) -> Result<()>;
@@ -105,7 +106,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
         };
 
         self.committer
-            .commit(&ctx.task_info, pre_commits)
+            .commit(epoch, &ctx.task_info, pre_commits)
             .await
             .expect("committer committed");
 

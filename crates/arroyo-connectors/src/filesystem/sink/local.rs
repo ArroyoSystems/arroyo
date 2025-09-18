@@ -260,6 +260,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
 
     async fn commit(
         &mut self,
+        _epoch: u32,
         _task_info: &TaskInfo,
         pre_commit: Vec<Self::PreCommit>,
     ) -> Result<()> {

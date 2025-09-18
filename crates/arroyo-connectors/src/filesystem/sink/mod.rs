@@ -119,7 +119,7 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
 
-        self.event_logger.task_info = Some(task_info);
+        self.event_logger.task_info = Some(task_info.clone());
         self.sender = Some(sender);
         self.checkpoint_receiver = Some(checkpoint_receiver);
 
@@ -132,10 +132,15 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         let mut table_format = self.table_format.take().expect("table format must be set");
 
         let provider = table_format
-            .get_storage_provider(&self.table, &schema.schema_without_timestamp())
+            .get_storage_provider(
+                task_info.clone(),
+                &self.table,
+                &schema.schema_without_timestamp(),
+            )
             .await?;
 
         let mut writer = AsyncMultipartFileSystemWriter::<R>::new(
+            task_info,
             Arc::new(provider),
             receiver,
             checkpoint_sender,
@@ -311,7 +316,10 @@ enum FileSystemMessages {
         watermark: Option<SystemTime>,
         then_stop: bool,
     },
-    FilesToFinish(Vec<FileToFinish>),
+    FilesToFinish {
+        files: Vec<FileToFinish>,
+        epoch: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -720,6 +728,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     async fn new(
+        task_info: Arc<TaskInfo>,
         object_store: Arc<StorageProvider>,
         receiver: Receiver<FileSystemMessages>,
         checkpoint_sender: Sender<CheckpointData>,
@@ -739,7 +748,7 @@ where
             },
             TableFormat::None => CommitState::VanillaParquet,
             TableFormat::Iceberg(mut table) => {
-                let t = table.load_or_create(&schema.schema).await?;
+                let t = table.load_or_create(task_info, &schema.schema).await?;
                 iceberg_schema = Some(t.metadata().current_schema().clone());
                 CommitState::Iceberg(table)
             }
@@ -816,8 +825,8 @@ where
                             self.checkpoint_sender.send({CheckpointData::Finished {  max_file_index: self.max_file_index,
                             delta_version}}).await?;
                         },
-                        FileSystemMessages::FilesToFinish(files_to_finish) =>{
-                            self.finish_files(files_to_finish).await?;
+                        FileSystemMessages::FilesToFinish{ files, epoch }  =>{
+                            self.finish_files(epoch, files).await?;
                         }
                     }
                 }
@@ -967,7 +976,7 @@ where
         }
     }
 
-    async fn finish_files(&mut self, files_to_finish: Vec<FileToFinish>) -> Result<()> {
+    async fn finish_files(&mut self, epoch: u32, files_to_finish: Vec<FileToFinish>) -> Result<()> {
         debug!(
             message = "finishing files",
             number_of_files = files_to_finish.len()
@@ -996,7 +1005,7 @@ where
                 }
             }
             CommitState::Iceberg(table) => {
-                table.commit(&finished_files).await?;
+                table.commit(epoch, &finished_files).await?;
             }
             CommitState::VanillaParquet => {
                 // nothing to do
@@ -1810,13 +1819,17 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
 
     async fn commit(
         &mut self,
+        epoch: u32,
         _task_info: &TaskInfo,
         pre_commit: Vec<Self::PreCommit>,
     ) -> Result<()> {
         self.sender
             .as_ref()
             .unwrap()
-            .send(FileSystemMessages::FilesToFinish(pre_commit))
+            .send(FileSystemMessages::FilesToFinish {
+                files: pre_commit,
+                epoch,
+            })
             .await?;
         // loop over checkpoint receiver until finished received
         if let Some(checkpoint_message) = self.checkpoint_receiver.as_mut().unwrap().recv().await {
