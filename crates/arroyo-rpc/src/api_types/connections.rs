@@ -84,13 +84,15 @@ pub enum FieldType {
     #[schema(title = "Int64")]
     Int64,
     #[schema(title = "UInt32")]
-    UInt32,
+    Uint32,
     #[schema(title = "UInt64")]
-    UInt64,
-    #[schema(title = "F32")]
-    F32,
-    #[schema(title = "F64")]
-    F64,
+    Uint64,
+    #[schema(title = "Float32")]
+    #[serde(alias = "f32")]
+    Float32,
+    #[schema(title = "Float64")]
+    #[serde(alias = "f64")]
+    Float64,
     #[schema(title = "Bool")]
     Bool,
     #[serde(alias = "utf8")]
@@ -114,10 +116,10 @@ impl FieldType {
         match self {
             FieldType::Int32 => "INTEGER".into(),
             FieldType::Int64 => "BIGINT".into(),
-            FieldType::UInt32 => "INTEGER UNSIGNED".into(),
-            FieldType::UInt64 => "BIGINT UNSIGNED".into(),
-            FieldType::F32 => "FLOAT".into(),
-            FieldType::F64 => "DOUBLE".into(),
+            FieldType::Uint32 => "INTEGER UNSIGNED".into(),
+            FieldType::Uint64 => "BIGINT UNSIGNED".into(),
+            FieldType::Float32 => "FLOAT".into(),
+            FieldType::Float64 => "DOUBLE".into(),
             FieldType::Bool => "BOOLEAN".into(),
             FieldType::String => "TEXT".into(),
             FieldType::Bytes => "BINARY".into(),
@@ -207,10 +209,10 @@ impl From<SourceField> for Field {
         let (t, ext) = match f.field_type {
             FieldType::Int32 => (DataType::Int32, None),
             FieldType::Int64 => (DataType::Int64, None),
-            FieldType::UInt32 => (DataType::UInt32, None),
-            FieldType::UInt64 => (DataType::UInt64, None),
-            FieldType::F32 => (DataType::Float32, None),
-            FieldType::F64 => (DataType::Float64, None),
+            FieldType::Uint32 => (DataType::UInt32, None),
+            FieldType::Uint64 => (DataType::UInt64, None),
+            FieldType::Float32 => (DataType::Float32, None),
+            FieldType::Float64 => (DataType::Float64, None),
             FieldType::Bool => (DataType::Boolean, None),
             FieldType::String => (DataType::Utf8, None),
             FieldType::Bytes => (DataType::Binary, None),
@@ -251,10 +253,10 @@ impl TryFrom<Field> for SourceField {
             (DataType::Boolean, None) => FieldType::Bool,
             (DataType::Int32, None) => FieldType::Int32,
             (DataType::Int64, None) => FieldType::Int64,
-            (DataType::UInt32, None) => FieldType::UInt32,
-            (DataType::UInt64, None) => FieldType::UInt64,
-            (DataType::Float32, None) => FieldType::F32,
-            (DataType::Float64, None) => FieldType::F64,
+            (DataType::UInt32, None) => FieldType::Uint32,
+            (DataType::UInt64, None) => FieldType::Uint64,
+            (DataType::Float32, None) => FieldType::Float32,
+            (DataType::Float64, None) => FieldType::Float64,
             (DataType::Binary, None) | (DataType::LargeBinary, None) => FieldType::Bytes,
             (DataType::Timestamp(TimeUnit::Second, _), None) => {
                 FieldType::Timestamp(TimestampField {
