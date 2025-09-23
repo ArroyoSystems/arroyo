@@ -9,7 +9,7 @@ use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
 use object_store::{
-    aws::AmazonS3Builder, local::LocalFileSystem, MultipartId, ObjectStore, PutPayload,
+    aws::AmazonS3Builder, local::LocalFileSystem, MultipartId, ObjectStore, PutPayload, RetryConfig,
 };
 use object_store::{Error, ObjectMeta};
 use regex::{Captures, Regex};
@@ -489,6 +489,14 @@ impl StorageProvider {
             builder = builder.with_config(s3_config_key, value);
         }
 
+        // disable retries; we do our own
+        let retry_config = RetryConfig {
+            max_retries: 0,
+            ..Default::default()
+        };
+
+        builder = builder.with_retry(retry_config);
+
         let endpoint = config
             .endpoint
             .as_ref()
@@ -598,6 +606,14 @@ impl StorageProvider {
             })?,
         );
 
+        // disable retries; we do our own
+        let retry_config = RetryConfig {
+            max_retries: 0,
+            ..Default::default()
+        };
+
+        builder = builder.with_retry(retry_config);
+
         let mut endpoint = "https://".to_string();
         endpoint.push_str(&config.account_id);
         if let Some(jurisdiction) = config.jurisdiction.as_ref() {
@@ -629,6 +645,14 @@ impl StorageProvider {
 
     async fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
         let mut builder = GoogleCloudStorageBuilder::from_env().with_bucket_name(&config.bucket);
+
+        // disable retries; we do our own
+        let retry_config = RetryConfig {
+            max_retries: 0,
+            ..Default::default()
+        };
+
+        builder = builder.with_retry(retry_config);
 
         if let Ok(service_account_key) = std::env::var("GOOGLE_SERVICE_ACCOUNT_KEY") {
             debug!("Constructing GCS builder with service account key");
