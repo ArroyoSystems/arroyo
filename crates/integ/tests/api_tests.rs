@@ -598,7 +598,7 @@ async fn connection_table() {
             },
             {
                 "name": "b",
-                "type": "f64",
+                "type": "float64",
                 "sql_name": "DOUBLE",
                 "required": false,
             },
