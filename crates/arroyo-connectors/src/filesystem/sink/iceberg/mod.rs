@@ -16,6 +16,7 @@ use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use std::collections::{HashMap, HashSet};
 use std::iter::once;
 use std::sync::Arc;
+use tracing::debug;
 
 const CONFIG_MAPPINGS: [(&str, &str); 4] = [
     ("s3.region", "aws_region"),
@@ -204,6 +205,11 @@ impl IcebergTable {
             .try_collect()?;
 
         // commit the transaction in the rest catalog
+        debug!(
+            message = "starting iceberg commit",
+            files = files.len(),
+            manifest_files = self.manifest_files.len()
+        );
         let tx = Transaction::new(table);
         let tx = tx
             .fast_append()
@@ -212,6 +218,7 @@ impl IcebergTable {
             .apply(tx)?;
 
         tx.commit(&self.catalog).await?;
+        debug!("finished iceberg commit");
         // the tx.commit call returns the table but the FileIO somehow ends up misconfigured in such
         // a way that breaks future IO operations
         self.table = Some(self.catalog.load_table(&self.table_ident).await?);

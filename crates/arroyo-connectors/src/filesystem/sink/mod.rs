@@ -489,6 +489,16 @@ pub enum CommitState {
     VanillaParquet,
 }
 
+impl CommitState {
+    fn name(&self) -> &'static str {
+        match self {
+            CommitState::DeltaLake { .. } => "delta",
+            CommitState::Iceberg(_) => "iceberg",
+            CommitState::VanillaParquet => "none",
+        }
+    }
+}
+
 async fn from_checkpoint(
     path: &Path,
     partition: Option<String>,
@@ -958,12 +968,21 @@ where
     }
 
     async fn finish_files(&mut self, files_to_finish: Vec<FileToFinish>) -> Result<()> {
+        debug!(
+            message = "finishing files",
+            number_of_files = files_to_finish.len()
+        );
         let mut finished_files: Vec<FinishedFile> = vec![];
         for file_to_finish in files_to_finish {
             if let Some(file) = self.finish_file(file_to_finish).await? {
                 finished_files.push(file);
             }
         }
+
+        debug!(
+            message = "starting commit",
+            commit_type = self.commit_state.name()
+        );
 
         match &mut self.commit_state {
             CommitState::DeltaLake {
@@ -983,6 +1002,11 @@ where
                 // nothing to do
             }
         }
+
+        debug!(
+            message = "finished commit",
+            commit_type = self.commit_state.name()
+        );
 
         let finished_message = CheckpointData::Finished {
             max_file_index: self.max_file_index,

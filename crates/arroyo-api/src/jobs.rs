@@ -1,18 +1,15 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use arroyo_rpc::api_types::checkpoints::{
-    Checkpoint, CheckpointEventSpan, JobCheckpointSpan, OperatorCheckpointGroup,
-    SubtaskCheckpointGroup,
+    Checkpoint, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
 use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
 use arroyo_rpc::api_types::{
     CheckpointCollection, JobCollection, JobLogMessageCollection,
     OperatorCheckpointGroupCollection, PaginationQueryParams,
 };
-use arroyo_rpc::grpc;
-use arroyo_rpc::grpc::api::{
-    OperatorCheckpointDetail, TaskCheckpointDetail, TaskCheckpointEventType,
-};
+use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::{get_event_spans, grpc};
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
 use axum::Json;
@@ -275,71 +272,6 @@ pub async fn get_job_checkpoints(
     Ok(Json(CheckpointCollection { data: checkpoints }))
 }
 
-fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEventSpan> {
-    let alignment_started = subtask_details
-        .events
-        .iter()
-        .find(|e| e.event_type == TaskCheckpointEventType::AlignmentStarted as i32);
-
-    let checkpoint_started = subtask_details
-        .events
-        .iter()
-        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointStarted as i32);
-
-    let sync_finished = subtask_details
-        .events
-        .iter()
-        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointSyncFinished as i32);
-
-    let pre_commit = subtask_details
-        .events
-        .iter()
-        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointPreCommit as i32);
-
-    let mut event_spans = vec![];
-
-    if let (Some(alignment_started), Some(checkpoint_started)) =
-        (alignment_started, checkpoint_started)
-    {
-        event_spans.push(CheckpointEventSpan {
-            event: "Alignment".to_string(),
-            description: "Time spent waiting for alignment barriers".to_string(),
-            start_time: alignment_started.time,
-            finish_time: checkpoint_started.time,
-        });
-    }
-
-    if let (Some(checkpoint_started), Some(sync_finished)) = (checkpoint_started, sync_finished) {
-        event_spans.push(CheckpointEventSpan {
-            event: "Sync".to_string(),
-            description: "The synchronous part of checkpointing".to_string(),
-            start_time: checkpoint_started.time,
-            finish_time: sync_finished.time,
-        });
-    }
-
-    if let (Some(async_started), Some(checkpoint_finished)) =
-        (sync_finished, subtask_details.finish_time)
-    {
-        event_spans.push(CheckpointEventSpan {
-            event: "Async".to_string(),
-            description: "The asynchronous part of checkpointing".to_string(),
-            start_time: async_started.time,
-            finish_time: checkpoint_finished,
-        });
-    };
-    if let (Some(operator_finished), Some(pre_commit)) = (subtask_details.finish_time, pre_commit) {
-        event_spans.push(CheckpointEventSpan {
-            event: "Committing".to_string(),
-            description: "Committing the checkpoint".to_string(),
-            start_time: operator_finished,
-            finish_time: pre_commit.time,
-        });
-    }
-
-    event_spans
-}
-
 /// Get a checkpoint's details
 #[utoipa::path(
     get,
@@ -399,7 +331,7 @@ pub async fn get_checkpoint_details(
                     subtasks.push(SubtaskCheckpointGroup {
                         index: *subtask_index,
                         bytes: subtask_details.bytes.unwrap_or(0),
-                        event_spans: get_event_spans(subtask_details),
+                        event_spans: get_event_spans(subtask_details).into(),
                     });
                 });
 

@@ -4,8 +4,10 @@ pub mod public_ids;
 pub mod schema_resolver;
 pub mod var_str;
 
+use crate::api_types::checkpoints::CheckpointEventSpan;
 use crate::config::{config, TlsConfig};
 use crate::formats::{BadData, Format, Framing};
+use crate::grpc::api::TaskCheckpointDetail;
 use crate::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::{anyhow, Context, Result};
@@ -1053,6 +1055,102 @@ pub fn local_address(bind_address: IpAddr) -> String {
             format!("[{local_ip}]")
         }
     }
+}
+
+#[derive(Default)]
+pub struct TaskEventSpans {
+    pub alignment: Option<(u64, u64)>,
+    pub sync: Option<(u64, u64)>,
+    pub r#async: Option<(u64, u64)>,
+    pub committing: Option<(u64, u64)>,
+}
+
+impl From<TaskEventSpans> for Vec<CheckpointEventSpan> {
+    fn from(val: TaskEventSpans) -> Self {
+        let mut spans = vec![];
+
+        if let Some((start_time, finish_time)) = val.alignment {
+            spans.push(CheckpointEventSpan {
+                event: "Alignment".to_string(),
+                description: "Time spent waiting for alignment barriers".to_string(),
+                start_time,
+                finish_time,
+            });
+        }
+
+        if let Some((start_time, finish_time)) = val.sync {
+            spans.push(CheckpointEventSpan {
+                event: "Sync".to_string(),
+                description: "The synchronous part of checkpointing".to_string(),
+                start_time,
+                finish_time,
+            });
+        }
+
+        if let Some((start_time, finish_time)) = val.r#async {
+            spans.push(CheckpointEventSpan {
+                event: "Async".to_string(),
+                description: "The asynchronous part of checkpointing".to_string(),
+                start_time,
+                finish_time,
+            });
+        }
+
+        if let Some((start_time, finish_time)) = val.committing {
+            spans.push(CheckpointEventSpan {
+                event: "Committing".to_string(),
+                description: "Committing the checkpoint".to_string(),
+                start_time,
+                finish_time,
+            });
+        }
+
+        spans
+    }
+}
+
+pub fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> TaskEventSpans {
+    let alignment_started = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == grpc::api::TaskCheckpointEventType::AlignmentStarted as i32);
+
+    let checkpoint_started = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == grpc::api::TaskCheckpointEventType::CheckpointStarted as i32);
+
+    let sync_finished = subtask_details.events.iter().find(|e| {
+        e.event_type == grpc::api::TaskCheckpointEventType::CheckpointSyncFinished as i32
+    });
+
+    let pre_commit = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == grpc::api::TaskCheckpointEventType::CheckpointPreCommit as i32);
+
+    let mut event_spans = TaskEventSpans::default();
+
+    if let (Some(alignment_started), Some(checkpoint_started)) =
+        (alignment_started, checkpoint_started)
+    {
+        event_spans.alignment = Some((alignment_started.time, checkpoint_started.time));
+    }
+
+    if let (Some(checkpoint_started), Some(sync_finished)) = (checkpoint_started, sync_finished) {
+        event_spans.sync = Some((checkpoint_started.time, sync_finished.time));
+    }
+
+    if let (Some(async_started), Some(checkpoint_finished)) =
+        (sync_finished, subtask_details.finish_time)
+    {
+        event_spans.r#async = Some((async_started.time, checkpoint_finished));
+    };
+    if let (Some(operator_finished), Some(pre_commit)) = (subtask_details.finish_time, pre_commit) {
+        event_spans.committing = Some((operator_finished, pre_commit.time));
+    }
+
+    event_spans
 }
 
 pub trait FromOpts: Sized {
