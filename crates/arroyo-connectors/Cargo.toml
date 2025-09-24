@@ -45,6 +45,7 @@ ulid = "1.2.1"
 schemars = "1.0.4"
 strum = "0.27"
 strum_macros = "0.27"
+sha2 = "0.10"
 
 ##########################
 # connector dependencies #

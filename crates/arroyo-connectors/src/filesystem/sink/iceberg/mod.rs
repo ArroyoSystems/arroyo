@@ -6,6 +6,7 @@ use crate::filesystem::sink::FinishedFile;
 use arrow::datatypes::Schema;
 use arrow::datatypes::{DataType, Field, Fields, UnionFields};
 use arroyo_storage::StorageProvider;
+use arroyo_types::TaskInfo;
 use iceberg::spec::ManifestFile;
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
@@ -13,10 +14,12 @@ use iceberg::{Catalog, TableCreation, TableIdent};
 use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
 use itertools::Itertools;
 use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
-use std::collections::{HashMap, HashSet};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::iter::once;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, info};
+use uuid::Uuid;
 
 const CONFIG_MAPPINGS: [(&str, &str); 4] = [
     ("s3.region", "aws_region"),
@@ -25,14 +28,47 @@ const CONFIG_MAPPINGS: [(&str, &str); 4] = [
     ("s3.secret-access-key", "aws_secret_access_key"),
 ];
 
+const ARROYO_COMMIT_ID: &str = "arroyo.commit-id";
+
 #[derive(Debug)]
 pub struct IcebergTable {
+    pub task_info: Option<Arc<TaskInfo>>,
     pub catalog: RestCatalog,
     pub storage_options: HashMap<String, String>,
     pub table_ident: TableIdent,
     pub location_path: Option<String>,
     pub table: Option<Table>,
     pub manifest_files: Vec<ManifestFile>,
+}
+
+pub fn to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0xf) as usize] as char);
+    }
+    out
+}
+
+/// Unique transaction ID per epoch so we can always determine if we've already committed for
+/// this epoch without needing to scan files
+fn transaction_id(task_info: &TaskInfo, epoch: u32, table_uuid: Uuid) -> String {
+    let mut h = Sha256::new();
+    h.update("arroyo-txid-v1");
+    h.update([0]);
+    h.update(&task_info.job_id);
+    h.update([0]);
+    h.update(&task_info.operator_id);
+    h.update([0]);
+    h.update(epoch.to_be_bytes());
+    h.update([0]);
+    h.update(table_uuid.as_bytes());
+
+    let digest = h.finalize();
+    let short = &digest[..16]; // 16 bytes is enough
+
+    format!("tx-{}", to_hex(short))
 }
 
 impl IcebergTable {
@@ -60,6 +96,7 @@ impl IcebergTable {
                 )?;
 
                 Ok(Self {
+                    task_info: None,
                     catalog,
                     location_path: sink.location_path.clone(),
                     storage_options: sink.storage_options.clone(),
@@ -71,10 +108,16 @@ impl IcebergTable {
         }
     }
 
-    pub async fn load_or_create(&mut self, schema: &Schema) -> anyhow::Result<&Table> {
+    pub async fn load_or_create(
+        &mut self,
+        task_info: Arc<TaskInfo>,
+        schema: &Schema,
+    ) -> anyhow::Result<&Table> {
         if self.table.is_some() {
             return Ok(self.table.as_ref().unwrap());
         }
+
+        self.task_info = Some(task_info);
 
         if !self
             .catalog
@@ -128,10 +171,11 @@ impl IcebergTable {
 
     pub async fn get_storage_provider(
         &mut self,
+        task_info: Arc<TaskInfo>,
         schema: &Schema,
     ) -> anyhow::Result<StorageProvider> {
         let storage_options = self.storage_options.clone();
-        let table = self.load_or_create(schema).await?;
+        let table = self.load_or_create(task_info, schema).await?;
         let (_, mut config) = table.file_io().clone().into_builder().into_parts();
 
         let mut our_config = HashMap::new();
@@ -163,22 +207,34 @@ impl IcebergTable {
         Ok(StorageProvider::for_url_with_options(&location, our_config).await?)
     }
 
-    pub async fn commit(&mut self, finished_files: &[FinishedFile]) -> anyhow::Result<()> {
+    pub async fn commit(
+        &mut self,
+        epoch: u32,
+        finished_files: &[FinishedFile],
+    ) -> anyhow::Result<()> {
         if finished_files.is_empty() {
+            debug!("no new files, skipping commit");
             return Ok(());
         }
 
         let table = self.table.as_ref().expect("table must have been loaded");
-        let mut existing_files = HashSet::new();
+
+        let tx_id = transaction_id(
+            self.task_info.as_ref().unwrap(),
+            epoch,
+            table.metadata().uuid(),
+        );
 
         if let Some(current_snapshot) = table.metadata().current_snapshot() {
-            let manifest_list = current_snapshot
-                .load_manifest_list(table.file_io(), &table.metadata_ref())
-                .await?;
-            for manifest_list_entry in manifest_list.entries() {
-                let manifest = manifest_list_entry.load_manifest(table.file_io()).await?;
-                for entry in manifest.entries() {
-                    existing_files.insert(entry.file_path().to_string());
+            if let Some(existing_tx_id) = current_snapshot
+                .summary()
+                .additional_properties
+                .get(ARROYO_COMMIT_ID)
+            {
+                if *existing_tx_id == tx_id {
+                    // we've already committed this epoch (but crashed before it could be records), so we're good
+                    info!("epoch {epoch} already committed to iceberg, skipping");
+                    return Ok(());
                 }
             }
         }
@@ -186,7 +242,6 @@ impl IcebergTable {
         let partition_spec_id = table.metadata().default_partition_spec_id();
         let files: Vec<_> = finished_files
             .iter()
-            .filter(|f| !existing_files.contains(f.filename.as_str()))
             .map(|f| {
                 build_datafile_from_meta(
                     table.metadata().current_schema(),
@@ -213,6 +268,11 @@ impl IcebergTable {
         let tx = Transaction::new(table);
         let tx = tx
             .fast_append()
+            .set_snapshot_properties(
+                [(ARROYO_COMMIT_ID.to_string(), tx_id)]
+                    .into_iter()
+                    .collect(),
+            )
             .add_data_files(files)
             .with_check_duplicate(false)
             .apply(tx)?;

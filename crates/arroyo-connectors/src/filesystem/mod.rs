@@ -21,7 +21,9 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_storage::{BackendConfig, StorageProvider};
+use arroyo_types::TaskInfo;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 const ICON: &str = include_str!("./filesystem.svg");
 
@@ -34,6 +36,7 @@ pub enum TableFormat {
 impl TableFormat {
     pub async fn get_storage_provider(
         &mut self,
+        task_info: Arc<TaskInfo>,
         config: &FileSystemSink,
         schema: &Schema,
     ) -> anyhow::Result<StorageProvider> {
@@ -42,7 +45,7 @@ impl TableFormat {
                 StorageProvider::for_url_with_options(&config.path, config.storage_options.clone())
                     .await?
             }
-            TableFormat::Iceberg(table) => table.get_storage_provider(schema).await?,
+            TableFormat::Iceberg(table) => table.get_storage_provider(task_info, schema).await?,
         })
     }
 }
