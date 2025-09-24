@@ -41,6 +41,10 @@ RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm instal
 
 COPY docker/refinery.toml refinery.toml
 
+ENV LIBRARY_PATH=/usr/local/lib \
+    RUSTFLAGS="-L native=/usr/local/lib -Clink-arg=-Wl,-rpath,/usr/local/lib"
+
+
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${PROFILE} \
       --mount=type=cache,target=/app/target,id=${TARGETPLATFORM}-${PROFILE} \
     service postgresql start && \
@@ -73,6 +77,7 @@ RUN cp -r /python/bin/* /usr/local/bin/ && \
 ENV INSTALL_RUSTC=true \
     INSTALL_CLANG=true \
     ARROYO__API__RUN_HTTP_PORT=5115
+
 
 EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
