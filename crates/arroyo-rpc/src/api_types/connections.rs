@@ -5,7 +5,9 @@ use ahash::HashSet;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
-use serde::{Deserialize, Serialize};
+use serde::__private::ser::FlatMapSerializer;
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -180,17 +182,78 @@ pub struct TimestampField {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct StructField {
-    pub name: Option<String>,
     pub fields: Vec<SourceField>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ListField {
-    pub items: Box<SourceField>,
+    pub items: Box<ListFieldItem>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+fn default_item_name() -> String {
+    "item".to_string()
+}
+
+#[derive(Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ListFieldItem {
+    #[serde(default = "default_item_name")]
+    pub name: String,
+
+    #[serde(flatten)]
+    pub field_type: FieldType,
+
+    #[serde(default)]
+    pub required: bool,
+
+    #[serde(default)]
+    #[schema(read_only)]
+    pub sql_name: Option<String>,
+}
+
+impl From<ListFieldItem> for Field {
+    fn from(value: ListFieldItem) -> Self {
+        SourceField {
+            name: value.name,
+            field_type: value.field_type,
+            required: value.required,
+            sql_name: None,
+            metadata_key: None,
+        }
+        .into()
+    }
+}
+
+impl Serialize for ListFieldItem {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut f = Serializer::serialize_map(s, None)?;
+        f.serialize_entry("name", &self.name)?;
+        self.field_type.serialize(FlatMapSerializer(&mut f))?;
+        f.serialize_entry("required", &self.required)?;
+        f.serialize_entry("sql_name", &self.field_type.sql_type())?;
+        f.end()
+    }
+}
+
+impl TryFrom<Field> for ListFieldItem {
+    type Error = String;
+
+    fn try_from(value: Field) -> Result<Self, Self::Error> {
+        let source_field: SourceField = value.try_into()?;
+        Ok(Self {
+            name: source_field.name,
+            field_type: source_field.field_type,
+            required: source_field.required,
+            sql_name: None,
+        })
+    }
+}
+
+#[derive(Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SourceField {
     pub name: String,
@@ -199,9 +262,27 @@ pub struct SourceField {
     #[serde(default)]
     pub required: bool,
     #[serde(default)]
-    pub sql_name: String,
+    #[schema(read_only)]
+    pub sql_name: Option<String>,
     #[serde(default)]
     pub metadata_key: Option<String>,
+}
+
+impl Serialize for SourceField {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut f = Serializer::serialize_map(s, None)?;
+        f.serialize_entry("name", &self.name)?;
+        self.field_type.serialize(FlatMapSerializer(&mut f))?;
+        f.serialize_entry("required", &self.required)?;
+        if let Some(metadata_key) = &self.metadata_key {
+            f.serialize_entry("metadata_key", metadata_key)?;
+        }
+        f.serialize_entry("sql_name", &self.field_type.sql_type())?;
+        f.end()
+    }
 }
 
 impl From<SourceField> for Field {
@@ -286,10 +367,7 @@ impl TryFrom<Field> for SourceField {
                     .map(|f| (**f).clone().try_into())
                     .collect();
 
-                let st = StructField {
-                    name: None,
-                    fields: fields?,
-                };
+                let st = StructField { fields: fields? };
 
                 FieldType::Struct(st)
             }
@@ -301,13 +379,12 @@ impl TryFrom<Field> for SourceField {
             }
         };
 
-        let sql_name = field_type.sql_type();
         Ok(SourceField {
             name: f.name().clone(),
             field_type,
             required: !f.is_nullable(),
+            sql_name: None,
             metadata_key: None,
-            sql_name,
         })
     }
 }
@@ -512,4 +589,299 @@ pub struct ConfluentSchema {
 pub struct ConfluentSchemaQueryParams {
     pub endpoint: String,
     pub topic: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_schema::{DataType, Field as ArrowField, TimeUnit};
+    use serde_json::{json, Value as J};
+    use std::sync::Arc;
+
+    fn af(name: &str, dt: DataType, nullable: bool) -> ArrowField {
+        ArrowField::new(name, dt, nullable)
+    }
+
+    #[test]
+    fn sql_type_struct_and_list() {
+        let st = FieldType::Struct(StructField {
+            fields: vec![
+                SourceField {
+                    name: "a".into(),
+                    field_type: FieldType::Int32,
+                    required: true,
+                    sql_name: None,
+                    metadata_key: None,
+                },
+                SourceField {
+                    name: "b".into(),
+                    field_type: FieldType::String,
+                    required: false,
+                    sql_name: None,
+                    metadata_key: None,
+                },
+            ],
+        });
+        assert_eq!(st.sql_type(), "STRUCT <a INTEGER, b TEXT>");
+
+        let lf = FieldType::List(ListField {
+            items: Box::new(ListFieldItem {
+                name: "item".into(),
+                field_type: FieldType::Bool,
+                required: false,
+                sql_name: None,
+            }),
+        });
+        assert_eq!(lf.sql_type(), "BOOLEAN[]");
+    }
+
+    #[test]
+    fn sourcefield_custom_serialize() {
+        let sf = SourceField {
+            name: "x".into(),
+            field_type: FieldType::Timestamp(TimestampField {
+                unit: TimestampUnit::Microsecond,
+            }),
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j = serde_json::to_value(&sf).unwrap();
+
+        assert_eq!(j.get("name"), Some(&J::String("x".into())));
+        assert_eq!(j.get("required"), Some(&J::Bool(true)));
+        assert_eq!(j.get("type"), Some(&J::String("timestamp".into())));
+        assert_eq!(j.pointer("/unit"), Some(&J::String("microsecond".into())));
+        assert_eq!(j.get("sql_name"), Some(&J::String("TIMESTAMP(6)".into())));
+    }
+
+    #[test]
+    fn sourcefield_to_arrow_and_back_primitives() {
+        let sf = SourceField {
+            name: "flag".into(),
+            field_type: FieldType::Bool,
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+
+        let arrow: ArrowField = sf.clone().into();
+        assert_eq!(arrow.name(), "flag");
+        assert_eq!(arrow.data_type(), &DataType::Boolean);
+        assert!(!arrow.is_nullable());
+
+        let round: SourceField = arrow.try_into().unwrap();
+        assert_eq!(round, sf);
+    }
+
+    #[test]
+    fn json_extension_roundtrip() {
+        let sf = SourceField {
+            name: "payload".into(),
+            field_type: FieldType::Json,
+            required: false,
+            sql_name: None,
+            metadata_key: None,
+        };
+
+        let arrow: ArrowField = sf.clone().into();
+        assert_eq!(arrow.data_type(), &DataType::Utf8);
+        let back: SourceField = arrow.try_into().unwrap();
+        assert_eq!(back.field_type, FieldType::Json);
+    }
+
+    #[test]
+    fn struct_roundtrip() {
+        let sf = SourceField {
+            name: "s".into(),
+            field_type: FieldType::Struct(StructField {
+                fields: vec![
+                    SourceField {
+                        name: "id".into(),
+                        field_type: FieldType::Int64,
+                        required: true,
+                        sql_name: None,
+                        metadata_key: None,
+                    },
+                    SourceField {
+                        name: "name".into(),
+                        field_type: FieldType::String,
+                        required: false,
+                        sql_name: None,
+                        metadata_key: None,
+                    },
+                ],
+            }),
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+
+        let arrow: ArrowField = sf.clone().into();
+        match arrow.data_type() {
+            DataType::Struct(fields) => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name(), "id");
+                assert_eq!(fields[1].name(), "name");
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+
+        let round: SourceField = arrow.try_into().unwrap();
+        assert_eq!(round, sf);
+    }
+
+    #[test]
+    fn list_item_conversions() {
+        let item = ListFieldItem {
+            name: "elem".into(),
+            field_type: FieldType::Int32,
+            required: true,
+            sql_name: None,
+        };
+        let as_field: ArrowField = Field::from(SourceField {
+            name: item.name.clone(),
+            field_type: item.field_type.clone(),
+            required: item.required,
+            sql_name: None,
+            metadata_key: None,
+        });
+
+        let list_arrow = af("nums", DataType::List(Arc::new(as_field.clone())), true);
+
+        let recovered_item: ListFieldItem = (**match list_arrow.data_type() {
+            DataType::List(inner) => inner,
+            _ => panic!("expected list"),
+        })
+        .clone()
+        .try_into()
+        .unwrap();
+
+        assert_eq!(recovered_item.name, "elem");
+        assert_eq!(recovered_item.field_type, FieldType::Int32);
+        assert!(recovered_item.required);
+    }
+
+    #[test]
+    fn list_without_name() {
+        let json = json!({
+            "name": "my_list",
+            "type": "list",
+            "items": {
+                "type": "int32",
+                "required": true
+            }
+        });
+
+        let field: SourceField = serde_json::from_value(json).unwrap();
+        assert_eq!(field.name.as_str(), "my_list");
+        assert!(!field.required);
+
+        assert_eq!(
+            field.field_type,
+            FieldType::List(ListField {
+                items: Box::new(ListFieldItem {
+                    name: "item".to_string(),
+                    field_type: FieldType::Int32,
+                    required: true,
+                    sql_name: None,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn list_roundtrip_from_fieldtype() {
+        let schema_field = SourceField {
+            name: "tags".into(),
+            field_type: FieldType::List(ListField {
+                items: Box::new(ListFieldItem {
+                    name: "item".into(),
+                    field_type: FieldType::String,
+                    required: false,
+                    sql_name: None,
+                }),
+            }),
+            required: false,
+            sql_name: None,
+            metadata_key: None,
+        };
+
+        let arrow: ArrowField = schema_field.clone().into();
+        match arrow.data_type() {
+            DataType::List(inner) => {
+                assert_eq!(inner.name(), "item");
+                assert_eq!(inner.data_type(), &DataType::Utf8);
+            }
+            dt => panic!("expected List, got {dt:?}"),
+        }
+
+        let round: SourceField = arrow.try_into().unwrap();
+        assert_eq!(round, schema_field);
+    }
+
+    #[test]
+    fn connection_schema_arroyo_schema_mapping() {
+        let fields = vec![
+            SourceField {
+                name: "id".into(),
+                field_type: FieldType::Int64,
+                required: true,
+                sql_name: None,
+                metadata_key: None,
+            },
+            SourceField {
+                name: "ts".into(),
+                field_type: FieldType::Timestamp(TimestampField {
+                    unit: TimestampUnit::Millisecond,
+                }),
+                required: false,
+                sql_name: None,
+                metadata_key: None,
+            },
+        ];
+
+        let cs = ConnectionSchema {
+            format: None,
+            bad_data: None,
+            framing: None,
+            fields: fields.clone(),
+            definition: None,
+            inferred: Some(false),
+            primary_keys: ["id".to_string()].into_iter().collect(),
+        };
+
+        let arroyo = cs.arroyo_schema();
+        let a_fields = arroyo.schema.fields();
+        assert_eq!(a_fields.len(), 3);
+        assert_eq!(a_fields[0].name(), "id");
+        assert_eq!(a_fields[1].name(), "ts");
+        assert_eq!(a_fields[0].data_type(), &DataType::Int64);
+        assert_eq!(
+            a_fields[1].data_type(),
+            &DataType::Timestamp(TimeUnit::Millisecond, None)
+        );
+    }
+
+    #[test]
+    fn arrow_roundtrip_timestamp_units() {
+        for (unit, tu) in [
+            (TimeUnit::Second, TimestampUnit::Second),
+            (TimeUnit::Millisecond, TimestampUnit::Millisecond),
+            (TimeUnit::Microsecond, TimestampUnit::Microsecond),
+            (TimeUnit::Nanosecond, TimestampUnit::Nanosecond),
+        ] {
+            let sf = SourceField {
+                name: "ts".into(),
+                field_type: FieldType::Timestamp(TimestampField { unit: tu.clone() }),
+                required: true,
+                sql_name: None,
+                metadata_key: None,
+            };
+            let a: ArrowField = sf.clone().into();
+            assert_eq!(a.data_type(), &DataType::Timestamp(unit, None));
+            let back: SourceField = a.try_into().unwrap();
+            assert_eq!(back, sf);
+        }
+    }
 }

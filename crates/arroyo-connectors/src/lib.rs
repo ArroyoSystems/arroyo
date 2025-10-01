@@ -84,7 +84,7 @@ pub(crate) fn source_field(name: &str, field_type: FieldType) -> SourceField {
         field_type,
         required: true,
         metadata_key: None,
-        sql_name,
+        sql_name: Some(sql_name),
     }
 }
 
