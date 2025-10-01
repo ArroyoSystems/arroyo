@@ -1,10 +1,11 @@
 pub mod metadata;
+pub mod schema;
 
 use crate::filesystem::config::{IcebergCatalog, IcebergSink};
 use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
+use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 use crate::filesystem::sink::FinishedFile;
 use arrow::datatypes::Schema;
-use arrow::datatypes::{DataType, Field, Fields, UnionFields};
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use iceberg::spec::ManifestFile;
@@ -13,7 +14,6 @@ use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::{Catalog, TableCreation, TableIdent};
 use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
 use itertools::Itertools;
-use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::iter::once;
@@ -284,141 +284,5 @@ impl IcebergTable {
         self.table = Some(self.catalog.load_table(&self.table_ident).await?);
 
         Ok(())
-    }
-}
-
-/// Add metadata "PARQUET:field_id" to every field , which is required by the arrow -> iceberg
-/// schema conversion code from iceberg-rust
-pub fn add_parquet_field_ids(schema: &Schema) -> Schema {
-    let mut next_id: i32 = 1;
-    let new_fields: Fields = schema
-        .fields()
-        .iter()
-        .map(|f| annotate_field(f, &mut next_id))
-        .collect();
-
-    Schema::new_with_metadata(new_fields, schema.metadata().clone())
-}
-
-fn annotate_field(field: &Field, next_id: &mut i32) -> Field {
-    let new_dt = match field.data_type() {
-        DataType::Struct(children) => {
-            let ch: Fields = children
-                .iter()
-                .map(|c| annotate_field(c, next_id))
-                .collect();
-            DataType::Struct(ch)
-        }
-        DataType::List(child) => {
-            let c = Arc::new(annotate_field(child, next_id));
-            DataType::List(c)
-        }
-        DataType::LargeList(child) => {
-            let c = Arc::new(annotate_field(child, next_id));
-            DataType::LargeList(c)
-        }
-        DataType::FixedSizeList(child, len) => {
-            let c = Arc::new(annotate_field(child, next_id));
-            DataType::FixedSizeList(c, *len)
-        }
-        DataType::Map(entry_field, keys_sorted) => {
-            let e = Arc::new(annotate_field(entry_field, next_id));
-            DataType::Map(e, *keys_sorted)
-        }
-        DataType::Union(fields, mode) => {
-            let new_fields_vec: Vec<Field> = fields
-                .iter()
-                .map(|(_, f)| annotate_field(f, next_id))
-                .collect();
-            let type_ids: Vec<i8> = fields.iter().map(|(id, _)| id).collect();
-            let uf = UnionFields::new(type_ids, new_fields_vec);
-            DataType::Union(uf, *mode)
-        }
-        other => other.clone(),
-    };
-
-    let mut md = field.metadata().clone();
-    md.insert(PARQUET_FIELD_ID_META_KEY.to_string(), next_id.to_string());
-    *next_id += 1;
-
-    Field::new(field.name(), new_dt, field.is_nullable()).with_metadata(md)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::add_parquet_field_ids;
-    use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-    use std::sync::Arc;
-
-    #[test]
-    fn test_adds_parquet_field_ids_recursively() {
-        let struct_field = Field::new(
-            "props",
-            DataType::Struct(
-                vec![
-                    Field::new("k", DataType::Utf8, true),
-                    Field::new("v", DataType::Utf8, true),
-                ]
-                .into(),
-            ),
-            true,
-        );
-
-        let list_field = Field::new(
-            "tags",
-            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-            true,
-        );
-
-        let id_field = Field::new("id", DataType::Int64, false);
-        let price_field = Field::new("price", DataType::Decimal128(10, 2), true);
-        let active_field = Field::new("active", DataType::Boolean, true);
-        let ts_field = Field::new(
-            "ts",
-            DataType::Timestamp(TimeUnit::Microsecond, None),
-            false,
-        );
-
-        let schema = Schema::new(vec![
-            id_field,
-            price_field,
-            active_field,
-            ts_field,
-            list_field,
-            struct_field,
-        ]);
-
-        let out = add_parquet_field_ids(&schema);
-
-        let has_id = |f: &Field| {
-            f.metadata()
-                .get("PARQUET:field_id")
-                .map(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
-                .unwrap_or(false)
-        };
-
-        let fields = out.fields();
-        assert!(has_id(&fields[0]), "id missing PARQUET:field_id");
-        assert!(has_id(&fields[1]), "price missing PARQUET:field_id");
-        assert!(has_id(&fields[2]), "active missing PARQUET:field_id");
-        assert!(has_id(&fields[3]), "ts missing PARQUET:field_id");
-        assert!(has_id(&fields[4]), "tags (list) missing PARQUET:field_id");
-        assert!(
-            has_id(&fields[5]),
-            "props (struct) missing PARQUET:field_id"
-        );
-
-        if let DataType::List(inner) = fields[4].data_type() {
-            assert!(has_id(inner), "list inner field missing PARQUET:field_id");
-        } else {
-            panic!("tags not a List");
-        }
-
-        if let DataType::Struct(children) = fields[5].data_type() {
-            assert!(has_id(&children[0]), "struct.k missing PARQUET:field_id");
-            assert!(has_id(&children[1]), "struct.v missing PARQUET:field_id");
-        } else {
-            panic!("props not a Struct");
-        }
     }
 }

@@ -3,9 +3,12 @@ use super::{
     BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
 };
 use crate::filesystem::config;
-use crate::filesystem::sink::iceberg::add_parquet_field_ids;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::filesystem::sink::iceberg::schema::{
+    add_parquet_field_ids, normalize_batch_to_schema, update_field_ids_to_iceberg,
+};
 use anyhow::Result;
+use arrow::datatypes::SchemaRef;
 use arrow::{
     array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
     compute::{sort_to_indices, take},
@@ -92,6 +95,7 @@ pub struct ParquetBatchBufferingWriter {
     buffer: SharedBuffer,
     row_group_size_bytes: usize,
     schema: ArroyoSchemaRef,
+    writer_schema: SchemaRef,
     iceberg_schema: Option<iceberg::spec::SchemaRef>,
     event_logger: FsEventLogger,
 }
@@ -112,9 +116,18 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
 
         let buffer = SharedBuffer::new(row_group_size_bytes);
 
+        let mut writer_schema = Arc::new(add_parquet_field_ids(&schema.schema_without_timestamp()));
+
+        if let Some(iceberg) = &iceberg_schema {
+            writer_schema = Arc::new(
+                update_field_ids_to_iceberg(&writer_schema, iceberg)
+                    .expect("failed to assign iceberg ids to schema"),
+            );
+        }
+
         let writer = ArrowWriter::try_new(
             buffer.clone(),
-            Arc::new(add_parquet_field_ids(&schema.schema_without_timestamp())),
+            writer_schema.clone(),
             Some(writer_properties),
         )
         .unwrap();
@@ -123,6 +136,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
             writer: Some(writer),
             buffer,
             row_group_size_bytes,
+            writer_schema,
             schema,
             iceberg_schema,
             event_logger,
@@ -139,6 +153,11 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         // remove timestamp column
         let mut data = data.clone();
         self.schema.remove_timestamp_column(&mut data);
+
+        if self.iceberg_schema.is_some() {
+            data = normalize_batch_to_schema(&data, &self.writer_schema)
+                .expect("could not normalize batch");
+        }
 
         let prev_size = writer.in_progress_size();
         writer.write(&data).unwrap();
