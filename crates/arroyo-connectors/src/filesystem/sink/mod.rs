@@ -1,9 +1,4 @@
-use ::arrow::{
-    array::StringBuilder,
-    datatypes::{DataType, TimeUnit},
-    record_batch::RecordBatch,
-    util::display::{ArrayFormatter, FormatOptions},
-};
+use ::arrow::{datatypes::DataType, record_batch::RecordBatch};
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
@@ -13,14 +8,11 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use datafusion::execution::SessionStateBuilder;
-use datafusion::logical_expr::ScalarFunctionArgs;
-use datafusion::prelude::concat;
+use datafusion::prelude::{col, concat, lit, to_char};
 use datafusion::{
-    common::{Column, Result as DFResult},
-    logical_expr::{
-        expr::ScalarFunction, Expr, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature, Volatility,
-    },
-    physical_plan::{ColumnarValue, PhysicalExpr},
+    common::Column,
+    logical_expr::Expr,
+    physical_plan::PhysicalExpr,
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
     scalar::ScalarValue,
 };
@@ -29,7 +21,6 @@ use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
 use std::{
-    any::Any,
     collections::HashMap,
     fmt::{Debug, Formatter},
     marker::PhantomData,
@@ -187,7 +178,7 @@ fn partition_string_for_time(
     schema: ArroyoSchemaRef,
     time_partition_pattern: &str,
 ) -> Result<Arc<dyn PhysicalExpr>> {
-    let function = timestamp_logical_expression(time_partition_pattern)?;
+    let function = timestamp_logical_expression(time_partition_pattern);
     compile_expression(&function, schema)
 }
 
@@ -197,7 +188,7 @@ fn partition_string_for_fields_and_time(
     time_partition_pattern: &str,
 ) -> Result<Arc<dyn PhysicalExpr>> {
     let field_function = field_logical_expression(schema.clone(), partition_fields)?;
-    let time_function = timestamp_logical_expression(time_partition_pattern)?;
+    let time_function = timestamp_logical_expression(time_partition_pattern);
     let function = concat(vec![
         time_function,
         Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
@@ -206,7 +197,10 @@ fn partition_string_for_fields_and_time(
     compile_expression(&function, schema)
 }
 
-fn compile_expression(expr: &Expr, schema: ArroyoSchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
+pub(crate) fn compile_expression(
+    expr: &Expr,
+    schema: ArroyoSchemaRef,
+) -> Result<Arc<dyn PhysicalExpr>> {
     let physical_planner = DefaultPhysicalPlanner::default();
     let session_state = SessionStateBuilder::new().build();
 
@@ -251,14 +245,8 @@ fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]
     Ok(function)
 }
 
-fn timestamp_logical_expression(time_partition_pattern: &str) -> Result<Expr> {
-    let udf = TimestampFormattingUDF::new(time_partition_pattern.to_string());
-    let scalar_function = ScalarFunction::new_udf(
-        Arc::new(ScalarUDF::new_from_impl(udf)),
-        vec![Expr::Column(Column::from_name(TIMESTAMP_FIELD))],
-    );
-    let function = Expr::ScalarFunction(scalar_function);
-    Ok(function)
+pub(crate) fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
+    to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
 }
 
 #[derive(Clone)]
@@ -1928,62 +1916,55 @@ pub(crate) fn add_suffix_prefix(
     }
 }
 
-#[derive(Debug)]
-pub struct TimestampFormattingUDF {
-    // TODO: figure out how to manage this with lifetimes.
-    pattern: String,
-    signature: Signature,
-}
+#[cfg(test)]
+mod tests {
+    use crate::filesystem::sink::{compile_expression, timestamp_logical_expression};
+    use arrow::array::{AsArray, RecordBatch, TimestampNanosecondArray};
+    use arroyo_rpc::df::ArroyoSchema;
+    use datafusion::logical_expr::ColumnarValue;
+    use std::sync::Arc;
 
-impl TimestampFormattingUDF {
-    // Initialization method
-    pub fn new(pattern: String) -> Self {
-        TimestampFormattingUDF {
-            pattern,
-            signature: Signature::new(
-                TypeSignature::Exact(vec![DataType::Timestamp(TimeUnit::Nanosecond, None)]),
-                Volatility::Immutable,
-            ),
+    fn test_pattern(pattern: &str, expected: &str) -> anyhow::Result<()> {
+        let pattern = timestamp_logical_expression(pattern);
+
+        let test_schema = Arc::new(ArroyoSchema::from_fields(vec![]));
+
+        let expr = compile_expression(&pattern, test_schema.clone()).unwrap();
+
+        let data = RecordBatch::try_new(
+            test_schema.schema.clone(),
+            vec![Arc::new(TimestampNanosecondArray::from_value(
+                1759871368595325952,
+                1,
+            ))],
+        )
+        .unwrap();
+
+        match expr.evaluate(&data)? {
+            ColumnarValue::Array(a) => {
+                assert_eq!(a.as_string::<i32>().value(0), expected)
+            }
+            ColumnarValue::Scalar(_) => {
+                panic!("should be array");
+            }
         }
-    }
-}
 
-impl ScalarUDFImpl for TimestampFormattingUDF {
-    fn as_any(&self) -> &dyn Any {
-        self
+        Ok(())
     }
 
-    fn name(&self) -> &str {
-        "partitioning_formatter"
-    }
+    #[test]
+    fn test_timestamp_udf() {
+        test_pattern("%Y", "2025").unwrap();
+        test_pattern("%Y-%m-%d", "2025-10-07").unwrap();
+        test_pattern("%Y%m%d", "20251007").unwrap();
+        test_pattern("%H", "21").unwrap();
+        test_pattern("%H:%M:%S", "21:09:28").unwrap();
+        test_pattern("%Y/%m/%d/%H", "2025/10/07/21").unwrap();
+        test_pattern("year=%Y/month=%m/day=%d", "year=2025/month=10/day=07").unwrap();
+        test_pattern("%Y-%m-%dT%H:%M:%S%.3fZ", "2025-10-07T21:09:28.595Z").unwrap();
+        test_pattern("literal_text_%Y%m%d", "literal_text_20251007").unwrap();
 
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DFResult<DataType> {
-        Ok(DataType::Utf8)
-    }
-
-    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
-        let args = args.args;
-        let (array, scalar) = match &args[0] {
-            ColumnarValue::Array(array) => (array.clone(), false),
-            ColumnarValue::Scalar(scalar) => (scalar.to_array_of_size(1)?, true),
-        };
-        let items = array.len();
-        let mut result = StringBuilder::with_capacity(items, 20 * items);
-        let format_options = FormatOptions::new().with_timestamp_format(Some(&self.pattern));
-        let formatter = ArrayFormatter::try_new(array.as_ref(), &format_options)?;
-        for i in 0..items {
-            result.append_value(format!("{}", formatter.value(i)));
-        }
-        if scalar {
-            Ok(ColumnarValue::Scalar(ScalarValue::Utf8(Some(
-                result.finish().value(0).to_string(),
-            ))))
-        } else {
-            Ok(ColumnarValue::Array(Arc::new(result.finish())))
-        }
+        // invalid pattern
+        test_pattern("%F/%H%M%S%L", "").unwrap_err();
     }
 }
