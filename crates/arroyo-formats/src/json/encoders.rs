@@ -1,8 +1,8 @@
 use arrow_array::cast::AsArray;
 use arrow_array::{
-    Array, Date32Array, Date64Array, Decimal128Array, GenericStringArray, OffsetSizeTrait,
-    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray,
+    Array, ArrayAccessor, Date32Array, Date64Array, Decimal128Array, GenericStringArray,
+    OffsetSizeTrait, TimestampMicrosecondArray, TimestampMillisecondArray,
+    TimestampNanosecondArray, TimestampSecondArray,
 };
 use arrow_json::writer::NullableEncoder;
 use arrow_json::{Encoder, EncoderFactory, EncoderOptions};
@@ -10,7 +10,9 @@ use arrow_schema::{ArrowError, DataType, FieldRef, TimeUnit};
 use arroyo_rpc::formats::{DecimalEncoding, TimestampFormat};
 use arroyo_types::ArroyoExtensionType;
 use base64::prelude::BASE64_STANDARD;
+use base64::write::EncoderWriter;
 use base64::Engine;
+use std::io::Write;
 
 /// Custom JSON encoder factory that adds some Arroyo-specific features:
 ///   * Customizable time format handling, controlled by the supplied `TimestampFormat`
@@ -116,6 +118,8 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
+            (_, _, DataType::Binary) => Box::new(BinaryEncoder(array.as_binary::<i32>())),
+            (_, _, DataType::LargeBinary) => Box::new(BinaryEncoder(array.as_binary::<i64>())),
             _ => {
                 return Ok(None);
             }
@@ -181,5 +185,24 @@ impl<O: OffsetSizeTrait> Encoder for RawJsonEncoder<O> {
                 // cannot fail when writing to a Vec buffer
                 .unwrap()
         }
+    }
+}
+
+/// New-type wrapper for encoding the binary types in arrow: `Binary` and `LargeBinary`
+/// as base64 strings in JSON.
+struct BinaryEncoder<B>(B);
+
+impl<'a, B> Encoder for BinaryEncoder<B>
+where
+    B: ArrayAccessor<Item = &'a [u8]>,
+{
+    fn encode(&mut self, idx: usize, out: &mut Vec<u8>) {
+        out.push(b'"');
+        let mut writer = EncoderWriter::new(out, &BASE64_STANDARD);
+        // infallible because the underlying writer is a Vec
+        writer.write_all(self.0.value(idx)).unwrap();
+        let out = writer.finish().unwrap();
+
+        out.push(b'"');
     }
 }

@@ -571,4 +571,47 @@ mod tests {
             r#"{"value":"///////////////////+cQ=="}"#.to_string()
         );
     }
+
+    #[test]
+    fn test_json_binary() {
+        let mut serializer = ArrowSerializer::new(Format::Json(arroyo_rpc::formats::JsonFormat {
+            ..Default::default()
+        }));
+
+        let binary = vec![
+            b"hello".as_slice(),
+            b"123123".as_slice(),
+            [0, 1, 2, 3, 4].as_slice(),
+        ];
+
+        let ts: Vec<_> = binary
+            .iter()
+            .enumerate()
+            .map(|(i, _)| to_nanos(SystemTime::now() + Duration::from_secs(i as u64)) as i64)
+            .collect();
+
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("value", arrow_schema::DataType::Binary, false),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let batch = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(arrow_array::GenericBinaryArray::<i32>::from(binary)),
+                Arc::new(arrow_array::TimestampNanosecondArray::from(ts)),
+            ],
+        )
+        .unwrap();
+
+        let mut iter = serializer.serialize(&batch);
+        assert_eq!(iter.next().unwrap(), br#"{"value":"aGVsbG8="}"#);
+        assert_eq!(iter.next().unwrap(), br#"{"value":"MTIzMTIz"}"#);
+        assert_eq!(iter.next().unwrap(), br#"{"value":"AAECAwQ="}"#);
+        assert_eq!(iter.next(), None);
+    }
 }
