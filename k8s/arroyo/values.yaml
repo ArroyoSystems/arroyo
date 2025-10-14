@@ -72,6 +72,11 @@ postgresql:
     create: true
     name: arroyo-postgresql
 
+  # for now, use the legacy bitnami images while we figure out how to migrate off
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 15.3.0-debian-11-r24
 
 prometheus:
   # set to true to enable prometheus annotations on Arroyo cluster resources; if false,
