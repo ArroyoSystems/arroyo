@@ -5,7 +5,7 @@ use super::{
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::iceberg::schema::{
-    add_parquet_field_ids, normalize_batch_to_schema, update_field_ids_to_iceberg,
+    normalize_batch_to_schema, update_field_ids_to_iceberg,
 };
 use anyhow::Result;
 use arrow::array::{Array, RecordBatch, TimestampNanosecondArray};
@@ -113,14 +113,13 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
 
         let buffer = SharedBuffer::new(row_group_size_bytes);
 
-        let mut writer_schema = Arc::new(add_parquet_field_ids(&schema.schema_without_timestamp()));
-
+        let mut writer_schema = schema.schema_without_timestamp();
         if let Some(iceberg) = &iceberg_schema {
-            writer_schema = Arc::new(
-                update_field_ids_to_iceberg(&writer_schema, iceberg)
-                    .expect("failed to assign iceberg ids to schema"),
-            );
-        }
+            writer_schema = update_field_ids_to_iceberg(&writer_schema, iceberg)
+                .expect("failed to assign iceberg ids to schema")
+        };
+
+        let writer_schema = Arc::new(writer_schema);
 
         let writer = ArrowWriter::try_new(
             buffer.clone(),
