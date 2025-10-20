@@ -512,6 +512,13 @@ impl FromOpts for IcebergProfile {
     }
 }
 
+/// Iceberg partitioning configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IcebergPartitioning {
+    
+}
+
 fn default_namespace() -> String {
     "default".into()
 }
