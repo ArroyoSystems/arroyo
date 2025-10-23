@@ -114,6 +114,7 @@ rustls = "0.22"
 # NATS
 async-nats = "0.38.0"
 nkeys = "0.3.0"
+murmur3 = "0.5.2"
 
 [build-dependencies]
 glob = "0.3"

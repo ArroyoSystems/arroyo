@@ -596,6 +596,7 @@ dependencies = [
  "iceberg",
  "iceberg-catalog-rest",
  "itertools 0.14.0",
+ "murmur3",
  "nkeys 0.3.2",
  "num-bigint",
  "object_store",

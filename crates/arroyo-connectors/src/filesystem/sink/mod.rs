@@ -92,8 +92,8 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             table: config,
             format,
             commit_strategy: match &table_format {
-                TableFormat::None => CommitStrategy::PerSubtask,
-                TableFormat::Delta | TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
+                TableFormat::None { .. } => CommitStrategy::PerSubtask,
+                TableFormat::Delta { .. } | TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
             },
             table_format: Some(table_format),
 
@@ -151,18 +151,24 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
 }
 
 fn get_partitioner_from_file_settings(
-    partitioning: &PartitioningConfig,
+    table_format: &TableFormat,
     schema: ArroyoSchemaRef,
 ) -> Option<Arc<dyn PhysicalExpr>> {
-    match (&partitioning.time_pattern, &partitioning.fields) {
-        (None, fields) if !fields.is_empty() => {
-            Some(partition_string_for_fields(schema, fields).unwrap())
+    match table_format {
+        TableFormat::None { partitioning } |
+        TableFormat::Delta { partitioning } => {
+            match (&partitioning.time_pattern, &partitioning.fields) {
+                (None, fields) if !fields.is_empty() => {
+                    Some(partition_string_for_fields(schema, fields).unwrap())
+                }
+                (None, _) => None,
+                (Some(pattern), fields) if !fields.is_empty() => {
+                    Some(partition_string_for_fields_and_time(schema, fields, pattern).unwrap())
+                }
+                (Some(pattern), _) => Some(partition_string_for_time(schema, pattern).unwrap()),
+            }
         }
-        (None, _) => None,
-        (Some(pattern), fields) if !fields.is_empty() => {
-            Some(partition_string_for_fields_and_time(schema, fields, pattern).unwrap())
-        }
-        (Some(pattern), _) => Some(partition_string_for_time(schema, pattern).unwrap()),
+        TableFormat::Iceberg(table) => table.partitioning_expr(),
     }
 }
 
@@ -788,13 +794,13 @@ where
     ) -> Result<Self> {
         let mut iceberg_schema = None;
         let commit_state = match table_format {
-            TableFormat::Delta => CommitState::DeltaLake {
+            TableFormat::Delta { .. } => CommitState::DeltaLake {
                 last_version: -1,
                 table: Box::new(
                     load_or_create_table(&object_store, &schema.schema_without_timestamp()).await?,
                 ),
             },
-            TableFormat::None => CommitState::VanillaParquet,
+            TableFormat::None { .. } => CommitState::VanillaParquet,
             TableFormat::Iceberg(mut table) => {
                 let t = table.load_or_create(task_info, &schema.schema).await?;
                 iceberg_schema = Some(t.metadata().current_schema().clone());

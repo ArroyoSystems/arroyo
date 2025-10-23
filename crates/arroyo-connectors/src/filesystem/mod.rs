@@ -28,8 +28,12 @@ use std::sync::Arc;
 const ICON: &str = include_str!("./filesystem.svg");
 
 pub enum TableFormat {
-    None,
-    Delta,
+    None {
+        partitioning: PartitioningConfig
+    },
+    Delta {
+        partitioning: PartitioningConfig
+    },
     Iceberg(Box<sink::iceberg::IcebergTable>),
 }
 
@@ -41,7 +45,7 @@ impl TableFormat {
         schema: &Schema,
     ) -> anyhow::Result<StorageProvider> {
         Ok(match self {
-            TableFormat::None | TableFormat::Delta => {
+            TableFormat::None { .. } | TableFormat::Delta { .. } => {
                 StorageProvider::for_url_with_options(&config.path, config.storage_options.clone())
                     .await?
             }
@@ -57,7 +61,7 @@ pub fn make_sink(
     connection_id: Option<String>,
 ) -> Result<ConstructedOperator> {
     let is_local = match table_format {
-        TableFormat::None | TableFormat::Delta => {
+        TableFormat::None { .. } | TableFormat::Delta { .. } => {
             let backend_config = BackendConfig::parse_url(&sink.path, true)?;
             backend_config.is_local()
         }
@@ -250,7 +254,12 @@ impl Connector for FileSystemConnector {
                     file_states: HashMap::new(),
                 },
             ))),
-            FileSystemTableType::Sink(sink) => make_sink(sink, config, TableFormat::None, None),
+            FileSystemTableType::Sink(sink) => {
+                let partitioning = sink.partitioning.clone();
+                make_sink(sink, config, TableFormat::None {
+                    partitioning,
+                }, None)
+            },
         }
     }
 }

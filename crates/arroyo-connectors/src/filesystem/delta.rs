@@ -145,19 +145,22 @@ impl Connector for DeltaLakeConnector {
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
         match table.table_type {
-            DeltaLakeTableType::Sink(sink) => make_sink(
-                FileSystemSink {
-                    path: sink.path,
-                    storage_options: sink.storage_options,
-                    rolling_policy: sink.rolling_policy,
-                    file_naming: sink.file_naming,
-                    partitioning: sink.partitioning,
-                    multipart: sink.multipart,
-                },
-                config,
-                TableFormat::Delta,
-                None,
-            ),
+            DeltaLakeTableType::Sink(sink) => {
+                let partitioning = sink.partitioning.clone();
+                make_sink(
+                    FileSystemSink {
+                        path: sink.path,
+                        storage_options: sink.storage_options,
+                        rolling_policy: sink.rolling_policy,
+                        file_naming: sink.file_naming,
+                        partitioning: sink.partitioning,
+                        multipart: sink.multipart,
+                    },
+                    config,
+                    TableFormat::Delta { partitioning } ,
+                    None,
+                )
+            },
         }
     }
 }

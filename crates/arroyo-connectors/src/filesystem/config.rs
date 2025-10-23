@@ -8,6 +8,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::num::NonZeroU64;
+use anyhow::anyhow;
+use datafusion::physical_plan::PhysicalExpr;
+use datafusion::prelude::Expr;
+use iceberg::spec::{PartitionSpec, Schema, SchemaRef};
+use prost::Message;
 use strum_macros::EnumString;
 
 const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
@@ -512,11 +517,119 @@ impl FromOpts for IcebergProfile {
     }
 }
 
-/// Iceberg partitioning configuration
+/// Iceberg partitioning transforms
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Transform {
+    /// Source value, unmodified
+    Identity,
+    /// Hash of value, mod `N`.
+    Bucket(u32),
+    /// Value truncated to width `W`
+    Truncate(u32),
+    /// Extract a date or timestamp year, as years from 1970
+    Year,
+    /// Extract a date or timestamp month, as months from 1970-01-01
+    Month,
+    /// Extract a date or timestamp day, as days from 1970-01-01
+    Day,
+    /// Extract a timestamp hour, as hours from 1970-01-01 00:00:00
+    Hour,
+    /// Always produces `null`
+    Void,
+}
+
+impl From<Transform> for iceberg::spec::Transform {
+    fn from(value: Transform) -> Self {
+        use iceberg::spec::Transform as ITransform;
+
+        match value {
+            Transform::Identity => ITransform::Identity,
+            Transform::Bucket(b) => ITransform::Bucket(b),
+            Transform::Truncate(t) => ITransform::Truncate(t),
+            Transform::Year => ITransform::Year,
+            Transform::Month => ITransform::Month,
+            Transform::Day => ITransform::Day,
+            Transform::Hour => ITransform::Hour,
+            Transform::Void => ITransform::Void,
+        }
+    }
+}
+
+
+/// Iceberg partitioning field configuration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IcebergPartitioningField {
+    pub name: Option<String>,
+    pub field: String,
+    pub transform: Transform,
+}
+
+impl IcebergPartitioningField {
+    pub fn name(&self) -> String {
+        if let Some(name) = &self.name {
+            return name.clone();
+        }
+
+        let t = match self.transform {
+            Transform::Identity => "identity".to_string(),
+            Transform::Bucket(b) => format!("bucket_{b}"),
+            Transform::Truncate(t) => format!("truncate_{t}"),
+            Transform::Year => "year".to_string(),
+            Transform::Month => "month".to_string(),
+            Transform::Day => "day".to_string(),
+            Transform::Hour => "hour".to_string(),
+            Transform::Void => "void".to_string(),
+        };
+
+        format!("{}_{}", self.field, t)
+    }
+
+    fn expr(&self) -> Expr {
+        match self.transform {
+            Transform::Identity => {}
+            Transform::Bucket(_) => {}
+            Transform::Truncate(_) => {}
+            Transform::Year => {}
+            Transform::Month => {}
+            Transform::Day => {}
+            Transform::Hour => {}
+            Transform::Void => {}
+        }
+    }
+}
+
+/// Iceberg partitioning configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IcebergPartitioning {
-    
+    /// Field names used for partitioning (bucketed layout).
+    #[schemars(
+        title = "Partition Fields",
+        description = "Fields to partition the data by"
+    )]
+    #[serde(default)]
+    pub fields: Vec<IcebergPartitioningField>,
+
+    /// Partition shuffle settings (see [`PartitionShuffle`]).
+    #[schemars(
+        title = "Partition shuffle settings",
+        description = "Advanced tuning for hash shuffling of partition keys"
+    )]
+    pub shuffle_by_partition: PartitionShuffle,
+}
+
+impl IcebergPartitioning {
+    pub fn as_partition_spec(&self, schema: SchemaRef) -> anyhow::Result<PartitionSpec> {
+        let mut builder = PartitionSpec::builder(schema.clone());
+
+        for f in &self.fields {
+            builder = builder.add_partition_field(&f.field, f.name(), f.transform.into())?;
+        }
+
+        Ok(builder.build()?)
+    }
 }
 
 fn default_namespace() -> String {
@@ -535,6 +648,14 @@ pub struct IcebergSink {
     /// Table identifier
     #[schemars(title = "Table Name", description = "Table name")]
     pub table_name: String,
+
+    #[schemars(
+        title = "Partitioning",
+        description = "Iceberg partitioning config"
+    )]
+    #[serde(default)]
+    pub partitioning: IcebergPartitioning,
+
 
     /// Optional path controlling where parquet files will be written, if creating the table
     #[schemars(title = "Location Path", description = "Data file location")]
@@ -564,6 +685,7 @@ impl FromOpts for IcebergSink {
                 .pull_opt_str("namespace")?
                 .unwrap_or_else(|| "default".to_string()),
             table_name: opts.pull_str("table_name")?,
+            partitioning: todo!(),
             location_path: opts.pull_opt_str("location_path")?,
             storage_options: pull_storage_options(opts)?,
             rolling_policy: opts.pull_struct()?,

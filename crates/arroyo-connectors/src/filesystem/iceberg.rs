@@ -1,9 +1,9 @@
 use crate::filesystem::config::{
-    FileSystemSink, IcebergProfile, IcebergSink, IcebergTable, PartitioningConfig,
+    FileSystemSink, IcebergProfile, IcebergTable, PartitioningConfig,
 };
 use crate::filesystem::{make_sink, sink, TableFormat};
 use crate::render_schema;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
@@ -13,6 +13,10 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use datafusion::common::plan_datafusion_err;
 use std::collections::HashMap;
+use std::sync::Arc;
+use arrow::datatypes::FieldRef;
+use arroyo_rpc::formats::Format;
+use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 
 pub struct IcebergConnector {}
 
@@ -76,23 +80,42 @@ impl Connector for IcebergConnector {
             .map(|s| s.to_owned())
             .ok_or_else(|| anyhow!("no schema defined for Iceberg connection"))?;
 
+        let IcebergTable::Sink(sink) = &table;
+
+        if !schema.fields.is_empty() {
+            let fields: Vec<FieldRef> = schema
+                .clone()
+                .fields
+                .into_iter()
+                .map(|f| Arc::new(f.into()))
+                .collect();
+
+            // validate that the schema can be converted to Iceberg
+            let arrow_schema = arrow::datatypes::Schema::new(fields);
+
+            let schema_with_ids = add_parquet_field_ids(&arrow_schema);
+            let ischema = iceberg::arrow::arrow_schema_to_schema(&schema_with_ids)?;
+
+            sink.partitioning.as_partition_spec(ischema.into())?;
+        }
+
+        let partitioning_fields = if sink.partitioning.shuffle_by_partition.enabled {
+            Some(sink.partitioning.fields.iter().map(|f| f.field.clone()).collect())
+        } else {
+            None
+        };
+
         let format = schema
             .format
             .as_ref()
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Iceberg connection"))?;
 
-        let (description, connection_type, partition_fields) = match &table {
-            IcebergTable::Sink(IcebergSink {
-                namespace,
-                table_name,
-                ..
-            }) => {
-                let description = format!("IcebergSink<{format}, {namespace}.{table_name}>");
-
-                (description, ConnectionType::Sink, None)
-            }
+        if !matches!(format, Format::Parquet(..)) {
+            bail!("'format' must be parquet for Iceberg sink")
         };
+
+        let description = format!("IcebergSink<{}.{}>", sink.namespace, sink.table_name);
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -108,12 +131,12 @@ impl Connector for IcebergConnector {
             id,
             self.name(),
             name.to_string(),
-            connection_type,
+            ConnectionType::Sink,
             schema,
             &config,
             description,
         )
-        .with_partition_fields(partition_fields))
+        .with_partition_fields(partitioning_fields))
     }
 
     fn from_options(
