@@ -501,7 +501,11 @@ async fn from_checkpoint(
     checkpoint_data: FileCheckpointData,
     mut pushed_size: usize,
     object_store: Arc<StorageProvider>,
+    target_multipart_size: usize,
 ) -> Result<Option<FileToFinish>> {
+    // TODO: this recovery code duplicates some complex and important logic from
+    //  BatchMultipartWriter / MultipartManager and it would be good in the future to unify them
+
     let mut parts = vec![];
     let (multipart_id, metadata) = match checkpoint_data {
         FileCheckpointData::Empty => {
@@ -517,6 +521,7 @@ async fn from_checkpoint(
                 .start_multipart(path)
                 .await
                 .expect("failed to create multipart upload");
+
             for (part_index, data) in parts_to_add.into_iter().enumerate() {
                 pushed_size += data.len();
                 let upload_part = object_store
@@ -524,19 +529,24 @@ async fn from_checkpoint(
                     .await?;
                 parts.push(upload_part);
             }
-            if let Some(trailing_bytes) = trailing_bytes {
-                pushed_size += trailing_bytes.len();
-                let upload_part = object_store
-                    .add_multipart(path, &multipart_id, parts.len(), trailing_bytes.into())
-                    .await?;
-                parts.push(upload_part);
-            }
+
+            pushed_size += write_trailing_bytes(
+                path,
+                &object_store,
+                &mut parts,
+                trailing_bytes,
+                &multipart_id,
+                target_multipart_size,
+            )
+            .await?;
+
             debug!(
                 "parts: {:?}, pushed_size: {:?}, multipart id: {:?}",
                 parts, pushed_size, multipart_id
             );
             (multipart_id, metadata)
         }
+
         FileCheckpointData::MultiPartInFlight {
             multi_part_upload_id,
             in_flight_parts,
@@ -557,18 +567,22 @@ async fn from_checkpoint(
                     }
                 }
             }
-            if let Some(trailing_bytes) = trailing_bytes {
-                pushed_size += trailing_bytes.len();
-                let upload_part = object_store
-                    .add_multipart(
-                        path,
-                        &multi_part_upload_id,
-                        parts.len(),
-                        trailing_bytes.into(),
-                    )
-                    .await?;
-                parts.push(upload_part);
-            }
+
+            pushed_size += write_trailing_bytes(
+                path,
+                &object_store,
+                &mut parts,
+                trailing_bytes,
+                &multi_part_upload_id,
+                target_multipart_size,
+            )
+            .await?;
+
+            debug!(
+                "parts: {:?}, pushed_size: {:?}, multipart id: {:?}",
+                parts, pushed_size, multi_part_upload_id
+            );
+
             (multi_part_upload_id, metadata)
         }
         FileCheckpointData::MultiPartWriterClosed {
@@ -612,6 +626,53 @@ async fn from_checkpoint(
         size: pushed_size,
         metadata,
     }))
+}
+
+async fn write_trailing_bytes(
+    path: &Path,
+    object_store: &Arc<StorageProvider>,
+    parts: &mut Vec<PartId>,
+    trailing_bytes: Option<Vec<u8>>,
+    multipart_id: &MultipartId,
+    multipart_upload_size: usize,
+) -> Result<usize> {
+    let mut pushed_size = 0;
+    if let Some(trailing_bytes) = trailing_bytes {
+        pushed_size += trailing_bytes.len();
+
+        if object_store.requires_same_part_sizes()
+            && !parts.is_empty()
+            && trailing_bytes.len() > multipart_upload_size
+        {
+            // our last part is bigger than our part size, which isn't allowed by some object stores
+            // so we need to split it up
+            debug!(
+                "final multipart upload ({}) is bigger than part size ({}) so splitting into two",
+                trailing_bytes.len(),
+                multipart_upload_size
+            );
+            let mut part1: Bytes = trailing_bytes.into();
+            let part2 = part1.split_off(multipart_upload_size);
+
+            parts.push(
+                object_store
+                    .add_multipart(path, multipart_id, parts.len(), part1)
+                    .await?,
+            );
+            parts.push(
+                object_store
+                    .add_multipart(path, multipart_id, parts.len(), part2)
+                    .await?,
+            );
+        } else {
+            parts.push(
+                object_store
+                    .add_multipart(path, multipart_id, parts.len(), trailing_bytes.into())
+                    .await?,
+            );
+        }
+    }
+    Ok(pushed_size)
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
@@ -704,7 +765,6 @@ impl RollingPolicy {
 pub struct MultiPartWriterStats {
     bytes_written: usize,
     parts_written: usize,
-    part_size: Option<usize>,
     last_write_at: Instant,
     first_write_at: Instant,
     representative_timestamp: SystemTime,
@@ -794,7 +854,9 @@ where
                                     recovered_file.partition.clone(),
                                     recovered_file.data,
                                     recovered_file.pushed_size,
-                                    self.object_store.clone()).await?;
+                                    self.object_store.clone(),
+                                    self.properties.multipart.target_part_size_bytes.unwrap_or(DEFAULT_TARGET_PART_SIZE as u64) as usize,
+                                ).await?;
 
                                 if let Some(file_to_finish) = file_to_finish {
                                     debug!("adding file to finish: {:?}", file_to_finish);
@@ -1188,6 +1250,11 @@ impl MultipartManager {
         &mut self,
         data: Bytes,
     ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
+        debug!(
+            message = "writing multipart",
+            size = data.len(),
+            id = self.multipart_id
+        );
         match &self.multipart_id {
             Some(_multipart_id) => Ok(Some(self.get_part_upload_future(PartToUpload {
                 part_index: self.pushed_parts.len(),
@@ -1547,7 +1614,6 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
                 parts_written: 0,
-                part_size: None,
                 last_write_at: Instant::now(),
                 first_write_at: Instant::now(),
                 representative_timestamp,
@@ -1559,21 +1625,14 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
         self.batch_buffering_writer.add_batch_data(&batch);
 
-        let bytes = match stats.part_size {
-            None => {
-                if self.batch_buffering_writer.buffered_bytes() >= self.target_part_size_bytes {
-                    let buf = self
-                        .batch_buffering_writer
-                        .split_to(self.target_part_size_bytes);
-                    assert!(!buf.is_empty(), "Trying to write empty part file");
-                    stats.part_size = Some(buf.len());
-                    Some(buf)
-                } else {
-                    None
-                }
-            }
-            Some(part_size) => (self.batch_buffering_writer.buffered_bytes() >= part_size)
-                .then(|| self.batch_buffering_writer.split_to(part_size)),
+        let bytes = if self.batch_buffering_writer.buffered_bytes() >= self.target_part_size_bytes {
+            let buf = self
+                .batch_buffering_writer
+                .split_to(self.target_part_size_bytes);
+            assert!(!buf.is_empty(), "Trying to write empty part file");
+            Some(buf)
+        } else {
+            None
         };
 
         if let Some(bytes) = bytes {
@@ -1637,7 +1696,13 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
         if let Some((bytes, metadata)) = self.batch_buffering_writer.close(None) {
             self.metadata = metadata;
-            let existing_part_size = self.stats.as_ref().and_then(|s| s.part_size);
+            let existing_part_size = self.stats.as_ref().and_then(|s| {
+                if s.bytes_written > 0 {
+                    Some(self.target_part_size_bytes)
+                } else {
+                    None
+                }
+            });
 
             if self
                 .multipart_manager

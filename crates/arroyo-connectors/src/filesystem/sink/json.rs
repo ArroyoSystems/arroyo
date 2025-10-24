@@ -131,7 +131,6 @@ impl LocalWriter for JsonLocalWriter {
                 representative_timestamp: representitive_timestamp(
                     batch.column(self.schema.timestamp_index),
                 )?,
-                part_size: None,
             });
         } else {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
