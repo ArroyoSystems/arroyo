@@ -14,7 +14,7 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 use super::{
-    add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
+    add_suffix_prefix, delta, parquet::batches_by_partition,
     two_phase_committer::TwoPhaseCommitterOperator, CommitState, FilenameStrategy, FinishedFile,
     MultiPartWriterStats, RollingPolicy,
 };

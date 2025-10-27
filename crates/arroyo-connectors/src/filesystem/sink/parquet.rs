@@ -17,7 +17,7 @@ use arroyo_rpc::formats::{ParquetCompression, ParquetFormat};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
 use bytes::{BufMut, Bytes, BytesMut};
-use datafusion::physical_plan::PhysicalExpr;
+use datafusion::physical_plan::{ColumnarValue, PhysicalExpr};
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},
@@ -32,6 +32,8 @@ use std::{
     sync::Arc,
     time::{Instant, SystemTime},
 };
+use datafusion::common::ScalarValue;
+use itertools::Itertools;
 
 const DEFAULT_ROW_GROUP_BYTES: u64 = 1024 * 1024 * 128; // 128MB
 
@@ -367,9 +369,10 @@ impl LocalWriter for ParquetLocalWriter {
 
 pub(crate) fn batches_by_partition(
     batch: RecordBatch,
-    partitioner: Arc<dyn PhysicalExpr>,
-) -> Result<Vec<(RecordBatch, Option<String>)>> {
+    partitioner: &dyn PhysicalExpr,
+) -> Result<Vec<RecordBatch>> {
     let partition = partitioner.evaluate(&batch)?.into_array(batch.num_rows())?;
+
     // sort the partition, and then the batch, then compute partitions
     let sort_indices = sort_to_indices(&partition, None, None)?;
     let sorted_partition = take(&*partition, &sort_indices, None).unwrap();
@@ -381,17 +384,13 @@ pub(crate) fn batches_by_partition(
             .map(|col| take(col, &sort_indices, None).unwrap())
             .collect(),
     )?;
+
     let partition = arrow::compute::partition(&[sorted_partition.clone()])?;
-    let typed_partition = sorted_partition
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .unwrap();
-    let mut result = Vec::with_capacity(partition.len());
-    for partition in partition.ranges() {
-        let partition_string = typed_partition.value(partition.start);
-        let batch = sorted_batch.slice(partition.start, partition.end - partition.start);
-        result.push((batch, Some(partition_string.to_string())));
-    }
+
+    let result = partition.ranges().iter().map(|range| {
+        sorted_batch.slice(range.start, range.end - range.start)
+    }).collect_vec();
+
     Ok(result)
 }
 

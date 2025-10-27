@@ -1,17 +1,17 @@
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::{ConnectorOptions, FromOpts};
+use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
-use datafusion::common::{plan_err, DataFusionError, Result};
+use datafusion::common::{plan_err, DataFusionError, Result, ScalarValue};
 use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::num::NonZeroU64;
-use anyhow::anyhow;
+use arrow::datatypes::{DataType, Schema};
 use datafusion::physical_plan::PhysicalExpr;
-use datafusion::prelude::Expr;
-use iceberg::spec::{PartitionSpec, Schema, SchemaRef};
+use datafusion::prelude::{concat, Expr, to_char, col, lit};
+use iceberg::spec::{PartitionSpec, Schema as IceSchema, SchemaRef};
 use prost::Message;
 use strum_macros::EnumString;
 
@@ -150,6 +150,79 @@ pub struct PartitioningConfig {
         description = "Advanced tuning for hash shuffling of partition keys"
     )]
     pub shuffle_by_partition: PartitionShuffle,
+}
+
+impl PartitioningConfig {
+    pub fn partition_expr(
+        &self,
+        schema: &Schema,
+    ) -> Result<Option<Expr>> {
+        Ok(match (&self.time_pattern, &self.fields) {
+            (None, fields) if !fields.is_empty() => {
+                Some(Self::field_logical_expression(schema, fields)?)
+            }
+            (None, _) => None,
+            (Some(pattern), fields) if !fields.is_empty() => {
+                Some(Self::partition_string_for_fields_and_time(schema, fields, pattern)?)
+            }
+            (Some(pattern), _) => Some(Self::timestamp_logical_expression(pattern)),
+        })
+    }
+
+    fn partition_string_for_fields_and_time(
+        schema: &Schema,
+        partition_fields: &[String],
+        time_partition_pattern: &str,
+    ) -> Result<Expr> {
+        let field_function = Self::field_logical_expression(schema, partition_fields)?;
+        let time_function = Self::timestamp_logical_expression(time_partition_pattern);
+        let function = concat(vec![
+            time_function,
+            Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
+            field_function,
+        ]);
+        Ok(function)
+    }
+
+
+    fn field_logical_expression(schema: &Schema, partition_fields: &[String]) -> Result<Expr> {
+        let columns_as_string = partition_fields
+            .iter()
+            .map(|field| {
+                let field = schema.field_with_name(field)?;
+                let column_expr = col(field.name());
+                let expr = match field.data_type() {
+                    DataType::Utf8 => column_expr,
+                    _ => Expr::Cast(datafusion::logical_expr::Cast {
+                        expr: Box::new(column_expr),
+                        data_type: DataType::Utf8,
+                    }),
+                };
+                Ok((field.name(), expr))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let function = concat(
+            columns_as_string
+                .into_iter()
+                .enumerate()
+                .flat_map(|(i, (name, expr))| {
+                    let preamble = if i == 0 {
+                        format!("{name}=")
+                    } else {
+                        format!("/{name}=")
+                    };
+                    vec![Expr::Literal(ScalarValue::Utf8(Some(preamble)), None), expr]
+                })
+                .collect(),
+        );
+
+        Ok(function)
+    }
+
+    fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
+        to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
+    }
 }
 
 impl FromOpts for PartitioningConfig {
@@ -585,19 +658,6 @@ impl IcebergPartitioningField {
 
         format!("{}_{}", self.field, t)
     }
-
-    fn expr(&self) -> Expr {
-        match self.transform {
-            Transform::Identity => {}
-            Transform::Bucket(_) => {}
-            Transform::Truncate(_) => {}
-            Transform::Year => {}
-            Transform::Month => {}
-            Transform::Day => {}
-            Transform::Hour => {}
-            Transform::Void => {}
-        }
-    }
 }
 
 /// Iceberg partitioning configuration
@@ -629,6 +689,10 @@ impl IcebergPartitioning {
         }
 
         Ok(builder.build()?)
+    }
+
+    pub fn partition_expr(&self) -> Result<Option<Vec<Expr>>> {
+        todo!()
     }
 }
 

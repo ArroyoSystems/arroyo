@@ -11,7 +11,7 @@ use crate::filesystem::config::*;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{render_schema, EmptyConfig};
 use anyhow::{anyhow, bail, Result};
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use arrow::datatypes::{Field, Schema};
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
@@ -19,25 +19,20 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::{ConnectorOptions, OperatorConfig, TIMESTAMP_FIELD};
+use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_storage::{BackendConfig, StorageProvider};
 use arroyo_types::TaskInfo;
 use std::collections::{HashMap};
 use std::sync::Arc;
-use datafusion::common::ScalarValue;
-use datafusion::logical_expr::Expr;
-use datafusion::prelude::{col, concat, lit, to_char};
+use datafusion::physical_planner::{PhysicalPlanner};
 use itertools::Itertools;
+use crate::filesystem::sink::partitioning::PartitionerMode;
 
 const ICON: &str = include_str!("./filesystem.svg");
 
 pub enum TableFormat {
-    None {
-        partitioning: PartitioningConfig
-    },
-    Delta {
-        partitioning: PartitioningConfig
-    },
+    None,
+    Delta,
     Iceberg(Box<sink::iceberg::IcebergTable>),
 }
 
@@ -58,82 +53,11 @@ impl TableFormat {
     }
 }
 
-fn partitioner_from_config(
-    config: &PartitioningConfig,
-    schema: SchemaRef,
-) -> Result<Option<Expr>> {
-    Ok(match (&config.time_pattern, &config.fields) {
-        (None, fields) if !fields.is_empty() => {
-            Some(field_logical_expression(schema.clone(), fields)?)
-        }
-        (None, _) => None,
-        (Some(pattern), fields) if !fields.is_empty() => {
-            Some(partition_string_for_fields_and_time(schema, fields, pattern)?)
-        }
-        (Some(pattern), _) => Some(timestamp_logical_expression(pattern)),
-    })
-}
-
-fn partition_string_for_fields_and_time(
-    schema: SchemaRef,
-    partition_fields: &[String],
-    time_partition_pattern: &str,
-) -> Result<Expr> {
-    let field_function = field_logical_expression(schema.clone(), partition_fields)?;
-    let time_function = timestamp_logical_expression(time_partition_pattern);
-    let function = concat(vec![
-        time_function,
-        Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
-        field_function,
-    ]);
-    Ok(function)
-}
-
-
-fn field_logical_expression(schema: SchemaRef, partition_fields: &[String]) -> Result<Expr> {
-    let columns_as_string = partition_fields
-        .iter()
-        .map(|field| {
-            let field = schema.field_with_name(field)?;
-            let column_expr = col(field.name());
-            let expr = match field.data_type() {
-                DataType::Utf8 => column_expr,
-                _ => Expr::Cast(datafusion::logical_expr::Cast {
-                    expr: Box::new(column_expr),
-                    data_type: DataType::Utf8,
-                }),
-            };
-            Ok((field.name(), expr))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    let function = concat(
-        columns_as_string
-            .into_iter()
-            .enumerate()
-            .flat_map(|(i, (name, expr))| {
-                let preamble = if i == 0 {
-                    format!("{name}=")
-                } else {
-                    format!("/{name}=")
-                };
-                vec![Expr::Literal(ScalarValue::Utf8(Some(preamble)), None), expr]
-            })
-            .collect(),
-    );
-
-    Ok(function)
-}
-
-pub(crate) fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
-    to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
-}
-
-
 pub fn make_sink(
     sink: FileSystemSink,
     config: OperatorConfig,
     table_format: TableFormat,
+    partitioner: PartitionerMode,
     connection_id: Option<String>,
 ) -> Result<ConstructedOperator> {
     let is_local = match table_format {
@@ -157,13 +81,13 @@ pub fn make_sink(
             LocalParquetFileSystemSink::new(sink, table_format, format),
         ))),
         (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            ParquetFileSystemSink::create_and_start(sink, table_format, format, connection_id),
+            ParquetFileSystemSink::create_and_start(sink, table_format, format, partitioner, connection_id),
         ))),
         (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalJsonFileSystemSink::new(sink, table_format, format),
         ))),
         (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            JsonFileSystemSink::create_and_start(sink, table_format, format, connection_id),
+            JsonFileSystemSink::create_and_start(sink, table_format, format, partitioner, connection_id),
         ))),
         (f, _) => bail!("unsupported format {f}"),
     }
@@ -255,7 +179,7 @@ impl Connector for FileSystemConnector {
                     .map(|f| Field::from(f.clone()))
                     .collect_vec());
 
-                let partitioner = partitioner_from_config(&partitioning, schema.into())?;
+                let partitioner = partitioning.partition_expr(&schema)?;
 
                 (description, ConnectionType::Sink, partitioner.map(|p| vec![p]))
             }
@@ -314,9 +238,7 @@ impl Connector for FileSystemConnector {
             ))),
             FileSystemTableType::Sink(sink) => {
                 let partitioning = sink.partitioning.clone();
-                make_sink(sink, config, TableFormat::None {
-                    partitioning,
-                }, None)
+                make_sink(sink, config, TableFormat::None, PartitionerMode::FileConfig(partitioning), None)
             },
         }
     }
