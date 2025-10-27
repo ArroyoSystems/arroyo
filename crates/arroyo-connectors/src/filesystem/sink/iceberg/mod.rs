@@ -2,14 +2,14 @@ pub mod metadata;
 pub mod schema;
 mod transforms;
 
-use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink, Transform};
+use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
 use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
 use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 use crate::filesystem::sink::FinishedFile;
 use arrow::datatypes::Schema;
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
-use iceberg::spec::{ManifestFile, PartitionSpec};
+use iceberg::spec::{ManifestFile};
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::{Catalog, TableCreation, TableIdent};
@@ -19,7 +19,6 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::iter::once;
 use std::sync::Arc;
-use datafusion::physical_plan::PhysicalExpr;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -111,46 +110,7 @@ impl IcebergTable {
             }
         }
     }
-
-    pub fn partitioning_expr(&self) -> Option<Arc<dyn PhysicalExpr>> {
-        if self.partitioning.fields.is_empty() {
-            return None;
-        };
-
-        for f in &self.partitioning.fields {
-            match f.transform {
-                Transform::Identity => {}
-                Transform::Bucket(_) => {}
-                Transform::Truncate(_) => {}
-                Transform::Year => {}
-                Transform::Month => {}
-                Transform::Day => {}
-                Transform::Hour => {}
-                Transform::Void => {}
-            }
-        }
-
-        if schema
-            .schema
-            .field_with_name(ICEBERG_TIMESTAMP_COLUMN)
-            .is_ok()
-        {
-            Some(
-                compile_expression(
-                    &cast(
-                        cast(col(ICEBERG_TIMESTAMP_COLUMN), DataType::Date32),
-                        DataType::Utf8,
-                    ),
-                    schema,
-                )
-                    .unwrap(),
-            )
-        } else {
-            None
-        }
-
-    }
-
+    
     pub async fn load_or_create(
         &mut self,
         task_info: Arc<TaskInfo>,

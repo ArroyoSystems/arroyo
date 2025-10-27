@@ -13,6 +13,7 @@ use serde::ser::Serialize;
 use serde_json::value::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use datafusion::prelude::Expr;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 
@@ -25,7 +26,7 @@ pub struct Connection {
     pub schema: ConnectionSchema,
     pub config: String,
     pub description: String,
-    pub partition_fields: Option<Vec<String>>,
+    pub partition_exprs: Option<Vec<Expr>>,
 }
 
 impl Connection {
@@ -46,12 +47,12 @@ impl Connection {
             schema,
             config: serde_json::to_string(config).unwrap(),
             description,
-            partition_fields: None,
+            partition_exprs: None,
         }
     }
 
-    pub fn with_partition_fields(mut self, partition_fields: Option<Vec<String>>) -> Self {
-        self.partition_fields = partition_fields;
+    pub fn with_partition_exprs(mut self, partition_fields: Option<Vec<Expr>>) -> Self {
+        self.partition_exprs = partition_fields;
         self
     }
 }

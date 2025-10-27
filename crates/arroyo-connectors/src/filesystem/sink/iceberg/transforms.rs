@@ -1,4 +1,4 @@
-// Adapted from https://github.com/JanKaul/iceberg-rust/blob/main/iceberg-rust/src/arrow/transform.rs
+// Adapted from https://github.com/JanKaul/iceberg-rust/blob/495a566f762f276b30c55caa5c10d3d7cbf856f5/iceberg-rust/src/arrow/transform.rs
 // Licensed under Apache2
 
 use std::sync::Arc;
@@ -193,4 +193,317 @@ fn datepart_to_years(year: i32) -> i32 {
 #[inline]
 fn datepart_to_months(year: i32, month: i32) -> i32 {
     12 * (year - YEARS_BEFORE_UNIX_EPOCH) + month
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use arrow::array::{ArrayRef, Date32Array, TimestampMicrosecondArray};
+
+    fn create_date32_array() -> ArrayRef {
+        Arc::new(Date32Array::from(vec![
+            Some(19478), // 2023-05-01
+            Some(19523), // 2023-06-15
+            Some(19723), // 2024-01-01
+            None,
+        ])) as ArrayRef
+    }
+
+    fn create_timestamp_micro_array() -> ArrayRef {
+        Arc::new(TimestampMicrosecondArray::from(vec![
+            Some(1682937000000000),
+            Some(1686840330000000),
+            Some(1704067200000000),
+            None,
+        ])) as ArrayRef
+    }
+
+    #[test]
+    fn test_identity_transform() {
+        let array = create_date32_array();
+        let result = transform_arrow(array.clone(), &Transform::Identity).unwrap();
+        assert_eq!(&array, &result);
+    }
+
+    #[test]
+    fn test_date32_day_transform() {
+        let array = create_date32_array();
+        let result = transform_arrow(array, &Transform::Day).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(19478),
+            Some(19523),
+            Some(19723),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_date32_month_transform() {
+        let array = create_date32_array();
+        let result = transform_arrow(array, &Transform::Month).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(641),
+            Some(642),
+            Some(649),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_date32_year_transform() {
+        let array = create_date32_array();
+        let result = transform_arrow(array, &Transform::Year).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(53),
+            Some(53),
+            Some(54),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_timestamp_micro_hour_transform() {
+        let array = create_timestamp_micro_array();
+        let result = transform_arrow(array, &Transform::Hour).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(467482),
+            Some(468566),
+            Some(473352),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_timestamp_micro_day_transform() {
+        let array = create_timestamp_micro_array();
+        let result = transform_arrow(array, &Transform::Day).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(19478),
+            Some(19523),
+            Some(19723),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_timestamp_micro_month_transform() {
+        let array = create_timestamp_micro_array();
+        let result = transform_arrow(array, &Transform::Month).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(641),
+            Some(642),
+            Some(649),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_timestamp_micro_year_transform() {
+        let array = create_timestamp_micro_array();
+        let result = transform_arrow(array, &Transform::Year).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(53),
+            Some(53),
+            Some(54),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_int16_truncate_transform() {
+        let array = Arc::new(arrow::array::Int16Array::from(vec![
+            Some(17),
+            Some(23),
+            Some(-15),
+            Some(5),
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Truncate(10)).unwrap();
+        let expected = Arc::new(arrow::array::Int16Array::from(vec![
+            Some(10),  // 17 - 17 % 10 = 17 - 7 = 10
+            Some(20),  // 23 - 23 % 10 = 23 - 3 = 20
+            Some(-20), // -15 - (-15 % 10) = -15 - (-5) = -15 + 5 = -10, but rem_euclid gives -15 - 5 = -20
+            Some(0),   // 5 - 5 % 10 = 5 - 5 = 0
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_int32_truncate_transform() {
+        let array = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(127),
+            Some(234),
+            Some(-156),
+            Some(50),
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Truncate(100)).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(100),  // 127 - 127 % 100 = 127 - 27 = 100
+            Some(200),  // 234 - 234 % 100 = 234 - 34 = 200
+            Some(-200), // -156 - (-156 % 100) = -156 - (-56) = -156 + 56 = -100, but rem_euclid gives -156 - 44 = -200
+            Some(0),    // 50 - 50 % 100 = 50 - 50 = 0
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_int64_truncate_transform() {
+        let array = Arc::new(arrow::array::Int64Array::from(vec![
+            Some(1275),
+            Some(2348),
+            Some(-1567),
+            Some(500),
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Truncate(1000)).unwrap();
+        let expected = Arc::new(arrow::array::Int64Array::from(vec![
+            Some(1000),  // 1275 - 1275 % 1000 = 1275 - 275 = 1000
+            Some(2000),  // 2348 - 2348 % 1000 = 2348 - 348 = 2000
+            Some(-2000), // -1567 - (-1567 % 1000) = -1567 - (-567) = -1567 + 567 = -1000, but rem_euclid gives -1567 - 433 = -2000
+            Some(0),     // 500 - 500 % 1000 = 500 - 500 = 0
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_bucket_hash_value() {
+        // Check value match https://iceberg.apache.org/spec/#appendix-b-32-bit-hash-requirements
+
+        // 34 -> 2017239379
+        let mut buffer = std::io::Cursor::new((34i32 as i64).to_le_bytes());
+        assert_eq!(murmur3::murmur3_32(&mut buffer, 0).unwrap(), 2017239379);
+
+        // 34 -> 2017239379
+        let mut buffer = std::io::Cursor::new((34i64).to_le_bytes());
+        assert_eq!(murmur3::murmur3_32(&mut buffer, 0).unwrap(), 2017239379);
+
+        // daysFromUnixEpoch(2017-11-16) -> 17_486 -> -653330422
+        let mut buffer = std::io::Cursor::new((17_486i32 as i64).to_le_bytes());
+        assert_eq!(
+            murmur3::murmur3_32(&mut buffer, 0).unwrap() as i32,
+            -653330422
+        );
+
+        // 81_068_000_000 number of micros from midnight 22:31:08
+        let mut buffer = std::io::Cursor::new((81_068_000_000i64).to_le_bytes());
+        assert_eq!(
+            murmur3::murmur3_32(&mut buffer, 0).unwrap() as i32,
+            -662762989
+        );
+
+        // utf8Bytes(iceberg) -> 1210000089
+        assert_eq!(
+            murmur3::murmur3_32(&mut "iceberg".as_bytes(), 0).unwrap() as i32,
+            1210000089
+        );
+    }
+
+    #[test]
+    fn test_int32_bucket_transform() {
+        let array = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(34),       // Spec value
+            Some(17_486),   // number of day between 2017-11-16 and epoch
+            Some(84668000), // number of micros from midnight 22:31:08
+            Some(-2000),
+            Some(0),
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Bucket(1000)).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(2017239379i32.rem_euclid(1000)),
+            Some(578), // -653330422 % 1000 not match I don't know why
+            Some(988822981i32.rem_euclid(1000)),
+            Some(964620854i32.rem_euclid(1000)),
+            Some(1669671676i32.rem_euclid(1000)),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_int64_bucket_transform() {
+        let array = Arc::new(arrow::array::Int64Array::from(vec![
+            Some(34),     // Spec value
+            Some(17_486), // number of day between 2017-11-16 and epoch
+            Some(2000),
+            Some(-2000),
+            Some(0),
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Bucket(1000)).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(2017239379i32.rem_euclid(1000)),
+            Some(578), // -653_330_422 % 1000 not match probably like to signed number
+            Some(117), // 716_914_497 = 1000 not match probably like to signed number
+            Some(964_620_854i32.rem_euclid(1000)),
+            Some(1669671676i32.rem_euclid(1000)),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_date32_bucket_transform() {
+        let array = Arc::new(arrow::array::Date32Array::from(vec![
+            Some(17_486), // number of day between 2017-11-16
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Bucket(1000)).unwrap();
+
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(578), // -653330422 % 1000 not match probably like to signed number
+            None,
+        ])) as ArrayRef;
+
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_time32_bucket_transform() {
+        let array = Arc::new(arrow::array::Time32MillisecondArray::from(vec![
+            Some(81_068_000), // number of micros from midnight 22:31:08
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Bucket(1000)).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(693), // -662762989 % 1000 not match probably like to signed number
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_utf8_bucket_transform() {
+        let array =
+            Arc::new(arrow::array::StringArray::from(vec![Some("iceberg"), None])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Bucket(1000)).unwrap();
+        let expected = Arc::new(arrow::array::Int32Array::from(vec![
+            Some(1_210_000_089i32.rem_euclid(1000)),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_unsupported_transform() {
+        let array = Arc::new(arrow::array::StringArray::from(vec!["a", "b", "c"])) as ArrayRef;
+        let result = transform_arrow(array, &Transform::Day);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Compute error: Failed to perform transform for datatype"
+        );
+    }
 }

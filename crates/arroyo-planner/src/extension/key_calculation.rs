@@ -1,36 +1,36 @@
 use std::{fmt::Formatter, sync::Arc};
-
+use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
-use arroyo_rpc::{
-    df::{ArroyoSchema, ArroyoSchemaRef},
-    grpc::api::KeyPlanOperator,
-};
-use datafusion::common::{internal_err, plan_err, DFSchemaRef, Result};
+use arroyo_rpc::{df::{ArroyoSchema, ArroyoSchemaRef}, grpc::api::KeyPlanOperator, TIMESTAMP_FIELD};
+use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result};
 
-use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::logical_expr::{Expr, ExprSchemable, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use itertools::Itertools;
 use prost::Message;
 
-use crate::{
-    builder::{NamedNode, Planner},
-    fields_with_qualifiers, multifield_partial_ord,
-    physical::ArroyoPhysicalExtensionCodec,
-    schema_from_df_fields_with_metadata,
-};
-
+use crate::{builder::{NamedNode, Planner}, fields_with_qualifiers, multifield_partial_ord, physical::ArroyoPhysicalExtensionCodec, schema_from_df_fields_with_metadata, DFField};
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 
 pub(crate) const KEY_CALCULATION_NAME: &str = "KeyCalculationExtension";
 
-/* Calculation for computing keyed data, with a vec of keys
-   that will be used for shuffling data to the correct nodes.
+/// Two ways of specifying keys — either as col indexes in the existing data or as a set of
+/// exprs to evaluate
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd)]
+pub enum KeysOrExprs {
+    Keys(Vec<usize>),
+    Exprs(Vec<Expr>),
+}
 
-*/
+/// Calculation for computing keyed data, with a vec of keys
+/// that will be used for shuffling data to the correct nodes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct KeyCalculationExtension {
     pub(crate) name: Option<String>,
     pub(crate) input: LogicalPlan,
-    pub(crate) keys: Vec<usize>,
+    pub(crate) keys: KeysOrExprs,
     pub(crate) schema: DFSchemaRef,
 }
 
@@ -49,17 +49,18 @@ impl KeyCalculationExtension {
                 }
             })
             .collect();
+
         let schema =
             schema_from_df_fields_with_metadata(&output_fields, input.schema().metadata().clone())
                 .unwrap();
         Self {
             name: Some(name),
             input,
-            keys,
+            keys: KeysOrExprs::Keys(keys),
             schema: Arc::new(schema),
         }
     }
-    pub fn new(input: LogicalPlan, keys: Vec<usize>) -> Self {
+    pub fn new(input: LogicalPlan, keys: KeysOrExprs) -> Self {
         let schema = input.schema().clone();
         Self {
             name: None,
@@ -86,17 +87,40 @@ impl ArroyoExtension for KeyCalculationExtension {
             return plan_err!("KeyCalculationExtension should have exactly one input");
         }
         let input_schema = input_schemas[0].clone();
+        let input_df_schema =
+            Arc::new(DFSchema::try_from(input_schema.schema.as_ref().clone())?);
+
         let physical_plan = planner.sync_plan(&self.input)?;
 
         let physical_plan_node: PhysicalPlanNode = PhysicalPlanNode::try_from_physical_plan(
             physical_plan,
             &ArroyoPhysicalExtensionCodec::default(),
         )?;
+
+        let (key_fields, exprs) = match &self.keys {
+            KeysOrExprs::Keys(keys) => {
+                (keys.iter().map(|k| *k as u64).collect_vec(), vec![])
+            }
+            KeysOrExprs::Exprs(exprs) => {
+                let mut physical_exprs = vec![];
+                for e in exprs {
+                    let phys = planner.create_physical_expr(e, &input_df_schema)
+                        .map_err(|e| e.context("in PARTITION BY"))?;
+                    physical_exprs.push(
+                        serialize_physical_expr(&phys, &DefaultPhysicalExtensionCodec {})?.encode_to_vec());
+                }
+
+                (vec![], physical_exprs)
+            }
+        };
+
         let config = KeyPlanOperator {
             name: "key".into(),
             physical_plan: physical_plan_node.encode_to_vec(),
-            key_fields: self.keys.iter().map(|k: &usize| *k as u64).collect(),
+            key_fields,
+            exprs,
         };
+
         let node = LogicalNode::single(
             index as u32,
             format!("key_{index}"),
@@ -113,8 +137,31 @@ impl ArroyoExtension for KeyCalculationExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        let arrow_schema = Arc::new(self.input.schema().as_ref().into());
-        ArroyoSchema::from_schema_keys(arrow_schema, self.keys.clone()).unwrap()
+        let arrow_schema = self.input.schema().as_ref();
+        // timestamp, then keys, then values
+
+        match &self.keys {
+            KeysOrExprs::Keys(keys) => {
+                ArroyoSchema::from_schema_keys(arrow_schema.into(), keys.clone()).unwrap()
+            }
+            KeysOrExprs::Exprs(exprs) => {
+                let mut fields = vec![
+                    // timestamp field
+                    arrow_schema.field_with_name(None, TIMESTAMP_FIELD).unwrap().clone()
+                ];
+
+                for (i, e) in exprs.iter().enumerate() {
+                    let (dt, nullable) = e.data_type_and_nullable(arrow_schema).unwrap();
+                    fields.push(Field::new(format!("__key_{}", i),  dt, nullable));
+                }
+
+                ArroyoSchema::from_schema_keys(
+                    Arc::new(Schema::new(fields)), (1..=exprs.len()).collect_vec()
+                ).unwrap()
+            }
+        }
+
+
     }
 }
 
@@ -139,16 +186,21 @@ impl UserDefinedLogicalNodeCore for KeyCalculationExtension {
         write!(f, "KeyCalculationExtension: {}", self.schema())
     }
 
-    fn with_exprs_and_inputs(&self, _exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
+    fn with_exprs_and_inputs(&self, exprs: Vec<Expr>, inputs: Vec<LogicalPlan>) -> Result<Self> {
         if inputs.len() != 1 {
             return internal_err!("input size inconsistent");
         }
 
-        Ok(match self.name {
-            Some(ref name) => {
-                Self::new_named_and_trimmed(inputs[0].clone(), self.keys.clone(), name.clone())
-            }
-            None => Self::new(inputs[0].clone(), self.keys.clone()),
+        let keys = match &self.keys {
+            KeysOrExprs::Keys(k) => KeysOrExprs::Keys(k.clone()),
+            KeysOrExprs::Exprs(_) => KeysOrExprs::Exprs(exprs),
+        };
+
+        Ok(Self {
+            name: self.name.clone(),
+            input: inputs[0].clone(),
+            keys,
+            schema: self.schema.clone(),
         })
     }
 }

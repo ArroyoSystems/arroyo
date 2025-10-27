@@ -34,10 +34,7 @@ use datafusion::prelude::SessionConfig;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
-use datafusion::logical_expr::{
-    create_udaf, ColumnarValue, Expr, Extension, LogicalPlan, ScalarFunctionArgs, ScalarUDF,
-    ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF,
-};
+use datafusion::logical_expr::{create_udaf, ColumnarValue, Expr, ExprSchemable, Extension, LogicalPlan, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF};
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
 use extension::ArroyoExtension;
@@ -684,11 +681,11 @@ fn maybe_add_key_extension_to_sink(plan: LogicalPlan) -> Result<LogicalPlan> {
         return Ok(plan);
     };
 
-    let Some(partition_fields) = sink.table.partition_fields() else {
+    let Some(partition_exprs) = sink.table.partition_exprs() else {
         return Ok(plan);
     };
 
-    if partition_fields.is_empty() {
+    if partition_exprs.is_empty() {
         return Ok(plan);
     }
 
@@ -696,24 +693,10 @@ fn maybe_add_key_extension_to_sink(plan: LogicalPlan) -> Result<LogicalPlan> {
         .inputs()
         .into_iter()
         .map(|input| {
-            let keys = partition_fields
-                .iter()
-                .map(|pf| {
-                    input
-                        .schema()
-                        .index_of_column_by_name(None, pf)
-                        .ok_or_else(|| {
-                            plan_datafusion_err!(
-                                "Partition field '{pf}' not found in sink input schema"
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
             Ok(LogicalPlan::Extension(Extension {
                 node: Arc::new(KeyCalculationExtension {
                     name: Some("key-calc-partition".to_string()),
-                    keys,
+                    exprs:  
                     schema: input.schema().clone(),
                     input: input.clone(),
                 }),

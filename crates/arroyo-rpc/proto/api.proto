@@ -24,7 +24,9 @@ message ValuePlanOperator {
 message KeyPlanOperator {
   string name = 1;
   bytes physical_plan = 2;
+  // just of key_fields or exprs should be set
   repeated uint64 key_fields = 3;
+  repeated bytes exprs = 4;
 }
 
 message TumblingWindowAggregateOperator {

@@ -11,7 +11,7 @@ use crate::filesystem::config::*;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{render_schema, EmptyConfig};
 use anyhow::{anyhow, bail, Result};
-use arrow::datatypes::Schema;
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
@@ -19,11 +19,15 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::{ConnectorOptions, OperatorConfig};
+use arroyo_rpc::{ConnectorOptions, OperatorConfig, TIMESTAMP_FIELD};
 use arroyo_storage::{BackendConfig, StorageProvider};
 use arroyo_types::TaskInfo;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::sync::Arc;
+use datafusion::common::ScalarValue;
+use datafusion::logical_expr::Expr;
+use datafusion::prelude::{col, concat, lit, to_char};
+use itertools::Itertools;
 
 const ICON: &str = include_str!("./filesystem.svg");
 
@@ -53,6 +57,78 @@ impl TableFormat {
         })
     }
 }
+
+fn partitioner_from_config(
+    config: &PartitioningConfig,
+    schema: SchemaRef,
+) -> Result<Option<Expr>> {
+    Ok(match (&config.time_pattern, &config.fields) {
+        (None, fields) if !fields.is_empty() => {
+            Some(field_logical_expression(schema.clone(), fields)?)
+        }
+        (None, _) => None,
+        (Some(pattern), fields) if !fields.is_empty() => {
+            Some(partition_string_for_fields_and_time(schema, fields, pattern)?)
+        }
+        (Some(pattern), _) => Some(timestamp_logical_expression(pattern)),
+    })
+}
+
+fn partition_string_for_fields_and_time(
+    schema: SchemaRef,
+    partition_fields: &[String],
+    time_partition_pattern: &str,
+) -> Result<Expr> {
+    let field_function = field_logical_expression(schema.clone(), partition_fields)?;
+    let time_function = timestamp_logical_expression(time_partition_pattern);
+    let function = concat(vec![
+        time_function,
+        Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
+        field_function,
+    ]);
+    Ok(function)
+}
+
+
+fn field_logical_expression(schema: SchemaRef, partition_fields: &[String]) -> Result<Expr> {
+    let columns_as_string = partition_fields
+        .iter()
+        .map(|field| {
+            let field = schema.field_with_name(field)?;
+            let column_expr = col(field.name());
+            let expr = match field.data_type() {
+                DataType::Utf8 => column_expr,
+                _ => Expr::Cast(datafusion::logical_expr::Cast {
+                    expr: Box::new(column_expr),
+                    data_type: DataType::Utf8,
+                }),
+            };
+            Ok((field.name(), expr))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let function = concat(
+        columns_as_string
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, (name, expr))| {
+                let preamble = if i == 0 {
+                    format!("{name}=")
+                } else {
+                    format!("/{name}=")
+                };
+                vec![Expr::Literal(ScalarValue::Utf8(Some(preamble)), None), expr]
+            })
+            .collect(),
+    );
+
+    Ok(function)
+}
+
+pub(crate) fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
+    to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
+}
+
 
 pub fn make_sink(
     sink: FileSystemSink,
@@ -91,21 +167,6 @@ pub fn make_sink(
         ))),
         (f, _) => bail!("unsupported format {f}"),
     }
-}
-
-pub(crate) fn validate_partitioning_fields(
-    schema: &ConnectionSchema,
-    fields: &[String],
-) -> anyhow::Result<()> {
-    let schema_fields: HashSet<_> = schema.fields.iter().map(|f| f.name.as_str()).collect();
-
-    for field in fields {
-        if !schema_fields.contains(field.as_str()) {
-            bail!("partition field '{}' does not exist in the schema", field);
-        }
-    }
-
-    Ok(())
 }
 
 pub struct FileSystemConnector {}
@@ -188,21 +249,18 @@ impl Connector for FileSystemConnector {
             }) => {
                 BackendConfig::parse_url(path, true)?;
 
-                let partition_fields = match (
-                    partitioning.shuffle_by_partition.enabled,
-                    &partitioning.fields.is_empty(),
-                ) {
-                    (true, false) => Some(partitioning.fields.clone()),
-                    _ => None,
-                };
-
-                validate_partitioning_fields(&schema, &partitioning.fields)?;
-
                 let description = format!("FileSystemSink<{format}, {path}>");
 
-                (description, ConnectionType::Sink, partition_fields)
+                let schema = Schema::new(schema.fields.iter()
+                    .map(|f| Field::from(f.clone()))
+                    .collect_vec());
+
+                let partitioner = partitioner_from_config(&partitioning, schema.into())?;
+
+                (description, ConnectionType::Sink, partitioner.map(|p| vec![p]))
             }
         };
+
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -223,7 +281,7 @@ impl Connector for FileSystemConnector {
             &config,
             description,
         )
-        .with_partition_fields(partition_fields))
+        .with_partition_exprs(partition_fields))
     }
 
     fn from_options(

@@ -41,6 +41,7 @@ pub mod json;
 pub mod local;
 pub mod parquet;
 mod two_phase_committer;
+
 use self::{
     json::{JsonLocalWriter, JsonWriter},
     local::LocalFileSystemWriter,
@@ -150,110 +151,6 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
     }
 }
 
-fn get_partitioner_from_file_settings(
-    table_format: &TableFormat,
-    schema: ArroyoSchemaRef,
-) -> Option<Arc<dyn PhysicalExpr>> {
-    match table_format {
-        TableFormat::None { partitioning } |
-        TableFormat::Delta { partitioning } => {
-            match (&partitioning.time_pattern, &partitioning.fields) {
-                (None, fields) if !fields.is_empty() => {
-                    Some(partition_string_for_fields(schema, fields).unwrap())
-                }
-                (None, _) => None,
-                (Some(pattern), fields) if !fields.is_empty() => {
-                    Some(partition_string_for_fields_and_time(schema, fields, pattern).unwrap())
-                }
-                (Some(pattern), _) => Some(partition_string_for_time(schema, pattern).unwrap()),
-            }
-        }
-        TableFormat::Iceberg(table) => table.partitioning_expr(),
-    }
-}
-
-fn partition_string_for_fields(
-    schema: ArroyoSchemaRef,
-    partition_fields: &[String],
-) -> Result<Arc<dyn PhysicalExpr>> {
-    let function = field_logical_expression(schema.clone(), partition_fields)?;
-    compile_expression(&function, schema)
-}
-
-fn partition_string_for_time(
-    schema: ArroyoSchemaRef,
-    time_partition_pattern: &str,
-) -> Result<Arc<dyn PhysicalExpr>> {
-    let function = timestamp_logical_expression(time_partition_pattern);
-    compile_expression(&function, schema)
-}
-
-fn partition_string_for_fields_and_time(
-    schema: ArroyoSchemaRef,
-    partition_fields: &[String],
-    time_partition_pattern: &str,
-) -> Result<Arc<dyn PhysicalExpr>> {
-    let field_function = field_logical_expression(schema.clone(), partition_fields)?;
-    let time_function = timestamp_logical_expression(time_partition_pattern);
-    let function = concat(vec![
-        time_function,
-        Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
-        field_function,
-    ]);
-    compile_expression(&function, schema)
-}
-
-pub(crate) fn compile_expression(
-    expr: &Expr,
-    schema: ArroyoSchemaRef,
-) -> Result<Arc<dyn PhysicalExpr>> {
-    let physical_planner = DefaultPhysicalPlanner::default();
-    let session_state = SessionStateBuilder::new().build();
-
-    let plan = physical_planner.create_physical_expr(
-        expr,
-        &(schema.schema.as_ref().clone()).try_into()?,
-        &session_state,
-    )?;
-    Ok(plan)
-}
-
-fn field_logical_expression(schema: ArroyoSchemaRef, partition_fields: &[String]) -> Result<Expr> {
-    let columns_as_string = partition_fields
-        .iter()
-        .map(|field| {
-            let field = schema.schema.field_with_name(field)?;
-            let column_expr = Expr::Column(Column::from_name(field.name().to_string()));
-            let expr = match field.data_type() {
-                DataType::Utf8 => column_expr,
-                _ => Expr::Cast(datafusion::logical_expr::Cast {
-                    expr: Box::new(column_expr),
-                    data_type: DataType::Utf8,
-                }),
-            };
-            Ok((field.name(), expr))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let function = concat(
-        columns_as_string
-            .into_iter()
-            .enumerate()
-            .flat_map(|(i, (name, expr))| {
-                let preamble = if i == 0 {
-                    format!("{name}=")
-                } else {
-                    format!("/{name}=")
-                };
-                vec![Expr::Literal(ScalarValue::Utf8(Some(preamble)), None), expr]
-            })
-            .collect(),
-    );
-    Ok(function)
-}
-
-pub(crate) fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
-    to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
-}
 
 #[derive(Clone)]
 pub(crate) struct FsEventLogger {
