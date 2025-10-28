@@ -8,12 +8,12 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::{DisplayAsSql, SourceError};
 use async_trait::async_trait;
+use datafusion::prelude::Expr;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use datafusion::prelude::Expr;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 

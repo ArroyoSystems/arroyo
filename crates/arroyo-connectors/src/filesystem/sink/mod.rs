@@ -1,3 +1,4 @@
+use ::arrow::row::OwnedRow;
 use ::arrow::{datatypes::DataType, record_batch::RecordBatch};
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
@@ -27,7 +28,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
-use ::arrow::row::OwnedRow;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
@@ -40,8 +40,8 @@ pub(crate) mod iceberg;
 pub mod json;
 pub mod local;
 pub mod parquet;
-mod two_phase_committer;
 pub(crate) mod partitioning;
+mod two_phase_committer;
 
 use self::{
     json::{JsonLocalWriter, JsonWriter},
@@ -56,9 +56,9 @@ use self::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::config::{NamingConfig, PartitioningConfig};
 use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::IcebergTable;
+use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
 use crate::filesystem::{config, FilenameStrategy, TableFormat};
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
-use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
 
 const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
 
@@ -118,7 +118,10 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         self.event_logger.task_info = Some(task_info.clone());
         self.sender = Some(sender);
         self.checkpoint_receiver = Some(checkpoint_receiver);
-        self.partitioner = Some(Arc::new(Partitioner::new(self.partitioner_mode.clone(), &*schema.schema)?));
+        self.partitioner = Some(Arc::new(Partitioner::new(
+            self.partitioner_mode.clone(),
+            &*schema.schema,
+        )?));
 
         let table = self.table.clone();
         let format = self.format.clone();
@@ -153,7 +156,6 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         Ok(())
     }
 }
-
 
 #[derive(Clone)]
 pub(crate) struct FsEventLogger {
@@ -1507,7 +1509,10 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     }
 
     fn partition(&self) -> Option<Vec<u8>> {
-        self.multipart_manager.partition.as_ref().map(|p| p.as_ref().to_vec())
+        self.multipart_manager
+            .partition
+            .as_ref()
+            .map(|p| p.as_ref().to_vec())
     }
 
     async fn insert_batch(
@@ -1764,7 +1769,7 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                     .unwrap()
                     .send(FileSystemMessages::Data {
                         value: batch,
-                        partition: Some(partition)
+                        partition: Some(partition),
                     })
                     .await?;
             }

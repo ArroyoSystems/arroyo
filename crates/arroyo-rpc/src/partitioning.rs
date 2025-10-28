@@ -1,9 +1,9 @@
-use std::borrow::Cow;
-use std::hash::{Hash, Hasher};
 use arrow_array::Datum;
 use datafusion::common::ScalarValue;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+use std::borrow::Cow;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum PartValue {
@@ -49,7 +49,9 @@ impl Partition {
                 PartValue::Null => {}
                 PartValue::Bool(true) => b.push_str("true"),
                 PartValue::Bool(false) => b.push_str("false"),
-                PartValue::I32(i) => {todo!()}
+                PartValue::I32(i) => {
+                    todo!()
+                }
                 PartValue::I64(_) => {}
                 PartValue::Date(_) => {}
                 PartValue::Timestamp(_) => {}

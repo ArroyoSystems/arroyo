@@ -9,7 +9,7 @@ use crate::filesystem::sink::FinishedFile;
 use arrow::datatypes::Schema;
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
-use iceberg::spec::{ManifestFile};
+use iceberg::spec::ManifestFile;
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::{Catalog, TableCreation, TableIdent};
@@ -110,7 +110,7 @@ impl IcebergTable {
             }
         }
     }
-    
+
     pub async fn load_or_create(
         &mut self,
         task_info: Arc<TaskInfo>,

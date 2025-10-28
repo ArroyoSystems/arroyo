@@ -8,6 +8,7 @@ use self::sink::{
     JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
 };
 use crate::filesystem::config::*;
+use crate::filesystem::sink::partitioning::PartitionerMode;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{render_schema, EmptyConfig};
 use anyhow::{anyhow, bail, Result};
@@ -22,11 +23,10 @@ use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_storage::{BackendConfig, StorageProvider};
 use arroyo_types::TaskInfo;
-use std::collections::{HashMap};
-use std::sync::Arc;
-use datafusion::physical_planner::{PhysicalPlanner};
+use datafusion::physical_planner::PhysicalPlanner;
 use itertools::Itertools;
-use crate::filesystem::sink::partitioning::PartitionerMode;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 const ICON: &str = include_str!("./filesystem.svg");
 
@@ -81,13 +81,25 @@ pub fn make_sink(
             LocalParquetFileSystemSink::new(sink, table_format, format),
         ))),
         (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            ParquetFileSystemSink::create_and_start(sink, table_format, format, partitioner, connection_id),
+            ParquetFileSystemSink::create_and_start(
+                sink,
+                table_format,
+                format,
+                partitioner,
+                connection_id,
+            ),
         ))),
         (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalJsonFileSystemSink::new(sink, table_format, format),
         ))),
         (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            JsonFileSystemSink::create_and_start(sink, table_format, format, partitioner, connection_id),
+            JsonFileSystemSink::create_and_start(
+                sink,
+                table_format,
+                format,
+                partitioner,
+                connection_id,
+            ),
         ))),
         (f, _) => bail!("unsupported format {f}"),
     }
@@ -175,16 +187,23 @@ impl Connector for FileSystemConnector {
 
                 let description = format!("FileSystemSink<{format}, {path}>");
 
-                let schema = Schema::new(schema.fields.iter()
-                    .map(|f| Field::from(f.clone()))
-                    .collect_vec());
+                let schema = Schema::new(
+                    schema
+                        .fields
+                        .iter()
+                        .map(|f| Field::from(f.clone()))
+                        .collect_vec(),
+                );
 
                 let partitioner = partitioning.partition_expr(&schema)?;
 
-                (description, ConnectionType::Sink, partitioner.map(|p| vec![p]))
+                (
+                    description,
+                    ConnectionType::Sink,
+                    partitioner.map(|p| vec![p]),
+                )
             }
         };
-
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -238,8 +257,14 @@ impl Connector for FileSystemConnector {
             ))),
             FileSystemTableType::Sink(sink) => {
                 let partitioning = sink.partitioning.clone();
-                make_sink(sink, config, TableFormat::None, PartitionerMode::FileConfig(partitioning), None)
-            },
+                make_sink(
+                    sink,
+                    config,
+                    TableFormat::None,
+                    PartitionerMode::FileConfig(partitioning),
+                    None,
+                )
+            }
         }
     }
 }

@@ -1,22 +1,20 @@
-use crate::filesystem::config::{
-    FileSystemSink, IcebergProfile, IcebergTable, PartitioningConfig,
-};
+use crate::filesystem::config::{FileSystemSink, IcebergProfile, IcebergTable, PartitioningConfig};
+use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 use crate::filesystem::{make_sink, sink, TableFormat};
 use crate::render_schema;
 use anyhow::{anyhow, bail};
+use arrow::datatypes::FieldRef;
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
+use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use datafusion::common::plan_datafusion_err;
 use std::collections::HashMap;
 use std::sync::Arc;
-use arrow::datatypes::FieldRef;
-use arroyo_rpc::formats::Format;
-use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 
 pub struct IcebergConnector {}
 
@@ -100,7 +98,13 @@ impl Connector for IcebergConnector {
         }
 
         let partitioning_fields = if sink.partitioning.shuffle_by_partition.enabled {
-            Some(sink.partitioning.fields.iter().map(|f| f.field.clone()).collect())
+            Some(
+                sink.partitioning
+                    .fields
+                    .iter()
+                    .map(|f| f.field.clone())
+                    .collect(),
+            )
         } else {
             None
         };

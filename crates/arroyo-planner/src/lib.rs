@@ -34,7 +34,10 @@ use datafusion::prelude::SessionConfig;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
-use datafusion::logical_expr::{create_udaf, ColumnarValue, Expr, ExprSchemable, Extension, LogicalPlan, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF};
+use datafusion::logical_expr::{
+    create_udaf, ColumnarValue, Expr, ExprSchemable, Extension, LogicalPlan, ScalarFunctionArgs,
+    ScalarUDF, ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF,
+};
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
 use extension::ArroyoExtension;
@@ -56,7 +59,7 @@ use std::fmt::{Debug, Formatter};
 use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
-use crate::extension::key_calculation::KeyCalculationExtension;
+use crate::extension::key_calculation::{KeyCalculationExtension, KeysOrExprs};
 use crate::udafs::EmptyUdaf;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
@@ -696,9 +699,9 @@ fn maybe_add_key_extension_to_sink(plan: LogicalPlan) -> Result<LogicalPlan> {
             Ok(LogicalPlan::Extension(Extension {
                 node: Arc::new(KeyCalculationExtension {
                     name: Some("key-calc-partition".to_string()),
-                    exprs:  
                     schema: input.schema().clone(),
                     input: input.clone(),
+                    keys: KeysOrExprs::Exprs(partition_exprs.clone()),
                 }),
             }))
         })

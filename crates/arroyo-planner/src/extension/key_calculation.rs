@@ -1,18 +1,27 @@
-use std::{fmt::Formatter, sync::Arc};
 use arrow_schema::{Field, Schema};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
-use arroyo_rpc::{df::{ArroyoSchema, ArroyoSchemaRef}, grpc::api::KeyPlanOperator, TIMESTAMP_FIELD};
+use arroyo_rpc::{
+    df::{ArroyoSchema, ArroyoSchemaRef},
+    grpc::api::KeyPlanOperator,
+    TIMESTAMP_FIELD,
+};
 use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result};
+use std::{fmt::Formatter, sync::Arc};
 
 use datafusion::logical_expr::{Expr, ExprSchemable, LogicalPlan, UserDefinedLogicalNodeCore};
-use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
-use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use itertools::Itertools;
 use prost::Message;
 
-use crate::{builder::{NamedNode, Planner}, fields_with_qualifiers, multifield_partial_ord, physical::ArroyoPhysicalExtensionCodec, schema_from_df_fields_with_metadata, DFField};
 use super::{ArroyoExtension, NodeWithIncomingEdges};
+use crate::{
+    builder::{NamedNode, Planner},
+    fields_with_qualifiers, multifield_partial_ord,
+    physical::ArroyoPhysicalExtensionCodec,
+    schema_from_df_fields_with_metadata, DFField,
+};
 
 pub(crate) const KEY_CALCULATION_NAME: &str = "KeyCalculationExtension";
 
@@ -87,8 +96,7 @@ impl ArroyoExtension for KeyCalculationExtension {
             return plan_err!("KeyCalculationExtension should have exactly one input");
         }
         let input_schema = input_schemas[0].clone();
-        let input_df_schema =
-            Arc::new(DFSchema::try_from(input_schema.schema.as_ref().clone())?);
+        let input_df_schema = Arc::new(DFSchema::try_from(input_schema.schema.as_ref().clone())?);
 
         let physical_plan = planner.sync_plan(&self.input)?;
 
@@ -98,16 +106,17 @@ impl ArroyoExtension for KeyCalculationExtension {
         )?;
 
         let (key_fields, exprs) = match &self.keys {
-            KeysOrExprs::Keys(keys) => {
-                (keys.iter().map(|k| *k as u64).collect_vec(), vec![])
-            }
+            KeysOrExprs::Keys(keys) => (keys.iter().map(|k| *k as u64).collect_vec(), vec![]),
             KeysOrExprs::Exprs(exprs) => {
                 let mut physical_exprs = vec![];
                 for e in exprs {
-                    let phys = planner.create_physical_expr(e, &input_df_schema)
+                    let phys = planner
+                        .create_physical_expr(e, &input_df_schema)
                         .map_err(|e| e.context("in PARTITION BY"))?;
                     physical_exprs.push(
-                        serialize_physical_expr(&phys, &DefaultPhysicalExtensionCodec {})?.encode_to_vec());
+                        serialize_physical_expr(&phys, &DefaultPhysicalExtensionCodec {})?
+                            .encode_to_vec(),
+                    );
                 }
 
                 (vec![], physical_exprs)
@@ -147,21 +156,24 @@ impl ArroyoExtension for KeyCalculationExtension {
             KeysOrExprs::Exprs(exprs) => {
                 let mut fields = vec![
                     // timestamp field
-                    arrow_schema.field_with_name(None, TIMESTAMP_FIELD).unwrap().clone()
+                    arrow_schema
+                        .field_with_name(None, TIMESTAMP_FIELD)
+                        .unwrap()
+                        .clone(),
                 ];
 
                 for (i, e) in exprs.iter().enumerate() {
                     let (dt, nullable) = e.data_type_and_nullable(arrow_schema).unwrap();
-                    fields.push(Field::new(format!("__key_{}", i),  dt, nullable));
+                    fields.push(Field::new(format!("__key_{}", i), dt, nullable));
                 }
 
                 ArroyoSchema::from_schema_keys(
-                    Arc::new(Schema::new(fields)), (1..=exprs.len()).collect_vec()
-                ).unwrap()
+                    Arc::new(Schema::new(fields)),
+                    (1..=exprs.len()).collect_vec(),
+                )
+                .unwrap()
             }
         }
-
-
     }
 }
 

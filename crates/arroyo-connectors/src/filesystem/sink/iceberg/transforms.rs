@@ -1,18 +1,21 @@
 // Adapted from https://github.com/JanKaul/iceberg-rust/blob/495a566f762f276b30c55caa5c10d3d7cbf856f5/iceberg-rust/src/arrow/transform.rs
 // Licensed under Apache2
 
-use std::sync::Arc;
-use arrow::array::{as_primitive_array, downcast_array, Array, ArrayRef, PrimitiveArray, StringArray};
+use crate::filesystem::config::Transform;
+use arrow::array::{
+    as_primitive_array, downcast_array, Array, ArrayRef, PrimitiveArray, StringArray,
+};
 use arrow::buffer::ScalarBuffer;
 use arrow::compute::{binary, cast, date_part, unary, DatePart};
-use arrow::datatypes::{DataType, Date32Type, Int16Type, Int32Type, Int64Type, TimeUnit, TimestampMicrosecondType};
+use arrow::datatypes::{
+    DataType, Date32Type, Int16Type, Int32Type, Int64Type, TimeUnit, TimestampMicrosecondType,
+};
 use arrow::error::ArrowError;
-use crate::filesystem::config::Transform;
+use std::sync::Arc;
 
 static YEARS_BEFORE_UNIX_EPOCH: i32 = 1970;
 static MICROS_IN_HOUR: i64 = 3_600_000_000;
 static MICROS_IN_DAY: i64 = 86_400_000_000;
-
 
 /// Applies an Iceberg partition transform to an Arrow array
 ///
@@ -164,7 +167,7 @@ pub fn transform_arrow(array: ArrayRef, transform: &Transform) -> Result<ArrayRe
                     } else {
                         0
                     }
-                        .rem_euclid(*m as i32)
+                    .rem_euclid(*m as i32)
                 })),
                 nulls.cloned(),
             )))

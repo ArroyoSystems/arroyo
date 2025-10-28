@@ -1,18 +1,18 @@
+use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
 use datafusion::common::{plan_err, DataFusionError, Result, ScalarValue};
+use datafusion::physical_plan::PhysicalExpr;
+use datafusion::prelude::{col, concat, lit, to_char, Expr};
 use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
+use iceberg::spec::{PartitionSpec, Schema as IceSchema, SchemaRef};
+use prost::Message;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::num::NonZeroU64;
-use arrow::datatypes::{DataType, Schema};
-use datafusion::physical_plan::PhysicalExpr;
-use datafusion::prelude::{concat, Expr, to_char, col, lit};
-use iceberg::spec::{PartitionSpec, Schema as IceSchema, SchemaRef};
-use prost::Message;
 use strum_macros::EnumString;
 
 const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
@@ -153,18 +153,15 @@ pub struct PartitioningConfig {
 }
 
 impl PartitioningConfig {
-    pub fn partition_expr(
-        &self,
-        schema: &Schema,
-    ) -> Result<Option<Expr>> {
+    pub fn partition_expr(&self, schema: &Schema) -> Result<Option<Expr>> {
         Ok(match (&self.time_pattern, &self.fields) {
             (None, fields) if !fields.is_empty() => {
                 Some(Self::field_logical_expression(schema, fields)?)
             }
             (None, _) => None,
-            (Some(pattern), fields) if !fields.is_empty() => {
-                Some(Self::partition_string_for_fields_and_time(schema, fields, pattern)?)
-            }
+            (Some(pattern), fields) if !fields.is_empty() => Some(
+                Self::partition_string_for_fields_and_time(schema, fields, pattern)?,
+            ),
             (Some(pattern), _) => Some(Self::timestamp_logical_expression(pattern)),
         })
     }
@@ -183,7 +180,6 @@ impl PartitioningConfig {
         ]);
         Ok(function)
     }
-
 
     fn field_logical_expression(schema: &Schema, partition_fields: &[String]) -> Result<Expr> {
         let columns_as_string = partition_fields
@@ -629,7 +625,6 @@ impl From<Transform> for iceberg::spec::Transform {
     }
 }
 
-
 /// Iceberg partitioning field configuration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -713,13 +708,9 @@ pub struct IcebergSink {
     #[schemars(title = "Table Name", description = "Table name")]
     pub table_name: String,
 
-    #[schemars(
-        title = "Partitioning",
-        description = "Iceberg partitioning config"
-    )]
+    #[schemars(title = "Partitioning", description = "Iceberg partitioning config")]
     #[serde(default)]
     pub partitioning: IcebergPartitioning,
-
 
     /// Optional path controlling where parquet files will be written, if creating the table
     #[schemars(title = "Location Path", description = "Data file location")]

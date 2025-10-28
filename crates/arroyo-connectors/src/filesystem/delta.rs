@@ -157,10 +157,10 @@ impl Connector for DeltaLakeConnector {
                         multipart: sink.multipart,
                     },
                     config,
-                    TableFormat::Delta { partitioning } ,
+                    TableFormat::Delta { partitioning },
                     None,
                 )
-            },
+            }
         }
     }
 }

@@ -17,7 +17,9 @@ use arroyo_rpc::formats::{ParquetCompression, ParquetFormat};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
 use bytes::{BufMut, Bytes, BytesMut};
+use datafusion::common::ScalarValue;
 use datafusion::physical_plan::{ColumnarValue, PhysicalExpr};
+use itertools::Itertools;
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},
@@ -32,8 +34,6 @@ use std::{
     sync::Arc,
     time::{Instant, SystemTime},
 };
-use datafusion::common::ScalarValue;
-use itertools::Itertools;
 
 const DEFAULT_ROW_GROUP_BYTES: u64 = 1024 * 1024 * 128; // 128MB
 
@@ -387,9 +387,11 @@ pub(crate) fn batches_by_partition(
 
     let partition = arrow::compute::partition(&[sorted_partition.clone()])?;
 
-    let result = partition.ranges().iter().map(|range| {
-        sorted_batch.slice(range.start, range.end - range.start)
-    }).collect_vec();
+    let result = partition
+        .ranges()
+        .iter()
+        .map(|range| sorted_batch.slice(range.start, range.end - range.start))
+        .collect_vec();
 
     Ok(result)
 }
