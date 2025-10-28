@@ -237,8 +237,7 @@ impl ArrowOperator for AsyncUdfOperator {
         gs.get_all()
             .iter()
             .filter(|(task_index, _)| {
-                **task_index % ctx.task_info.parallelism as u32
-                    == ctx.task_info.task_index as u32
+                **task_index % ctx.task_info.parallelism as u32 == ctx.task_info.task_index as u32
             })
             .for_each(|(_, state)| {
                 for (k, v) in &state.inputs {
