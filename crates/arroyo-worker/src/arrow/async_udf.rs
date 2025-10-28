@@ -227,7 +227,7 @@ impl ArrowOperator for AsyncUdfOperator {
 
         let gs = ctx
             .table_manager
-            .get_global_keyed_state::<usize, AsyncUdfState>("a")
+            .get_global_keyed_state::<u32, AsyncUdfState>("a")
             .await
             .unwrap();
 
@@ -237,8 +237,8 @@ impl ArrowOperator for AsyncUdfOperator {
         gs.get_all()
             .iter()
             .filter(|(task_index, _)| {
-                **task_index % ctx.task_info.parallelism as usize
-                    == ctx.task_info.task_index as usize
+                **task_index % ctx.task_info.parallelism as u32
+                    == ctx.task_info.task_index as u32
             })
             .for_each(|(_, state)| {
                 for (k, v) in &state.inputs {
@@ -401,7 +401,11 @@ impl ArrowOperator for AsyncUdfOperator {
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) {
-        let gs = ctx.table_manager.get_global_keyed_state("a").await.unwrap();
+        let gs = ctx
+            .table_manager
+            .get_global_keyed_state::<u32, AsyncUdfState>("a")
+            .await
+            .unwrap();
 
         let state = AsyncUdfState {
             inputs: self
@@ -417,7 +421,7 @@ impl ArrowOperator for AsyncUdfOperator {
             watermarks: self.watermarks.clone(),
         };
 
-        gs.insert(ctx.task_info.task_index, state).await;
+        gs.insert(ctx.task_info.task_index as u32, state).await;
     }
 
     async fn on_close(
