@@ -10,14 +10,14 @@ use datafusion::logical_expr::{
 };
 use tracing::debug;
 
+use super::WindowDetectingVisitor;
+use crate::extension::key_calculation::KeysOrExprs;
 use crate::{
     extension::{key_calculation::KeyCalculationExtension, window_fn::WindowFunctionExtension},
     fields_with_qualifiers,
     plan::extract_column,
     schema_from_df_fields,
 };
-
-use super::WindowDetectingVisitor;
 
 pub(crate) struct WindowFunctionRewriter {}
 
@@ -146,7 +146,7 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
         let key_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(KeyCalculationExtension::new(
                 key_projection,
-                (0..key_count).collect(),
+                KeysOrExprs::Keys((0..key_count).collect()),
             )),
         });
 

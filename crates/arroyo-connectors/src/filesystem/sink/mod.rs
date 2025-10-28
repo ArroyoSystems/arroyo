@@ -1,5 +1,5 @@
+use ::arrow::record_batch::RecordBatch;
 use ::arrow::row::OwnedRow;
-use ::arrow::{datatypes::DataType, record_batch::RecordBatch};
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
@@ -10,7 +10,6 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use datafusion::prelude::{col, concat, lit, to_char};
 use datafusion::{
-    common::Column,
     logical_expr::Expr,
     physical_plan::PhysicalExpr,
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
@@ -46,10 +45,7 @@ mod two_phase_committer;
 use self::{
     json::{JsonLocalWriter, JsonWriter},
     local::LocalFileSystemWriter,
-    parquet::{
-        batches_by_partition, representitive_timestamp, ParquetBatchBufferingWriter,
-        ParquetLocalWriter,
-    },
+    parquet::{representitive_timestamp, ParquetBatchBufferingWriter, ParquetLocalWriter},
 };
 
 use self::iceberg::metadata::IcebergFileMetadata;
@@ -230,7 +226,8 @@ enum CheckpointData {
 #[derive(Decode, Encode, Clone, PartialEq, Eq)]
 struct InProgressFileCheckpoint {
     filename: String,
-    partition: Option<Vec<u8>>,
+    // unused, retained for backwards compatibility
+    partition: Option<String>,
     data: FileCheckpointData,
     pushed_size: usize,
 }
@@ -406,7 +403,6 @@ impl CommitState {
 
 async fn from_checkpoint(
     path: &Path,
-    partition: Option<Vec<u8>>,
     checkpoint_data: FileCheckpointData,
     mut pushed_size: usize,
     object_store: Arc<StorageProvider>,
@@ -529,7 +525,7 @@ async fn from_checkpoint(
     };
     Ok(Some(FileToFinish {
         filename: path.to_string(),
-        partition,
+        partition: None,
         multi_part_upload_id: multipart_id,
         completed_parts: parts.into_iter().map(|p| p.content_id).collect(),
         size: pushed_size,
@@ -587,7 +583,8 @@ async fn write_trailing_bytes(
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct FileToFinish {
     filename: String,
-    partition: Option<Vec<u8>>,
+    // unused -- retained for backwards compatibility
+    partition: Option<String>,
     multi_part_upload_id: String,
     completed_parts: Vec<String>,
     size: usize,
@@ -597,7 +594,8 @@ pub struct FileToFinish {
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct FinishedFile {
     filename: String,
-    partition: Option<Vec<u8>>,
+    // unused, retained for backwards compatibility
+    partition: Option<String>,
     size: usize,
     metadata: Option<IcebergFileMetadata>,
 }
@@ -762,7 +760,6 @@ where
                             for recovered_file in recovered_files {
                                 let file_to_finish = from_checkpoint(
                                     &Path::parse(&recovered_file.filename)?,
-                                    recovered_file.partition.clone(),
                                     recovered_file.data,
                                     recovered_file.pushed_size,
                                     self.object_store.clone(),
@@ -1018,7 +1015,7 @@ where
 
                 Ok(Some(FinishedFile {
                     filename: file.filename,
-                    partition: file.partition,
+                    partition: None,
                     size: file.size,
                     metadata: file.metadata,
                 }))
@@ -1087,7 +1084,7 @@ where
             let in_progress_checkpoint =
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
                     filename: filename.clone(),
-                    partition: writer.partition(),
+                    partition: None,
                     data,
                     pushed_size: writer.stats().as_ref().unwrap().bytes_written,
                 });
@@ -1098,7 +1095,7 @@ where
                 .send(CheckpointData::InProgressFileCheckpoint(
                     InProgressFileCheckpoint {
                         filename: file_to_finish.filename,
-                        partition: file_to_finish.partition,
+                        partition: None,
                         data: FileCheckpointData::MultiPartWriterUploadCompleted {
                             multi_part_upload_id: file_to_finish.multi_part_upload_id,
                             completed_parts: file_to_finish.completed_parts,
@@ -1270,7 +1267,7 @@ impl MultipartManager {
         } else {
             Ok(Some(FileToFinish {
                 filename: self.name(),
-                partition: self.partition.as_ref().map(|p| p.as_ref().to_vec()),
+                partition: None,
                 multi_part_upload_id: self
                     .multipart_id
                     .as_ref()
@@ -1413,7 +1410,7 @@ impl MultipartManager {
         }
         FileToFinish {
             filename: self.name(),
-            partition: self.partition.as_ref().map(|p| p.as_ref().to_vec()),
+            partition: None,
             multi_part_upload_id: self
                 .multipart_id
                 .as_ref()
@@ -1855,7 +1852,7 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                             filename.clone(),
                             FileToFinish {
                                 filename,
-                                partition,
+                                partition: None,
                                 multi_part_upload_id,
                                 completed_parts,
                                 size: pushed_size,

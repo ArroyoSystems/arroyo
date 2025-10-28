@@ -367,35 +367,6 @@ impl LocalWriter for ParquetLocalWriter {
     }
 }
 
-pub(crate) fn batches_by_partition(
-    batch: RecordBatch,
-    partitioner: &dyn PhysicalExpr,
-) -> Result<Vec<RecordBatch>> {
-    let partition = partitioner.evaluate(&batch)?.into_array(batch.num_rows())?;
-
-    // sort the partition, and then the batch, then compute partitions
-    let sort_indices = sort_to_indices(&partition, None, None)?;
-    let sorted_partition = take(&*partition, &sort_indices, None).unwrap();
-    let sorted_batch = RecordBatch::try_new(
-        batch.schema(),
-        batch
-            .columns()
-            .iter()
-            .map(|col| take(col, &sort_indices, None).unwrap())
-            .collect(),
-    )?;
-
-    let partition = arrow::compute::partition(&[sorted_partition.clone()])?;
-
-    let result = partition
-        .ranges()
-        .iter()
-        .map(|range| sorted_batch.slice(range.start, range.end - range.start))
-        .collect_vec();
-
-    Ok(result)
-}
-
 pub(crate) fn representitive_timestamp(timestamp_column: &Arc<dyn Array>) -> Result<SystemTime> {
     let time = timestamp_column
         .as_any()

@@ -1,5 +1,5 @@
 use crate::extension::aggregate::AggregateExtension;
-use crate::extension::key_calculation::KeyCalculationExtension;
+use crate::extension::key_calculation::{KeyCalculationExtension, KeysOrExprs};
 use crate::extension::updating_aggregate::UpdatingAggregateExtension;
 use crate::plan::WindowDetectingVisitor;
 use crate::{
@@ -70,7 +70,7 @@ impl AggregateRewriter<'_> {
         let key_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(KeyCalculationExtension::new(
                 key_projection,
-                (0..key_count).collect(),
+                KeysOrExprs::Keys((0..key_count).collect()),
             )),
         });
         let Ok(timestamp_field) = key_plan
@@ -256,7 +256,7 @@ impl TreeNodeRewriter for AggregateRewriter<'_> {
         let key_plan = LogicalPlan::Extension(Extension {
             node: Arc::new(KeyCalculationExtension::new(
                 key_projection,
-                (0..key_count).collect(),
+                KeysOrExprs::Keys((0..key_count).collect()),
             )),
         });
         let mut aggregate_schema_fields = fields_with_qualifiers(&schema);

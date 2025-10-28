@@ -12,7 +12,7 @@ use crate::filesystem::sink::partitioning::PartitionerMode;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{render_schema, EmptyConfig};
 use anyhow::{anyhow, bail, Result};
-use arrow::datatypes::{Field, Schema};
+use arrow::datatypes::Schema;
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
@@ -23,8 +23,6 @@ use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_storage::{BackendConfig, StorageProvider};
 use arroyo_types::TaskInfo;
-use datafusion::physical_planner::PhysicalPlanner;
-use itertools::Itertools;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -78,7 +76,7 @@ pub fn make_sink(
 
     match (&format, is_local) {
         (Format::Parquet { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
-            LocalParquetFileSystemSink::new(sink, table_format, format),
+            LocalParquetFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
         (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
             ParquetFileSystemSink::create_and_start(
@@ -90,7 +88,7 @@ pub fn make_sink(
             ),
         ))),
         (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
-            LocalJsonFileSystemSink::new(sink, table_format, format),
+            LocalJsonFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
         (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
             JsonFileSystemSink::create_and_start(
@@ -187,21 +185,15 @@ impl Connector for FileSystemConnector {
 
                 let description = format!("FileSystemSink<{format}, {path}>");
 
-                let schema = Schema::new(
-                    schema
-                        .fields
-                        .iter()
-                        .map(|f| Field::from(f.clone()))
-                        .collect_vec(),
-                );
+                let partitioner = if partitioning.shuffle_by_partition.enabled {
+                    partitioning
+                        .partition_expr(&schema.arroyo_schema().schema)?
+                        .map(|p| vec![p])
+                } else {
+                    None
+                };
 
-                let partitioner = partitioning.partition_expr(&schema)?;
-
-                (
-                    description,
-                    ConnectionType::Sink,
-                    partitioner.map(|p| vec![p]),
-                )
+                (description, ConnectionType::Sink, partitioner)
             }
         };
 

@@ -55,7 +55,6 @@ use url::{Host, Url};
 
 pub mod config;
 pub mod df;
-mod partitioning;
 
 pub mod grpc {
     pub mod rpc {

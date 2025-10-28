@@ -151,7 +151,7 @@ impl ArroyoExtension for KeyCalculationExtension {
 
         match &self.keys {
             KeysOrExprs::Keys(keys) => {
-                ArroyoSchema::from_schema_keys(arrow_schema.into(), keys.clone()).unwrap()
+                ArroyoSchema::from_schema_keys(Arc::new(arrow_schema.into()), keys.clone()).unwrap()
             }
             KeysOrExprs::Exprs(exprs) => {
                 let mut fields = vec![

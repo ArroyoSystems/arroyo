@@ -1,5 +1,6 @@
 use crate::filesystem::config::{FileSystemSink, IcebergProfile, IcebergTable, PartitioningConfig};
 use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
+use crate::filesystem::sink::partitioning::PartitionerMode;
 use crate::filesystem::{make_sink, sink, TableFormat};
 use crate::render_schema;
 use anyhow::{anyhow, bail};
@@ -97,18 +98,6 @@ impl Connector for IcebergConnector {
             sink.partitioning.as_partition_spec(ischema.into())?;
         }
 
-        let partitioning_fields = if sink.partitioning.shuffle_by_partition.enabled {
-            Some(
-                sink.partitioning
-                    .fields
-                    .iter()
-                    .map(|f| f.field.clone())
-                    .collect(),
-            )
-        } else {
-            None
-        };
-
         let format = schema
             .format
             .as_ref()
@@ -139,8 +128,7 @@ impl Connector for IcebergConnector {
             schema,
             &config,
             description,
-        )
-        .with_partition_fields(partitioning_fields))
+        ))
     }
 
     fn from_options(
@@ -182,6 +170,7 @@ impl Connector for IcebergConnector {
                     },
                     config,
                     TableFormat::Iceberg(Box::new(tf)),
+                    PartitionerMode::Iceberg(sink.partitioning),
                     None,
                 )
             }
