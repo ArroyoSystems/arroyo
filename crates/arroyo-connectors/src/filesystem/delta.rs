@@ -93,10 +93,12 @@ impl Connector for DeltaLakeConnector {
 
                 let description = format!("DeltaLakeSink<{format}, {path}>");
 
+                let exprs = partitioning
+                    .partition_expr(&schema.arroyo_schema().schema)?
+                    .map(|p| vec![p]);
+
                 let partitioner = if partitioning.shuffle_by_partition.enabled {
-                    partitioning
-                        .partition_expr(&schema.arroyo_schema().schema)?
-                        .map(|e| vec![e])
+                    exprs
                 } else {
                     None
                 };

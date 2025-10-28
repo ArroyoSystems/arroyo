@@ -1,8 +1,9 @@
+use anyhow::anyhow;
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
-use datafusion::common::{plan_err, DataFusionError, Result, ScalarValue};
+use datafusion::common::{plan_datafusion_err, plan_err, DataFusionError, Result, ScalarValue};
 use datafusion::physical_plan::PhysicalExpr;
 use datafusion::prelude::{col, concat, lit, to_char, Expr};
 use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
@@ -153,7 +154,7 @@ pub struct PartitioningConfig {
 }
 
 impl PartitioningConfig {
-    pub fn partition_expr(&self, schema: &Schema) -> Result<Option<Expr>> {
+    pub fn partition_expr(&self, schema: &Schema) -> anyhow::Result<Option<Expr>> {
         Ok(match (&self.time_pattern, &self.fields) {
             (None, fields) if !fields.is_empty() => {
                 Some(Self::field_logical_expression(schema, fields)?)
@@ -170,7 +171,7 @@ impl PartitioningConfig {
         schema: &Schema,
         partition_fields: &[String],
         time_partition_pattern: &str,
-    ) -> Result<Expr> {
+    ) -> anyhow::Result<Expr> {
         let field_function = Self::field_logical_expression(schema, partition_fields)?;
         let time_function = Self::timestamp_logical_expression(time_partition_pattern);
         let function = concat(vec![
@@ -181,11 +182,19 @@ impl PartitioningConfig {
         Ok(function)
     }
 
-    fn field_logical_expression(schema: &Schema, partition_fields: &[String]) -> Result<Expr> {
+    fn field_logical_expression(
+        schema: &Schema,
+        partition_fields: &[String],
+    ) -> anyhow::Result<Expr> {
         let columns_as_string = partition_fields
             .iter()
             .map(|field| {
-                let field = schema.field_with_name(field)?;
+                let field = schema.field_with_name(field).map_err(|e| {
+                    anyhow!(
+                        "partition field '{field}' does not exist in the schema ({:?})",
+                        e
+                    )
+                })?;
                 let column_expr = col(field.name());
                 let expr = match field.data_type() {
                     DataType::Utf8 => column_expr,
@@ -196,7 +205,7 @@ impl PartitioningConfig {
                 };
                 Ok((field.name(), expr))
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         let function = concat(
             columns_as_string
