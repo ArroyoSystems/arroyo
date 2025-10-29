@@ -8,9 +8,7 @@ use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructo
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
 use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
-use crate::arrow::{
-    KeyExecutionConstructor, ProjectionConstructor, ProjectionOperator, ValueExecutionConstructor,
-};
+use crate::arrow::{KeyExecutionConstructor, ProjectionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{

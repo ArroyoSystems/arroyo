@@ -40,7 +40,6 @@ impl SinkExtension {
         table: Table,
         mut schema: DFSchemaRef,
         mut input: Arc<LogicalPlan>,
-        shuffle_inputs: bool,
     ) -> Result<Self> {
         let input_is_updating = input
             .schema()

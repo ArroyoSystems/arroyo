@@ -1,7 +1,7 @@
 use crate::filesystem::config::{IcebergPartitioning, PartitioningConfig};
 use arrow::array::{ArrayRef, AsArray, RecordBatch, UInt32Array};
 use arrow::compute::take;
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Schema};
 use arrow::row::{OwnedRow, RowConverter, SortField};
 use datafusion::execution::SessionStateBuilder;
 use datafusion::physical_expr::PhysicalExpr;
@@ -45,16 +45,10 @@ impl Partitioner {
     pub fn new(mode: PartitionerMode, schema: &Schema) -> anyhow::Result<Self> {
         let exprs = match &mode {
             PartitionerMode::FileConfig(fc) => fc
-                .partition_expr(&schema)?
+                .partition_expr(schema)?
                 .map(|f| vec![f])
                 .unwrap_or_default(),
-            PartitionerMode::Iceberg(ic) => {
-                if let Some(expr) = ic.partition_expr(schema)? {
-                    expr
-                } else {
-                    vec![]
-                }
-            }
+            PartitionerMode::Iceberg(ic) => ic.partition_expr(schema)?.unwrap_or_default(),
         };
 
         let (exprs, row_converter) = Self::compile(exprs, schema)?;
@@ -72,7 +66,7 @@ impl Partitioner {
     ) -> anyhow::Result<(Vec<Arc<dyn PhysicalExpr>>, RowConverter)> {
         let exprs: Vec<_> = exprs
             .iter()
-            .map(|e| compile_expression(&e, schema))
+            .map(|e| compile_expression(e, schema))
             .try_collect()?;
 
         let fields: Result<_, anyhow::Error> = exprs
@@ -84,7 +78,7 @@ impl Partitioner {
     }
 
     pub fn is_partitioned(&self) -> bool {
-        self.exprs.len() > 0
+        !self.exprs.is_empty()
     }
 
     /// Partition the batch by this partitioner
@@ -244,8 +238,8 @@ mod tests {
         let test_schema = Arc::new(ArroyoSchema::from_fields(vec![]));
 
         let partitioner =
-            Partitioner::new(PartitionerMode::FileConfig(config), &*test_schema.schema).unwrap();
-        let expr = partitioner.exprs.get(0).unwrap();
+            Partitioner::new(PartitionerMode::FileConfig(config), &test_schema.schema).unwrap();
+        let expr = partitioner.exprs.first().unwrap();
 
         let data = RecordBatch::try_new(
             test_schema.schema.clone(),

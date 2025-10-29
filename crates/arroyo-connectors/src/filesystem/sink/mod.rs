@@ -2,19 +2,12 @@ use ::arrow::record_batch::RecordBatch;
 use ::arrow::row::OwnedRow;
 use anyhow::{bail, Result};
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event, TIMESTAMP_FIELD};
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event};
 use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use datafusion::prelude::{col, concat, lit, to_char};
-use datafusion::{
-    logical_expr::Expr,
-    physical_plan::PhysicalExpr,
-    physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
-    scalar::ScalarValue,
-};
 use deltalake::DeltaTable;
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
@@ -49,7 +42,7 @@ use self::{
 };
 
 use self::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::config::{NamingConfig, PartitioningConfig};
+use crate::filesystem::config::NamingConfig;
 use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::IcebergTable;
 use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
@@ -93,8 +86,8 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             table: config,
             format,
             commit_strategy: match &table_format {
-                TableFormat::None { .. } => CommitStrategy::PerSubtask,
-                TableFormat::Delta { .. } | TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
+                TableFormat::None => CommitStrategy::PerSubtask,
+                TableFormat::Delta | TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
             },
             table_format: Some(table_format),
             partitioner: None,
@@ -116,7 +109,7 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         self.checkpoint_receiver = Some(checkpoint_receiver);
         self.partitioner = Some(Arc::new(Partitioner::new(
             self.partitioner_mode.clone(),
-            &*schema.schema,
+            &schema.schema,
         )?));
 
         let table = self.table.clone();
@@ -696,13 +689,13 @@ where
     ) -> Result<Self> {
         let mut iceberg_schema = None;
         let commit_state = match table_format {
-            TableFormat::Delta { .. } => CommitState::DeltaLake {
+            TableFormat::Delta => CommitState::DeltaLake {
                 last_version: -1,
                 table: Box::new(
                     load_or_create_table(&object_store, &schema.schema_without_timestamp()).await?,
                 ),
             },
-            TableFormat::None { .. } => CommitState::VanillaParquet,
+            TableFormat::None => CommitState::VanillaParquet,
             TableFormat::Iceberg(mut table) => {
                 let t = table.load_or_create(task_info, &schema.schema).await?;
                 iceberg_schema = Some(t.metadata().current_schema().clone());
@@ -881,7 +874,6 @@ where
         BatchMultipartWriter::new(
             self.object_store.clone(),
             filename.into(),
-            partition.clone(),
             &self.properties,
             self.format.clone(),
             self.schema.clone(),
@@ -1116,7 +1108,6 @@ type BoxedTryFuture<T> = Pin<Box<dyn Future<Output = Result<T>> + Send>>;
 struct MultipartManager {
     storage_provider: Arc<StorageProvider>,
     location: Path,
-    partition: Option<OwnedRow>,
     multipart_id: Option<MultipartId>,
     pushed_parts: Vec<PartIdOrBufferedData>,
     uploaded_parts: usize,
@@ -1130,13 +1121,11 @@ impl MultipartManager {
     fn new(
         object_store: Arc<StorageProvider>,
         location: Path,
-        partition: Option<OwnedRow>,
         event_logger: FsEventLogger,
     ) -> Self {
         Self {
             storage_provider: object_store,
             location,
-            partition,
             multipart_id: None,
             pushed_parts: vec![],
             uploaded_parts: 0,
@@ -1472,7 +1461,6 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     fn new(
         object_store: Arc<StorageProvider>,
         path: Path,
-        partition: Option<OwnedRow>,
         config: &config::FileSystemSink,
         format: Format,
         schema: ArroyoSchemaRef,
@@ -1489,7 +1477,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
         Self {
             batch_buffering_writer,
-            multipart_manager: MultipartManager::new(object_store, path, partition, event_logger),
+            multipart_manager: MultipartManager::new(object_store, path, event_logger),
             stats: None,
             schema,
             target_part_size_bytes: config
@@ -1503,13 +1491,6 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
     fn name(&self) -> String {
         self.multipart_manager.name()
-    }
-
-    fn partition(&self) -> Option<Vec<u8>> {
-        self.multipart_manager
-            .partition
-            .as_ref()
-            .map(|p| p.as_ref().to_vec())
     }
 
     async fn insert_batch(

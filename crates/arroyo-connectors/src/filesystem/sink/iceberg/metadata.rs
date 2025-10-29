@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 use crate::filesystem::config::IcebergPartitioning;
 use bincode::{Decode, Encode};
-use futures::{StreamExt, TryStreamExt};
 use iceberg::spec::{
     visit_schema, DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType,
     Literal, MapType, NestedFieldRef, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema,
@@ -168,13 +167,13 @@ pub fn build_datafile_from_meta(
             let fun = create_transform_function(&f.transform.into())?;
             let result = fun
                 .transform_literal_result(v)
-                .map_err(|e| anyhow!("failed to compute partition function {}", f))?;
+                .map_err(|_| anyhow!("failed to compute partition function {}", f))?;
 
             Ok(Some(Literal::Primitive(result.literal().clone())))
         })
         .collect();
 
-    let partition = iceberg::spec::Struct::from_iter(partition?.into_iter());
+    let partition = iceberg::spec::Struct::from_iter(partition?);
 
     let df = DataFileBuilder::default()
         .file_path(file_path)

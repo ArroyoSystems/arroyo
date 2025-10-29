@@ -30,7 +30,6 @@ use futures::StreamExt;
 use itertools::Itertools;
 use prost::Message as ProstMessage;
 use std::borrow::Cow;
-use std::collections;
 use std::sync::Arc;
 use std::sync::RwLock;
 

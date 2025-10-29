@@ -31,7 +31,7 @@ multifield_partial_ord!(ProjectionExtension, name, exprs);
 
 impl ProjectionExtension {
     pub(crate) fn new(inputs: Vec<LogicalPlan>, name: Option<String>, exprs: Vec<Expr>) -> Self {
-        let input_schema = inputs.get(0).unwrap().schema();
+        let input_schema = inputs.first().unwrap().schema();
         let fields = exprs
             .iter()
             .map(|e| DFField::from(e.to_field(input_schema).unwrap()))
@@ -79,7 +79,7 @@ impl ArroyoExtension for ProjectionExtension {
 
         for e in &self.exprs {
             let phys = planner
-                .create_physical_expr(&e, &input_df_schema)
+                .create_physical_expr(e, &input_df_schema)
                 .map_err(|e| e.context("projection"))?;
             physical_exprs.push(
                 serialize_physical_expr(&phys, &DefaultPhysicalExtensionCodec {})?.encode_to_vec(),
@@ -87,12 +87,7 @@ impl ArroyoExtension for ProjectionExtension {
         }
 
         let config = ProjectionOperator {
-            name: self
-                .name
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or("projection")
-                .to_string(),
+            name: self.name.as_deref().unwrap_or("projection").to_string(),
             input_schema: Some(input_schema.clone().into()),
 
             output_schema: Some(self.output_schema().into()),
@@ -104,10 +99,7 @@ impl ArroyoExtension for ProjectionExtension {
             format!("projection_{index}"),
             OperatorName::Projection,
             config.encode_to_vec(),
-            format!(
-                "ArrowProjection<{}>",
-                self.name.as_ref().map(|s| s.as_str()).unwrap_or("_")
-            ),
+            format!("ArrowProjection<{}>", self.name.as_deref().unwrap_or("_")),
             1,
         );
 

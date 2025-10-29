@@ -24,9 +24,7 @@ use arroyo_datastream::WindowType;
 
 use builder::NamedNode;
 use datafusion::common::tree_node::TreeNode;
-use datafusion::common::{
-    not_impl_err, plan_datafusion_err, plan_err, Column, DFSchema, Result, ScalarValue,
-};
+use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::prelude::SessionConfig;
@@ -35,8 +33,8 @@ use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    create_udaf, ColumnarValue, Expr, ExprSchemable, Extension, LogicalPlan, ScalarFunctionArgs,
-    ScalarUDF, ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF,
+    create_udaf, ColumnarValue, Expr, Extension, LogicalPlan, ScalarFunctionArgs, ScalarUDF,
+    ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF,
 };
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
@@ -881,7 +879,6 @@ pub async fn parse_and_get_arrow_program(
                             table.clone(),
                             plan_rewrite.schema().clone(),
                             Arc::new(plan_rewrite),
-                            false,
                         )
                     }
                     Table::MemoryTable { logical_plan, .. } => {
@@ -909,7 +906,6 @@ pub async fn parse_and_get_arrow_program(
                 },
                 plan_rewrite.schema().clone(),
                 Arc::new(plan_rewrite),
-                false,
             ),
         };
         extensions.push(LogicalPlan::Extension(Extension {

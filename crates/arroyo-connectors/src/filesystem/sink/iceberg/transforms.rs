@@ -251,7 +251,7 @@ fn scalar_to_u32(arg: &ColumnarValue, fname: &str, pos: usize) -> DFResult<u32> 
 }
 
 fn truncate_return_type(arg_types: &[DataType]) -> DFResult<DataType> {
-    let Some(lhs) = arg_types.get(0) else {
+    let Some(lhs) = arg_types.first() else {
         return Ok(DataType::Null);
     };
     match lhs {
@@ -283,7 +283,7 @@ fn time_signature() -> Signature {
 make_transform_udf!(
     IceIdentity,
     ice_identity,
-    |arg_types: &[DataType]| Ok(arg_types.get(0).cloned().unwrap_or(DataType::Null)),
+    |arg_types: &[DataType]| Ok(arg_types.first().cloned().unwrap_or(DataType::Null)),
     // any single arg
     Signature::new(TypeSignature::Any(1), Volatility::Immutable),
     |_args: &ScalarFunctionArgs| Ok(Transform::Identity),

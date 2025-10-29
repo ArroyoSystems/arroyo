@@ -225,14 +225,14 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         let schema = ctx.in_schemas[0].clone();
 
         self.commit_state = Some(match self.table_format {
-            TableFormat::Delta { .. } => CommitState::DeltaLake {
+            TableFormat::Delta => CommitState::DeltaLake {
                 last_version: -1,
                 table: Box::new(
                     load_or_create_table(&storage_provider, &schema.schema_without_timestamp())
                         .await?,
                 ),
             },
-            TableFormat::None { .. } => CommitState::VanillaParquet,
+            TableFormat::None => CommitState::VanillaParquet,
             TableFormat::Iceberg { .. } => todo!(),
         });
 

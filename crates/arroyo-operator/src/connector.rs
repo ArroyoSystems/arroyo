@@ -1,4 +1,4 @@
-use crate::operator::{ConstructedOperator, Registry};
+use crate::operator::ConstructedOperator;
 use anyhow::{anyhow, bail};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema};
@@ -91,7 +91,7 @@ pub trait Connector: Send {
 
     fn table_type(&self, config: Self::ProfileT, table: Self::TableT) -> ConnectionType;
 
-    #[allow(unusued)]
+    #[allow(unused)]
     fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()> {
         Ok(())
     }

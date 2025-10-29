@@ -147,12 +147,7 @@ impl ArroyoExtension for KeyCalculationExtension {
                 }
 
                 let config = ProjectionOperator {
-                    name: self
-                        .name
-                        .as_ref()
-                        .map(|s| s.as_str())
-                        .unwrap_or("key")
-                        .to_string(),
+                    name: self.name.as_deref().unwrap_or("key").to_string(),
                     input_schema: Some(input_schema.clone().into()),
 
                     output_schema: Some(self.output_schema().into()),
@@ -168,10 +163,7 @@ impl ArroyoExtension for KeyCalculationExtension {
             format!("key_{index}"),
             name,
             config,
-            format!(
-                "ArrowKey<{}>",
-                self.name.as_ref().map(|s| s.as_str()).unwrap_or("_")
-            ),
+            format!("ArrowKey<{}>", self.name.as_deref().unwrap_or("_")),
             1,
         );
         let edge = LogicalEdge::project_all(LogicalEdgeType::Forward, input_schema);
@@ -193,7 +185,7 @@ impl ArroyoExtension for KeyCalculationExtension {
 
                 for (i, e) in exprs.iter().enumerate() {
                     let (dt, nullable) = e.data_type_and_nullable(arrow_schema).unwrap();
-                    fields.push(Field::new(format!("__key_{}", i), dt, nullable).into());
+                    fields.push(Field::new(format!("__key_{i}"), dt, nullable).into());
                 }
 
                 for f in arrow_schema.fields().iter() {

@@ -8,18 +8,12 @@ use crate::filesystem::sink::iceberg::schema::{
     add_parquet_field_ids, normalize_batch_to_schema, update_field_ids_to_iceberg,
 };
 use anyhow::Result;
+use arrow::array::{Array, RecordBatch, TimestampNanosecondArray};
 use arrow::datatypes::SchemaRef;
-use arrow::{
-    array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
-    compute::{sort_to_indices, take},
-};
 use arroyo_rpc::formats::{ParquetCompression, ParquetFormat};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
 use bytes::{BufMut, Bytes, BytesMut};
-use datafusion::common::ScalarValue;
-use datafusion::physical_plan::{ColumnarValue, PhysicalExpr};
-use itertools::Itertools;
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},

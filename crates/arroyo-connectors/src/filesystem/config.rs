@@ -4,15 +4,11 @@ use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
-use datafusion::common::{
-    plan_datafusion_err, plan_err, DFSchema, DataFusionError, Result, ScalarValue,
-};
-use datafusion::physical_plan::PhysicalExpr;
-use datafusion::prelude::{col, concat, date_trunc, lit, to_char, Expr};
+use datafusion::common::{plan_err, DFSchema, DataFusionError, Result, ScalarValue};
+use datafusion::prelude::{col, concat, lit, to_char, Expr};
 use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
 use datafusion_expr::ExprSchemable;
-use iceberg::spec::{PartitionSpec, Schema as IceSchema, SchemaRef};
-use prost::Message;
+use iceberg::spec::{PartitionSpec, SchemaRef};
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -688,7 +684,7 @@ impl Display for IcebergPartitioningField {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}({}", self.transform.name(), self.field)?;
         if let Transform::Bucket(b) | Transform::Truncate(b) = self.transform {
-            write!(f, ", {}", b)?;
+            write!(f, ", {b}")?;
         }
         write!(f, ")")
     }
@@ -751,7 +747,7 @@ impl IcebergPartitioning {
                 )
             })?;
 
-            if let Err(_) = expr.data_type_and_nullable(&dfschema) {
+            if expr.data_type_and_nullable(&dfschema).is_err() {
                 bail!("partition transform {} has invalid types", field);
             }
         }
