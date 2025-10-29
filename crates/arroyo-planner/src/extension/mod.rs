@@ -27,6 +27,7 @@ use self::{
 };
 use crate::builder::{NamedNode, Planner};
 use crate::extension::lookup::LookupJoin;
+use crate::extension::projection::ProjectionExtension;
 use crate::schemas::{add_timestamp_field, has_timestamp_field};
 use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
 use join::JoinExtension;
@@ -36,6 +37,7 @@ pub(crate) mod debezium;
 pub(crate) mod join;
 pub(crate) mod key_calculation;
 pub(crate) mod lookup;
+pub(crate) mod projection;
 pub(crate) mod remote_table;
 pub(crate) mod sink;
 pub(crate) mod table_source;
@@ -89,6 +91,7 @@ impl<'a> TryFrom<&'a dyn UserDefinedLogicalNode> for &'a dyn ArroyoExtension {
             .or_else(|_| try_from_t::<DebeziumUnrollingExtension>(node))
             .or_else(|_| try_from_t::<UpdatingAggregateExtension>(node))
             .or_else(|_| try_from_t::<LookupJoin>(node))
+            .or_else(|_| try_from_t::<ProjectionExtension>(node))
             .map_err(|_| DataFusionError::Plan(format!("unexpected node: {}", node.name())))
     }
 }

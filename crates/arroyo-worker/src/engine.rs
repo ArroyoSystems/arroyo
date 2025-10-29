@@ -8,7 +8,9 @@ use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructo
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
 use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
-use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
+use crate::arrow::{
+    KeyExecutionConstructor, ProjectionConstructor, ProjectionOperator, ValueExecutionConstructor,
+};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{
@@ -858,6 +860,7 @@ pub fn construct_operator(
     let ctor: Box<dyn ErasedConstructor> = match operator {
         OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
         OperatorName::ArrowKey => Box::new(KeyExecutionConstructor),
+        OperatorName::Projection => Box::new(ProjectionConstructor),
         OperatorName::AsyncUdf => Box::new(AsyncUdfConstructor),
         OperatorName::TumblingWindowAggregate => Box::new(TumblingAggregateWindowConstructor),
         OperatorName::SlidingWindowAggregate => Box::new(SlidingAggregatingWindowConstructor),

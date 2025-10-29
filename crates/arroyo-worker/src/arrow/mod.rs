@@ -7,6 +7,7 @@ use arroyo_operator::operator::{
 };
 use arroyo_planner::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_planner::physical::DecodingContext;
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
 use datafusion::common::{internal_err, DataFusionError};
@@ -26,8 +27,10 @@ use datafusion_proto::protobuf::physical_aggregate_expr_node::AggregateFunction;
 use datafusion_proto::protobuf::physical_expr_node::ExprType;
 use datafusion_proto::protobuf::{proto_error, PhysicalExprNode, PhysicalPlanNode};
 use futures::StreamExt;
+use itertools::Itertools;
 use prost::Message as ProstMessage;
 use std::borrow::Cow;
+use std::collections;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -91,6 +94,85 @@ impl ArrowOperator for ValueExecutionOperator {
             let batch = batch.expect("should be able to compute batch");
             collector.collect(batch).await;
         }
+    }
+}
+
+pub struct ProjectionOperator {
+    name: String,
+    output_schema: ArroyoSchema,
+    exprs: Vec<Arc<dyn PhysicalExpr>>,
+}
+
+pub struct ProjectionConstructor;
+impl OperatorConstructor for ProjectionConstructor {
+    type ConfigT = api::ProjectionOperator;
+
+    fn with_config(
+        &self,
+        config: Self::ConfigT,
+        registry: Arc<Registry>,
+    ) -> anyhow::Result<ConstructedOperator> {
+        let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
+        let output_schema: ArroyoSchema = config.output_schema.unwrap().try_into()?;
+
+        let exprs: anyhow::Result<_> = config
+            .exprs
+            .iter()
+            .map(|expr| {
+                Ok(parse_physical_expr(
+                    &PhysicalExprNode::decode(&mut expr.as_slice())?,
+                    registry.as_ref(),
+                    &input_schema.schema,
+                    &DefaultPhysicalExtensionCodec {},
+                )?)
+            })
+            .collect();
+
+        Ok(ConstructedOperator::from_operator(Box::new(
+            ProjectionOperator {
+                name: config.name,
+                output_schema,
+                exprs: exprs?,
+            },
+        )))
+    }
+}
+
+#[async_trait::async_trait]
+impl ArrowOperator for ProjectionOperator {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: (&self.name).into(),
+            fields: vec![(
+                "exprs",
+                AsDisplayable::List(self.exprs.iter().map(|e| e.to_string()).collect()),
+            )],
+        }
+    }
+
+    async fn process_batch(
+        &mut self,
+        record_batch: RecordBatch,
+        _: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) {
+        let outputs = self
+            .exprs
+            .iter()
+            .map(|e| {
+                e.evaluate(&record_batch)
+                    .and_then(|f| f.into_array(record_batch.num_rows()))
+                    .unwrap()
+            })
+            .collect_vec();
+
+        collector
+            .collect(RecordBatch::try_new(self.output_schema.schema.clone(), outputs).unwrap())
+            .await;
     }
 }
 

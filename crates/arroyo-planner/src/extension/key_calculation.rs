@@ -3,25 +3,25 @@ use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, Oper
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::KeyPlanOperator,
-    TIMESTAMP_FIELD,
 };
 use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result};
 use std::{fmt::Formatter, sync::Arc};
-
-use datafusion::logical_expr::{Expr, ExprSchemable, LogicalPlan, UserDefinedLogicalNodeCore};
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
-use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
-use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
-use itertools::Itertools;
-use prost::Message;
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::{
     builder::{NamedNode, Planner},
     fields_with_qualifiers, multifield_partial_ord,
     physical::ArroyoPhysicalExtensionCodec,
-    schema_from_df_fields_with_metadata, DFField,
+    schema_from_df_fields_with_metadata,
 };
+use arroyo_rpc::grpc::api::ProjectionOperator;
+use datafusion::logical_expr::{Expr, ExprSchemable, LogicalPlan, UserDefinedLogicalNodeCore};
+use datafusion::prelude::col;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
+use itertools::Itertools;
+use prost::Message;
 
 pub(crate) const KEY_CALCULATION_NAME: &str = "KeyCalculationExtension";
 
@@ -95,7 +95,7 @@ impl ArroyoExtension for KeyCalculationExtension {
         if input_schemas.len() != 1 {
             return plan_err!("KeyCalculationExtension should have exactly one input");
         }
-        let input_schema = input_schemas[0].clone();
+        let input_schema = (*input_schemas[0]).clone();
         let input_df_schema = Arc::new(DFSchema::try_from(input_schema.schema.as_ref().clone())?);
 
         let physical_plan = planner.sync_plan(&self.input)?;
@@ -105,13 +105,40 @@ impl ArroyoExtension for KeyCalculationExtension {
             &ArroyoPhysicalExtensionCodec::default(),
         )?;
 
-        let (key_fields, exprs) = match &self.keys {
-            KeysOrExprs::Keys(keys) => (keys.iter().map(|k| *k as u64).collect_vec(), vec![]),
-            KeysOrExprs::Exprs(exprs) => {
+        let (config, name) = match &self.keys {
+            KeysOrExprs::Keys(keys) => (
+                KeyPlanOperator {
+                    name: "key".into(),
+                    physical_plan: physical_plan_node.encode_to_vec(),
+                    key_fields: keys.iter().map(|k| *k as u64).collect(),
+                }
+                .encode_to_vec(),
+                OperatorName::ArrowKey,
+            ),
+            KeysOrExprs::Exprs(key_exprs) => {
+                let mut exprs = vec![];
+                for k in key_exprs {
+                    exprs.push(k.clone())
+                }
+
+                for f in input_schema.schema.fields.iter() {
+                    exprs.push(col(f.name()));
+                }
+
+                let output_schema = self.output_schema();
+
+                // ensure that the exprs generate the output schema
+                for (expr, expected) in exprs.iter().zip(output_schema.schema.fields()) {
+                    let (data_type, nullable) = expr.data_type_and_nullable(&input_df_schema)?;
+                    assert_eq!(data_type, *expected.data_type());
+                    assert_eq!(nullable, expected.is_nullable());
+                }
+
                 let mut physical_exprs = vec![];
+
                 for e in exprs {
                     let phys = planner
-                        .create_physical_expr(e, &input_df_schema)
+                        .create_physical_expr(&e, &input_df_schema)
                         .map_err(|e| e.context("in PARTITION BY"))?;
                     physical_exprs.push(
                         serialize_physical_expr(&phys, &DefaultPhysicalExtensionCodec {})?
@@ -119,26 +146,35 @@ impl ArroyoExtension for KeyCalculationExtension {
                     );
                 }
 
-                (vec![], physical_exprs)
-            }
-        };
+                let config = ProjectionOperator {
+                    name: self
+                        .name
+                        .as_ref()
+                        .map(|s| s.as_str())
+                        .unwrap_or("key")
+                        .to_string(),
+                    input_schema: Some(input_schema.clone().into()),
 
-        let config = KeyPlanOperator {
-            name: "key".into(),
-            physical_plan: physical_plan_node.encode_to_vec(),
-            key_fields,
-            exprs,
+                    output_schema: Some(self.output_schema().into()),
+                    exprs: physical_exprs,
+                };
+
+                (config.encode_to_vec(), OperatorName::Projection)
+            }
         };
 
         let node = LogicalNode::single(
             index as u32,
             format!("key_{index}"),
-            OperatorName::ArrowKey,
-            config.encode_to_vec(),
-            format!("ArrowKey<{}>", config.name),
+            name,
+            config,
+            format!(
+                "ArrowKey<{}>",
+                self.name.as_ref().map(|s| s.as_str()).unwrap_or("_")
+            ),
             1,
         );
-        let edge = LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone());
+        let edge = LogicalEdge::project_all(LogicalEdgeType::Forward, input_schema);
         Ok(NodeWithIncomingEdges {
             node,
             edges: vec![edge],
@@ -147,24 +183,21 @@ impl ArroyoExtension for KeyCalculationExtension {
 
     fn output_schema(&self) -> ArroyoSchema {
         let arrow_schema = self.input.schema().as_ref();
-        // timestamp, then keys, then values
 
         match &self.keys {
             KeysOrExprs::Keys(keys) => {
                 ArroyoSchema::from_schema_keys(Arc::new(arrow_schema.into()), keys.clone()).unwrap()
             }
             KeysOrExprs::Exprs(exprs) => {
-                let mut fields = vec![
-                    // timestamp field
-                    arrow_schema
-                        .field_with_name(None, TIMESTAMP_FIELD)
-                        .unwrap()
-                        .clone(),
-                ];
+                let mut fields = vec![];
 
                 for (i, e) in exprs.iter().enumerate() {
                     let (dt, nullable) = e.data_type_and_nullable(arrow_schema).unwrap();
-                    fields.push(Field::new(format!("__key_{}", i), dt, nullable));
+                    fields.push(Field::new(format!("__key_{}", i), dt, nullable).into());
+                }
+
+                for f in arrow_schema.fields().iter() {
+                    fields.push(f.clone());
                 }
 
                 ArroyoSchema::from_schema_keys(

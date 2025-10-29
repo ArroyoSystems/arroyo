@@ -29,6 +29,7 @@ pub enum OperatorName {
     ExpressionWatermark,
     ArrowValue,
     ArrowKey,
+    Projection,
     AsyncUdf,
     Join,
     InstantJoin,
@@ -402,7 +403,8 @@ impl LogicalProgram {
                     OperatorName::AsyncUdf => "async-udf".to_string(),
                     OperatorName::ExpressionWatermark
                     | OperatorName::ArrowValue
-                    | OperatorName::ArrowKey => continue,
+                    | OperatorName::ArrowKey
+                    | OperatorName::Projection => continue,
                     OperatorName::Join => "join-with-expiration".to_string(),
                     OperatorName::InstantJoin => "windowed-join".to_string(),
                     OperatorName::WindowFunction => "sql-window-function".to_string(),

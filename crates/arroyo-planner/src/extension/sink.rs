@@ -30,7 +30,6 @@ pub(crate) struct SinkExtension {
     pub(crate) table: Table,
     pub(crate) schema: DFSchemaRef,
     inputs: Arc<Vec<LogicalPlan>>,
-    pub(crate) shuffle_inputs: bool,
 }
 
 multifield_partial_ord!(SinkExtension, name, inputs);
@@ -85,7 +84,6 @@ impl SinkExtension {
             table,
             schema,
             inputs,
-            shuffle_inputs,
         })
     }
 
@@ -137,7 +135,6 @@ impl UserDefinedLogicalNodeCore for SinkExtension {
             table: self.table.clone(),
             schema: self.schema.clone(),
             inputs: Arc::new(inputs),
-            shuffle_inputs: self.shuffle_inputs,
         })
     }
 }
@@ -171,15 +168,11 @@ impl ArroyoExtension for SinkExtension {
             1,
         );
 
-        let edge_type = if self.shuffle_inputs {
-            LogicalEdgeType::Shuffle
-        } else {
-            LogicalEdgeType::Forward
-        };
-
         let edges = input_schemas
             .into_iter()
-            .map(|input_schema| LogicalEdge::project_all(edge_type, (*input_schema).clone()))
+            .map(|input_schema| {
+                LogicalEdge::project_all(LogicalEdgeType::Forward, (*input_schema).clone())
+            })
             .collect();
         Ok(NodeWithIncomingEdges { node, edges })
     }
