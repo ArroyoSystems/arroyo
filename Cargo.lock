@@ -586,6 +586,7 @@ dependencies = [
  "bytes",
  "chrono",
  "datafusion",
+ "datafusion-expr",
  "delta_kernel",
  "deltalake",
  "eventsource-client",

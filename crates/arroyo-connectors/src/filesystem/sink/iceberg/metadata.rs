@@ -1,12 +1,15 @@
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 
+use crate::filesystem::config::IcebergPartitioning;
 use bincode::{Decode, Encode};
+use futures::{StreamExt, TryStreamExt};
 use iceberg::spec::{
     visit_schema, DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType,
-    MapType, NestedFieldRef, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema,
+    Literal, MapType, NestedFieldRef, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema,
     SchemaVisitor, StructType, Type,
 };
+use iceberg::transform::create_transform_function;
 use itertools::Itertools;
 use parquet::file::metadata::ParquetMetaDataReader;
 use parquet::file::statistics::Statistics;
@@ -118,6 +121,7 @@ impl IcebergFileMetadata {
 pub fn build_datafile_from_meta(
     ice_schema: &IceSchema,
     meta: &IcebergFileMetadata,
+    partitioning: &IcebergPartitioning,
     file_path: String,
     file_size_bytes: u64,
     partition_spec_id: i32,
@@ -151,13 +155,34 @@ pub fn build_datafile_from_meta(
         }
     }
 
+    let partition: anyhow::Result<Vec<_>> = partitioning
+        .fields
+        .iter()
+        .map(|f| {
+            let f_id = ice_schema
+                .field_id_by_name(&f.field)
+                .ok_or_else(|| anyhow!("partition field not found in schema '{}'!", f.field))?;
+            let v = lower_bounds
+                .get(&f_id)
+                .ok_or_else(|| anyhow!("no metadata for partition field '{}'", f.field))?;
+            let fun = create_transform_function(&f.transform.into())?;
+            let result = fun
+                .transform_literal_result(v)
+                .map_err(|e| anyhow!("failed to compute partition function {}", f))?;
+
+            Ok(Some(Literal::Primitive(result.literal().clone())))
+        })
+        .collect();
+
+    let partition = iceberg::spec::Struct::from_iter(partition?.into_iter());
+
     let df = DataFileBuilder::default()
         .file_path(file_path)
         .file_format(DataFileFormat::Parquet)
         .record_count(meta.row_count)
         .file_size_in_bytes(file_size_bytes)
         .content(DataContentType::Data)
-        .partition(iceberg::spec::Struct::empty())
+        .partition(partition)
         .partition_spec_id(partition_spec_id)
         .split_offsets(meta.split_offsets.clone())
         .column_sizes(column_sizes)
@@ -560,6 +585,7 @@ mod tests {
     use parquet::basic::Compression;
     use parquet::file::properties::WriterProperties;
 
+    use crate::filesystem::config::{IcebergPartitioningField, Transform};
     use iceberg::spec::{NestedField, PrimitiveLiteral, PrimitiveType as PT, Schema, Type as IT};
 
     fn iceberg_schema() -> Schema {
@@ -635,6 +661,14 @@ mod tests {
         let df = build_datafile_from_meta(
             &ice_schema,
             &ifm,
+            &IcebergPartitioning {
+                fields: vec![IcebergPartitioningField {
+                    name: None,
+                    field: "id".to_string(),
+                    transform: Transform::Bucket(4),
+                }],
+                ..Default::default()
+            },
             "s3://bucket/data/file.parquet".to_string(),
             1234,
             0,

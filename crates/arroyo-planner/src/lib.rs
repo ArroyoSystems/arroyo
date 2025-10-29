@@ -62,6 +62,7 @@ use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewrit
 use crate::extension::key_calculation::{KeyCalculationExtension, KeysOrExprs};
 use crate::extension::projection::ProjectionExtension;
 use crate::udafs::EmptyUdaf;
+use arroyo_connectors::connectors;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
@@ -149,6 +150,10 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
 
     for p in SessionStateDefaults::default_expr_planners() {
         registry.register_expr_planner(p).unwrap();
+    }
+
+    for (_, c) in connectors() {
+        c.register_udfs(registry).unwrap();
     }
 }
 

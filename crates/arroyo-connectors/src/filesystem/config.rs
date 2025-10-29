@@ -1,18 +1,23 @@
-use anyhow::anyhow;
+use crate::filesystem::sink::iceberg::transforms;
+use anyhow::{anyhow, bail};
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
-use datafusion::common::{plan_datafusion_err, plan_err, DataFusionError, Result, ScalarValue};
+use datafusion::common::{
+    plan_datafusion_err, plan_err, DFSchema, DataFusionError, Result, ScalarValue,
+};
 use datafusion::physical_plan::PhysicalExpr;
-use datafusion::prelude::{col, concat, lit, to_char, Expr};
+use datafusion::prelude::{col, concat, date_trunc, lit, to_char, Expr};
 use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
+use datafusion_expr::ExprSchemable;
 use iceberg::spec::{PartitionSpec, Schema as IceSchema, SchemaRef};
 use prost::Message;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::num::NonZeroU64;
 use strum_macros::EnumString;
 
@@ -617,6 +622,21 @@ pub enum Transform {
     Void,
 }
 
+impl Transform {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Transform::Identity => "identity",
+            Transform::Bucket(_) => "bucket",
+            Transform::Truncate(_) => "truncate",
+            Transform::Year => "year",
+            Transform::Month => "month",
+            Transform::Day => "day",
+            Transform::Hour => "hour",
+            Transform::Void => "void",
+        }
+    }
+}
+
 impl From<Transform> for iceberg::spec::Transform {
     fn from(value: Transform) -> Self {
         use iceberg::spec::Transform as ITransform;
@@ -664,6 +684,16 @@ impl IcebergPartitioningField {
     }
 }
 
+impl Display for IcebergPartitioningField {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}({}", self.transform.name(), self.field)?;
+        if let Transform::Bucket(b) | Transform::Truncate(b) = self.transform {
+            write!(f, ", {}", b)?;
+        }
+        write!(f, ")")
+    }
+}
+
 /// Iceberg partitioning configuration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -695,8 +725,42 @@ impl IcebergPartitioning {
         Ok(builder.build()?)
     }
 
-    pub fn partition_expr(&self) -> Result<Option<Vec<Expr>>> {
-        todo!()
+    pub fn partition_expr(&self, schema: &Schema) -> anyhow::Result<Option<Vec<Expr>>> {
+        let exprs: Vec<_> = self
+            .fields
+            .iter()
+            .map(|f| match f.transform {
+                Transform::Identity => transforms::fns::ice_identity(),
+                Transform::Bucket(c) => transforms::fns::ice_bucket(col(&f.field), lit(c)),
+                Transform::Truncate(c) => transforms::fns::ice_bucket(col(&f.field), lit(c)),
+                Transform::Year => transforms::fns::ice_year(col(&f.field)),
+                Transform::Month => transforms::fns::ice_month(col(&f.field)),
+                Transform::Day => transforms::fns::ice_day(col(&f.field)),
+                Transform::Hour => transforms::fns::ice_hour(col(&f.field)),
+                Transform::Void => lit(ScalarValue::Null),
+            })
+            .collect();
+
+        let dfschema = DFSchema::try_from(schema.clone())?;
+
+        for (expr, field) in exprs.iter().zip(&self.fields) {
+            let field = schema.field_with_name(&field.field).map_err(|e| {
+                anyhow!(
+                    "partition field '{field}' does not exist in the schema ({:?})",
+                    e
+                )
+            })?;
+
+            if let Err(_) = expr.data_type_and_nullable(&dfschema) {
+                bail!("partition transform {} has invalid types", field);
+            }
+        }
+
+        if exprs.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(exprs))
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 pub mod metadata;
 pub mod schema;
-mod transforms;
+pub mod transforms;
 
 use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
 use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
@@ -142,6 +142,10 @@ impl IcebergTable {
             let schema_with_ids = add_parquet_field_ids(schema);
             let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&schema_with_ids)?;
 
+            let partition_spec = self
+                .partitioning
+                .as_partition_spec(Arc::new(iceberg_schema.clone()))?;
+
             match self
                 .catalog
                 .create_table(
@@ -149,7 +153,7 @@ impl IcebergTable {
                     TableCreation::builder()
                         .location_opt(self.location_path.clone())
                         .schema(iceberg_schema)
-                        // TODO: partitioning
+                        .partition_spec(partition_spec)
                         .name(self.table_ident.name.clone())
                         .build(),
                 )
@@ -251,6 +255,7 @@ impl IcebergTable {
                     f.metadata
                         .as_ref()
                         .expect("metadata not set for Iceberg write"),
+                    &self.partitioning,
                     format!(
                         "{}/data/{}",
                         table.metadata().location(),

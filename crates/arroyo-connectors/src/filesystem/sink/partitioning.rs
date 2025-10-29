@@ -49,7 +49,7 @@ impl Partitioner {
                 .map(|f| vec![f])
                 .unwrap_or_default(),
             PartitionerMode::Iceberg(ic) => {
-                if let Some(expr) = ic.partition_expr()? {
+                if let Some(expr) = ic.partition_expr(schema)? {
                     expr
                 } else {
                     vec![]

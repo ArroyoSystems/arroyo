@@ -1,10 +1,10 @@
 use crate::filesystem::config::{FileSystemSink, IcebergProfile, IcebergTable, PartitioningConfig};
 use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
+use crate::filesystem::sink::iceberg::transforms;
 use crate::filesystem::sink::partitioning::PartitionerMode;
 use crate::filesystem::{make_sink, sink, TableFormat};
 use crate::render_schema;
 use anyhow::{anyhow, bail};
-use arrow::datatypes::FieldRef;
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
@@ -14,8 +14,8 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use datafusion::common::plan_datafusion_err;
+use datafusion::execution::FunctionRegistry;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 pub struct IcebergConnector {}
 
@@ -81,22 +81,20 @@ impl Connector for IcebergConnector {
 
         let IcebergTable::Sink(sink) = &table;
 
+        let arrow_schema = schema.arroyo_schema().schema.clone();
+
         if !schema.fields.is_empty() {
-            let fields: Vec<FieldRef> = schema
-                .clone()
-                .fields
-                .into_iter()
-                .map(|f| Arc::new(f.into()))
-                .collect();
-
             // validate that the schema can be converted to Iceberg
-            let arrow_schema = arrow::datatypes::Schema::new(fields);
-
             let schema_with_ids = add_parquet_field_ids(&arrow_schema);
             let ischema = iceberg::arrow::arrow_schema_to_schema(&schema_with_ids)?;
 
             sink.partitioning.as_partition_spec(ischema.into())?;
         }
+
+        let mut partitioning = sink.partitioning.partition_expr(&arrow_schema)?;
+        if !sink.partitioning.shuffle_by_partition.enabled {
+            partitioning = None;
+        };
 
         let format = schema
             .format
@@ -128,7 +126,8 @@ impl Connector for IcebergConnector {
             schema,
             &config,
             description,
-        ))
+        )
+        .with_partition_exprs(partitioning))
     }
 
     fn from_options(
@@ -147,6 +146,10 @@ impl Connector for IcebergConnector {
             .unwrap_or_else(|| options.pull_struct())?;
 
         self.from_config(None, name, profile, options.pull_struct()?, schema)
+    }
+
+    fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()> {
+        Ok(transforms::register_all(registry)?)
     }
 
     fn make_operator(

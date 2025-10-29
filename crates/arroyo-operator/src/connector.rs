@@ -1,4 +1,4 @@
-use crate::operator::ConstructedOperator;
+use crate::operator::{ConstructedOperator, Registry};
 use anyhow::{anyhow, bail};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema};
@@ -8,6 +8,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::{DisplayAsSql, SourceError};
 use async_trait::async_trait;
+use datafusion::execution::FunctionRegistry;
 use datafusion::prelude::Expr;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
@@ -89,6 +90,11 @@ pub trait Connector: Send {
     }
 
     fn table_type(&self, config: Self::ProfileT, table: Self::TableT) -> ConnectionType;
+
+    #[allow(unusued)]
+    fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     #[allow(unused)]
     fn get_schema(
@@ -183,6 +189,8 @@ pub trait ErasedConnector: Send {
     ) -> Result<ConnectionType, serde_json::Error>;
 
     fn config_description(&self, s: &serde_json::Value) -> Result<String, serde_json::Error>;
+
+    fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()>;
 
     fn get_schema(
         &self,
@@ -397,6 +405,10 @@ impl<C: Connector> ErasedConnector for C {
             config,
             schema,
         )
+    }
+
+    fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()> {
+        self.register_udfs(registry)
     }
 }
 
