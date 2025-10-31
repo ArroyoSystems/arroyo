@@ -40,6 +40,7 @@ fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, u
         ParquetCompression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
         ParquetCompression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
         ParquetCompression::Lz4 => parquet::basic::Compression::LZ4,
+        ParquetCompression::Lz4Raw => parquet::basic::Compression::LZ4_RAW,
     });
 
     (

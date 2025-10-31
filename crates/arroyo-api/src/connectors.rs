@@ -13,11 +13,7 @@ use axum::Json;
     ),
 )]
 pub async fn get_connectors() -> Result<Json<ConnectorCollection>, ErrorResp> {
-    let mut connectors: Vec<_> = connectors()
-        .values()
-        .map(|c| c.metadata())
-        .filter(|metadata| !metadata.hidden)
-        .collect();
+    let mut connectors: Vec<_> = connectors().values().map(|c| c.metadata()).collect();
 
     connectors.sort_by_cached_key(|c| c.name.clone());
     Ok(Json(ConnectorCollection { data: connectors }))

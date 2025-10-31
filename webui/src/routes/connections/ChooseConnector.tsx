@@ -31,7 +31,7 @@ export function ChooseConnector() {
     setMenuItems([]);
   }, []);
 
-  const connectorCards = connectors?.map(c => {
+  const connectorCards = connectors?.filter(c => !c.hidden).map(c => {
     return (
       <Card key={c.name} size={'md'} maxW={400}>
         <Text fontSize={'12px'} p={2} w={'100%'} bgColor={'gray.600'} color={'blue.100'}>

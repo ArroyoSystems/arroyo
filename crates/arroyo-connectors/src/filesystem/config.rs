@@ -548,14 +548,14 @@ pub struct IcebergRestCatalog {
     #[schemars(
         url,
         description = "Base URL for the REST catalog",
-        example = "http://localhost:8001/iceberg"
+        example = "http://localhost:8001/catalog"
     )]
     pub url: String,
 
     /// Warehouse to connect to.
     #[schemars(
         description = "The Warehouse to connect to",
-        example = "16ba210d70caae96ecb1f6e17afe6f3b_my-bucket"
+        example = "\"my_warehouse\""
     )]
     pub warehouse: Option<String>,
 
@@ -598,14 +598,14 @@ impl FromOpts for IcebergProfile {
 
 /// Iceberg partitioning transforms
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "name", rename_all = "snake_case")]
 pub enum Transform {
     /// Source value, unmodified
     Identity,
     /// Hash of value, mod `N`.
-    Bucket(u32),
+    Bucket { n: u32 },
     /// Value truncated to width `W`
-    Truncate(u32),
+    Truncate { width: u32 },
     /// Extract a date or timestamp year, as years from 1970
     Year,
     /// Extract a date or timestamp month, as months from 1970-01-01
@@ -622,8 +622,8 @@ impl Transform {
     pub fn name(&self) -> &'static str {
         match self {
             Transform::Identity => "identity",
-            Transform::Bucket(_) => "bucket",
-            Transform::Truncate(_) => "truncate",
+            Transform::Bucket { .. } => "bucket",
+            Transform::Truncate { .. } => "truncate",
             Transform::Year => "year",
             Transform::Month => "month",
             Transform::Day => "day",
@@ -639,8 +639,8 @@ impl From<Transform> for iceberg::spec::Transform {
 
         match value {
             Transform::Identity => ITransform::Identity,
-            Transform::Bucket(b) => ITransform::Bucket(b),
-            Transform::Truncate(t) => ITransform::Truncate(t),
+            Transform::Bucket { n } => ITransform::Bucket(n),
+            Transform::Truncate { width } => ITransform::Truncate(width),
             Transform::Year => ITransform::Year,
             Transform::Month => ITransform::Month,
             Transform::Day => ITransform::Day,
@@ -667,8 +667,8 @@ impl IcebergPartitioningField {
 
         let t = match self.transform {
             Transform::Identity => "identity".to_string(),
-            Transform::Bucket(b) => format!("bucket_{b}"),
-            Transform::Truncate(t) => format!("truncate_{t}"),
+            Transform::Bucket { n } => format!("bucket_{n}"),
+            Transform::Truncate { width } => format!("truncate_{width}"),
             Transform::Year => "year".to_string(),
             Transform::Month => "month".to_string(),
             Transform::Day => "day".to_string(),
@@ -683,8 +683,8 @@ impl IcebergPartitioningField {
 impl Display for IcebergPartitioningField {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}({}", self.transform.name(), self.field)?;
-        if let Transform::Bucket(b) | Transform::Truncate(b) = self.transform {
-            write!(f, ", {b}")?;
+        if let Transform::Bucket { n: i } | Transform::Truncate { width: i } = self.transform {
+            write!(f, ", {i}")?;
         }
         write!(f, ")")
     }
@@ -707,6 +707,7 @@ pub struct IcebergPartitioning {
         title = "Partition shuffle settings",
         description = "Advanced tuning for hash shuffling of partition keys"
     )]
+    #[serde(default)]
     pub shuffle_by_partition: PartitionShuffle,
 }
 
@@ -727,8 +728,10 @@ impl IcebergPartitioning {
             .iter()
             .map(|f| match f.transform {
                 Transform::Identity => transforms::fns::ice_identity(),
-                Transform::Bucket(c) => transforms::fns::ice_bucket(col(&f.field), lit(c)),
-                Transform::Truncate(c) => transforms::fns::ice_bucket(col(&f.field), lit(c)),
+                Transform::Bucket { n } => transforms::fns::ice_bucket(col(&f.field), lit(n)),
+                Transform::Truncate { width } => {
+                    transforms::fns::ice_bucket(col(&f.field), lit(width))
+                }
                 Transform::Year => transforms::fns::ice_year(col(&f.field)),
                 Transform::Month => transforms::fns::ice_month(col(&f.field)),
                 Transform::Day => transforms::fns::ice_day(col(&f.field)),

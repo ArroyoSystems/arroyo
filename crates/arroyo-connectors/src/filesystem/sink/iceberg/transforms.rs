@@ -105,38 +105,41 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 datepart_to_years,
             )))
         }
-        (DataType::Int16, Transform::Truncate(m)) => Ok(Arc::<PrimitiveArray<Int16Type>>::new(
-            unary(as_primitive_array::<Int16Type>(&array), |i| {
-                i - i.rem_euclid(m as i16)
-            }),
-        )),
-        (DataType::Int32, Transform::Truncate(m)) => Ok(Arc::<PrimitiveArray<Int32Type>>::new(
-            unary(as_primitive_array::<Int32Type>(&array), |i| {
-                i - i.rem_euclid(m as i32)
-            }),
-        )),
-        (DataType::Int64, Transform::Truncate(m)) => Ok(Arc::<PrimitiveArray<Int64Type>>::new(
-            unary(as_primitive_array::<Int64Type>(&array), |i| {
-                i - i.rem_euclid(m as i64)
-            }),
-        )),
-        (DataType::Int32, Transform::Bucket(m)) => Ok(Arc::<PrimitiveArray<Int32Type>>::new(
+        (DataType::Int16, Transform::Truncate { width }) => {
+            Ok(Arc::<PrimitiveArray<Int16Type>>::new(unary(
+                as_primitive_array::<Int16Type>(&array),
+                |i| i - i.rem_euclid(width as i16),
+            )))
+        }
+        (DataType::Int32, Transform::Truncate { width }) => {
+            Ok(Arc::<PrimitiveArray<Int32Type>>::new(unary(
+                as_primitive_array::<Int32Type>(&array),
+                |i| i - i.rem_euclid(width as i32),
+            )))
+        }
+        (DataType::Int64, Transform::Truncate { width }) => {
+            Ok(Arc::<PrimitiveArray<Int64Type>>::new(unary(
+                as_primitive_array::<Int64Type>(&array),
+                |i| i - i.rem_euclid(width as i64),
+            )))
+        }
+        (DataType::Int32, Transform::Bucket { n }) => Ok(Arc::<PrimitiveArray<Int32Type>>::new(
             unary(as_primitive_array::<Int32Type>(&array), |i| {
                 let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
                 (murmur3::murmur3_32(&mut buffer, 0).expect("murmur3 hash failled for some reason")
                     as i32)
-                    .rem_euclid(m as i32)
+                    .rem_euclid(n as i32)
             }),
         )),
-        (DataType::Int64, Transform::Bucket(m)) => Ok(Arc::<PrimitiveArray<Int32Type>>::new(
+        (DataType::Int64, Transform::Bucket { n }) => Ok(Arc::<PrimitiveArray<Int32Type>>::new(
             unary(as_primitive_array::<Int64Type>(&array), |i| {
                 let mut buffer = std::io::Cursor::new((i).to_le_bytes());
                 (murmur3::murmur3_32(&mut buffer, 0).expect("murmur3 hash failled for some reason")
                     as i32)
-                    .rem_euclid(m as i32)
+                    .rem_euclid(n as i32)
             }),
         )),
-        (DataType::Date32, Transform::Bucket(m)) => {
+        (DataType::Date32, Transform::Bucket { n }) => {
             let temp = cast(&array, &DataType::Int32)?;
 
             Ok(Arc::<PrimitiveArray<Int32Type>>::new(unary(
@@ -145,11 +148,11 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                     let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
                     (murmur3::murmur3_32(&mut buffer, 0)
                         .expect("murmur3 hash failled for some reason") as i32)
-                        .rem_euclid(m as i32)
+                        .rem_euclid(n as i32)
                 },
             )))
         }
-        (DataType::Time32(TimeUnit::Millisecond), Transform::Bucket(m)) => {
+        (DataType::Time32(TimeUnit::Millisecond), Transform::Bucket { n }) => {
             let temp = cast(&array, &DataType::Int32)?;
 
             Ok(Arc::<PrimitiveArray<Int32Type>>::new(unary(
@@ -158,11 +161,11 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                     let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
                     (murmur3::murmur3_32(&mut buffer, 0)
                         .expect("murmur3 hash failled for some reason") as i32)
-                        .rem_euclid(m as i32)
+                        .rem_euclid(n as i32)
                 },
             )))
         }
-        (DataType::Utf8, Transform::Bucket(m)) => {
+        (DataType::Utf8, Transform::Bucket { n }) => {
             let nulls = array.nulls();
             let local_array: StringArray = downcast_array::<StringArray>(&array);
 
@@ -175,7 +178,7 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                     } else {
                         0
                     }
-                    .rem_euclid(m as i32)
+                    .rem_euclid(n as i32)
                 })),
                 nulls.cloned(),
             )))
@@ -338,8 +341,8 @@ make_transform_udf!(
         if args.args.len() != 2 {
             return exec_err!("ice_truncate requires 2 args (value, m)");
         }
-        let m = scalar_to_u32(&args.args[1], "ice_truncate", 2)?;
-        Ok(Transform::Truncate(m))
+        let width = scalar_to_u32(&args.args[1], "ice_truncate", 2)?;
+        Ok(Transform::Truncate { width })
     },
 );
 
@@ -353,8 +356,8 @@ make_transform_udf!(
         if args.args.len() != 2 {
             return exec_err!("ice_bucket requires 2 args (value, m)");
         }
-        let m = scalar_to_u32(&args.args[1], "ice_bucket", 2)?;
-        Ok(Transform::Bucket(m))
+        let n = scalar_to_u32(&args.args[1], "ice_bucket", 2)?;
+        Ok(Transform::Bucket { n })
     },
 );
 
@@ -534,7 +537,7 @@ mod tests {
             Some(5),
             None,
         ])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Truncate(10)).unwrap();
+        let result = transform_arrow(array, Transform::Truncate { width: 10 }).unwrap();
         let expected = Arc::new(arrow::array::Int16Array::from(vec![
             Some(10),  // 17 - 17 % 10 = 17 - 7 = 10
             Some(20),  // 23 - 23 % 10 = 23 - 3 = 20
@@ -554,7 +557,7 @@ mod tests {
             Some(50),
             None,
         ])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Truncate(100)).unwrap();
+        let result = transform_arrow(array, Transform::Truncate { width: 100 }).unwrap();
         let expected = Arc::new(arrow::array::Int32Array::from(vec![
             Some(100),  // 127 - 127 % 100 = 127 - 27 = 100
             Some(200),  // 234 - 234 % 100 = 234 - 34 = 200
@@ -574,7 +577,7 @@ mod tests {
             Some(500),
             None,
         ])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Truncate(1000)).unwrap();
+        let result = transform_arrow(array, Transform::Truncate { width: 1000 }).unwrap();
         let expected = Arc::new(arrow::array::Int64Array::from(vec![
             Some(1000),  // 1275 - 1275 % 1000 = 1275 - 275 = 1000
             Some(2000),  // 2348 - 2348 % 1000 = 2348 - 348 = 2000
@@ -628,7 +631,7 @@ mod tests {
             Some(0),
             None,
         ])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Bucket(1000)).unwrap();
+        let result = transform_arrow(array, Transform::Bucket { n: 1000 }).unwrap();
         let expected = Arc::new(arrow::array::Int32Array::from(vec![
             Some(2017239379i32.rem_euclid(1000)),
             Some(578), // -653330422 % 1000 not match I don't know why
@@ -650,7 +653,7 @@ mod tests {
             Some(0),
             None,
         ])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Bucket(1000)).unwrap();
+        let result = transform_arrow(array, Transform::Bucket { n: 1000 }).unwrap();
         let expected = Arc::new(arrow::array::Int32Array::from(vec![
             Some(2017239379i32.rem_euclid(1000)),
             Some(578), // -653_330_422 % 1000 not match probably like to signed number
@@ -668,7 +671,7 @@ mod tests {
             Some(17_486), // number of day between 2017-11-16
             None,
         ])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Bucket(1000)).unwrap();
+        let result = transform_arrow(array, Transform::Bucket { n: 1000 }).unwrap();
 
         let expected = Arc::new(arrow::array::Int32Array::from(vec![
             Some(578), // -653330422 % 1000 not match probably like to signed number
@@ -684,7 +687,7 @@ mod tests {
             Some(81_068_000), // number of micros from midnight 22:31:08
             None,
         ])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Bucket(1000)).unwrap();
+        let result = transform_arrow(array, Transform::Bucket { n: 1000 }).unwrap();
         let expected = Arc::new(arrow::array::Int32Array::from(vec![
             Some(693), // -662762989 % 1000 not match probably like to signed number
             None,
@@ -696,7 +699,7 @@ mod tests {
     fn test_utf8_bucket_transform() {
         let array =
             Arc::new(arrow::array::StringArray::from(vec![Some("iceberg"), None])) as ArrayRef;
-        let result = transform_arrow(array, Transform::Bucket(1000)).unwrap();
+        let result = transform_arrow(array, Transform::Bucket { n: 1000 }).unwrap();
         let expected = Arc::new(arrow::array::Int32Array::from(vec![
             Some(1_210_000_089i32.rem_euclid(1000)),
             None,

@@ -82,6 +82,14 @@ impl IcebergTable {
                     props.insert("token".to_string(), token.sub_env_vars()?);
                 }
 
+                for (k, v) in &sink.storage_options {
+                    if let Some((mapped, _)) = CONFIG_MAPPINGS.iter().find(|(_, n)| n == k) {
+                        props.insert(mapped.to_string(), v.to_string());
+                    }
+                }
+
+                println!("props! {:?}", props);
+
                 let config = RestCatalogConfig::builder()
                     .uri(rest.url.clone())
                     .warehouse_opt(rest.warehouse.clone())
