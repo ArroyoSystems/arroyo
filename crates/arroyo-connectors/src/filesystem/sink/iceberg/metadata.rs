@@ -664,7 +664,7 @@ mod tests {
                 fields: vec![IcebergPartitioningField {
                     name: None,
                     field: "id".to_string(),
-                    transform_fn: Transform::Bucket{ arg0: 4 },
+                    transform_fn: Transform::Bucket { arg0: 4 },
                 }],
                 ..Default::default()
             },

@@ -610,9 +610,8 @@ impl ConnectorOptions {
 
         Ok(Self {
             options,
-            partitions: partition_by.clone().unwrap_or_default()
+            partitions: partition_by.clone().unwrap_or_default(),
         })
-
     }
 
     pub fn partitions(&self) -> &[Expr] {

@@ -4,9 +4,16 @@ use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
-use datafusion::common::{plan_datafusion_err, plan_err, DFSchema, DataFusionError, Result, ScalarValue};
+use core::slice::Iter;
+use datafusion::common::{
+    plan_datafusion_err, plan_err, DFSchema, DataFusionError, Result, ScalarValue,
+};
+use datafusion::logical_expr::sqlparser::ast::Function;
 use datafusion::prelude::{col, concat, lit, to_char, Expr};
-use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan};
+use datafusion::sql::sqlparser;
+use datafusion::sql::sqlparser::ast::{
+    Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
+};
 use datafusion_expr::ExprSchemable;
 use iceberg::spec::{PartitionSpec, SchemaRef};
 use regex::Regex;
@@ -15,10 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::num::NonZeroU64;
-use datafusion::logical_expr::sqlparser::ast::Function;
-use datafusion::sql::sqlparser;
 use strum_macros::EnumString;
-use core::slice::Iter;
 
 const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
 
@@ -692,9 +696,18 @@ impl TryFrom<&sqlparser::ast::Function> for IcebergPartitioningField {
             return plan_err!("expected arg list");
         };
 
-        fn take_arg<'a, 'b>(f: &'a str, expected: u32, iter: &'b mut Iter<FunctionArg>) -> Result<&'b sqlparser::ast::Expr, DataFusionError> {
-            let arg = iter.next().ok_or_else(||
-                plan_datafusion_err!("Iceberg PARTITION BY function '{}' expects {} arguments", f, expected))?;
+        fn take_arg<'b>(
+            f: &str,
+            expected: u32,
+            iter: &'b mut Iter<FunctionArg>,
+        ) -> Result<&'b sqlparser::ast::Expr, DataFusionError> {
+            let arg = iter.next().ok_or_else(|| {
+                plan_datafusion_err!(
+                    "Iceberg PARTITION BY function '{}' expects {} arguments",
+                    f,
+                    expected
+                )
+            })?;
             let FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) = arg else {
                 return plan_err!("unexpected argument to PARTITION BY fucntion '{}'", f);
             };
@@ -702,16 +715,31 @@ impl TryFrom<&sqlparser::ast::Function> for IcebergPartitioningField {
             Ok(e)
         }
 
-        fn take_u32<'a, 'b>(f: &'a str, expected: u32, iter: &'b mut Iter<FunctionArg>) -> Result<u32, DataFusionError> {
+        fn take_u32(
+            f: &str,
+            expected: u32,
+            iter: &mut Iter<FunctionArg>,
+        ) -> Result<u32, DataFusionError> {
             let sqlparser::ast::Expr::Value(value) = take_arg(f, expected, iter)? else {
-                return plan_err!("expected a second argument for '{}' in iceberg PARTITION BY", f);
+                return plan_err!(
+                    "expected a second argument for '{}' in iceberg PARTITION BY",
+                    f
+                );
             };
 
             let Value::Number(n, _) = &value.value else {
-                return plan_err!("expected number as second argument for '{}' in iceberg PARTITION BY", f);
+                return plan_err!(
+                    "expected number as second argument for '{}' in iceberg PARTITION BY",
+                    f
+                );
             };
 
-            let n: u32 = n.parse().map_err(|_| plan_datafusion_err!("expected u32 as second argument for '{}' in iceberg PARTITION BY", f))?;
+            let n: u32 = n.parse().map_err(|_| {
+                plan_datafusion_err!(
+                    "expected u32 as second argument for '{}' in iceberg PARTITION BY",
+                    f
+                )
+            })?;
 
             Ok(n)
         }
@@ -721,22 +749,32 @@ impl TryFrom<&sqlparser::ast::Function> for IcebergPartitioningField {
         let name = value.name.to_string();
 
         let sqlparser::ast::Expr::Identifier(ident) = take_arg(&name, 1, &mut arg_iter)? else {
-            return plan_err!("expected field identifier as first argument for '{}' in iceberg PARTITION BY", name);
+            return plan_err!(
+                "expected field identifier as first argument for '{}' in iceberg PARTITION BY",
+                name
+            );
         };
 
         let field = ident.value.to_string();
 
         let transform = match name.as_str() {
             "identity" => Transform::Identity,
-            "bucket" => Transform::Bucket {  arg0: take_u32(&name, 2, &mut arg_iter)? },
-            "truncate" => Transform::Truncate {  arg0: take_u32(&name, 2, &mut arg_iter)? },
+            "bucket" => Transform::Bucket {
+                arg0: take_u32(&name, 2, &mut arg_iter)?,
+            },
+            "truncate" => Transform::Truncate {
+                arg0: take_u32(&name, 2, &mut arg_iter)?,
+            },
             "year" => Transform::Year,
             "month" => Transform::Month,
             "day" => Transform::Day,
             "hour" => Transform::Hour,
             "void" => Transform::Void,
             _ => {
-                return plan_err!("unsupported iceberg transform function '{}' in PARTITION BY", name);
+                return plan_err!(
+                    "unsupported iceberg transform function '{}' in PARTITION BY",
+                    name
+                );
             }
         };
 

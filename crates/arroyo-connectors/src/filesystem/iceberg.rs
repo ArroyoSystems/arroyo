@@ -7,7 +7,6 @@ use crate::filesystem::sink::partitioning::PartitionerMode;
 use crate::filesystem::{make_sink, sink, TableFormat};
 use crate::render_schema;
 use anyhow::{anyhow, bail};
-use arrow::datatypes::FieldRef;
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
@@ -20,10 +19,8 @@ use datafusion::common::plan_datafusion_err;
 use datafusion::execution::FunctionRegistry;
 use iceberg::Catalog;
 use reqwest::header::{HeaderMap, AUTHORIZATION};
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 use std::collections::HashMap;
-use std::sync::Arc;
-use url::Url;
 
 pub struct IcebergConnector {}
 

@@ -123,22 +123,28 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 |i| i - i.rem_euclid(width as i64),
             )))
         }
-        (DataType::Int32, Transform::Bucket { arg0: n }) => Ok(Arc::<PrimitiveArray<Int32Type>>::new(
-            unary(as_primitive_array::<Int32Type>(&array), |i| {
-                let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
-                (murmur3::murmur3_32(&mut buffer, 0).expect("murmur3 hash failled for some reason")
-                    as i32)
-                    .rem_euclid(n as i32)
-            }),
-        )),
-        (DataType::Int64, Transform::Bucket { arg0: n }) => Ok(Arc::<PrimitiveArray<Int32Type>>::new(
-            unary(as_primitive_array::<Int64Type>(&array), |i| {
-                let mut buffer = std::io::Cursor::new((i).to_le_bytes());
-                (murmur3::murmur3_32(&mut buffer, 0).expect("murmur3 hash failled for some reason")
-                    as i32)
-                    .rem_euclid(n as i32)
-            }),
-        )),
+        (DataType::Int32, Transform::Bucket { arg0: n }) => {
+            Ok(Arc::<PrimitiveArray<Int32Type>>::new(unary(
+                as_primitive_array::<Int32Type>(&array),
+                |i| {
+                    let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
+                    (murmur3::murmur3_32(&mut buffer, 0)
+                        .expect("murmur3 hash failled for some reason") as i32)
+                        .rem_euclid(n as i32)
+                },
+            )))
+        }
+        (DataType::Int64, Transform::Bucket { arg0: n }) => {
+            Ok(Arc::<PrimitiveArray<Int32Type>>::new(unary(
+                as_primitive_array::<Int64Type>(&array),
+                |i| {
+                    let mut buffer = std::io::Cursor::new((i).to_le_bytes());
+                    (murmur3::murmur3_32(&mut buffer, 0)
+                        .expect("murmur3 hash failled for some reason") as i32)
+                        .rem_euclid(n as i32)
+                },
+            )))
+        }
         (DataType::Date32, Transform::Bucket { arg0: n }) => {
             let temp = cast(&array, &DataType::Int32)?;
 

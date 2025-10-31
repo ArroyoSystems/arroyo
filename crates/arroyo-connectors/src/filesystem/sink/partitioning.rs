@@ -158,7 +158,6 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Int32Type, Schema};
     use arroyo_rpc::df::ArroyoSchema;
     use datafusion::logical_expr::{col, ColumnarValue};
-    use datafusion::physical_expr::PhysicalExpr;
     use datafusion::prelude::{lit, Expr};
     use std::sync::Arc;
 
