@@ -88,8 +88,6 @@ impl IcebergTable {
                     }
                 }
 
-                println!("props! {:?}", props);
-
                 let config = RestCatalogConfig::builder()
                     .uri(rest.url.clone())
                     .warehouse_opt(rest.warehouse.clone())

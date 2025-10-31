@@ -763,11 +763,12 @@ impl Table {
             query: None,
             temporary,
             constraints,
+            arroyo_partitions,
             ..
         }) = statement
         {
             let name: String = name.to_string();
-            let mut connector_opts: ConnectorOptions = with_options.try_into()?;
+            let mut connector_opts = ConnectorOptions::new(with_options, arroyo_partitions)?;
 
             let connector = connector_opts.pull_opt_str("connector")?;
             let fields = Self::schema_from_columns(&name, columns, schema_provider)?;

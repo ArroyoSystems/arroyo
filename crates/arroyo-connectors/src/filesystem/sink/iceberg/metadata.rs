@@ -164,7 +164,7 @@ pub fn build_datafile_from_meta(
             let v = lower_bounds
                 .get(&f_id)
                 .ok_or_else(|| anyhow!("no metadata for partition field '{}'", f.field))?;
-            let fun = create_transform_function(&f.transform.into())?;
+            let fun = create_transform_function(&f.transform_fn.into())?;
             let result = fun
                 .transform_literal_result(v)
                 .map_err(|_| anyhow!("failed to compute partition function {}", f))?;
@@ -664,7 +664,7 @@ mod tests {
                 fields: vec![IcebergPartitioningField {
                     name: None,
                     field: "id".to_string(),
-                    transform: Transform::Bucket(4),
+                    transform_fn: Transform::Bucket{ arg0: 4 },
                 }],
                 ..Default::default()
             },

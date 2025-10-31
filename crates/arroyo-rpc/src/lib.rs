@@ -590,15 +590,14 @@ impl DataSizeUnit {
 
 pub struct ConnectorOptions {
     options: HashMap<String, Expr>,
+    partitions: Vec<Expr>,
 }
 
-impl TryFrom<&Vec<SqlOption>> for ConnectorOptions {
-    type Error = datafusion::error::DataFusionError;
-
-    fn try_from(value: &Vec<SqlOption>) -> Result<Self, Self::Error> {
+impl ConnectorOptions {
+    pub fn new(sql_opts: &[SqlOption], partition_by: &Option<Vec<Expr>>) -> DFResult<Self> {
         let mut options = HashMap::new();
 
-        for option in value {
+        for option in sql_opts {
             let SqlOption::KeyValue { key, value } = &option else {
                 return plan_err!(
                     "invalid with option: '{}'; expected an `=` delimited key-value pair",
@@ -609,11 +608,17 @@ impl TryFrom<&Vec<SqlOption>> for ConnectorOptions {
             options.insert(key.value.to_string(), value.clone());
         }
 
-        Ok(Self { options })
-    }
-}
+        Ok(Self {
+            options,
+            partitions: partition_by.clone().unwrap_or_default()
+        })
 
-impl ConnectorOptions {
+    }
+
+    pub fn partitions(&self) -> &[Expr] {
+        &self.partitions
+    }
+
     pub fn pull_struct<T: FromOpts>(&mut self) -> DFResult<T> {
         T::from_opts(self)
     }

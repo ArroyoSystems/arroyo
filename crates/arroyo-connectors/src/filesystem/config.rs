@@ -4,9 +4,9 @@ use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
-use datafusion::common::{plan_err, DFSchema, DataFusionError, Result, ScalarValue};
+use datafusion::common::{plan_datafusion_err, plan_err, DFSchema, DataFusionError, Result, ScalarValue};
 use datafusion::prelude::{col, concat, lit, to_char, Expr};
-use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
+use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan};
 use datafusion_expr::ExprSchemable;
 use iceberg::spec::{PartitionSpec, SchemaRef};
 use regex::Regex;
@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::num::NonZeroU64;
+use datafusion::logical_expr::sqlparser::ast::Function;
+use datafusion::sql::sqlparser;
 use strum_macros::EnumString;
+use core::slice::Iter;
 
 const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
 
@@ -598,14 +601,14 @@ impl FromOpts for IcebergProfile {
 
 /// Iceberg partitioning transforms
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "name", rename_all = "snake_case")]
+#[serde(tag = "transform", rename_all = "snake_case")]
 pub enum Transform {
     /// Source value, unmodified
     Identity,
     /// Hash of value, mod `N`.
-    Bucket { n: u32 },
+    Bucket { arg0: u32 },
     /// Value truncated to width `W`
-    Truncate { width: u32 },
+    Truncate { arg0: u32 },
     /// Extract a date or timestamp year, as years from 1970
     Year,
     /// Extract a date or timestamp month, as months from 1970-01-01
@@ -639,8 +642,8 @@ impl From<Transform> for iceberg::spec::Transform {
 
         match value {
             Transform::Identity => ITransform::Identity,
-            Transform::Bucket { n } => ITransform::Bucket(n),
-            Transform::Truncate { width } => ITransform::Truncate(width),
+            Transform::Bucket { arg0: n } => ITransform::Bucket(n),
+            Transform::Truncate { arg0: width } => ITransform::Truncate(width),
             Transform::Year => ITransform::Year,
             Transform::Month => ITransform::Month,
             Transform::Day => ITransform::Day,
@@ -652,11 +655,12 @@ impl From<Transform> for iceberg::spec::Transform {
 
 /// Iceberg partitioning field configuration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
 pub struct IcebergPartitioningField {
     pub name: Option<String>,
     pub field: String,
-    pub transform: Transform,
+    #[serde(flatten)]
+    pub transform_fn: Transform,
 }
 
 impl IcebergPartitioningField {
@@ -665,10 +669,10 @@ impl IcebergPartitioningField {
             return name.clone();
         }
 
-        let t = match self.transform {
+        let t = match self.transform_fn {
             Transform::Identity => "identity".to_string(),
-            Transform::Bucket { n } => format!("bucket_{n}"),
-            Transform::Truncate { width } => format!("truncate_{width}"),
+            Transform::Bucket { arg0: n } => format!("bucket_{n}"),
+            Transform::Truncate { arg0: width } => format!("truncate_{width}"),
             Transform::Year => "year".to_string(),
             Transform::Month => "month".to_string(),
             Transform::Day => "day".to_string(),
@@ -680,10 +684,74 @@ impl IcebergPartitioningField {
     }
 }
 
+impl TryFrom<&sqlparser::ast::Function> for IcebergPartitioningField {
+    type Error = DataFusionError;
+
+    fn try_from(value: &Function) -> Result<Self, Self::Error> {
+        let FunctionArguments::List(args) = &value.args else {
+            return plan_err!("expected arg list");
+        };
+
+        fn take_arg<'a, 'b>(f: &'a str, expected: u32, iter: &'b mut Iter<FunctionArg>) -> Result<&'b sqlparser::ast::Expr, DataFusionError> {
+            let arg = iter.next().ok_or_else(||
+                plan_datafusion_err!("Iceberg PARTITION BY function '{}' expects {} arguments", f, expected))?;
+            let FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) = arg else {
+                return plan_err!("unexpected argument to PARTITION BY fucntion '{}'", f);
+            };
+
+            Ok(e)
+        }
+
+        fn take_u32<'a, 'b>(f: &'a str, expected: u32, iter: &'b mut Iter<FunctionArg>) -> Result<u32, DataFusionError> {
+            let sqlparser::ast::Expr::Value(value) = take_arg(f, expected, iter)? else {
+                return plan_err!("expected a second argument for '{}' in iceberg PARTITION BY", f);
+            };
+
+            let Value::Number(n, _) = &value.value else {
+                return plan_err!("expected number as second argument for '{}' in iceberg PARTITION BY", f);
+            };
+
+            let n: u32 = n.parse().map_err(|_| plan_datafusion_err!("expected u32 as second argument for '{}' in iceberg PARTITION BY", f))?;
+
+            Ok(n)
+        }
+
+        let mut arg_iter = args.args.iter();
+
+        let name = value.name.to_string();
+
+        let sqlparser::ast::Expr::Identifier(ident) = take_arg(&name, 1, &mut arg_iter)? else {
+            return plan_err!("expected field identifier as first argument for '{}' in iceberg PARTITION BY", name);
+        };
+
+        let field = ident.value.to_string();
+
+        let transform = match name.as_str() {
+            "identity" => Transform::Identity,
+            "bucket" => Transform::Bucket {  arg0: take_u32(&name, 2, &mut arg_iter)? },
+            "truncate" => Transform::Truncate {  arg0: take_u32(&name, 2, &mut arg_iter)? },
+            "year" => Transform::Year,
+            "month" => Transform::Month,
+            "day" => Transform::Day,
+            "hour" => Transform::Hour,
+            "void" => Transform::Void,
+            _ => {
+                return plan_err!("unsupported iceberg transform function '{}' in PARTITION BY", name);
+            }
+        };
+
+        Ok(Self {
+            name: None,
+            field,
+            transform_fn: transform,
+        })
+    }
+}
+
 impl Display for IcebergPartitioningField {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}({}", self.transform.name(), self.field)?;
-        if let Transform::Bucket { n: i } | Transform::Truncate { width: i } = self.transform {
+        write!(f, "{}({}", self.transform_fn.name(), self.field)?;
+        if let Transform::Bucket { arg0: i } | Transform::Truncate { arg0: i } = self.transform_fn {
             write!(f, ", {i}")?;
         }
         write!(f, ")")
@@ -711,12 +779,31 @@ pub struct IcebergPartitioning {
     pub shuffle_by_partition: PartitionShuffle,
 }
 
+impl FromOpts for IcebergPartitioning {
+    fn from_opts(opts: &mut ConnectorOptions) -> std::result::Result<Self, DataFusionError> {
+        let mut fields = vec![];
+
+        for expr in opts.partitions() {
+            let sqlparser::ast::Expr::Function(f) = expr else {
+                return plan_err!("unexpected expression in PARTITION BY: {:?}", expr);
+            };
+
+            fields.push(f.try_into()?);
+        }
+
+        Ok(Self {
+            fields,
+            shuffle_by_partition: opts.pull_struct()?,
+        })
+    }
+}
+
 impl IcebergPartitioning {
     pub fn as_partition_spec(&self, schema: SchemaRef) -> anyhow::Result<PartitionSpec> {
         let mut builder = PartitionSpec::builder(schema.clone());
 
         for f in &self.fields {
-            builder = builder.add_partition_field(&f.field, f.name(), f.transform.into())?;
+            builder = builder.add_partition_field(&f.field, f.name(), f.transform_fn.into())?;
         }
 
         Ok(builder.build()?)
@@ -726,10 +813,10 @@ impl IcebergPartitioning {
         let exprs: Vec<_> = self
             .fields
             .iter()
-            .map(|f| match f.transform {
+            .map(|f| match f.transform_fn {
                 Transform::Identity => transforms::fns::ice_identity(),
-                Transform::Bucket { n } => transforms::fns::ice_bucket(col(&f.field), lit(n)),
-                Transform::Truncate { width } => {
+                Transform::Bucket { arg0: n } => transforms::fns::ice_bucket(col(&f.field), lit(n)),
+                Transform::Truncate { arg0: width } => {
                     transforms::fns::ice_bucket(col(&f.field), lit(width))
                 }
                 Transform::Year => transforms::fns::ice_year(col(&f.field)),
@@ -812,7 +899,7 @@ impl FromOpts for IcebergSink {
                 .pull_opt_str("namespace")?
                 .unwrap_or_else(|| "default".to_string()),
             table_name: opts.pull_str("table_name")?,
-            partitioning: todo!(),
+            partitioning: opts.pull_struct()?,
             location_path: opts.pull_opt_str("location_path")?,
             storage_options: pull_storage_options(opts)?,
             rolling_policy: opts.pull_struct()?,
