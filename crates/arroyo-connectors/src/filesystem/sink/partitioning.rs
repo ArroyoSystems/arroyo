@@ -98,7 +98,7 @@ impl Partitioner {
         for i in 0..n {
             let k = rows.row(i).owned();
             let entry = groups.entry(k.clone()).or_insert_with(|| {
-                order.push(k.clone());
+                order.push(k);
                 Vec::new()
             });
             entry.push(i as u32);

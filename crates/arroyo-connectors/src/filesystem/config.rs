@@ -848,22 +848,42 @@ impl IcebergPartitioning {
     }
 
     pub fn partition_expr(&self, schema: &Schema) -> anyhow::Result<Option<Vec<Expr>>> {
-        let exprs: Vec<_> = self
+        let exprs: anyhow::Result<Vec<_>> = self
             .fields
             .iter()
-            .map(|f| match f.transform_fn {
-                Transform::Identity => transforms::fns::ice_identity(),
-                Transform::Bucket { arg0: n } => transforms::fns::ice_bucket(col(&f.field), lit(n)),
-                Transform::Truncate { arg0: width } => {
-                    transforms::fns::ice_bucket(col(&f.field), lit(width))
-                }
-                Transform::Year => transforms::fns::ice_year(col(&f.field)),
-                Transform::Month => transforms::fns::ice_month(col(&f.field)),
-                Transform::Day => transforms::fns::ice_day(col(&f.field)),
-                Transform::Hour => transforms::fns::ice_hour(col(&f.field)),
-                Transform::Void => lit(ScalarValue::Null),
+            .map(|f| {
+                Ok(match f.transform_fn {
+                    Transform::Identity => transforms::fns::ice_identity(),
+                    Transform::Bucket { arg0 } => {
+                        if arg0 == 0 {
+                            bail!(
+                                "in bucket({}, {}) second argument is invalid, must be positive",
+                                f.field,
+                                arg0
+                            );
+                        }
+                        transforms::fns::ice_bucket(col(&f.field), lit(arg0))
+                    }
+                    Transform::Truncate { arg0: width } => {
+                        if width == 0 {
+                            bail!(
+                                "in truncate({}, {}) second argument is invalid, must be positive",
+                                f.field,
+                                width
+                            );
+                        }
+                        transforms::fns::ice_bucket(col(&f.field), lit(width))
+                    }
+                    Transform::Year => transforms::fns::ice_year(col(&f.field)),
+                    Transform::Month => transforms::fns::ice_month(col(&f.field)),
+                    Transform::Day => transforms::fns::ice_day(col(&f.field)),
+                    Transform::Hour => transforms::fns::ice_hour(col(&f.field)),
+                    Transform::Void => lit(ScalarValue::Null),
+                })
             })
             .collect();
+
+        let exprs = exprs?;
 
         let dfschema = DFSchema::try_from(schema.clone())?;
 

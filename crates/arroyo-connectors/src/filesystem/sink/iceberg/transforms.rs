@@ -129,7 +129,7 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 |i| {
                     let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
                     (murmur3::murmur3_32(&mut buffer, 0)
-                        .expect("murmur3 hash failled for some reason") as i32)
+                        .expect("murmur3 hash failed for some reason") as i32)
                         .rem_euclid(n as i32)
                 },
             )))
@@ -140,7 +140,7 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 |i| {
                     let mut buffer = std::io::Cursor::new((i).to_le_bytes());
                     (murmur3::murmur3_32(&mut buffer, 0)
-                        .expect("murmur3 hash failled for some reason") as i32)
+                        .expect("murmur3 hash failed for some reason") as i32)
                         .rem_euclid(n as i32)
                 },
             )))
@@ -153,7 +153,7 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 |i| {
                     let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
                     (murmur3::murmur3_32(&mut buffer, 0)
-                        .expect("murmur3 hash failled for some reason") as i32)
+                        .expect("murmur3 hash failed for some reason") as i32)
                         .rem_euclid(n as i32)
                 },
             )))
@@ -166,7 +166,7 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 |i: i32| {
                     let mut buffer = std::io::Cursor::new((i as i64).to_le_bytes());
                     (murmur3::murmur3_32(&mut buffer, 0)
-                        .expect("murmur3 hash failled for some reason") as i32)
+                        .expect("murmur3 hash failed for some reason") as i32)
                         .rem_euclid(n as i32)
                 },
             )))
@@ -179,7 +179,7 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 ScalarBuffer::from_iter(local_array.iter().map(|a| {
                     if let Some(value) = a {
                         murmur3::murmur3_32(&mut value.as_bytes(), 0)
-                            .expect("murmur3 hash failled for some reason")
+                            .expect("murmur3 hash failed for some reason")
                             as i32
                     } else {
                         0
