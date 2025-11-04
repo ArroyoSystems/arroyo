@@ -1,12 +1,26 @@
+use crate::filesystem::sink::iceberg::transforms;
+use anyhow::{anyhow, bail};
+use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::{ConnectorOptions, FromOpts};
+use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
-use datafusion::common::{plan_err, DataFusionError, Result};
-use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, Value, ValueWithSpan};
+use core::slice::Iter;
+use datafusion::common::{
+    plan_datafusion_err, plan_err, DFSchema, DataFusionError, Result, ScalarValue,
+};
+use datafusion::logical_expr::sqlparser::ast::Function;
+use datafusion::prelude::{col, concat, lit, to_char, Expr};
+use datafusion::sql::sqlparser;
+use datafusion::sql::sqlparser::ast::{
+    Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
+};
+use datafusion_expr::ExprSchemable;
+use iceberg::spec::{PartitionSpec, SchemaRef};
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::num::NonZeroU64;
 use strum_macros::EnumString;
 
@@ -145,6 +159,83 @@ pub struct PartitioningConfig {
         description = "Advanced tuning for hash shuffling of partition keys"
     )]
     pub shuffle_by_partition: PartitionShuffle,
+}
+
+impl PartitioningConfig {
+    pub fn partition_expr(&self, schema: &Schema) -> anyhow::Result<Option<Expr>> {
+        Ok(match (&self.time_pattern, &self.fields) {
+            (None, fields) if !fields.is_empty() => {
+                Some(Self::field_logical_expression(schema, fields)?)
+            }
+            (None, _) => None,
+            (Some(pattern), fields) if !fields.is_empty() => Some(
+                Self::partition_string_for_fields_and_time(schema, fields, pattern)?,
+            ),
+            (Some(pattern), _) => Some(Self::timestamp_logical_expression(pattern)),
+        })
+    }
+
+    fn partition_string_for_fields_and_time(
+        schema: &Schema,
+        partition_fields: &[String],
+        time_partition_pattern: &str,
+    ) -> anyhow::Result<Expr> {
+        let field_function = Self::field_logical_expression(schema, partition_fields)?;
+        let time_function = Self::timestamp_logical_expression(time_partition_pattern);
+        let function = concat(vec![
+            time_function,
+            Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
+            field_function,
+        ]);
+        Ok(function)
+    }
+
+    fn field_logical_expression(
+        schema: &Schema,
+        partition_fields: &[String],
+    ) -> anyhow::Result<Expr> {
+        let columns_as_string = partition_fields
+            .iter()
+            .map(|field| {
+                let field = schema.field_with_name(field).map_err(|e| {
+                    anyhow!(
+                        "partition field '{field}' does not exist in the schema ({:?})",
+                        e
+                    )
+                })?;
+                let column_expr = col(field.name());
+                let expr = match field.data_type() {
+                    DataType::Utf8 => column_expr,
+                    _ => Expr::Cast(datafusion::logical_expr::Cast {
+                        expr: Box::new(column_expr),
+                        data_type: DataType::Utf8,
+                    }),
+                };
+                Ok((field.name(), expr))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        let function = concat(
+            columns_as_string
+                .into_iter()
+                .enumerate()
+                .flat_map(|(i, (name, expr))| {
+                    let preamble = if i == 0 {
+                        format!("{name}=")
+                    } else {
+                        format!("/{name}=")
+                    };
+                    vec![Expr::Literal(ScalarValue::Utf8(Some(preamble)), None), expr]
+                })
+                .collect(),
+        );
+
+        Ok(function)
+    }
+
+    fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
+        to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
+    }
 }
 
 impl FromOpts for PartitioningConfig {
@@ -464,14 +555,14 @@ pub struct IcebergRestCatalog {
     #[schemars(
         url,
         description = "Base URL for the REST catalog",
-        example = "http://localhost:8001/iceberg"
+        example = "http://localhost:8001/catalog"
     )]
     pub url: String,
 
     /// Warehouse to connect to.
     #[schemars(
         description = "The Warehouse to connect to",
-        example = "16ba210d70caae96ecb1f6e17afe6f3b_my-bucket"
+        example = "\"my_warehouse\""
     )]
     pub warehouse: Option<String>,
 
@@ -512,6 +603,311 @@ impl FromOpts for IcebergProfile {
     }
 }
 
+/// Iceberg partitioning transforms
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "transform", rename_all = "snake_case")]
+pub enum Transform {
+    /// Source value, unmodified
+    Identity,
+    /// Hash of value, mod `N`.
+    Bucket { arg0: u32 },
+    /// Value truncated to width `W`
+    Truncate { arg0: u32 },
+    /// Extract a date or timestamp year, as years from 1970
+    Year,
+    /// Extract a date or timestamp month, as months from 1970-01-01
+    Month,
+    /// Extract a date or timestamp day, as days from 1970-01-01
+    Day,
+    /// Extract a timestamp hour, as hours from 1970-01-01 00:00:00
+    Hour,
+    /// Always produces `null`
+    Void,
+}
+
+impl Transform {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Transform::Identity => "identity",
+            Transform::Bucket { .. } => "bucket",
+            Transform::Truncate { .. } => "truncate",
+            Transform::Year => "year",
+            Transform::Month => "month",
+            Transform::Day => "day",
+            Transform::Hour => "hour",
+            Transform::Void => "void",
+        }
+    }
+}
+
+impl From<Transform> for iceberg::spec::Transform {
+    fn from(value: Transform) -> Self {
+        use iceberg::spec::Transform as ITransform;
+
+        match value {
+            Transform::Identity => ITransform::Identity,
+            Transform::Bucket { arg0: n } => ITransform::Bucket(n),
+            Transform::Truncate { arg0: width } => ITransform::Truncate(width),
+            Transform::Year => ITransform::Year,
+            Transform::Month => ITransform::Month,
+            Transform::Day => ITransform::Day,
+            Transform::Hour => ITransform::Hour,
+            Transform::Void => ITransform::Void,
+        }
+    }
+}
+
+/// Iceberg partitioning field configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct IcebergPartitioningField {
+    pub name: Option<String>,
+    pub field: String,
+    #[serde(flatten)]
+    pub transform_fn: Transform,
+}
+
+impl IcebergPartitioningField {
+    pub fn name(&self) -> String {
+        if let Some(name) = &self.name {
+            return name.clone();
+        }
+
+        let t = match self.transform_fn {
+            Transform::Identity => "identity".to_string(),
+            Transform::Bucket { arg0: n } => format!("bucket_{n}"),
+            Transform::Truncate { arg0: width } => format!("truncate_{width}"),
+            Transform::Year => "year".to_string(),
+            Transform::Month => "month".to_string(),
+            Transform::Day => "day".to_string(),
+            Transform::Hour => "hour".to_string(),
+            Transform::Void => "void".to_string(),
+        };
+
+        format!("{}_{}", self.field, t)
+    }
+}
+
+impl TryFrom<&sqlparser::ast::Function> for IcebergPartitioningField {
+    type Error = DataFusionError;
+
+    fn try_from(value: &Function) -> Result<Self, Self::Error> {
+        let FunctionArguments::List(args) = &value.args else {
+            return plan_err!("expected arg list");
+        };
+
+        fn take_arg<'b>(
+            f: &str,
+            expected: u32,
+            iter: &'b mut Iter<FunctionArg>,
+        ) -> Result<&'b sqlparser::ast::Expr, DataFusionError> {
+            let arg = iter.next().ok_or_else(|| {
+                plan_datafusion_err!(
+                    "Iceberg PARTITION BY function '{}' expects {} arguments",
+                    f,
+                    expected
+                )
+            })?;
+            let FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) = arg else {
+                return plan_err!("unexpected argument to PARTITION BY fucntion '{}'", f);
+            };
+
+            Ok(e)
+        }
+
+        fn take_u32(
+            f: &str,
+            expected: u32,
+            iter: &mut Iter<FunctionArg>,
+        ) -> Result<u32, DataFusionError> {
+            let sqlparser::ast::Expr::Value(value) = take_arg(f, expected, iter)? else {
+                return plan_err!(
+                    "expected a second argument for '{}' in iceberg PARTITION BY",
+                    f
+                );
+            };
+
+            let Value::Number(n, _) = &value.value else {
+                return plan_err!(
+                    "expected number as second argument for '{}' in iceberg PARTITION BY",
+                    f
+                );
+            };
+
+            let n: u32 = n.parse().map_err(|_| {
+                plan_datafusion_err!(
+                    "expected u32 as second argument for '{}' in iceberg PARTITION BY",
+                    f
+                )
+            })?;
+
+            Ok(n)
+        }
+
+        let mut arg_iter = args.args.iter();
+
+        let name = value.name.to_string();
+
+        let sqlparser::ast::Expr::Identifier(ident) = take_arg(&name, 1, &mut arg_iter)? else {
+            return plan_err!(
+                "expected field identifier as first argument for '{}' in iceberg PARTITION BY",
+                name
+            );
+        };
+
+        let field = ident.value.to_string();
+
+        let transform = match name.as_str() {
+            "identity" => Transform::Identity,
+            "bucket" => Transform::Bucket {
+                arg0: take_u32(&name, 2, &mut arg_iter)?,
+            },
+            "truncate" => Transform::Truncate {
+                arg0: take_u32(&name, 2, &mut arg_iter)?,
+            },
+            "year" => Transform::Year,
+            "month" => Transform::Month,
+            "day" => Transform::Day,
+            "hour" => Transform::Hour,
+            "void" => Transform::Void,
+            _ => {
+                return plan_err!(
+                    "unsupported iceberg transform function '{}' in PARTITION BY",
+                    name
+                );
+            }
+        };
+
+        Ok(Self {
+            name: None,
+            field,
+            transform_fn: transform,
+        })
+    }
+}
+
+impl Display for IcebergPartitioningField {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}({}", self.transform_fn.name(), self.field)?;
+        if let Transform::Bucket { arg0: i } | Transform::Truncate { arg0: i } = self.transform_fn {
+            write!(f, ", {i}")?;
+        }
+        write!(f, ")")
+    }
+}
+
+/// Iceberg partitioning configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IcebergPartitioning {
+    /// Field names used for partitioning (bucketed layout).
+    #[schemars(
+        title = "Partition Fields",
+        description = "Fields to partition the data by"
+    )]
+    #[serde(default)]
+    pub fields: Vec<IcebergPartitioningField>,
+
+    /// Partition shuffle settings (see [`PartitionShuffle`]).
+    #[schemars(
+        title = "Partition shuffle settings",
+        description = "Advanced tuning for hash shuffling of partition keys"
+    )]
+    #[serde(default)]
+    pub shuffle_by_partition: PartitionShuffle,
+}
+
+impl FromOpts for IcebergPartitioning {
+    fn from_opts(opts: &mut ConnectorOptions) -> std::result::Result<Self, DataFusionError> {
+        let mut fields = vec![];
+
+        for expr in opts.partitions() {
+            let sqlparser::ast::Expr::Function(f) = expr else {
+                return plan_err!("unexpected expression in PARTITION BY: {:?}", expr);
+            };
+
+            fields.push(f.try_into()?);
+        }
+
+        Ok(Self {
+            fields,
+            shuffle_by_partition: opts.pull_struct()?,
+        })
+    }
+}
+
+impl IcebergPartitioning {
+    pub fn as_partition_spec(&self, schema: SchemaRef) -> anyhow::Result<PartitionSpec> {
+        let mut builder = PartitionSpec::builder(schema.clone());
+
+        for f in &self.fields {
+            builder = builder.add_partition_field(&f.field, f.name(), f.transform_fn.into())?;
+        }
+
+        Ok(builder.build()?)
+    }
+
+    pub fn partition_expr(&self, schema: &Schema) -> anyhow::Result<Option<Vec<Expr>>> {
+        let exprs: anyhow::Result<Vec<_>> = self
+            .fields
+            .iter()
+            .map(|f| {
+                Ok(match f.transform_fn {
+                    Transform::Identity => transforms::fns::ice_identity(),
+                    Transform::Bucket { arg0 } => {
+                        if arg0 == 0 {
+                            bail!(
+                                "in bucket({}, {}) second argument is invalid, must be positive",
+                                f.field,
+                                arg0
+                            );
+                        }
+                        transforms::fns::ice_bucket(col(&f.field), lit(arg0))
+                    }
+                    Transform::Truncate { arg0: width } => {
+                        if width == 0 {
+                            bail!(
+                                "in truncate({}, {}) second argument is invalid, must be positive",
+                                f.field,
+                                width
+                            );
+                        }
+                        transforms::fns::ice_bucket(col(&f.field), lit(width))
+                    }
+                    Transform::Year => transforms::fns::ice_year(col(&f.field)),
+                    Transform::Month => transforms::fns::ice_month(col(&f.field)),
+                    Transform::Day => transforms::fns::ice_day(col(&f.field)),
+                    Transform::Hour => transforms::fns::ice_hour(col(&f.field)),
+                    Transform::Void => lit(ScalarValue::Null),
+                })
+            })
+            .collect();
+
+        let exprs = exprs?;
+
+        let dfschema = DFSchema::try_from(schema.clone())?;
+
+        for (expr, field) in exprs.iter().zip(&self.fields) {
+            let field = schema.field_with_name(&field.field).map_err(|e| {
+                anyhow!(
+                    "partition field '{field}' does not exist in the schema ({:?})",
+                    e
+                )
+            })?;
+
+            if expr.data_type_and_nullable(&dfschema).is_err() {
+                bail!("partition transform {} has invalid types", field);
+            }
+        }
+
+        if exprs.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(exprs))
+        }
+    }
+}
+
 fn default_namespace() -> String {
     "default".into()
 }
@@ -528,6 +924,10 @@ pub struct IcebergSink {
     /// Table identifier
     #[schemars(title = "Table Name", description = "Table name")]
     pub table_name: String,
+
+    #[schemars(title = "Partitioning", description = "Iceberg partitioning config")]
+    #[serde(default)]
+    pub partitioning: IcebergPartitioning,
 
     /// Optional path controlling where parquet files will be written, if creating the table
     #[schemars(title = "Location Path", description = "Data file location")]
@@ -557,6 +957,7 @@ impl FromOpts for IcebergSink {
                 .pull_opt_str("namespace")?
                 .unwrap_or_else(|| "default".to_string()),
             table_name: opts.pull_str("table_name")?,
+            partitioning: opts.pull_struct()?,
             location_path: opts.pull_opt_str("location_path")?,
             storage_options: pull_storage_options(opts)?,
             rolling_policy: opts.pull_struct()?,

@@ -16,15 +16,24 @@ message ConnectorOp {
   string description = 3;
 }
 
+/// Deprecated -- use ProjectionOperator instead
 message ValuePlanOperator {
   string name = 1;
   bytes physical_plan = 2;
 }
 
+/// Deprecated -- use ProjectionOperator instead
 message KeyPlanOperator {
   string name = 1;
   bytes physical_plan = 2;
   repeated uint64 key_fields = 3;
+}
+
+message ProjectionOperator {
+  string name = 1;
+  ArroyoSchema input_schema = 2;
+  ArroyoSchema output_schema = 3;
+  repeated bytes exprs = 4;
 }
 
 message TumblingWindowAggregateOperator {

@@ -8,6 +8,7 @@ use self::sink::{
     JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
 };
 use crate::filesystem::config::*;
+use crate::filesystem::sink::partitioning::PartitionerMode;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{render_schema, EmptyConfig};
 use anyhow::{anyhow, bail, Result};
@@ -22,7 +23,7 @@ use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_storage::{BackendConfig, StorageProvider};
 use arroyo_types::TaskInfo;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 const ICON: &str = include_str!("./filesystem.svg");
@@ -54,6 +55,7 @@ pub fn make_sink(
     sink: FileSystemSink,
     config: OperatorConfig,
     table_format: TableFormat,
+    partitioner: PartitionerMode,
     connection_id: Option<String>,
 ) -> Result<ConstructedOperator> {
     let is_local = match table_format {
@@ -74,34 +76,31 @@ pub fn make_sink(
 
     match (&format, is_local) {
         (Format::Parquet { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
-            LocalParquetFileSystemSink::new(sink, table_format, format),
+            LocalParquetFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
         (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            ParquetFileSystemSink::create_and_start(sink, table_format, format, connection_id),
+            ParquetFileSystemSink::create_and_start(
+                sink,
+                table_format,
+                format,
+                partitioner,
+                connection_id,
+            ),
         ))),
         (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
-            LocalJsonFileSystemSink::new(sink, table_format, format),
+            LocalJsonFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
         (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            JsonFileSystemSink::create_and_start(sink, table_format, format, connection_id),
+            JsonFileSystemSink::create_and_start(
+                sink,
+                table_format,
+                format,
+                partitioner,
+                connection_id,
+            ),
         ))),
         (f, _) => bail!("unsupported format {f}"),
     }
-}
-
-pub(crate) fn validate_partitioning_fields(
-    schema: &ConnectionSchema,
-    fields: &[String],
-) -> anyhow::Result<()> {
-    let schema_fields: HashSet<_> = schema.fields.iter().map(|f| f.name.as_str()).collect();
-
-    for field in fields {
-        if !schema_fields.contains(field.as_str()) {
-            bail!("partition field '{}' does not exist in the schema", field);
-        }
-    }
-
-    Ok(())
 }
 
 pub struct FileSystemConnector {}
@@ -184,19 +183,19 @@ impl Connector for FileSystemConnector {
             }) => {
                 BackendConfig::parse_url(path, true)?;
 
-                let partition_fields = match (
-                    partitioning.shuffle_by_partition.enabled,
-                    &partitioning.fields.is_empty(),
-                ) {
-                    (true, false) => Some(partitioning.fields.clone()),
-                    _ => None,
-                };
-
-                validate_partitioning_fields(&schema, &partitioning.fields)?;
-
                 let description = format!("FileSystemSink<{format}, {path}>");
 
-                (description, ConnectionType::Sink, partition_fields)
+                let exprs = partitioning
+                    .partition_expr(&schema.arroyo_schema().schema)?
+                    .map(|p| vec![p]);
+
+                let partitioner = if partitioning.shuffle_by_partition.enabled {
+                    exprs
+                } else {
+                    None
+                };
+
+                (description, ConnectionType::Sink, partitioner)
             }
         };
 
@@ -219,7 +218,7 @@ impl Connector for FileSystemConnector {
             &config,
             description,
         )
-        .with_partition_fields(partition_fields))
+        .with_partition_exprs(partition_fields))
     }
 
     fn from_options(
@@ -250,7 +249,16 @@ impl Connector for FileSystemConnector {
                     file_states: HashMap::new(),
                 },
             ))),
-            FileSystemTableType::Sink(sink) => make_sink(sink, config, TableFormat::None, None),
+            FileSystemTableType::Sink(sink) => {
+                let partitioning = sink.partitioning.clone();
+                make_sink(
+                    sink,
+                    config,
+                    TableFormat::None,
+                    PartitionerMode::FileConfig(partitioning),
+                    None,
+                )
+            }
         }
     }
 }

@@ -12,7 +12,8 @@ use crate::{render_schema, EmptyConfig};
 use crate::filesystem::config::{
     DeltaLakeSink, DeltaLakeTable, DeltaLakeTableType, FileSystemSink,
 };
-use crate::filesystem::{make_sink, validate_partitioning_fields, TableFormat};
+use crate::filesystem::sink::partitioning::PartitionerMode;
+use crate::filesystem::{make_sink, TableFormat};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
@@ -90,19 +91,19 @@ impl Connector for DeltaLakeConnector {
             }) => {
                 BackendConfig::parse_url(path, true)?;
 
-                let partition_fields = match (
-                    partitioning.shuffle_by_partition.enabled,
-                    &partitioning.fields.is_empty(),
-                ) {
-                    (true, false) => Some(partitioning.fields.clone()),
-                    _ => None,
-                };
-
-                validate_partitioning_fields(&schema, &partitioning.fields)?;
-
                 let description = format!("DeltaLakeSink<{format}, {path}>");
 
-                (description, ConnectionType::Sink, partition_fields)
+                let exprs = partitioning
+                    .partition_expr(&schema.arroyo_schema().schema)?
+                    .map(|p| vec![p]);
+
+                let partitioner = if partitioning.shuffle_by_partition.enabled {
+                    exprs
+                } else {
+                    None
+                };
+
+                (description, ConnectionType::Sink, partitioner)
             }
         };
 
@@ -125,7 +126,7 @@ impl Connector for DeltaLakeConnector {
             &config,
             description,
         )
-        .with_partition_fields(partition_fields))
+        .with_partition_exprs(partition_fields))
     }
 
     fn from_options(
@@ -145,19 +146,23 @@ impl Connector for DeltaLakeConnector {
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
         match table.table_type {
-            DeltaLakeTableType::Sink(sink) => make_sink(
-                FileSystemSink {
-                    path: sink.path,
-                    storage_options: sink.storage_options,
-                    rolling_policy: sink.rolling_policy,
-                    file_naming: sink.file_naming,
-                    partitioning: sink.partitioning,
-                    multipart: sink.multipart,
-                },
-                config,
-                TableFormat::Delta,
-                None,
-            ),
+            DeltaLakeTableType::Sink(sink) => {
+                let partitioning = sink.partitioning.clone();
+                make_sink(
+                    FileSystemSink {
+                        path: sink.path,
+                        storage_options: sink.storage_options,
+                        rolling_policy: sink.rolling_policy,
+                        file_naming: sink.file_naming,
+                        partitioning: sink.partitioning,
+                        multipart: sink.multipart,
+                    },
+                    config,
+                    TableFormat::Delta {},
+                    PartitionerMode::FileConfig(partitioning),
+                    None,
+                )
+            }
         }
     }
 }

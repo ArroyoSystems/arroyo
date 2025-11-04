@@ -716,7 +716,8 @@ impl TreeNodeRewriter for RowTimeRewriter {
                     relation: None,
                     name: "_timestamp".to_string(),
                     spans: Default::default(),
-                });
+                })
+                .alias("row_time()");
                 return Ok(Transformed::yes(transformed));
             }
         }

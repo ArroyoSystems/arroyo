@@ -24,9 +24,7 @@ use arroyo_datastream::WindowType;
 
 use builder::NamedNode;
 use datafusion::common::tree_node::TreeNode;
-use datafusion::common::{
-    not_impl_err, plan_datafusion_err, plan_err, Column, DFSchema, Result, ScalarValue,
-};
+use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::prelude::SessionConfig;
@@ -59,8 +57,10 @@ use std::fmt::{Debug, Formatter};
 use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
-use crate::extension::key_calculation::KeyCalculationExtension;
+use crate::extension::key_calculation::{KeyCalculationExtension, KeysOrExprs};
+use crate::extension::projection::ProjectionExtension;
 use crate::udafs::EmptyUdaf;
+use arroyo_connectors::connectors;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
@@ -75,6 +75,7 @@ use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::optimizer::Analyzer;
+use datafusion::prelude::col;
 use sqlparser::ast::{OneOrManyWithParens, Statement};
 use sqlparser::dialect::ArroyoDialect;
 use sqlparser::parser::{Parser, ParserError};
@@ -147,6 +148,10 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
 
     for p in SessionStateDefaults::default_expr_planners() {
         registry.register_expr_planner(p).unwrap();
+    }
+
+    for (_, c) in connectors() {
+        c.register_udfs(registry).unwrap();
     }
 }
 
@@ -684,11 +689,11 @@ fn maybe_add_key_extension_to_sink(plan: LogicalPlan) -> Result<LogicalPlan> {
         return Ok(plan);
     };
 
-    let Some(partition_fields) = sink.table.partition_fields() else {
+    let Some(partition_exprs) = sink.table.partition_exprs() else {
         return Ok(plan);
     };
 
-    if partition_fields.is_empty() {
+    if partition_exprs.is_empty() {
         return Ok(plan);
     }
 
@@ -696,34 +701,31 @@ fn maybe_add_key_extension_to_sink(plan: LogicalPlan) -> Result<LogicalPlan> {
         .inputs()
         .into_iter()
         .map(|input| {
-            let keys = partition_fields
-                .iter()
-                .map(|pf| {
-                    input
-                        .schema()
-                        .index_of_column_by_name(None, pf)
-                        .ok_or_else(|| {
-                            plan_datafusion_err!(
-                                "Partition field '{pf}' not found in sink input schema"
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
             Ok(LogicalPlan::Extension(Extension {
                 node: Arc::new(KeyCalculationExtension {
                     name: Some("key-calc-partition".to_string()),
-                    keys,
                     schema: input.schema().clone(),
                     input: input.clone(),
+                    keys: KeysOrExprs::Exprs(partition_exprs.clone()),
                 }),
             }))
         })
         .collect::<Result<_>>()?;
 
-    let mut sink = sink.clone();
-    sink.shuffle_inputs = true;
-    let node = sink.with_exprs_and_inputs(vec![], inputs)?;
+    // insert an unkey projection after the key-by
+    let unkey = LogicalPlan::Extension(Extension {
+        node: Arc::new(
+            ProjectionExtension::new(
+                inputs,
+                Some("unkey".to_string()),
+                sink.schema().iter().map(|(_, f)| col(f.name())).collect(),
+            )
+            .shuffled(),
+        ),
+    });
+
+    let sink = sink.clone();
+    let node = sink.with_exprs_and_inputs(vec![], vec![unkey])?;
 
     Ok(LogicalPlan::Extension(Extension { node }))
 }
@@ -877,7 +879,6 @@ pub async fn parse_and_get_arrow_program(
                             table.clone(),
                             plan_rewrite.schema().clone(),
                             Arc::new(plan_rewrite),
-                            false,
                         )
                     }
                     Table::MemoryTable { logical_plan, .. } => {
@@ -905,7 +906,6 @@ pub async fn parse_and_get_arrow_program(
                 },
                 plan_rewrite.schema().clone(),
                 Arc::new(plan_rewrite),
-                false,
             ),
         };
         extensions.push(LogicalPlan::Extension(Extension {

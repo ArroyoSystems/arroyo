@@ -7,31 +7,32 @@ use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use datafusion::physical_plan::PhysicalExpr;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::debug;
 use ulid::Ulid;
 use uuid::Uuid;
 
 use super::{
-    add_suffix_prefix, delta, get_partitioner_from_file_settings, parquet::batches_by_partition,
-    two_phase_committer::TwoPhaseCommitterOperator, CommitState, FilenameStrategy, FinishedFile,
-    MultiPartWriterStats, RollingPolicy,
+    add_suffix_prefix, delta, two_phase_committer::TwoPhaseCommitterOperator, CommitState,
+    FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
 };
 use crate::filesystem::config::NamingConfig;
 use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
 use crate::filesystem::{config, sink::two_phase_committer::TwoPhaseCommitter, TableFormat};
 use anyhow::{bail, Result};
+use arrow::row::OwnedRow;
 
 pub struct LocalFileSystemWriter<V: LocalWriter> {
     // writer to a local tmp file
-    writers: HashMap<Option<String>, V>,
+    writers: HashMap<Option<OwnedRow>, V>,
     tmp_dir: String,
     final_dir: String,
     next_file_index: usize,
     subtask_id: usize,
-    partitioner: Option<Arc<dyn PhysicalExpr>>,
+    partitioner_mode: PartitionerMode,
+    partitioner: Option<Arc<Partitioner>>,
     finished_files: Vec<FilePreCommit>,
     rolling_policies: Vec<RollingPolicy>,
     table_properties: config::FileSystemSink,
@@ -47,6 +48,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
         table_properties: config::FileSystemSink,
         table_format: TableFormat,
         format: Format,
+        partitioner_mode: PartitionerMode,
     ) -> TwoPhaseCommitterOperator<Self> {
         let mut final_dir = table_properties.path.clone();
         if final_dir.starts_with("file://") {
@@ -77,11 +79,12 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             commit_state: None,
             file_naming,
             table_format,
+            partitioner_mode,
         };
         TwoPhaseCommitterOperator::new(writer)
     }
 
-    fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
+    fn get_or_insert_writer(&mut self, partition: &Option<OwnedRow>) -> &mut V {
         let filename_strategy = self.file_naming.strategy.unwrap_or_default();
 
         if !self.writers.contains_key(partition) {
@@ -95,21 +98,18 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
                 FilenameStrategy::UuidV7 => Uuid::now_v7().to_string(),
             };
 
-            let filename = add_suffix_prefix(
+            let mut filename = add_suffix_prefix(
                 filename_base,
                 self.file_naming.prefix.as_ref(),
                 self.file_naming.suffix.as_ref().unwrap(),
             );
 
-            let filename = match partition {
-                Some(partition) => {
-                    // make sure the partition directory exists in tmp and final
-                    create_dir_all(format!("{}/{}", self.tmp_dir, partition)).unwrap();
-                    create_dir_all(format!("{}/{}", self.final_dir, partition)).unwrap();
-                    format!("{partition}/{filename}")
+            if let Some(partition) = partition {
+                if let Some(hive) = self.partitioner.as_ref().unwrap().hive_path(partition) {
+                    filename = format!("{hive}/{filename}");
                 }
-                None => filename,
-            };
+            }
+
             self.writers.insert(
                 partition.clone(),
                 V::new(
@@ -236,8 +236,10 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             TableFormat::Iceberg { .. } => todo!(),
         });
 
-        self.partitioner =
-            get_partitioner_from_file_settings(&self.table_properties.partitioning, schema.clone());
+        self.partitioner = Some(Arc::new(Partitioner::new(
+            self.partitioner_mode.clone(),
+            &schema.schema,
+        )?));
 
         self.schema = Some(schema);
 
@@ -245,9 +247,10 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
     }
 
     async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
-        if let Some(partitioner) = self.partitioner.as_ref() {
-            for (batch, partition) in batches_by_partition(batch, partitioner.clone())? {
-                let writer = self.get_or_insert_writer(&partition);
+        let partitioner = self.partitioner.as_ref().unwrap();
+        if partitioner.is_partitioned() {
+            for (partition, batch) in partitioner.partition(&batch)? {
+                let writer = self.get_or_insert_writer(&Some(partition));
                 writer.write_batch(&batch)?;
             }
         } else {

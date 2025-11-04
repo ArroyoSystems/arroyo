@@ -43,6 +43,7 @@ rustls-native-certs = "0.8.1"
 rustls = {workspace = true}
 local-ip-address = "0.6"
 schemars = "1"
+smallvec = "1"
 
 [build-dependencies]
 tonic-build = { workspace = true }

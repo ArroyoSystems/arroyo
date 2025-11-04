@@ -8,6 +8,8 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::{DisplayAsSql, SourceError};
 use async_trait::async_trait;
+use datafusion::execution::FunctionRegistry;
+use datafusion::prelude::Expr;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json::value::Value;
@@ -25,7 +27,7 @@ pub struct Connection {
     pub schema: ConnectionSchema,
     pub config: String,
     pub description: String,
-    pub partition_fields: Option<Vec<String>>,
+    pub partition_exprs: Option<Vec<Expr>>,
 }
 
 impl Connection {
@@ -46,12 +48,12 @@ impl Connection {
             schema,
             config: serde_json::to_string(config).unwrap(),
             description,
-            partition_fields: None,
+            partition_exprs: None,
         }
     }
 
-    pub fn with_partition_fields(mut self, partition_fields: Option<Vec<String>>) -> Self {
-        self.partition_fields = partition_fields;
+    pub fn with_partition_exprs(mut self, partition_fields: Option<Vec<Expr>>) -> Self {
+        self.partition_exprs = partition_fields;
         self
     }
 }
@@ -88,6 +90,11 @@ pub trait Connector: Send {
     }
 
     fn table_type(&self, config: Self::ProfileT, table: Self::TableT) -> ConnectionType;
+
+    #[allow(unused)]
+    fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     #[allow(unused)]
     fn get_schema(
@@ -182,6 +189,8 @@ pub trait ErasedConnector: Send {
     ) -> Result<ConnectionType, serde_json::Error>;
 
     fn config_description(&self, s: &serde_json::Value) -> Result<String, serde_json::Error>;
+
+    fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()>;
 
     fn get_schema(
         &self,
@@ -396,6 +405,10 @@ impl<C: Connector> ErasedConnector for C {
             config,
             schema,
         )
+    }
+
+    fn register_udfs(&self, registry: &mut dyn FunctionRegistry) -> anyhow::Result<()> {
+        self.register_udfs(registry)
     }
 }
 

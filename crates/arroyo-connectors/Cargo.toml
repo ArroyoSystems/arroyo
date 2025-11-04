@@ -20,6 +20,7 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 
 arrow = { workspace = true }
 datafusion = { workspace = true }
+datafusion-expr = { workspace = true }
 async-trait = "0.1"
 bincode = "2.0.0-rc.3"
 chrono = "0.4"
@@ -114,6 +115,7 @@ rustls = "0.22"
 # NATS
 async-nats = "0.38.0"
 nkeys = "0.3.0"
+murmur3 = "0.5.2"
 
 [build-dependencies]
 glob = "0.3"

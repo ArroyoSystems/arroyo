@@ -1,7 +1,8 @@
 pub mod metadata;
 pub mod schema;
+pub mod transforms;
 
-use crate::filesystem::config::{IcebergCatalog, IcebergSink};
+use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
 use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
 use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 use crate::filesystem::sink::FinishedFile;
@@ -39,6 +40,7 @@ pub struct IcebergTable {
     pub location_path: Option<String>,
     pub table: Option<Table>,
     pub manifest_files: Vec<ManifestFile>,
+    pub partitioning: IcebergPartitioning,
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -80,6 +82,12 @@ impl IcebergTable {
                     props.insert("token".to_string(), token.sub_env_vars()?);
                 }
 
+                for (k, v) in &sink.storage_options {
+                    if let Some((mapped, _)) = CONFIG_MAPPINGS.iter().find(|(_, n)| n == k) {
+                        props.insert(mapped.to_string(), v.to_string());
+                    }
+                }
+
                 let config = RestCatalogConfig::builder()
                     .uri(rest.url.clone())
                     .warehouse_opt(rest.warehouse.clone())
@@ -103,6 +111,7 @@ impl IcebergTable {
                     table_ident,
                     table: None,
                     manifest_files: vec![],
+                    partitioning: sink.partitioning.clone(),
                 })
             }
         }
@@ -139,6 +148,10 @@ impl IcebergTable {
             let schema_with_ids = add_parquet_field_ids(schema);
             let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&schema_with_ids)?;
 
+            let partition_spec = self
+                .partitioning
+                .as_partition_spec(Arc::new(iceberg_schema.clone()))?;
+
             match self
                 .catalog
                 .create_table(
@@ -146,7 +159,7 @@ impl IcebergTable {
                     TableCreation::builder()
                         .location_opt(self.location_path.clone())
                         .schema(iceberg_schema)
-                        // TODO: partitioning
+                        .partition_spec(partition_spec)
                         .name(self.table_ident.name.clone())
                         .build(),
                 )
@@ -248,6 +261,7 @@ impl IcebergTable {
                     f.metadata
                         .as_ref()
                         .expect("metadata not set for Iceberg write"),
+                    &self.partitioning,
                     format!(
                         "{}/data/{}",
                         table.metadata().location(),

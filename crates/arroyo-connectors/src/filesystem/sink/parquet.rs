@@ -8,16 +8,12 @@ use crate::filesystem::sink::iceberg::schema::{
     add_parquet_field_ids, normalize_batch_to_schema, update_field_ids_to_iceberg,
 };
 use anyhow::Result;
+use arrow::array::{Array, RecordBatch, TimestampNanosecondArray};
 use arrow::datatypes::SchemaRef;
-use arrow::{
-    array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
-    compute::{sort_to_indices, take},
-};
 use arroyo_rpc::formats::{ParquetCompression, ParquetFormat};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
 use bytes::{BufMut, Bytes, BytesMut};
-use datafusion::physical_plan::PhysicalExpr;
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},
@@ -44,6 +40,7 @@ fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, u
         ParquetCompression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
         ParquetCompression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
         ParquetCompression::Lz4 => parquet::basic::Compression::LZ4,
+        ParquetCompression::Lz4Raw => parquet::basic::Compression::LZ4_RAW,
     });
 
     (
@@ -363,36 +360,6 @@ impl LocalWriter for ParquetLocalWriter {
     fn stats(&self) -> MultiPartWriterStats {
         self.stats.as_ref().unwrap().clone()
     }
-}
-
-pub(crate) fn batches_by_partition(
-    batch: RecordBatch,
-    partitioner: Arc<dyn PhysicalExpr>,
-) -> Result<Vec<(RecordBatch, Option<String>)>> {
-    let partition = partitioner.evaluate(&batch)?.into_array(batch.num_rows())?;
-    // sort the partition, and then the batch, then compute partitions
-    let sort_indices = sort_to_indices(&partition, None, None)?;
-    let sorted_partition = take(&*partition, &sort_indices, None).unwrap();
-    let sorted_batch = RecordBatch::try_new(
-        batch.schema(),
-        batch
-            .columns()
-            .iter()
-            .map(|col| take(col, &sort_indices, None).unwrap())
-            .collect(),
-    )?;
-    let partition = arrow::compute::partition(&[sorted_partition.clone()])?;
-    let typed_partition = sorted_partition
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .unwrap();
-    let mut result = Vec::with_capacity(partition.len());
-    for partition in partition.ranges() {
-        let partition_string = typed_partition.value(partition.start);
-        let batch = sorted_batch.slice(partition.start, partition.end - partition.start);
-        result.push((batch, Some(partition_string.to_string())));
-    }
-    Ok(result)
 }
 
 pub(crate) fn representitive_timestamp(timestamp_column: &Arc<dyn Array>) -> Result<SystemTime> {

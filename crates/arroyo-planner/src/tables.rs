@@ -77,7 +77,7 @@ pub struct ConnectorTable {
     pub idle_time: Option<Duration>,
     pub primary_keys: Arc<Vec<String>>,
     pub inferred_fields: Option<Vec<FieldRef>>,
-    pub partition_fields: Arc<Option<Vec<String>>>,
+    pub partition_exprs: Arc<Option<Vec<Expr>>>,
 
     // for lookup tables
     pub lookup_cache_max_bytes: Option<u64>,
@@ -210,7 +210,7 @@ impl From<Connection> for ConnectorTable {
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
             primary_keys: Arc::new(vec![]),
-            partition_fields: Arc::new(value.partition_fields),
+            partition_exprs: Arc::new(value.partition_exprs),
             inferred_fields: None,
             lookup_cache_max_bytes: None,
             lookup_cache_ttl: None,
@@ -763,11 +763,12 @@ impl Table {
             query: None,
             temporary,
             constraints,
+            arroyo_partitions,
             ..
         }) = statement
         {
             let name: String = name.to_string();
-            let mut connector_opts: ConnectorOptions = with_options.try_into()?;
+            let mut connector_opts = ConnectorOptions::new(with_options, arroyo_partitions)?;
 
             let connector = connector_opts.pull_opt_str("connector")?;
             let fields = Self::schema_from_columns(&name, columns, schema_provider)?;
@@ -966,9 +967,9 @@ impl Table {
         }
     }
 
-    pub fn partition_fields(&self) -> Option<&Vec<String>> {
+    pub fn partition_exprs(&self) -> Option<&Vec<Expr>> {
         match self {
-            Table::ConnectorTable(c) => (*c.partition_fields).as_ref(),
+            Table::ConnectorTable(c) => (*c.partition_exprs).as_ref(),
             _ => None,
         }
     }
