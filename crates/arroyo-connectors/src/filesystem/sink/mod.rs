@@ -1577,6 +1577,20 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     }
 }
 
+fn split_into_parts(mut bytes: Bytes, part_size: usize) -> Vec<Bytes> {
+    let mut parts = Vec::new();
+    while bytes.len() > part_size {
+        let mut part = bytes;
+        let remainder = part.split_off(part_size);
+        parts.push(part);
+        bytes = remainder;
+    }
+    if !bytes.is_empty() {
+        parts.push(bytes);
+    }
+    parts
+}
+
 impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     fn write_closing_multipart(
         &mut self,
@@ -1603,14 +1617,17 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
                 // our last part is bigger than our part size, which isn't allowed by some object stores
                 // so we need to split it up
                 let part_size = existing_part_size.unwrap();
-                debug!("final multipart upload ({}) is bigger than part size ({}) so splitting into two",
-                    bytes.len(), part_size);
-                let mut part1 = bytes;
-                let part2 = part1.split_off(part_size);
-                // these can't be None, so safe to unwrap
-                let f1 = self.multipart_manager.write_next_part(part1)?.unwrap();
-                let f2 = self.multipart_manager.write_next_part(part2)?.unwrap();
-                Ok(vec![f1, f2])
+                let len = bytes.len();
+
+                let parts = split_into_parts(bytes, part_size);
+
+                debug!("final multipart upload ({}) is bigger than part size ({}) so splitting into {}",
+                    len, part_size, parts.len());
+
+                parts
+                    .into_iter()
+                    .map(|part| Ok(self.multipart_manager.write_next_part(part)?.unwrap()))
+                    .collect()
             } else {
                 Ok(self
                     .multipart_manager
@@ -1863,5 +1880,35 @@ pub(crate) fn add_suffix_prefix(
     match prefix {
         None => format!("{filename}.{suffix}"),
         Some(prefix) => format!("{prefix}-{filename}.{suffix}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::filesystem::sink::split_into_parts;
+    use bytes::Bytes;
+
+    #[test]
+    fn test_split_into_parts() {
+        let data: Bytes = (0..10).collect();
+        let parts = split_into_parts(data.clone(), 3);
+
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0], vec![0, 1, 2]);
+        assert_eq!(parts[1], vec![3, 4, 5]);
+        assert_eq!(parts[2], vec![6, 7, 8]);
+        assert_eq!(parts[3], vec![9]);
+
+        let combined: Vec<u8> = parts.concat();
+        assert_eq!(combined, data);
+
+        let data: Bytes = vec![1, 2].into();
+        let parts = split_into_parts(data.clone(), 10);
+        assert_eq!(parts, vec![data]);
+
+        let data: Bytes = (0..6).collect();
+        let parts = split_into_parts(data.clone(), 3);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts.concat(), data);
     }
 }
