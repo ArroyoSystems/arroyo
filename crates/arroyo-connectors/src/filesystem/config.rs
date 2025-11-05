@@ -273,8 +273,8 @@ impl FromOpts for PartitioningConfig {
 #[schemars(title = "Filename Strategy")]
 pub enum FilenameStrategy {
     Serial,
-    #[default]
     Uuid,
+    #[default]
     UuidV7,
     Ulid,
 }
