@@ -20,7 +20,7 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
-
+use arroyo_rpc::errors::UserError;
 use super::SourceOffset;
 
 pub struct FluvioSourceFunc {

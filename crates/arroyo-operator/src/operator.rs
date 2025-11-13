@@ -51,6 +51,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace, warn, Instrument};
+use arroyo_rpc::errors::DataflowResult;
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -380,7 +381,7 @@ where
     'b: 'a,
     'a: 'b,
 {
-    async fn collect(&mut self, batch: RecordBatch) {
+    async fn collect(&mut self, batch: RecordBatch) -> DataflowResult<()> {
         if let Some(next) = &mut self.cur.next {
             let mut collector = ChainedCollector {
                 cur: next,
@@ -399,7 +400,7 @@ where
                     &mut self.cur.context,
                     &mut collector,
                 )
-                .await;
+                .await?;
         } else {
             self.cur
                 .operator
@@ -410,14 +411,18 @@ where
                     &mut self.cur.context,
                     self.final_collector,
                 )
-                .await;
+                .await?;
         };
+
+        Ok(())
     }
 
-    async fn broadcast_watermark(&mut self, watermark: Watermark) {
+    async fn broadcast_watermark(&mut self, watermark: Watermark) -> DataflowResult<()> {
         self.cur
             .handle_watermark(watermark, self.index, self.final_collector)
-            .await;
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -682,7 +687,7 @@ impl ChainedOperator {
         watermark: Watermark,
         index: usize,
         final_collector: &mut ArrowCollector,
-    ) {
+    ) -> DataflowResult<()> {
         trace!(
             "handling watermark {:?} for {}",
             watermark,
@@ -696,7 +701,7 @@ impl ChainedOperator {
             .expect("watermark index is too big");
 
         let Some(watermark) = watermark else {
-            return;
+            return Ok(());
         };
 
         if let Watermark::EventTime(_t) = watermark {
@@ -717,15 +722,15 @@ impl ChainedOperator {
                     .handle_watermark(watermark, &mut self.context, &mut collector)
                     .await;
 
-                if let Some(watermark) = watermark {
-                    Box::pin(next.handle_watermark(watermark, 0, final_collector)).await;
+                if let Some(watermark) = watermark? {
+                    Box::pin(next.handle_watermark(watermark, 0, final_collector)).await?;
                 }
             }
             None => {
                 let watermark = self
                     .operator
                     .handle_watermark(watermark, &mut self.context, final_collector)
-                    .await;
+                    .await?;
                 if let Some(watermark) = watermark {
                     final_collector
                         .broadcast(SignalMessage::Watermark(watermark))
@@ -733,6 +738,7 @@ impl ChainedOperator {
                 }
             }
         }
+        Ok(())
     }
 
     async fn handle_future_result(
@@ -1094,7 +1100,9 @@ pub trait ArrowOperator: Send + 'static {
     }
 
     #[allow(unused_variables)]
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {}
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
+        Ok(())
+    }
 
     #[allow(unused_variables)]
     async fn process_batch_index(
@@ -1104,7 +1112,7 @@ pub trait ArrowOperator: Send + 'static {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         self.process_batch(batch, ctx, collector).await
     }
 
@@ -1113,7 +1121,7 @@ pub trait ArrowOperator: Send + 'static {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    );
+    ) -> DataflowResult<()>;
 
     #[allow(clippy::type_complexity)]
     fn future_to_poll(
@@ -1140,8 +1148,8 @@ pub trait ArrowOperator: Send + 'static {
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
-        Some(watermark)
+    ) -> DataflowResult<Option<Watermark>> {
+        Ok(Some(watermark))
     }
 
     #[allow(unused_variables)]
@@ -1150,7 +1158,8 @@ pub trait ArrowOperator: Send + 'static {
         b: CheckpointBarrier,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
+        Ok(())
     }
 
     #[allow(unused_variables)]
@@ -1159,8 +1168,9 @@ pub trait ArrowOperator: Send + 'static {
         epoch: u32,
         commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut OperatorContext,
-    ) {
+    ) -> DataflowResult<()> {
         warn!("default handling of commit with epoch {:?}", epoch);
+        Ok(())
     }
 
     #[allow(unused_variables)]
@@ -1169,7 +1179,8 @@ pub trait ArrowOperator: Send + 'static {
         tick: u64,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
+        Ok(())
     }
 
     #[allow(unused_variables)]
@@ -1178,7 +1189,8 @@ pub trait ArrowOperator: Send + 'static {
         final_message: &Option<SignalMessage>,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
+        Ok(())
     }
 }
 

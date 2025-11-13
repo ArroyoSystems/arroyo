@@ -8,7 +8,7 @@ use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::UserError;
+use arroyo_rpc::errors::UserError;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use rabbitmq_stream_client::types::OffsetSpecification;

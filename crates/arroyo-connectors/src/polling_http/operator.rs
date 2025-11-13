@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use arroyo_rpc::ControlMessage;
-use arroyo_types::{SignalMessage, UserError, Watermark};
+use arroyo_types::{SignalMessage, Watermark};
 
 use tokio::select;
 use tokio::time::MissedTickBehavior;
@@ -21,6 +21,7 @@ use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use tracing::{debug, info, warn};
+use arroyo_rpc::errors::UserError;
 
 const MAX_BODY_SIZE: usize = 5 * 1024 * 1024; // 5M ought to be enough for anybody
 

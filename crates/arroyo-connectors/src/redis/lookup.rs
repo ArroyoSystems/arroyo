@@ -5,11 +5,12 @@ use arrow::datatypes::DataType;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_operator::connector::LookupConnector;
 use arroyo_rpc::MetadataField;
-use arroyo_types::{SourceError, LOOKUP_KEY_INDEX_FIELD};
+use arroyo_types::LOOKUP_KEY_INDEX_FIELD;
 use async_trait::async_trait;
 use redis::aio::ConnectionLike;
 use redis::{cmd, Value};
 use std::collections::HashMap;
+use arroyo_rpc::errors::SourceError;
 
 pub struct RedisLookup {
     pub(crate) deserializer: ArrowDeserializer,
