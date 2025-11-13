@@ -14,7 +14,7 @@ use arroyo_rpc::grpc::rpc::StopMode;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlMessage;
 use arroyo_rpc::OperatorConfig;
-use arroyo_types::UserError;
+use arroyo_rpc::errors::UserError;
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;

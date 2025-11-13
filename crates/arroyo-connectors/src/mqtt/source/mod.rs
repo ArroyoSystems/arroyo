@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
-use arroyo_types::{SignalMessage, UserError, Watermark};
+use arroyo_types::{SignalMessage, Watermark};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rumqttc::mqttbytes::QoS;
 use rumqttc::Outgoing;
@@ -21,6 +21,7 @@ use arroyo_operator::SourceFinishType;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
+use arroyo_rpc::errors::UserError;
 
 #[cfg(test)]
 mod test;

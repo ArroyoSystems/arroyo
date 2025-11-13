@@ -12,7 +12,7 @@ use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp, MetadataField};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
-    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo, UserError,
+    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo,
     Watermark,
 };
 use async_trait::async_trait;
@@ -27,6 +27,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
 use tracing::{trace, warn};
+use arroyo_rpc::errors::{DataflowResult, SourceError, UserError};
 
 pub type QueueItem = ArrowMessage;
 
@@ -493,8 +494,8 @@ impl ErrorReporter {
 
 #[async_trait]
 pub trait Collector: Send {
-    async fn collect(&mut self, batch: RecordBatch);
-    async fn broadcast_watermark(&mut self, watermark: Watermark);
+    async fn collect(&mut self, batch: RecordBatch) -> DataflowResult<()>;
+    async fn broadcast_watermark(&mut self, watermark: Watermark) -> DataflowResult<()>;
 }
 
 #[derive(Clone)]
@@ -565,7 +566,7 @@ fn repartition<'a>(
 
 #[async_trait]
 impl Collector for ArrowCollector {
-    async fn collect(&mut self, record: RecordBatch) {
+    async fn collect(&mut self, record: RecordBatch) -> DataflowResult<()> {
         TaskCounters::MessagesSent
             .for_task(&self.chain_info, |c| c.inc_by(record.num_rows() as u64));
         TaskCounters::BatchesSent.for_task(&self.chain_info, |c| c.inc());
@@ -608,10 +609,14 @@ impl Collector for ArrowCollector {
                     .for_each(|g| g.set(out_q[partition].queued_bytes() as i64));
             }
         }
+        
+        Ok(())
     }
 
-    async fn broadcast_watermark(&mut self, watermark: Watermark) {
+    async fn broadcast_watermark(&mut self, watermark: Watermark) -> DataflowResult<()> {
         self.broadcast(SignalMessage::Watermark(watermark)).await;
+        
+        Ok(())
     }
 }
 

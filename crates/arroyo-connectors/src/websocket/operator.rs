@@ -11,7 +11,7 @@ use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{SignalMessage, UserError, Watermark};
+use arroyo_types::{SignalMessage, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use tokio::select;
@@ -20,6 +20,7 @@ use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use tungstenite::http::Request;
+use arroyo_rpc::errors::UserError;
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct WebsocketSourceState {}

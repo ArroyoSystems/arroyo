@@ -14,13 +14,14 @@ use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
-use arroyo_types::{to_nanos, SourceError, LOOKUP_KEY_INDEX_FIELD};
+use arroyo_types::{to_nanos, LOOKUP_KEY_INDEX_FIELD};
 use prost_reflect::DescriptorPool;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
+use arroyo_rpc::errors::SourceError;
 
 #[derive(Debug, Copy, Clone)]
 pub enum FieldValueType<'a> {
@@ -744,10 +745,11 @@ mod tests {
         BadData, Format, Framing, JsonFormat, NewlineDelimitedFraming, RawBytesFormat,
     };
     use arroyo_rpc::MetadataField;
-    use arroyo_types::{to_nanos, SourceError};
+    use arroyo_types::to_nanos;
     use serde_json::json;
     use std::sync::Arc;
     use std::time::SystemTime;
+    use arroyo_rpc::errors::SourceError;
 
     #[test]
     fn test_line_framing() {

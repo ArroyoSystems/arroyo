@@ -15,7 +15,7 @@ use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{from_nanos, UserError};
+use arroyo_types::from_nanos;
 use async_trait::async_trait;
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_kinesis::error::SdkError;
@@ -30,7 +30,7 @@ use tokio::{
     time::{Duration, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
-
+use arroyo_rpc::errors::UserError;
 use super::SourceOffset;
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]

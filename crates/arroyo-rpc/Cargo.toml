@@ -44,6 +44,7 @@ rustls = {workspace = true}
 local-ip-address = "0.6"
 schemars = "1"
 smallvec = "1"
+thiserror = "2"
 
 [build-dependencies]
 tonic-build = { workspace = true }

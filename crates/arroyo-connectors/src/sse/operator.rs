@@ -6,7 +6,7 @@ use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{string_to_map, SignalMessage, UserError, Watermark};
+use arroyo_types::{string_to_map, SignalMessage, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, Error, SSE};
@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, info};
+use arroyo_rpc::errors::UserError;
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct SSESourceState {
