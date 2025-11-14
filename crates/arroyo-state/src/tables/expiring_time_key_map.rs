@@ -4,7 +4,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use anyhow::{anyhow, bail, Ok, Result};
 use arrow::compute::{concat_batches, kernels::aggregate, take};
 use arrow::row::{OwnedRow, Row};
 use arrow_array::{
@@ -40,7 +39,7 @@ use crate::{
 };
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use tracing::debug;
-
+use arroyo_rpc::errors::StateError;
 use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpointer};
 
 #[derive(Debug, Clone)]
@@ -58,7 +57,7 @@ impl ExpiringTimeKeyTable {
         &self,
         state_tx: Sender<StateMessage>,
         watermark: Option<SystemTime>,
-    ) -> Result<ExpiringTimeKeyView> {
+    ) -> Result<ExpiringTimeKeyView, StateError> {
         let cutoff = self.get_cutoff(watermark);
         let files = self.get_files_with_filtering(cutoff);
 
@@ -69,21 +68,22 @@ impl ExpiringTimeKeyTable {
                 let timestamp_array: &PrimitiveArray<TimestampNanosecondType> = batch
                     .column(self.schema.timestamp_index())
                     .as_primitive_opt()
-                    .ok_or_else(|| anyhow!("failed to find timestamp column"))?;
+                    .ok_or_else(|| StateError::Other { table: self.table_name.clone(), error: "failed to find timestamp column".to_string() })?;
                 let max_timestamp = from_nanos(
                     aggregate::max(timestamp_array)
-                        .ok_or_else(|| anyhow!("should have max timestamp"))?
+                        .ok_or_else(|| StateError::Other { table: self.table_name.clone(), error: "should have max timestamp".to_string() })?
                         as u128,
                 );
                 let min_timestamp = from_nanos(
                     aggregate::min(timestamp_array)
-                        .ok_or_else(|| anyhow!("should have min timestamp"))?
+                        .ok_or_else(|| StateError::Other { table: self.table_name.clone(), error: "should have min timestamp".to_string() })?
                         as u128,
                 );
                 let batches = if max_timestamp != min_timestamp {
                     // assume monotonic for now
                     let partitions =
-                        partition(vec![batch.column(timestamp_index).clone()].as_slice())?;
+                        partition(vec![batch.column(timestamp_index).clone()].as_slice())
+                            .map_err(|e| StateError::Other { table: self.table_name.clone(), error: e.to_string() })?;
                     partitions
                         .ranges()
                         .into_iter()

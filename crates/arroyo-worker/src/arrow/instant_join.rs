@@ -31,6 +31,8 @@ use std::{
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::debug;
+use arroyo_rpc::errors::DataflowResult;
+
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
 pub struct InstantJoin {
@@ -198,7 +200,7 @@ impl ArrowOperator for InstantJoin {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let left_table = ctx
             .table_manager
