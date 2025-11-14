@@ -17,11 +17,11 @@ use arroyo_formats::de::FieldValueType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::UserError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
-use arroyo_rpc::errors::UserError;
 use arroyo_types::*;
 
 use super::{Context, SourceOffset, StreamConsumer};

@@ -8,6 +8,7 @@ use arroyo_operator::operator::{
 use arroyo_planner::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_planner::physical::DecodingContext;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
 use datafusion::common::{internal_err, DataFusionError};
@@ -32,7 +33,6 @@ use prost::Message as ProstMessage;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::RwLock;
-use arroyo_rpc::errors::DataflowResult;
 
 pub mod async_udf;
 pub mod incremental_aggregator;

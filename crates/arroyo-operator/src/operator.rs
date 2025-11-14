@@ -12,6 +12,7 @@ use arrow::datatypes::Schema;
 use arroyo_datastream::logical::{DylibUdfConfig, PythonUdfConfig};
 use arroyo_metrics::TaskCounters;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
@@ -51,7 +52,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Barrier;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace, warn, Instrument};
-use arroyo_rpc::errors::DataflowResult;
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;

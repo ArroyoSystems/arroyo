@@ -2,6 +2,7 @@ use crate::sse::SseTable;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::{ConstructedOperator, SourceOperator};
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::UserError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
@@ -16,7 +17,6 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, info};
-use arroyo_rpc::errors::UserError;
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct SSESourceState {

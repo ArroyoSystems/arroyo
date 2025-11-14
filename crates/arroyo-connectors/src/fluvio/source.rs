@@ -1,7 +1,9 @@
+use super::SourceOffset;
 use anyhow::anyhow;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::UserError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
@@ -20,8 +22,6 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
-use arroyo_rpc::errors::UserError;
-use super::SourceOffset;
 
 pub struct FluvioSourceFunc {
     pub topic: String,
