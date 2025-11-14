@@ -7,6 +7,7 @@ use arroyo_operator::operator::{
     ArrowOperator, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry,
 };
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::{api, rpc::TableConfig},
@@ -31,7 +32,6 @@ use std::{
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::debug;
-use arroyo_rpc::errors::DataflowResult;
 
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 

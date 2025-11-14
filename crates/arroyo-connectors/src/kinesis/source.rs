@@ -6,10 +6,12 @@ use std::{
     time::SystemTime,
 };
 
+use super::SourceOffset;
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::UserError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
@@ -30,8 +32,6 @@ use tokio::{
     time::{Duration, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
-use arroyo_rpc::errors::UserError;
-use super::SourceOffset;
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
 pub enum KinesisOffset {

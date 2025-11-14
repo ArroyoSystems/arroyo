@@ -17,19 +17,19 @@ use tokio::sync::{
     oneshot,
 };
 
-use crate::{
-    get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, BackingStore, StateBackend,
-    StateMessage,
-};
-use crate::{CheckpointMessage, TableData};
-use arroyo_rpc::grpc::rpc::CheckpointMetadata;
-use tracing::{debug, error, info, warn};
-use arroyo_rpc::errors::StateError;
 use super::expiring_time_key_map::{
     ExpiringTimeKeyTable, ExpiringTimeKeyView, KeyTimeView, UncachedKeyValueView,
 };
 use super::global_keyed_map::GlobalKeyedView;
 use super::{ErasedCheckpointer, ErasedTable};
+use crate::{
+    get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, BackingStore, StateBackend,
+    StateMessage,
+};
+use crate::{CheckpointMessage, TableData};
+use arroyo_rpc::errors::StateError;
+use arroyo_rpc::grpc::rpc::CheckpointMetadata;
+use tracing::{debug, error, info, warn};
 
 #[allow(unused)]
 pub struct TableManager {
@@ -427,14 +427,19 @@ impl TableManager {
         if let std::collections::hash_map::Entry::Vacant(e) =
             self.caches.entry(table_name.to_string())
         {
-            let table_implementation = self
-                .tables
-                .get(table_name)
-                .ok_or_else(|| StateError::NoRegisteredTable { table: table_name.to_string() })?;
+            let table_implementation =
+                self.tables
+                    .get(table_name)
+                    .ok_or_else(|| StateError::NoRegisteredTable {
+                        table: table_name.to_string(),
+                    })?;
             let expiring_time_key_table = table_implementation
                 .as_any()
                 .downcast_ref::<ExpiringTimeKeyTable>()
-                .ok_or_else(|| StateError::WrongTableKind { table: table_name.to_string(),  expected: "expiring_time_key_table" })?;
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "expiring_time_key_table",
+                })?;
             let saved_data = expiring_time_key_table
                 .get_view(self.writer.sender.clone(), watermark)
                 .await?;
@@ -442,9 +447,13 @@ impl TableManager {
             e.insert(cache);
         }
         let cache = self.caches.get_mut(table_name).unwrap();
-        let cache: &mut ExpiringTimeKeyView = cache
-            .downcast_mut()
-            .ok_or_else(|| StateError::WrongTableKind { table: table_name.to_string(),  expected: "expiring_time_key_table" })?;
+        let cache: &mut ExpiringTimeKeyView =
+            cache
+                .downcast_mut()
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "expiring_time_key_table",
+                })?;
         Ok(cache)
     }
 
@@ -456,14 +465,19 @@ impl TableManager {
         if let std::collections::hash_map::Entry::Vacant(e) =
             self.caches.entry(table_name.to_string())
         {
-            let table_implementation = self
-                .tables
-                .get(table_name)
-                .ok_or_else(|| StateError::NoRegisteredTable { table: table_name.to_string() })?;
+            let table_implementation =
+                self.tables
+                    .get(table_name)
+                    .ok_or_else(|| StateError::NoRegisteredTable {
+                        table: table_name.to_string(),
+                    })?;
             let expiring_time_key_table = table_implementation
                 .as_any()
                 .downcast_ref::<ExpiringTimeKeyTable>()
-                .ok_or_else(|| StateError::WrongTableKind { table: table_name.to_string(),  expected: "key_time_table" })?;
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "key_time_table",
+                })?;
             let saved_data = expiring_time_key_table
                 .get_key_time_view(self.writer.sender.clone(), watermark)
                 .await?;
@@ -471,9 +485,13 @@ impl TableManager {
             e.insert(cache);
         }
         let cache = self.caches.get_mut(table_name).unwrap();
-        let cache: &mut KeyTimeView = cache
-            .downcast_mut()
-            .ok_or_else(|| StateError::WrongTableKind { table: table_name.to_string(),  expected: "key_time_table" })?;
+        let cache: &mut KeyTimeView =
+            cache
+                .downcast_mut()
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "key_time_table",
+                })?;
         Ok(cache)
     }
 
@@ -484,15 +502,20 @@ impl TableManager {
         if let std::collections::hash_map::Entry::Vacant(e) =
             self.caches.entry(table_name.to_string())
         {
-            let table_implementation = self
-                .tables
-                .get(table_name)
-                .ok_or_else(|| StateError::NoRegisteredTable { table: table_name.to_string() } )?;
+            let table_implementation =
+                self.tables
+                    .get(table_name)
+                    .ok_or_else(|| StateError::NoRegisteredTable {
+                        table: table_name.to_string(),
+                    })?;
 
             let expiring_time_key_table = table_implementation
                 .as_any()
                 .downcast_ref::<ExpiringTimeKeyTable>()
-                .ok_or_else(|| StateError::WrongTableKind { table: table_name.to_string(), expected: "uncached_key_value" })?;
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "uncached_key_value",
+                })?;
 
             let view = expiring_time_key_table
                 .get_uncached_key_value_view(self.writer.sender.clone())
@@ -503,9 +526,13 @@ impl TableManager {
         }
 
         let cache = self.caches.get_mut(table_name).unwrap();
-        let cache: &mut UncachedKeyValueView = cache
-            .downcast_mut()
-            .ok_or_else(|| StateError::WrongTableKind { table: table_name.to_string(), expected: "uncached_key_value" })?;
+        let cache: &mut UncachedKeyValueView =
+            cache
+                .downcast_mut()
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "uncached_key_value",
+                })?;
 
         Ok(cache)
     }

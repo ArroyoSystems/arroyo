@@ -18,10 +18,10 @@ use crate::mqtt::{create_connection, MqttConfig};
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::UserError;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
-use arroyo_rpc::errors::UserError;
 
 #[cfg(test)]
 mod test;

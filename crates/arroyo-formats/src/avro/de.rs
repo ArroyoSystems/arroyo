@@ -1,9 +1,9 @@
 use crate::float_to_json;
 use apache_avro::types::{Value, Value as AvroValue};
 use apache_avro::{from_avro_datum, AvroResult, Reader, Schema};
+use arroyo_rpc::errors::SourceError;
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::errors::SourceError;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::Arc;

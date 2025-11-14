@@ -854,6 +854,7 @@ dependencies = [
  "local-ip-address",
  "log",
  "nanoid",
+ "object_store",
  "percent-encoding",
  "prost",
  "rand 0.9.1",

@@ -6,14 +6,14 @@ use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::{DataflowResult, SourceError, UserError};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp, MetadataField};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
-    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo,
-    Watermark,
+    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, Watermark,
 };
 use async_trait::async_trait;
 use datafusion::common::hash_utils;
@@ -27,7 +27,6 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
 use tracing::{trace, warn};
-use arroyo_rpc::errors::{DataflowResult, SourceError, UserError};
 
 pub type QueueItem = ArrowMessage;
 
@@ -609,13 +608,13 @@ impl Collector for ArrowCollector {
                     .for_each(|g| g.set(out_q[partition].queued_bytes() as i64));
             }
         }
-        
+
         Ok(())
     }
 
     async fn broadcast_watermark(&mut self, watermark: Watermark) -> DataflowResult<()> {
         self.broadcast(SignalMessage::Watermark(watermark)).await;
-        
+
         Ok(())
     }
 }

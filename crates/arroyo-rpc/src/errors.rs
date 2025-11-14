@@ -8,22 +8,35 @@ pub enum DataflowError {
     #[error(transparent)]
     SourceError(#[from] SourceError),
     #[error("operator error: {error} {message}")]
-    InternalOperatorError{
-        error: String,
-        message: String,
-    },
+    InternalOperatorError { error: String, message: String },
     #[error(transparent)]
-    StateError(#[from] StateError)
+    StateError(#[from] StateError),
 }
 
 pub type DataflowResult<T> = Result<T, DataflowError>;
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
+pub enum StorageError {
+    #[error("the provided URL is not a valid object store")]
+    InvalidUrl,
+
+    #[error("could not instantiate storage from path: {0}")]
+    PathError(String),
+
+    #[error("URL does not contain a key")]
+    NoKeyInUrl,
+
+    #[error("object store error: {0:?}")]
+    ObjectStore(#[from] object_store::Error),
+
+    #[error("failed to load credentials: {0}")]
+    CredentialsError(String),
+}
+
+#[derive(Error, Debug)]
 pub enum StateError {
     #[error("no registered table with name {table}")]
-    NoRegisteredTable {
-        table: String,
-    },
+    NoRegisteredTable { table: String },
     #[error("trying to fetch {table} with wrong table type (expected {expected})")]
     WrongTableKind {
         table: String,
@@ -35,12 +48,16 @@ pub enum StateError {
         expected: &'static str,
     },
     #[error("unexpected state error: [{table}] {error}")]
-    Other {
-        table: String,
-        error: String,
-    }
+    Other { table: String, error: String },
+    #[error("storage error: {0}")]
+    StorageError(#[from] StorageError),
+    #[error("checkpoint error: {0}")]
+    CheckpointError(String),
+    #[error("serialization error: {0}")]
+    SerializationError(String),
+    #[error("arrow error: {0}")]
+    ArrowError(String),
 }
-
 
 #[derive(Debug, Clone)]
 pub struct UserError {

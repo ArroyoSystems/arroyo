@@ -2,6 +2,7 @@ use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::Collector;
 use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
     grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
     CheckpointEvent,
@@ -14,7 +15,6 @@ use prost::Message;
 use std::fmt::Debug;
 use std::{collections::HashMap, time::SystemTime};
 use tracing::debug;
-use arroyo_rpc::errors::DataflowResult;
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {
     committer: TPC,

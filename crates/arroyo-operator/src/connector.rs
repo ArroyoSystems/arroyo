@@ -5,6 +5,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
+use arroyo_rpc::errors::SourceError;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::DisplayAsSql;
 use async_trait::async_trait;
@@ -17,7 +18,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
-use arroyo_rpc::errors::SourceError;
 
 #[derive(Debug, Clone)]
 pub struct Connection {

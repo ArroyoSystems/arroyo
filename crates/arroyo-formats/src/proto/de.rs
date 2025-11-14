@@ -1,7 +1,7 @@
 use crate::float_to_json;
 use anyhow::anyhow;
-use arroyo_rpc::formats::ProtobufFormat;
 use arroyo_rpc::errors::SourceError;
+use arroyo_rpc::formats::ProtobufFormat;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use integer_encoding::VarInt;

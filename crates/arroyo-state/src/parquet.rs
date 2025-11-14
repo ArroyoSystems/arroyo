@@ -2,7 +2,7 @@ use crate::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use crate::tables::global_keyed_map::GlobalKeyedTable;
 use crate::tables::{CompactionConfig, ErasedTable};
 use crate::{get_storage_provider, BackingStore};
-use anyhow::{bail, Result};
+use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
 };
@@ -41,12 +41,16 @@ impl BackingStore for ParquetBackend {
         "parquet"
     }
 
-    async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Result<CheckpointMetadata> {
+    async fn load_checkpoint_metadata(
+        job_id: &str,
+        epoch: u32,
+    ) -> Result<CheckpointMetadata, StateError> {
         let storage_client = get_storage_provider().await?;
         let data = storage_client
             .get(metadata_path(&base_path(job_id, epoch)).as_str())
             .await?;
-        let metadata = CheckpointMetadata::decode(&data[..])?;
+        let metadata = CheckpointMetadata::decode(&data[..])
+            .map_err(|e| StateError::SerializationError(e.to_string()))?;
         Ok(metadata)
     }
 
@@ -54,23 +58,26 @@ impl BackingStore for ParquetBackend {
         job_id: &str,
         operator_id: &str,
         epoch: u32,
-    ) -> Result<Option<OperatorCheckpointMetadata>> {
+    ) -> Result<Option<OperatorCheckpointMetadata>, StateError> {
         let storage_client = get_storage_provider().await?;
         storage_client
             .get_if_present(metadata_path(&operator_path(job_id, epoch, operator_id)).as_str())
             .await?
-            .map(|data| Ok(OperatorCheckpointMetadata::decode(&data[..])?))
+            .map(|data| {
+                OperatorCheckpointMetadata::decode(&data[..])
+                    .map_err(|e| StateError::SerializationError(e.to_string()))
+            })
             .transpose()
     }
 
     async fn write_operator_checkpoint_metadata(
         metadata: OperatorCheckpointMetadata,
-    ) -> Result<()> {
+    ) -> Result<(), StateError> {
         let storage_client = get_storage_provider().await?;
         let operator_metadata = metadata
             .operator_metadata
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("missing operator metadata"))?;
+            .ok_or_else(|| StateError::CheckpointError("missing operator metadata".to_string()))?;
         let path = metadata_path(&operator_path(
             &operator_metadata.job_id,
             operator_metadata.epoch,
@@ -83,7 +90,7 @@ impl BackingStore for ParquetBackend {
         Ok(())
     }
 
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<()> {
+    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<(), StateError> {
         debug!("writing checkpoint {:?}", metadata);
         let storage_client = get_storage_provider().await?;
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
@@ -93,7 +100,7 @@ impl BackingStore for ParquetBackend {
         Ok(())
     }
 
-    async fn prepare_checkpoint_load(_metadata: &CheckpointMetadata) -> anyhow::Result<()> {
+    async fn prepare_checkpoint_load(_metadata: &CheckpointMetadata) -> Result<(), StateError> {
         Ok(())
     }
 
@@ -101,7 +108,7 @@ impl BackingStore for ParquetBackend {
         mut metadata: CheckpointMetadata,
         old_min_epoch: u32,
         min_epoch: u32,
-    ) -> Result<()> {
+    ) -> Result<(), StateError> {
         info!(
             message = "Cleaning checkpoint",
             min_epoch,
@@ -160,7 +167,7 @@ impl ParquetBackend {
         job_id: Arc<String>,
         operator_id: &str,
         epoch: u32,
-    ) -> Result<HashMap<String, TableCheckpointMetadata>> {
+    ) -> Result<HashMap<String, TableCheckpointMetadata>, StateError> {
         let min_files_to_compact = config().pipeline.compaction.checkpoints_to_compact as usize;
 
         let operator_checkpoint_metadata =
@@ -184,7 +191,11 @@ impl ParquetBackend {
                 .unwrap()
                 .clone();
             if let Some(compacted_metadata) = match table_metadata.table_type() {
-                rpc::TableEnum::MissingTableType => bail!("should have table type"),
+                rpc::TableEnum::MissingTableType => {
+                    return Err(StateError::CheckpointError(
+                        "should have table type".to_string(),
+                    ))
+                }
                 rpc::TableEnum::GlobalKeyValue => {
                     GlobalKeyedTable::compact_data(
                         table_config,
@@ -216,7 +227,7 @@ impl ParquetBackend {
         operator_id: String,
         old_min_epoch: u32,
         new_min_epoch: u32,
-    ) -> Result<String> {
+    ) -> Result<String, StateError> {
         let operator_metadata = Self::load_operator_metadata(&job_id, &operator_id, new_min_epoch)
             .await?
             .expect("expect new_min_epoch metadata to still be present");
@@ -261,8 +272,8 @@ impl ParquetBackend {
                     let table_config = operator_metadata
                         .table_configs
                         .get(table_name)
-                        .ok_or_else(|| anyhow::anyhow!("missing table config for operator {}, table {}, metadata is {:?}, operator_metadata is {:?}",
-                         operator_id, table_name, metadata, operator_metadata)).unwrap()
+                        .ok_or_else(|| StateError::CheckpointError(format!("missing table config for operator {}, table {}, metadata is {:?}, operator_metadata is {:?}",
+                         operator_id, table_name, metadata, operator_metadata))).unwrap()
                         .clone();
 
                     match table_config.table_type() {

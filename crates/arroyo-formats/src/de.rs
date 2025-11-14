@@ -11,6 +11,7 @@ use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Schema, SchemaRef};
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::SourceError;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
@@ -21,7 +22,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
-use arroyo_rpc::errors::SourceError;
 
 #[derive(Debug, Copy, Clone)]
 pub enum FieldValueType<'a> {
@@ -741,6 +741,7 @@ mod tests {
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
     use arrow_schema::{DataType, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
+    use arroyo_rpc::errors::SourceError;
     use arroyo_rpc::formats::{
         BadData, Format, Framing, JsonFormat, NewlineDelimitedFraming, RawBytesFormat,
     };
@@ -749,7 +750,6 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
     use std::time::SystemTime;
-    use arroyo_rpc::errors::SourceError;
 
     #[test]
     fn test_line_framing() {

@@ -17,11 +17,11 @@ use crate::polling_http::EmitBehavior;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::UserError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use tracing::{debug, info, warn};
-use arroyo_rpc::errors::UserError;
 
 const MAX_BODY_SIZE: usize = 5 * 1024 * 1024; // 5M ought to be enough for anybody
 
