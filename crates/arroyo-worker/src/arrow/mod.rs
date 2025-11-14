@@ -32,6 +32,7 @@ use prost::Message as ProstMessage;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::RwLock;
+use arroyo_rpc::errors::DataflowResult;
 
 pub mod async_udf;
 pub mod incremental_aggregator;
@@ -158,20 +159,19 @@ impl ArrowOperator for ProjectionOperator {
         record_batch: RecordBatch,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let outputs = self
             .exprs
             .iter()
             .map(|e| {
                 e.evaluate(&record_batch)
                     .and_then(|f| f.into_array(record_batch.num_rows()))
-                    .unwrap()
             })
-            .collect_vec();
+            .try_collect()?;
 
         collector
             .collect(RecordBatch::try_new(self.output_schema.schema.clone(), outputs).unwrap())
-            .await;
+            .await
     }
 }
 

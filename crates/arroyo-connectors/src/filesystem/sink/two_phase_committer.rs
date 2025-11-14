@@ -14,6 +14,7 @@ use prost::Message;
 use std::fmt::Debug;
 use std::{collections::HashMap, time::SystemTime};
 use tracing::debug;
+use arroyo_rpc::errors::DataflowResult;
 
 pub struct TwoPhaseCommitterOperator<TPC: TwoPhaseCommitter> {
     committer: TPC,
@@ -161,7 +162,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         true
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let tracking_key_state: &mut GlobalKeyedView<usize, TPC::DataRecovery> = ctx
             .table_manager
             .get_global_keyed_state("r")

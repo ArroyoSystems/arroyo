@@ -11,10 +11,36 @@ pub enum DataflowError {
     InternalOperatorError{
         error: String,
         message: String,
-    }
+    },
+    #[error(transparent)]
+    StateError(#[from] StateError)
 }
 
 pub type DataflowResult<T> = Result<T, DataflowError>;
+
+#[derive(Error, Debug, Clone)]
+pub enum StateError {
+    #[error("no registered table with name {table}")]
+    NoRegisteredTable {
+        table: String,
+    },
+    #[error("trying to fetch {table} with wrong table type (expected {expected})")]
+    WrongTableKind {
+        table: String,
+        expected: &'static str,
+    },
+    #[error("trying to fetch {table} with value table type (expected {expected})")]
+    WrongValueType {
+        table: String,
+        expected: &'static str,
+    },
+    #[error("unexpected state error: [{table}] {error}")]
+    Other {
+        table: String,
+        error: String,
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct UserError {
