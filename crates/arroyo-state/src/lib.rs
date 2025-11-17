@@ -179,10 +179,7 @@ pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvide
         .get_or_try_init(|| async {
             let storage_url = &config().checkpoint_url;
 
-            StorageProvider::for_url(storage_url)
-                .await
-                .map(Arc::new)
-                .map_err(StateError::StorageError)
+            Ok(StorageProvider::for_url(storage_url).await.map(Arc::new)?)
         })
         .await
 }

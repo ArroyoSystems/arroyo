@@ -1,3 +1,4 @@
+use crate::errors::StateError;
 use crate::grpc::api;
 use crate::{Converter, TIMESTAMP_FIELD};
 use anyhow::{anyhow, bail, Result};
@@ -11,7 +12,7 @@ use arrow_array::{Array, PrimitiveArray, RecordBatch, TimestampNanosecondArray, 
 use arrow_ord::cmp::gt_eq;
 use arrow_ord::partition::partition;
 use arrow_ord::sort::{lexsort_to_indices, SortColumn};
-use arrow_schema::FieldRef;
+use arrow_schema::{ArrowError, FieldRef};
 use arroyo_types::to_nanos;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use std::ops::Range;
@@ -212,7 +213,7 @@ impl ArroyoSchema {
         &self,
         batch: RecordBatch,
         cutoff: Option<SystemTime>,
-    ) -> anyhow::Result<RecordBatch> {
+    ) -> Result<RecordBatch, ArrowError> {
         let Some(cutoff) = cutoff else {
             // no watermark, so we just return the same batch.
             return Ok(batch);
@@ -222,9 +223,11 @@ impl ArroyoSchema {
             .column(self.timestamp_index)
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
-            .ok_or_else(|| anyhow!("failed to downcast column {} of {:?} to timestamp. Schema is supposed to be {:?}", self.timestamp_index, batch, self.schema))?;
+            .ok_or_else(|| ArrowError::CastError(
+                format!("failed to downcast column {} of {:?} to timestamp. Schema is supposed to be {:?}",
+                        self.timestamp_index, batch, self.schema)))?;
         let cutoff_scalar = TimestampNanosecondArray::new_scalar(to_nanos(cutoff) as i64);
-        let on_time = gt_eq(timestamp_column, &cutoff_scalar).unwrap();
+        let on_time = gt_eq(timestamp_column, &cutoff_scalar)?;
         Ok(filter_record_batch(&batch, &on_time)?)
     }
 
@@ -263,7 +266,7 @@ impl ArroyoSchema {
             .collect()
     }
 
-    pub fn converter(&self, with_timestamp: bool) -> Result<Converter> {
+    pub fn converter(&self, with_timestamp: bool) -> Result<Converter, ArrowError> {
         Converter::new(self.sort_fields(with_timestamp))
     }
 
@@ -271,7 +274,7 @@ impl ArroyoSchema {
         &self,
         with_timestamp: bool,
         generation_index: usize,
-    ) -> Result<Converter> {
+    ) -> Result<Converter, ArrowError> {
         match &self.key_indices {
             None => {
                 let mut indices = (0..self.schema.fields().len()).collect::<Vec<_>>();
@@ -313,7 +316,11 @@ impl ArroyoSchema {
         }
     }
 
-    pub fn sort(&self, batch: RecordBatch, with_timestamp: bool) -> Result<RecordBatch> {
+    pub fn sort(
+        &self,
+        batch: RecordBatch,
+        with_timestamp: bool,
+    ) -> Result<RecordBatch, ArrowError> {
         if self.key_indices.is_none() && !with_timestamp {
             return Ok(batch);
         }
@@ -332,7 +339,7 @@ impl ArroyoSchema {
         &self,
         batch: &RecordBatch,
         with_timestamp: bool,
-    ) -> Result<Vec<Range<usize>>> {
+    ) -> Result<Vec<Range<usize>>, ArrowError> {
         if self.key_indices.is_none() && !with_timestamp {
             #[allow(clippy::single_range_in_vec_init)]
             return Ok(vec![0..batch.num_rows()]);
@@ -350,7 +357,7 @@ impl ArroyoSchema {
         Ok(partition(&partition_columns)?.ranges())
     }
 
-    pub fn unkeyed_batch(&self, batch: &RecordBatch) -> Result<RecordBatch> {
+    pub fn unkeyed_batch(&self, batch: &RecordBatch) -> Result<RecordBatch, ArrowError> {
         if self.key_indices.is_none() {
             return Ok(batch.clone());
         }
@@ -360,7 +367,7 @@ impl ArroyoSchema {
         Ok(batch.project(&columns)?)
     }
 
-    pub fn schema_without_keys(&self) -> Result<Self> {
+    pub fn schema_without_keys(&self) -> Result<Self, ArrowError> {
         if self.key_indices.is_none() {
             return Ok(self.clone());
         }
@@ -383,7 +390,7 @@ impl ArroyoSchema {
         })
     }
 
-    pub fn with_fields(&self, fields: Vec<FieldRef>) -> Result<Self> {
+    pub fn with_fields(&self, fields: Vec<FieldRef>) -> Result<Self, ArrowError> {
         let schema = Arc::new(Schema::new_with_metadata(
             fields,
             self.schema.metadata.clone(),
@@ -398,11 +405,11 @@ impl ArroyoSchema {
             .unwrap_or(&0);
 
         if schema.fields.len() - 1 < max_index {
-            bail!(
+            return Err(ArrowError::InvalidArgumentError(format!(
                 "expected at least {} fields, but were only {}",
                 max_index + 1,
                 schema.fields.len()
-            );
+            )));
         }
 
         Ok(Self {
@@ -413,7 +420,10 @@ impl ArroyoSchema {
         })
     }
 
-    pub fn with_additional_fields(&self, new_fields: impl Iterator<Item = Field>) -> Result<Self> {
+    pub fn with_additional_fields(
+        &self,
+        new_fields: impl Iterator<Item = Field>,
+    ) -> Result<Self, ArrowError> {
         let mut fields = self.schema.fields.to_vec();
         fields.extend(new_fields.map(Arc::new));
 
@@ -424,7 +434,7 @@ impl ArroyoSchema {
 pub fn server_for_hash_array(
     hash: &PrimitiveArray<UInt64Type>,
     n: usize,
-) -> anyhow::Result<PrimitiveArray<UInt64Type>> {
+) -> Result<PrimitiveArray<UInt64Type>, ArrowError> {
     let range_size = u64::MAX / (n as u64) + 1;
     let range_scalar = UInt64Array::new_scalar(range_size);
     let division = div(hash, &range_scalar)?;
