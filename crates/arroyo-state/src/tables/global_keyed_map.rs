@@ -1,6 +1,6 @@
 use crate::{CheckpointMessage, StateMessage, TableData};
 use arrow_array::{BinaryArray, RecordBatch};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{ArrowError, DataType, Field, Schema};
 use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     GlobalKeyedTableSubtaskCheckpointMetadata, GlobalKeyedTableTaskCheckpointMetadata,
@@ -55,23 +55,29 @@ impl GlobalKeyedTable {
         Zip<impl Iterator<Item = Option<&'a [u8]>>, impl Iterator<Item = Option<&'a [u8]>>>,
         StateError,
     > {
-        let key_column = record_batch
-            .column_by_name("key")
-            .ok_or_else(|| StateError::ArrowError("missing key column".to_string()))?;
-        let value_column = record_batch
-            .column_by_name("value")
-            .ok_or_else(|| StateError::ArrowError("missing value column".to_string()))?;
+        let key_column = record_batch.column_by_name("key").ok_or_else(|| {
+            StateError::ArrowError(ArrowError::SchemaError("missing column 'key'".to_string()))
+        })?;
+        let value_column = record_batch.column_by_name("value").ok_or_else(|| {
+            StateError::ArrowError(ArrowError::SchemaError(
+                "missing column 'value'".to_string(),
+            ))
+        })?;
         let cast_key_column = key_column
             .as_any()
             .downcast_ref::<arrow_array::BinaryArray>()
             .ok_or_else(|| {
-                StateError::ArrowError("failed to downcast key column to BinaryArray".to_string())
+                StateError::ArrowError(ArrowError::CastError(
+                    "failed to downcast key to binary".to_string(),
+                ))
             })?;
         let cast_value_column = value_column
             .as_any()
             .downcast_ref::<arrow_array::BinaryArray>()
             .ok_or_else(|| {
-                StateError::ArrowError("failed to downcast value column to BinaryArray".to_string())
+                StateError::ArrowError(ArrowError::CastError(
+                    "failed to downcast value column to BinaryArray".to_string(),
+                ))
             })?;
         Ok(cast_key_column.into_iter().zip(cast_value_column))
     }
@@ -82,29 +88,21 @@ impl GlobalKeyedTable {
         let mut data = HashMap::new();
         for file in &self.files {
             let contents = self.storage_provider.get(file.as_str()).await?;
-            let reader = ParquetRecordBatchReaderBuilder::try_new(contents)
-                .map_err(|e| StateError::ArrowError(e.to_string()))?
-                .build()
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+            let reader = ParquetRecordBatchReaderBuilder::try_new(contents)?.build()?;
+
             for batch in reader {
-                for (key, value) in self.get_key_value_iterator(
-                    &batch.map_err(|e| StateError::ArrowError(e.to_string()))?,
-                )? {
-                    let key = key.ok_or_else(|| {
-                        StateError::ArrowError("unexpected null key from record batch".to_string())
+                for (key, value) in self.get_key_value_iterator(&batch?)? {
+                    let key = key.ok_or_else(|| StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "unexpected null key from record batch".to_string(),
                     })?;
-                    let value = value.ok_or_else(|| {
-                        StateError::ArrowError(
-                            "unexpected null value from record batch".to_string(),
-                        )
+                    let value = value.ok_or_else(|| StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "unexpected null value from record batch".to_string(),
                     })?;
                     data.insert(
-                        bincode::decode_from_slice(key, config::standard())
-                            .map_err(|e| StateError::SerializationError(e.to_string()))?
-                            .0,
-                        bincode::decode_from_slice(value, config::standard())
-                            .map_err(|e| StateError::SerializationError(e.to_string()))?
-                            .0,
+                        bincode::decode_from_slice(key, config::standard())?.0,
+                        bincode::decode_from_slice(value, config::standard())?.0,
                     );
                 }
             }
@@ -260,17 +258,19 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
     async fn insert_data(&mut self, data: TableData) -> Result<(), StateError> {
         match data {
             TableData::RecordBatch(_) => {
-                return Err(StateError::CheckpointError(
-                    "global keyed data expects KeyedData, not record batches".to_string(),
-                ));
+                return Err(StateError::Other {
+                    table: self.table_name.clone(),
+                    error: "global keyed data expects KeyedData, not record batches".to_string(),
+                });
             }
             TableData::CommitData { data } => {
                 debug!("received commit data");
                 // set commit data, failing if it was already set
                 if self.commit_data.is_some() {
-                    return Err(StateError::CheckpointError(
-                        "commit data already set for this epoch".to_string(),
-                    ));
+                    return Err(StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "commit data already set for this epoch".to_string(),
+                    });
                 }
                 self.commit_data = Some(data);
             }
@@ -296,22 +296,18 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         let batch = RecordBatch::try_new(
             GLOBAL_KEY_VALUE_SCHEMA.clone(),
             vec![Arc::new(key_array), Arc::new(value_array)],
-        )
-        .map_err(|e| StateError::ArrowError(e.to_string()))?;
+        )?;
 
         let props = WriterProperties::builder()
             .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::default()))
             .set_statistics_enabled(EnabledStatistics::None)
             .build();
         let cursor = Vec::new();
-        let mut writer = ArrowWriter::try_new(cursor, batch.schema(), Some(props))
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
-        writer
-            .write(&batch)
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
-        writer
-            .flush()
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
+        let mut writer = ArrowWriter::try_new(cursor, batch.schema(), Some(props))?;
+        writer.write(&batch)?;
+
+        writer.flush()?;
+
         let parquet_bytes = writer.into_inner().unwrap();
         let bytes = parquet_bytes.len() as u64;
         let path = table_checkpoint_path(

@@ -12,6 +12,7 @@ use arrow_array::{
     Array, ArrayRef, PrimitiveArray, RecordBatch,
 };
 use arrow_ord::{partition::partition, sort::sort_to_indices};
+use arrow_schema::ArrowError;
 use arroyo_rpc::{
     df::server_for_hash_array,
     grpc::rpc::{
@@ -139,16 +140,12 @@ impl ExpiringTimeKeyTable {
                 object_meta.location,
             )
             .with_file_size(object_meta.size);
-            let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
-                .await
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
-            let mut stream = reader_builder
-                .build()
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+            let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
+            let mut stream = reader_builder.build()?;
             // projection to trim the metadata fields. Should probably be factored out.
             let projection: Vec<_> = (0..(stream.schema().fields().len() - 2)).collect();
             while let Some(batch_result) = stream.next().await {
-                let mut batch = batch_result.map_err(|e| StateError::ArrowError(e.to_string()))?;
+                let mut batch = batch_result?;
                 if needs_filtering {
                     match self
                         .schema
@@ -161,9 +158,7 @@ impl ExpiringTimeKeyTable {
                 if batch.num_rows() == 0 {
                     continue;
                 }
-                batch = batch
-                    .project(&projection)
-                    .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                batch = batch.project(&projection)?;
                 result.extend(batch_processor(batch)?)
             }
         }
@@ -260,9 +255,15 @@ impl Table for ExpiringTimeKeyTable {
     ) -> Result<Self, StateError> {
         let schema: ArroyoSchema = config
             .schema
-            .ok_or_else(|| StateError::CheckpointError("should have schema".to_string()))?
+            .ok_or_else(|| StateError::Other {
+                table: config.table_name.clone(),
+                error: "should have schema".to_string(),
+            })?
             .try_into()
-            .map_err(|e| StateError::CheckpointError(format!("schema conversion error: {}", e)))?;
+            .map_err(|e| StateError::Other {
+                table: config.table_name.clone(),
+                error: format!("schema conversion error: {:?}", e),
+            })?;
 
         let schema = SchemaWithHashAndOperation::new(Arc::new(schema), config.generational);
 
@@ -410,9 +411,15 @@ impl Table for ExpiringTimeKeyTable {
         }
         let schema: ArroyoSchema = config
             .schema
-            .ok_or_else(|| StateError::CheckpointError("expect schema".to_string()))?
+            .ok_or_else(|| StateError::Other {
+                table: config.table_name.clone(),
+                error: "missing schema".to_string(),
+            })?
             .try_into()
-            .map_err(|e| StateError::CheckpointError(format!("schema conversion error: {}", e)))?;
+            .map_err(|e| StateError::Other {
+                table: config.table_name.clone(),
+                error: format!("schema conversion error: {:?}", e),
+            })?;
         let state_schema = SchemaWithHashAndOperation::new(Arc::new(schema), config.generational);
 
         for (generation, epochs) in epochs_in_generation {
@@ -444,6 +451,7 @@ impl Table for ExpiringTimeKeyTable {
 }
 
 struct CompactedFileWriter {
+    table: String,
     file_name: String,
     schema: SchemaWithHashAndOperation,
     writer: Option<AsyncArrowWriter<BufWriter>>,
@@ -505,22 +513,19 @@ impl TimeTableCompactor {
             let multiple_partitions = first_partition != last_partition;
             let reader_builder = ParquetRecordBatchStreamBuilder::new(reader)
                 .await
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                .map_err(|e| StateError::ArrowError(e.into()))?;
             let mut stream = reader_builder
                 .build()
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                .map_err(|e| StateError::ArrowError(e.into()))?;
 
             // projection to trim the metadata fields. Should probably be factored out.
             while let Some(batch) = stream
                 .try_next()
                 .await
-                .map_err(|e| StateError::ArrowError(e.to_string()))?
+                .map_err(|e| StateError::ArrowError(e.into()))?
             {
                 // Filter by _timestamp field
-                let time_filtered = schema
-                    .state_schema()
-                    .filter_by_time(batch, cutoff)
-                    .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                let time_filtered = schema.state_schema().filter_by_time(batch, cutoff)?;
                 if time_filtered.num_rows() == 0 {
                     continue;
                 }
@@ -536,10 +541,13 @@ impl TimeTableCompactor {
                             .column(schema.hash_index())
                             .as_any()
                             .downcast_ref::<PrimitiveArray<UInt64Type>>()
-                            .unwrap(),
+                            .ok_or_else(|| {
+                                ArrowError::CastError(
+                                    "expected hash column to be uint64".to_string(),
+                                )
+                            })?,
                         operator_metadata.parallelism as usize,
-                    )
-                    .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                    )?;
 
                     let indices = sort_to_indices(&partitions, None, None).unwrap();
                     let columns = time_filtered
@@ -549,13 +557,10 @@ impl TimeTableCompactor {
                         .collect();
 
                     let sorted =
-                        RecordBatch::try_new(schema.state_schema().schema.clone(), columns)
-                            .map_err(|e| StateError::ArrowError(e.to_string()))?;
-                    let sorted_keys = take(&partitions, &indices, None)
-                        .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                        RecordBatch::try_new(schema.state_schema().schema.clone(), columns)?;
+                    let sorted_keys = take(&partitions, &indices, None)?;
 
-                    let partition = partition(vec![sorted_keys.clone()].as_slice())
-                        .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                    let partition = partition(vec![sorted_keys.clone()].as_slice())?;
                     let typed_keys: &PrimitiveArray<UInt64Type> =
                         sorted_keys.as_any().downcast_ref().unwrap();
                     for range in partition.ranges() {
@@ -589,19 +594,17 @@ impl TimeTableCompactor {
             );
             let buf_writer = self.storage_provider.buf_writer(file_name.as_str());
 
-            let writer = Some(
-                AsyncArrowWriter::try_new(
-                    buf_writer,
-                    self.schema.state_schema().schema.clone(),
-                    None,
-                )
-                .map_err(|e| StateError::ArrowError(e.to_string()))?,
-            );
+            let writer = Some(AsyncArrowWriter::try_new(
+                buf_writer,
+                self.schema.state_schema().schema.clone(),
+                None,
+            )?);
             e.insert(CompactedFileWriter {
                 file_name,
                 schema: self.schema.clone(),
                 writer,
                 parquet_stats: None,
+                table: self.table.clone(),
             });
         }
         let writer = self.writers.get_mut(&partition).unwrap();
@@ -628,25 +631,21 @@ impl CompactedFileWriter {
         }
         self.parquet_stats = Some(parquet_stats);
         let Some(writer) = self.writer.as_mut() else {
-            return Err(StateError::CheckpointError(
-                "should have writer".to_string(),
-            ));
+            return Err(StateError::Other {
+                table: self.table.clone(),
+                error: "missing writer".to_string(),
+            })?;
         };
-        writer
-            .write(&record_batch)
-            .await
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
+        writer.write(&record_batch).await?;
         Ok(())
     }
 
     async fn finish(mut self, epoch: u32, generation: u64) -> Result<ParquetTimeFile, StateError> {
-        let writer = self.writer.take().ok_or_else(|| {
-            StateError::CheckpointError(format!("unset compacted file writer {}", self.file_name))
+        let writer = self.writer.take().ok_or_else(|| StateError::Other {
+            table: self.table.clone(),
+            error: format!("unset compacted file writer {}", self.file_name),
         })?;
-        let _closed = writer
-            .close()
-            .await
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
+        let _closed = writer.close().await?;
         let stats = self.parquet_stats.take().expect("should have stats");
         Ok(ParquetTimeFile {
             epoch,
@@ -699,14 +698,11 @@ impl ExpiringTimeKeyTableCheckpointer {
         let writer_properties = WriterProperties::builder()
             .set_compression(Compression::ZSTD(ZstdLevel::default()))
             .build();
-        self.writer = Some(
-            AsyncArrowWriter::try_new(
-                buf_writer,
-                self.parent.schema.state_schema().schema.clone(),
-                Some(writer_properties),
-            )
-            .map_err(|e| StateError::ArrowError(e.to_string()))?,
-        );
+        self.writer = Some(AsyncArrowWriter::try_new(
+            buf_writer,
+            self.parent.schema.state_schema().schema.clone(),
+            Some(writer_properties),
+        )?);
         Ok(())
     }
 }
@@ -717,9 +713,10 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
 
     async fn insert_data(&mut self, data: crate::TableData) -> Result<(), StateError> {
         let TableData::RecordBatch(batch) = data else {
-            return Err(StateError::CheckpointError(
-                "expect record batch data for expiring time key map tables".to_string(),
-            ));
+            return Err(StateError::Other {
+                table: self.parent.table_name.clone(),
+                error: "expect record batch data for expiring time key map tables".to_string(),
+            });
         };
         if self.writer.is_none() {
             self.init_writer().await?;
@@ -730,8 +727,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
             .as_mut()
             .expect("writer should be set")
             .write(&annotated_batch)
-            .await
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
+            .await?;
         Ok(())
     }
 
@@ -755,10 +751,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
             .collect();
         let mut bytes = 0;
         if let Some(writer) = self.writer.take() {
-            let _result = writer
-                .close()
-                .await
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+            let _result = writer.close().await?;
 
             let stats = self.parquet_stats.expect("should have set parquet stats");
             let meta = self
@@ -844,9 +837,7 @@ impl ExpiringTimeKeyView {
                         data: TableData::RecordBatch(batch.clone()),
                     })
                     .await
-                    .map_err(|e| {
-                        StateError::CheckpointError(format!("failed to send state message: {}", e))
-                    })?;
+                    .expect("queue closed");
             }
             self.flushed_batches_by_max_timestamp
                 .entry(max_timestamp)
@@ -896,9 +887,9 @@ impl ExpiringTimeKeyView {
         }
     }
 
-    pub async fn flush_timestamp(&mut self, bin_start: SystemTime) -> Result<(), StateError> {
+    pub async fn flush_timestamp(&mut self, bin_start: SystemTime) {
         let Some(batches_to_flush) = self.batches_to_flush.remove(&bin_start) else {
-            return Ok(());
+            return ();
         };
         let flushed_vec = self
             .flushed_batches_by_max_timestamp
@@ -912,11 +903,8 @@ impl ExpiringTimeKeyView {
                     data: TableData::RecordBatch(batch),
                 })
                 .await
-                .map_err(|e| {
-                    StateError::CheckpointError(format!("failed to send state message: {}", e))
-                })?;
+                .expect("queue closed");
         }
-        Ok(())
     }
 
     pub fn get_min_time(&self) -> Option<SystemTime> {
@@ -955,14 +943,9 @@ impl KeyTimeView {
         state_tx: Sender<StateMessage>,
     ) -> Result<Self, StateError> {
         let schema = parent.schema.memory_schema();
-        let key_converter = schema
-            .converter(false)
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
-        let value_schema = Arc::new(
-            schema
-                .schema_without_keys()
-                .map_err(|e| StateError::ArrowError(format!("schema error: {}", e)))?,
-        );
+        let key_converter = schema.converter(false)?;
+
+        let value_schema = Arc::new(schema.schema_without_keys()?);
         let value_indices = schema.value_indices(true);
         Ok(Self {
             key_converter,
@@ -983,8 +966,7 @@ impl KeyTimeView {
             unreachable!("just checked")
         };
         if let BatchData::BatchVec(batches) = value {
-            let coalesced_batches = concat_batches(&self.value_schema.schema, batches.iter())
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+            let coalesced_batches = concat_batches(&self.value_schema.schema, batches.iter())?;
             *value = BatchData::SingleBatch(coalesced_batches);
         }
         let Some(BatchData::SingleBatch(single_batch)) = self.keyed_data.get(row) else {
@@ -993,17 +975,14 @@ impl KeyTimeView {
         Ok(Some(single_batch))
     }
 
-    pub async fn write_batch_to_state(&mut self, batch: RecordBatch) -> Result<(), StateError> {
+    pub async fn write_batch_to_state(&mut self, batch: RecordBatch) {
         self.state_tx
             .send(StateMessage::TableData {
                 table: self.parent.table_name.to_string(),
                 data: TableData::RecordBatch(batch.clone()),
             })
             .await
-            .map_err(|e| {
-                StateError::CheckpointError(format!("failed to send state message: {}", e))
-            })?;
-        Ok(())
+            .expect("queue closed");
     }
 
     pub async fn insert(&mut self, batch: RecordBatch) -> Result<Vec<OwnedRow>, StateError> {
@@ -1013,41 +992,29 @@ impl KeyTimeView {
                 data: TableData::RecordBatch(batch.clone()),
             })
             .await
-            .map_err(|e| {
-                StateError::CheckpointError(format!("failed to send state message: {}", e))
-            })?;
+            .expect("queue closed");
         Ok(self.insert_internal(batch)?)
     }
 
     fn insert_internal(&mut self, batch: RecordBatch) -> Result<Vec<OwnedRow>, StateError> {
-        let sorted_batch = self
-            .schema
-            .sort(batch, false)
-            .map_err(|e| StateError::ArrowError(format!("sort error: {}", e)))?;
-        let value_batch = sorted_batch
-            .project(&self.value_indices)
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
+        let sorted_batch = self.schema.sort(batch, false)?;
+
+        let value_batch = sorted_batch.project(&self.value_indices)?;
+
         let mut rows = vec![];
-        for range in self
-            .schema
-            .partition(&sorted_batch, false)
-            .map_err(|e| StateError::ArrowError(format!("partition error: {}", e)))?
-        {
+        for range in self.schema.partition(&sorted_batch, false)? {
             let value_batch = value_batch.slice(range.start, range.end - range.start);
             let key_columns = if self.schema.storage_keys().is_none() {
                 vec![]
             } else {
                 sorted_batch
                     .slice(range.start, 1)
-                    .project(self.schema.storage_keys().as_ref().unwrap())
-                    .map_err(|e| StateError::ArrowError(e.to_string()))?
+                    .project(self.schema.storage_keys().as_ref().unwrap())?
                     .columns()
                     .to_vec()
             };
-            let key_row = self
-                .key_converter
-                .convert_columns(&key_columns)
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+            let key_row = self.key_converter.convert_columns(&key_columns)?;
+
             let contents = self.keyed_data.get_mut(key_row.as_ref());
             rows.push(key_row.clone());
             let batch = match contents {
@@ -1085,9 +1052,7 @@ impl UncachedKeyValueView {
         state_tx: Sender<StateMessage>,
     ) -> Result<Self, StateError> {
         let schema = parent.schema.memory_schema();
-        let key_converter = schema
-            .converter(false)
-            .map_err(|e| StateError::ArrowError(e.to_string()))?;
+        let key_converter = schema.converter(false)?;
 
         Ok(Self {
             key_converter,
@@ -1103,8 +1068,7 @@ impl UncachedKeyValueView {
         };
 
         let batch_with_generation =
-            RecordBatch::try_new(self.parent.schema.memory_schema().schema.clone(), columns)
-                .map_err(|e| StateError::ArrowError(e.to_string()))?;
+            RecordBatch::try_new(self.parent.schema.memory_schema().schema.clone(), columns)?;
 
         self.state_tx
             .send(StateMessage::TableData {
@@ -1112,16 +1076,12 @@ impl UncachedKeyValueView {
                 data: TableData::RecordBatch(batch_with_generation),
             })
             .await
-            .map_err(|e| {
-                StateError::CheckpointError(format!("failed to send state message: {}", e))
-            })?;
+            .expect("queued closed");
         Ok(())
     }
 
-    pub fn convert_keys(&self, rows: Vec<Row>) -> Result<Vec<ArrayRef>, StateError> {
-        self.key_converter
-            .convert_rows(rows)
-            .map_err(|e| StateError::ArrowError(e.to_string()))
+    pub fn convert_keys(&self, rows: Vec<Row>) -> Result<Vec<ArrayRef>, ArrowError> {
+        self.key_converter.convert_rows(rows)
     }
 
     /// Gets all data from the checkpoint files. Note this is not necessarily ordered, or
@@ -1193,9 +1153,7 @@ impl UncachedKeyValueView {
                                 // Project to remove metadata field
                                 let projection: Vec<_> =
                                     (0..(batch.schema().fields().len() - 2)).collect();
-                                batch = batch
-                                    .project(&projection)
-                                    .map_err(|e| StateError::ArrowError(e.to_string()))?;
+                                batch = batch.project(&projection)?;
 
                                 Ok(Some(batch))
                             }

@@ -199,14 +199,22 @@ pub trait ErasedTable: Send + Sync + 'static {
         Self: Sized,
     {
         if Self::table_type() != table_type {
-            return Err(StateError::CheckpointError(format!(
-                "mismatched table type, expected type {:?}, got {:?}",
-                Self::table_type(),
-                table_type
-            )));
+            return Err(StateError::Other {
+                table: "".to_string(),
+                error: format!(
+                    "mismatched table type, expected type {:?}, got {:?}",
+                    Self::table_type(),
+                    table_type
+                ),
+            });
         }
-        Ok(Message::decode(&mut data.as_slice())
-            .map_err(|e| StateError::SerializationError(e.to_string()))?)
+
+        Ok(
+            Message::decode(&mut data.as_slice()).map_err(|e| StateError::Other {
+                table: "".to_string(),
+                error: format!("Failed to deserialize table config: {:?}", e),
+            })?,
+        )
     }
 
     fn files_to_keep(

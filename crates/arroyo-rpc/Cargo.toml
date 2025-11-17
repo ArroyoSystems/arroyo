@@ -46,7 +46,7 @@ schemars = "1"
 smallvec = "1"
 thiserror = "2"
 object_store = { workspace = true, features = ["aws", "gcp", "azure"] }
-
+bincode = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }

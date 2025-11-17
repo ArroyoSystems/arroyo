@@ -77,6 +77,7 @@ rustls = "0.23.27"
 tokio-rustls = "0.26.2"
 rustls-pemfile = "2.2.0"
 webpki-roots = "1.0.0"
+bincode = "2.0.0-rc.3"
 
 [profile.release]
 debug = 1

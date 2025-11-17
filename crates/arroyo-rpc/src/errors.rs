@@ -1,4 +1,5 @@
 use datafusion::error::DataFusionError;
+use datafusion::parquet::errors::ParquetError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -51,12 +52,16 @@ pub enum StateError {
     Other { table: String, error: String },
     #[error("storage error: {0}")]
     StorageError(#[from] StorageError),
-    #[error("checkpoint error: {0}")]
-    CheckpointError(String),
-    #[error("serialization error: {0}")]
-    SerializationError(String),
     #[error("arrow error: {0}")]
-    ArrowError(String),
+    ArrowError(#[from] arrow::error::ArrowError),
+    #[error("parquet error: {0}")]
+    ParquetError(#[from] ParquetError),
+    #[error("bincode decode error: {0}")]
+    BincodeDecodeError(#[from] bincode::error::DecodeError),
+    #[error("bincode encode error: {0}")]
+    BincodeEncodeError(#[from] bincode::error::EncodeError),
+    #[error("protobuf decode error: {0}")]
+    ProtoDecodeError(#[from] prost::DecodeError),
 }
 
 #[derive(Debug, Clone)]

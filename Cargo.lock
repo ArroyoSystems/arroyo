@@ -846,6 +846,7 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "base64 0.22.1",
+ "bincode",
  "datafusion",
  "dirs",
  "figment",
