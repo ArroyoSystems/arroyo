@@ -296,7 +296,9 @@ impl FromStr for ParquetCompression {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct ParquetFormat {
     #[serde(default)]

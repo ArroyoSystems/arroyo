@@ -853,7 +853,7 @@ impl IcebergPartitioning {
             .iter()
             .map(|f| {
                 Ok(match f.transform_fn {
-                    Transform::Identity => transforms::fns::ice_identity(),
+                    Transform::Identity => transforms::fns::ice_identity(col(&f.field)),
                     Transform::Bucket { arg0 } => {
                         if arg0 == 0 {
                             bail!(
@@ -888,7 +888,7 @@ impl IcebergPartitioning {
         let dfschema = DFSchema::try_from(schema.clone())?;
 
         for (expr, field) in exprs.iter().zip(&self.fields) {
-            let field = schema.field_with_name(&field.field).map_err(|e| {
+            schema.field_with_name(&field.field).map_err(|e| {
                 anyhow!(
                     "partition field '{field}' does not exist in the schema ({:?})",
                     e
