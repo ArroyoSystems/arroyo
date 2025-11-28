@@ -13,7 +13,7 @@ use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::formats::Format;
+use arroyo_rpc::formats::{Format, ParquetFormat};
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use datafusion::common::plan_datafusion_err;
 use datafusion::execution::FunctionRegistry;
@@ -229,7 +229,7 @@ impl Connector for IcebergConnector {
             .format
             .as_ref()
             .map(|t| t.to_owned())
-            .ok_or_else(|| anyhow!("'format' must be set for Iceberg connection"))?;
+            .unwrap_or_else(|| Format::Parquet(ParquetFormat::default()));
 
         if !matches!(format, Format::Parquet(..)) {
             bail!("'format' must be parquet for Iceberg sink")

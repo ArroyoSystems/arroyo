@@ -382,7 +382,7 @@ pub mod fns {
     use super::*;
 
     export_functions!(
-        (ice_identity, "computes the iceberg identity transform",),
+        (ice_identity, "computes the iceberg identity transform", value),
         (ice_hour, "computes the iceberg hour transform", timestamp),
         (ice_day, "computes the iceberg day transform", timestamp),
         (ice_month, "computes the iceberg month transform", timestamp),
