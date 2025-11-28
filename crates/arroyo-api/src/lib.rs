@@ -318,6 +318,7 @@ impl IntoResponse for HttpError {
         StructField,
         ListField,
         ListFieldItem,
+        DecimalField,
         TimestampField,
         TimestampUnit,
         SchemaDefinition,

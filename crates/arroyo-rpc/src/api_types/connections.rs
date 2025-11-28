@@ -95,6 +95,8 @@ pub enum FieldType {
     #[schema(title = "Float64")]
     #[serde(alias = "f64")]
     Float64,
+    #[schema(title = "Decimal128")]
+    Decimal128(DecimalField),
     #[schema(title = "Bool")]
     Bool,
     #[serde(alias = "utf8")]
@@ -122,6 +124,7 @@ impl FieldType {
             FieldType::Uint64 => "BIGINT UNSIGNED".into(),
             FieldType::Float32 => "FLOAT".into(),
             FieldType::Float64 => "DOUBLE".into(),
+            FieldType::Decimal128(f) => format!("DECIMAL({}, {})", f.precision, f.scale),
             FieldType::Bool => "BOOLEAN".into(),
             FieldType::String => "TEXT".into(),
             FieldType::Bytes => "BINARY".into(),
@@ -177,6 +180,13 @@ impl TimestampUnit {
 pub struct TimestampField {
     #[serde(default)]
     pub unit: TimestampUnit,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct DecimalField {
+    pub precision: u8,
+    pub scale: i8,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
@@ -297,6 +307,7 @@ impl From<SourceField> for Field {
             FieldType::Bool => (DataType::Boolean, None),
             FieldType::String => (DataType::Utf8, None),
             FieldType::Bytes => (DataType::Binary, None),
+            FieldType::Decimal128(f) => (DataType::Decimal128(f.precision, f.scale), None),
             FieldType::Timestamp(TimestampField {
                 unit: TimestampUnit::Second,
             }) => (DataType::Timestamp(TimeUnit::Second, None), None),
@@ -338,6 +349,10 @@ impl TryFrom<Field> for SourceField {
             (DataType::UInt64, None) => FieldType::Uint64,
             (DataType::Float32, None) => FieldType::Float32,
             (DataType::Float64, None) => FieldType::Float64,
+            (DataType::Decimal128(p, s), None) => FieldType::Decimal128(DecimalField {
+                precision: *p,
+                scale: *s,
+            }),
             (DataType::Binary, None) | (DataType::LargeBinary, None) => FieldType::Bytes,
             (DataType::Timestamp(TimeUnit::Second, _), None) => {
                 FieldType::Timestamp(TimestampField {
