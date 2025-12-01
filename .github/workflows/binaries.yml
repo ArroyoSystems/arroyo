@@ -19,8 +19,8 @@ jobs:
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
-          - { runner: ubuntu-22.04-32, protoc: linux-x86_64, pyarch: x86_64, artifact: linux-x86_64 }
-          - { runner: ubuntu-22.04-32-arm, protoc: linux-aarch_64, pyarch: aarch64, artifact: linux-arm64 }
+          - { runner: ubuntu-22.04-32, protoc: linux-x86_64, python_arch: x64, artifact: linux-x86_64 }
+          - { runner: ubuntu-22.04-32-arm, protoc: linux-aarch_64, python_arch: arm64, artifact: linux-arm64 }
     runs-on: ${{ matrix.config.runner }}
     services:
       postgres:
@@ -49,16 +49,11 @@ jobs:
       - name: Update rust
         run: |
           rustup update
-      - name: Install Python 3.12
-        run: |
-          curl -OL https://github.com/indygreg/python-build-standalone/releases/download/20240814/cpython-3.12.5+20240814-${{ matrix.config.pyarch }}-unknown-linux-gnu-install_only.tar.gz
-          tar xvfz cpython*.tar.gz
-          sudo cp -r python/bin/* /usr/local/bin/
-          sudo cp -r python/include/* /usr/local/include/
-          sudo cp -r python/lib/* /usr/local/lib/
-          sudo cp -r python/share/* /usr/local/share/
-          sudo ldconfig
-
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.config.python_arch }}
       - name: Run DB migrations
         run: |          
           cargo install --debug refinery_cli --version $REFINERY_VERSION
@@ -68,7 +63,7 @@ jobs:
       - name: Create output directory
         run: mkdir artifacts
       - name: Build Arroyo with Python
-        run: cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
+        run: PYO3_PYTHON="$pythonLocation/bin/python3" LD_LIBRARY_PATH="$pythonLocation/lib:${LD_LIBRARY_PATH:-}" cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
       - name: Build Arroyo without Python
         run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
       - uses: actions/upload-artifact@v4
@@ -78,6 +73,8 @@ jobs:
           if-no-files-found: error
 
   macos:
+    env:
+      CMAKE_ARGS: -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     strategy:
       fail-fast: true
       matrix:
@@ -94,7 +91,23 @@ jobs:
         with:
           version: 9.7.1
       - name: Install Python 3.12 via homebrew
-        run: brew install python@3.12
+        run: |
+          set -euxo pipefail
+          # macOS runners come with a python.org install that leaves conflicting
+          # /usr/local/bin symlinks; overwrite them so Homebrew can link cleanly.
+          if ! brew install python@3.12; then
+            brew link --overwrite python@3.12
+          fi
+          brew list python@3.12 >/dev/null
+      - name: Install CMake 3.29
+        run: |
+          set -euxo pipefail
+          CMAKE_VERSION=3.29.6
+          CMAKE_DIR="$RUNNER_TEMP/cmake-$CMAKE_VERSION"
+          mkdir -p "$CMAKE_DIR"
+          curl -L "https://github.com/Kitware/CMake/releases/download/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-macos-universal.tar.gz" -o "$RUNNER_TEMP/cmake.tar.gz"
+          tar -xzf "$RUNNER_TEMP/cmake.tar.gz" -C "$CMAKE_DIR" --strip-components=1
+          echo "$CMAKE_DIR/CMake.app/Contents/bin" >> "$GITHUB_PATH"
       - name: Install protoc compiler
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
