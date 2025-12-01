@@ -73,6 +73,8 @@ jobs:
           if-no-files-found: error
 
   macos:
+    env:
+      CMAKE_ARGS: -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     strategy:
       fail-fast: true
       matrix:
@@ -97,11 +99,6 @@ jobs:
             brew link --overwrite python@3.12
           fi
           brew list python@3.12 >/dev/null
-      - name: Pin CMake for librdkafka
-        run: |
-          set -euxo pipefail
-          python3 -m pip install --upgrade --user 'cmake<3.30'
-          echo "$HOME/Library/Python/3.12/bin" >> "$GITHUB_PATH"
       - name: Install protoc compiler
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
