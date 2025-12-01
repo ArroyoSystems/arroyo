@@ -6,7 +6,7 @@ clusterDomain: cluster.local
 
 image:
   repository: ghcr.io/arroyosystems/arroyo
-  tag: "tip"
+  tag: "0.15"
 imagePullPolicy: IfNotPresent
 imagePullSecrets: []
 
