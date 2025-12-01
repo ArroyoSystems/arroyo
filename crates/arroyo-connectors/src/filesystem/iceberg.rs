@@ -150,7 +150,7 @@ impl Connector for IcebergConnector {
             source: false,
             sink: true,
             testing: false,
-            hidden: false,
+            hidden: true,
             custom_schemas: true,
             connection_config: Some(render_schema::<Self::ProfileT>()),
             table_config: render_schema::<Self::TableT>(),
