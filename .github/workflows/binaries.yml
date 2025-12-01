@@ -3,77 +3,116 @@ name: Build Binaries
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+*'
+      - "v[0-9]+.[0-9]+.[0-9]+*"
     branches:
-      - '*_build'
+      - "*_build"
 
 env:
+  # Versions
+  REFINERY_VERSION: "0.8.14"
+  PROTOC_VERSION: "27.3"
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9.7.1"
+
+  # Postgres related
   REFINERY_CONFIG: postgres://arroyo:arroyo@localhost:5432/arroyo
-  REFINERY_VERSION: 0.8.14
-  PROTOC_VERSION: 27.3
+  POSTGRES_USER: arroyo
+  POSTGRES_PASSWORD: arroyo
+  POSTGRES_DB: arroyo
+  POSTGRES_HOST: localhost
+
+  # Cargo build optimizations
+  CARGO_PROFILE_RELEASE_LTO: "thin"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+  CARGO_PROFILE_RELEASE_STRIP: true
 
 jobs:
   linux:
     strategy:
       fail-fast: true
       matrix:
-        # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-        config:
-          - { runner: ubuntu-22.04-32, protoc: linux-x86_64, pyarch: x86_64, artifact: linux-x86_64 }
-          - { runner: ubuntu-22.04-32-arm, protoc: linux-aarch_64, pyarch: aarch64, artifact: linux-arm64 }
-    runs-on: ${{ matrix.config.runner }}
+        include:
+          - runner: ubuntu-24.04
+            protoc: linux-x86_64
+            artifact: linux-x86_64
+
+          - runner: ubuntu-24.04-arm
+            protoc: linux-aarch_64
+            artifact: linux-arm64
     services:
       postgres:
         image: postgres:14.13-alpine3.20
         env:
-          POSTGRES_USER: arroyo
-          POSTGRES_PASSWORD: arroyo
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
         ports:
           - 5432:5432
+    name: ${{ matrix.artifact }} build
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ${{ matrix.artifact }}
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9.7.1
-      - name: Install protoc compiler
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }} with caching
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: Setup protoc compiler
         run: |
-          wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
-          unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
-      - name: Update rust
-        run: |
-          rustup update
-      - name: Install Python 3.12
-        run: |
-          curl -OL https://github.com/indygreg/python-build-standalone/releases/download/20240814/cpython-3.12.5+20240814-${{ matrix.config.pyarch }}-unknown-linux-gnu-install_only.tar.gz
-          tar xvfz cpython*.tar.gz
-          sudo cp -r python/bin/* /usr/local/bin/
-          sudo cp -r python/include/* /usr/local/include/
-          sudo cp -r python/lib/* /usr/local/lib/
-          sudo cp -r python/share/* /usr/local/share/
-          sudo ldconfig
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${{ env.PROTOC_VERSION }}/protoc-${{ env.PROTOC_VERSION }}-${{ matrix.protoc }}.zip
+          unzip protoc*.zip
+          sudo mv bin/protoc /usr/local/bin
 
       - name: Run DB migrations
-        run: |          
-          cargo install --debug refinery_cli --version $REFINERY_VERSION
+        run: |
+          cargo install --debug refinery_cli --version ${{ env.REFINERY_VERSION }}
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
+
       - name: Run frontend build
         run: cd webui && pnpm install && pnpm build
-      - name: Create output directory
+
+      - name: Create artifacts directory
         run: mkdir artifacts
+
       - name: Build Arroyo with Python
-        run: cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
+        run: |
+          PYO3_PYTHON=${{ env.pythonLocation }}/bin/python cargo build --features python --release --package arroyo
+          mv target/release/arroyo artifacts/arroyo-python
+
       - name: Build Arroyo without Python
-        run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
-      - uses: actions/upload-artifact@v4
+        run: |
+          cargo build --release --package arroyo
+          mv target/release/arroyo artifacts/arroyo
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v4
         with:
-          name: arroyo-${{ matrix.config.artifact }}
+          name: arroyo-${{ matrix.artifact }}
           path: artifacts/*
           if-no-files-found: error
 
@@ -81,43 +120,82 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-        config:
-          - { runner: macos-14-large, protoc: osx-x86_64, artifact: macos-x86_64 }
-          - { runner: macos-14-xlarge, protoc: osx-aarch_64, artifact: macos-m1 }
-    runs-on: ${{ matrix.config.runner }}
+        include:
+          - runner: macos-14-large
+            protoc: osx-x86_64
+            artifact: macos-x86_64
+
+          - runner: macos-14-xlarge
+            protoc: osx-aarch_64
+            artifact: macos-m1
+    name: ${{ matrix.artifact }} build
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ${{ matrix.artifact }}
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9.7.1
-      - name: Install Python 3.12 via homebrew
-        run: brew install python@3.12
-      - name: Install protoc compiler
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }} with caching
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: Setup protoc compiler
         run: |
-          wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
-          unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
-      - name: Install Postgres and prepare DB
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${{ env.PROTOC_VERSION }}/protoc-${{ env.PROTOC_VERSION }}-${{ matrix.protoc }}.zip
+          unzip protoc*.zip
+          sudo mv bin/protoc /usr/local/bin
+
+      - name: Setup PostgreSQL and prepare DB
         run: |
           brew install postgresql@14 && brew services start postgresql && sleep 10
-          psql postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
-          createdb arroyo
+          psql postgres -c "CREATE USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD' SUPERUSER;"
+          createdb $POSTGRES_DB
+
       - name: Run DB migrations
         run: |
-          cargo install --debug refinery_cli --version $REFINERY_VERSION
+          cargo install --debug refinery_cli --version ${{ env.REFINERY_VERSION }}
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
+
       - name: Run frontend build
         run: cd webui && pnpm install && pnpm build
-      - name: Create output directory
+
+      - name: Create artifacts directory
         run: mkdir artifacts
+
       - name: Build Arroyo with Python
-        run: PYO3_PYTHON=$(brew --prefix python@3.12)/Frameworks/Python.framework/Versions/3.12/bin/python3.12 cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
+        run: |
+          PYO3_PYTHON=${{ env.pythonLocation }}/bin/python cargo build --features python --release --package arroyo
+          mv target/release/arroyo artifacts/arroyo-python
+
       - name: Build Arroyo without Python
-        run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
-      - uses: actions/upload-artifact@v4
+        run: |
+          cargo build --release --package arroyo
+          mv target/release/arroyo artifacts/arroyo
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v4
         with:
-          name: arroyo-${{ matrix.config.artifact }}
+          name: arroyo-${{ matrix.artifact }}
           path: artifacts/*
           if-no-files-found: error
