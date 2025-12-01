@@ -99,6 +99,15 @@ jobs:
             brew link --overwrite python@3.12
           fi
           brew list python@3.12 >/dev/null
+      - name: Install CMake 3.29
+        run: |
+          set -euxo pipefail
+          CMAKE_VERSION=3.29.6
+          CMAKE_DIR="$RUNNER_TEMP/cmake-$CMAKE_VERSION"
+          mkdir -p "$CMAKE_DIR"
+          curl -L "https://github.com/Kitware/CMake/releases/download/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-macos-universal.tar.gz" -o "$RUNNER_TEMP/cmake.tar.gz"
+          tar -xzf "$RUNNER_TEMP/cmake.tar.gz" -C "$CMAKE_DIR" --strip-components=1
+          echo "$CMAKE_DIR/CMake.app/Contents/bin" >> "$GITHUB_PATH"
       - name: Install protoc compiler
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
