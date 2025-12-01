@@ -5,11 +5,10 @@
 
 
 <h4 align="center">
-  <a href="https://arroyo.dev/">Arroyo Cloud</a> |
   <a href="https://doc.arroyo.dev/getting-started">Getting started</a> |
   <a href="https://doc.arroyo.dev">Docs</a> |
   <a href="https://discord.gg/cjCr5rVmyR">Discord</a> |
-  <a href="https://arroyo.dev">Website</a>
+  <a href="https://www.arroyo.dev">Website</a>
 </h4>
 
 <h4 align="center">
@@ -40,15 +39,17 @@ In short: Arroyo lets you ask complex questions of high-volume real-time data wi
 
 ## Features
 
-🦀 SQL and Rust pipelines
+🦀 SQL streaming pipelines
 
 🚀 Scales up to millions of events per second
 
-🪟 Stateful operations like windows and joins
+🪟 Stateful operations including windows and joins
 
 🔥State checkpointing for fault-tolerance and recovery of pipelines
 
-🕒 Timely stream processing via the [Dataflow model](https://www.oreilly.com/radar/the-world-beyond-batch-streaming-101/)
+🕒 Time-oriented stream processing via the [Dataflow model](https://www.oreilly.com/radar/the-world-beyond-batch-streaming-101/)
+
+🔌 A wide variety of [connectors](https://doc.arroyo.dev/connectors), including Kafka and Iceberg
 
 ## Use cases
 
@@ -107,6 +108,14 @@ For a more in-depth guide, see the [getting started guide](https://doc.arroyo.de
 Once you have Arroyo running, follow the [tutorial](https://doc.arroyo.dev/tutorial) to create your first real-time
 pipeline.
 
+
+## Cloudflare Pipelines
+
+If you don't want to self-host, Arroyo is available as a fully-managed solution on the 
+Cloudflare Developer Platform: [Cloudflare Pipelines](https://developers.cloudflare.com/pipelines/),
+now available in beta. Currently, stateless pipelines ingesting into R2 are supported, and we'll
+be expanding to stateful pipelines in the near future.
+
 ## Developing Arroyo
 
 We love contributions from the community! See the [developer setup](https://doc.arroyo.dev/developing/dev-setup) guide
@@ -117,8 +126,3 @@ to get started, and reach out to the team on [discord](https://discord.gg/cjCr5r
 * [Discord](https://discord.gg/cjCr5rVmyR) &mdash; support and project discussion
 * [GitHub issues](https://github.com/ArroyoSystems/arroyo/issues) &mdash; bugs and feature requests
 * [Arroyo Blog](https://arroyo.dev/blog) &mdash; updates from the Arroyo team
-
-## Arroyo Enterprise
-
-Running in production? Arroyo Systems provides [enterprise features and support](https://www.arroyo.dev/enterprise) for
-Arroyo users. Get in touch at [support@arroyo.systems](mailto:support@arroyo.systems).
