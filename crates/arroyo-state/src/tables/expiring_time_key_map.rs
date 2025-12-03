@@ -7,22 +7,22 @@ use std::{
 use arrow::compute::{concat_batches, kernels::aggregate, take};
 use arrow::row::{OwnedRow, Row};
 use arrow_array::{
+    Array, ArrayRef, PrimitiveArray, RecordBatch,
     cast::AsArray,
     types::{TimestampNanosecondType, UInt64Type},
-    Array, ArrayRef, PrimitiveArray, RecordBatch,
 };
 use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arrow_schema::ArrowError;
 use arroyo_rpc::{
+    Converter,
     df::server_for_hash_array,
     grpc::rpc::{
         ExpiringKeyedTimeSubtaskCheckpointMetadata, ExpiringKeyedTimeTableCheckpointMetadata,
         ExpiringKeyedTimeTableConfig, OperatorMetadata, ParquetTimeFile, TableEnum,
     },
-    Converter,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{from_micros, from_nanos, print_time, server_for_hash, to_micros, TaskInfo};
+use arroyo_types::{TaskInfo, from_micros, from_nanos, print_time, server_for_hash, to_micros};
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
@@ -34,10 +34,10 @@ use parquet::{
 };
 use tokio::sync::mpsc::Sender;
 
-use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpointer};
+use super::{CompactionConfig, Table, TableEpochCheckpointer, table_checkpoint_path};
 use crate::{
-    parquet::ParquetStats, schemas::SchemaWithHashAndOperation, CheckpointMessage, StateMessage,
-    TableData,
+    CheckpointMessage, StateMessage, TableData, parquet::ParquetStats,
+    schemas::SchemaWithHashAndOperation,
 };
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::errors::StateError;
@@ -1088,7 +1088,7 @@ impl UncachedKeyValueView {
     /// de-duplicated so callers must do so themselves. We avoid doing this here because
     /// callers will likely already be doing some of the necessary work (like row conversion)
     /// and it would be wasteful to do this multiple times.
-    pub fn get_all(&mut self) -> impl Stream<Item = anyhow::Result<RecordBatch>> {
+    pub fn get_all(&mut self) -> impl Stream<Item = anyhow::Result<RecordBatch>> + use<'_> {
         let files: Vec<(String, bool)> = self
             .parent
             .checkpoint_files

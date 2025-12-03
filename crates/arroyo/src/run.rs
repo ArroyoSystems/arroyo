@@ -402,7 +402,7 @@ pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging_with_filter(
         "pipeline",
         if env::var("RUST_LOG").is_err() {
-            set_var("RUST_LOG", "WARN");
+            unsafe { set_var("RUST_LOG", "WARN") };
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::WARN.into())
                 .from_env_lossy()

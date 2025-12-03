@@ -228,7 +228,7 @@ where
         }
         (ColumnarValue::Scalar(value), ColumnarValue::Scalar(path)) => {
             let path = parse_path(name, path)?;
-            let ScalarValue::Utf8(ref value) = value else {
+            let ScalarValue::Utf8(value) = value else {
                 return Err(DataFusionError::Execution(format!(
                     "The value argument to {name} must be of type TEXT"
                 )));
@@ -276,7 +276,7 @@ pub fn extract_json(args: &[ColumnarValue]) -> Result<ColumnarValue> {
         }
         (ColumnarValue::Scalar(value), ColumnarValue::Scalar(path)) => {
             let path = parse_path("extract_json", path)?;
-            let ScalarValue::Utf8(ref v) = value else {
+            let ScalarValue::Utf8(v) = value else {
                 return Err(DataFusionError::Execution(
                     "The value argument to extract_json must be of type TEXT".to_string(),
                 ));

@@ -485,7 +485,7 @@ impl NetworkManager {
 
                 match &mut *s {
                     InStreamsOrSenders::InStreams(streams) => streams.push(network_stream),
-                    InStreamsOrSenders::Senders(ref senders) => {
+                    InStreamsOrSenders::Senders(senders) => {
                         let senders = senders.clone();
 
                         tokio::spawn(async move {
@@ -505,7 +505,7 @@ impl NetworkManager {
         let mut sockets = self.in_streams.lock().await;
 
         match &mut *sockets {
-            InStreamsOrSenders::InStreams(ref mut in_streams) => {
+            InStreamsOrSenders::InStreams(in_streams) => {
                 for s in in_streams.drain(..) {
                     let senders = senders.clone();
                     tokio::spawn(async move {

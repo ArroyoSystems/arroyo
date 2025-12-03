@@ -68,7 +68,7 @@ impl FluvioSourceFunc {
     async fn get_consumer(
         &mut self,
         ctx: &mut SourceContext,
-    ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>>>> {
+    ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>> + use<>>> {
         info!("Creating Fluvio consumer for {:?}", self.endpoint);
 
         let config: Option<FluvioConfig> = self.endpoint.as_ref().map(FluvioConfig::new);
