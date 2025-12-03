@@ -734,7 +734,7 @@ impl IncrementalAggregatingFunc {
     }
 
     fn get_retracts(batch: &RecordBatch) -> Option<&BooleanArray> {
-        let retracts = if let Some(meta_col) = batch.column_by_name(UPDATING_META_FIELD) {
+        if let Some(meta_col) = batch.column_by_name(UPDATING_META_FIELD) {
             let meta_struct = meta_col
                 .as_any()
                 .downcast_ref::<StructArray>()
@@ -751,8 +751,7 @@ impl IncrementalAggregatingFunc {
             Some(is_retract)
         } else {
             None
-        };
-        retracts
+        }
     }
 
     fn make_accumulators(&self) -> Vec<IncrementalState> {
@@ -880,7 +879,7 @@ impl IncrementalAggregatingFunc {
     }
 
     fn compute_inputs(&self, batch: &&RecordBatch) -> Vec<Vec<ArrayRef>> {
-        let aggregate_input_cols = self
+        self
             .aggregates
             .iter()
             .map(|agg| {
@@ -895,8 +894,7 @@ impl IncrementalAggregatingFunc {
                     })
                     .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>();
-        aggregate_input_cols
+            .collect::<Vec<_>>()
     }
 }
 
