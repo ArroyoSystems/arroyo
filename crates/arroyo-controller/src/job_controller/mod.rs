@@ -251,15 +251,14 @@ impl RunningJobModel {
                         };
                         checkpoint_state.checkpoint_finished(c).await?;
 
-                        if checkpoint_state.done() {
-                            if let Some(e) = self
+                        if checkpoint_state.done()
+                            && let Some(e) = self
                                 .checkpoint_spans
                                 .iter_mut()
                                 .find(|e| e.event == JobCheckpointEventType::CheckpointingOperators)
                             {
                                 e.finish()
                             }
-                        }
 
                         self.update_db(db).await?;
                     }
@@ -544,7 +543,7 @@ impl RunningJobModel {
     }
 
     pub fn cleanup_needed(&self) -> Option<u32> {
-        if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP && self.epoch % COMPACT_EVERY == 0 {
+        if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP && self.epoch.is_multiple_of(COMPACT_EVERY) {
             Some(self.epoch - CHECKPOINTS_TO_KEEP)
         } else {
             None
@@ -831,11 +830,10 @@ impl JobController {
             }
         }
 
-        if let Some(new_epoch) = self.model.cleanup_needed() {
-            if self.cleanup_task.is_none() && self.model.checkpoint_state.is_none() {
+        if let Some(new_epoch) = self.model.cleanup_needed()
+            && self.cleanup_task.is_none() && self.model.checkpoint_state.is_none() {
                 self.cleanup_task = Some(self.start_cleanup(new_epoch));
             }
-        }
 
         // check on checkpointing
         if self.model.checkpoint_state.is_some() {

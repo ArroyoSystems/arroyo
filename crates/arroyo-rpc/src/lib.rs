@@ -369,7 +369,7 @@ impl Converter {
                 Ok(row_converter.convert_columns(columns)?.row(0).owned())
             }
             Converter::Empty(row_converter, array) => Ok(row_converter
-                .convert_columns(&[array.clone()])?
+                .convert_columns(std::slice::from_ref(array))?
                 .row(0)
                 .owned()),
         }

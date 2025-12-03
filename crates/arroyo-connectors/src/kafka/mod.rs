@@ -60,7 +60,7 @@ import_types!(
 import_types!(schema = "src/kafka/table.json");
 
 impl KafkaTable {
-    pub fn subject(&self) -> Cow<str> {
+    pub fn subject(&self) -> Cow<'_, str> {
         match &self.value_subject {
             None => Cow::Owned(format!("{}-value", self.topic)),
             Some(s) => Cow::Borrowed(s),
@@ -288,12 +288,11 @@ impl Connector for KafkaConnector {
 
             let mut message = tester.test_connection().await;
 
-            if !message.error {
-                if let Err(e) = tester.test_schema_registry().await {
+            if !message.error
+                && let Err(e) = tester.test_schema_registry().await {
                     message.error = true;
                     message.message = format!("Failed to connect to schema registry: {e:?}");
                 }
-            }
 
             message.done = true;
             tx.send(message).unwrap();

@@ -149,12 +149,10 @@ impl TaskCounters {
         {
             if let Some((counter, has_connection_id)) =
                 cache.read().unwrap().get(&(*self, chain_info.clone()))
-            {
-                if *has_connection_id || connection_id.is_empty() {
+                && (*has_connection_id || connection_id.is_empty()) {
                     f(counter);
                     return;
                 }
-            }
         }
 
         let counter = self.metric().with_label_values(&[

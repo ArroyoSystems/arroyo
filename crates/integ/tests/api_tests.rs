@@ -143,8 +143,7 @@ async fn start_and_monitor(
             .data
             .iter()
             .find(|c| c.epoch == checkpoints_to_wait as i32)
-        {
-            if checkpoint.finish_time.is_some() {
+            && checkpoint.finish_time.is_some() {
                 // get details
                 let details = api_client
                     .get_checkpoint_details()
@@ -160,7 +159,6 @@ async fn start_and_monitor(
 
                 return Ok((pipeline_id, job.id.clone(), run_id));
             }
-        }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

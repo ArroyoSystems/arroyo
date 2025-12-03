@@ -147,14 +147,13 @@ pub fn validate_pagination_params(
     limit: Option<u32>,
 ) -> Result<(Option<String>, u32), ErrorResp> {
     // return ErrorResp if limit is less than 1
-    if let Some(limit) = limit {
-        if limit < 1 {
+    if let Some(limit) = limit
+        && limit < 1 {
             return Err(ErrorResp {
                 status_code: StatusCode::BAD_REQUEST,
                 message: "Limit must be greater than 0".to_string(),
             });
         }
-    }
 
     // increase limit by 1 to determine if there are more results
     let limit = limit.unwrap_or(DEFAULT_ITEMS_PER_PAGE) + 1;

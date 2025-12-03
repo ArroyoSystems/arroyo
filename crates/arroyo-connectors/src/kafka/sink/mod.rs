@@ -229,7 +229,7 @@ impl ArrowOperator for KafkaSinkFunc {
         format!("kafka-producer-{}", self.topic)
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("KafkaSinkFunc"),
             fields: vec![

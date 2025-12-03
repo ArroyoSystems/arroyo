@@ -383,11 +383,10 @@ impl FromOpts for FileSystemSource {
     fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
         let regex_pattern = opts.pull_opt_str("source.regex_pattern")?;
 
-        if let Some(regex) = &regex_pattern {
-            if let Err(e) = Regex::new(regex) {
+        if let Some(regex) = &regex_pattern
+            && let Err(e) = Regex::new(regex) {
                 return plan_err!("could not parse regex_pattern '{regex}': {:?}", e);
             }
-        }
 
         Ok(Self {
             path: pull_path(opts)?,

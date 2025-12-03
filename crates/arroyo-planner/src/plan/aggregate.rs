@@ -152,7 +152,6 @@ impl TreeNodeRewriter for AggregateRewriter<'_> {
         let mut key_fields: Vec<DFField> = fields_with_qualifiers(&schema)
             .iter()
             .take(group_expr.len())
-            .cloned()
             .map(|field| {
                 DFField::new(
                     field.qualifier().cloned(),

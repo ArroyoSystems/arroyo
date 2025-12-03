@@ -309,10 +309,13 @@ async fn run_and_checkpoint(
         .unwrap();
     let running_engine = engine.start().await;
     info!("Smoke test checkpointing enabled");
-    env::set_var(
-        "ARROYO__CONTROLLER__COMPACTION__CHECKPOINTS_TO_COMPACT",
-        "2",
-    );
+
+    unsafe {
+        env::set_var(
+            "ARROYO__CONTROLLER__COMPACTION__CHECKPOINTS_TO_COMPACT",
+            "2",
+        );
+    }
 
     let ctx = &mut SmokeTestContext {
         job_id: job_id.clone(),

@@ -469,8 +469,8 @@ impl WorkerServer {
             }
         };
 
-        if let Ok(mut client) = controller_client("worker", &config().worker.tls).await {
-            if let Err(e) = client
+        if let Ok(mut client) = controller_client("worker", &config().worker.tls).await
+            && let Err(e) = client
                 .worker_initialization_complete(Request::new(WorkerInitializationCompleteReq {
                     worker_id: worker_id.0,
                     job_id,
@@ -485,7 +485,6 @@ impl WorkerServer {
                     e
                 );
             }
-        }
     }
 
     async fn initialize_inner(

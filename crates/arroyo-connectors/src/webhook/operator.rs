@@ -78,8 +78,8 @@ impl ArrowOperator for WebhookSinkFunc {
                     match client.execute(req).await {
                         Ok(_) => break,
                         Err(e) => {
-                            if let Ok(mut last_reported) = error_lock.try_lock() {
-                                if last_reported.elapsed().unwrap_or_default()
+                            if let Ok(mut last_reported) = error_lock.try_lock()
+                                && last_reported.elapsed().unwrap_or_default()
                                     > Duration::from_secs(1)
                                 {
                                     warn!("websink request failed: {:?}", e);
@@ -106,7 +106,6 @@ impl ArrowOperator for WebhookSinkFunc {
 
                                     *last_reported = SystemTime::now();
                                 }
-                            }
 
                             retries += 1;
 

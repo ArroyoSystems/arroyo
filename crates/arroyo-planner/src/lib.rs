@@ -664,9 +664,9 @@ pub fn rewrite_plan(
 fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<LogicalPlan>> {
     let mut sink_inputs = HashMap::<NamedNode, Vec<LogicalPlan>>::new();
     for extension in extensions.iter() {
-        if let LogicalPlan::Extension(extension) = extension {
-            if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
-                if let Some(named_node) = sink_node.node_name() {
+        if let LogicalPlan::Extension(extension) = extension
+            && let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>()
+                && let Some(named_node) = sink_node.node_name() {
                     let inputs = sink_node
                         .inputs()
                         .into_iter()
@@ -674,8 +674,6 @@ fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<Logic
                         .collect::<Vec<LogicalPlan>>();
                     sink_inputs.entry(named_node).or_default().extend(inputs);
                 }
-            }
-        }
     }
     sink_inputs
 }

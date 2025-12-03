@@ -161,11 +161,10 @@ impl Connector for NexmarkConnector {
 
         let runtime = options.pull_opt_f64("runtime")?;
 
-        if let Some(schema) = schema {
-            if !schema.fields.is_empty() && schema.fields != nexmark_schema().fields {
+        if let Some(schema) = schema
+            && !schema.fields.is_empty() && schema.fields != nexmark_schema().fields {
                 bail!("invalid schema for nexmark source; omit fields to rely on inference");
             }
-        }
 
         self.from_config(
             None,

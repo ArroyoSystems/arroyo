@@ -329,8 +329,8 @@ impl UnnestRewriter {
         let mut c: Option<Expr> = None;
 
         let expr = expr.transform_up(&mut |e| {
-            if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e {
-                if udf.name() == "unnest" {
+            if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e
+                && udf.name() == "unnest" {
                     match args.len() {
                         1 => {
                             if c.replace(args[0].clone()).is_some() {
@@ -348,8 +348,7 @@ impl UnnestRewriter {
                             panic!("Unnest has wrong number of arguments (expected 1, found {n})");
                         }
                     }
-                }
-            };
+                };
             Ok(Transformed::no(e))
         })?;
 
@@ -380,11 +379,10 @@ impl TreeNodeRewriter for UnnestRewriter {
             .map(|(i, expr)| {
                 let (expr, opt) = Self::split_unnest(expr)?;
                 let typ = if let Some(e) = opt {
-                    if let Some(prev) = unnest.replace((e, i)) {
-                        if &prev != unnest.as_ref().unwrap() {
+                    if let Some(prev) = unnest.replace((e, i))
+                        && &prev != unnest.as_ref().unwrap() {
                             return plan_err!("Projection contains multiple unnests, which is not currently supported");
                         }
-                    }
                     true
                 } else {
                     false
@@ -497,8 +495,8 @@ impl<'a> AsyncUdfRewriter<'a> {
     ) -> DFResult<(Expr, Option<AsyncSplitResult>)> {
         let mut c: Option<(String, AsyncOptions, Vec<Expr>)> = None;
         let expr = expr.transform_up(&mut |e| {
-            if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e {
-                if let Some(UdfType::Async(opts)) =
+            if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e
+                && let Some(UdfType::Async(opts)) =
                     provider.udf_defs.get(udf.name()).map(|udf| udf.udf_type)
                 {
                     if c.replace((udf.name().to_string(), opts, args.clone()))
@@ -512,7 +510,6 @@ impl<'a> AsyncUdfRewriter<'a> {
                         ASYNC_RESULT_FIELD,
                     ))));
                 }
-            }
             Ok(Transformed::no(e))
         })?;
 
@@ -692,14 +689,13 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
     type Node = Expr;
 
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
-        if let Expr::IsNotNull(expr) = &node {
-            if is_time_window(expr).is_some() {
+        if let Expr::IsNotNull(expr) = &node
+            && is_time_window(expr).is_some() {
                 return Ok(Transformed::yes(Expr::Literal(
                     ScalarValue::Boolean(Some(true)),
                     None,
                 )));
             }
-        }
 
         Ok(Transformed::no(node))
     }
@@ -710,8 +706,8 @@ pub struct RowTimeRewriter {}
 impl TreeNodeRewriter for RowTimeRewriter {
     type Node = Expr;
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
-        if let Expr::ScalarFunction(func) = &node {
-            if func.name() == "row_time" {
+        if let Expr::ScalarFunction(func) = &node
+            && func.name() == "row_time" {
                 let transformed = Expr::Column(Column {
                     relation: None,
                     name: "_timestamp".to_string(),
@@ -720,7 +716,6 @@ impl TreeNodeRewriter for RowTimeRewriter {
                 .alias("row_time()");
                 return Ok(Transformed::yes(transformed));
             }
-        }
         Ok(Transformed::no(node))
     }
 }
@@ -745,9 +740,9 @@ impl TreeNodeRewriter for SinkInputRewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
-        if let LogicalPlan::Extension(extension) = &node {
-            if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
-                if let Some(named_node) = sink_node.node_name() {
+        if let LogicalPlan::Extension(extension) = &node
+            && let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>()
+                && let Some(named_node) = sink_node.node_name() {
                     if let Some(inputs) = self.sink_inputs.remove(&named_node) {
                         let extension = LogicalPlan::Extension(Extension {
                             node: sink_node.with_exprs_and_inputs(vec![], inputs)?,
@@ -757,8 +752,6 @@ impl TreeNodeRewriter for SinkInputRewriter<'_> {
                         self.was_removed = true;
                     }
                 }
-            }
-        }
         Ok(Transformed::no(node))
     }
 }

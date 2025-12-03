@@ -554,7 +554,7 @@ pub async fn write_message_and_header<W: AsyncWrite + AsyncWriteExt>(
     encoded: EncodedData,
 ) -> Result<(), ArrowError> {
     let arrow_data_len = encoded.arrow_data.len();
-    if arrow_data_len % 8 != 0 {
+    if !arrow_data_len.is_multiple_of(8) {
         return Err(ArrowError::MemoryError(
             "Arrow data not aligned".to_string(),
         ));

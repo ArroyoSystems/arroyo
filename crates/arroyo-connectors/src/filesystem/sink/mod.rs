@@ -865,11 +865,10 @@ where
             self.file_naming.suffix.as_ref().unwrap(),
         );
 
-        if let Some(partition) = partition {
-            if let Some(hive) = self.partitioner.hive_path(partition) {
+        if let Some(partition) = partition
+            && let Some(hive) = self.partitioner.hive_path(partition) {
                 filename = format!("{hive}/{filename}");
             }
-        }
 
         BatchMultipartWriter::new(
             self.object_store.clone(),
@@ -1607,16 +1606,14 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
                 }
             });
 
-            if self
+            if let Some(part_size) = existing_part_size && self
                 .multipart_manager
                 .storage_provider
                 .requires_same_part_sizes()
-                && existing_part_size.is_some()
                 && bytes.len() > existing_part_size.unwrap()
             {
                 // our last part is bigger than our part size, which isn't allowed by some object stores
                 // so we need to split it up
-                let part_size = existing_part_size.unwrap();
                 let len = bytes.len();
 
                 let parts = split_into_parts(bytes, part_size);

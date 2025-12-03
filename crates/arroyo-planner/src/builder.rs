@@ -245,8 +245,8 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
         _session_state: &SessionState,
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
         let schema = node.schema().as_ref().into();
-        if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into() {
-            if arroyo_extension.transparent() {
+        if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into()
+            && arroyo_extension.transparent() {
                 match node.name() {
                     DEBEZIUM_UNROLLING_EXTENSION_NAME => {
                         let node = node
@@ -265,8 +265,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
                     }
                     _ => return Ok(None),
                 }
-            }
-        };
+            };
         let name =
             if let Some(key_extension) = node.as_any().downcast_ref::<KeyCalculationExtension>() {
                 key_extension.name.clone()
@@ -302,15 +301,14 @@ impl PlanToGraphVisitor<'_> {
         input_nodes: Vec<NodeIndex>,
         extension: &dyn ArroyoExtension,
     ) -> Result<()> {
-        if let Some(node_name) = extension.node_name() {
-            if self.named_nodes.contains_key(&node_name) {
+        if let Some(node_name) = extension.node_name()
+            && self.named_nodes.contains_key(&node_name) {
                 // we should've short circuited
                 return plan_err!(
                     "extension {:?} has already been planned, shouldn't try again.",
                     node_name
                 );
             }
-        }
 
         let input_schemas = input_nodes
             .iter()
@@ -359,12 +357,11 @@ impl TreeNodeVisitor<'_> for PlanToGraphVisitor<'_> {
             return Ok(TreeNodeRecursion::Continue);
         }
 
-        if let Some(name) = arroyo_extension.node_name() {
-            if let Some(node_index) = self.named_nodes.get(&name) {
+        if let Some(name) = arroyo_extension.node_name()
+            && let Some(node_index) = self.named_nodes.get(&name) {
                 self.add_index_to_traversal(*node_index);
                 return Ok(TreeNodeRecursion::Jump);
             }
-        }
 
         if !node.inputs().is_empty() {
             self.traversal.push(vec![]);
@@ -387,11 +384,10 @@ impl TreeNodeVisitor<'_> for PlanToGraphVisitor<'_> {
             return Ok(TreeNodeRecursion::Continue);
         }
 
-        if let Some(name) = arroyo_extension.node_name() {
-            if self.named_nodes.contains_key(&name) {
+        if let Some(name) = arroyo_extension.node_name()
+            && self.named_nodes.contains_key(&name) {
                 return Ok(TreeNodeRecursion::Continue);
             }
-        }
 
         let input_nodes = if !node.inputs().is_empty() {
             self.traversal.pop().unwrap_or_default()

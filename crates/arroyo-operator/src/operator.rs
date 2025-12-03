@@ -88,7 +88,7 @@ impl ConstructedOperator {
         }
     }
 
-    pub fn display(&self) -> DisplayableOperator {
+    pub fn display(&self) -> DisplayableOperator<'_> {
         match self {
             Self::Source(_) => DisplayableOperator {
                 name: self.name().into(),
@@ -570,13 +570,13 @@ impl ChainedOperator {
         Ok(false)
     }
 
-    pub fn iter(&self) -> ChainIterator {
+    pub fn iter(&self) -> ChainIterator<'_> {
         ChainIterator {
             current: Some(self),
         }
     }
 
-    pub fn iter_mut(&mut self) -> ChainIteratorMut {
+    pub fn iter_mut(&mut self) -> ChainIteratorMut<'_> {
         ChainIteratorMut {
             current: Some(self),
         }
@@ -1155,7 +1155,7 @@ pub trait ArrowOperator: Send + 'static {
         None
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: self.name().into(),
             fields: vec![],

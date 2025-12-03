@@ -98,7 +98,7 @@ impl ArrowOperator for WatermarkGenerator {
         "expression_watermark_generator".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("WatermarkGenerator"),
             fields: vec![
@@ -214,8 +214,8 @@ impl ArrowOperator for WatermarkGenerator {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        if let Some(idle_time) = self.idle_time {
-            if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
+        if let Some(idle_time) = self.idle_time
+            && self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
                 info!(
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
@@ -223,7 +223,6 @@ impl ArrowOperator for WatermarkGenerator {
                 collector.broadcast_watermark(Watermark::Idle).await?;
                 self.idle = true;
             }
-        }
         Ok(())
     }
 }

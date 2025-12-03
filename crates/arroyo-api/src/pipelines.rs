@@ -696,13 +696,12 @@ pub async fn patch_pipeline(
         StopType::Force => types::public::StopMode::force,
     });
 
-    if let Some(interval) = interval {
-        if interval < Duration::from_secs(1) || interval > Duration::from_secs(24 * 60 * 60) {
+    if let Some(interval) = interval
+        && (interval < Duration::from_secs(1) || interval > Duration::from_secs(24 * 60 * 60)) {
             return Err(bad_request(
                 "checkpoint_interval_micros must be between 1 second and 1 day".to_string(),
             ));
         }
-    }
 
     let parallelism_overrides = if let Some(parallelism) = pipeline_patch.parallelism {
         let res = api_queries::fetch_get_job_details(&db, &auth_data.organization_id, &job_id)

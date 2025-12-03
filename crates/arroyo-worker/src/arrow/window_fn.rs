@@ -62,11 +62,10 @@ impl WindowFunctionOperator {
         let max_timestamp = from_nanos(max(timestamp_column).unwrap() as u128);
 
         // early exit if all rows should be filtered.
-        if let Some(watermark) = watermark {
-            if max_timestamp < watermark {
+        if let Some(watermark) = watermark
+            && max_timestamp < watermark {
                 return Ok(vec![]);
             }
-        }
 
         if min_timestamp == max_timestamp {
             return Ok(vec![(batch, max_timestamp)]);

@@ -105,11 +105,10 @@ impl Connector for ImpulseConnector {
         let message_count = options.pull_opt_i64("message_count")?;
 
         // validate the schema
-        if let Some(s) = schema {
-            if !s.fields.is_empty() && s.fields != impulse_schema().fields {
+        if let Some(s) = schema
+            && !s.fields.is_empty() && s.fields != impulse_schema().fields {
                 bail!("invalid schema for impulse source");
             }
-        }
 
         self.from_config(
             None,

@@ -155,7 +155,7 @@ impl InstantJoin {
             .collect();
         let sorted = RecordBatch::try_new(batch.schema(), columns).unwrap();
         let sorted_timestamps = take(time_column, &indices, None).unwrap();
-        let ranges = partition(&[sorted_timestamps.clone()]).unwrap().ranges();
+        let ranges = partition(std::slice::from_ref(&sorted_timestamps)).unwrap().ranges();
         let typed_timestamps = sorted_timestamps
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
@@ -193,7 +193,7 @@ impl ArrowOperator for InstantJoin {
         "InstantJoin".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("InstantJoin"),
             fields: vec![("join_execution_plan", self.join_exec.as_ref().into())],

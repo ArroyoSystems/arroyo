@@ -268,11 +268,10 @@ impl Scheduler for KubernetesScheduler {
             .delete_collection(&delete_params, &ListParams::default().labels(&labels))
             .await?;
 
-        if let Some(status) = result.right() {
-            if status.is_failure() {
+        if let Some(status) = result.right()
+            && status.is_failure() {
                 bail!("Failed to clean cluster: {:?}", status);
             }
-        }
 
         // wait for workers to stop
         for i in 0..20 {

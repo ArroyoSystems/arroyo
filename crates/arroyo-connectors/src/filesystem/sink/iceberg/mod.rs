@@ -132,17 +132,13 @@ impl IcebergTable {
             .catalog
             .namespace_exists(self.table_ident.namespace())
             .await?
-        {
-            if let Err(e) = self
+            && let Err(e) = self
                 .catalog
                 .create_namespace(self.table_ident.namespace(), HashMap::new())
                 .await
-            {
-                if e.kind() != iceberg::ErrorKind::NamespaceAlreadyExists {
+                && e.kind() != iceberg::ErrorKind::NamespaceAlreadyExists {
                     return Err(e.into());
                 }
-            }
-        }
 
         let table = if !self.catalog.table_exists(&self.table_ident).await? {
             let schema_with_ids = add_parquet_field_ids(schema);
@@ -238,19 +234,16 @@ impl IcebergTable {
             table.metadata().uuid(),
         );
 
-        if let Some(current_snapshot) = table.metadata().current_snapshot() {
-            if let Some(existing_tx_id) = current_snapshot
+        if let Some(current_snapshot) = table.metadata().current_snapshot()
+            && let Some(existing_tx_id) = current_snapshot
                 .summary()
                 .additional_properties
                 .get(ARROYO_COMMIT_ID)
-            {
-                if *existing_tx_id == tx_id {
+                && *existing_tx_id == tx_id {
                     // we've already committed this epoch (but crashed before it could be records), so we're good
                     info!("epoch {epoch} already committed to iceberg, skipping");
                     return Ok(());
                 }
-            }
-        }
 
         let partition_spec_id = table.metadata().default_partition_spec_id();
         let files: Vec<_> = finished_files

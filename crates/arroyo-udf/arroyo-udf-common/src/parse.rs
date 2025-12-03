@@ -242,19 +242,14 @@ pub struct ParsedUdf {
 
 impl ParsedUdf {
     pub fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
-        if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
-            if let Some(segment) = path.segments.last() {
-                if segment.ident == "Vec" {
-                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                        if args.args.len() == 1 {
-                            if let syn::GenericArgument::Type(inner_ty) = &args.args[0] {
+        if let syn::Type::Path(syn::TypePath { path, .. }) = ty
+            && let Some(segment) = path.segments.last()
+                && segment.ident == "Vec"
+                    && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                        && args.args.len() == 1
+                            && let syn::GenericArgument::Type(inner_ty) = &args.args[0] {
                                 return Some(inner_ty.clone());
                             }
-                        }
-                    }
-                }
-            }
-        }
         None
     }
 
@@ -272,9 +267,9 @@ impl ParsedUdf {
                 }
                 FnArg::Typed(t) => {
                     let vec_type = Self::vec_inner_type(&t.ty);
-                    if vec_type.is_some() {
+                    if let Some(vec_type) = &vec_type {
                         vec_arguments += 1;
-                        let vec_type = rust_to_arrow(vec_type.as_ref().unwrap(), false).map_err(|e| {
+                        let vec_type = rust_to_arrow(vec_type, false).map_err(|e| {
                             anyhow!(
                                 "Could not convert function {name} inner vector arg {i} into an Arrow data type: {e}",
                             )
@@ -308,8 +303,7 @@ impl ParsedUdf {
                 .attrs
                 .iter()
                 .find(|attr| attr.path().is_ident("udf"))
-            {
-                if attr.meta.require_path_only().is_err() {
+                && attr.meta.require_path_only().is_err() {
                     attr.parse_nested_meta(|meta| {
                         if meta.path.is_ident("ordered") {
                             t.ordered = true;
@@ -336,7 +330,6 @@ impl ParsedUdf {
                         Ok(())
                     })?;
                 }
-            }
 
             UdfType::Async(t)
         } else {

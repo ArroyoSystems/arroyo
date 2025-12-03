@@ -496,6 +496,8 @@ impl IncrementalAggregatingFunc {
             }
         }
 
+        drop(stream);
+
         // initialize the batch accumulator cache, if there are batch accumulators
         if self
             .aggregates
@@ -904,7 +906,7 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         "UpdatingAggregatingFunc".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         let aggregates = self
             .aggregates
             .iter()
@@ -1006,11 +1008,10 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        if let Some(SignalMessage::EndOfData) = final_message {
-            if let Some(batch) = self.flush(ctx).await? {
+        if let Some(SignalMessage::EndOfData) = final_message
+            && let Some(batch) = self.flush(ctx).await? {
                 collector.collect(batch).await?;
             }
-        }
         Ok(())
     }
 

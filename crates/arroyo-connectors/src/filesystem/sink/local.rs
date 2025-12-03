@@ -104,15 +104,10 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
                 self.file_naming.suffix.as_ref().unwrap(),
             );
 
-            if let Some(partition) = partition {
-                if let Some(hive) = self.partitioner.as_ref().unwrap().hive_path(partition) {
+            if let Some(partition) = partition
+                && let Some(hive) = self.partitioner.as_ref().unwrap().hive_path(partition) {
                     filename = format!("{hive}/{filename}");
                 }
-            }
-            // make sure the partition directory exists in tmp and final
-            let dir = Path::new(&filename).parent().unwrap().to_str().unwrap();
-            create_dir_all(format!("{}/{}", self.tmp_dir, dir)).unwrap();
-            create_dir_all(format!("{}/{}", self.final_dir, dir)).unwrap();
 
             self.writers.insert(
                 partition.clone(),

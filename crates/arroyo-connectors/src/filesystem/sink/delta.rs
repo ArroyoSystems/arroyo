@@ -141,11 +141,10 @@ async fn check_existing_files(
         table.log_store().peek_next_commit(version_to_check).await?
     {
         for action in actions {
-            if let Action::Add(add) = action {
-                if files.contains(&add.path) {
+            if let Action::Add(add) = action
+                && files.contains(&add.path) {
                     return Ok(Some(version));
                 }
-            }
         }
         version_to_check = version;
     }

@@ -32,8 +32,8 @@ impl Parse for ParsedFunction {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let function: ItemFn = input.parse()?;
 
-        if function.sig.asyncness.is_some() {
-            if let Some(vec) = function.sig.inputs.iter().find_map(|t| match t {
+        if function.sig.asyncness.is_some()
+            && let Some(vec) = function.sig.inputs.iter().find_map(|t| match t {
                 FnArg::Receiver(_) => None,
                 FnArg::Typed(t) => {
                     if ParsedUdf::vec_inner_type(&t.ty).is_some() && !is_vec_u8(&t.ty) {
@@ -48,7 +48,6 @@ impl Parse for ParsedFunction {
                     "Async UDAFs are not supported (hint: remove the Vec<_> args)",
                 ));
             }
-        }
 
         Ok(ParsedFunction(
             ParsedUdf::try_parse(&function)

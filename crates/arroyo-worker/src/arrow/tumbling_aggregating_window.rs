@@ -206,7 +206,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         "tumbling_window".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("TumblingAggregatingWindowFunc"),
             fields: vec![
@@ -279,11 +279,11 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
             let bin_start = from_nanos(typed_bin.value(range.start) as u128);
             let watermark = ctx.last_present_watermark();
 
-            if watermark.is_some() && bin_start < self.bin_start(watermark.unwrap()) {
+            if let Some(watermark) = watermark && bin_start < self.bin_start(watermark) {
                 warn!(
                     "bin start {} is before watermark {}, skipping",
                     print_time(bin_start),
-                    print_time(watermark.unwrap())
+                    print_time(watermark)
                 );
                 continue;
             }

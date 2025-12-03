@@ -11,15 +11,13 @@ use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
-use datafusion::common::{internal_err, DataFusionError};
+use datafusion::common::internal_err;
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::{FunctionRegistry, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
 use datafusion::physical_expr::{LexOrdering, PhysicalExpr};
-use datafusion::physical_plan::memory::MemoryStream;
 use datafusion::physical_plan::{displayable, ExecutionPlan};
-use datafusion::physical_plan::{DisplayAs, PlanProperties};
 use datafusion_proto::physical_plan::from_proto::{parse_physical_expr, parse_physical_sort_expr};
 use datafusion_proto::physical_plan::{
     AsExecutionPlan, DefaultPhysicalExtensionCodec, PhysicalExtensionCodec,
@@ -76,7 +74,7 @@ impl ArrowOperator for ValueExecutionOperator {
         self.name.clone()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: (&self.name).into(),
             fields: vec![("plan", (&*self.executor.plan).into())],
@@ -145,7 +143,7 @@ impl ArrowOperator for ProjectionOperator {
         self.name.clone()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: (&self.name).into(),
             fields: vec![(
@@ -179,72 +177,6 @@ impl ArrowOperator for ProjectionOperator {
     }
 }
 
-#[derive(Debug)]
-struct RwLockRecordBatchReader {
-    schema: SchemaRef,
-    locked_batch: Arc<RwLock<Option<RecordBatch>>>,
-    plan_properties: PlanProperties,
-}
-
-impl DisplayAs for RwLockRecordBatchReader {
-    fn fmt_as(
-        &self,
-        _t: datafusion::physical_plan::DisplayFormatType,
-        f: &mut std::fmt::Formatter,
-    ) -> std::fmt::Result {
-        write!(f, "RW Lock RecordBatchReader")
-    }
-}
-
-impl ExecutionPlan for RwLockRecordBatchReader {
-    fn name(&self) -> &str {
-        "rw_lock_reader"
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
-
-    fn properties(&self) -> &PlanProperties {
-        &self.plan_properties
-    }
-
-    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
-        vec![]
-    }
-
-    fn with_new_children(
-        self: Arc<Self>,
-        _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        Err(DataFusionError::Internal("not supported".into()))
-    }
-
-    fn execute(
-        &self,
-        _partition: usize,
-        _context: Arc<TaskContext>,
-    ) -> datafusion::common::Result<datafusion::execution::SendableRecordBatchStream> {
-        let result = self.locked_batch.read().unwrap().clone().unwrap();
-        Ok(Box::pin(MemoryStream::try_new(
-            vec![result],
-            self.schema.clone(),
-            None,
-        )?))
-    }
-
-    fn statistics(&self) -> DFResult<datafusion::common::Statistics> {
-        todo!()
-    }
-
-    fn reset(&self) -> DFResult<()> {
-        Ok(())
-    }
-}
 
 pub struct KeyExecutionOperator {
     name: String,
@@ -285,7 +217,7 @@ impl ArrowOperator for KeyExecutionOperator {
         self.name.clone()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed(&self.name),
             fields: vec![

@@ -133,8 +133,8 @@ fn sanitize_schema(mut schema: Value) -> Value {
                 obj.remove("default");
 
                 // collapse schemars's type | null types
-                if let Some(Value::Array(types)) = obj.get_mut("type") {
-                    if types.len() == 2
+                if let Some(Value::Array(types)) = obj.get_mut("type")
+                    && types.len() == 2
                         && types.iter().any(|t| t == "null")
                         && types.iter().all(|t| t.is_string())
                     {
@@ -145,14 +145,12 @@ fn sanitize_schema(mut schema: Value) -> Value {
                             .to_owned();
                         *obj.get_mut("type").unwrap() = Value::String(non_null);
                     }
-                }
 
                 // remove null from enums
-                if let Some(Value::Array(values)) = obj.get_mut("enum") {
-                    if let Some(i) = values.iter().position(|v| v.is_null()) {
+                if let Some(Value::Array(values)) = obj.get_mut("enum")
+                    && let Some(i) = values.iter().position(|v| v.is_null()) {
                         values.remove(i);
                     }
-                }
 
                 // change anyOf to oneOf
                 if let Some(any_of) = obj.remove("anyOf") {

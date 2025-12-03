@@ -268,13 +268,11 @@ impl ConnectorTable {
         let framing = Framing::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
 
-        if temporary {
-            if let Some(t) = options.insert_str("type", "lookup")? {
-                if t != "lookup" {
+        if temporary
+            && let Some(t) = options.insert_str("type", "lookup")?
+                && t != "lookup" {
                     return plan_err!("Cannot have a temporary table with type '{}'; temporary tables must be type 'lookup'", t);
                 }
-            }
-        }
 
         let mut input_to_schema_fields = fields.clone();
 
@@ -616,8 +614,8 @@ impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
     type Node = Expr;
 
     fn f_down(&mut self, node: &'a Self::Node) -> Result<TreeNodeRecursion> {
-        if let Expr::ScalarFunction(func) = node {
-            if func.name() == "metadata" {
+        if let Expr::ScalarFunction(func) = node
+            && func.name() == "metadata" {
                 if self.depth > 0 {
                     return plan_err!(
                         "Metadata columns must have only a single call to 'metadata'"
@@ -635,7 +633,6 @@ impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
                     plan_err!("For metadata columns, metadata call must have a single argument")
                 };
             }
-        }
         self.depth += 1;
         Ok(TreeNodeRecursion::Continue)
     }
