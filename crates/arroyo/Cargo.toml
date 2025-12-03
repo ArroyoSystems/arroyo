@@ -1,7 +1,7 @@
 [package]
 name = "arroyo"
 version = "0.16.0-dev"
-edition = "2021"
+edition = "2024"
 
 [features]
 profiling = ["tikv-jemallocator/profiling"]
