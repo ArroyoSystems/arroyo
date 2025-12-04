@@ -940,9 +940,9 @@ impl ArrowOperator for IncrementalAggregatingFunc {
             .map(|k| !k.is_empty())
             .unwrap_or_default()
         {
-            self.keyed_aggregate(&batch, ctx).unwrap()
+            self.keyed_aggregate(&batch, ctx)?
         } else {
-            self.global_aggregate(&batch).unwrap()
+            self.global_aggregate(&batch)?
         };
         Ok(())
     }
@@ -953,8 +953,8 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        if let Some(batch) = self.flush(ctx).await.unwrap() {
-            collector.collect(batch).await;
+        if let Some(batch) = self.flush(ctx).await? {
+            collector.collect(batch).await?;
         }
         Ok(())
     }
@@ -996,8 +996,8 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        if let Some(batch) = self.flush(ctx).await.unwrap() {
-            collector.collect(batch).await;
+        if let Some(batch) = self.flush(ctx).await? {
+            collector.collect(batch).await?;
         }
         Ok(())
     }
@@ -1009,15 +1009,15 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
-            if let Some(batch) = self.flush(ctx).await.unwrap() {
-                collector.collect(batch).await;
+            if let Some(batch) = self.flush(ctx).await? {
+                collector.collect(batch).await?;
             }
         }
         Ok(())
     }
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
-        self.initialize(ctx).await.unwrap();
+        self.initialize(ctx).await?;
         Ok(())
     }
 }

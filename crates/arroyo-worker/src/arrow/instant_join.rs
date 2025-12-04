@@ -205,30 +205,24 @@ impl ArrowOperator for InstantJoin {
         let left_table = ctx
             .table_manager
             .get_expiring_time_key_table("left", watermark)
-            .await
-            .expect("should have left table");
+            .await?;
         let left_batches: Vec<_> = left_table
             .all_batches_for_watermark(watermark)
             .flat_map(|(_time, batches)| batches.clone())
             .collect();
         for batch in left_batches {
-            self.process_left(batch.clone(), ctx)
-                .await
-                .expect("should be able to add left from state");
+            self.process_left(batch.clone(), ctx).await?;
         }
         let right_table = ctx
             .table_manager
             .get_expiring_time_key_table("right", watermark)
-            .await
-            .expect("should have right table");
+            .await?;
         let right_batches: Vec<_> = right_table
             .all_batches_for_watermark(watermark)
             .flat_map(|(_time, batches)| batches.clone())
             .collect();
         for batch in right_batches {
-            self.process_right(batch.clone(), ctx)
-                .await
-                .expect("should be able to add right from state");
+            self.process_right(batch.clone(), ctx).await?;
         }
         Ok(())
     }
@@ -251,14 +245,8 @@ impl ArrowOperator for InstantJoin {
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
         match index / (total_inputs / 2) {
-            0 => self
-                .process_left(record_batch, ctx)
-                .await
-                .expect("should process left"),
-            1 => self
-                .process_right(record_batch, ctx)
-                .await
-                .expect("should process right"),
+            0 => self.process_left(record_batch, ctx).await?,
+            1 => self.process_right(record_batch, ctx).await?,
             _ => unreachable!(),
         }
         Ok(())
@@ -274,9 +262,8 @@ impl ArrowOperator for InstantJoin {
         };
         let futures_to_drain = {
             let mut futures_to_drain = vec![];
-            while !self.execs.is_empty() {
-                let first_watermark = self.execs.first_key_value().unwrap().0;
-                if *first_watermark >= watermark {
+            while let Some(entry) = self.execs.first_key_value() {
+                if *entry.0 >= watermark {
                     break;
                 }
                 let (_time, exec) = self.execs.pop_first().expect("should have exec");
@@ -286,14 +273,7 @@ impl ArrowOperator for InstantJoin {
         };
         for mut future in futures_to_drain {
             while let (_time, Some((batch, new_exec))) = future.await {
-                match batch {
-                    Ok(batch) => {
-                        collector.collect(batch).await;
-                    }
-                    Err(err) => {
-                        panic!("error in future: {err:?}");
-                    }
-                }
+                collector.collect(batch?).await?;
                 future = new_exec;
             }
         }
@@ -309,18 +289,14 @@ impl ArrowOperator for InstantJoin {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("left", watermark)
-            .await
-            .expect("should have left table")
+            .await?
             .flush(watermark)
-            .await
-            .expect("should flush");
+            .await?;
         ctx.table_manager
             .get_expiring_time_key_table("right", watermark)
-            .await
-            .expect("should have right table")
+            .await?
             .flush(watermark)
-            .await
-            .expect("should flush");
+            .await?;
         Ok(())
     }
 

@@ -183,14 +183,8 @@ impl ArrowOperator for JoinWithExpiration {
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
         match index / (total_inputs / 2) {
-            0 => self
-                .process_left(record_batch, ctx, collector)
-                .await
-                .expect("should process left"),
-            1 => self
-                .process_right(record_batch, ctx, collector)
-                .await
-                .expect("should process right"),
+            0 => self.process_left(record_batch, ctx, collector).await?,
+            1 => self.process_right(record_batch, ctx, collector).await?,
             _ => unreachable!(),
         }
         Ok(())

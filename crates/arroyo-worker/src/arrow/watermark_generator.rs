@@ -114,11 +114,7 @@ impl ArrowOperator for WatermarkGenerator {
     }
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
-        let gs = ctx
-            .table_manager
-            .get_global_keyed_state("s")
-            .await
-            .expect("should have watermark table.");
+        let gs = ctx.table_manager.get_global_keyed_state("s").await?;
         self.last_event = SystemTime::now();
 
         let state = *(gs
@@ -157,7 +153,7 @@ impl ArrowOperator for WatermarkGenerator {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        collector.collect(record.clone()).await;
+        collector.collect(record.clone()).await?;
         self.last_event = SystemTime::now();
 
         let timestamp_column = get_timestamp_col(&record, ctx);
@@ -169,10 +165,8 @@ impl ArrowOperator for WatermarkGenerator {
         // calculate watermark using expression
         let watermark = self
             .expression
-            .evaluate(&record)
-            .unwrap()
-            .into_array(record.num_rows())
-            .unwrap();
+            .evaluate(&record)?
+            .into_array(record.num_rows())?;
 
         let watermark = watermark
             .as_any()
@@ -195,7 +189,7 @@ impl ArrowOperator for WatermarkGenerator {
             );
             collector
                 .broadcast_watermark(Watermark::EventTime(watermark))
-                .await;
+                .await?;
             self.state_cache.last_watermark_emitted_at = max_timestamp;
             self.idle = false;
         }
@@ -208,11 +202,7 @@ impl ArrowOperator for WatermarkGenerator {
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        let gs = ctx
-            .table_manager
-            .get_global_keyed_state("s")
-            .await
-            .expect("state");
+        let gs = ctx.table_manager.get_global_keyed_state("s").await?;
 
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
         Ok(())
