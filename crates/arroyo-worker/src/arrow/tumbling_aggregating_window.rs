@@ -7,6 +7,7 @@ use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
     Registry,
 };
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_planner::schemas::add_timestamp_field_arrow;
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
@@ -230,7 +231,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -244,6 +245,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 .iter()
                 .for_each(|batch| holder.finished_batches.push(batch.clone()));
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -251,7 +253,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -312,6 +314,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 .send(bin_batch)
                 .unwrap();
         }
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -319,7 +322,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         if let Some(watermark) = ctx.last_present_watermark() {
             let bin = self.bin_start(watermark);
             while !self.execs.is_empty() {
@@ -387,7 +390,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 }
             }
         }
-        Some(watermark)
+        Ok(Some(watermark))
     }
 
     fn future_to_poll(
@@ -431,7 +434,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {
@@ -464,6 +467,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
             }
         }
         table.flush(watermark).await.unwrap();
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

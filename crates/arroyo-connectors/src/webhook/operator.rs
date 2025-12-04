@@ -15,6 +15,7 @@ use crate::webhook::MAX_INFLIGHT;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlResp;
 use arroyo_state::global_table_config;
@@ -42,7 +43,7 @@ impl ArrowOperator for WebhookSinkFunc {
         record: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         for body in self.serializer.serialize(&record) {
             let permit = self
                 .semaphore
@@ -118,6 +119,7 @@ impl ArrowOperator for WebhookSinkFunc {
                 }
             });
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -125,10 +127,11 @@ impl ArrowOperator for WebhookSinkFunc {
         _: CheckpointBarrier,
         _ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         // wait to acquire all of the permits (effectively blocking until all inflight requests are done)
         let _permits = self.semaphore.acquire_many(MAX_INFLIGHT).await.unwrap();
 
         // TODO: instead of blocking checkpoints on in-progress (or failing) requests, we should store them to state
+        Ok(())
     }
 }

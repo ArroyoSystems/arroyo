@@ -9,6 +9,7 @@ use arroyo_operator::operator::{
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::{
     df::ArroyoSchema,
+    errors::DataflowResult,
     grpc::{api, rpc::TableConfig},
 };
 use arroyo_state::timestamp_table_config;
@@ -170,7 +171,7 @@ impl ArrowOperator for JoinWithExpiration {
         _record_batch: RecordBatch,
         _ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         unreachable!();
     }
     async fn process_batch_index(
@@ -180,7 +181,7 @@ impl ArrowOperator for JoinWithExpiration {
         record_batch: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         match index / (total_inputs / 2) {
             0 => self
                 .process_left(record_batch, ctx, collector)
@@ -192,6 +193,7 @@ impl ArrowOperator for JoinWithExpiration {
                 .expect("should process right"),
             _ => unreachable!(),
         }
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

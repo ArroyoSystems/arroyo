@@ -230,6 +230,7 @@ impl ArrowOperator for InstantJoin {
                 .await
                 .expect("should be able to add right from state");
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -237,7 +238,7 @@ impl ArrowOperator for InstantJoin {
         _: RecordBatch,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         unreachable!();
     }
 
@@ -248,7 +249,7 @@ impl ArrowOperator for InstantJoin {
         record_batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         match index / (total_inputs / 2) {
             0 => self
                 .process_left(record_batch, ctx)
@@ -260,15 +261,16 @@ impl ArrowOperator for InstantJoin {
                 .expect("should process right"),
             _ => unreachable!(),
         }
+        Ok(())
     }
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         let Some(watermark) = ctx.last_present_watermark() else {
-            return Some(watermark);
+            return Ok(Some(watermark));
         };
         let futures_to_drain = {
             let mut futures_to_drain = vec![];
@@ -295,7 +297,7 @@ impl ArrowOperator for InstantJoin {
                 future = new_exec;
             }
         }
-        Some(Watermark::EventTime(watermark))
+        Ok(Some(Watermark::EventTime(watermark)))
     }
 
     async fn handle_checkpoint(
@@ -303,7 +305,7 @@ impl ArrowOperator for InstantJoin {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("left", watermark)
@@ -319,6 +321,7 @@ impl ArrowOperator for InstantJoin {
             .flush(watermark)
             .await
             .expect("should flush");
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

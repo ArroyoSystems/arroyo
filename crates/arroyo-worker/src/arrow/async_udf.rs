@@ -9,6 +9,7 @@ use arroyo_operator::operator::{
     Registry,
 };
 use arroyo_planner::ASYNC_RESULT_FIELD;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
@@ -150,7 +151,7 @@ impl ArrowOperator for AsyncUdfOperator {
         global_table_config("a", "AsyncMapOperator state")
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         info!("Starting async UDF with timeout {:?}", self.timeout);
         self.input_row_converter = RowConverter::new(
             ctx.in_schemas[0]
@@ -288,6 +289,8 @@ impl ArrowOperator for AsyncUdfOperator {
                     .unwrap_or(0),
             )
             + 1;
+
+        Ok(())
     }
 
     fn tick_interval(&self) -> Option<Duration> {
@@ -299,7 +302,7 @@ impl ArrowOperator for AsyncUdfOperator {
         batch: RecordBatch,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let arg_batch: Vec<_> = self
             .input_exprs
             .iter()
@@ -332,6 +335,8 @@ impl ArrowOperator for AsyncUdfOperator {
                 .expect("failed to send data to async UDF runtime");
             self.next_id += 1;
         }
+
+        Ok(())
     }
 
     async fn handle_tick(
@@ -339,13 +344,13 @@ impl ArrowOperator for AsyncUdfOperator {
         _: u64,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let Some((ids, results)) = self
             .udf
             .drain_results()
             .expect("failed to get results from async UDF executor")
         else {
-            return;
+            return Ok(());
         };
 
         let mut rows = vec![];
@@ -383,6 +388,8 @@ impl ArrowOperator for AsyncUdfOperator {
         }
 
         self.flush_output(ctx, collector).await;
+
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -390,9 +397,9 @@ impl ArrowOperator for AsyncUdfOperator {
         watermark: Watermark,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         self.watermarks.push_back((self.next_id, watermark));
-        None
+        Ok(None)
     }
 
     async fn handle_checkpoint(
@@ -400,7 +407,7 @@ impl ArrowOperator for AsyncUdfOperator {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let gs = ctx
             .table_manager
             .get_global_keyed_state::<usize, AsyncUdfState>("a")
@@ -422,6 +429,8 @@ impl ArrowOperator for AsyncUdfOperator {
         };
 
         gs.insert(ctx.task_info.task_index as usize, state).await;
+
+        Ok(())
     }
 
     async fn on_close(
@@ -429,13 +438,15 @@ impl ArrowOperator for AsyncUdfOperator {
         final_message: &Option<SignalMessage>,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
             while !self.inputs.is_empty() && !self.outputs.is_empty() {
-                self.handle_tick(0, ctx, collector).await;
+                self.handle_tick(0, ctx, collector).await?;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
+
+        Ok(())
     }
 }
 

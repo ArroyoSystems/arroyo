@@ -11,6 +11,7 @@ use arroyo_operator::operator::{
     ArrowOperator, ConstructedOperator, OperatorConstructor, Registry,
 };
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::{MetadataField, OperatorConfig};
 use arroyo_types::LOOKUP_KEY_INDEX_FIELD;
@@ -54,7 +55,7 @@ impl ArrowOperator for LookupJoin {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let num_rows = batch.num_rows();
 
         let key_arrays: Vec<_> = self
@@ -185,6 +186,7 @@ impl ArrowOperator for LookupJoin {
         }
 
         collector.collect(batch).await;
+        Ok(())
     }
 }
 

@@ -5,6 +5,7 @@ use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_types::*;
 use async_trait::async_trait;
@@ -36,7 +37,7 @@ impl ArrowOperator for NatsSinkFunc {
         HashMap::new()
     }
 
-    async fn on_start(&mut self, _ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, _ctx: &mut OperatorContext) -> DataflowResult<()> {
         match get_nats_client(&self.connection).await {
             Ok(client) => {
                 self.publisher = Some(client);
@@ -45,6 +46,7 @@ impl ArrowOperator for NatsSinkFunc {
                 panic!("Failed to construct NATS publisher: {e:?}");
             }
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -52,7 +54,7 @@ impl ArrowOperator for NatsSinkFunc {
         _: CheckpointBarrier,
         _ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         // TODO: Implement checkpointing of in-progress data to avoid depending on
         // the downstream NATS availability to flush and checkpoint.
         let publisher = self
@@ -66,6 +68,7 @@ impl ArrowOperator for NatsSinkFunc {
                 panic!("Failed to flush NATS publisher: {e:?}");
             }
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -73,7 +76,7 @@ impl ArrowOperator for NatsSinkFunc {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let SinkType::Subject(s) = &self.sink_type;
         let nats_subject = async_nats::Subject::from(s.clone());
         for msg in self.serializer.serialize(&batch) {
@@ -90,5 +93,6 @@ impl ArrowOperator for NatsSinkFunc {
                 }
             }
         }
+        Ok(())
     }
 }

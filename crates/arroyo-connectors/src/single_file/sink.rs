@@ -10,6 +10,7 @@ use async_trait::async_trait;
 
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::errors::DataflowResult;
 use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
@@ -36,16 +37,17 @@ impl ArrowOperator for SingleFileSink {
         batch: RecordBatch,
         _ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let values = self.serializer.serialize(&batch);
         let file = self.file.as_mut().unwrap();
         for value in values {
             file.write_all(&value).await.unwrap();
             file.write_all(b"\n").await.unwrap();
         }
+        Ok(())
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let file_path = Path::new(&self.output_path);
         let parent = file_path.parent().unwrap();
         fs::create_dir_all(&parent).await.unwrap();
@@ -75,6 +77,7 @@ impl ArrowOperator for SingleFileSink {
                 .unwrap()
         };
         self.file = Some(file);
+        Ok(())
     }
 
     async fn on_close(
@@ -82,10 +85,11 @@ impl ArrowOperator for SingleFileSink {
         final_message: &Option<SignalMessage>,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
             self.file.as_mut().unwrap().flush().await.unwrap();
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -93,7 +97,7 @@ impl ArrowOperator for SingleFileSink {
         _b: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         self.file.as_mut().unwrap().flush().await.unwrap();
         let state = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
         state
@@ -102,5 +106,6 @@ impl ArrowOperator for SingleFileSink {
                 self.file.as_ref().unwrap().metadata().await.unwrap().len(),
             )
             .await;
+        Ok(())
     }
 }

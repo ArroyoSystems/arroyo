@@ -7,6 +7,7 @@ use arroyo_operator::operator::{
     Registry,
 };
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
@@ -112,7 +113,7 @@ impl ArrowOperator for WatermarkGenerator {
         Some(Duration::from_secs(1))
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let gs = ctx
             .table_manager
             .get_global_keyed_state("s")
@@ -128,6 +129,7 @@ impl ArrowOperator for WatermarkGenerator {
             }));
 
         self.state_cache = state;
+        Ok(())
     }
 
     async fn on_close(
@@ -135,7 +137,7 @@ impl ArrowOperator for WatermarkGenerator {
         final_message: &Option<SignalMessage>,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
             // send final watermark on close
             collector
@@ -146,6 +148,7 @@ impl ArrowOperator for WatermarkGenerator {
                 )
                 .await;
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -153,13 +156,13 @@ impl ArrowOperator for WatermarkGenerator {
         record: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         collector.collect(record.clone()).await;
         self.last_event = SystemTime::now();
 
         let timestamp_column = get_timestamp_col(&record, ctx);
         let Some(max_timestamp) = kernels::aggregate::max(timestamp_column) else {
-            return;
+            return Ok(());
         };
         let max_timestamp = from_nanos(max_timestamp as u128);
 
@@ -196,6 +199,7 @@ impl ArrowOperator for WatermarkGenerator {
             self.state_cache.last_watermark_emitted_at = max_timestamp;
             self.idle = false;
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -203,7 +207,7 @@ impl ArrowOperator for WatermarkGenerator {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let gs = ctx
             .table_manager
             .get_global_keyed_state("s")
@@ -211,6 +215,7 @@ impl ArrowOperator for WatermarkGenerator {
             .expect("state");
 
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
+        Ok(())
     }
 
     async fn handle_tick(
@@ -218,7 +223,7 @@ impl ArrowOperator for WatermarkGenerator {
         _: u64,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(idle_time) = self.idle_time {
             if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
                 info!(
@@ -229,5 +234,6 @@ impl ArrowOperator for WatermarkGenerator {
                 self.idle = true;
             }
         }
+        Ok(())
     }
 }
