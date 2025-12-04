@@ -6,6 +6,7 @@ use arroyo_operator::{
     context::OperatorContext,
     operator::{ArrowOperator, ConstructedOperator, OperatorConstructor},
 };
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
@@ -156,7 +157,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
                 self.tiered_record_batches.insert(batch, bin_start)?;
             }
         }
-        partial_table.flush_timestamp(bin_end).await?;
+        partial_table.flush_timestamp(bin_end).await;
         partial_table.expire_timestamp(bin_end - self.width + self.slide);
         let interval_start = bin_end - self.width;
         let interval_end = bin_end;
@@ -556,7 +557,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -595,6 +596,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                 next_window_start: watermark_bin,
             };
         }
+        Ok(())
     }
 
     // TODO: filter out late data
@@ -603,7 +605,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -673,6 +675,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                 .send(bin_batch)
                 .unwrap();
         }
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -680,14 +683,16 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
-        let last_watermark = ctx.last_present_watermark()?;
+    ) -> DataflowResult<Option<Watermark>> {
+        let Some(last_watermark) = ctx.last_present_watermark() else {
+            return Ok(None);
+        };
 
         while self.should_advance(last_watermark) {
             self.advance(ctx, collector).await.unwrap();
         }
 
-        Some(watermark)
+        Ok(Some(watermark))
     }
 
     async fn handle_checkpoint(
@@ -695,7 +700,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {
@@ -734,6 +739,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
             }
         }
         table.flush(watermark).await.unwrap();
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

@@ -3,6 +3,7 @@ use arrow::array::{AsArray, RecordBatch};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, ErrorReporter, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
 use redis::aio::{ConnectionLike, ConnectionManager};
@@ -228,7 +229,7 @@ impl ArrowOperator for RedisSinkFunc {
         "RedisSink".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         match &self.target {
             Target::ListTable {
                 list_key_column: Some(key),
@@ -305,7 +306,7 @@ impl ArrowOperator for RedisSinkFunc {
                         },
                     }
                     .start();
-                    return;
+                    return Ok(());
                 }
                 Err(e) => {
                     ctx.report_error("Failed to connect", e.to_string()).await;
@@ -324,7 +325,7 @@ impl ArrowOperator for RedisSinkFunc {
         batch: RecordBatch,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         for (i, value) in self.serializer.serialize(&batch).enumerate() {
             match &self.target {
                 Target::StringTable { key_prefix, .. } => {
@@ -359,6 +360,7 @@ impl ArrowOperator for RedisSinkFunc {
                 }
             };
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -366,7 +368,7 @@ impl ArrowOperator for RedisSinkFunc {
         checkpoint: CheckpointBarrier,
         _ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         self.tx
             .send(RedisCmd::Flush(checkpoint.epoch))
             .await
@@ -376,7 +378,7 @@ impl ArrowOperator for RedisSinkFunc {
             match tokio::time::timeout(Duration::from_secs(30), self.rx.recv()).await {
                 Ok(Some(epoch)) => {
                     if checkpoint.epoch == epoch {
-                        return;
+                        return Ok(());
                     }
                 }
                 Ok(None) => {

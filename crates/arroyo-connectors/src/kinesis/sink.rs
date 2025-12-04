@@ -7,6 +7,7 @@ use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::retry;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
@@ -32,7 +33,7 @@ impl ArrowOperator for KinesisSinkFunc {
         format!("kinesis-producer-{}", self.name)
     }
 
-    async fn on_start(&mut self, _ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, _ctx: &mut OperatorContext) -> DataflowResult<()> {
         let mut loader = aws_config::defaults(BehaviorVersion::v2025_01_17());
         if let Some(region) = &self.aws_region {
             loader = loader.region(Region::new(region.clone()));
@@ -42,6 +43,7 @@ impl ArrowOperator for KinesisSinkFunc {
         self.client = Some(client.clone());
 
         self.in_progress_batch = Some(BatchRecordPreparer::new(client, self.name.clone()));
+        Ok(())
     }
 
     async fn process_batch(
@@ -49,7 +51,7 @@ impl ArrowOperator for KinesisSinkFunc {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         for v in self.serializer.serialize(&batch) {
             self.in_progress_batch
                 .as_mut()
@@ -59,6 +61,7 @@ impl ArrowOperator for KinesisSinkFunc {
                 .await
                 .expect("failed to flush batch during processing");
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -66,7 +69,7 @@ impl ArrowOperator for KinesisSinkFunc {
         _: CheckpointBarrier,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         retry!(
             self.in_progress_batch.as_mut().unwrap().flush().await,
             30,
@@ -75,12 +78,14 @@ impl ArrowOperator for KinesisSinkFunc {
             |e| warn!("{}", e)
         )
         .expect("could not flush to Kinesis during checkpointing");
+        Ok(())
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext, _: &mut dyn Collector) {
+    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext, _: &mut dyn Collector) -> DataflowResult<()> {
         self.maybe_flush_with_retries(ctx)
             .await
             .expect("failed to flush batch during tick");
+        Ok(())
     }
 }
 

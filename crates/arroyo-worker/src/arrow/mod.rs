@@ -88,12 +88,13 @@ impl ArrowOperator for ValueExecutionOperator {
         record_batch: RecordBatch,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let mut records = self.executor.process_batch(record_batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
             collector.collect(batch).await;
         }
+        Ok(())
     }
 }
 
@@ -296,7 +297,7 @@ impl ArrowOperator for KeyExecutionOperator {
         batch: RecordBatch,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let mut records = self.executor.process_batch(batch).await;
         while let Some(batch) = records.next().await {
             let batch = batch.expect("should be able to compute batch");
@@ -304,6 +305,7 @@ impl ArrowOperator for KeyExecutionOperator {
             //info!("batch {:?}", batch);
             collector.collect(batch).await;
         }
+        Ok(())
     }
 }
 

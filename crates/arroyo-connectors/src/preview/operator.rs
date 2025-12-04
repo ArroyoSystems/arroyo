@@ -5,6 +5,7 @@ use arroyo_formats::json::encoders::ArroyoEncoderFactory;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::controller_client;
 use arroyo_rpc::formats::TimestampFormat;
 use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
@@ -34,7 +35,7 @@ impl ArrowOperator for PreviewSink {
         )
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let table = ctx.table_manager.get_global_keyed_state("s").await.unwrap();
 
         self.row = *table.get(&ctx.task_info.task_index).unwrap_or(&0);
@@ -44,6 +45,7 @@ impl ArrowOperator for PreviewSink {
                 .await
                 .expect("could not connect to controller"),
         );
+        Ok(())
     }
 
     async fn process_batch(
@@ -51,7 +53,7 @@ impl ArrowOperator for PreviewSink {
         mut batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let ts = ctx.in_schemas[0].timestamp_index;
         let timestamps: Vec<_> = batch
             .column(ts)
@@ -94,6 +96,7 @@ impl ArrowOperator for PreviewSink {
             .unwrap();
 
         self.row += batch.num_rows();
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -101,7 +104,7 @@ impl ArrowOperator for PreviewSink {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let table = ctx
             .table_manager
             .get_global_keyed_state::<u32, usize>("s")
@@ -109,6 +112,7 @@ impl ArrowOperator for PreviewSink {
             .unwrap();
 
         table.insert(ctx.task_info.task_index, self.row).await;
+        Ok(())
     }
 
     async fn on_close(
@@ -116,7 +120,7 @@ impl ArrowOperator for PreviewSink {
         _: &Option<SignalMessage>,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         self.client
             .as_mut()
             .unwrap()
@@ -131,5 +135,6 @@ impl ArrowOperator for PreviewSink {
             })
             .await
             .unwrap();
+        Ok(())
     }
 }

@@ -10,6 +10,7 @@ use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
     ArrowOperator, ConstructedOperator, OperatorConstructor, Registry,
 };
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::rpc::TableConfig;
@@ -126,7 +127,7 @@ impl ArrowOperator for WindowFunctionOperator {
         "WindowFunction".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -139,6 +140,7 @@ impl ArrowOperator for WindowFunctionOperator {
                 exec.sender.send(batch.clone()).unwrap();
             }
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -146,7 +148,7 @@ impl ArrowOperator for WindowFunctionOperator {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let current_watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
@@ -161,6 +163,7 @@ impl ArrowOperator for WindowFunctionOperator {
             let bin_exec = self.get_or_insert_exec(timestamp).await;
             bin_exec.sender.send(batch).unwrap();
         }
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -168,9 +171,9 @@ impl ArrowOperator for WindowFunctionOperator {
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         let Some(watermark) = ctx.last_present_watermark() else {
-            return Some(watermark);
+            return Ok(Some(watermark));
         };
         loop {
             let finished = {
@@ -193,7 +196,7 @@ impl ArrowOperator for WindowFunctionOperator {
                 collector.collect(batch).await;
             }
         }
-        Some(Watermark::EventTime(watermark))
+        Ok(Some(Watermark::EventTime(watermark)))
     }
 
     async fn handle_checkpoint(
@@ -201,7 +204,7 @@ impl ArrowOperator for WindowFunctionOperator {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("input", watermark)
@@ -210,6 +213,7 @@ impl ArrowOperator for WindowFunctionOperator {
             .flush(watermark)
             .await
             .expect("should flush");
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
