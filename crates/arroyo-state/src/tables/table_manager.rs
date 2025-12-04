@@ -373,21 +373,21 @@ impl TableManager {
         Ok(())
     }
 
-    pub async fn insert_committing_data(&mut self, table: &str, data: Vec<u8>) -> Result<()> {
+    pub async fn insert_committing_data(&mut self, table: &str, data: Vec<u8>) {
         self.writer
             .sender
             .send(StateMessage::TableData {
                 table: table.to_string(),
                 data: TableData::CommitData { data },
             })
-            .await?;
-        Ok(())
+            .await
+            .expect("checkpoint queue closed");
     }
 
     pub async fn get_global_keyed_state<K: Key, V: Data>(
         &mut self,
         table_name: &str,
-    ) -> Result<&mut GlobalKeyedView<K, V>> {
+    ) -> Result<&mut GlobalKeyedView<K, V>, StateError> {
         // this is done because populating it is async, so can't use or_insert().
         if let std::collections::hash_map::Entry::Vacant(e) =
             self.caches.entry(table_name.to_string())
@@ -395,11 +395,18 @@ impl TableManager {
             let table_implementation = self
                 .tables
                 .get(table_name)
-                .ok_or_else(|| anyhow!("no registered table {}", table_name))?;
+                .ok_or_else(|| StateError::NoRegisteredTable {
+                    table: table_name.to_string(),
+                })?;
+
             let global_keyed_table = table_implementation
                 .as_any()
                 .downcast_ref::<GlobalKeyedTable>()
-                .ok_or_else(|| anyhow!("wrong table type for table {}", table_name))?;
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "global_keyed_state",
+                })?;
+
             let saved_data = global_keyed_table
                 .memory_view::<K, V>(self.writer.sender.clone())
                 .await?;
@@ -409,12 +416,10 @@ impl TableManager {
 
         let cache = self.caches.get_mut(table_name).unwrap();
         let cache: &mut GlobalKeyedView<K, V> = cache.downcast_mut().ok_or_else(|| {
-            anyhow!(
-                "Failed to downcast table {} to key type {} and value type {}",
-                table_name,
-                std::any::type_name::<K>(),
-                std::any::type_name::<V>()
-            )
+            StateError::WrongTableKind {
+                table: table_name.to_string(),
+                expected: "global_keyed_state",
+            }
         })?;
         Ok(cache)
     }

@@ -2,6 +2,7 @@ use arrow::array::RecordBatch;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use async_trait::async_trait;
+use arroyo_rpc::errors::DataflowResult;
 
 #[derive(Debug)]
 pub struct BlackholeSinkFunc {}
@@ -23,7 +24,8 @@ impl ArrowOperator for BlackholeSinkFunc {
         _: RecordBatch,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         // no-op
+        Ok(())
     }
 }

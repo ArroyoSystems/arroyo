@@ -1,6 +1,40 @@
+use std::time::Duration;
 use datafusion::error::DataFusionError;
 use datafusion::parquet::errors::ParquetError;
 use thiserror::Error;
+
+/// Creates a `DataflowError::ConnectorError` with format string support.
+///
+/// # Basic usage
+///
+/// ```ignore
+/// // External error with backoff retry
+/// connector_err!(External, WithBackoff, "connection failed: {}", e)
+///
+/// // Full form with retry and source
+/// connector_err!(External, WithBackoff, source: io_err, "network error: {}", msg)
+/// ```
+#[macro_export]
+macro_rules! connector_err {
+    // Domain + retry hint + source error
+    ($domain:ident, $retry:ident, source: $source:expr, $($arg:tt)+) => {
+        $crate::errors::DataflowError::ConnectorError {
+            domain: $crate::errors::ConnectorErrorDomain::$domain,
+            retry: $crate::errors::RetryHint::$retry,
+            error: format!($($arg)+),
+            source: Some($source),
+        }
+    };
+
+    ($domain:ident, $retry:ident, $($arg:tt)+) => {
+        $crate::errors::DataflowError::ConnectorError {
+            domain: $crate::errors::ConnectorErrorDomain::$domain,
+            retry: $crate::errors::RetryHint::$retry,
+            error: format!($($arg)+),
+            source: None,
+        }
+    };
+}
 
 #[derive(Error, Debug)]
 pub enum DataflowError {
@@ -9,9 +43,39 @@ pub enum DataflowError {
     #[error(transparent)]
     SourceError(#[from] SourceError),
     #[error("operator error: {error} {message}")]
-    InternalOperatorError { error: String, message: String },
+    InternalOperatorError { error: &'static str, message: String },
     #[error(transparent)]
     StateError(#[from] StateError),
+    #[error("the arguments for this operator are invalid: {0}")]
+    ArgumentError(String),
+    #[error("error with external system: {0}")]
+    ExternalError(String),
+    #[error("error in connector: {error}")]
+    ConnectorError {
+        domain: ConnectorErrorDomain,
+        retry: RetryHint,
+        error: String,
+        source: Option<anyhow::Error>,
+    },
+    // to ease the migration, we'll start with the ability to wrap anyhows; these will
+    // be removed in later stages of the migration
+    #[error("unknown error: {0}")]
+    UnknownError(#[from] anyhow::Error)
+}
+
+
+#[derive(Debug)]
+pub enum ConnectorErrorDomain {
+    User,
+    External,
+    Internal,
+}
+
+#[derive(Debug)]
+pub enum RetryHint {
+    NoRetry,
+    WithBackoff,
+    After(Duration),
 }
 
 pub type DataflowResult<T> = Result<T, DataflowError>;
