@@ -91,8 +91,8 @@ impl ArrowOperator for ValueExecutionOperator {
     ) -> DataflowResult<()> {
         let mut records = self.executor.process_batch(record_batch).await;
         while let Some(batch) = records.next().await {
-            let batch = batch.expect("should be able to compute batch");
-            collector.collect(batch).await;
+            let batch = batch?;
+            collector.collect(batch).await?;
         }
         Ok(())
     }
@@ -171,7 +171,7 @@ impl ArrowOperator for ProjectionOperator {
             .try_collect()?;
 
         collector
-            .collect(RecordBatch::try_new(self.output_schema.schema.clone(), outputs).unwrap())
+            .collect(RecordBatch::try_new(self.output_schema.schema.clone(), outputs)?)
             .await
     }
 }
@@ -300,10 +300,9 @@ impl ArrowOperator for KeyExecutionOperator {
     ) -> DataflowResult<()> {
         let mut records = self.executor.process_batch(batch).await;
         while let Some(batch) = records.next().await {
-            let batch = batch.expect("should be able to compute batch");
             //TODO: sort by the key
             //info!("batch {:?}", batch);
-            collector.collect(batch).await;
+            collector.collect(batch?).await?;
         }
         Ok(())
     }

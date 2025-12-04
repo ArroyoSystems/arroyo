@@ -562,8 +562,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)
-            .await
-            .expect("should be able to load table");
+            .await?;
         // bins before the watermark should be put into the TieredRecordBatchHolder, those after in the exec.
         let watermark_bin = self.bin_start(watermark.unwrap_or(SystemTime::UNIX_EPOCH));
         for (timestamp, batches) in table.all_batches_for_watermark(watermark) {
@@ -689,7 +688,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         };
 
         while self.should_advance(last_watermark) {
-            self.advance(ctx, collector).await.unwrap();
+            self.advance(ctx, collector).await?;
         }
 
         Ok(Some(watermark))
@@ -710,8 +709,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)
-            .await
-            .expect("should get table");
+            .await?;
 
         // TODO: this was a separate map just to the active execs, which could, in corner cases, be much smaller.
         for (bin, exec) in self.execs.iter_mut() {
@@ -727,18 +725,18 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                     unreachable!("should only get batches for the bin we're working on");
                 }
                 active_exec = next_exec;
-                let batch = batch.expect("should be able to compute batch");
+                let batch = batch?;
                 let bin_start = ScalarValue::TimestampNanosecond(Some(bucket_nanos), None);
-                let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
+                let timestamp_array = bin_start.to_array_of_size(batch.num_rows())?;
                 let mut columns: Vec<Arc<dyn Array>> = batch.columns().to_vec();
                 columns.push(timestamp_array);
                 let state_batch =
-                    RecordBatch::try_new(self.partial_schema.schema.clone(), columns).unwrap();
+                    RecordBatch::try_new(self.partial_schema.schema.clone(), columns)?;
                 table.insert(*bin, state_batch);
                 exec.finished_batches.push(batch);
             }
         }
-        table.flush(watermark).await.unwrap();
+        table.flush(watermark).await?;
         Ok(())
     }
 

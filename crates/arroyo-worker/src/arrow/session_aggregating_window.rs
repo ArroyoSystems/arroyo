@@ -90,7 +90,7 @@ impl SessionAggregatingWindowFunc {
                 .to_record_batch(results, ctx)
                 .context("should convert to record batch")?;
             debug!("emitting session batch of size {}", result_batch.num_rows());
-            collector.collect(result_batch).await;
+            collector.collect(result_batch).await?;
         }
 
         Ok(())
@@ -797,7 +797,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
 
     async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let start_times_map: &mut GlobalKeyedView<u32, Option<SystemTime>> =
-            ctx.table_manager.get_global_keyed_state("e").await.unwrap();
+            ctx.table_manager.get_global_keyed_state("e").await?;
         let start_time = start_times_map
             .get_all()
             .values()
@@ -813,36 +813,26 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             // TODO: this will subtract the retention from start time, so hold more than it should,
             // but we plan to overhaul it all anyway.
             .get_expiring_time_key_table("s", start_time)
-            .await
-            .expect("should be able to load table");
+            .await?;
 
         let all_batches = table.all_batches_for_watermark(start_time);
 
         for (_max_timestamp, batches) in all_batches {
             for batch in batches {
-                let batch = self
-                    .filter_batch_by_time(batch.clone(), start_time)
-                    .expect("should be able to filter");
+                let batch = self.filter_batch_by_time(batch.clone(), start_time)?;
                 if batch.num_rows() == 0 {
                     continue;
                 }
-                let sorted = self
-                    .sort_batch(&batch)
-                    .expect("should be able to sort batch");
+                let sorted = self.sort_batch(&batch)?;
 
-                self.add_at_watermark(sorted, start_time)
-                    .await
-                    .expect("should be able to add batch");
+                self.add_at_watermark(sorted, start_time).await?;
             }
         }
         let Some(watermark) = ctx.last_present_watermark() else {
             return Ok(());
         };
 
-        let evicted_results = self
-            .results_at_watermark(watermark)
-            .await
-            .expect("should be able to get results");
+        let evicted_results = self.results_at_watermark(watermark).await?;
         if !evicted_results.is_empty() {
             warn!(
                 "evicted {} results when restoring from state.",
@@ -867,10 +857,10 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
                 .column(self.config.input_schema_ref.timestamp_index)
                 .as_any()
                 .downcast_ref::<TimestampNanosecondArray>()
-                .unwrap();
+                .ok_or_else(|| anyhow!("expected timestamp column"))?;
             let watermark_scalar = TimestampNanosecondArray::new_scalar(to_nanos(watermark) as i64);
-            let on_time = gt_eq(timestamp_column, &watermark_scalar).unwrap();
-            filter_record_batch(&batch, &on_time).unwrap()
+            let on_time = gt_eq(timestamp_column, &watermark_scalar)?;
+            filter_record_batch(&batch, &on_time)?
         } else {
             batch
         };
@@ -878,30 +868,25 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             warn!("fully filtered out a batch");
             return Ok(());
         }
-        let sorted = self
-            .sort_batch(&batch)
-            .expect("should be able to sort batch");
+        let sorted = self.sort_batch(&batch)?;
 
         // send to state backend.
         // TODO: pre-aggregate data before sending to state backend.
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("s", current_watermark)
-            .await
-            .expect("should get table");
+            .await?;
 
         let max_timestamp = max(sorted
             .column(self.config.input_schema_ref.timestamp_index)
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
-            .expect("should have max timestamp"))
-        .unwrap();
+            .ok_or_else(|| anyhow!("expected timestamp column"))?)
+        .ok_or_else(|| anyhow!("expected max timestamp"))?;
 
         table.insert(from_nanos(max_timestamp as u128), sorted.clone());
 
-        self.add_at_watermark(sorted, current_watermark)
-            .await
-            .expect("should be able to add batch");
+        self.add_at_watermark(sorted, current_watermark).await?;
         Ok(())
     }
 
@@ -911,7 +896,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<Option<Watermark>> {
-        self.advance(ctx, collector).await.unwrap();
+        self.advance(ctx, collector).await?;
         Ok(Some(watermark))
     }
 
@@ -925,13 +910,11 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("s", watermark)
-            .await
-            .expect("should get table");
-        table.flush(watermark).await.unwrap();
+            .await?;
+        table.flush(watermark).await?;
         ctx.table_manager
             .get_global_keyed_state("e")
-            .await
-            .unwrap()
+            .await?
             .insert(ctx.task_info.task_index, self.earliest_batch_time())
             .await;
         Ok(())

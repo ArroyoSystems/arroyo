@@ -1,4 +1,5 @@
 use std::time::Duration;
+use arrow_schema::ArrowError;
 use datafusion::error::DataFusionError;
 use datafusion::parquet::errors::ParquetError;
 use thiserror::Error;
@@ -38,6 +39,8 @@ macro_rules! connector_err {
 
 #[derive(Error, Debug)]
 pub enum DataflowError {
+    #[error("Arrow error: {:0?}", .0)]
+    ArrowError(#[from] ArrowError),
     #[error("SQL processing error: {:0?}", .0)]
     DataFusionError(#[from] DataFusionError),
     #[error(transparent)]
