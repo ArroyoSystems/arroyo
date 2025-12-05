@@ -3,10 +3,10 @@ use anyhow::anyhow;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::errors::UserError;
+use arroyo_rpc::errors::{DataflowResult, UserError};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
+use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::*;
@@ -52,7 +52,7 @@ impl SourceOperator for FluvioSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -60,14 +60,7 @@ impl SourceOperator for FluvioSourceFunc {
             &[],
         );
 
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -150,11 +143,10 @@ impl FluvioSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> DataflowResult<SourceFinishType> {
         let mut streams = self
             .get_consumer(ctx)
-            .await
-            .map_err(|e| UserError::new("Could not create Fluvio consumer", format!("{e:?}")))?;
+            .await?;
 
         if streams.is_empty() {
             warn!("Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
@@ -186,7 +178,7 @@ impl FluvioSourceFunc {
                             error!("encountered error {:?} while reading partition {}", e, p);
                         }
                         None => {
-                            panic!("Stream closed");
+                            connector_err!(External, WithBackoff, "Stream closed");
                         }
                     }
                 }
@@ -227,7 +219,7 @@ impl FluvioSourceFunc {
                             }
                         }
                         Some(ControlMessage::Commit{..}) => {
-                            return Err(UserError::new("Fluvio source does not support committing", ""));
+                            return Err(connector_err!(User, NoRetry, "Fluvio source does not support committing"));
                         }
                         Some(ControlMessage::LoadCompacted {compacted}) => {
                             ctx.load_compacted(compacted).await;

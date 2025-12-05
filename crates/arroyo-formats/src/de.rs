@@ -11,7 +11,7 @@ use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Schema, SchemaRef};
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::errors::SourceError;
+use arroyo_rpc::errors::{DataflowError, DataflowResult, SourceError};
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
@@ -140,7 +140,7 @@ impl BufferDecoder {
     fn flush(
         &mut self,
         bad_data: &BadData,
-    ) -> Option<Result<(Vec<ArrayRef>, Option<BooleanArray>), SourceError>> {
+    ) -> Option<Result<(Vec<ArrayRef>, Option<BooleanArray>), DataflowError>> {
         match self {
             BufferDecoder::Buffer(buffer) => {
                 if buffer.size() > 0 {
@@ -178,7 +178,7 @@ impl BufferDecoder {
         }
     }
 
-    fn decode_json(&mut self, msg: &[u8]) -> Result<(), SourceError> {
+    fn decode_json(&mut self, msg: &[u8]) -> DataflowResult<()> {
         match self {
             BufferDecoder::Buffer(_) => {
                 unreachable!("Tried to decode JSON for non-JSON deserializer");
@@ -402,7 +402,7 @@ impl ArrowDeserializer {
         msg: &[u8],
         timestamp: SystemTime,
         additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
-    ) -> Vec<SourceError> {
+    ) -> Vec<DataflowError> {
         self.deserialize_slice_int(msg, Some(timestamp), additional_fields)
             .await
     }
@@ -412,7 +412,7 @@ impl ArrowDeserializer {
         &mut self,
         msg: &[u8],
         additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
-    ) -> Vec<SourceError> {
+    ) -> Vec<DataflowError> {
         self.deserialize_slice_int(msg, None, additional_fields)
             .await
     }
@@ -430,7 +430,7 @@ impl ArrowDeserializer {
         msg: &[u8],
         timestamp: Option<SystemTime>,
         additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
-    ) -> Vec<SourceError> {
+    ) -> Vec<DataflowError> {
         let (count, errors) = match &*self.format {
             Format::Avro(_) => self.deserialize_slice_avro(msg).await,
             _ => {
@@ -497,7 +497,7 @@ impl ArrowDeserializer {
         self.buffer_decoder.should_flush()
     }
 
-    pub fn flush_buffer(&mut self) -> (Option<RecordBatch>, Vec<SourceError>) {
+    pub fn flush_buffer(&mut self) -> (Option<RecordBatch>, Vec<DataflowError>) {
         let (arrays, error_mask) = match self.buffer_decoder.flush(&self.bad_data) {
             Some(Ok((a, b))) => (a, b),
             Some(Err(e)) => return (None, vec![e]),
@@ -554,7 +554,7 @@ impl ArrowDeserializer {
         )
     }
 
-    fn deserialize_single(&mut self, msg: &[u8]) -> Result<(), SourceError> {
+    fn deserialize_single(&mut self, msg: &[u8]) -> DataflowResult<()> {
         match &*self.format {
             Format::RawString(_)
             | Format::Json(JsonFormat {
@@ -605,7 +605,7 @@ impl ArrowDeserializer {
         array.append_value(value.to_string());
     }
 
-    async fn deserialize_slice_avro(&mut self, msg: &[u8]) -> (usize, Vec<SourceError>) {
+    async fn deserialize_slice_avro(&mut self, msg: &[u8]) -> (usize, Vec<DataflowError>) {
         let Format::Avro(format) = &*self.format else {
             unreachable!("not avro");
         };
@@ -650,7 +650,7 @@ impl ArrowDeserializer {
 
                 Ok(())
             })
-            .filter_map(|r: Result<(), SourceError>| r.err())
+            .filter_map(|r: Result<(), DataflowError>| r.err())
             .collect();
 
         (count, errors)
@@ -741,7 +741,7 @@ mod tests {
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
     use arrow_schema::{DataType, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
-    use arroyo_rpc::errors::SourceError;
+    use arroyo_rpc::errors::{DataflowError, SourceError};
     use arroyo_rpc::formats::{
         BadData, Format, Framing, JsonFormat, NewlineDelimitedFraming, RawBytesFormat,
     };
@@ -852,17 +852,15 @@ mod tests {
 
         let now = SystemTime::now();
 
-        assert_eq!(
+        assert!(
             deserializer
                 .deserialize_slice(json!({ "x": 5 }).to_string().as_bytes(), now, None,)
-                .await,
-            vec![]
+                .await.is_empty()
         );
-        assert_eq!(
+        assert!(
             deserializer
                 .deserialize_slice(json!({ "x": "hello" }).to_string().as_bytes(), now, None,)
-                .await,
-            vec![]
+                .await.is_empty()
         );
 
         let batch = deserializer.flush_buffer().0.unwrap();
@@ -880,30 +878,28 @@ mod tests {
     async fn test_bad_data_fail() {
         let mut deserializer = setup_deserializer(BadData::Fail {});
 
-        assert_eq!(
+        assert!(
             deserializer
                 .deserialize_slice(
                     json!({ "x": 5 }).to_string().as_bytes(),
                     SystemTime::now(),
                     None,
                 )
-                .await,
-            vec![]
+                .await.is_empty()
         );
-        assert_eq!(
+        assert!(
             deserializer
                 .deserialize_slice(
                     json!({ "x": "hello" }).to_string().as_bytes(),
                     SystemTime::now(),
                     None,
                 )
-                .await,
-            vec![]
+                .await.is_empty()
         );
 
         let err = deserializer.flush_buffer().1.remove(0);
 
-        assert!(matches!(err, SourceError::BadData { .. }));
+        assert!(matches!(err, DataflowError::DataError { .. }));
     }
 
     #[tokio::test]
