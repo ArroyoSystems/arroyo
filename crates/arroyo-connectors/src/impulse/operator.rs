@@ -16,6 +16,7 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
 use tracing::{debug, info};
+use arroyo_rpc::errors::DataflowResult;
 
 #[derive(Encode, Decode, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ImpulseSourceState {
@@ -96,7 +97,7 @@ impl ImpulseSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
+    ) -> DataflowResult<SourceFinishType> {
         let delay = self.delay(ctx);
         info!(
             "Starting impulse source with start {} delay {:?} and limit {}",
@@ -154,7 +155,7 @@ impl ImpulseSourceFunc {
                         )
                         .unwrap(),
                     )
-                    .await;
+                    .await?;
                 items = 0;
             }
 
@@ -180,17 +181,16 @@ impl ImpulseSourceFunc {
                                 )
                                 .unwrap(),
                             )
-                            .await;
+                            .await?;
                         items = 0;
                     }
                     ctx.table_manager
                         .get_global_keyed_state("i")
-                        .await
-                        .unwrap()
+                        .await?
                         .insert(ctx.task_info.task_index, self.state)
                         .await;
                     if self.start_checkpoint(c, ctx, collector).await {
-                        return SourceFinishType::Immediate;
+                        return Ok(SourceFinishType::Immediate);
                     }
                 }
                 Ok(ControlMessage::Stop { mode }) => {
@@ -198,10 +198,10 @@ impl ImpulseSourceFunc {
 
                     match mode {
                         StopMode::Graceful => {
-                            return SourceFinishType::Graceful;
+                            return Ok(SourceFinishType::Graceful);
                         }
                         StopMode::Immediate => {
-                            return SourceFinishType::Immediate;
+                            return Ok(SourceFinishType::Immediate);
                         }
                     }
                 }
@@ -209,7 +209,7 @@ impl ImpulseSourceFunc {
                     unreachable!("sources shouldn't receive commit messages");
                 }
                 Ok(ControlMessage::LoadCompacted { compacted }) => {
-                    ctx.table_manager.load_compacted(&compacted).await.unwrap();
+                    ctx.table_manager.load_compacted(&compacted).await?;
                 }
                 Ok(ControlMessage::NoOp) => {}
                 Err(_) => {
@@ -226,7 +226,7 @@ impl ImpulseSourceFunc {
         }
         if items > 0 {
             let counter_column = counter_builder.finish();
-            let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
+            let task_index_column = task_index_scalar.to_array_of_size(items)?;
             let timestamp_column = timestamp_builder.finish();
             collector
                 .collect(
@@ -237,13 +237,12 @@ impl ImpulseSourceFunc {
                             Arc::new(task_index_column),
                             Arc::new(timestamp_column),
                         ],
-                    )
-                    .unwrap(),
+                    )?,
                 )
-                .await;
+                .await?;
         }
 
-        SourceFinishType::Final
+        Ok(SourceFinishType::Final)
     }
 }
 
@@ -257,23 +256,24 @@ impl SourceOperator for ImpulseSourceFunc {
         arroyo_state::global_table_config("i", "impulse source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut SourceContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
         let s = ctx
             .table_manager
             .get_global_keyed_state("i")
-            .await
-            .expect("should have table i in impulse source");
+            .await?;
 
         if let Some(state) = s.get(&ctx.task_info.task_index) {
             self.state = *state;
         }
+
+        Ok(())
     }
 
     async fn run(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
+    ) -> DataflowResult<SourceFinishType> {
         self.run(ctx, collector).await
     }
 }

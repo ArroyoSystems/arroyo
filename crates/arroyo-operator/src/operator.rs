@@ -180,7 +180,9 @@ impl OperatorNode {
                     .await
                     .unwrap();
 
-                let result = s.operator.run(&mut source_context, &mut collector).await;
+                let result = s.operator.run(&mut source_context, &mut collector).await
+                    // TODO: propogate this properly
+                    .unwrap();
 
                 s.operator
                     .on_close(&mut source_context, &mut collector)
@@ -300,16 +302,20 @@ pub trait SourceOperator: Send + 'static {
     }
 
     #[allow(unused_variables)]
-    async fn on_start(&mut self, ctx: &mut SourceContext) {}
+    async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
+        Ok(())
+    }
 
     async fn run(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType;
+    ) -> DataflowResult<SourceFinishType>;
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) {}
+    async fn on_close(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> DataflowResult<()> {
+        Ok(())
+    }
 
     async fn start_checkpoint(
         &mut self,

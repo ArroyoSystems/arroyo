@@ -1,6 +1,6 @@
 use crate::float_to_json;
 use anyhow::anyhow;
-use arroyo_rpc::errors::SourceError;
+use arroyo_rpc::errors::{DataflowError, SourceError};
 use arroyo_rpc::formats::ProtobufFormat;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
@@ -12,7 +12,7 @@ pub(crate) fn deserialize_proto(
     pool: &mut DescriptorPool,
     proto: &ProtobufFormat,
     mut msg: &[u8],
-) -> Result<serde_json::Value, SourceError> {
+) -> Result<serde_json::Value, DataflowError> {
     if proto.confluent_schema_registry {
         skip_confluent_header(&mut msg).map_err(|e| {
             SourceError::bad_data(format!("invalid confluent schema header: {e:?}"))

@@ -43,8 +43,6 @@ pub enum DataflowError {
     ArrowError(#[from] ArrowError),
     #[error("SQL processing error: {:0?}", .0)]
     DataFusionError(#[from] DataFusionError),
-    #[error(transparent)]
-    SourceError(#[from] SourceError),
     #[error("operator error: {error} {message}")]
     InternalOperatorError { error: &'static str, message: String },
     #[error(transparent)]
@@ -53,6 +51,8 @@ pub enum DataflowError {
     ArgumentError(String),
     #[error("error with external system: {0}")]
     ExternalError(String),
+    #[error("error deserializing data: {details} ({count} times)")]
+    DataError { details: String, count: usize },
     #[error("error in connector: {error}")]
     ConnectorError {
         domain: ConnectorErrorDomain,
@@ -146,39 +146,21 @@ impl UserError {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum SourceError {
-    #[error("failed to deserialize {count} events: {details} ")]
-    BadData { details: String, count: usize },
-    #[error("error in source: {name}: {details} ")]
-    Other { name: String, details: String },
+pub struct SourceError {
 }
 
 impl SourceError {
-    pub fn bad_data(details: impl Into<String>) -> SourceError {
-        SourceError::BadData {
+    pub fn bad_data(details: impl Into<String>) -> DataflowError {
+        DataflowError::DataError {
             details: details.into(),
             count: 1,
         }
     }
 
-    pub fn bad_data_count(details: impl Into<String>, count: usize) -> SourceError {
-        SourceError::BadData {
+    pub fn bad_data_count(details: impl Into<String>, count: usize) -> DataflowError {
+        DataflowError::DataError {
             details: details.into(),
             count,
-        }
-    }
-
-    pub fn other(name: impl Into<String>, details: impl Into<String>) -> SourceError {
-        SourceError::Other {
-            name: name.into(),
-            details: details.into(),
-        }
-    }
-
-    pub fn details(&self) -> &String {
-        match self {
-            SourceError::BadData { details, .. } | SourceError::Other { details, .. } => details,
         }
     }
 }
