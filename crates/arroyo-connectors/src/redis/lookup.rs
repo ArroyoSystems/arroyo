@@ -4,7 +4,7 @@ use arrow::array::{Array, ArrayRef, AsArray, RecordBatch};
 use arrow::datatypes::DataType;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_operator::connector::LookupConnector;
-use arroyo_rpc::errors::SourceError;
+use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::MetadataField;
 use arroyo_types::LOOKUP_KEY_INDEX_FIELD;
 use async_trait::async_trait;
@@ -25,7 +25,7 @@ impl LookupConnector for RedisLookup {
         "RedisLookup".to_string()
     }
 
-    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, SourceError>> {
+    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, DataflowError>> {
         if self.connection.is_none() {
             self.connection = Some(self.client.get_connection().await.unwrap());
         }

@@ -11,7 +11,7 @@ use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::errors::UserError;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
@@ -168,7 +168,7 @@ impl SourceOperator for KinesisSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -176,13 +176,7 @@ impl SourceOperator for KinesisSourceFunc {
             &[],
         );
 
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(UserError { name, details, .. }) => {
-                ctx.report_error(name.clone(), details.clone()).await;
-                panic!("{name}: {details}");
-            }
-        }
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -227,7 +221,7 @@ impl KinesisSourceFunc {
         shard_id: String,
         async_result: AsyncResult,
         collector: &mut SourceCollector,
-    ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
+    ) -> DataflowResult<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         match async_result {
             AsyncResult::ShardIteratorIdUpdate(new_shard_iterator) => {
                 self.handle_shard_iterator_id_update(shard_id, new_shard_iterator)
@@ -245,7 +239,7 @@ impl KinesisSourceFunc {
         &mut self,
         shard_id: String,
         shard_iterator_id: Option<String>,
-    ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
+    ) -> DataflowResult<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let shard_state = self.shards.get_mut(&shard_id).unwrap();
         match shard_iterator_id {
             Some(shard_iterator) => Ok(Some(self.next_read_future(shard_id, shard_iterator))),
@@ -309,7 +303,7 @@ impl KinesisSourceFunc {
         shard_id: String,
         get_records: GetRecordsOutput,
         collector: &mut SourceCollector,
-    ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
+    ) -> DataflowResult<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let last_sequence_number = get_records
             .records()
             .last()
@@ -333,7 +327,7 @@ impl KinesisSourceFunc {
     async fn handle_need_new_iterator(
         &mut self,
         shard_id: String,
-    ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
+    ) -> DataflowResult<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let shard_state = self.shards.get_mut(&shard_id).unwrap();
         Ok(Some(shard_state.get_update_shard_iterator_future(
             self.kinesis_client.as_ref().unwrap(),
@@ -359,12 +353,9 @@ impl KinesisSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> DataflowResult<SourceFinishType> {
         self.init_client().await;
-        let starting_futures = self
-            .init_shards(ctx)
-            .await
-            .map_err(|e| UserError::new("failed to initialize shards.", e.to_string()))?;
+        let starting_futures = self.init_shards(ctx).await?;
         let mut futures = FuturesUnordered::new();
         futures.extend(starting_futures.into_iter());
 
@@ -376,7 +367,7 @@ impl KinesisSourceFunc {
                 result = futures.select_next_some() => {
                     let shard_id = result.name;
                     if let Some(future) = self.handle_async_result_split(shard_id,
-                        result.result.map_err(|e| UserError::new("Fatal Kinesis error", e.to_string()))?, collector).await? {
+                        result.result?, collector).await? {
                             futures.push(future);
                         }
                 },
@@ -387,7 +378,6 @@ impl KinesisSourceFunc {
                     match self.sync_shards(ctx).await {
                         Err(err) => {
                             warn!("failed to sync shards: {}", err);
-                            ctx.report_error("failed to sync shards".to_string(), err.to_string()).await;
                         },
                         Ok(new_futures) => {
                             futures.extend(new_futures.into_iter());
@@ -398,7 +388,7 @@ impl KinesisSourceFunc {
                     match control_message {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            let s = ctx.table_manager.get_global_keyed_state("k").await.unwrap();
+                            let s = ctx.table_manager.get_global_keyed_state("k").await?;
                             for (shard_id, shard_state) in &self.shards {
                                 s.insert(shard_id.clone(), shard_state.clone()).await;
                             }
@@ -437,7 +427,7 @@ impl KinesisSourceFunc {
         &mut self,
         get_records_output: GetRecordsOutput,
         collector: &mut SourceCollector,
-    ) -> Result<Option<String>, UserError> {
+    ) -> DataflowResult<Option<String>> {
         let records = get_records_output.records;
         for record in records {
             let data = record.data.into_inner();
