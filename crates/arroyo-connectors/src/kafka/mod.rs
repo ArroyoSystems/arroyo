@@ -664,7 +664,7 @@ impl KafkaTester {
                     }
 
                     if let Some(error) = error {
-                        bail!("Failed to parse message as schema-registry Avro (SR-Avro): {:?}. Ensure that the format and schema type are correct.", error.details());
+                        bail!("Failed to parse message as schema-registry Avro (SR-Avro): {}. Ensure that the format and schema type are correct.", error);
                     }
                 } else {
                     let aschema: ArroyoSchema = schema.clone().into();
@@ -689,7 +689,7 @@ impl KafkaTester {
                         if msg[0] == 0 {
                             bail!("Failed to parse message as regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct.");
                         } else {
-                            bail!("Failed to parse message as Avro: {:?}. Ensure that the format and schema type are correct.", error.details());
+                            bail!("Failed to parse message as Avro: {}. Ensure that the format and schema type are correct.", error);
                         };
                     }
                 }
@@ -726,7 +726,7 @@ impl KafkaTester {
                 if let Some(error) = error {
                     bail!(
                         "Failed to parse message according to the provided Protobuf schema: {}",
-                        error.details()
+                        error
                     );
                 }
             }

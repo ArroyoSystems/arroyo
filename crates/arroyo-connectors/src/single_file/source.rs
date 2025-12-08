@@ -4,6 +4,8 @@ use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
+    connector_err,
+    errors::DataflowResult,
     formats::{BadData, Format, Framing},
     grpc::rpc::{StopMode, TableConfig},
     ControlMessage,
@@ -34,11 +36,11 @@ impl SingleFileSourceFunc {
     ) -> Option<SourceFinishType> {
         match msg {
             Some(ControlMessage::Checkpoint(c)) => {
-                collector.flush_buffer().await.unwrap();
+                let _ = collector.flush_buffer().await;
                 let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
                     String,
                     usize,
-                > = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+                > = ctx.table_manager.get_global_keyed_state("f").await.ok()?;
                 state.insert(self.input_file.clone(), self.lines_read).await;
                 // checkpoint our state
                 if self.start_checkpoint(c, ctx, collector).await {
@@ -76,25 +78,25 @@ impl SourceOperator for SingleFileSourceFunc {
         arroyo_state::global_table_config("f", "file_source")
     }
 
-    async fn on_start(&mut self, ctx: &mut SourceContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
         let s: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> = ctx
             .table_manager
             .get_global_keyed_state("f")
-            .await
-            .expect("should have table f in file source");
+            .await?;
 
         if let Some(state) = s.get(&self.input_file) {
             self.lines_read = *state;
         }
+        Ok(())
     }
 
     async fn run(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
+    ) -> DataflowResult<SourceFinishType> {
         if ctx.task_info.task_index != 0 {
-            return SourceFinishType::Final;
+            return Ok(SourceFinishType::Final);
         }
         collector.initialize_deserializer(
             self.format.clone(),
@@ -104,26 +106,31 @@ impl SourceOperator for SingleFileSourceFunc {
         );
 
         let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
-            ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+            ctx.table_manager.get_global_keyed_state("f").await?;
 
         self.lines_read = state.get(&self.input_file).copied().unwrap_or_default();
 
-        let file = File::open(&self.input_file).await.expect(&self.input_file);
+        let file = File::open(&self.input_file)
+            .await
+            .map_err(|e| connector_err!(User, NoRetry, "failed to open file '{}': {}", self.input_file, e))?;
         let mut lines = BufReader::new(file).lines();
 
         let mut i = 0;
 
-        while let Some(s) = lines.next_line().await.unwrap() {
+        while let Some(s) = lines
+            .next_line()
+            .await
+            .map_err(|e| connector_err!(External, WithBackoff, "failed to read line from file '{}': {}", self.input_file, e))?
+        {
             if i < self.lines_read {
                 i += 1;
                 continue;
             }
             collector
                 .deserialize_slice(s.as_bytes(), SystemTime::now(), None)
-                .await
-                .unwrap();
+                .await?;
             if collector.should_flush() {
-                collector.flush_buffer().await.unwrap();
+                collector.flush_buffer().await?;
             }
 
             self.lines_read += 1;
@@ -139,12 +146,12 @@ impl SourceOperator for SingleFileSourceFunc {
             };
 
             if let Some(value) = return_type {
-                return value;
+                return Ok(value);
             }
         }
 
-        collector.flush_buffer().await.unwrap();
+        collector.flush_buffer().await?;
         info!("file source finished");
-        SourceFinishType::Final
+        Ok(SourceFinishType::Final)
     }
 }

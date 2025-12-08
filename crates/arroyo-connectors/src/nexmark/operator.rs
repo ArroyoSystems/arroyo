@@ -6,8 +6,9 @@ use arroyo_formats::should_flush;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
-use arroyo_rpc::ControlMessage;
+use arroyo_rpc::{connector_err, ControlMessage};
 use arroyo_types::{to_millis, to_nanos};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -208,14 +209,13 @@ impl SourceOperator for NexmarkSourceFunc {
         arroyo_state::global_table_config("s", "nexmark source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut SourceContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
         // load state
         self.state = Some({
             let ss = ctx
                 .table_manager
                 .get_global_keyed_state::<usize, NexmarkSourceState>("s")
-                .await
-                .expect("should be able to read state");
+                .await?;
             let saved_states = ss.get_all().len();
             if saved_states != ctx.task_info.parallelism as usize {
                 let config = GeneratorConfig::new(
@@ -236,18 +236,19 @@ impl SourceOperator for NexmarkSourceFunc {
                 }
             } else {
                 ss.get(&(ctx.task_info.task_index as usize))
-                    .unwrap()
+                    .ok_or_else(|| connector_err!(Internal, NoRetry, "missing state for task index"))?
                     .clone()
             }
         });
+        Ok(())
     }
 
     async fn run(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
-        let state = self.state.as_ref().unwrap().clone();
+    ) -> DataflowResult<SourceFinishType> {
+        let state = self.state.as_ref().ok_or_else(|| anyhow::anyhow!("state not initialized"))?.clone();
 
         let mut generator = NexmarkGenerator::from_config(&state.config, state.event_count as u64);
 
@@ -285,10 +286,9 @@ impl SourceOperator for NexmarkSourceFunc {
                                 Arc::new(bid_builder.finish()),
                                 Arc::new(timestamp_builder.finish()),
                             ],
-                        )
-                        .unwrap(),
+                        )?,
                     )
-                    .await;
+                    .await?;
                 records = 0;
                 flush_time = Instant::now();
             }
@@ -300,8 +300,7 @@ impl SourceOperator for NexmarkSourceFunc {
                         // checkpoint our state
                         ctx.table_manager
                             .get_global_keyed_state::<usize, NexmarkSourceState>("s")
-                            .await
-                            .expect("should be able to get nexmark state")
+                            .await?
                             .insert(
                                 ctx.task_info.task_index as usize,
                                 NexmarkSourceState {
@@ -312,17 +311,17 @@ impl SourceOperator for NexmarkSourceFunc {
                             .await;
                         debug!("starting checkpointing {}", ctx.task_info.task_index);
                         if self.start_checkpoint(c, ctx, collector).await {
-                            return SourceFinishType::Immediate;
+                            return Ok(SourceFinishType::Immediate);
                         }
                     }
                     Ok(ControlMessage::Stop { mode }) => {
                         info!("Stopping nexmark source");
                         match mode {
                             StopMode::Graceful => {
-                                return SourceFinishType::Graceful;
+                                return Ok(SourceFinishType::Graceful);
                             }
                             StopMode::Immediate => {
-                                return SourceFinishType::Immediate;
+                                return Ok(SourceFinishType::Immediate);
                             }
                         }
                     }
@@ -336,7 +335,7 @@ impl SourceOperator for NexmarkSourceFunc {
         }
 
         info!("finished generating nexmark data");
-        SourceFinishType::Final
+        Ok(SourceFinishType::Final)
     }
 }
 

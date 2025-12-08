@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::SystemTime;
-
-use arroyo_rpc::ControlMessage;
+use anyhow::{anyhow, bail};
+use arroyo_rpc::{connector_err, ControlMessage};
 use arroyo_types::{SignalMessage, Watermark};
 
 use tokio::select;
@@ -17,7 +17,7 @@ use crate::polling_http::EmitBehavior;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::errors::UserError;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
@@ -53,31 +53,24 @@ impl SourceOperator for PollingHttpSourceFunc {
         arroyo_state::global_table_config("s", "polling http source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut SourceContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
         let s: &mut GlobalKeyedView<(), PollingHttpSourceState> = ctx
             .table_manager
             .get_global_keyed_state("s")
-            .await
-            .expect("should be able to read http state");
+            .await?;
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
         }
+        Ok(())
     }
 
     async fn run(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
+    ) -> DataflowResult<SourceFinishType> {
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -87,20 +80,19 @@ impl PollingHttpSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
         msg: Option<ControlMessage>,
-    ) -> Option<SourceFinishType> {
-        match msg? {
+    ) -> DataflowResult<Option<SourceFinishType>> {
+        let Some(msg) = msg else {
+            return Ok(None);
+        };
+        match msg {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
                 let state = self.state.clone();
-                let s = ctx
-                    .table_manager
-                    .get_global_keyed_state("s")
-                    .await
-                    .expect("should be able to get http state");
+                let s = ctx.table_manager.get_global_keyed_state("s").await?;
                 s.insert((), state).await;
 
                 if self.start_checkpoint(c, ctx, collector).await {
-                    return Some(SourceFinishType::Immediate);
+                    return Ok(Some(SourceFinishType::Immediate));
                 }
             }
             ControlMessage::Stop { mode } => {
@@ -108,10 +100,10 @@ impl PollingHttpSourceFunc {
 
                 match mode {
                     StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
+                        return Ok(Some(SourceFinishType::Graceful));
                     }
                     StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
+                        return Ok(Some(SourceFinishType::Immediate));
                     }
                 }
             }
@@ -123,10 +115,10 @@ impl PollingHttpSourceFunc {
             }
             ControlMessage::NoOp => {}
         }
-        None
+        Ok(None)
     }
 
-    async fn request(&mut self) -> Result<Vec<u8>, UserError> {
+    async fn request(&mut self) -> anyhow::Result<Vec<u8>> {
         let mut request = self
             .client
             .request(self.method.clone(), self.endpoint.clone());
@@ -137,39 +129,23 @@ impl PollingHttpSourceFunc {
 
         let resp = self
             .client
-            .execute(request.build().expect("building request failed"))
-            .await
-            .map_err(|e| {
-                UserError::new(
-                    "request failed",
-                    format!("failed to execute HTTP request: {e}"),
-                )
-            })?;
+            .execute(request.build()?)
+            .await?;
 
         if resp.status().is_success() {
             let content_len = resp.content_length().unwrap_or(0);
             if content_len > MAX_BODY_SIZE as u64 {
-                return Err(UserError::new(
-                    "error reading from http endpoint",
-                    format!(
-                        "content length sent by server exceeds maximum limit ({content_len} > {MAX_BODY_SIZE})"
-                    ),
-                ));
+                bail!("content length sent by server exceeds maximum limit ({content_len} > {MAX_BODY_SIZE})");
             }
 
             let mut buf = Vec::with_capacity(content_len as usize);
 
             let mut bytes_stream = resp.bytes_stream();
             while let Some(chunk) = bytes_stream.next().await {
-                buf.extend_from_slice(&chunk.map_err(|e| {
-                    UserError::new("request failed", format!("failed while reading body: {e}"))
-                })?);
+                buf.extend_from_slice(&chunk?);
 
                 if buf.len() > MAX_BODY_SIZE {
-                    return Err(UserError::new(
-                        "error reading from http endpoint",
-                        format!("response body exceeds max length {MAX_BODY_SIZE}"),
-                    ));
+                    bail!("response body exceeds max length {MAX_BODY_SIZE}");
                 }
             }
 
@@ -189,10 +165,7 @@ impl PollingHttpSourceFunc {
                 error_body
             );
 
-            Err(UserError::new(
-                "server responded with error",
-                format!("http server responded with {}", status.as_u16()),
-            ))
+            bail!("http server responded with {}", status.as_u16());
         }
     }
 
@@ -200,7 +173,7 @@ impl PollingHttpSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -231,12 +204,12 @@ impl PollingHttpSourceFunc {
                                 self.state.last_message = Some(buf);
                             }
                             Err(e) => {
-                                ctx.report_user_error(e).await;
+                                ctx.report_nonfatal_error(connector_err!(User, WithBackoff, "HTTP request failed: {}", e)).await;
                             }
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await {
+                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await? {
                             return Ok(r);
                         }
                     }
@@ -249,7 +222,7 @@ impl PollingHttpSourceFunc {
                 .await;
             loop {
                 let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {
+                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await? {
                     return Ok(r);
                 }
             }

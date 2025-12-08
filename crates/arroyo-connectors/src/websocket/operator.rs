@@ -6,7 +6,8 @@ use std::time::SystemTime;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::errors::UserError;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
@@ -45,23 +46,23 @@ impl SourceOperator for WebsocketSourceFunc {
         global_table_config("e", "websocket source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut SourceContext) {
+    async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
         let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
-            .await
-            .expect("couldn't get state for websocket");
+            .await?;
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
         }
+        Ok(())
     }
 
     async fn run(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -69,14 +70,7 @@ impl SourceOperator for WebsocketSourceFunc {
             &[],
         );
 
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -86,19 +80,21 @@ impl WebsocketSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
         msg: Option<ControlMessage>,
-    ) -> Option<SourceFinishType> {
-        match msg? {
+    ) -> DataflowResult<Option<SourceFinishType>> {
+        let Some(msg) = msg else {
+            return Ok(None);
+        };
+        match msg {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
                 let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
                     .table_manager
                     .get_global_keyed_state("e")
-                    .await
-                    .expect("couldn't get state for websocket");
+                    .await?;
                 s.insert((), self.state.clone()).await;
 
                 if self.start_checkpoint(c, ctx, collector).await {
-                    return Some(SourceFinishType::Immediate);
+                    return Ok(Some(SourceFinishType::Immediate));
                 }
             }
             ControlMessage::Stop { mode } => {
@@ -106,10 +102,10 @@ impl WebsocketSourceFunc {
 
                 match mode {
                     StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
+                        return Ok(Some(SourceFinishType::Graceful));
                     }
                     StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
+                        return Ok(Some(SourceFinishType::Immediate));
                     }
                 }
             }
@@ -121,14 +117,14 @@ impl WebsocketSourceFunc {
             }
             ControlMessage::NoOp => {}
         }
-        None
+        Ok(None)
     }
 
     async fn handle_message(
         &mut self,
         msg: &[u8],
         collector: &mut SourceCollector,
-    ) -> Result<(), UserError> {
+    ) -> DataflowResult<()> {
         collector
             .deserialize_slice(msg, SystemTime::now(), None)
             .await?;
@@ -144,24 +140,13 @@ impl WebsocketSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
-        let uri = match Uri::from_str(&self.url.to_string()) {
-            Ok(uri) => uri,
-            Err(e) => {
-                ctx.report_error("Failed to parse endpoint".to_string(), format!("{e:?}"))
-                    .await;
-                panic!("Failed to parse endpoint: {e:?}");
-            }
-        };
+    ) -> DataflowResult<SourceFinishType> {
+        let uri = Uri::from_str(&self.url.to_string())
+            .map_err(|e| connector_err!(User, NoRetry, "invalid websocket URL '{}': {}", self.url, e))?;
 
-        let host = match uri.host() {
-            Some(host) => host,
-            None => {
-                ctx.report_error("Endpoint must have a host".to_string(), "".to_string())
-                    .await;
-                panic!("Endpoint must have a host");
-            }
-        };
+        let host = uri
+            .host()
+            .ok_or_else(|| connector_err!(User, NoRetry, "websocket endpoint must have a host"))?;
 
         let mut request_builder = Request::builder().uri(&self.url);
 
@@ -169,45 +154,25 @@ impl WebsocketSourceFunc {
             request_builder = request_builder.header(k, v);
         }
 
-        let request = match request_builder
+        let request = request_builder
             .header("Host", host)
             .header("Sec-WebSocket-Key", generate_key())
             .header("Sec-WebSocket-Version", "13")
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
             .body(())
-        {
-            Ok(request) => request,
-            Err(e) => {
-                ctx.report_error("Failed to build request".to_string(), format!("{e:?}"))
-                    .await;
-                panic!("Failed to build request: {e:?}");
-            }
-        };
+            .map_err(|e| connector_err!(Internal, NoRetry, "failed to build websocket request: {}", e))?;
 
-        let ws_stream = match connect_async(request).await {
-            Ok((ws_stream, _)) => ws_stream,
-            Err(e) => {
-                ctx.report_error(
-                    "Failed to connect to websocket server".to_string(),
-                    e.to_string(),
-                )
-                .await;
-                panic!("{}", e);
-            }
-        };
+        let (ws_stream, _) = connect_async(request)
+            .await
+            .map_err(|e| connector_err!(External, WithBackoff, "failed to connect to websocket '{}': {}", self.url, e))?;
 
         let (mut tx, mut rx) = ws_stream.split();
 
         for msg in &self.subscription_messages {
-            if let Err(e) = tx.send(tungstenite::Message::Text(msg.clone())).await {
-                ctx.report_error(
-                    "Failed to send subscription message to websocket server".to_string(),
-                    e.to_string(),
-                )
-                .await;
-                panic!("Failed to send subscription message to websocket server: {e:?}");
-            }
+            tx.send(tungstenite::Message::Text(msg.clone()))
+                .await
+                .map_err(|e| connector_err!(External, WithBackoff, "failed to send subscription message: {}", e))?;
         }
 
         let mut flush_ticker = tokio::time::interval(std::time::Duration::from_millis(50));
@@ -228,16 +193,15 @@ impl WebsocketSourceFunc {
                                         self.handle_message(&bs, collector).await?
                                     },
                                     tungstenite::Message::Ping(d) => {
-                                        tx.send(tungstenite::Message::Pong(d)).await
-                                            .map(|_| ())
-                                            .map_err(|e| UserError::new("Failed to send pong to websocket server", e.to_string()))?
+                                        tx.send(tungstenite::Message::Pong(d))
+                                            .await
+                                            .map_err(|e| connector_err!(External, WithBackoff, "failed to send pong: {}", e))?;
                                     },
                                     tungstenite::Message::Pong(_) => {
                                         // ignore
                                     },
                                     tungstenite::Message::Close(_) => {
-                                        ctx.report_error("Received close frame from server".to_string(), "".to_string()).await;
-                                        panic!("Received close frame from server");
+                                        return Err(connector_err!(External, WithBackoff, "websocket server closed the connection"));
                                     },
                                     tungstenite::Message::Frame(_) => {
                                         // this should be captured by tungstenite
@@ -245,8 +209,7 @@ impl WebsocketSourceFunc {
                                 };
                             }
                         Some(Err(e)) => {
-                            ctx.report_error("Error while reading from websocket".to_string(), format!("{e:?}")).await;
-                            panic!("Error while reading from websocket: {e:?}");
+                            return Err(connector_err!(External, WithBackoff, "error reading from websocket: {}", e));
                         }
                         None => {
                             info!("Socket closed");
@@ -260,7 +223,7 @@ impl WebsocketSourceFunc {
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await {
+                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await? {
                             return Ok(r);
                         }
                     }
@@ -273,7 +236,7 @@ impl WebsocketSourceFunc {
                 .await;
             loop {
                 let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {
+                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await? {
                     return Ok(r);
                 }
             }
