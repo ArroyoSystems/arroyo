@@ -391,7 +391,12 @@ impl State for Scheduling {
                 })?;
 
             if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
-                return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e.into(), 10));
+                return Err(ctx.retryable(
+                    self,
+                    "failed to prepare checkpoint for loading",
+                    e.into(),
+                    10,
+                ));
             }
             metadata.min_epoch = min_epoch;
             if needs_commits {

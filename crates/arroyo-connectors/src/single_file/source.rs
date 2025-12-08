@@ -79,10 +79,8 @@ impl SourceOperator for SingleFileSourceFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
-        let s: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> = ctx
-            .table_manager
-            .get_global_keyed_state("f")
-            .await?;
+        let s: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
+            ctx.table_manager.get_global_keyed_state("f").await?;
 
         if let Some(state) = s.get(&self.input_file) {
             self.lines_read = *state;
@@ -110,18 +108,28 @@ impl SourceOperator for SingleFileSourceFunc {
 
         self.lines_read = state.get(&self.input_file).copied().unwrap_or_default();
 
-        let file = File::open(&self.input_file)
-            .await
-            .map_err(|e| connector_err!(User, NoRetry, "failed to open file '{}': {}", self.input_file, e))?;
+        let file = File::open(&self.input_file).await.map_err(|e| {
+            connector_err!(
+                User,
+                NoRetry,
+                "failed to open file '{}': {}",
+                self.input_file,
+                e
+            )
+        })?;
         let mut lines = BufReader::new(file).lines();
 
         let mut i = 0;
 
-        while let Some(s) = lines
-            .next_line()
-            .await
-            .map_err(|e| connector_err!(External, WithBackoff, "failed to read line from file '{}': {}", self.input_file, e))?
-        {
+        while let Some(s) = lines.next_line().await.map_err(|e| {
+            connector_err!(
+                External,
+                WithBackoff,
+                "failed to read line from file '{}': {}",
+                self.input_file,
+                e
+            )
+        })? {
             if i < self.lines_read {
                 i += 1;
                 continue;

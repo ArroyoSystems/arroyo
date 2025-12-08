@@ -353,9 +353,7 @@ impl ArrowOperator for InstantJoin {
                 Some((batch, future)) => match self.execs.get_mut(&bin) {
                     Some(exec) => {
                         exec.active_exec = future.clone();
-                        collector
-                            .collect(batch?)
-                            .await?;
+                        collector.collect(batch?).await?;
                         self.futures.lock().await.push(future);
                     }
                     None => unreachable!(
@@ -364,7 +362,7 @@ impl ArrowOperator for InstantJoin {
                 },
             }
         }
-        
+
         Ok(())
     }
 }

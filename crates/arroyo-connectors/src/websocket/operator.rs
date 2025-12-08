@@ -47,10 +47,8 @@ impl SourceOperator for WebsocketSourceFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
-        let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
-            .table_manager
-            .get_global_keyed_state("e")
-            .await?;
+        let s: &mut GlobalKeyedView<(), WebsocketSourceState> =
+            ctx.table_manager.get_global_keyed_state("e").await?;
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
@@ -87,10 +85,8 @@ impl WebsocketSourceFunc {
         match msg {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
-                    .table_manager
-                    .get_global_keyed_state("e")
-                    .await?;
+                let s: &mut GlobalKeyedView<(), WebsocketSourceState> =
+                    ctx.table_manager.get_global_keyed_state("e").await?;
                 s.insert((), self.state.clone()).await;
 
                 if self.start_checkpoint(c, ctx, collector).await {
@@ -141,8 +137,9 @@ impl WebsocketSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> DataflowResult<SourceFinishType> {
-        let uri = Uri::from_str(&self.url.to_string())
-            .map_err(|e| connector_err!(User, NoRetry, "invalid websocket URL '{}': {}", self.url, e))?;
+        let uri = Uri::from_str(&self.url.to_string()).map_err(|e| {
+            connector_err!(User, NoRetry, "invalid websocket URL '{}': {}", self.url, e)
+        })?;
 
         let host = uri
             .host()
@@ -161,18 +158,38 @@ impl WebsocketSourceFunc {
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
             .body(())
-            .map_err(|e| connector_err!(Internal, NoRetry, "failed to build websocket request: {}", e))?;
+            .map_err(|e| {
+                connector_err!(
+                    Internal,
+                    NoRetry,
+                    "failed to build websocket request: {}",
+                    e
+                )
+            })?;
 
-        let (ws_stream, _) = connect_async(request)
-            .await
-            .map_err(|e| connector_err!(External, WithBackoff, "failed to connect to websocket '{}': {}", self.url, e))?;
+        let (ws_stream, _) = connect_async(request).await.map_err(|e| {
+            connector_err!(
+                External,
+                WithBackoff,
+                "failed to connect to websocket '{}': {}",
+                self.url,
+                e
+            )
+        })?;
 
         let (mut tx, mut rx) = ws_stream.split();
 
         for msg in &self.subscription_messages {
             tx.send(tungstenite::Message::Text(msg.clone()))
                 .await
-                .map_err(|e| connector_err!(External, WithBackoff, "failed to send subscription message: {}", e))?;
+                .map_err(|e| {
+                    connector_err!(
+                        External,
+                        WithBackoff,
+                        "failed to send subscription message: {}",
+                        e
+                    )
+                })?;
         }
 
         let mut flush_ticker = tokio::time::interval(std::time::Duration::from_millis(50));

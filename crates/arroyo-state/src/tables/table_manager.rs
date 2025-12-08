@@ -363,7 +363,10 @@ impl TableManager {
     }
 
     pub async fn load_compacted(&mut self, compacted: &CompactionResult) {
-        assert_eq!(compacted.operator_id, self.task_info.operator_id, "shouldn't be loading compaction for other operator");
+        assert_eq!(
+            compacted.operator_id, self.task_info.operator_id,
+            "shouldn't be loading compaction for other operator"
+        );
 
         self.writer
             .sender
@@ -391,12 +394,12 @@ impl TableManager {
         if let std::collections::hash_map::Entry::Vacant(e) =
             self.caches.entry(table_name.to_string())
         {
-            let table_implementation = self
-                .tables
-                .get(table_name)
-                .ok_or_else(|| StateError::NoRegisteredTable {
-                    table: table_name.to_string(),
-                })?;
+            let table_implementation =
+                self.tables
+                    .get(table_name)
+                    .ok_or_else(|| StateError::NoRegisteredTable {
+                        table: table_name.to_string(),
+                    })?;
 
             let global_keyed_table = table_implementation
                 .as_any()
@@ -414,12 +417,13 @@ impl TableManager {
         }
 
         let cache = self.caches.get_mut(table_name).unwrap();
-        let cache: &mut GlobalKeyedView<K, V> = cache.downcast_mut().ok_or_else(|| {
-            StateError::WrongTableKind {
-                table: table_name.to_string(),
-                expected: "global_keyed_state",
-            }
-        })?;
+        let cache: &mut GlobalKeyedView<K, V> =
+            cache
+                .downcast_mut()
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "global_keyed_state",
+                })?;
         Ok(cache)
     }
 

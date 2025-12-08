@@ -233,9 +233,7 @@ impl SourceContext {
 
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         //TODO: support compaction in the table manager
-        self.table_manager
-            .load_compacted(&compaction)
-            .await;
+        self.table_manager.load_compacted(&compaction).await;
     }
 
     pub async fn report_nonfatal_error(&mut self, error: DataflowError) {
@@ -249,7 +247,6 @@ impl SourceContext {
             })
             .await
             .unwrap();
-
     }
 }
 
@@ -703,9 +700,7 @@ impl OperatorContext {
 
     pub async fn load_compacted(&mut self, compaction: &CompactionResult) {
         //TODO: support compaction in the table manager
-        self.table_manager
-            .load_compacted(compaction)
-            .await;
+        self.table_manager.load_compacted(compaction).await;
     }
 
     pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {

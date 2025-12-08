@@ -1,3 +1,6 @@
+use anyhow::bail;
+use arroyo_rpc::{connector_err, ControlMessage};
+use arroyo_types::{SignalMessage, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
@@ -6,9 +9,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::SystemTime;
-use anyhow::bail;
-use arroyo_rpc::{connector_err, ControlMessage};
-use arroyo_types::{SignalMessage, Watermark};
 
 use tokio::select;
 use tokio::time::MissedTickBehavior;
@@ -54,10 +54,8 @@ impl SourceOperator for PollingHttpSourceFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
-        let s: &mut GlobalKeyedView<(), PollingHttpSourceState> = ctx
-            .table_manager
-            .get_global_keyed_state("s")
-            .await?;
+        let s: &mut GlobalKeyedView<(), PollingHttpSourceState> =
+            ctx.table_manager.get_global_keyed_state("s").await?;
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
@@ -127,10 +125,7 @@ impl PollingHttpSourceFunc {
             request = request.body(body);
         }
 
-        let resp = self
-            .client
-            .execute(request.build()?)
-            .await?;
+        let resp = self.client.execute(request.build()?).await?;
 
         if resp.status().is_success() {
             let content_len = resp.content_length().unwrap_or(0);

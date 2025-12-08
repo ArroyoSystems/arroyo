@@ -21,13 +21,13 @@ use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
+use itertools::Itertools;
 use prost::Message;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
-use itertools::Itertools;
 use tracing::info;
 
 pub struct AsyncUdfOperator {
@@ -369,17 +369,11 @@ impl ArrowOperator for AsyncUdfOperator {
         let result: Vec<_> = self
             .final_exprs
             .iter()
-            .map(|expr| {
-                expr.evaluate(&batch)
-                    .unwrap()
-                    .into_array(batch.num_rows())
-            })
+            .map(|expr| expr.evaluate(&batch).unwrap().into_array(batch.num_rows()))
             .try_collect()?;
 
         // iterate through the batch convert to rows and push into our map
-        let out_rows = self
-            .output_row_converter
-            .convert_columns(&result)?;
+        let out_rows = self.output_row_converter.convert_columns(&result)?;
 
         for (row, id) in out_rows.into_iter().zip(ids.values()) {
             self.outputs.insert(*id, row.owned());
@@ -450,7 +444,11 @@ impl ArrowOperator for AsyncUdfOperator {
 }
 
 impl AsyncUdfOperator {
-    async fn flush_output(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) -> DataflowResult<()> {
+    async fn flush_output(
+        &mut self,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) -> DataflowResult<()> {
         // check if we can emit any records -- these are ones received before our most recent
         // watermark -- once all records from before a watermark have been processed, we can
         // remove and emit the watermark

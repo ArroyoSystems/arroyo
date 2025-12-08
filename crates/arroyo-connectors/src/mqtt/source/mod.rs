@@ -1,19 +1,19 @@
+use anyhow::Context;
 use arroyo_formats::de::FieldValueType;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
+use arroyo_types::{SignalMessage, Watermark};
 use async_trait::async_trait;
+use governor::{Quota, RateLimiter as GovernorRateLimiter};
+use rumqttc::mqttbytes::QoS;
+use rumqttc::Outgoing;
+use rumqttc::{Event as MqttEvent, Incoming};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use anyhow::Context;
-use arroyo_rpc::connector_err;
-use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
-use arroyo_types::{SignalMessage, Watermark};
-use governor::{Quota, RateLimiter as GovernorRateLimiter};
-use rumqttc::mqttbytes::QoS;
-use rumqttc::Outgoing;
-use rumqttc::{Event as MqttEvent, Incoming};
 
 use crate::mqtt::{create_connection, MqttConfig};
 use arroyo_operator::context::{SourceCollector, SourceContext};
@@ -115,12 +115,21 @@ impl MqttSourceFunc {
             &ctx.task_info.job_id,
             &ctx.task_info.operator_id,
             ctx.task_info.task_index as usize,
-        ).context("creating connection")?;
+        )
+        .context("creating connection")?;
 
         client
             .subscribe(self.topic.clone(), self.qos)
             .await
-            .map_err(|e| connector_err!(External, WithBackoff, "failed to subscribe to MQTT topic '{}': {}", self.topic, e))?;
+            .map_err(|e| {
+                connector_err!(
+                    External,
+                    WithBackoff,
+                    "failed to subscribe to MQTT topic '{}': {}",
+                    self.topic,
+                    e
+                )
+            })?;
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
 

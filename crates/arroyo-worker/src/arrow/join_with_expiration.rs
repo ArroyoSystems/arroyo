@@ -49,9 +49,7 @@ impl JoinWithExpiration {
             .table_manager
             .get_key_time_table("left", ctx.last_present_watermark())
             .await?;
-        let left_rows = left_table
-            .insert(record_batch.clone())
-            .await?;
+        let left_rows = left_table.insert(record_batch.clone()).await?;
         let right_table = ctx
             .table_manager
             .get_key_time_table("right", ctx.last_present_watermark())
@@ -59,9 +57,7 @@ impl JoinWithExpiration {
 
         let mut right_batches = vec![];
         for row in left_rows {
-            if let Some(batch) = right_table
-                .get_batch(row.as_ref())?
-            {
+            if let Some(batch) = right_table.get_batch(row.as_ref())? {
                 right_batches.push(batch.clone());
             }
         }
@@ -87,9 +83,7 @@ impl JoinWithExpiration {
             .get_key_time_table("right", ctx.last_present_watermark())
             .await?;
 
-        let right_rows = right_table
-            .insert(right_batch.clone())
-            .await?;
+        let right_rows = right_table.insert(right_batch.clone()).await?;
 
         let left_table = ctx
             .table_manager
@@ -98,9 +92,7 @@ impl JoinWithExpiration {
 
         let mut left_batches = vec![];
         for row in right_rows {
-            if let Some(batch) = left_table
-                .get_batch(row.as_ref())?
-            {
+            if let Some(batch) = left_table.get_batch(row.as_ref())? {
                 left_batches.push(batch.clone());
             }
         }
