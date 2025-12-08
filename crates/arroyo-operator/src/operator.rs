@@ -158,11 +158,10 @@ impl OperatorNode {
                     source_context.out_schema.clone(),
                     collector,
                     control_tx.clone(),
-                    &source_context.chain_info,
                     &source_context.task_info,
                 );
 
-                s.operator.on_start(&mut source_context).await;
+                s.operator.on_start(&mut source_context).await.unwrap();
 
                 ready.wait().await;
                 info!(
@@ -186,7 +185,7 @@ impl OperatorNode {
 
                 s.operator
                     .on_close(&mut source_context, &mut collector)
-                    .await;
+                    .await.unwrap();
 
                 if let Some(final_message) = result.into() {
                     collector.broadcast(final_message).await;
@@ -362,13 +361,15 @@ macro_rules! call_with_collector {
                 $self
                     .operator
                     .$name($arg, &mut $self.context, &mut collector)
-                    .await;
+                    .await
+                    .unwrap();
             }
             None => {
                 $self
                     .operator
                     .$name($arg, &mut $self.context, $final_collector)
-                    .await;
+                    .await
+                    .unwrap();
             }
         }
     };
@@ -520,7 +521,7 @@ impl ChainedOperator {
                 );
                 self.operator
                     .handle_commit(*epoch, commit_data, &mut self.context)
-                    .await;
+                    .await.unwrap();
                 return shutdown_after_commit;
             }
             ControlMessage::LoadCompacted { compacted } => {
@@ -567,7 +568,7 @@ impl ChainedOperator {
 
     async fn on_start(&mut self) {
         for (op, ctx) in self.iter_mut() {
-            op.on_start(ctx).await;
+            op.on_start(ctx).await.unwrap();
         }
     }
 
@@ -587,7 +588,7 @@ impl ChainedOperator {
             final_collector,
         };
 
-        collector.collect(batch).await;
+        collector.collect(batch).await.unwrap();
     }
 
     #[allow(clippy::type_complexity)]
@@ -670,7 +671,7 @@ impl ChainedOperator {
             SignalMessage::Watermark(watermark) => {
                 debug!("received watermark {:?} in {}", watermark, chain_info,);
 
-                self.handle_watermark(*watermark, idx, collector).await;
+                self.handle_watermark(*watermark, idx, collector).await.unwrap();
             }
             SignalMessage::Stop => {
                 closed.insert(idx);
@@ -752,7 +753,7 @@ impl ChainedOperator {
         op_index: usize,
         result: Box<dyn Any + Send>,
         final_collector: &mut ArrowCollector,
-    ) {
+    ) -> DataflowResult<()> {
         let mut op = self;
         for _ in 0..op_index {
             op = op
@@ -765,7 +766,7 @@ impl ChainedOperator {
             None => {
                 op.operator
                     .handle_future_result(result, &mut op.context, final_collector)
-                    .await;
+                    .await?;
             }
             Some(next) => {
                 let mut collector = ChainedCollector {
@@ -776,9 +777,11 @@ impl ChainedOperator {
                 };
                 op.operator
                     .handle_future_result(result, &mut op.context, &mut collector)
-                    .await;
+                    .await?;
             }
         }
+
+        Ok(())
     }
 
     async fn run_checkpoint(
@@ -832,13 +835,13 @@ impl ChainedOperator {
                 };
                 self.operator
                     .handle_tick(tick, &mut self.context, &mut collector)
-                    .await;
+                    .await.unwrap();
                 Box::pin(next.handle_tick(tick, final_collector)).await;
             }
             None => {
                 self.operator
                     .handle_tick(tick, &mut self.context, final_collector)
-                    .await;
+                    .await.unwrap();
             }
         }
     }
@@ -859,14 +862,14 @@ impl ChainedOperator {
 
                 self.operator
                     .on_close(final_message, &mut self.context, &mut collector)
-                    .await;
+                    .await.unwrap();
 
                 Box::pin(next.on_close(final_message, final_collector)).await;
             }
             None => {
                 self.operator
                     .on_close(final_message, &mut self.context, final_collector)
-                    .await;
+                    .await.unwrap();
             }
         }
     }
@@ -995,7 +998,7 @@ async fn operator_run_behavior(
                 }
             }
             Some(val) = operator_future => {
-                this.handle_future_result(val.0, val.1, collector).await;
+                this.handle_future_result(val.0, val.1, collector).await.unwrap();
             }
             _ = interval.tick() => {
                 this.handle_tick(ticks, collector).await;
@@ -1142,11 +1145,9 @@ pub trait ArrowOperator: Send + 'static {
         result: Box<dyn Any + Send>,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
+        Ok(())
     }
-
-    #[allow(unused_variables)]
-    async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut OperatorContext) {}
 
     #[allow(unused_variables)]
     async fn handle_watermark(

@@ -91,13 +91,13 @@ impl ArrowOperator for LookupJoin {
         if !uncached_keys.is_empty() {
             let cols = self
                 .key_row_converter
-                .convert_rows(uncached_keys.iter().map(|r| r.row()))
-                .unwrap();
+                .convert_rows(uncached_keys.iter().map(|r| r.row()))?;
 
             let result_batch = self.connector.lookup(&cols).await;
 
             if let Some(result_batch) = result_batch {
-                let mut result_batch = result_batch.unwrap();
+                let mut result_batch = result_batch?;
+
                 let key_idx_col = result_batch
                     .schema()
                     .index_of(LOOKUP_KEY_INDEX_FIELD)
@@ -137,8 +137,7 @@ impl ArrowOperator for LookupJoin {
 
         let right_side = self
             .result_row_converter
-            .convert_rows(output_rows.iter())
-            .unwrap();
+            .convert_rows(output_rows.iter())?;
 
         let nonnull = (self.join_type == LookupJoinType::Inner).then(|| {
             let mut nonnull = vec![false; batch.num_rows()];
@@ -174,18 +173,18 @@ impl ArrowOperator for LookupJoin {
             .filter(|i| !key_indices.contains(i) && *i != in_schema.timestamp_index)
             .collect();
 
-        let mut result = batch.project(&non_keys).unwrap().columns().to_vec();
+        let mut result = batch.project(&non_keys)?.columns().to_vec();
         result.extend(right_side);
         result.push(batch.column(in_schema.timestamp_index).clone());
 
         let mut batch =
-            RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), result).unwrap();
+            RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), result)?;
 
         if let Some(nonnull) = nonnull {
-            batch = filter_record_batch(&batch, &nonnull).unwrap();
+            batch = filter_record_batch(&batch, &nonnull)?;
         }
 
-        collector.collect(batch).await;
+        collector.collect(batch).await?;
         Ok(())
     }
 }

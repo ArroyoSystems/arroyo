@@ -262,7 +262,7 @@ impl Table for ExpiringTimeKeyTable {
             .try_into()
             .map_err(|e| StateError::Other {
                 table: config.table_name.clone(),
-                error: format!("schema conversion error: {:?}", e),
+                error: format!("schema conversion error: {e:?}"),
             })?;
 
         let schema = SchemaWithHashAndOperation::new(Arc::new(schema), config.generational);
@@ -418,7 +418,7 @@ impl Table for ExpiringTimeKeyTable {
             .try_into()
             .map_err(|e| StateError::Other {
                 table: config.table_name.clone(),
-                error: format!("schema conversion error: {:?}", e),
+                error: format!("schema conversion error: {e:?}"),
             })?;
         let state_schema = SchemaWithHashAndOperation::new(Arc::new(schema), config.generational);
 
@@ -889,7 +889,7 @@ impl ExpiringTimeKeyView {
 
     pub async fn flush_timestamp(&mut self, bin_start: SystemTime) {
         let Some(batches_to_flush) = self.batches_to_flush.remove(&bin_start) else {
-            return ();
+            return ;
         };
         let flushed_vec = self
             .flushed_batches_by_max_timestamp
@@ -993,7 +993,7 @@ impl KeyTimeView {
             })
             .await
             .expect("queue closed");
-        Ok(self.insert_internal(batch)?)
+        self.insert_internal(batch)
     }
 
     fn insert_internal(&mut self, batch: RecordBatch) -> Result<Vec<OwnedRow>, StateError> {

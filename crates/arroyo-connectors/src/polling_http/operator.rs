@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::SystemTime;
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use arroyo_rpc::{connector_err, ControlMessage};
 use arroyo_types::{SignalMessage, Watermark};
 

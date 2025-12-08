@@ -174,7 +174,7 @@ impl SchemaWithHashAndOperation {
             create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer).map_err(|e| {
                 StateError::Other {
                     table: "".to_string(),
-                    error: format!("failed to compute hashes: {:?}", e),
+                    error: format!("failed to compute hashes: {e:?}"),
                 }
             });
         let hash_array = PrimitiveArray::<UInt64Type>::from(hash_buffer);

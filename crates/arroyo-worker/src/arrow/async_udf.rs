@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
+use itertools::Itertools;
 use tracing::info;
 
 pub struct AsyncUdfOperator {
@@ -359,7 +360,7 @@ impl ArrowOperator for AsyncUdfOperator {
             rows.push(row.row());
         }
 
-        let mut cols = self.input_row_converter.convert_rows(rows).unwrap();
+        let mut cols = self.input_row_converter.convert_rows(rows)?;
         cols.push(make_array(results));
 
         let batch = RecordBatch::try_new(self.input_schema.as_ref().unwrap().clone(), cols)
@@ -372,22 +373,20 @@ impl ArrowOperator for AsyncUdfOperator {
                 expr.evaluate(&batch)
                     .unwrap()
                     .into_array(batch.num_rows())
-                    .unwrap()
             })
-            .collect();
+            .try_collect()?;
 
         // iterate through the batch convert to rows and push into our map
         let out_rows = self
             .output_row_converter
-            .convert_columns(&result)
-            .expect("could not convert output columns to rows");
+            .convert_columns(&result)?;
 
         for (row, id) in out_rows.into_iter().zip(ids.values()) {
             self.outputs.insert(*id, row.owned());
             self.inputs.remove(id);
         }
 
-        self.flush_output(ctx, collector).await;
+        self.flush_output(ctx, collector).await?;
 
         Ok(())
     }
@@ -451,7 +450,7 @@ impl ArrowOperator for AsyncUdfOperator {
 }
 
 impl AsyncUdfOperator {
-    async fn flush_output(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn flush_output(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) -> DataflowResult<()> {
         // check if we can emit any records -- these are ones received before our most recent
         // watermark -- once all records from before a watermark have been processed, we can
         // remove and emit the watermark
@@ -491,7 +490,7 @@ impl AsyncUdfOperator {
             let batch = RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), cols)
                 .expect("failed to construct record batch");
 
-            collector.collect(batch).await;
+            collector.collect(batch).await?;
 
             let Some(watermark) = watermark else {
                 break;
@@ -501,12 +500,13 @@ impl AsyncUdfOperator {
 
             if watermark_id <= oldest_unprocessed {
                 // we've processed everything before this watermark, we can emit and drop it
-                collector.broadcast_watermark(watermark).await;
+                collector.broadcast_watermark(watermark).await?;
             } else {
                 // we still have messages preceding this watermark to work on
                 self.watermarks.push_front((watermark_id, watermark));
                 break;
             }
         }
+        Ok(())
     }
 }

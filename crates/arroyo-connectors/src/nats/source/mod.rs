@@ -23,7 +23,6 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::time::Duration;
 use std::time::SystemTime;
-use anyhow::anyhow;
 use tokio::select;
 use tracing::debug;
 use tracing::info;

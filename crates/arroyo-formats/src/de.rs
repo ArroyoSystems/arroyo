@@ -741,7 +741,7 @@ mod tests {
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
     use arrow_schema::{DataType, Schema, TimeUnit};
     use arroyo_rpc::df::ArroyoSchema;
-    use arroyo_rpc::errors::{DataflowError, SourceError};
+    use arroyo_rpc::errors::DataflowError;
     use arroyo_rpc::formats::{
         BadData, Format, Framing, JsonFormat, NewlineDelimitedFraming, RawBytesFormat,
     };

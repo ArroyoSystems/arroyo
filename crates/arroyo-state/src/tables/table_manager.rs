@@ -362,15 +362,14 @@ impl TableManager {
         }
     }
 
-    pub async fn load_compacted(&mut self, compacted: &CompactionResult) -> Result<()> {
-        if compacted.operator_id != self.task_info.operator_id {
-            bail!("shouldn't be loading compaction for other operator");
-        }
+    pub async fn load_compacted(&mut self, compacted: &CompactionResult) {
+        assert_eq!(compacted.operator_id, self.task_info.operator_id, "shouldn't be loading compaction for other operator");
+
         self.writer
             .sender
             .send(StateMessage::Compaction(compacted.compacted_tables.clone()))
-            .await?;
-        Ok(())
+            .await
+            .expect("queue closed");
     }
 
     pub async fn insert_committing_data(&mut self, table: &str, data: Vec<u8>) {

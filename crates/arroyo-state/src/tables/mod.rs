@@ -209,12 +209,10 @@ pub trait ErasedTable: Send + Sync + 'static {
             });
         }
 
-        Ok(
-            Message::decode(&mut data.as_slice()).map_err(|e| StateError::Other {
+        Message::decode(&mut data.as_slice()).map_err(|e| StateError::Other {
                 table: "".to_string(),
-                error: format!("Failed to deserialize table config: {:?}", e),
-            })?,
-        )
+                error: format!("Failed to deserialize table config: {e:?}"),
+            })
     }
 
     fn files_to_keep(

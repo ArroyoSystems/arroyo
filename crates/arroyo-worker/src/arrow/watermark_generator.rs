@@ -142,7 +142,7 @@ impl ArrowOperator for WatermarkGenerator {
                     // but can still be formatted.
                     Watermark::EventTime(from_nanos(u64::MAX as u128)),
                 )
-                .await;
+                .await?;
         }
         Ok(())
     }
@@ -220,7 +220,7 @@ impl ArrowOperator for WatermarkGenerator {
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
                 );
-                collector.broadcast_watermark(Watermark::Idle).await;
+                collector.broadcast_watermark(Watermark::Idle).await?;
                 self.idle = true;
             }
         }

@@ -409,13 +409,13 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         result: Box<dyn Any + Send>,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, Some((batch, future)))) = *data {
             match self.execs.get_mut(&bin) {
                 Some(exec) => {
                     exec.finished_batches
-                        .push(batch.expect("should've been able to compute a batch"));
+                        .push(batch?);
                     self.futures.lock().await.push(future);
                 }
                 None => {
@@ -423,6 +423,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 }
             }
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(

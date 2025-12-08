@@ -1,7 +1,6 @@
-use crate::errors::StateError;
 use crate::grpc::api;
 use crate::{Converter, TIMESTAMP_FIELD};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result};
 use arrow::compute::kernels::numeric::div;
 use arrow::compute::{filter_record_batch, take};
 use arrow::datatypes::{DataType, Field, Schema, SchemaBuilder, TimeUnit};
@@ -228,7 +227,7 @@ impl ArroyoSchema {
                         self.timestamp_index, batch, self.schema)))?;
         let cutoff_scalar = TimestampNanosecondArray::new_scalar(to_nanos(cutoff) as i64);
         let on_time = gt_eq(timestamp_column, &cutoff_scalar)?;
-        Ok(filter_record_batch(&batch, &on_time)?)
+        filter_record_batch(&batch, &on_time)
     }
 
     pub fn sort_columns(&self, batch: &RecordBatch, with_timestamp: bool) -> Vec<SortColumn> {
@@ -332,7 +331,7 @@ impl ArroyoSchema {
             .map(|c| take(c, &sort_indices, None).unwrap())
             .collect();
 
-        Ok(RecordBatch::try_new(batch.schema(), columns)?)
+        RecordBatch::try_new(batch.schema(), columns)
     }
 
     pub fn partition(
@@ -364,7 +363,7 @@ impl ArroyoSchema {
         let columns: Vec<_> = (0..batch.num_columns())
             .filter(|index| !self.key_indices.as_ref().unwrap().contains(index))
             .collect();
-        Ok(batch.project(&columns)?)
+        batch.project(&columns)
     }
 
     pub fn schema_without_keys(&self) -> Result<Self, ArrowError> {

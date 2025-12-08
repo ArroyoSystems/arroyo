@@ -6,7 +6,7 @@ use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::errors::{DataflowError, DataflowResult, SourceError, UserError};
+use arroyo_rpc::errors::{DataflowError, DataflowResult};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
@@ -23,7 +23,6 @@ use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
-use datafusion::error::DataFusionError;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
@@ -236,8 +235,7 @@ impl SourceContext {
         //TODO: support compaction in the table manager
         self.table_manager
             .load_compacted(&compaction)
-            .await
-            .expect("should be able to load compacted");
+            .await;
     }
 
     pub async fn report_nonfatal_error(&mut self, error: DataflowError) {
@@ -262,7 +260,6 @@ pub struct SourceCollector {
     pub out_schema: Arc<ArroyoSchema>,
     pub(crate) collector: ArrowCollector,
     control_tx: Sender<ControlResp>,
-    chain_info: Arc<ChainInfo>,
     task_info: Arc<TaskInfo>,
     connection_id: Option<String>,
 }
@@ -272,14 +269,12 @@ impl SourceCollector {
         out_schema: Arc<ArroyoSchema>,
         collector: ArrowCollector,
         control_tx: Sender<ControlResp>,
-        chain_info: &Arc<ChainInfo>,
         task_info: &Arc<TaskInfo>,
     ) -> Self {
         Self {
             out_schema,
             collector,
             control_tx,
-            chain_info: chain_info.clone(),
             task_info: task_info.clone(),
             deserializer: None,
             buffered_error: None,
@@ -710,8 +705,7 @@ impl OperatorContext {
         //TODO: support compaction in the table manager
         self.table_manager
             .load_compacted(compaction)
-            .await
-            .expect("should be able to load compacted");
+            .await;
     }
 
     pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
@@ -826,7 +820,7 @@ mod tests {
             tx_queue_bytes_gauges,
         };
 
-        collector.collect(record).await;
+        collector.collect(record).await.unwrap();
 
         drop(collector);
 
