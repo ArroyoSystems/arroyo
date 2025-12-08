@@ -272,8 +272,7 @@ impl ParquetBackend {
                     .get(table_name)
                     .ok_or_else(|| StateError::Other {
                         table: table_name.clone(),
-                        error: format!("missing table config for operator {}, table {}, metadata is {:?}, operator_metadata is {:?}",
-                                       operator_id, table_name, metadata, operator_metadata)
+                        error: format!("missing table config for operator {operator_id}, table {table_name}, metadata is {metadata:?}, operator_metadata is {operator_metadata:?}")
                     })?
                     .clone();
 

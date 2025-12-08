@@ -301,7 +301,7 @@ impl FileSystemSourceFunc {
                 item = record_batch_stream.next() => {
                     match item.transpose()? {
                         Some(batch) => {
-                            collector.collect(batch).await;
+                            collector.collect(batch).await?;
                             records_read += 1;
                         }
                         None => {

@@ -1,4 +1,3 @@
-use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -45,37 +44,35 @@ impl JoinWithExpiration {
         record_batch: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Result<()> {
+    ) -> DataflowResult<()> {
         let left_table = ctx
             .table_manager
             .get_key_time_table("left", ctx.last_present_watermark())
-            .await
-            .expect("should have left table");
+            .await?;
         let left_rows = left_table
             .insert(record_batch.clone())
-            .await
-            .expect("should insert");
+            .await?;
         let right_table = ctx
             .table_manager
             .get_key_time_table("right", ctx.last_present_watermark())
-            .await
-            .expect("should have right table");
+            .await?;
+
         let mut right_batches = vec![];
         for row in left_rows {
             if let Some(batch) = right_table
-                .get_batch(row.as_ref())
-                .expect("shouldn't error getting batch")
+                .get_batch(row.as_ref())?
             {
                 right_batches.push(batch.clone());
             }
         }
-        let right_batch = concat_batches(&self.right_schema.schema, right_batches.iter()).unwrap();
+        let right_batch = concat_batches(&self.right_schema.schema, right_batches.iter())?;
         self.compute_pair(
             self.left_input_schema.unkeyed_batch(&record_batch)?,
             right_batch,
             collector,
         )
-        .await;
+        .await?;
+
         Ok(())
     }
 
@@ -84,37 +81,37 @@ impl JoinWithExpiration {
         right_batch: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Result<()> {
+    ) -> DataflowResult<()> {
         let right_table = ctx
             .table_manager
             .get_key_time_table("right", ctx.last_present_watermark())
-            .await
-            .expect("should have right table");
+            .await?;
+
         let right_rows = right_table
             .insert(right_batch.clone())
-            .await
-            .expect("should insert");
+            .await?;
+
         let left_table = ctx
             .table_manager
             .get_key_time_table("left", ctx.last_present_watermark())
-            .await
-            .expect("should have left table");
+            .await?;
+
         let mut left_batches = vec![];
         for row in right_rows {
             if let Some(batch) = left_table
-                .get_batch(row.as_ref())
-                .expect("shouldn't error getting batch")
+                .get_batch(row.as_ref())?
             {
                 left_batches.push(batch.clone());
             }
         }
-        let left_batch = concat_batches(&self.left_schema.schema, left_batches.iter()).unwrap();
+        let left_batch = concat_batches(&self.left_schema.schema, left_batches.iter())?;
         self.compute_pair(
             left_batch,
             self.right_input_schema.unkeyed_batch(&right_batch)?,
             collector,
         )
-        .await;
+        .await?;
+
         Ok(())
     }
 
@@ -123,7 +120,7 @@ impl JoinWithExpiration {
         left: RecordBatch,
         right: RecordBatch,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         {
             self.right_passer.write().unwrap().replace(right);
             self.left_passer.write().unwrap().replace(left);
@@ -134,9 +131,10 @@ impl JoinWithExpiration {
             .execute(0, SessionContext::new().task_ctx())
             .expect("successfully computed?");
         while let Some(batch) = records.next().await {
-            let batch = batch.expect("should be able to compute batch");
-            collector.collect(batch).await;
+            collector.collect(batch?).await?;
         }
+
+        Ok(())
     }
 }
 
@@ -174,6 +172,7 @@ impl ArrowOperator for JoinWithExpiration {
     ) -> DataflowResult<()> {
         unreachable!();
     }
+
     async fn process_batch_index(
         &mut self,
         index: usize,

@@ -209,7 +209,7 @@ impl ImpulseSourceFunc {
                     unreachable!("sources shouldn't receive commit messages");
                 }
                 Ok(ControlMessage::LoadCompacted { compacted }) => {
-                    ctx.table_manager.load_compacted(&compacted).await?;
+                    ctx.table_manager.load_compacted(&compacted).await;
                 }
                 Ok(ControlMessage::NoOp) => {}
                 Err(_) => {

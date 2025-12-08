@@ -343,7 +343,7 @@ impl ArrowOperator for InstantJoin {
         result: Box<dyn Any + Send>,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
@@ -354,8 +354,8 @@ impl ArrowOperator for InstantJoin {
                     Some(exec) => {
                         exec.active_exec = future.clone();
                         collector
-                            .collect(batch.expect("should compute batch in future"))
-                            .await;
+                            .collect(batch?)
+                            .await?;
                         self.futures.lock().await.push(future);
                     }
                     None => unreachable!(
@@ -364,6 +364,8 @@ impl ArrowOperator for InstantJoin {
                 },
             }
         }
+        
+        Ok(())
     }
 }
 

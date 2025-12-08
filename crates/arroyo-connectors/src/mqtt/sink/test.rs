@@ -97,7 +97,7 @@ impl MqttTopicTester {
         )
         .await;
 
-        mqtt.on_start(&mut ctx).await;
+        mqtt.on_start(&mut ctx).await.unwrap();
 
         MqttSinkWithWrites { sink: mqtt, ctx }
     }
@@ -149,7 +149,8 @@ async fn test_mqtt() {
         sink_with_writes
             .sink
             .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector {})
-            .await;
+            .await
+            .unwrap();
     }
 
     let mut message = 1u32;

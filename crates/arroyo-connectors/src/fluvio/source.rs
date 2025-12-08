@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::errors::{DataflowResult, UserError};
+use arroyo_rpc::errors::{DataflowResult};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage};

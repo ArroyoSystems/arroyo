@@ -144,11 +144,11 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
                     let bin_start_scalar =
                         ScalarValue::TimestampNanosecond(Some(bucket_nanos), None);
                     let timestamp_array =
-                        bin_start_scalar.to_array_of_size(batch.num_rows()).unwrap();
+                        bin_start_scalar.to_array_of_size(batch.num_rows())?;
                     let mut columns = batch.columns().to_vec();
                     columns.push(timestamp_array);
                     let state_batch =
-                        RecordBatch::try_new(self.partial_schema.schema.clone(), columns).unwrap();
+                        RecordBatch::try_new(self.partial_schema.schema.clone(), columns)?;
                     partial_table.insert(bin_start, state_batch);
                     bin_exec.finished_batches.push(batch);
                 }
@@ -170,8 +170,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         self.finish_execution_plan.reset()?;
         let mut final_exec = self
             .finish_execution_plan
-            .execute(0, SessionContext::new().task_ctx())
-            .unwrap();
+            .execute(0, SessionContext::new().task_ctx())?;
         self.tiered_record_batches
             .delete_before(bin_end + self.slide - self.width)?;
 
@@ -189,9 +188,8 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         };
         let mut aggregate_results = Vec::new();
         while let Some(batch) = final_exec.next().await {
-            let batch = batch.expect("should be able to compute batch");
             let with_timestamp = Self::add_bin_start_as_timestamp(
-                &batch,
+                &batch?,
                 interval_start,
                 self.projection_input_schema.clone(),
             )?;
@@ -206,8 +204,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             .final_projection
             .execute(0, SessionContext::new().task_ctx())?;
         while let Some(batch) = final_projection_exec.next().await {
-            let batch = batch.expect("should be able to compute batch");
-            collector.collect(batch).await;
+            collector.collect(batch?).await?;
         }
 
         Ok(())
@@ -219,7 +216,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
         let bin_start = ScalarValue::TimestampNanosecond(Some(to_nanos(bin_start) as i64), None);
-        let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
+        let timestamp_array = bin_start.to_array_of_size(batch.num_rows())?;
         let mut columns = batch.columns().to_vec();
         columns.push(timestamp_array);
         Ok(RecordBatch::try_new(schema, columns)?)
