@@ -179,13 +179,17 @@ impl OperatorNode {
                     .await
                     .unwrap();
 
-                let result = s.operator.run(&mut source_context, &mut collector).await
+                let result = s
+                    .operator
+                    .run(&mut source_context, &mut collector)
+                    .await
                     // TODO: propogate this properly
                     .unwrap();
 
                 s.operator
                     .on_close(&mut source_context, &mut collector)
-                    .await.unwrap();
+                    .await
+                    .unwrap();
 
                 if let Some(final_message) = result.into() {
                     collector.broadcast(final_message).await;
@@ -312,7 +316,11 @@ pub trait SourceOperator: Send + 'static {
     ) -> DataflowResult<SourceFinishType>;
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, ctx: &mut SourceContext, collector: &mut SourceCollector) -> DataflowResult<()> {
+    async fn on_close(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+    ) -> DataflowResult<()> {
         Ok(())
     }
 
@@ -521,7 +529,8 @@ impl ChainedOperator {
                 );
                 self.operator
                     .handle_commit(*epoch, commit_data, &mut self.context)
-                    .await.unwrap();
+                    .await
+                    .unwrap();
                 return shutdown_after_commit;
             }
             ControlMessage::LoadCompacted { compacted } => {
@@ -671,7 +680,9 @@ impl ChainedOperator {
             SignalMessage::Watermark(watermark) => {
                 debug!("received watermark {:?} in {}", watermark, chain_info,);
 
-                self.handle_watermark(*watermark, idx, collector).await.unwrap();
+                self.handle_watermark(*watermark, idx, collector)
+                    .await
+                    .unwrap();
             }
             SignalMessage::Stop => {
                 closed.insert(idx);
@@ -835,13 +846,15 @@ impl ChainedOperator {
                 };
                 self.operator
                     .handle_tick(tick, &mut self.context, &mut collector)
-                    .await.unwrap();
+                    .await
+                    .unwrap();
                 Box::pin(next.handle_tick(tick, final_collector)).await;
             }
             None => {
                 self.operator
                     .handle_tick(tick, &mut self.context, final_collector)
-                    .await.unwrap();
+                    .await
+                    .unwrap();
             }
         }
     }
@@ -862,14 +875,16 @@ impl ChainedOperator {
 
                 self.operator
                     .on_close(final_message, &mut self.context, &mut collector)
-                    .await.unwrap();
+                    .await
+                    .unwrap();
 
                 Box::pin(next.on_close(final_message, final_collector)).await;
             }
             None => {
                 self.operator
                     .on_close(final_message, &mut self.context, final_collector)
-                    .await.unwrap();
+                    .await
+                    .unwrap();
             }
         }
     }

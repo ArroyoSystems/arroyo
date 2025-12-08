@@ -1,7 +1,7 @@
-use std::time::Duration;
 use arrow_schema::ArrowError;
 use datafusion::error::DataFusionError;
 use datafusion::parquet::errors::ParquetError;
+use std::time::Duration;
 use thiserror::Error;
 
 /// Creates a `DataflowError::ConnectorError` with format string support.
@@ -38,13 +38,17 @@ macro_rules! connector_err {
 }
 
 #[derive(Error, Debug)]
+#[must_use]
 pub enum DataflowError {
     #[error("Arrow error: {:0?}", .0)]
     ArrowError(#[from] ArrowError),
     #[error("SQL processing error: {:0?}", .0)]
     DataFusionError(#[from] DataFusionError),
     #[error("operator error: {error} {message}")]
-    InternalOperatorError { error: &'static str, message: String },
+    InternalOperatorError {
+        error: &'static str,
+        message: String,
+    },
     #[error(transparent)]
     StateError(#[from] StateError),
     #[error("the arguments for this operator are invalid: {0}")]
@@ -63,9 +67,8 @@ pub enum DataflowError {
     // to ease the migration, we'll start with the ability to wrap anyhows; these will
     // be removed in later stages of the migration
     #[error("unknown error: {0}")]
-    UnknownError(#[from] anyhow::Error)
+    UnknownError(#[from] anyhow::Error),
 }
-
 
 #[derive(Debug)]
 pub enum ConnectorErrorDomain {
@@ -146,8 +149,7 @@ impl UserError {
     }
 }
 
-pub struct SourceError {
-}
+pub struct SourceError {}
 
 impl SourceError {
     pub fn bad_data(details: impl Into<String>) -> DataflowError {

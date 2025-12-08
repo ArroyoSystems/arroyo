@@ -1,6 +1,6 @@
 use crate::grpc::api;
 use crate::{Converter, TIMESTAMP_FIELD};
-use anyhow::{Result};
+use anyhow::Result;
 use arrow::compute::kernels::numeric::div;
 use arrow::compute::{filter_record_batch, take};
 use arrow::datatypes::{DataType, Field, Schema, SchemaBuilder, TimeUnit};

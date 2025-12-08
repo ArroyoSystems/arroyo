@@ -253,9 +253,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
                     self.pre_commits.push(value.clone());
                     pre_commit_state.insert(key, value).await;
                 }
-                ctx.table_manager
-                    .insert_committing_data("p", vec![])
-                    .await;
+                ctx.table_manager.insert_committing_data("p", vec![]).await;
             }
             CommitStrategy::PerOperator => {
                 let serialized_pre_commits =

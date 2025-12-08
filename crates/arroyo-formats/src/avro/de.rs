@@ -1,6 +1,7 @@
 use crate::float_to_json;
 use apache_avro::types::{Value, Value as AvroValue};
 use apache_avro::{from_avro_datum, AvroResult, Reader, Schema};
+use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::{DataflowError, SourceError};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
@@ -9,7 +10,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
-use arroyo_rpc::connector_err;
 
 pub(crate) async fn avro_messages(
     format: &AvroFormat,
@@ -50,7 +50,11 @@ pub(crate) async fn avro_messages(
                 })?;
 
             let new_schema = Schema::parse_str(&new_schema).map_err(|e| {
-                connector_err!(User, NoRetry, "schema from Confluent Schema registry is not valid: {e:?}")
+                connector_err!(
+                    User,
+                    NoRetry,
+                    "schema from Confluent Schema registry is not valid: {e:?}"
+                )
             })?;
 
             info!("Loaded new schema with id {} from Schema Registry", id);

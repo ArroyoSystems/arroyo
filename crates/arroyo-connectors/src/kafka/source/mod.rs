@@ -153,7 +153,10 @@ impl KafkaSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> DataflowResult<SourceFinishType> {
-        let consumer = self.get_consumer(ctx).await.context("creating kafka consumer")?;
+        let consumer = self
+            .get_consumer(ctx)
+            .await
+            .context("creating kafka consumer")?;
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
         let mut offsets = HashMap::new();

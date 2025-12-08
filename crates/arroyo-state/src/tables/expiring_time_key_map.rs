@@ -889,7 +889,7 @@ impl ExpiringTimeKeyView {
 
     pub async fn flush_timestamp(&mut self, bin_start: SystemTime) {
         let Some(batches_to_flush) = self.batches_to_flush.remove(&bin_start) else {
-            return ;
+            return;
         };
         let flushed_vec = self
             .flushed_batches_by_max_timestamp
@@ -1088,7 +1088,6 @@ impl UncachedKeyValueView {
     /// de-duplicated so callers must do so themselves. We avoid doing this here because
     /// callers will likely already be doing some of the necessary work (like row conversion)
     /// and it would be wasteful to do this multiple times.
-    // TODO: migrate this to use StateError - complex due to nested stream types
     pub fn get_all(&mut self) -> impl Stream<Item = anyhow::Result<RecordBatch>> {
         let files: Vec<(String, bool)> = self
             .parent

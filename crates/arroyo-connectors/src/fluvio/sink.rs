@@ -37,7 +37,7 @@ impl ArrowOperator for FluvioSinkFunc {
         self.producer = Some(self.get_producer().await.map_err(|e| {
             DataflowError::ArgumentError(format!("Failed to construct Fluvio producer: {e:?}"))
         })?);
-        
+
         Ok(())
     }
 
@@ -56,7 +56,7 @@ impl ArrowOperator for FluvioSinkFunc {
                 .await
                 .map_err(|e| DataflowError::ExternalError(e.to_string()))?;
         }
-        
+
         Ok(())
     }
 
@@ -66,7 +66,11 @@ impl ArrowOperator for FluvioSinkFunc {
         _: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        self.producer.as_mut().unwrap().flush().await
+        self.producer
+            .as_mut()
+            .unwrap()
+            .flush()
+            .await
             .map_err(|e| DataflowError::ExternalError(e.to_string()))
     }
 }

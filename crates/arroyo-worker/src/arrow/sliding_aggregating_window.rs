@@ -143,8 +143,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
 
                     let bin_start_scalar =
                         ScalarValue::TimestampNanosecond(Some(bucket_nanos), None);
-                    let timestamp_array =
-                        bin_start_scalar.to_array_of_size(batch.num_rows())?;
+                    let timestamp_array = bin_start_scalar.to_array_of_size(batch.num_rows())?;
                     let mut columns = batch.columns().to_vec();
                     columns.push(timestamp_array);
                     let state_batch =

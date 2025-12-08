@@ -30,7 +30,7 @@ use crate::filesystem::config;
 use crate::filesystem::config::SourceFileCompressionFormat;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::errors::{DataflowError};
+use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage};
@@ -144,14 +144,16 @@ impl SourceOperator for FileSystemSourceFunc {
         }
         info!("FileSystem source finished");
         Ok(SourceFinishType::Final)
-    }}
+    }
+}
 
 impl FileSystemSourceFunc {
     async fn get_newline_separated_stream(
         &mut self,
         storage_provider: &StorageProvider,
         path: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, DataflowError>> + Unpin + Send>, DataflowError> {
+    ) -> Result<Box<dyn Stream<Item = Result<String, DataflowError>> + Unpin + Send>, DataflowError>
+    {
         match &self.format {
             Format::Json(_) => {
                 let stream_reader = storage_provider.get_as_stream(path).await.unwrap();
@@ -174,7 +176,11 @@ impl FileSystemSourceFunc {
                     string_result.map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not get next path"))
                 })))
             }
-            other => Err(connector_err!(User, NoRetry, "newline separated stream not supported for {other:?}")),
+            other => Err(connector_err!(
+                User,
+                NoRetry,
+                "newline separated stream not supported for {other:?}"
+            )),
         }
     }
 
@@ -183,8 +189,10 @@ impl FileSystemSourceFunc {
         storage_provider: &StorageProvider,
         path: &str,
         out_schema: SchemaRef,
-    ) -> Result<Box<dyn Stream<Item = Result<RecordBatch, DataflowError>> + Unpin + Send>, DataflowError>
-    {
+    ) -> Result<
+        Box<dyn Stream<Item = Result<RecordBatch, DataflowError>> + Unpin + Send>,
+        DataflowError,
+    > {
         match &self.format {
             Format::Parquet(_) => {
                 let object_meta = storage_provider

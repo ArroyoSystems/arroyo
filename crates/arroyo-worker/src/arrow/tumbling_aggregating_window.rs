@@ -7,8 +7,8 @@ use arroyo_operator::operator::{
     ArrowOperator, AsDisplayable, ConstructedOperator, DisplayableOperator, OperatorConstructor,
     Registry,
 };
-use arroyo_rpc::errors::DataflowResult;
 use arroyo_planner::schemas::add_timestamp_field_arrow;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
@@ -374,8 +374,8 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                             *batches = aggregate_results;
                         }
                         final_projection.reset()?;
-                        let mut final_projection_exec = final_projection
-                            .execute(0, SessionContext::new().task_ctx())?;
+                        let mut final_projection_exec =
+                            final_projection.execute(0, SessionContext::new().task_ctx())?;
                         while let Some(batch) = final_projection_exec.next().await {
                             let batch = batch?;
                             collector.collect(batch).await?;
@@ -414,8 +414,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         if let Some((bin, Some((batch, future)))) = *data {
             match self.execs.get_mut(&bin) {
                 Some(exec) => {
-                    exec.finished_batches
-                        .push(batch?);
+                    exec.finished_batches.push(batch?);
                     self.futures.lock().await.push(future);
                 }
                 None => {

@@ -852,16 +852,14 @@ mod tests {
 
         let now = SystemTime::now();
 
-        assert!(
-            deserializer
-                .deserialize_slice(json!({ "x": 5 }).to_string().as_bytes(), now, None,)
-                .await.is_empty()
-        );
-        assert!(
-            deserializer
-                .deserialize_slice(json!({ "x": "hello" }).to_string().as_bytes(), now, None,)
-                .await.is_empty()
-        );
+        assert!(deserializer
+            .deserialize_slice(json!({ "x": 5 }).to_string().as_bytes(), now, None,)
+            .await
+            .is_empty());
+        assert!(deserializer
+            .deserialize_slice(json!({ "x": "hello" }).to_string().as_bytes(), now, None,)
+            .await
+            .is_empty());
 
         let batch = deserializer.flush_buffer().0.unwrap();
         assert_eq!(batch.num_rows(), 1);
@@ -878,24 +876,22 @@ mod tests {
     async fn test_bad_data_fail() {
         let mut deserializer = setup_deserializer(BadData::Fail {});
 
-        assert!(
-            deserializer
-                .deserialize_slice(
-                    json!({ "x": 5 }).to_string().as_bytes(),
-                    SystemTime::now(),
-                    None,
-                )
-                .await.is_empty()
-        );
-        assert!(
-            deserializer
-                .deserialize_slice(
-                    json!({ "x": "hello" }).to_string().as_bytes(),
-                    SystemTime::now(),
-                    None,
-                )
-                .await.is_empty()
-        );
+        assert!(deserializer
+            .deserialize_slice(
+                json!({ "x": 5 }).to_string().as_bytes(),
+                SystemTime::now(),
+                None,
+            )
+            .await
+            .is_empty());
+        assert!(deserializer
+            .deserialize_slice(
+                json!({ "x": "hello" }).to_string().as_bytes(),
+                SystemTime::now(),
+                None,
+            )
+            .await
+            .is_empty());
 
         let err = deserializer.flush_buffer().1.remove(0);
 

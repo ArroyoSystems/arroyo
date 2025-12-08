@@ -14,9 +14,9 @@ use std::time::{Duration, SystemTime};
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
 use tracing::{debug, info};
-use arroyo_rpc::errors::DataflowResult;
 
 #[derive(Encode, Decode, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ImpulseSourceState {
@@ -229,16 +229,14 @@ impl ImpulseSourceFunc {
             let task_index_column = task_index_scalar.to_array_of_size(items)?;
             let timestamp_column = timestamp_builder.finish();
             collector
-                .collect(
-                    RecordBatch::try_new(
-                        schema.clone(),
-                        vec![
-                            Arc::new(counter_column),
-                            Arc::new(task_index_column),
-                            Arc::new(timestamp_column),
-                        ],
-                    )?,
-                )
+                .collect(RecordBatch::try_new(
+                    schema.clone(),
+                    vec![
+                        Arc::new(counter_column),
+                        Arc::new(task_index_column),
+                        Arc::new(timestamp_column),
+                    ],
+                )?)
                 .await?;
         }
 
@@ -257,10 +255,7 @@ impl SourceOperator for ImpulseSourceFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut SourceContext) -> DataflowResult<()> {
-        let s = ctx
-            .table_manager
-            .get_global_keyed_state("i")
-            .await?;
+        let s = ctx.table_manager.get_global_keyed_state("i").await?;
 
         if let Some(state) = s.get(&ctx.task_info.task_index) {
             self.state = *state;

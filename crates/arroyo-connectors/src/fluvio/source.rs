@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
-use arroyo_rpc::errors::{DataflowResult};
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage};
@@ -144,9 +144,7 @@ impl FluvioSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> DataflowResult<SourceFinishType> {
-        let mut streams = self
-            .get_consumer(ctx)
-            .await?;
+        let mut streams = self.get_consumer(ctx).await?;
 
         if streams.is_empty() {
             warn!("Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
@@ -178,7 +176,7 @@ impl FluvioSourceFunc {
                             error!("encountered error {:?} while reading partition {}", e, p);
                         }
                         None => {
-                            connector_err!(External, WithBackoff, "Stream closed");
+                            return Err(connector_err!(External, WithBackoff, "Stream closed"));
                         }
                     }
                 }

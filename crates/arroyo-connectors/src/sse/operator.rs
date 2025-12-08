@@ -77,10 +77,8 @@ impl SourceOperator for SSESourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> DataflowResult<SourceFinishType> {
-        let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
-            .table_manager
-            .get_global_keyed_state("e")
-            .await?;
+        let s: &mut GlobalKeyedView<(), SSESourceState> =
+            ctx.table_manager.get_global_keyed_state("e").await?;
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();

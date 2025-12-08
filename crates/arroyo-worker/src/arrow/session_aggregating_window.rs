@@ -15,8 +15,8 @@ use arroyo_operator::{
     context::OperatorContext,
     operator::{ArrowOperator, ConstructedOperator, OperatorConstructor},
 };
-use arroyo_rpc::errors::DataflowResult;
 use arroyo_planner::schemas::window_arrow_struct;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
     grpc::{api, rpc::TableConfig},
     Converter,

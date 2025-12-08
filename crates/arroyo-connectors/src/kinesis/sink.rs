@@ -81,7 +81,12 @@ impl ArrowOperator for KinesisSinkFunc {
         Ok(())
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut OperatorContext, _: &mut dyn Collector) -> DataflowResult<()> {
+    async fn handle_tick(
+        &mut self,
+        _: u64,
+        ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) -> DataflowResult<()> {
         self.maybe_flush_with_retries(ctx)
             .await
             .expect("failed to flush batch during tick");

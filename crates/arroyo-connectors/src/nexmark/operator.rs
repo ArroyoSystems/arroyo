@@ -236,7 +236,9 @@ impl SourceOperator for NexmarkSourceFunc {
                 }
             } else {
                 ss.get(&(ctx.task_info.task_index as usize))
-                    .ok_or_else(|| connector_err!(Internal, NoRetry, "missing state for task index"))?
+                    .ok_or_else(|| {
+                        connector_err!(Internal, NoRetry, "missing state for task index")
+                    })?
                     .clone()
             }
         });
@@ -248,7 +250,11 @@ impl SourceOperator for NexmarkSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> DataflowResult<SourceFinishType> {
-        let state = self.state.as_ref().ok_or_else(|| anyhow::anyhow!("state not initialized"))?.clone();
+        let state = self
+            .state
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("state not initialized"))?
+            .clone();
 
         let mut generator = NexmarkGenerator::from_config(&state.config, state.event_count as u64);
 
@@ -277,17 +283,15 @@ impl SourceOperator for NexmarkSourceFunc {
 
             if should_flush(records, flush_time) {
                 collector
-                    .collect(
-                        RecordBatch::try_new(
-                            ctx.out_schema.schema.clone(),
-                            vec![
-                                Arc::new(person_builder.finish()),
-                                Arc::new(auction_builder.finish()),
-                                Arc::new(bid_builder.finish()),
-                                Arc::new(timestamp_builder.finish()),
-                            ],
-                        )?,
-                    )
+                    .collect(RecordBatch::try_new(
+                        ctx.out_schema.schema.clone(),
+                        vec![
+                            Arc::new(person_builder.finish()),
+                            Arc::new(auction_builder.finish()),
+                            Arc::new(bid_builder.finish()),
+                            Arc::new(timestamp_builder.finish()),
+                        ],
+                    )?)
                     .await?;
                 records = 0;
                 flush_time = Instant::now();

@@ -171,7 +171,10 @@ impl ArrowOperator for ProjectionOperator {
             .try_collect()?;
 
         collector
-            .collect(RecordBatch::try_new(self.output_schema.schema.clone(), outputs)?)
+            .collect(RecordBatch::try_new(
+                self.output_schema.schema.clone(),
+                outputs,
+            )?)
             .await
     }
 }

@@ -135,9 +135,7 @@ impl ArrowOperator for LookupJoin {
             output_rows.push(row.row());
         }
 
-        let right_side = self
-            .result_row_converter
-            .convert_rows(output_rows.iter())?;
+        let right_side = self.result_row_converter.convert_rows(output_rows.iter())?;
 
         let nonnull = (self.join_type == LookupJoinType::Inner).then(|| {
             let mut nonnull = vec![false; batch.num_rows()];
