@@ -533,7 +533,18 @@ async fn execute_state<'a>(
                 ["retries" => retries]
             );
 
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            let pipeline_config = &config().pipeline;
+            let base = *pipeline_config.state_initial_backoff;
+            let max = *pipeline_config.state_max_backoff;
+            let exp_backoff = max.min(base * 2u32.pow(ctx.retries_attempted as u32));
+
+            let backoff = exp_backoff / 2
+                + Duration::from_micros(rand::Rng::random_range(
+                    &mut rand::rng(),
+                    0..exp_backoff.as_micros() as u64 / 2,
+                ));
+            tokio::time::sleep(backoff).await;
+
             ctx.retries_attempted += 1;
             Some(state)
         }
