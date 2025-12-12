@@ -514,6 +514,12 @@ pub struct PipelineConfig {
     /// Amount of time to wait for tasks to startup before considering it failed
     pub task_startup_time: HumanReadableDuration,
 
+    /// Initial backoff delay for retryable state errors
+    pub state_initial_backoff: HumanReadableDuration,
+
+    /// Maximum backoff delay for retryable state errors
+    pub state_max_backoff: HumanReadableDuration,
+
     /// Default sink, for when none is specified
     #[serde(default)]
     pub default_sink: DefaultSink,

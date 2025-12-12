@@ -10,6 +10,8 @@ worker-heartbeat-timeout = "30s"
 healthy-duration = "2m"
 worker-startup-time = "10m"
 task-startup-time = "2m"
+state-initial-backoff = "500ms"
+state-max-backoff = "1m"
 chaining.enabled = true
 
 [pipeline.compaction]
