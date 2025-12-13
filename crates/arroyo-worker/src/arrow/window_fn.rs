@@ -12,6 +12,7 @@ use arroyo_operator::operator::{
 };
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};
 use arroyo_state::timestamp_table_config;
@@ -126,19 +127,21 @@ impl ArrowOperator for WindowFunctionOperator {
         "WindowFunction".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("input", watermark)
-            .await
-            .unwrap();
+            .await?;
         for (timestamp, batches) in table.all_batches_for_watermark(watermark) {
             let exec = self.get_or_insert_exec(*timestamp).await;
             for batch in batches {
-                exec.sender.send(batch.clone()).unwrap();
+                exec.sender
+                    .send(batch.clone())
+                    .map_err(|e| anyhow!("failed to send batch: {:?}", e))?;
             }
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -146,21 +149,21 @@ impl ArrowOperator for WindowFunctionOperator {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let current_watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("input", current_watermark)
-            .await
-            .unwrap();
-        for (batch, timestamp) in self
-            .filter_and_split_batches(batch, current_watermark)
-            .unwrap()
-        {
+            .await?;
+        for (batch, timestamp) in self.filter_and_split_batches(batch, current_watermark)? {
             table.insert(timestamp, batch.clone());
             let bin_exec = self.get_or_insert_exec(timestamp).await;
-            bin_exec.sender.send(batch).unwrap();
+            bin_exec
+                .sender
+                .send(batch)
+                .map_err(|e| anyhow!("failed to send batch: {:?}", e))?;
         }
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -168,9 +171,9 @@ impl ArrowOperator for WindowFunctionOperator {
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         let Some(watermark) = ctx.last_present_watermark() else {
-            return Some(watermark);
+            return Ok(Some(watermark));
         };
         loop {
             let finished = {
@@ -184,16 +187,19 @@ impl ArrowOperator for WindowFunctionOperator {
             }
             let mut active_exec = {
                 // the sender should be dropped here
-                let (_timestamp, exec) = self.execs.pop_first().unwrap();
+                let (_timestamp, exec) = self
+                    .execs
+                    .pop_first()
+                    .ok_or_else(|| anyhow!("expected exec"))?;
                 exec.active_exec
             };
             while let (_timestamp, Some((batch, new_exec))) = active_exec.await {
                 active_exec = new_exec;
-                let batch = batch.expect("batch should be computable");
-                collector.collect(batch).await;
+                let batch = batch?;
+                collector.collect(batch).await?;
             }
         }
-        Some(Watermark::EventTime(watermark))
+        Ok(Some(Watermark::EventTime(watermark)))
     }
 
     async fn handle_checkpoint(
@@ -201,15 +207,14 @@ impl ArrowOperator for WindowFunctionOperator {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("input", watermark)
-            .await
-            .expect("should have input table")
+            .await?
             .flush(watermark)
-            .await
-            .expect("should flush");
+            .await?;
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

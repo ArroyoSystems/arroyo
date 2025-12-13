@@ -4,11 +4,12 @@ use std::time::{Duration, SystemTime};
 use super::{RabbitmqStreamConfig, SourceOffset};
 use arroyo_operator::context::SourceContext;
 use arroyo_operator::{context::SourceCollector, operator::SourceOperator, SourceFinishType};
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::UserError;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use rabbitmq_stream_client::types::OffsetSpecification;
@@ -45,7 +46,7 @@ impl SourceOperator for RabbitmqStreamSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -53,14 +54,7 @@ impl SourceOperator for RabbitmqStreamSourceFunc {
             &[],
         );
 
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -98,13 +92,8 @@ impl RabbitmqStreamSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
-        let mut consumer = self.get_consumer(ctx).await.map_err(|e| {
-            UserError::new(
-                "Could not create RabbitMQ Stream consumer",
-                format!("{e:?}"),
-            )
-        })?;
+    ) -> DataflowResult<SourceFinishType> {
+        let mut consumer = self.get_consumer(ctx).await?;
 
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -149,9 +138,7 @@ impl RabbitmqStreamSourceFunc {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
 
-                            let s = ctx.table_manager.get_global_keyed_state("s")
-                               .await
-                               .expect("should be able to get rabbitmq stream state");
+                            let s = ctx.table_manager.get_global_keyed_state("s").await?;
                             s.insert(self.stream.clone(), RabbitmqStreamState {
                                 offset
                             }).await;
@@ -172,7 +159,7 @@ impl RabbitmqStreamSourceFunc {
                             }
                         }
                         Some(ControlMessage::Commit{..}) => {
-                            return Err(UserError::new("RabbitMQ Stream source does not support committing", ""));
+                            return Err(connector_err!(Internal, NoRetry, "RabbitMQ Stream source does not support committing"));
                         }
                         Some(ControlMessage::LoadCompacted {compacted}) => {
                             ctx.load_compacted(compacted).await;

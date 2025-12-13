@@ -6,14 +6,14 @@ use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::{DataflowError, DataflowResult};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp, MetadataField};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
-    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, SourceError, TaskInfo, UserError,
-    Watermark,
+    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, Watermark,
 };
 use async_trait::async_trait;
 use datafusion::common::hash_utils;
@@ -206,7 +206,6 @@ pub fn batch_bounded(size: u32) -> (BatchSender, BatchReceiver) {
 
 pub struct SourceContext {
     pub out_schema: Arc<ArroyoSchema>,
-    pub error_reporter: ErrorReporter,
     pub control_tx: Sender<ControlResp>,
     pub control_rx: Receiver<ControlMessage>,
     pub chain_info: Arc<ChainInfo>,
@@ -223,10 +222,6 @@ impl SourceContext {
     ) -> Self {
         Self {
             out_schema: ctx.out_schema.expect("sources must have downstream nodes"),
-            error_reporter: ErrorReporter {
-                tx: ctx.control_tx.clone(),
-                task_info: ctx.task_info.clone(),
-            },
             control_tx: ctx.control_tx,
             control_rx,
             chain_info,
@@ -238,24 +233,17 @@ impl SourceContext {
 
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         //TODO: support compaction in the table manager
-        self.table_manager
-            .load_compacted(&compaction)
-            .await
-            .expect("should be able to load compacted");
+        self.table_manager.load_compacted(&compaction).await;
     }
 
-    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
-        self.error_reporter.report_error(message, details).await;
-    }
-
-    pub async fn report_user_error(&mut self, error: UserError) {
+    pub async fn report_nonfatal_error(&mut self, error: DataflowError) {
         self.control_tx
             .send(ControlResp::Error {
                 node_id: self.task_info.node_id,
                 task_index: self.task_info.task_index as usize,
                 operator_id: self.task_info.operator_id.clone(),
-                message: error.name,
-                details: error.details,
+                message: "".to_string(),
+                details: error.to_string(),
             })
             .await
             .unwrap();
@@ -264,12 +252,11 @@ impl SourceContext {
 
 pub struct SourceCollector {
     deserializer: Option<ArrowDeserializer>,
-    buffered_error: Option<UserError>,
+    buffered_error: Option<DataflowError>,
     error_rate_limiter: RateLimiter,
     pub out_schema: Arc<ArroyoSchema>,
     pub(crate) collector: ArrowCollector,
     control_tx: Sender<ControlResp>,
-    chain_info: Arc<ChainInfo>,
     task_info: Arc<TaskInfo>,
     connection_id: Option<String>,
 }
@@ -279,14 +266,12 @@ impl SourceCollector {
         out_schema: Arc<ArroyoSchema>,
         collector: ArrowCollector,
         control_tx: Sender<ControlResp>,
-        chain_info: &Arc<ChainInfo>,
         task_info: &Arc<TaskInfo>,
     ) -> Self {
         Self {
             out_schema,
             collector,
             control_tx,
-            chain_info: chain_info.clone(),
             task_info: task_info.clone(),
             deserializer: None,
             buffered_error: None,
@@ -299,8 +284,8 @@ impl SourceCollector {
         self.connection_id = Some(connection_id);
     }
 
-    pub async fn collect(&mut self, record: RecordBatch) {
-        self.collector.collect(record).await;
+    pub async fn collect(&mut self, record: RecordBatch) -> DataflowResult<()> {
+        self.collector.collect(record).await
     }
 
     pub fn initialize_deserializer_with_resolver(
@@ -353,7 +338,7 @@ impl SourceCollector {
         msg: &[u8],
         time: SystemTime,
         additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
-    ) -> Result<(), UserError> {
+    ) -> DataflowResult<()> {
         let deserializer = self
             .deserializer
             .as_mut()
@@ -369,43 +354,34 @@ impl SourceCollector {
 
     /// Handling errors and rate limiting error reporting.
     /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
-    async fn collect_source_errors(&mut self, errors: Vec<SourceError>) -> Result<(), UserError> {
+    async fn collect_source_errors(&mut self, errors: Vec<DataflowError>) -> DataflowResult<()> {
         let bad_data = self
             .deserializer
             .as_ref()
             .expect("deserializer not initialized")
             .bad_data();
+
         for error in errors {
-            match error {
-                SourceError::BadData { count, details } => match bad_data {
-                    BadData::Drop {} => {
-                        self.error_rate_limiter
-                            .rate_limit(|| async {
-                                warn!("Dropping invalid data ({count}): {details}");
-                                self.control_tx
-                                    .send(ControlResp::Error {
-                                        node_id: self.task_info.node_id,
-                                        operator_id: self.task_info.operator_id.clone(),
-                                        task_index: self.task_info.task_index as usize,
-                                        message: format!("Dropping invalid data ({count})"),
-                                        details,
-                                    })
-                                    .await
-                                    .unwrap();
-                            })
-                            .await;
-                        TaskCounters::DeserializationErrors.for_connection(
-                            &self.chain_info,
-                            self.connection_id.as_deref().unwrap_or_default(),
-                            |c| c.inc_by(count as u64),
-                        )
-                    }
-                    BadData::Fail {} => {
-                        return Err(UserError::new("Deserialization error", details));
-                    }
-                },
-                SourceError::Other { name, details } => {
-                    return Err(UserError::new(name, details));
+            match (bad_data, error) {
+                (BadData::Drop { .. }, DataflowError::DataError { count, details }) => {
+                    self.error_rate_limiter
+                        .rate_limit(|| async {
+                            warn!("Dropping invalid data ({count}): {details}");
+                            self.control_tx
+                                .send(ControlResp::Error {
+                                    node_id: self.task_info.node_id,
+                                    operator_id: self.task_info.operator_id.clone(),
+                                    task_index: self.task_info.task_index as usize,
+                                    message: format!("Dropping invalid data ({count})"),
+                                    details,
+                                })
+                                .await
+                                .unwrap();
+                        })
+                        .await;
+                }
+                (_, e) => {
+                    return Err(e);
                 }
             }
         }
@@ -413,7 +389,7 @@ impl SourceCollector {
         Ok(())
     }
 
-    pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
+    pub async fn flush_buffer(&mut self) -> DataflowResult<()> {
         if let Some(deserializer) = self.deserializer.as_mut() {
             let (batch, errors) = deserializer.flush_buffer();
             if !errors.is_empty() {
@@ -421,7 +397,7 @@ impl SourceCollector {
             }
 
             if let Some(batch) = batch {
-                self.collector.collect(batch).await;
+                self.collector.collect(batch).await?;
             }
         }
 
@@ -493,8 +469,8 @@ impl ErrorReporter {
 
 #[async_trait]
 pub trait Collector: Send {
-    async fn collect(&mut self, batch: RecordBatch);
-    async fn broadcast_watermark(&mut self, watermark: Watermark);
+    async fn collect(&mut self, batch: RecordBatch) -> DataflowResult<()>;
+    async fn broadcast_watermark(&mut self, watermark: Watermark) -> DataflowResult<()>;
 }
 
 #[derive(Clone)]
@@ -565,7 +541,7 @@ fn repartition<'a>(
 
 #[async_trait]
 impl Collector for ArrowCollector {
-    async fn collect(&mut self, record: RecordBatch) {
+    async fn collect(&mut self, record: RecordBatch) -> DataflowResult<()> {
         TaskCounters::MessagesSent
             .for_task(&self.chain_info, |c| c.inc_by(record.num_rows() as u64));
         TaskCounters::BatchesSent.for_task(&self.chain_info, |c| c.inc());
@@ -608,10 +584,14 @@ impl Collector for ArrowCollector {
                     .for_each(|g| g.set(out_q[partition].queued_bytes() as i64));
             }
         }
+
+        Ok(())
     }
 
-    async fn broadcast_watermark(&mut self, watermark: Watermark) {
+    async fn broadcast_watermark(&mut self, watermark: Watermark) -> DataflowResult<()> {
         self.broadcast(SignalMessage::Watermark(watermark)).await;
+
+        Ok(())
     }
 }
 
@@ -720,10 +700,7 @@ impl OperatorContext {
 
     pub async fn load_compacted(&mut self, compaction: &CompactionResult) {
         //TODO: support compaction in the table manager
-        self.table_manager
-            .load_compacted(compaction)
-            .await
-            .expect("should be able to load compacted");
+        self.table_manager.load_compacted(compaction).await;
     }
 
     pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
@@ -838,7 +815,7 @@ mod tests {
             tx_queue_bytes_gauges,
         };
 
-        collector.collect(record).await;
+        collector.collect(record).await.unwrap();
 
         drop(collector);
 

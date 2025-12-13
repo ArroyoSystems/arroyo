@@ -8,6 +8,7 @@ use crate::mqtt::MqttConfig;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::Format;
 use rumqttc::mqttbytes::QoS;
 use rumqttc::AsyncClient;
@@ -45,7 +46,7 @@ impl ArrowOperator for MqttSinkFunc {
     fn name(&self) -> String {
         format!("mqtt-producer-{}", self.topic)
     }
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let mut attempts = 0;
         while attempts < 20 {
             match super::create_connection(
@@ -78,7 +79,7 @@ impl ArrowOperator for MqttSinkFunc {
                             }
                         }
                     });
-                    return;
+                    return Ok(());
                 }
                 Err(e) => {
                     ctx.report_error("Failed to connect", e.to_string()).await;
@@ -97,7 +98,7 @@ impl ArrowOperator for MqttSinkFunc {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         for v in self.serializer.serialize(&batch) {
             match self
                 .client
@@ -114,6 +115,7 @@ impl ArrowOperator for MqttSinkFunc {
                 }
             }
         }
+        Ok(())
     }
 }
 

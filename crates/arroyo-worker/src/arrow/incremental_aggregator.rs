@@ -21,6 +21,7 @@ use arroyo_operator::{
     },
 };
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
 use arroyo_rpc::{updating_meta_fields, TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use arroyo_state::timestamp_table_config;
@@ -931,7 +932,7 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let input_schema = &ctx.in_schemas[0];
 
         if input_schema
@@ -939,10 +940,11 @@ impl ArrowOperator for IncrementalAggregatingFunc {
             .map(|k| !k.is_empty())
             .unwrap_or_default()
         {
-            self.keyed_aggregate(&batch, ctx).unwrap()
+            self.keyed_aggregate(&batch, ctx)?
         } else {
-            self.global_aggregate(&batch).unwrap()
+            self.global_aggregate(&batch)?
         };
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -950,10 +952,11 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
-        if let Some(batch) = self.flush(ctx).await.unwrap() {
-            collector.collect(batch).await;
+    ) -> DataflowResult<()> {
+        if let Some(batch) = self.flush(ctx).await? {
+            collector.collect(batch).await?;
         }
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
@@ -992,10 +995,11 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         _tick: u64,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
-        if let Some(batch) = self.flush(ctx).await.unwrap() {
-            collector.collect(batch).await;
+    ) -> DataflowResult<()> {
+        if let Some(batch) = self.flush(ctx).await? {
+            collector.collect(batch).await?;
         }
+        Ok(())
     }
 
     async fn on_close(
@@ -1003,16 +1007,18 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         final_message: &Option<SignalMessage>,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
-            if let Some(batch) = self.flush(ctx).await.unwrap() {
-                collector.collect(batch).await;
+            if let Some(batch) = self.flush(ctx).await? {
+                collector.collect(batch).await?;
             }
         }
+        Ok(())
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
-        self.initialize(ctx).await.unwrap();
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
+        self.initialize(ctx).await?;
+        Ok(())
     }
 }
 

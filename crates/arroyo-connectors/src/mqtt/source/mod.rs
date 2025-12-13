@@ -1,23 +1,25 @@
+use anyhow::Context;
 use arroyo_formats::de::FieldValueType;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
+use arroyo_types::{SignalMessage, Watermark};
 use async_trait::async_trait;
+use governor::{Quota, RateLimiter as GovernorRateLimiter};
+use rumqttc::mqttbytes::QoS;
+use rumqttc::Outgoing;
+use rumqttc::{Event as MqttEvent, Incoming};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
-use arroyo_types::{SignalMessage, UserError, Watermark};
-use governor::{Quota, RateLimiter as GovernorRateLimiter};
-use rumqttc::mqttbytes::QoS;
-use rumqttc::Outgoing;
-use rumqttc::{Event as MqttEvent, Incoming};
-
 use crate::mqtt::{create_connection, MqttConfig};
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
@@ -51,15 +53,8 @@ impl SourceOperator for MqttSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(&e.name, &e.details).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
+    ) -> DataflowResult<SourceFinishType> {
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -96,7 +91,7 @@ impl MqttSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -115,30 +110,26 @@ impl MqttSourceFunc {
                 .await;
         }
 
-        let (client, mut eventloop) = match create_connection(
+        let (client, mut eventloop) = create_connection(
             &self.config,
             &ctx.task_info.job_id,
             &ctx.task_info.operator_id,
             ctx.task_info.task_index as usize,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(UserError {
-                    name: "MqttSourceError".to_string(),
-                    details: format!("Failed to create connection: {e}"),
-                });
-            }
-        };
+        )
+        .context("creating connection")?;
 
-        match client.subscribe(self.topic.clone(), self.qos).await {
-            Ok(_) => (),
-            Err(e) => {
-                return Err(UserError {
-                    name: "MqttSourceError".to_string(),
-                    details: format!("Failed to subscribe to topic: {e}"),
-                });
-            }
-        }
+        client
+            .subscribe(self.topic.clone(), self.qos)
+            .await
+            .map_err(|e| {
+                connector_err!(
+                    External,
+                    WithBackoff,
+                    "failed to subscribe to MQTT topic '{}': {}",
+                    self.topic,
+                    e
+                )
+            })?;
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
 
@@ -176,17 +167,10 @@ impl MqttSourceFunc {
                         Ok(_) => (),
                         Err(err) => {
                             tracing::error!("Failed to poll mqtt eventloop: {}", err);
-                            if let Err(err) = client
-                                .subscribe(
-                                    topic.clone(),
-                                    qos,
-                                )
-                                .await {
-                                    return Err(UserError {
-                                        name: "MqttSourceError".to_string(),
-                                        details: format!("Error while subscribing to mqtt topic {topic}: {err:?}"),
-                                    });
-                                }
+                            client
+                                .subscribe(topic.clone(), qos)
+                                .await
+                                .map_err(|e| connector_err!(External, WithBackoff, "failed to resubscribe to MQTT topic '{}': {}", topic, e))?;
                         }
                     }
                 }

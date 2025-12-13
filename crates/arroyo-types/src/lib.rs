@@ -135,56 +135,6 @@ impl ArrowMessage {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct UserError {
-    pub name: String,
-    pub details: String,
-}
-
-impl UserError {
-    pub fn new(name: impl Into<String>, details: impl Into<String>) -> UserError {
-        UserError {
-            name: name.into(),
-            details: details.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SourceError {
-    BadData { details: String, count: usize },
-    Other { name: String, details: String },
-}
-
-impl SourceError {
-    pub fn bad_data(details: impl Into<String>) -> SourceError {
-        SourceError::BadData {
-            details: details.into(),
-            count: 1,
-        }
-    }
-
-    pub fn bad_data_count(details: impl Into<String>, count: usize) -> SourceError {
-        SourceError::BadData {
-            details: details.into(),
-            count,
-        }
-    }
-
-    pub fn other(name: impl Into<String>, details: impl Into<String>) -> SourceError {
-        SourceError::Other {
-            name: name.into(),
-            details: details.into(),
-        }
-    }
-
-    pub fn details(&self) -> &String {
-        match self {
-            SourceError::BadData { details, .. } | SourceError::Other { details, .. } => details,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]
 pub enum UpdatingData<T: Data> {
     Retract(T),

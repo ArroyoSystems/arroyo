@@ -386,12 +386,17 @@ impl State for Scheduling {
                 .map_err(|err| {
                     fatal(
                         format!("Failed to restore job; checkpoint {epoch} not found."),
-                        err,
+                        err.into(),
                     )
                 })?;
 
             if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
-                return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 10));
+                return Err(ctx.retryable(
+                    self,
+                    "failed to prepare checkpoint for loading",
+                    e.into(),
+                    10,
+                ));
             }
             metadata.min_epoch = min_epoch;
             if needs_commits {
@@ -408,7 +413,7 @@ impl State for Scheduling {
                                     format!(
                                 "Failed to restore job; operator metadata for {operator_id} not found."
                             ),
-                                    err,
+                                    err.into(),
                                 )
                             })?;
                     let Some(operator_metadata) = operator_metadata else {
@@ -472,7 +477,7 @@ impl State for Scheduling {
                 .map_err(|err| {
                     fatal(
                         format!("Failed to write checkpoint metadata for epoch {epoch}."),
-                        err,
+                        err.into(),
                     )
                 })?;
         }

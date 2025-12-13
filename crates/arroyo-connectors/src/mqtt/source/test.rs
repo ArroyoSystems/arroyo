@@ -180,14 +180,13 @@ impl MqttTopicTester {
             ctx.out_schema.clone(),
             arrow_collector,
             command_tx,
-            &chain_info,
             &task_info,
         );
 
         let subscribed = mqtt.subscribed();
         tokio::spawn(async move {
-            mqtt.on_start(&mut ctx).await;
-            mqtt.run(&mut ctx, &mut collector).await;
+            mqtt.on_start(&mut ctx).await.unwrap();
+            mqtt.run(&mut ctx, &mut collector).await.unwrap();
         });
 
         MqttSourceWithReads {

@@ -8,6 +8,7 @@ use arroyo_operator::operator::{
     Registry,
 };
 use arroyo_planner::schemas::add_timestamp_field_arrow;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
@@ -230,13 +231,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)
-            .await
-            .expect("should be able to load table");
+            .await?;
         for (timestamp, batch) in table.all_batches_for_watermark(watermark) {
             let bin = self.bin_start(*timestamp);
             let holder = self.execs.entry(bin).or_default();
@@ -244,6 +244,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 .iter()
                 .for_each(|batch| holder.finished_batches.push(batch.clone()));
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -251,7 +252,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -312,6 +313,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 .send(bin_batch)
                 .unwrap();
         }
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -319,7 +321,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         if let Some(watermark) = ctx.last_present_watermark() {
             let bin = self.bin_start(watermark);
             while !self.execs.is_empty() {
@@ -337,7 +339,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                         exec.sender.take();
                         while let (_bin, Some((batch, new_exec))) = active_exec.await {
                             active_exec = new_exec;
-                            let batch = batch.expect("should be able to compute batch");
+                            let batch = batch?;
                             exec.finished_batches.push(batch);
                         }
                     }
@@ -351,21 +353,19 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                         .expect("reset execution plan");
                     let mut final_exec = self
                         .finish_execution_plan
-                        .execute(0, SessionContext::new().task_ctx())
-                        .unwrap();
+                        .execute(0, SessionContext::new().task_ctx())?;
                     let mut aggregate_results = vec![];
                     while let Some(batch) = final_exec.next().await {
-                        let batch = batch.expect("should be able to compute batch");
+                        let batch = batch?;
                         let with_timestamp = Self::add_bin_start_as_timestamp(
                             &batch,
                             popped_bin,
                             self.aggregate_with_timestamp_schema.clone(),
-                        )
-                        .expect("should be able to add timestamp");
+                        )?;
                         if self.final_projection.is_some() {
                             aggregate_results.push(with_timestamp);
                         } else {
-                            collector.collect(with_timestamp).await;
+                            collector.collect(with_timestamp).await?;
                         }
                     }
                     if let Some(final_projection) = self.final_projection.as_ref() {
@@ -373,13 +373,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                             let mut batches = self.final_batches_passer.write().unwrap();
                             *batches = aggregate_results;
                         }
-                        final_projection.reset().expect("reset execution plan");
-                        let mut final_projection_exec = final_projection
-                            .execute(0, SessionContext::new().task_ctx())
-                            .unwrap();
+                        final_projection.reset()?;
+                        let mut final_projection_exec =
+                            final_projection.execute(0, SessionContext::new().task_ctx())?;
                         while let Some(batch) = final_projection_exec.next().await {
-                            let batch = batch.expect("should be able to compute batch");
-                            collector.collect(batch).await;
+                            let batch = batch?;
+                            collector.collect(batch).await?;
                         }
                     }
                 } else {
@@ -387,7 +386,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 }
             }
         }
-        Some(watermark)
+        Ok(Some(watermark))
     }
 
     fn future_to_poll(
@@ -410,13 +409,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         result: Box<dyn Any + Send>,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, Some((batch, future)))) = *data {
             match self.execs.get_mut(&bin) {
                 Some(exec) => {
-                    exec.finished_batches
-                        .push(batch.expect("should've been able to compute a batch"));
+                    exec.finished_batches.push(batch?);
                     self.futures.lock().await.push(future);
                 }
                 None => {
@@ -424,6 +422,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 }
             }
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -431,7 +430,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {
@@ -441,8 +440,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)
-            .await
-            .expect("should get table");
+            .await?;
 
         // This was a separate map just to the active execs, which could, in corner cases, be much smaller.
         for (bin, exec) in self.execs.iter_mut() {
@@ -452,18 +450,18 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
             };
             while let (_bin_, Some((batch, next_exec))) = active_exec.await {
                 active_exec = next_exec;
-                let batch = batch.expect("should be able to compute batch");
+                let batch = batch?;
                 let state_batch = Self::add_bin_start_as_timestamp(
                     &batch,
                     *bin,
                     self.partial_schema.schema.clone(),
-                )
-                .expect("should be able to add timestamp");
+                )?;
                 table.insert(*bin, state_batch);
                 exec.finished_batches.push(batch);
             }
         }
-        table.flush(watermark).await.unwrap();
+        table.flush(watermark).await?;
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

@@ -6,6 +6,7 @@ use arroyo_operator::{
     context::OperatorContext,
     operator::{ArrowOperator, ConstructedOperator, OperatorConstructor},
 };
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
@@ -142,12 +143,11 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
 
                     let bin_start_scalar =
                         ScalarValue::TimestampNanosecond(Some(bucket_nanos), None);
-                    let timestamp_array =
-                        bin_start_scalar.to_array_of_size(batch.num_rows()).unwrap();
+                    let timestamp_array = bin_start_scalar.to_array_of_size(batch.num_rows())?;
                     let mut columns = batch.columns().to_vec();
                     columns.push(timestamp_array);
                     let state_batch =
-                        RecordBatch::try_new(self.partial_schema.schema.clone(), columns).unwrap();
+                        RecordBatch::try_new(self.partial_schema.schema.clone(), columns)?;
                     partial_table.insert(bin_start, state_batch);
                     bin_exec.finished_batches.push(batch);
                 }
@@ -156,7 +156,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
                 self.tiered_record_batches.insert(batch, bin_start)?;
             }
         }
-        partial_table.flush_timestamp(bin_end).await?;
+        partial_table.flush_timestamp(bin_end).await;
         partial_table.expire_timestamp(bin_end - self.width + self.slide);
         let interval_start = bin_end - self.width;
         let interval_end = bin_end;
@@ -169,8 +169,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         self.finish_execution_plan.reset()?;
         let mut final_exec = self
             .finish_execution_plan
-            .execute(0, SessionContext::new().task_ctx())
-            .unwrap();
+            .execute(0, SessionContext::new().task_ctx())?;
         self.tiered_record_batches
             .delete_before(bin_end + self.slide - self.width)?;
 
@@ -188,9 +187,8 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         };
         let mut aggregate_results = Vec::new();
         while let Some(batch) = final_exec.next().await {
-            let batch = batch.expect("should be able to compute batch");
             let with_timestamp = Self::add_bin_start_as_timestamp(
-                &batch,
+                &batch?,
                 interval_start,
                 self.projection_input_schema.clone(),
             )?;
@@ -205,8 +203,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             .final_projection
             .execute(0, SessionContext::new().task_ctx())?;
         while let Some(batch) = final_projection_exec.next().await {
-            let batch = batch.expect("should be able to compute batch");
-            collector.collect(batch).await;
+            collector.collect(batch?).await?;
         }
 
         Ok(())
@@ -218,7 +215,7 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
         let bin_start = ScalarValue::TimestampNanosecond(Some(to_nanos(bin_start) as i64), None);
-        let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
+        let timestamp_array = bin_start.to_array_of_size(batch.num_rows())?;
         let mut columns = batch.columns().to_vec();
         columns.push(timestamp_array);
         Ok(RecordBatch::try_new(schema, columns)?)
@@ -556,13 +553,12 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)
-            .await
-            .expect("should be able to load table");
+            .await?;
         // bins before the watermark should be put into the TieredRecordBatchHolder, those after in the exec.
         let watermark_bin = self.bin_start(watermark.unwrap_or(SystemTime::UNIX_EPOCH));
         for (timestamp, batches) in table.all_batches_for_watermark(watermark) {
@@ -595,6 +591,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                 next_window_start: watermark_bin,
             };
         }
+        Ok(())
     }
 
     // TODO: filter out late data
@@ -603,7 +600,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let bin = self
             .binning_function
             .evaluate(&batch)
@@ -673,6 +670,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                 .send(bin_batch)
                 .unwrap();
         }
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -680,14 +678,16 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
-        let last_watermark = ctx.last_present_watermark()?;
+    ) -> DataflowResult<Option<Watermark>> {
+        let Some(last_watermark) = ctx.last_present_watermark() else {
+            return Ok(None);
+        };
 
         while self.should_advance(last_watermark) {
-            self.advance(ctx, collector).await.unwrap();
+            self.advance(ctx, collector).await?;
         }
 
-        Some(watermark)
+        Ok(Some(watermark))
     }
 
     async fn handle_checkpoint(
@@ -695,7 +695,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx
             .watermark()
             .and_then(|watermark: Watermark| match watermark {
@@ -705,8 +705,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         let table = ctx
             .table_manager
             .get_expiring_time_key_table("t", watermark)
-            .await
-            .expect("should get table");
+            .await?;
 
         // TODO: this was a separate map just to the active execs, which could, in corner cases, be much smaller.
         for (bin, exec) in self.execs.iter_mut() {
@@ -722,18 +721,19 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                     unreachable!("should only get batches for the bin we're working on");
                 }
                 active_exec = next_exec;
-                let batch = batch.expect("should be able to compute batch");
+                let batch = batch?;
                 let bin_start = ScalarValue::TimestampNanosecond(Some(bucket_nanos), None);
-                let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
+                let timestamp_array = bin_start.to_array_of_size(batch.num_rows())?;
                 let mut columns: Vec<Arc<dyn Array>> = batch.columns().to_vec();
                 columns.push(timestamp_array);
                 let state_batch =
-                    RecordBatch::try_new(self.partial_schema.schema.clone(), columns).unwrap();
+                    RecordBatch::try_new(self.partial_schema.schema.clone(), columns)?;
                 table.insert(*bin, state_batch);
                 exec.finished_batches.push(batch);
             }
         }
-        table.flush(watermark).await.unwrap();
+        table.flush(watermark).await?;
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

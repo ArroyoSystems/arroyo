@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
+use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
     OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
@@ -128,34 +128,38 @@ pub enum DataOperation {
 #[async_trait]
 pub trait BackingStore {
     /// prepares a checkpoint to be loaded, e.g., by deleting future data
-    async fn prepare_checkpoint_load(metadata: &CheckpointMetadata) -> Result<()>;
+    async fn prepare_checkpoint_load(metadata: &CheckpointMetadata) -> Result<(), StateError>;
 
     /// loads the checkpoint metadata for a given job id and epoch
-    async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Result<CheckpointMetadata>;
+    async fn load_checkpoint_metadata(
+        job_id: &str,
+        epoch: u32,
+    ) -> Result<CheckpointMetadata, StateError>;
 
     /// loads the operator checkpoint metadata for a given job id, operator id, and epoch
     async fn load_operator_metadata(
         job_id: &str,
         operator_id: &str,
         epoch: u32,
-    ) -> Result<Option<OperatorCheckpointMetadata>>;
+    ) -> Result<Option<OperatorCheckpointMetadata>, StateError>;
 
     /// returns the name of the BackingStore implementation
     fn name() -> &'static str;
 
     /// writes the operator checkpoint metadata to the backing store
-    async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata)
-        -> Result<()>;
+    async fn write_operator_checkpoint_metadata(
+        metadata: OperatorCheckpointMetadata,
+    ) -> Result<(), StateError>;
 
     /// writes the checkpoint metadata to the backing store
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<()>;
+    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<(), StateError>;
 
     /// cleans up a checkpoint by deleting data that is no longer needed
     async fn cleanup_checkpoint(
         metadata: CheckpointMetadata,
         old_min_epoch: u32,
         new_min_epoch: u32,
-    ) -> Result<()>;
+    ) -> Result<(), StateError>;
 }
 
 pub fn hash_key<K: Hash>(key: &K) -> u64 {
@@ -167,7 +171,7 @@ pub fn hash_key<K: Hash>(key: &K) -> u64 {
 static STORAGE_PROVIDER: tokio::sync::OnceCell<Arc<StorageProvider>> =
     tokio::sync::OnceCell::const_new();
 
-pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>> {
+pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>, StateError> {
     // TODO: this should be encoded in the config so that the controller doesn't need
     // to be synchronized with the workers
 
@@ -175,12 +179,7 @@ pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvide
         .get_or_try_init(|| async {
             let storage_url = &config().checkpoint_url;
 
-            StorageProvider::for_url(storage_url)
-                .await
-                .context(format!(
-                    "failed to construct checkpoint backend for URL {storage_url}"
-                ))
-                .map(Arc::new)
+            Ok(StorageProvider::for_url(storage_url).await.map(Arc::new)?)
         })
         .await
 }
