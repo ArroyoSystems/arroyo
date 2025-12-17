@@ -760,6 +760,10 @@ pub struct LogConfig {
     /// Set switch whether record file name in log
     #[serde(default)]
     pub enable_file_name: bool,
+
+    /// Static logging fields
+    #[serde(default)]
+    pub static_fields: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

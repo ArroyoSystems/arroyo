@@ -10,6 +10,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 jemalloc_pprof = "0.7.0"
 
 # logging
+json-subscriber = "0.2.6"
 tracing = "0.1"
 tracing-logfmt = "0.2.0"
 tracing-subscriber = {version = "0.3", features = [ "env-filter", "json" ]}
@@ -48,3 +49,4 @@ serde = { version = "1.0.96", features = ["derive"] }
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
+
