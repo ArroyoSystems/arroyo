@@ -79,10 +79,10 @@ impl BackendFlusher {
                             .send(ControlResp::TaskFailed {
                                 node_id: self.task_info.node_id,
                                 task_index: self.task_info.task_index as usize,
-                                error: TaskError::internal(format!(
-                                    "Failed to flush state file: {:?}",
-                                    err
-                                ), self.task_info.operator_id.clone()),
+                                error: TaskError::internal(
+                                    format!("Failed to flush state file: {:?}", err),
+                                    self.task_info.operator_id.clone(),
+                                ),
                             })
                             .await
                             .unwrap();

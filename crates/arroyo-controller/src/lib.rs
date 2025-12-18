@@ -5,13 +5,9 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
-use arroyo_rpc::{config, errors};
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
-use arroyo_rpc::grpc::rpc::{
-    ErrorDomain, NonfatalErrorReq, RetryHint, SinkDataReq, SinkDataResp, TaskCheckpointEventReq,
-    TaskCheckpointEventResp, WorkerErrorRes,
-};
 use arroyo_rpc::grpc::rpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
     JobMetricsReq, JobMetricsResp, OutputData, RegisterNodeReq, RegisterNodeResp,
@@ -20,7 +16,12 @@ use arroyo_rpc::grpc::rpc::{
     TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp, WorkerInitializationCompleteReq,
     WorkerInitializationCompleteResp,
 };
+use arroyo_rpc::grpc::rpc::{
+    NonfatalErrorReq, RetryHint, SinkDataReq, SinkDataResp, TaskCheckpointEventReq,
+    TaskCheckpointEventResp, WorkerErrorRes,
+};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::{config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{from_micros, MachineId, WorkerId};
@@ -43,7 +44,6 @@ use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
-use arroyo_rpc::errors::ConnectorErrorDomain;
 
 //pub mod compiler;
 pub mod job_controller;
@@ -102,6 +102,7 @@ pub struct JobStatus {
     finish_time: Option<OffsetDateTime>,
     tasks: Option<i32>,
     failure_message: Option<String>,
+    failure_domain: Option<String>,
     restarts: i32,
     pipeline_path: Option<String>,
     wasm_path: Option<String>,
@@ -118,6 +119,7 @@ impl JobStatus {
             &self.finish_time,
             &self.tasks,
             &self.failure_message,
+            &self.failure_domain,
             &self.restarts,
             &self.pipeline_path,
             &self.wasm_path,
@@ -144,6 +146,17 @@ fn job_in_final_state(config: &JobConfig, status: &JobStatus) -> bool {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct TaskFailedEvent {
+    worker_id: WorkerId,
+    node_id: u32,
+    operator_id: String,
+    subtask_index: u32,
+    reason: String,
+    error_domain: errors::ErrorDomain,
+    retry_hint: errors::RetryHint,
+}
+
 #[derive(Debug)]
 pub enum RunningMessage {
     TaskCheckpointEvent(TaskCheckpointEventReq),
@@ -154,14 +167,7 @@ pub enum RunningMessage {
         node_id: u32,
         subtask_index: u32,
     },
-    TaskFailed {
-        worker_id: WorkerId,
-        node_id: u32,
-        subtask_index: u32,
-        reason: String,
-        error_domain: ErrorDomain,
-        retry_hint: RetryHint,
-    },
+    TaskFailed(TaskFailedEvent),
     WorkerHeartbeat {
         worker_id: WorkerId,
         time: Instant,
@@ -341,14 +347,15 @@ impl ControllerGrpc for ControllerServer {
 
         self.send_to_job_queue(
             &err.job_id,
-            JobMessage::RunningMessage(RunningMessage::TaskFailed {
+            JobMessage::RunningMessage(RunningMessage::TaskFailed(TaskFailedEvent {
                 worker_id: WorkerId(req.worker_id),
                 node_id: err.node_id,
                 subtask_index: err.operator_subtask as u32,
                 error_domain: err.error_domain().into(),
                 retry_hint: err.retry_hint().into(),
+                operator_id: err.operator_id,
                 reason: err.error,
-            }),
+            })),
         )
         .await?;
 
@@ -483,8 +490,8 @@ impl ControllerGrpc for ControllerServer {
             &LogLevel::error,
             &err.error,
             &err.details,
-            &ConnectorErrorDomain::from(err.error_domain()).to_string(),
-            &errors::RetryHint::from(err.retry_hint()).to_string(),
+            &errors::ErrorDomain::from(err.error_domain()).as_str(),
+            &errors::RetryHint::from(err.retry_hint()).as_str(),
         )
         .await
         {
@@ -635,6 +642,7 @@ impl ControllerServer {
                         finish_time: p.finish_time,
                         tasks: p.tasks,
                         failure_message: p.failure_message,
+                        failure_domain: p.failure_domain,
                         restarts: p.restarts,
                         pipeline_path: p.pipeline_path,
                         wasm_path: p.wasm_path,

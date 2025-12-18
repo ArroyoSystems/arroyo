@@ -21,11 +21,11 @@ use arroyo_operator::ErasedConstructor;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::TaskError;
 use arroyo_rpc::grpc::{
     api,
     rpc::{CheckpointMetadata, TaskAssignment},
 };
-use arroyo_rpc::errors::TaskError;
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{range_for_server, TaskInfo, WorkerId};
@@ -749,7 +749,10 @@ impl Engine {
                     .send(ControlResp::TaskFailed {
                         node_id: node.node_id,
                         task_index: task_index as usize,
-                        error: TaskError::internal(error.to_string(), task_info.operator_id.clone()),
+                        error: TaskError::internal(
+                            error.to_string(),
+                            task_info.operator_id.clone(),
+                        ),
                     })
                     .await
                     .ok();

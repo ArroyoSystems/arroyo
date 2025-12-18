@@ -24,11 +24,16 @@ use self::scheduling::Scheduling;
 use self::stopping::Stopping;
 use crate::job_controller::JobController;
 use crate::queries::controller_queries;
-use crate::types::public::StopMode;
-use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus, RunningMessage};
+use crate::types::public::{LogLevel, StopMode};
+use crate::{
+    queries, schedulers::Scheduler, JobConfig, JobMessage, JobStatus, RunningMessage,
+    TaskFailedEvent,
+};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
-use arroyo_rpc::log_event;
+use arroyo_rpc::errors::ErrorDomain;
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use prost::Message;
 
@@ -52,12 +57,14 @@ pub enum StateError {
     #[error("fatal error: {message:?}")]
     FatalError {
         message: String,
+        domain: errors::ErrorDomain,
         source: anyhow::Error,
     },
     #[error("retryable error: {message:?} ")]
     RetryableError {
         state: Box<dyn State>,
         message: String,
+        domain: errors::ErrorDomain,
         source: anyhow::Error,
         retries: usize,
     },
@@ -66,6 +73,7 @@ pub enum StateError {
 pub fn fatal(message: impl Into<String>, source: anyhow::Error) -> StateError {
     StateError::FatalError {
         message: message.into(),
+        domain: errors::ErrorDomain::Internal,
         source,
     }
 }
@@ -384,8 +392,59 @@ impl JobContext<'_> {
         StateError::RetryableError {
             state,
             message: message.into(),
+            domain: ErrorDomain::Internal,
             source,
             retries: retries.saturating_sub(self.retries_attempted),
+        }
+    }
+
+    pub async fn handle_task_error(
+        &self,
+        state: Box<dyn State>,
+        event: TaskFailedEvent,
+    ) -> StateError {
+        error!(
+            job_id = self.config.id.as_str(),
+            node_id = event.node_id,
+            operator_subtask = event.subtask_index,
+            operator_id = event.operator_id,
+            error_domain = event.error_domain.as_str(),
+            retry_hint = event.retry_hint.as_str(),
+            message = "task failed",
+            reason = event.reason,
+        );
+
+        let client = self.db.client().await.unwrap();
+        if let Err(db_err) = queries::controller_queries::execute_create_job_log_message(
+            &client,
+            &generate_id(IdTypes::JobLogMessage),
+            &self.config.id.as_str(),
+            &event.operator_id,
+            &(event.subtask_index as i64),
+            &LogLevel::error,
+            &"task failed",
+            &event.reason,
+            &event.error_domain.as_str(),
+            &event.retry_hint.as_str(),
+        )
+        .await
+        {
+            warn!("Failed to log task failure to database: {:?}", db_err);
+        }
+
+        match event.retry_hint {
+            errors::RetryHint::NoRetry => StateError::FatalError {
+                source: anyhow!("task failed: {}", event.reason),
+                message: event.reason,
+                domain: event.error_domain,
+            },
+            errors::RetryHint::WithBackoff => StateError::RetryableError {
+                state,
+                source: anyhow!("task failed: {}", event.reason),
+                message: event.reason,
+                domain: event.error_domain,
+                retries: 20,
+            },
         }
     }
 }
@@ -471,16 +530,22 @@ async fn execute_state<'a>(
             Some(s.state)
         }
         Ok(Transition::Stop) => None,
-        Err(StateError::FatalError { message, source })
+        Err(StateError::FatalError {
+            message,
+            source,
+            domain,
+        })
         | Err(StateError::RetryableError {
             message,
             source,
+            domain,
             retries: 1,
             ..
         })
         | Err(StateError::RetryableError {
             message,
             source,
+            domain,
             retries: 0,
             ..
         }) => {
@@ -498,11 +563,13 @@ async fn execute_state<'a>(
                     "job_id": ctx.config.id,
                     "state": state_name,
                     "error_message": message,
+                    "domain": domain.as_str(),
                     "error": format!("{:?}", source),
                     "retries": 0,
                 }
             );
             ctx.status.failure_message = Some(message);
+            ctx.status.failure_domain = Some(domain.as_str().to_string());
             ctx.status.finish_time = Some(OffsetDateTime::now_utc());
             let s: Box<dyn State> = Box::new(Failed {});
             Some(s)
@@ -512,6 +579,7 @@ async fn execute_state<'a>(
             message,
             source,
             retries,
+            domain,
         }) => {
             error!(
                 message = "retryable state error",
@@ -528,6 +596,7 @@ async fn execute_state<'a>(
                     "job_id": ctx.config.id,
                     "state": state_name,
                     "error_message": message,
+                    "domain": domain.as_str(),
                     "error": format!("{:?}", source),
                 },
                 ["retries" => retries]

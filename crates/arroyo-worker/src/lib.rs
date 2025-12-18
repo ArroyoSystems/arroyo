@@ -9,10 +9,10 @@ use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq, GetWorkerPhaseResp,
     HeartbeatReq, JobFinishedReq, JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes,
-    MetricFamily, MetricsReq, MetricsResp, RegisterWorkerReq, StartExecutionReq,
+    MetricFamily, MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq,
     StartExecutionResp, StopExecutionReq, StopExecutionResp, TaskCheckpointCompletedReq,
-    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq,
-    WorkerInfo, WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
+    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerInfo,
+    WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
     from_millis, to_micros, CheckpointBarrier, MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
@@ -36,6 +36,7 @@ use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
+use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
