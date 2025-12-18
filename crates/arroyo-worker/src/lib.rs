@@ -359,23 +359,35 @@ impl WorkerServer {
                             controller.task_failed(Request::new(
                                 TaskFailedReq {
                                     worker_id: worker_id.0,
-                                    job_id: job_id.clone(),
                                     time: to_micros(SystemTime::now()),
-                                    node_id,
-                                    operator_subtask: task_index as u64,
-                                    error,
+                                    error: Some(rpc::TaskError {
+                                        job_id: job_id.clone(),
+                                        node_id,
+                                        operator_subtask: task_index as u64,
+                                        error: error.message,
+                                        error_domain: rpc::ErrorDomain::from(error.domain) as i32,
+                                        retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
+                                        operator_id: error.operator_id,
+                                        details: error.details.unwrap_or_default(),
+                                    }),
                                 }
                             )).await.err()
                         }
                         Some(ControlResp::Error { node_id, operator_id, task_index, message, details}) => {
-                            controller.worker_error(Request::new(
-                                WorkerErrorReq {
-                                    job_id: job_id.clone(),
-                                    node_id,
-                                    operator_id,
-                                    task_index: task_index as u32,
-                                    message,
-                                    details
+                            controller.nonfatal_error(Request::new(
+                                NonfatalErrorReq {
+                                    worker_id: worker_id.0,
+                                    time: to_micros(SystemTime::now()),
+                                    error: Some(rpc::TaskError {
+                                        job_id: job_id.clone(),
+                                        node_id,
+                                        operator_id,
+                                        operator_subtask: task_index as u64,
+                                        error: message,
+                                        error_domain: rpc::ErrorDomain::External as i32,
+                                        retry_hint: rpc::RetryHint::NoRetry as i32,
+                                        details,
+                                    }),
                                 }
                             )).await.err()
                         }

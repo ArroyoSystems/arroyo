@@ -27,7 +27,7 @@ use crate::{
     StateMessage,
 };
 use crate::{CheckpointMessage, TableData};
-use arroyo_rpc::errors::StateError;
+use arroyo_rpc::errors::{StateError, TaskError};
 use arroyo_rpc::grpc::rpc::CheckpointMetadata;
 use tracing::{debug, error, info, warn};
 
@@ -79,7 +79,10 @@ impl BackendFlusher {
                             .send(ControlResp::TaskFailed {
                                 node_id: self.task_info.node_id,
                                 task_index: self.task_info.task_index as usize,
-                                error: err.to_string(),
+                                error: TaskError::internal(format!(
+                                    "Failed to flush state file: {:?}",
+                                    err
+                                ), self.task_info.operator_id.clone()),
                             })
                             .await
                             .unwrap();

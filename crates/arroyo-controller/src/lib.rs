@@ -5,9 +5,13 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
-use arroyo_rpc::config;
+use arroyo_rpc::{config, errors};
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
+use arroyo_rpc::grpc::rpc::{
+    ErrorDomain, NonfatalErrorReq, RetryHint, SinkDataReq, SinkDataResp, TaskCheckpointEventReq,
+    TaskCheckpointEventResp, WorkerErrorRes,
+};
 use arroyo_rpc::grpc::rpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
     JobMetricsReq, JobMetricsResp, OutputData, RegisterNodeReq, RegisterNodeResp,
@@ -15,10 +19,6 @@ use arroyo_rpc::grpc::rpc::{
     TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq,
     TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp, WorkerInitializationCompleteReq,
     WorkerInitializationCompleteResp,
-};
-use arroyo_rpc::grpc::rpc::{
-    SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
-    WorkerErrorRes,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::shutdown::ShutdownGuard;
@@ -42,7 +42,8 @@ use tokio::sync::RwLock;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
+use arroyo_rpc::errors::ConnectorErrorDomain;
 
 //pub mod compiler;
 pub mod job_controller;
@@ -158,6 +159,8 @@ pub enum RunningMessage {
         node_id: u32,
         subtask_index: u32,
         reason: String,
+        error_domain: ErrorDomain,
+        retry_hint: RetryHint,
     },
     WorkerHeartbeat {
         worker_id: WorkerId,
@@ -332,14 +335,19 @@ impl ControllerGrpc for ControllerServer {
         request: Request<TaskFailedReq>,
     ) -> Result<Response<TaskFailedResp>, Status> {
         let req = request.into_inner();
+        let err = req
+            .error
+            .ok_or_else(|| Status::invalid_argument("TaskFailedReq missing error"))?;
 
         self.send_to_job_queue(
-            &req.job_id,
+            &err.job_id,
             JobMessage::RunningMessage(RunningMessage::TaskFailed {
                 worker_id: WorkerId(req.worker_id),
-                node_id: req.node_id,
-                subtask_index: req.operator_subtask as u32,
-                reason: req.error,
+                node_id: err.node_id,
+                subtask_index: err.operator_subtask as u32,
+                error_domain: err.error_domain().into(),
+                retry_hint: err.retry_hint().into(),
+                reason: err.error,
             }),
         )
         .await?;
@@ -448,35 +456,40 @@ impl ControllerGrpc for ControllerServer {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn worker_error(
+    async fn nonfatal_error(
         &self,
-        request: Request<WorkerErrorReq>,
+        request: Request<NonfatalErrorReq>,
     ) -> Result<Response<WorkerErrorRes>, Status> {
         let req = request.into_inner();
+        let err = req
+            .error
+            .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing error"))?;
 
         info!(
-            job_id = req.job_id,
-            operator_id = req.operator_id,
+            job_id = err.job_id,
+            operator_id = err.operator_id,
             message = "operator error",
-            error_message = req.message,
-            error_details = req.details
+            error_message = err.error,
+            error_details = err.details
         );
 
         let client = self.db.client().await.unwrap();
         match queries::controller_queries::execute_create_job_log_message(
             &client,
             &generate_id(IdTypes::JobLogMessage),
-            &req.job_id,
-            &req.operator_id,
-            &(req.task_index as i64),
+            &err.job_id,
+            &err.operator_id,
+            &(err.operator_subtask as i64),
             &LogLevel::error,
-            &req.message,
-            &req.details,
+            &err.error,
+            &err.details,
+            &ConnectorErrorDomain::from(err.error_domain()).to_string(),
+            &errors::RetryHint::from(err.retry_hint()).to_string(),
         )
         .await
         {
             Ok(_) => Ok(Response::new(WorkerErrorRes {})),
-            Err(err) => Err(Status::from_error(Box::new(err))),
+            Err(db_err) => Err(Status::from_error(Box::new(db_err))),
         }
     }
 

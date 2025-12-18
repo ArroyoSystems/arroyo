@@ -228,7 +228,7 @@ pub enum ControlResp {
     TaskFailed {
         node_id: u32,
         task_index: usize,
-        error: String,
+        error: crate::errors::TaskError,
     },
     Error {
         node_id: u32,
