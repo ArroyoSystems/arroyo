@@ -21,7 +21,7 @@ use arroyo_operator::ErasedConstructor;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::errors::TaskError;
+use arroyo_rpc::errors::{DataflowError, TaskError};
 use arroyo_rpc::grpc::{
     api,
     rpc::{CheckpointMetadata, TaskAssignment},
@@ -749,10 +749,12 @@ impl Engine {
                     .send(ControlResp::TaskFailed {
                         node_id: node.node_id,
                         task_index: task_index as usize,
-                        error: TaskError::internal(
-                            error.to_string(),
-                            task_info.operator_id.clone(),
-                        ),
+                        error: DataflowError::InternalOperatorError {
+                            error: "task panicked",
+                            message: error.to_string(),
+                        }
+                        .with_operator(task_info.operator_id.clone())
+                        .into(),
                     })
                     .await
                     .ok();

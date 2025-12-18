@@ -27,7 +27,7 @@ use crate::{
     StateMessage,
 };
 use crate::{CheckpointMessage, TableData};
-use arroyo_rpc::errors::{StateError, TaskError};
+use arroyo_rpc::errors::{DataflowError, DataflowResult, StateError, TaskError};
 use arroyo_rpc::grpc::rpc::CheckpointMetadata;
 use tracing::{debug, error, info, warn};
 
@@ -79,13 +79,8 @@ impl BackendFlusher {
                             .send(ControlResp::TaskFailed {
                                 node_id: self.task_info.node_id,
                                 task_index: self.task_info.task_index as usize,
-                                error: TaskError::internal(
-                                    format!("Failed to flush state file: {:?}", err),
-                                    self.task_info.operator_id.clone(),
-                                ),
-                            })
-                            .await
-                            .unwrap();
+                                error: err.with_operator(self.task_info.operator_id.clone()).into(),
+                            }).await.expect("control queue closed");
                         return;
                     }
                 }
@@ -93,7 +88,7 @@ impl BackendFlusher {
         });
     }
 
-    async fn flush_iteration(&mut self) -> Result<bool> {
+    async fn flush_iteration(&mut self) -> DataflowResult<bool> {
         let mut checkpoint_epoch = None;
 
         for (table_name, checkpointer) in &self.tables {
@@ -132,8 +127,9 @@ impl BackendFlusher {
             }
         }
         let Some(cp) = checkpoint_epoch else {
-            bail!("somehow exited loop without checkpoint_epoch being set");
+            unreachable!("somehow exited loop without checkpoint_epoch being set");
         };
+
         let mut metadatas = HashMap::new();
         let mut bytes = 0;
         for (table_name, checkpointer) in self.table_checkpointers.drain() {
@@ -183,7 +179,7 @@ impl BackendFlusher {
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_metadata,
             }))
-            .await?;
+            .await.expect("control queue closed");
         if cp.then_stop {
             self.finish_tx
                 .take()

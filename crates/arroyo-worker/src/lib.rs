@@ -368,7 +368,7 @@ impl WorkerServer {
                                         error: error.message,
                                         error_domain: rpc::ErrorDomain::from(error.domain) as i32,
                                         retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
-                                        operator_id: error.operator_id,
+                                        operator_id: error.operator_id.unwrap_or_default(),
                                         details: error.details.unwrap_or_default(),
                                     }),
                                 }

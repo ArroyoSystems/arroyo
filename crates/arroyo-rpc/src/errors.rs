@@ -70,6 +70,24 @@ pub enum DataflowError {
     // be removed in later stages of the migration
     #[error("unknown error: {0}")]
     UnknownError(#[from] anyhow::Error),
+    #[error("{error} in {operator_id}")]
+    WithOperator { error: Box<DataflowError>, operator_id: String },
+}
+
+impl DataflowError {
+    pub fn with_operator(self, operator_id: String) -> Self {
+        match self {
+            DataflowError::WithOperator { error, .. } => {
+                DataflowError::WithOperator {error, operator_id }
+            }
+            e => {
+                DataflowError::WithOperator {
+                    error: Box::new(e),
+                    operator_id,
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -147,7 +165,7 @@ pub struct TaskError {
     pub message: String,
     pub domain: ErrorDomain,
     pub retry_hint: RetryHint,
-    pub operator_id: String,
+    pub operator_id: Option<String>,
     pub details: Option<String>,
 }
 
@@ -174,64 +192,52 @@ fn classify_datafusion_error(err: &DataFusionError) -> (ErrorDomain, RetryHint) 
     }
 }
 
-impl TaskError {
-    pub fn from_dataflow_error(error: &DataflowError, operator_id: String) -> Self {
-        let (domain, retry_hint, details) = match error {
+impl From<DataflowError> for TaskError {
+    fn from(value: DataflowError) -> Self {
+        let message = value.to_string();
+        let (domain, retry_hint, details) = match value {
             DataflowError::ConnectorError {
                 domain,
                 retry,
                 source,
                 ..
             } => (
-                *domain,
+                domain,
                 retry.clone(),
                 source.as_ref().map(|s| format!("{:?}", s)),
             ),
-
             DataflowError::ArrowError(_) => (ErrorDomain::Internal, RetryHint::NoRetry, None),
-
             DataflowError::DataFusionError(df_err) => {
-                let (domain, retry) = classify_datafusion_error(df_err);
+                let (domain, retry) = classify_datafusion_error(&df_err);
                 (domain, retry, None)
             }
-
             DataflowError::InternalOperatorError { .. } => {
                 (ErrorDomain::Internal, RetryHint::NoRetry, None)
             }
-
             DataflowError::StateError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
-
             DataflowError::ArgumentError(_) => (ErrorDomain::User, RetryHint::NoRetry, None),
-
             DataflowError::ExternalError(_) => {
                 (ErrorDomain::External, RetryHint::WithBackoff, None)
             }
-
             DataflowError::DataError { details, count } => (
                 ErrorDomain::External,
                 RetryHint::WithBackoff,
                 Some(format!("count: {}, details: {}", count, details)),
             ),
-
             DataflowError::UnknownError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
+            DataflowError::WithOperator { error, operator_id } => {
+                let mut inner: TaskError = (*error).into();
+                inner.operator_id = Some(operator_id);
+                return inner;
+            }
         };
 
         Self {
-            message: error.to_string(),
+            message,
             domain,
             retry_hint,
-            operator_id,
+            operator_id: None,
             details,
-        }
-    }
-
-    pub fn internal(message: impl Into<String>, operator_id: String) -> Self {
-        Self {
-            message: message.into(),
-            domain: ErrorDomain::Internal,
-            retry_hint: RetryHint::WithBackoff,
-            operator_id,
-            details: None,
         }
     }
 }
