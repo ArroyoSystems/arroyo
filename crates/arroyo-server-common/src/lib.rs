@@ -19,13 +19,13 @@ use prometheus::{register_int_counter, Encoder, IntCounter, ProtobufEncoder, Tex
 use reqwest::Client;
 use serde_json::{json, Number, Value};
 use std::error::Error;
-use std::fs;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::{env, fs};
 use tokio::net::TcpListener;
 use tonic::transport::Server;
 use tower::layer::util::Stack;
@@ -35,7 +35,8 @@ use tower_http::trace::{DefaultOnFailure, TraceLayer};
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::metadata::LevelFilter;
 use tracing::{debug, info, span, Level};
-use tracing_subscriber::fmt::format::{FmtSpan, Format};
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
@@ -121,14 +122,28 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
             )
         }
         LogFormat::Json => {
-            register_log!(
-                tracing_subscriber::fmt::layer()
-                    .with_line_number(config().logging.enable_file_line)
-                    .with_file(config().logging.enable_file_name)
-                    .event_format(Format::default().json()),
-                nonblocking,
-                filter
-            )
+            let mut layer = json_subscriber::JsonLayer::stdout();
+
+            // match standard tracing subscriber logging options
+            layer
+                .with_event("fields")
+                .with_timer("timestamp", SystemTime)
+                .with_target("target")
+                .with_level("level");
+
+            if config().logging.enable_file_line {
+                layer.with_line_number("line_number");
+            }
+            if config().logging.enable_file_name {
+                layer.with_file("filename");
+            }
+
+            // add static fields
+            for (key, value) in &config().logging.static_fields {
+                layer.add_static_field(key, serde_json::json!(value));
+            }
+
+            register_log!(layer, nonblocking, filter)
         }
     }
 
