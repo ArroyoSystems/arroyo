@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::default_sink;
 use arroyo_rpc::api_types::pipelines::{
-    Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
+    FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
     QueryValidationResult, StopType, ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
@@ -53,6 +53,7 @@ use crate::udfs::build_udf;
 use crate::AuthData;
 use crate::{connection_tables, to_micros};
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
 use petgraph::prelude::EdgeRef;
@@ -514,7 +515,13 @@ impl From<DbPipelineJob> for Job {
             start_time: val.start_time.map(to_micros),
             finish_time: val.finish_time.map(to_micros),
             tasks: val.tasks.map(|t| t as u64),
-            failure_message: val.failure_message,
+            failure_reason: val.failure_message.map(|error| FailureReason {
+                error,
+                domain: val
+                    .failure_domain
+                    .and_then(|f| ErrorDomain::from_str(&f).ok())
+                    .unwrap_or_default(),
+            }),
             created_at: to_micros(val.created_at),
         }
     }

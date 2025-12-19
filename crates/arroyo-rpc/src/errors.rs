@@ -1,10 +1,12 @@
+use crate::grpc::rpc;
 use arrow_schema::ArrowError;
 use datafusion::error::DataFusionError;
 use datafusion::parquet::errors::ParquetError;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 use thiserror::Error;
-
-use crate::grpc::rpc;
+use utoipa::ToSchema;
 
 /// Creates a `DataflowError::ConnectorError` with format string support.
 ///
@@ -44,7 +46,7 @@ macro_rules! connector_err {
 pub enum DataflowError {
     #[error("Arrow error: {}", .0)]
     ArrowError(#[from] ArrowError),
-    #[error("SQL processing error: {}", .0)]
+    #[error("SQL error: {}", .0.message())]
     DataFusionError(#[from] DataFusionError),
     #[error("operator error: {error} {message}")]
     InternalOperatorError {
@@ -91,10 +93,12 @@ impl DataflowError {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ErrorDomain {
     User,
     External,
+    #[default]
     Internal,
 }
 
@@ -105,6 +109,19 @@ impl ErrorDomain {
             Self::External => "external",
             Self::Internal => "internal",
         }
+    }
+}
+
+impl FromStr for ErrorDomain {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "user" => Self::User,
+            "external" => Self::External,
+            "internal" => Self::Internal,
+            _ => return Err(()),
+        })
     }
 }
 

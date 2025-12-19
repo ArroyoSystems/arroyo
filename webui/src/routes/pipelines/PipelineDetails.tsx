@@ -120,12 +120,12 @@ export function PipelineDetails() {
         />
       </Flex>
       <Stack w="500px" className="pipelineInfo" spacing={2} overflow={'auto'}>
-        {job?.failure_message ? (
+        {job?.failure_reason?.error ? (
           <Box>
             <Alert status="error" marginBottom={5}>
               <Box>
                 <AlertTitle>Job Failed</AlertTitle>
-                <AlertDescription>{job?.failure_message}</AlertDescription>
+                <AlertDescription>{job?.failure_reason?.error}</AlertDescription>
               </Box>
               <Spacer />
               <AlertIcon alignSelf="flex-start" />
