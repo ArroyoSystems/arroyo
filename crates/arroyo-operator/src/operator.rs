@@ -259,7 +259,7 @@ impl OperatorNode {
             .await
         {
             Ok(()) => {
-                error!(
+                info!(
                     node_id = chain_info.node_id,
                     subtask_index = chain_info.task_index,
                     description = chain_info.description,

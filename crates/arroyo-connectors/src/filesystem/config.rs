@@ -1,12 +1,11 @@
 use crate::filesystem::sink::iceberg::transforms;
-use anyhow::{anyhow, bail};
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
 use core::slice::Iter;
 use datafusion::common::{
-    DFSchema, DataFusionError, Result, ScalarValue, plan_datafusion_err, plan_err,
+    DFSchema, DataFusionError, Result, ScalarValue, exec_err, plan_datafusion_err, plan_err,
 };
 use datafusion::logical_expr::sqlparser::ast::Function;
 use datafusion::prelude::{Expr, col, concat, lit, to_char};
@@ -25,6 +24,19 @@ use std::num::NonZeroU64;
 use strum_macros::EnumString;
 
 const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
+
+/// Which version of the FileSystemSink to use
+#[derive(
+    Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default, EnumString,
+)]
+#[strum(serialize_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+#[schemars(title = "File System Sink Version")]
+pub enum SinkVersion {
+    #[default]
+    V1,
+    V2,
+}
 
 /// Rolling policy for file sinks (when & why to close a file and open a new one).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
@@ -162,7 +174,7 @@ pub struct PartitioningConfig {
 }
 
 impl PartitioningConfig {
-    pub fn partition_expr(&self, schema: &Schema) -> anyhow::Result<Option<Expr>> {
+    pub fn partition_expr(&self, schema: &Schema) -> Result<Option<Expr>, DataFusionError> {
         Ok(match (&self.time_pattern, &self.fields) {
             (None, fields) if !fields.is_empty() => {
                 Some(Self::field_logical_expression(schema, fields)?)
@@ -179,7 +191,7 @@ impl PartitioningConfig {
         schema: &Schema,
         partition_fields: &[String],
         time_partition_pattern: &str,
-    ) -> anyhow::Result<Expr> {
+    ) -> Result<Expr, DataFusionError> {
         let field_function = Self::field_logical_expression(schema, partition_fields)?;
         let time_function = Self::timestamp_logical_expression(time_partition_pattern);
         let function = concat(vec![
@@ -193,16 +205,11 @@ impl PartitioningConfig {
     fn field_logical_expression(
         schema: &Schema,
         partition_fields: &[String],
-    ) -> anyhow::Result<Expr> {
+    ) -> Result<Expr, DataFusionError> {
         let columns_as_string = partition_fields
             .iter()
             .map(|field| {
-                let field = schema.field_with_name(field).map_err(|e| {
-                    anyhow!(
-                        "partition field '{field}' does not exist in the schema ({:?})",
-                        e
-                    )
-                })?;
+                let field = schema.field_with_name(field)?;
                 let column_expr = col(field.name());
                 let expr = match field.data_type() {
                     DataType::Utf8 => column_expr,
@@ -213,7 +220,7 @@ impl PartitioningConfig {
                 };
                 Ok((field.name(), expr))
             })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, DataFusionError>>()?;
 
         let function = concat(
             columns_as_string
@@ -426,6 +433,9 @@ pub struct FileSystemSink {
 
     #[serde(default)]
     pub multipart: MultipartConfig,
+
+    #[serde(default)]
+    pub version: SinkVersion,
 }
 
 impl FromOpts for FileSystemSink {
@@ -437,6 +447,7 @@ impl FromOpts for FileSystemSink {
             file_naming: opts.pull_struct()?,
             partitioning: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
+            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
         })
     }
 }
@@ -499,6 +510,9 @@ pub struct DeltaLakeSink {
 
     #[serde(default)]
     pub multipart: MultipartConfig,
+
+    #[serde(default)]
+    pub version: SinkVersion,
 }
 
 impl FromOpts for DeltaLakeSink {
@@ -510,6 +524,7 @@ impl FromOpts for DeltaLakeSink {
             file_naming: opts.pull_struct()?,
             partitioning: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
+            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
         })
     }
 }
@@ -837,18 +852,18 @@ impl FromOpts for IcebergPartitioning {
 }
 
 impl IcebergPartitioning {
-    pub fn as_partition_spec(&self, schema: SchemaRef) -> anyhow::Result<PartitionSpec> {
+    pub fn as_partition_spec(&self, schema: SchemaRef) -> Result<PartitionSpec, iceberg::Error> {
         let mut builder = PartitionSpec::builder(schema.clone());
 
         for f in &self.fields {
             builder = builder.add_partition_field(&f.field, f.name(), f.transform_fn.into())?;
         }
 
-        Ok(builder.build()?)
+        builder.build()
     }
 
-    pub fn partition_expr(&self, schema: &Schema) -> anyhow::Result<Option<Vec<Expr>>> {
-        let exprs: anyhow::Result<Vec<_>> = self
+    pub fn partition_expr(&self, schema: &Schema) -> Result<Option<Vec<Expr>>, DataFusionError> {
+        let exprs: Result<Vec<_>, DataFusionError> = self
             .fields
             .iter()
             .map(|f| {
@@ -856,7 +871,7 @@ impl IcebergPartitioning {
                     Transform::Identity => transforms::fns::ice_identity(col(&f.field)),
                     Transform::Bucket { arg0 } => {
                         if arg0 == 0 {
-                            bail!(
+                            return exec_err!(
                                 "in bucket({}, {}) second argument is invalid, must be positive",
                                 f.field,
                                 arg0
@@ -866,7 +881,7 @@ impl IcebergPartitioning {
                     }
                     Transform::Truncate { arg0: width } => {
                         if width == 0 {
-                            bail!(
+                            return exec_err!(
                                 "in truncate({}, {}) second argument is invalid, must be positive",
                                 f.field,
                                 width
@@ -888,15 +903,10 @@ impl IcebergPartitioning {
         let dfschema = DFSchema::try_from(schema.clone())?;
 
         for (expr, field) in exprs.iter().zip(&self.fields) {
-            schema.field_with_name(&field.field).map_err(|e| {
-                anyhow!(
-                    "partition field '{field}' does not exist in the schema ({:?})",
-                    e
-                )
-            })?;
+            schema.field_with_name(&field.field)?;
 
             if expr.data_type_and_nullable(&dfschema).is_err() {
-                bail!("partition transform {} has invalid types", field);
+                return exec_err!("partition transform {} has invalid types", field);
             }
         }
 
@@ -948,6 +958,9 @@ pub struct IcebergSink {
 
     #[serde(default)]
     pub multipart: MultipartConfig,
+
+    #[serde(default)]
+    pub version: SinkVersion,
 }
 
 impl FromOpts for IcebergSink {
@@ -963,6 +976,7 @@ impl FromOpts for IcebergSink {
             rolling_policy: opts.pull_struct()?,
             file_naming: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
+            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
         })
     }
 }

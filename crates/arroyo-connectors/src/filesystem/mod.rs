@@ -8,7 +8,10 @@ use self::sink::{
     JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
 };
 use crate::filesystem::config::*;
+use crate::filesystem::sink::json::JsonWriter;
+use crate::filesystem::sink::parquet::ParquetBatchBufferingWriter;
 use crate::filesystem::sink::partitioning::PartitionerMode;
+use crate::filesystem::sink::v2::FileSystemSinkV2;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{EmptyConfig, render_schema};
 use anyhow::{Result, anyhow, bail};
@@ -19,6 +22,8 @@ use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_storage::{BackendConfig, StorageProvider};
@@ -40,11 +45,18 @@ impl TableFormat {
         task_info: Arc<TaskInfo>,
         config: &FileSystemSink,
         schema: &Schema,
-    ) -> anyhow::Result<StorageProvider> {
+    ) -> Result<StorageProvider, DataflowError> {
         Ok(match self {
             TableFormat::None | TableFormat::Delta => {
                 StorageProvider::for_url_with_options(&config.path, config.storage_options.clone())
-                    .await?
+                    .await
+                    .map_err(|e| {
+                        connector_err!(
+                            User,
+                            NoRetry,
+                            "failed to construct object storage writer: {e:?}"
+                        )
+                    })?
             }
             TableFormat::Iceberg(table) => table.get_storage_provider(task_info, schema).await?,
         })
@@ -74,32 +86,50 @@ pub fn make_sink(
 
     let format = config.format.expect("must have format for FileSystemSink");
 
-    match (&format, is_local) {
-        (Format::Parquet { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
+    match (&format, is_local, sink.version) {
+        (Format::Parquet { .. }, true, _) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalParquetFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
-        (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            ParquetFileSystemSink::create_and_start(
+        (Format::Parquet { .. }, false, SinkVersion::V1) => Ok(ConstructedOperator::from_operator(
+            Box::new(ParquetFileSystemSink::create_and_start(
                 sink,
                 table_format,
                 format,
                 partitioner,
                 connection_id,
-            ),
-        ))),
-        (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
+            )),
+        )),
+        (Format::Parquet { .. }, false, SinkVersion::V2) => Ok(ConstructedOperator::from_operator(
+            Box::new(FileSystemSinkV2::<ParquetBatchBufferingWriter>::new(
+                sink,
+                table_format,
+                format,
+                partitioner,
+                connection_id,
+            )),
+        )),
+        (Format::Json { .. }, true, _) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalJsonFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
-        (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
-            JsonFileSystemSink::create_and_start(
+        (Format::Json { .. }, false, SinkVersion::V1) => Ok(ConstructedOperator::from_operator(
+            Box::new(JsonFileSystemSink::create_and_start(
                 sink,
                 table_format,
                 format,
                 partitioner,
                 connection_id,
-            ),
-        ))),
-        (f, _) => bail!("unsupported format {f}"),
+            )),
+        )),
+        (Format::Json { .. }, false, SinkVersion::V2) => Ok(ConstructedOperator::from_operator(
+            Box::new(FileSystemSinkV2::<JsonWriter>::new(
+                sink,
+                table_format,
+                format,
+                partitioner,
+                connection_id,
+            )),
+        )),
+        (f, _, _) => bail!("unsupported format {f}"),
     }
 }
 

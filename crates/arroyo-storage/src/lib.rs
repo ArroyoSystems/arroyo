@@ -403,6 +403,7 @@ impl StorageProvider {
     pub async fn for_url(url: &str) -> Result<Self, StorageError> {
         Self::for_url_with_options(url, HashMap::new()).await
     }
+
     pub async fn for_url_with_options(
         url: &str,
         options: HashMap<String, String>,
@@ -801,6 +802,14 @@ impl StorageProvider {
         Ok(())
     }
 
+    pub async fn put_bytes(&self, path: &Path, bytes: Bytes) -> Result<(), StorageError> {
+        let bytes = PutPayload::from(bytes);
+        let path = self.qualify_path(&path);
+        storage_retry!(self.object_store.put(&path, bytes.clone()).await)?;
+
+        Ok(())
+    }
+
     pub fn qualify_path<'a>(&self, path: &'a Path) -> Cow<'a, Path> {
         match self.config.key() {
             Some(prefix) => Cow::Owned(prefix.parts().chain(path.parts()).collect()),
@@ -859,9 +868,7 @@ impl StorageProvider {
 
     pub async fn head(&self, path: impl Into<Path>) -> Result<ObjectMeta, StorageError> {
         let path = path.into();
-        self.object_store
-            .head(&self.qualify_path(&path))
-            .await
+        storage_retry!(self.object_store.head(&self.qualify_path(&path)).await)
             .map_err(Into::<StorageError>::into)
     }
 

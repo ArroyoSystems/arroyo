@@ -1,12 +1,12 @@
-use std::{collections::HashMap, fs::create_dir_all, path::Path, sync::Arc, time::SystemTime};
-
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::OperatorContext;
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
+use arroyo_rpc::{connector_err, df::ArroyoSchemaRef, formats::Format};
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use std::io::ErrorKind;
+use std::{collections::HashMap, fs::create_dir_all, io, path::Path, sync::Arc, time::SystemTime};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::debug;
 use ulid::Ulid;
@@ -23,6 +23,7 @@ use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
 use crate::filesystem::{TableFormat, config, sink::two_phase_committer::TwoPhaseCommitter};
 use anyhow::{Result, bail};
 use arrow::row::OwnedRow;
+use arroyo_rpc::errors::{DataflowError, DataflowResult};
 
 pub struct LocalFileSystemWriter<V: LocalWriter> {
     // writer to a local tmp file
@@ -140,11 +141,11 @@ pub trait LocalWriter: Send + 'static {
         schema: ArroyoSchemaRef,
     ) -> Self;
     fn file_suffix() -> &'static str;
-    fn write_batch(&mut self, batch: &RecordBatch) -> Result<usize>;
+    fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize>;
     // returns the total size of the file
-    fn sync(&mut self) -> Result<usize>;
-    fn close(&mut self) -> Result<FilePreCommit>;
-    fn checkpoint(&mut self) -> Result<Option<CurrentFileRecovery>>;
+    fn sync(&mut self) -> anyhow::Result<usize>;
+    fn close(&mut self) -> anyhow::Result<FilePreCommit>;
+    fn checkpoint(&mut self) -> anyhow::Result<Option<CurrentFileRecovery>>;
     fn stats(&self) -> MultiPartWriterStats;
 }
 
@@ -169,6 +170,21 @@ pub struct FilePreCommit {
     pub destination: String,
 }
 
+fn map_io_error(e: io::Error, ctx: &str) -> DataflowError {
+    match e.kind() {
+        ErrorKind::NotFound
+        | ErrorKind::PermissionDenied
+        | ErrorKind::IsADirectory
+        | ErrorKind::ReadOnlyFilesystem
+        | ErrorKind::InvalidFilename => {
+            connector_err!(User, NoRetry, source: e.into(), "failed while {}", ctx)
+        }
+        _ => {
+            connector_err!(External, WithBackoff, source: e.into(), "failed while {}", ctx)
+        }
+    }
+}
+
 #[async_trait]
 impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWriter<V> {
     type DataRecovery = LocalFileDataRecovery;
@@ -182,7 +198,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         &mut self,
         ctx: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
-    ) -> Result<()> {
+    ) -> DataflowResult<()> {
         let mut max_file_index = 0;
         let mut recovered_files = Vec::new();
         for LocalFileDataRecovery {
@@ -208,13 +224,23 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 let mut file = OpenOptions::new()
                     .write(true)
                     .open(tmp_file.clone())
-                    .await?;
-                file.set_len(bytes_written as u64).await?;
+                    .await
+                    .map_err(|e| map_io_error(e, "opening in-progress file"))?;
+
+                file.set_len(bytes_written as u64)
+                    .await
+                    .map_err(|e| map_io_error(e, "setting length"))?;
                 if let Some(suffix) = suffix {
-                    file.write_all(&suffix).await?;
+                    file.write_all(&suffix)
+                        .await
+                        .map_err(|e| map_io_error(e, "writing to in-progress file"))?;
                 }
-                file.flush().await?;
-                file.sync_all().await?;
+                file.flush()
+                    .await
+                    .map_err(|e| map_io_error(e, "flushing in-progress file"))?;
+                file.sync_all()
+                    .await
+                    .map_err(|e| map_io_error(e, "finishing in-progress file"))?;
                 recovered_files.push(FilePreCommit {
                     tmp_file,
                     destination,
@@ -225,7 +251,16 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         self.finished_files = recovered_files;
         self.next_file_index = max_file_index;
 
-        let storage_provider = StorageProvider::for_url(&self.final_dir).await?;
+        let storage_provider = StorageProvider::for_url(&self.final_dir)
+            .await
+            .map_err(|e| {
+                connector_err!(
+                    User,
+                    NoRetry,
+                    "could not construct storage provider for given directory: {}",
+                    e
+                )
+            })?;
 
         let schema = ctx.in_schemas[0].clone();
 
@@ -251,7 +286,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         Ok(())
     }
 
-    async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()> {
+    async fn insert_batch(&mut self, batch: RecordBatch) -> DataflowResult<()> {
         let partitioner = self.partitioner.as_ref().unwrap();
         if partitioner.is_partitioned() {
             for (partition, batch) in partitioner.partition(&batch)? {
@@ -271,7 +306,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         _epoch: u32,
         _task_info: &TaskInfo,
         pre_commit: Vec<Self::PreCommit>,
-    ) -> Result<()> {
+    ) -> DataflowResult<()> {
         if pre_commit.is_empty() {
             return Ok(());
         }
@@ -290,7 +325,12 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             }
 
             if !tmp_file.exists() {
-                bail!("tmp file {} does not exist", tmp_file.to_string_lossy());
+                return Err(connector_err!(
+                    External,
+                    NoRetry,
+                    "tmp file {} does not exist",
+                    tmp_file.to_string_lossy()
+                ));
             }
 
             debug!(
@@ -299,7 +339,9 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 destination.to_string_lossy()
             );
 
-            tokio::fs::rename(tmp_file, destination).await?;
+            tokio::fs::rename(tmp_file, destination)
+                .await
+                .map_err(|e| map_io_error(e, "moving file to final directory"))?;
 
             let filename = destination
                 .to_string_lossy()
@@ -315,7 +357,10 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             finished_files.push(FinishedFile {
                 filename,
                 partition: None,
-                size: destination.metadata()?.len() as usize,
+                size: destination
+                    .metadata()
+                    .map_err(|e| map_io_error(e, "getting file metadata"))?
+                    .len() as usize,
                 // TODO: this breaks iceberg, but we don't support iceberg on local filesystem anyways
                 metadata: None,
             });
@@ -348,7 +393,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         _task_info: &TaskInfo,
         watermark: Option<SystemTime>,
         stopping: bool,
-    ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)> {
+    ) -> DataflowResult<(Self::DataRecovery, HashMap<String, Self::PreCommit>)> {
         let mut partitions_to_roll = vec![];
         for (partition, writer) in self.writers.iter_mut() {
             writer.sync()?;
@@ -377,7 +422,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
                 .writers
                 .iter_mut()
                 .filter_map(|(_partition, writer)| writer.checkpoint().transpose())
-                .collect::<Result<_>>()?,
+                .collect::<anyhow::Result<_>>()?,
         };
         Ok((data_recovery, pre_commits))
     }
