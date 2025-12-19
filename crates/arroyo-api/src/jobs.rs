@@ -157,6 +157,10 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
         ("Failed", true) => ("Failed", Option::None, Stable),
         ("Failed", false) => ("Start", Some(None), Stable),
 
+        // Failing is a transient state during graceful shutdown before Failed
+        ("Failing", true) => ("Failing", Option::None, InProgress),
+        ("Failing", false) => ("Failing", Option::None, InProgress),
+
         _ => panic!("unhandled state {state}"),
     };
 

@@ -16,6 +16,7 @@ use cornucopia_async::DatabaseSource;
 
 use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
+use self::failing::Failing;
 use self::finishing::Finishing;
 use self::recovering::Recovering;
 use self::rescaling::Rescaling;
@@ -39,6 +40,7 @@ use prost::Message;
 
 mod checkpoint_stopping;
 mod compiling;
+mod failing;
 mod finishing;
 mod recovering;
 mod rescaling;
@@ -233,6 +235,10 @@ impl TransitionTo<Compiling> for Failed {
         })
     }
 }
+
+impl TransitionTo<Failing> for Running {}
+impl TransitionTo<Failing> for Scheduling {}
+impl TransitionTo<Failed> for Failing {}
 
 fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
@@ -571,7 +577,8 @@ async fn execute_state<'a>(
             ctx.status.failure_message = Some(message);
             ctx.status.failure_domain = Some(domain.as_str().to_string());
             ctx.status.finish_time = Some(OffsetDateTime::now_utc());
-            let s: Box<dyn State> = Box::new(Failed {});
+            // Transition to Failing state for graceful shutdown before Failed
+            let s: Box<dyn State> = Box::new(Failing {});
             Some(s)
         }
         Err(StateError::RetryableError {
@@ -753,6 +760,11 @@ impl StateMachine {
             "Failed" => Some(Box::new(Failed {})),
             "Compiling" | "Scheduling" | "Running" | "Recovering" | "Rescaling" => {
                 Some(Box::new(Compiling {}))
+            }
+            "Failing" => {
+                // If we crashed during Failing, the job was already failing.
+                // Transition directly to Failed which will clean up any remaining workers.
+                Some(Box::new(Failed {}))
             }
             "Stopping" | "CheckpointStopping" => {
                 // TODO: do we need to handle a failure in CheckpointStopping specially?
