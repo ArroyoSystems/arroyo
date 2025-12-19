@@ -6,17 +6,21 @@ use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink
 use crate::filesystem::sink::FinishedFile;
 use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
 use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
+use anyhow::anyhow;
 use arrow::datatypes::Schema;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::{DataflowError, ErrorDomain, RetryHint};
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use iceberg::spec::ManifestFile;
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
-use iceberg::{Catalog, TableCreation, TableIdent};
+use iceberg::{Catalog, ErrorKind, TableCreation, TableIdent};
 use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
 use itertools::Itertools;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::error::Error;
 use std::iter::once;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -73,6 +77,41 @@ fn transaction_id(task_info: &TaskInfo, epoch: u32, table_uuid: Uuid) -> String 
     format!("tx-{}", to_hex(short))
 }
 
+fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
+    let (domain, msg) = match error.kind() {
+        ErrorKind::PreconditionFailed => (ErrorDomain::Internal, error.to_string()),
+        ErrorKind::DataInvalid | ErrorKind::NamespaceNotFound | ErrorKind::TableNotFound => {
+            (ErrorDomain::User, error.to_string())
+        }
+        ErrorKind::Unexpected => {
+            if let Some(source) = error.source() {
+                if let Some(err) = source.downcast_ref::<reqwest::Error>() {
+                    match err.status().map(|c| c.as_u16()) {
+                        Some(401) | Some(403) | Some(404) => (ErrorDomain::User, err.to_string()),
+                        _ => (ErrorDomain::External, err.to_string()),
+                    }
+                } else {
+                    (ErrorDomain::External, source.to_string())
+                }
+            } else {
+                (ErrorDomain::External, error.to_string())
+            }
+        }
+        _ => (ErrorDomain::External, error.to_string()),
+    };
+
+    DataflowError::ConnectorError {
+        domain,
+        retry: if error.retryable() {
+            RetryHint::WithBackoff
+        } else {
+            RetryHint::NoRetry
+        },
+        error: msg,
+        source: error.source().map(|e| anyhow!("{}", e)),
+    }
+}
+
 impl IcebergTable {
     pub fn new(catalog: &IcebergCatalog, sink: &IcebergSink) -> anyhow::Result<Self> {
         match catalog {
@@ -121,7 +160,7 @@ impl IcebergTable {
         &mut self,
         task_info: Arc<TaskInfo>,
         schema: &Schema,
-    ) -> anyhow::Result<&Table> {
+    ) -> Result<&Table, DataflowError> {
         if self.table.is_some() {
             return Ok(self.table.as_ref().unwrap());
         }
@@ -131,23 +170,31 @@ impl IcebergTable {
         if !self
             .catalog
             .namespace_exists(self.table_ident.namespace())
-            .await?
+            .await
+            .map_err(map_iceberg_error)?
             && let Err(e) = self
                 .catalog
                 .create_namespace(self.table_ident.namespace(), HashMap::new())
                 .await
             && e.kind() != iceberg::ErrorKind::NamespaceAlreadyExists
         {
-            return Err(e.into());
+            return Err(map_iceberg_error(e));
         }
 
-        let table = if !self.catalog.table_exists(&self.table_ident).await? {
+        let table = if !self
+            .catalog
+            .table_exists(&self.table_ident)
+            .await
+            .map_err(map_iceberg_error)?
+        {
             let schema_with_ids = add_parquet_field_ids(schema);
-            let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&schema_with_ids)?;
+            let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&schema_with_ids)
+                .map_err(map_iceberg_error)?;
 
             let partition_spec = self
                 .partitioning
-                .as_partition_spec(Arc::new(iceberg_schema.clone()))?;
+                .as_partition_spec(Arc::new(iceberg_schema.clone()))
+                .map_err(map_iceberg_error)?;
 
             match self
                 .catalog
@@ -163,15 +210,20 @@ impl IcebergTable {
                 .await
             {
                 Ok(table) => table,
-                Err(e) if e.kind() == iceberg::ErrorKind::TableAlreadyExists => {
-                    self.catalog.load_table(&self.table_ident).await?
-                }
+                Err(e) if e.kind() == iceberg::ErrorKind::TableAlreadyExists => self
+                    .catalog
+                    .load_table(&self.table_ident)
+                    .await
+                    .map_err(map_iceberg_error)?,
                 Err(e) => {
-                    return Err(e.into());
+                    return Err(map_iceberg_error(e));
                 }
             }
         } else {
-            self.catalog.load_table(&self.table_ident).await?
+            self.catalog
+                .load_table(&self.table_ident)
+                .await
+                .map_err(map_iceberg_error)?
         };
 
         self.table = Some(table);
@@ -183,7 +235,7 @@ impl IcebergTable {
         &mut self,
         task_info: Arc<TaskInfo>,
         schema: &Schema,
-    ) -> anyhow::Result<StorageProvider> {
+    ) -> Result<StorageProvider, DataflowError> {
         let storage_options = self.storage_options.clone();
         let table = self.load_or_create(task_info, schema).await?;
         let (_, mut config) = table.file_io().clone().into_builder().into_parts();
@@ -214,7 +266,9 @@ impl IcebergTable {
         }
         location.push_str("data/");
 
-        Ok(StorageProvider::for_url_with_options(&location, our_config).await?)
+        StorageProvider::for_url_with_options(&location, our_config).await.map_err(|e| {
+            connector_err!(User, NoRetry, source: e.into(), "failed to construct storage provider")
+        })
     }
 
     pub async fn commit(

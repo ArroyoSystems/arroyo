@@ -299,6 +299,7 @@ impl Connector for IcebergConnector {
                         file_naming: sink.file_naming,
                         partitioning: PartitioningConfig::default(),
                         multipart: sink.multipart,
+                        version: sink.version,
                     },
                     config,
                     TableFormat::Iceberg(Box::new(tf)),

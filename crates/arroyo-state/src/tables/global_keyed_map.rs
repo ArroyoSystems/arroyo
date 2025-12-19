@@ -25,6 +25,7 @@ use arroyo_rpc::grpc::rpc::GlobalKeyedTableConfig;
 use std::time::SystemTime;
 use std::{
     collections::{BTreeMap, HashMap},
+    mem,
     sync::Arc,
 };
 use tokio::sync::mpsc::Sender;
@@ -375,5 +376,11 @@ impl<K: Key, V: Data> GlobalKeyedView<K, V> {
 
     pub fn get(&self, key: &K) -> Option<&V> {
         self.data.get(key)
+    }
+
+    pub fn take(&mut self) -> HashMap<K, V> {
+        let mut data = HashMap::new();
+        mem::swap(&mut data, &mut self.data);
+        data
     }
 }

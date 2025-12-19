@@ -1,4 +1,3 @@
-use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::Collector;
 use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
@@ -47,21 +46,21 @@ pub trait TwoPhaseCommitter: Send + 'static {
         &mut self,
         task_info: &mut OperatorContext,
         data_recovery: Vec<Self::DataRecovery>,
-    ) -> Result<()>;
-    async fn insert_batch(&mut self, batch: RecordBatch) -> Result<()>;
+    ) -> DataflowResult<()>;
+    async fn insert_batch(&mut self, batch: RecordBatch) -> DataflowResult<()>;
     // TODO: figure out how to have the relevant vectors be of pointers across async boundaries.
     async fn commit(
         &mut self,
         epoch: u32,
         task_info: &TaskInfo,
         pre_commit: Vec<Self::PreCommit>,
-    ) -> Result<()>;
+    ) -> DataflowResult<()>;
     async fn checkpoint(
         &mut self,
         task_info: &TaskInfo,
         watermark: Option<SystemTime>,
         stopping: bool,
-    ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)>;
+    ) -> DataflowResult<(Self::DataRecovery, HashMap<String, Self::PreCommit>)>;
     fn commit_strategy(&self) -> CommitStrategy {
         CommitStrategy::PerSubtask
     }

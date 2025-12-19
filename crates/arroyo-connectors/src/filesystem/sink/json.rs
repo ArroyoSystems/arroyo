@@ -55,6 +55,10 @@ impl BatchBufferingWriter for JsonWriter {
         );
     }
 
+    fn unflushed_bytes(&self) -> usize {
+        0
+    }
+
     fn buffered_bytes(&self) -> usize {
         self.current_buffer.len()
     }
@@ -63,29 +67,12 @@ impl BatchBufferingWriter for JsonWriter {
         self.current_buffer.split_to(pos).freeze()
     }
 
-    fn get_trailing_bytes_for_checkpoint(
-        &mut self,
-    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>) {
-        if self.current_buffer.is_empty() {
-            (None, None)
-        } else {
-            (Some(self.current_buffer.to_vec()), None)
-        }
+    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Vec<u8>, Option<IcebergFileMetadata>) {
+        (self.current_buffer.to_vec(), None)
     }
 
-    fn close(
-        &mut self,
-        final_batch: Option<RecordBatch>,
-    ) -> Option<(Bytes, Option<IcebergFileMetadata>)> {
-        if let Some(final_batch) = final_batch {
-            self.add_batch_data(&final_batch);
-        }
-
-        if self.current_buffer.is_empty() {
-            None
-        } else {
-            Some((self.current_buffer.split().freeze(), None))
-        }
+    fn close(&mut self) -> (Bytes, Option<IcebergFileMetadata>) {
+        (self.current_buffer.split().freeze(), None)
     }
 }
 

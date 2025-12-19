@@ -3,6 +3,8 @@ use arrow::array::{ArrayRef, AsArray, RecordBatch, UInt32Array};
 use arrow::compute::take;
 use arrow::datatypes::{DataType, Schema};
 use arrow::row::{OwnedRow, RowConverter, SortField};
+use arroyo_rpc::errors::DataflowResult;
+use datafusion::error::DataFusionError;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
@@ -32,7 +34,10 @@ pub struct Partitioner {
     row_converter: RowConverter,
 }
 
-fn compile_expression(expr: &Expr, schema: &Schema) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
+fn compile_expression(
+    expr: &Expr,
+    schema: &Schema,
+) -> Result<Arc<dyn PhysicalExpr>, DataFusionError> {
     let physical_planner = DefaultPhysicalPlanner::default();
     let session_state = SessionStateBuilder::new().build();
 
@@ -42,7 +47,7 @@ fn compile_expression(expr: &Expr, schema: &Schema) -> anyhow::Result<Arc<dyn Ph
 }
 
 impl Partitioner {
-    pub fn new(mode: PartitionerMode, schema: &Schema) -> anyhow::Result<Self> {
+    pub fn new(mode: PartitionerMode, schema: &Schema) -> DataflowResult<Self> {
         let exprs = match &mode {
             PartitionerMode::FileConfig(fc) => fc
                 .partition_expr(schema)?
@@ -63,13 +68,13 @@ impl Partitioner {
     fn compile(
         exprs: Vec<Expr>,
         schema: &Schema,
-    ) -> anyhow::Result<(Vec<Arc<dyn PhysicalExpr>>, RowConverter)> {
+    ) -> Result<(Vec<Arc<dyn PhysicalExpr>>, RowConverter), DataFusionError> {
         let exprs: Vec<_> = exprs
             .iter()
             .map(|e| compile_expression(e, schema))
             .try_collect()?;
 
-        let fields: Result<_, anyhow::Error> = exprs
+        let fields: Result<_, DataFusionError> = exprs
             .iter()
             .map(|e| Ok(SortField::new(e.data_type(schema)?)))
             .collect();
@@ -82,11 +87,14 @@ impl Partitioner {
     }
 
     /// Partition the batch by this partitioner
-    pub fn partition(&self, batch: &RecordBatch) -> anyhow::Result<Vec<(OwnedRow, RecordBatch)>> {
-        let key_arrays: anyhow::Result<Vec<_>> = self
+    pub fn partition(
+        &self,
+        batch: &RecordBatch,
+    ) -> Result<Vec<(OwnedRow, RecordBatch)>, DataFusionError> {
+        let key_arrays: Result<Vec<_>, DataFusionError> = self
             .exprs
             .iter()
-            .map(|e| Ok(e.evaluate(batch)?.into_array(batch.num_rows())?))
+            .map(|e| e.evaluate(batch)?.into_array(batch.num_rows()))
             .collect();
 
         let rows = self.row_converter.convert_columns(&key_arrays?)?;
@@ -117,7 +125,7 @@ impl Partitioner {
             .columns()
             .iter()
             .map(|c| Ok(take(c.as_ref(), &perm, None)?))
-            .collect::<anyhow::Result<_>>()?;
+            .collect::<Result<_, DataFusionError>>()?;
 
         let permuted = RecordBatch::try_new(batch.schema(), permuted_cols)?;
 
