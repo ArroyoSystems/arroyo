@@ -42,9 +42,9 @@ macro_rules! connector_err {
 #[derive(Error, Debug)]
 #[must_use]
 pub enum DataflowError {
-    #[error("Arrow error: {:0?}", .0)]
+    #[error("Arrow error: {}", .0)]
     ArrowError(#[from] ArrowError),
-    #[error("SQL processing error: {:0?}", .0)]
+    #[error("SQL processing error: {}", .0)]
     DataFusionError(#[from] DataFusionError),
     #[error("operator error: {error} {message}")]
     InternalOperatorError {
@@ -71,21 +71,22 @@ pub enum DataflowError {
     #[error("unknown error: {0}")]
     UnknownError(#[from] anyhow::Error),
     #[error("{error} in {operator_id}")]
-    WithOperator { error: Box<DataflowError>, operator_id: String },
+    WithOperator {
+        error: Box<DataflowError>,
+        operator_id: String,
+    },
 }
 
 impl DataflowError {
     pub fn with_operator(self, operator_id: String) -> Self {
         match self {
             DataflowError::WithOperator { error, .. } => {
-                DataflowError::WithOperator {error, operator_id }
+                DataflowError::WithOperator { error, operator_id }
             }
-            e => {
-                DataflowError::WithOperator {
-                    error: Box::new(e),
-                    operator_id,
-                }
-            }
+            e => DataflowError::WithOperator {
+                error: Box::new(e),
+                operator_id,
+            },
         }
     }
 }
@@ -175,7 +176,8 @@ fn classify_datafusion_error(err: &DataFusionError) -> (ErrorDomain, RetryHint) 
         | DataFusionError::Plan(_)
         | DataFusionError::Configuration(_)
         | DataFusionError::SchemaError(_, _)
-        | DataFusionError::Execution(_) => (ErrorDomain::User, RetryHint::NoRetry),
+        | DataFusionError::Execution(_)
+        | DataFusionError::ArrowError(_, _) => (ErrorDomain::User, RetryHint::NoRetry),
 
         DataFusionError::IoError(_)
         | DataFusionError::ObjectStore(_)

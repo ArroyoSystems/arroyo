@@ -80,7 +80,9 @@ impl BackendFlusher {
                                 node_id: self.task_info.node_id,
                                 task_index: self.task_info.task_index as usize,
                                 error: err.with_operator(self.task_info.operator_id.clone()).into(),
-                            }).await.expect("control queue closed");
+                            })
+                            .await
+                            .expect("control queue closed");
                         return;
                     }
                 }
@@ -179,7 +181,8 @@ impl BackendFlusher {
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_metadata,
             }))
-            .await.expect("control queue closed");
+            .await
+            .expect("control queue closed");
         if cp.then_stop {
             self.finish_tx
                 .take()
