@@ -1,7 +1,7 @@
 use crate::{CheckpointMessage, StateMessage, TableData};
-use anyhow::{anyhow, bail, Result};
 use arrow_array::{BinaryArray, RecordBatch};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{ArrowError, DataType, Field, Schema};
+use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     GlobalKeyedTableSubtaskCheckpointMetadata, GlobalKeyedTableTaskCheckpointMetadata,
     OperatorMetadata, TableEnum,
@@ -51,38 +51,55 @@ impl GlobalKeyedTable {
     fn get_key_value_iterator<'a>(
         &self,
         record_batch: &'a RecordBatch,
-    ) -> Result<Zip<impl Iterator<Item = Option<&'a [u8]>>, impl Iterator<Item = Option<&'a [u8]>>>>
-    {
-        let key_column = record_batch
-            .column_by_name("key")
-            .ok_or_else(|| anyhow!("missing key column"))?;
-        let value_column = record_batch
-            .column_by_name("value")
-            .ok_or_else(|| anyhow!("missing value column"))?;
+    ) -> Result<
+        Zip<impl Iterator<Item = Option<&'a [u8]>>, impl Iterator<Item = Option<&'a [u8]>>>,
+        StateError,
+    > {
+        let key_column = record_batch.column_by_name("key").ok_or_else(|| {
+            StateError::ArrowError(ArrowError::SchemaError("missing column 'key'".to_string()))
+        })?;
+        let value_column = record_batch.column_by_name("value").ok_or_else(|| {
+            StateError::ArrowError(ArrowError::SchemaError(
+                "missing column 'value'".to_string(),
+            ))
+        })?;
         let cast_key_column = key_column
             .as_any()
             .downcast_ref::<arrow_array::BinaryArray>()
-            .ok_or_else(|| anyhow!("failed to downcast key column to BinaryArray"))?;
+            .ok_or_else(|| {
+                StateError::ArrowError(ArrowError::CastError(
+                    "failed to downcast key to binary".to_string(),
+                ))
+            })?;
         let cast_value_column = value_column
             .as_any()
             .downcast_ref::<arrow_array::BinaryArray>()
-            .ok_or_else(|| anyhow!("failed to downcast value column to BinaryArray"))?;
+            .ok_or_else(|| {
+                StateError::ArrowError(ArrowError::CastError(
+                    "failed to downcast value column to BinaryArray".to_string(),
+                ))
+            })?;
         Ok(cast_key_column.into_iter().zip(cast_value_column))
     }
     pub async fn memory_view<K: Key, V: Data>(
         &self,
         state_tx: Sender<StateMessage>,
-    ) -> anyhow::Result<GlobalKeyedView<K, V>> {
+    ) -> Result<GlobalKeyedView<K, V>, StateError> {
         let mut data = HashMap::new();
         for file in &self.files {
             let contents = self.storage_provider.get(file.as_str()).await?;
             let reader = ParquetRecordBatchReaderBuilder::try_new(contents)?.build()?;
+
             for batch in reader {
                 for (key, value) in self.get_key_value_iterator(&batch?)? {
-                    let key =
-                        key.ok_or_else(|| anyhow!("unexpected null key from record batch"))?;
-                    let value =
-                        value.ok_or_else(|| anyhow!("unexpected null value from record batch"))?;
+                    let key = key.ok_or_else(|| StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "unexpected null key from record batch".to_string(),
+                    })?;
+                    let value = value.ok_or_else(|| StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "unexpected null value from record batch".to_string(),
+                    })?;
                     data.insert(
                         bincode::decode_from_slice(key, config::standard())?.0,
                         bincode::decode_from_slice(value, config::standard())?.0,
@@ -112,7 +129,7 @@ impl Table for GlobalKeyedTable {
         &self,
         epoch: u32,
         _previous_metadata: Option<Self::TableSubtaskCheckpointMetadata>,
-    ) -> Result<Self::Checkpointer> {
+    ) -> Result<Self::Checkpointer, StateError> {
         Ok(Self::Checkpointer {
             table_name: self.table_name.clone(),
             epoch,
@@ -128,7 +145,7 @@ impl Table for GlobalKeyedTable {
         task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, StateError> {
         Ok(Self {
             table_name: config.table_name,
             task_info,
@@ -142,7 +159,7 @@ impl Table for GlobalKeyedTable {
     fn merge_checkpoint_metadata(
         config: Self::ConfigMessage,
         subtask_metadata: HashMap<u32, Self::TableSubtaskCheckpointMetadata>,
-    ) -> Result<Option<Self::TableCheckpointMessage>> {
+    ) -> Result<Option<Self::TableCheckpointMessage>, StateError> {
         if subtask_metadata.is_empty() {
             // TODO: maybe this should fail? These tables should emit on every epoch, and there should always be at least one value.
             Ok(None)
@@ -175,7 +192,7 @@ impl Table for GlobalKeyedTable {
     fn subtask_metadata_from_table(
         &self,
         _table_metadata: Self::TableCheckpointMessage,
-    ) -> Result<Option<Self::TableSubtaskCheckpointMetadata>> {
+    ) -> Result<Option<Self::TableSubtaskCheckpointMetadata>, StateError> {
         // this method is to inherit data dependencies from previous epochs, but this table is regenerated every epoch.
         Ok(None)
     }
@@ -191,7 +208,7 @@ impl Table for GlobalKeyedTable {
     fn files_to_keep(
         _config: Self::ConfigMessage,
         checkpoint: Self::TableCheckpointMessage,
-    ) -> Result<std::collections::HashSet<String>> {
+    ) -> Result<std::collections::HashSet<String>, StateError> {
         Ok(checkpoint.files.into_iter().collect())
     }
 
@@ -211,7 +228,7 @@ impl Table for GlobalKeyedTable {
         _compaction_config: &CompactionConfig,
         _operator_metadata: &OperatorMetadata,
         _current_metadata: Self::TableCheckpointMessage,
-    ) -> Result<Option<Self::TableCheckpointMessage>> {
+    ) -> Result<Option<Self::TableCheckpointMessage>, StateError> {
         Ok(None)
     }
 
@@ -220,7 +237,7 @@ impl Table for GlobalKeyedTable {
         _epoch: u32,
         _compacted_checkpoint: Self::TableSubtaskCheckpointMetadata,
         subtask_metadata: Self::TableSubtaskCheckpointMetadata,
-    ) -> Result<Self::TableSubtaskCheckpointMetadata> {
+    ) -> Result<Self::TableSubtaskCheckpointMetadata, StateError> {
         Ok(subtask_metadata)
     }
 }
@@ -238,16 +255,22 @@ pub struct GlobalKeyedCheckpointer {
 impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
     type SubTableCheckpointMessage = GlobalKeyedTableSubtaskCheckpointMetadata;
 
-    async fn insert_data(&mut self, data: TableData) -> anyhow::Result<()> {
+    async fn insert_data(&mut self, data: TableData) -> Result<(), StateError> {
         match data {
             TableData::RecordBatch(_) => {
-                bail!("global keyed data expects KeyedData, not record batches")
+                return Err(StateError::Other {
+                    table: self.table_name.clone(),
+                    error: "global keyed data expects KeyedData, not record batches".to_string(),
+                });
             }
             TableData::CommitData { data } => {
                 debug!("received commit data");
                 // set commit data, failing if it was already set
                 if self.commit_data.is_some() {
-                    bail!("commit data already set for this epoch")
+                    return Err(StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "commit data already set for this epoch".to_string(),
+                    });
                 }
                 self.commit_data = Some(data);
             }
@@ -261,7 +284,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
     async fn finish(
         self,
         _checkpoint: &CheckpointMessage,
-    ) -> Result<Option<(Self::SubTableCheckpointMessage, usize)>> {
+    ) -> Result<Option<(Self::SubTableCheckpointMessage, usize)>, StateError> {
         let _start_time = to_micros(SystemTime::now());
         let (keys, values): (Vec<_>, Vec<_>) = self
             .latest_values
@@ -282,7 +305,9 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         let cursor = Vec::new();
         let mut writer = ArrowWriter::try_new(cursor, batch.schema(), Some(props))?;
         writer.write(&batch)?;
+
         writer.flush()?;
+
         let parquet_bytes = writer.into_inner().unwrap();
         let bytes = parquet_bytes.len() as u64;
         let path = table_checkpoint_path(

@@ -8,6 +8,7 @@ use tracing::info;
 
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::errors::{DataflowError, DataflowResult};
 use arroyo_types::CheckpointBarrier;
 
 pub struct FluvioSinkFunc {
@@ -32,21 +33,12 @@ impl ArrowOperator for FluvioSinkFunc {
         format!("fluvio-sink-{}", self.topic)
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
-        match self.get_producer().await {
-            Ok(producer) => {
-                self.producer = Some(producer);
-            }
-            Err(e) => {
-                ctx.error_reporter
-                    .report_error(
-                        "Failed to construct Fluvio producer".to_string(),
-                        e.to_string(),
-                    )
-                    .await;
-                panic!("Failed to construct Fluvio producer: {e:?}");
-            }
-        }
+    async fn on_start(&mut self, _: &mut OperatorContext) -> DataflowResult<()> {
+        self.producer = Some(self.get_producer().await.map_err(|e| {
+            DataflowError::ArgumentError(format!("Failed to construct Fluvio producer: {e:?}"))
+        })?);
+
+        Ok(())
     }
 
     async fn process_batch(
@@ -54,7 +46,7 @@ impl ArrowOperator for FluvioSinkFunc {
         batch: RecordBatch,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let values = self.serializer.serialize(&batch);
         for v in values {
             self.producer
@@ -62,8 +54,10 @@ impl ArrowOperator for FluvioSinkFunc {
                 .unwrap()
                 .send(Vec::new(), v)
                 .await
-                .unwrap();
+                .map_err(|e| DataflowError::ExternalError(e.to_string()))?;
         }
+
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -71,8 +65,13 @@ impl ArrowOperator for FluvioSinkFunc {
         _: CheckpointBarrier,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
-        self.producer.as_mut().unwrap().flush().await.unwrap();
+    ) -> DataflowResult<()> {
+        self.producer
+            .as_mut()
+            .unwrap()
+            .flush()
+            .await
+            .map_err(|e| DataflowError::ExternalError(e.to_string()))
     }
 }
 

@@ -14,7 +14,7 @@ use anyhow::{anyhow, Context, Result};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
-use arrow_schema::{DataType, Field, Fields};
+use arrow_schema::{ArrowError, DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use datafusion::common::{
     not_impl_err, plan_datafusion_err, plan_err, DFSchema, Result as DFResult, ScalarValue,
@@ -55,6 +55,7 @@ use url::{Host, Url};
 
 pub mod config;
 pub mod df;
+pub mod errors;
 
 pub mod grpc {
     pub mod rpc {
@@ -350,7 +351,7 @@ pub enum Converter {
 }
 
 impl Converter {
-    pub fn new(sort_fields: Vec<SortField>) -> Result<Self> {
+    pub fn new(sort_fields: Vec<SortField>) -> Result<Self, ArrowError> {
         if sort_fields.is_empty() {
             let array = Arc::new(BooleanArray::from(vec![false]));
             Ok(Self::Empty(
@@ -362,7 +363,7 @@ impl Converter {
         }
     }
 
-    pub fn convert_columns(&self, columns: &[Arc<dyn Array>]) -> anyhow::Result<OwnedRow> {
+    pub fn convert_columns(&self, columns: &[Arc<dyn Array>]) -> Result<OwnedRow, ArrowError> {
         match self {
             Converter::RowConverter(row_converter) => {
                 Ok(row_converter.convert_columns(columns)?.row(0).owned())
@@ -378,7 +379,7 @@ impl Converter {
         &self,
         columns: &[Arc<dyn Array>],
         num_rows: usize,
-    ) -> anyhow::Result<Rows> {
+    ) -> Result<Rows, ArrowError> {
         match self {
             Converter::RowConverter(row_converter) => Ok(row_converter.convert_columns(columns)?),
             Converter::Empty(row_converter, _array) => {
@@ -388,14 +389,17 @@ impl Converter {
         }
     }
 
-    pub fn convert_rows(&self, rows: Vec<arrow::row::Row<'_>>) -> anyhow::Result<Vec<ArrayRef>> {
+    pub fn convert_rows(
+        &self,
+        rows: Vec<arrow::row::Row<'_>>,
+    ) -> Result<Vec<ArrayRef>, ArrowError> {
         match self {
             Converter::RowConverter(row_converter) => Ok(row_converter.convert_rows(rows)?),
             Converter::Empty(_row_converter, _array) => Ok(vec![]),
         }
     }
 
-    pub fn convert_raw_rows(&self, row_bytes: Vec<&[u8]>) -> anyhow::Result<Vec<ArrayRef>> {
+    pub fn convert_raw_rows(&self, row_bytes: Vec<&[u8]>) -> Result<Vec<ArrayRef>, ArrowError> {
         match self {
             Converter::RowConverter(row_converter) => {
                 let parser = row_converter.parser();

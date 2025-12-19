@@ -102,7 +102,7 @@ impl KafkaTopicTester {
         )
         .await;
 
-        kafka.on_start(&mut ctx).await;
+        kafka.on_start(&mut ctx).await.unwrap();
 
         KafkaSinkWithWrites { sink: kafka, ctx }
     }
@@ -156,7 +156,8 @@ async fn test_kafka_checkpoint_flushes() {
         sink_with_writes
             .sink
             .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector {})
-            .await;
+            .await
+            .unwrap();
     }
     let barrier = CheckpointBarrier {
         epoch: 2,
@@ -167,7 +168,8 @@ async fn test_kafka_checkpoint_flushes() {
     sink_with_writes
         .sink
         .handle_checkpoint(barrier, &mut sink_with_writes.ctx, &mut DummyCollector {})
-        .await;
+        .await
+        .unwrap();
 
     for message in 1u32..200 {
         let record = get_data(&mut consumer).await;
@@ -194,7 +196,8 @@ async fn test_kafka() {
         sink_with_writes
             .sink
             .process_batch(batch, &mut sink_with_writes.ctx, &mut DummyCollector {})
-            .await;
+            .await
+            .unwrap();
         sink_with_writes
             .sink
             .producer

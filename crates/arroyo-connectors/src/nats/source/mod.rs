@@ -8,13 +8,14 @@ use super::{get_nats_client, SourceType};
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::rpc::StopMode;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::ControlMessage;
 use arroyo_rpc::OperatorConfig;
-use arroyo_types::UserError;
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -61,14 +62,8 @@ impl SourceOperator for NatsSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
-        match self.run_int(ctx, collector).await {
-            Ok(res) => res,
-            Err(err) => {
-                ctx.report_user_error(err.clone()).await;
-                panic!("{}: {}", err.name, err.details);
-            }
-        }
+    ) -> DataflowResult<SourceFinishType> {
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -329,7 +324,7 @@ impl NatsSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -414,15 +409,12 @@ impl NatsSourceFunc {
                                     // TODO: Has ACK to happens here at every message? Maybe it can be
                                     // done by ack only the last message before checkpointing in the below
                                     // `ControlMessage::Checkpoint` match.
-                                    match msg.ack().await {
-                                        Ok(_) => (),
-                                        Err(e) => {
-                                            return Err(UserError::new("NATS message acknowledgmnent error: {}", e.to_string()));
-                                        }
-                                    }
+                                    msg.ack()
+                                        .await
+                                        .map_err(|e| connector_err!(External, WithBackoff, "failed to ack NATS message: {}", e))?;
                                 },
                                 Some(Err(msg)) => {
-                                    return Err(UserError::new("NATS message error", msg.to_string()));
+                                    return Err(connector_err!(External, WithBackoff, "NATS message error: {}", msg));
                                 },
                                 None => {
                                     break
@@ -436,25 +428,16 @@ impl NatsSourceFunc {
                                     debug!("Starting checkpointing {}", ctx.task_info.task_index);
                                     let state = ctx.table_manager
                                         .get_global_keyed_state("n")
-                                        .await
-                                        .map_err(|err| UserError::new("failed to get global key value", err.to_string()))?;
+                                        .await?;
 
                                     // TODO: Should this be parallelized?
                                     for (stream_name, sequence_number) in &sequence_numbers {
                                         state.insert(stream_name.clone(), sequence_number.clone()).await;
                                     }
 
-                                    let state_sequence_number = state
-                                        .get(&ctx.task_info.operator_id)
-                                        .map(|nats_state| nats_state.stream_sequence_number)
-                                        .ok_or_else(|| UserError::new("No sequence number could be fetched from the state", "")
-                                    );
-
                                     if self.start_checkpoint(c, ctx, collector).await {
                                         return Ok(SourceFinishType::Immediate);
                                     }
-
-                                    info!("Checkpoint done at sequence number #{:?}", state_sequence_number);
                                 }
                                 Some(ControlMessage::Stop { mode }) => {
                                     info!("Stopping NATS source: {:?}", mode);

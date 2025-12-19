@@ -2,6 +2,7 @@ use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::Collector;
 use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
     grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
     CheckpointEvent,
@@ -161,7 +162,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         true
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let tracking_key_state: &mut GlobalKeyedView<usize, TPC::DataRecovery> = ctx
             .table_manager
             .get_global_keyed_state("r")
@@ -183,6 +184,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
                 .expect("should be able to get table");
             self.pre_commits = pre_commit_state.get_all().values().cloned().collect();
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -190,11 +192,12 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         batch: RecordBatch,
         _ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         self.committer
             .insert_batch(batch)
             .await
             .expect("record inserted");
+        Ok(())
     }
 
     async fn handle_commit(
@@ -202,8 +205,9 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         epoch: u32,
         commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut OperatorContext,
-    ) {
+    ) -> DataflowResult<()> {
         self.handle_commit(epoch, commit_data.clone(), ctx).await;
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -211,7 +215,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         checkpoint_barrier: arroyo_types::CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let (recovery_data, pre_commits) = self
             .committer
             .checkpoint(
@@ -235,7 +239,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
             .await;
         self.pre_commits.clear();
         if pre_commits.is_empty() {
-            return;
+            return Ok(());
         }
         let commit_strategy = self.committer.commit_strategy();
         match commit_strategy {
@@ -249,19 +253,16 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
                     self.pre_commits.push(value.clone());
                     pre_commit_state.insert(key, value).await;
                 }
-                ctx.table_manager
-                    .insert_committing_data("p", vec![])
-                    .await
-                    .expect("should be able to send committing data");
+                ctx.table_manager.insert_committing_data("p", vec![]).await;
             }
             CommitStrategy::PerOperator => {
                 let serialized_pre_commits =
                     bincode::encode_to_vec(&pre_commits, config::standard()).unwrap();
                 ctx.table_manager
                     .insert_committing_data("p", serialized_pre_commits)
-                    .await
-                    .expect("should be able to send committing data");
+                    .await;
             }
         }
+        Ok(())
     }
 }

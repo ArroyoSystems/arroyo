@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::borrow::Cow;
 
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, ControlResp};
 use arroyo_types::*;
@@ -271,12 +272,13 @@ impl ArrowOperator for KafkaSinkFunc {
         matches!(self.consistency_mode, ConsistencyMode::ExactlyOnce { .. })
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         self.set_timestamp_col(&ctx.in_schemas[0]);
         self.set_key_col(&ctx.in_schemas[0]);
 
         self.init_producer(&ctx.task_info)
             .expect("Producer creation failed");
+        Ok(())
     }
 
     async fn process_batch(
@@ -284,7 +286,7 @@ impl ArrowOperator for KafkaSinkFunc {
         batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let values = self.serializer.serialize(&batch);
         let timestamps = batch
             .column(
@@ -309,6 +311,7 @@ impl ArrowOperator for KafkaSinkFunc {
             let key = keys.map(|k| k.value(i).as_bytes().to_vec());
             self.publish(timestamp, key, v, ctx).await;
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -316,7 +319,7 @@ impl ArrowOperator for KafkaSinkFunc {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         self.flush(ctx).await;
         if let ConsistencyMode::ExactlyOnce {
             next_transaction_index,
@@ -334,6 +337,7 @@ impl ArrowOperator for KafkaSinkFunc {
             self.init_producer(&ctx.task_info)
                 .expect("creating new producer during checkpointing");
         }
+        Ok(())
     }
 
     async fn handle_commit(
@@ -341,19 +345,19 @@ impl ArrowOperator for KafkaSinkFunc {
         epoch: u32,
         _commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut OperatorContext,
-    ) {
+    ) -> DataflowResult<()> {
         let ConsistencyMode::ExactlyOnce {
             next_transaction_index: _,
             producer_to_complete,
         } = &mut self.consistency_mode
         else {
             warn!("received commit but consistency mode is not exactly once");
-            return;
+            return Ok(());
         };
 
         let Some(committing_producer) = producer_to_complete.take() else {
             error!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
-            return;
+            return Ok(());
         };
 
         let mut commits_attempted = 0;
@@ -382,6 +386,7 @@ impl ArrowOperator for KafkaSinkFunc {
             .send(checkpoint_event)
             .await
             .expect("sent commit event");
+        Ok(())
     }
 
     async fn on_close(
@@ -389,7 +394,8 @@ impl ArrowOperator for KafkaSinkFunc {
         _: &Option<SignalMessage>,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         self.flush(ctx).await;
+        Ok(())
     }
 }

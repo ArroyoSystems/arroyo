@@ -1,5 +1,5 @@
 use crate::{CheckpointMessage, DataOperation, TableData};
-use anyhow::{bail, Result};
+use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     OperatorMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
     TableSubtaskCheckpointMetadata,
@@ -83,7 +83,7 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
         task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self, StateError>
     where
         Self: Sized;
     // Returns a stateful struct that processes new data to checkpoint,
@@ -95,26 +95,26 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
         &self,
         epoch: u32,
         previous_metadata: Option<Self::TableSubtaskCheckpointMetadata>,
-    ) -> Result<Self::Checkpointer>;
+    ) -> Result<Self::Checkpointer, StateError>;
     // A controller method to merge the metadata from each subtask into a single Table metadata.
     // Will do things like dedup files and compute overall min and max watermarks.
     fn merge_checkpoint_metadata(
         config: Self::ConfigMessage,
         subtask_metadata: HashMap<u32, Self::TableSubtaskCheckpointMetadata>,
-    ) -> Result<Option<Self::TableCheckpointMessage>>;
+    ) -> Result<Option<Self::TableCheckpointMessage>, StateError>;
     // compute the subtask metadata from the overall table metadata.
     // This is needed because of repartitioning, which means a subtask might need to read data "owned" by other subtasks in the previous epoch.
     fn subtask_metadata_from_table(
         &self,
         table_metadata: Self::TableCheckpointMessage,
-    ) -> Result<Option<Self::TableSubtaskCheckpointMetadata>>;
+    ) -> Result<Option<Self::TableSubtaskCheckpointMetadata>, StateError>;
 
     fn apply_compacted_checkpoint(
         &self,
         epoch: u32,
         compacted_checkpoint: Self::TableSubtaskCheckpointMetadata,
         subtask_metadata: Self::TableSubtaskCheckpointMetadata,
-    ) -> Result<Self::TableSubtaskCheckpointMetadata>;
+    ) -> Result<Self::TableSubtaskCheckpointMetadata, StateError>;
 
     fn table_type() -> TableEnum;
 
@@ -123,14 +123,14 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
     fn files_to_keep(
         config: Self::ConfigMessage,
         checkpoint: Self::TableCheckpointMessage,
-    ) -> Result<HashSet<String>>;
+    ) -> Result<HashSet<String>, StateError>;
 
     async fn compact_data(
         config: Self::ConfigMessage,
         compaction_config: &CompactionConfig,
         operator_metadata: &OperatorMetadata,
         current_metadata: Self::TableCheckpointMessage,
-    ) -> Result<Option<Self::TableCheckpointMessage>>;
+    ) -> Result<Option<Self::TableCheckpointMessage>, StateError>;
 
     fn committing_data(
         _config: Self::ConfigMessage,
@@ -159,7 +159,7 @@ pub trait ErasedTable: Send + Sync + 'static {
         task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<TableCheckpointMetadata>,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self, StateError>
     where
         Self: Sized;
     // Returns a stateful struct that processes new data to checkpoint,
@@ -171,13 +171,13 @@ pub trait ErasedTable: Send + Sync + 'static {
         &self,
         epoch: u32,
         previous_metadata: Option<TableSubtaskCheckpointMetadata>,
-    ) -> Result<Box<dyn ErasedCheckpointer>>;
+    ) -> Result<Box<dyn ErasedCheckpointer>, StateError>;
     // A controller method to merge the metadata from each subtask into a single Table metadata.
     // Will do things like dedup files and compute overall min and max watermarks.
     fn merge_checkpoint_metadata(
         config: TableConfig,
         subtask_metadata: HashMap<u32, TableSubtaskCheckpointMetadata>,
-    ) -> Result<Option<TableCheckpointMetadata>>
+    ) -> Result<Option<TableCheckpointMetadata>, StateError>
     where
         Self: Sized;
     // compute the subtask metadata from the overall table metadata.
@@ -185,30 +185,40 @@ pub trait ErasedTable: Send + Sync + 'static {
     fn subtask_metadata_from_table(
         &self,
         table_metadata: TableCheckpointMetadata,
-    ) -> Result<Option<TableSubtaskCheckpointMetadata>>;
+    ) -> Result<Option<TableSubtaskCheckpointMetadata>, StateError>;
 
     fn table_type() -> TableEnum
     where
         Self: Sized;
 
-    fn checked_proto_decode<M: Message + Default>(table_type: TableEnum, data: Vec<u8>) -> Result<M>
+    fn checked_proto_decode<M: Message + Default>(
+        table_type: TableEnum,
+        data: Vec<u8>,
+    ) -> Result<M, StateError>
     where
         Self: Sized,
     {
         if Self::table_type() != table_type {
-            bail!(
-                "mismatched table type, expected type {:?}, got {:?}",
-                Self::table_type(),
-                table_type
-            )
+            return Err(StateError::Other {
+                table: "".to_string(),
+                error: format!(
+                    "mismatched table type, expected type {:?}, got {:?}",
+                    Self::table_type(),
+                    table_type
+                ),
+            });
         }
-        Ok(Message::decode(&mut data.as_slice())?)
+
+        Message::decode(&mut data.as_slice()).map_err(|e| StateError::Other {
+            table: "".to_string(),
+            error: format!("Failed to deserialize table config: {e:?}"),
+        })
     }
 
     fn files_to_keep(
         config: TableConfig,
         checkpoint: TableCheckpointMetadata,
-    ) -> Result<HashSet<String>>
+    ) -> Result<HashSet<String>, StateError>
     where
         Self: Sized;
 
@@ -220,7 +230,7 @@ pub trait ErasedTable: Send + Sync + 'static {
         compaction_config: &CompactionConfig,
         operator_metadata: &OperatorMetadata,
         current_metadata: TableCheckpointMetadata,
-    ) -> Result<Option<TableCheckpointMetadata>>
+    ) -> Result<Option<TableCheckpointMetadata>, StateError>
     where
         Self: Sized;
 
@@ -236,7 +246,7 @@ pub trait ErasedTable: Send + Sync + 'static {
         epoch: u32,
         compacted_checkpoint: TableSubtaskCheckpointMetadata,
         subtask_metadata: TableSubtaskCheckpointMetadata,
-    ) -> Result<TableSubtaskCheckpointMetadata>;
+    ) -> Result<TableSubtaskCheckpointMetadata, StateError>;
 }
 
 impl<T: Table + Sized + 'static> ErasedTable for T {
@@ -245,7 +255,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<TableCheckpointMetadata>,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self, StateError>
     where
         Self: Sized,
     {
@@ -264,7 +274,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         &self,
         epoch: u32,
         previous_metadata: Option<TableSubtaskCheckpointMetadata>,
-    ) -> Result<Box<dyn ErasedCheckpointer>> {
+    ) -> Result<Box<dyn ErasedCheckpointer>, StateError> {
         let previous_metadata = previous_metadata
             .map(|metadata| Self::checked_proto_decode(metadata.table_type(), metadata.data))
             .transpose()?;
@@ -275,7 +285,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
     fn merge_checkpoint_metadata(
         config: TableConfig,
         subtask_metadata: HashMap<u32, TableSubtaskCheckpointMetadata>,
-    ) -> Result<Option<TableCheckpointMetadata>>
+    ) -> Result<Option<TableCheckpointMetadata>, StateError>
     where
         Self: Sized,
     {
@@ -286,7 +296,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
                 let value = Self::checked_proto_decode(value.table_type(), value.data)?;
                 Ok((key, value))
             })
-            .collect::<Result<HashMap<_, _>>>()?;
+            .collect::<Result<HashMap<_, _>, StateError>>()?;
         let result = T::merge_checkpoint_metadata(config, subtask_metadata)?;
         Ok(result.map(|table| TableCheckpointMetadata {
             table_type: T::table_type().into(),
@@ -297,7 +307,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
     fn subtask_metadata_from_table(
         &self,
         table_metadata: TableCheckpointMetadata,
-    ) -> Result<Option<TableSubtaskCheckpointMetadata>> {
+    ) -> Result<Option<TableSubtaskCheckpointMetadata>, StateError> {
         let table_metadata =
             Self::checked_proto_decode(table_metadata.table_type(), table_metadata.data)?;
         let subtask_metadata = self.subtask_metadata_from_table(table_metadata)?;
@@ -315,7 +325,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         epoch: u32,
         compacted_checkpoint: TableSubtaskCheckpointMetadata,
         subtask_metadata: TableSubtaskCheckpointMetadata,
-    ) -> Result<TableSubtaskCheckpointMetadata> {
+    ) -> Result<TableSubtaskCheckpointMetadata, StateError> {
         let compacted_checkpoint = Self::checked_proto_decode(
             compacted_checkpoint.table_type(),
             compacted_checkpoint.data,
@@ -345,7 +355,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
     fn files_to_keep(
         config: TableConfig,
         checkpoint: TableCheckpointMetadata,
-    ) -> Result<HashSet<String>>
+    ) -> Result<HashSet<String>, StateError>
     where
         Self: Sized,
     {
@@ -373,7 +383,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         compaction_config: &CompactionConfig,
         operator_metadata: &OperatorMetadata,
         current_metadata: TableCheckpointMetadata,
-    ) -> Result<Option<TableCheckpointMetadata>> {
+    ) -> Result<Option<TableCheckpointMetadata>, StateError> {
         let config = Self::checked_proto_decode(config.table_type(), config.config)?;
         let result = T::compact_data(
             config,
@@ -392,12 +402,12 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
 #[async_trait::async_trait]
 pub trait TableEpochCheckpointer: Send {
     type SubTableCheckpointMessage: prost::Message;
-    async fn insert_data(&mut self, data: TableData) -> Result<()>;
+    async fn insert_data(&mut self, data: TableData) -> Result<(), StateError>;
     // returning Ok(None) means there is no state to restore.
     async fn finish(
         self,
         checkpoint: &CheckpointMessage,
-    ) -> Result<Option<(Self::SubTableCheckpointMessage, usize)>>;
+    ) -> Result<Option<(Self::SubTableCheckpointMessage, usize)>, StateError>;
 
     fn table_type() -> TableEnum;
 
@@ -406,23 +416,23 @@ pub trait TableEpochCheckpointer: Send {
 
 #[async_trait::async_trait]
 pub trait ErasedCheckpointer: Send {
-    async fn insert_data(&mut self, data: TableData) -> Result<()>;
+    async fn insert_data(&mut self, data: TableData) -> Result<(), StateError>;
     async fn finish(
         mut self: Box<Self>,
         checkpoint: &CheckpointMessage,
-    ) -> Result<Option<(TableSubtaskCheckpointMetadata, usize)>>;
+    ) -> Result<Option<(TableSubtaskCheckpointMetadata, usize)>, StateError>;
 }
 
 #[async_trait::async_trait]
 impl<T: TableEpochCheckpointer + Sized> ErasedCheckpointer for T {
-    async fn insert_data(&mut self, data: TableData) -> Result<()> {
+    async fn insert_data(&mut self, data: TableData) -> Result<(), StateError> {
         self.insert_data(data).await
     }
 
     async fn finish(
         mut self: Box<Self>,
         checkpoint: &CheckpointMessage,
-    ) -> Result<Option<(TableSubtaskCheckpointMetadata, usize)>> {
+    ) -> Result<Option<(TableSubtaskCheckpointMetadata, usize)>, StateError> {
         let subtask_index = self.subtask_index();
         let subtask = (*self).finish(checkpoint).await?;
         Ok(subtask.map(|(metadata, size)| {

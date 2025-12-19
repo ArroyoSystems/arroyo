@@ -30,11 +30,12 @@ use crate::filesystem::config;
 use crate::filesystem::config::SourceFileCompressionFormat;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
+use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{to_nanos, UserError};
+use arroyo_types::to_nanos;
 
 #[allow(unused)]
 pub struct FileSystemSourceFunc {
@@ -65,30 +66,13 @@ impl SourceOperator for FileSystemSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
-        match self.run_int(ctx, collector).await {
-            Ok(s) => s,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
-    }
-}
-
-impl FileSystemSourceFunc {
-    async fn run_int(
-        &mut self,
-        ctx: &mut SourceContext,
-        collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> Result<SourceFinishType, DataflowError> {
         let storage_provider = StorageProvider::for_url_with_options(
             &self.source.path,
             self.source.storage_options.clone(),
         )
-        .await
-        .map_err(|err| UserError::new("failed to create storage provider", err.to_string()))?;
+            .await
+            .map_err(|err| connector_err!(User, NoRetry, source: err.into(), "failed to construct storage provider"))?;
 
         let regex_pattern = self
             .source
@@ -97,13 +81,9 @@ impl FileSystemSourceFunc {
             .map(|pattern| Regex::new(pattern))
             .transpose()
             .map_err(|err| {
-                UserError::new(
-                    format!(
+                connector_err!(User, NoRetry, source: err.into(),
                         "invalid regex pattern {}",
-                        self.source.regex_pattern.as_ref().unwrap()
-                    ),
-                    err.to_string(),
-                )
+                        self.source.regex_pattern.as_ref().unwrap())
             })?;
 
         collector.initialize_deserializer(
@@ -119,7 +99,7 @@ impl FileSystemSourceFunc {
         let mut file_paths = storage_provider
             .list(regex_pattern.is_some())
             .await
-            .map_err(|err| UserError::new("could not list files", err.to_string()))?
+            .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not list files"))?
             .filter(|path| {
                 let Ok(path) = path else {
                     return ready(true);
@@ -147,7 +127,7 @@ impl FileSystemSourceFunc {
 
         while let Some(path) = file_paths.next().await {
             let obj_key = path
-                .map_err(|err| UserError::new("could not get next path", err.to_string()))?
+                .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not get next path"))?
                 .to_string();
 
             if let Some(FileReadState::Finished) = self.file_states.get(&obj_key) {
@@ -165,12 +145,15 @@ impl FileSystemSourceFunc {
         info!("FileSystem source finished");
         Ok(SourceFinishType::Final)
     }
+}
 
+impl FileSystemSourceFunc {
     async fn get_newline_separated_stream(
         &mut self,
         storage_provider: &StorageProvider,
         path: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, UserError>> + Unpin + Send>, UserError> {
+    ) -> Result<Box<dyn Stream<Item = Result<String, DataflowError>> + Unpin + Send>, DataflowError>
+    {
         match &self.format {
             Format::Json(_) => {
                 let stream_reader = storage_provider.get_as_stream(path).await.unwrap();
@@ -190,14 +173,13 @@ impl FileSystemSourceFunc {
                 // use line iterators
                 let lines = LinesStream::new(BufReader::new(compression_reader).lines());
                 Ok(Box::new(lines.map(|string_result| {
-                    string_result.map_err(|err| {
-                        UserError::new("could not read line from stream", err.to_string())
-                    })
+                    string_result.map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not get next path"))
                 })))
             }
-            other => Err(UserError::new(
-                "bad format",
-                format!("newline separated stream not supported for {other:?}"),
+            other => Err(connector_err!(
+                User,
+                NoRetry,
+                "newline separated stream not supported for {other:?}"
             )),
         }
     }
@@ -207,17 +189,17 @@ impl FileSystemSourceFunc {
         storage_provider: &StorageProvider,
         path: &str,
         out_schema: SchemaRef,
-    ) -> Result<Box<dyn Stream<Item = Result<RecordBatch, UserError>> + Unpin + Send>, UserError>
-    {
+    ) -> Result<
+        Box<dyn Stream<Item = Result<RecordBatch, DataflowError>> + Unpin + Send>,
+        DataflowError,
+    > {
         match &self.format {
             Format::Parquet(_) => {
                 let object_meta = storage_provider
                     .get_backing_store()
                     .head(&(path.into()))
                     .await
-                    .map_err(|err| {
-                        UserError::new("could not get object metadata", err.to_string())
-                    })?;
+                    .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not get object metadata"))?;
                 let object_reader = ParquetObjectReader::new(
                     storage_provider.get_backing_store(),
                     object_meta.location,
@@ -225,19 +207,13 @@ impl FileSystemSourceFunc {
                 .with_file_size(object_meta.size);
                 let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
                     .await
-                    .map_err(|err| {
-                        UserError::new(
-                            "could not create parquet record batch stream builder",
-                            format!("path:{path}, err:{err}"),
-                        )
-                    })?
+                    .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not construct parquet reader for file {path}"))?
                     .with_batch_size(8192);
+
                 let stream = reader_builder.build().map_err(|err| {
-                    UserError::new(
-                        "could not build parquet record batch stream",
-                        err.to_string(),
-                    )
+                    connector_err!(External, WithBackoff, source: err.into(), "could not construct parquet stream for file {path}")
                 })?;
+
                 let result = Box::new(stream.map(move |res| match res {
                     Ok(record_batch) => {
                         // add timestamp
@@ -252,19 +228,17 @@ impl FileSystemSourceFunc {
 
                             columns.push(time_column);
 
-                            let out_batch = RecordBatch::try_new(
+                            RecordBatch::try_new(
                                 out_schema.clone(),
                                 columns
-                            ).map_err(|e| UserError::new("data does not match schema",
-                                format!("The parquet file has a schema that does not match the table schema: {e:?}")))?;
-                                Ok(out_batch)
+                            ).map_err(|e| connector_err!(User, NoRetry, source: e.into(), "The parquet file has a schema that does not match the table schema"))
                     },
-                    Err(err) => Err(UserError::new(
+                    Err(err) => Err(connector_err!(
+                        User, NoRetry, source: err.into(),
                         "could not read record batch from stream",
-                        err.to_string(),
                     )),
                 }))
-                    as Box<dyn Stream<Item = Result<RecordBatch, UserError>> + Send + Unpin>;
+                    as Box<dyn Stream<Item = Result<RecordBatch, DataflowError>> + Send + Unpin>;
                 Ok(result)
             }
             _ => unreachable!("code path only for Parquet"),
@@ -277,7 +251,7 @@ impl FileSystemSourceFunc {
         collector: &mut SourceCollector,
         storage_provider: &StorageProvider,
         obj_key: &String,
-    ) -> Result<Option<SourceFinishType>, UserError> {
+    ) -> Result<Option<SourceFinishType>, DataflowError> {
         let read_state = self
             .file_states
             .entry(obj_key.to_string())
@@ -285,9 +259,10 @@ impl FileSystemSourceFunc {
         let records_read = match read_state {
             FileReadState::RecordsRead(records_read) => *records_read,
             FileReadState::Finished => {
-                return Err(UserError::new(
-                    "reading finished file",
-                    format!("{obj_key} has already been read"),
+                return Err(connector_err!(
+                    User,
+                    NoRetry,
+                    "{obj_key} has already been read",
                 ));
             }
         };
@@ -325,16 +300,16 @@ impl FileSystemSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-        mut record_batch_stream: impl Stream<Item = Result<RecordBatch, UserError>> + Unpin + Send,
+        mut record_batch_stream: impl Stream<Item = Result<RecordBatch, DataflowError>> + Unpin + Send,
         obj_key: &String,
         mut records_read: usize,
-    ) -> Result<Option<SourceFinishType>, UserError> {
+    ) -> Result<Option<SourceFinishType>, DataflowError> {
         loop {
             select! {
                 item = record_batch_stream.next() => {
                     match item.transpose()? {
                         Some(batch) => {
-                            collector.collect(batch).await;
+                            collector.collect(batch).await?;
                             records_read += 1;
                         }
                         None => {
@@ -360,10 +335,10 @@ impl FileSystemSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-        mut line_reader: impl Stream<Item = Result<String, UserError>> + Unpin + Send,
+        mut line_reader: impl Stream<Item = Result<String, DataflowError>> + Unpin + Send,
         obj_key: &String,
         mut records_read: usize,
-    ) -> Result<Option<SourceFinishType>, UserError> {
+    ) -> Result<Option<SourceFinishType>, DataflowError> {
         loop {
             select! {
                 line = line_reader.next() => {

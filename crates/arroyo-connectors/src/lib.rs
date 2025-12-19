@@ -185,6 +185,7 @@ pub fn render_schema<T: ?Sized + JsonSchema>() -> String {
 mod test {
     use arrow::array::RecordBatch;
     use arroyo_operator::context::Collector;
+    use arroyo_rpc::errors::DataflowResult;
     use arroyo_types::Watermark;
     use async_trait::async_trait;
 
@@ -192,11 +193,11 @@ mod test {
 
     #[async_trait]
     impl Collector for DummyCollector {
-        async fn collect(&mut self, _: RecordBatch) {
+        async fn collect(&mut self, _: RecordBatch) -> DataflowResult<()> {
             unreachable!()
         }
 
-        async fn broadcast_watermark(&mut self, _: Watermark) {
+        async fn broadcast_watermark(&mut self, _: Watermark) -> DataflowResult<()> {
             unreachable!()
         }
     }

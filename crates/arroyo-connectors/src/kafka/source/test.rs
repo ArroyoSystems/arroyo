@@ -150,12 +150,11 @@ impl KafkaTopicTester {
             ctx.out_schema.clone(),
             arrow_collector,
             command_tx,
-            &chain_info,
             &task_info,
         );
 
         tokio::spawn(async move {
-            kafka.run(&mut ctx, &mut collector).await;
+            kafka.run(&mut ctx, &mut collector).await.unwrap();
         });
         KafkaSourceWithReads {
             to_control_tx,
@@ -454,12 +453,11 @@ async fn test_kafka_with_metadata_fields() {
         ctx.out_schema.clone(),
         arrow_collector,
         command_tx,
-        &chain_info,
         &task_info,
     );
 
     tokio::spawn(async move {
-        kafka.run(&mut ctx, &mut collector).await;
+        kafka.run(&mut ctx, &mut collector).await.unwrap();
     });
 
     let mut reader = kafka_topic_tester

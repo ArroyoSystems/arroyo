@@ -2,11 +2,13 @@ use crate::sse::SseTable;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::{ConstructedOperator, SourceOperator};
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{string_to_map, SignalMessage, UserError, Watermark};
+use arroyo_types::{string_to_map, SignalMessage, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, Error, SSE};
@@ -74,25 +76,15 @@ impl SourceOperator for SSESourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
-        let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
-            .table_manager
-            .get_global_keyed_state("e")
-            .await
-            .expect("should be able to read SSE state");
+    ) -> DataflowResult<SourceFinishType> {
+        let s: &mut GlobalKeyedView<(), SSESourceState> =
+            ctx.table_manager.get_global_keyed_state("e").await?;
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
         }
 
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
+        self.run_int(ctx, collector).await
     }
 }
 
@@ -102,19 +94,18 @@ impl SSESourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
         msg: Option<ControlMessage>,
-    ) -> Option<SourceFinishType> {
-        match msg? {
+    ) -> DataflowResult<Option<SourceFinishType>> {
+        let Some(msg) = msg else {
+            return Ok(None);
+        };
+        match msg {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let s = ctx
-                    .table_manager
-                    .get_global_keyed_state("e")
-                    .await
-                    .expect("should be able to get SSE state");
+                let s = ctx.table_manager.get_global_keyed_state("e").await?;
                 s.insert((), self.state.clone()).await;
 
                 if self.start_checkpoint(c, ctx, collector).await {
-                    return Some(SourceFinishType::Immediate);
+                    return Ok(Some(SourceFinishType::Immediate));
                 }
             }
             ControlMessage::Stop { mode } => {
@@ -122,10 +113,10 @@ impl SSESourceFunc {
 
                 match mode {
                     StopMode::Graceful => {
-                        return Some(SourceFinishType::Graceful);
+                        return Ok(Some(SourceFinishType::Graceful));
                     }
                     StopMode::Immediate => {
-                        return Some(SourceFinishType::Immediate);
+                        return Ok(Some(SourceFinishType::Immediate));
                     }
                 }
             }
@@ -137,14 +128,14 @@ impl SSESourceFunc {
             }
             ControlMessage::NoOp => {}
         }
-        None
+        Ok(None)
     }
 
     async fn run_int(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> DataflowResult<SourceFinishType> {
         collector.initialize_deserializer(
             self.format.clone(),
             self.framing.clone(),
@@ -152,14 +143,17 @@ impl SSESourceFunc {
             &[],
         );
 
-        let mut client = eventsource_client::ClientBuilder::for_url(&self.url).unwrap();
+        let mut client = eventsource_client::ClientBuilder::for_url(&self.url)
+            .map_err(|e| connector_err!(User, NoRetry, "invalid SSE URL '{}': {}", self.url, e))?;
 
         if let Some(id) = &self.state.last_id {
             client = client.last_event_id(id.clone());
         }
 
         for (k, v) in &self.headers {
-            client = client.header(k, v).unwrap();
+            client = client
+                .header(k, v)
+                .map_err(|e| connector_err!(User, NoRetry, "invalid header '{}': {}", k, e))?;
         }
 
         let mut stream = client.build().stream();
@@ -202,18 +196,12 @@ impl SSESourceFunc {
                                 // Many SSE servers will periodically send an EOF; just reconnect
                                 // and continue on unless we immediately get another
                                 if last_eof.elapsed() < Duration::from_secs(5) {
-                                    ctx.report_user_error(UserError::new("Error while reading from EventSource",
-                                    "Received repeated EOF from EventSource server")).await;
-                                    panic!("Error while reading from EventSource: EOF");
+                                    return Err(connector_err!(External, WithBackoff, "received repeated EOF from SSE server '{}'", self.url));
                                 }
                                 last_eof = Instant::now();
                             }
                             Some(Err(e)) => {
-                                ctx.report_user_error(UserError::new(
-                                    "Error while reading from EventSource",
-                                    format!("{e:?}")
-                                )).await;
-                                panic!("Error while reading from EventSource: {e:?}");
+                                return Err(connector_err!(External, WithBackoff, "error reading from SSE server '{}': {:?}", self.url, e));
                             }
                             None => {
                                 info!("Socket closed");
@@ -222,7 +210,7 @@ impl SSESourceFunc {
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
-                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await {
+                        if let Some(r) = self.our_handle_control_message(ctx, collector, control_message).await? {
                             return Ok(r);
                         }
                     }
@@ -241,7 +229,7 @@ impl SSESourceFunc {
 
             loop {
                 let msg = ctx.control_rx.recv().await;
-                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await {
+                if let Some(r) = self.our_handle_control_message(ctx, collector, msg).await? {
                     return Ok(r);
                 }
             }

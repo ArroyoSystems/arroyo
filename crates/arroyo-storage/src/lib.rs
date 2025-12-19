@@ -1,3 +1,4 @@
+use arroyo_rpc::errors::StorageError;
 use arroyo_rpc::retry;
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
@@ -22,7 +23,6 @@ use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
 };
-use thiserror::Error;
 use tracing::{debug, error};
 
 mod aws;
@@ -43,24 +43,6 @@ impl Debug for StorageProvider {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "StorageProvider<{}>", self.canonical_url)
     }
-}
-
-#[derive(Error, Debug)]
-pub enum StorageError {
-    #[error("the provided URL is not a valid object store")]
-    InvalidUrl,
-
-    #[error("could not instantiate storage from path: {0}")]
-    PathError(String),
-
-    #[error("URL does not contain a key")]
-    NoKeyInUrl,
-
-    #[error("object store error: {0:?}")]
-    ObjectStore(#[from] object_store::Error),
-
-    #[error("failed to load credentials: {0}")]
-    CredentialsError(String),
 }
 
 // https://s3.us-west-2.amazonaws.com/DOC-EXAMPLE-BUCKET1/puppy.jpg

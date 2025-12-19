@@ -9,6 +9,7 @@ use arroyo_operator::operator::{
     Registry,
 };
 use arroyo_planner::ASYNC_RESULT_FIELD;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
@@ -20,6 +21,7 @@ use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
+use itertools::Itertools;
 use prost::Message;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -150,7 +152,7 @@ impl ArrowOperator for AsyncUdfOperator {
         global_table_config("a", "AsyncMapOperator state")
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         info!("Starting async UDF with timeout {:?}", self.timeout);
         self.input_row_converter = RowConverter::new(
             ctx.in_schemas[0]
@@ -288,6 +290,8 @@ impl ArrowOperator for AsyncUdfOperator {
                     .unwrap_or(0),
             )
             + 1;
+
+        Ok(())
     }
 
     fn tick_interval(&self) -> Option<Duration> {
@@ -299,7 +303,7 @@ impl ArrowOperator for AsyncUdfOperator {
         batch: RecordBatch,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let arg_batch: Vec<_> = self
             .input_exprs
             .iter()
@@ -332,6 +336,8 @@ impl ArrowOperator for AsyncUdfOperator {
                 .expect("failed to send data to async UDF runtime");
             self.next_id += 1;
         }
+
+        Ok(())
     }
 
     async fn handle_tick(
@@ -339,13 +345,13 @@ impl ArrowOperator for AsyncUdfOperator {
         _: u64,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let Some((ids, results)) = self
             .udf
             .drain_results()
             .expect("failed to get results from async UDF executor")
         else {
-            return;
+            return Ok(());
         };
 
         let mut rows = vec![];
@@ -354,7 +360,7 @@ impl ArrowOperator for AsyncUdfOperator {
             rows.push(row.row());
         }
 
-        let mut cols = self.input_row_converter.convert_rows(rows).unwrap();
+        let mut cols = self.input_row_converter.convert_rows(rows)?;
         cols.push(make_array(results));
 
         let batch = RecordBatch::try_new(self.input_schema.as_ref().unwrap().clone(), cols)
@@ -363,26 +369,20 @@ impl ArrowOperator for AsyncUdfOperator {
         let result: Vec<_> = self
             .final_exprs
             .iter()
-            .map(|expr| {
-                expr.evaluate(&batch)
-                    .unwrap()
-                    .into_array(batch.num_rows())
-                    .unwrap()
-            })
-            .collect();
+            .map(|expr| expr.evaluate(&batch).unwrap().into_array(batch.num_rows()))
+            .try_collect()?;
 
         // iterate through the batch convert to rows and push into our map
-        let out_rows = self
-            .output_row_converter
-            .convert_columns(&result)
-            .expect("could not convert output columns to rows");
+        let out_rows = self.output_row_converter.convert_columns(&result)?;
 
         for (row, id) in out_rows.into_iter().zip(ids.values()) {
             self.outputs.insert(*id, row.owned());
             self.inputs.remove(id);
         }
 
-        self.flush_output(ctx, collector).await;
+        self.flush_output(ctx, collector).await?;
+
+        Ok(())
     }
 
     async fn handle_watermark(
@@ -390,9 +390,9 @@ impl ArrowOperator for AsyncUdfOperator {
         watermark: Watermark,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         self.watermarks.push_back((self.next_id, watermark));
-        None
+        Ok(None)
     }
 
     async fn handle_checkpoint(
@@ -400,7 +400,7 @@ impl ArrowOperator for AsyncUdfOperator {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let gs = ctx
             .table_manager
             .get_global_keyed_state::<usize, AsyncUdfState>("a")
@@ -422,6 +422,8 @@ impl ArrowOperator for AsyncUdfOperator {
         };
 
         gs.insert(ctx.task_info.task_index as usize, state).await;
+
+        Ok(())
     }
 
     async fn on_close(
@@ -429,18 +431,24 @@ impl ArrowOperator for AsyncUdfOperator {
         final_message: &Option<SignalMessage>,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
             while !self.inputs.is_empty() && !self.outputs.is_empty() {
-                self.handle_tick(0, ctx, collector).await;
+                self.handle_tick(0, ctx, collector).await?;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
+
+        Ok(())
     }
 }
 
 impl AsyncUdfOperator {
-    async fn flush_output(&mut self, ctx: &mut OperatorContext, collector: &mut dyn Collector) {
+    async fn flush_output(
+        &mut self,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) -> DataflowResult<()> {
         // check if we can emit any records -- these are ones received before our most recent
         // watermark -- once all records from before a watermark have been processed, we can
         // remove and emit the watermark
@@ -480,7 +488,7 @@ impl AsyncUdfOperator {
             let batch = RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), cols)
                 .expect("failed to construct record batch");
 
-            collector.collect(batch).await;
+            collector.collect(batch).await?;
 
             let Some(watermark) = watermark else {
                 break;
@@ -490,12 +498,13 @@ impl AsyncUdfOperator {
 
             if watermark_id <= oldest_unprocessed {
                 // we've processed everything before this watermark, we can emit and drop it
-                collector.broadcast_watermark(watermark).await;
+                collector.broadcast_watermark(watermark).await?;
             } else {
                 // we still have messages preceding this watermark to work on
                 self.watermarks.push_front((watermark_id, watermark));
                 break;
             }
         }
+        Ok(())
     }
 }

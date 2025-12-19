@@ -5,8 +5,9 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
+use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
-use arroyo_types::{DisplayAsSql, SourceError};
+use arroyo_types::DisplayAsSql;
 use async_trait::async_trait;
 use datafusion::execution::FunctionRegistry;
 use datafusion::prelude::Expr;
@@ -416,5 +417,5 @@ impl<C: Connector> ErasedConnector for C {
 pub trait LookupConnector {
     fn name(&self) -> String;
 
-    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, SourceError>>;
+    async fn lookup(&mut self, keys: &[ArrayRef]) -> Option<Result<RecordBatch, DataflowError>>;
 }

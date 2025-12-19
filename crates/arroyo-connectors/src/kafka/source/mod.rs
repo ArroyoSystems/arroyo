@@ -1,4 +1,4 @@
-use anyhow::bail;
+use anyhow::{bail, Context as _};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::FutureExt;
@@ -17,10 +17,11 @@ use arroyo_formats::de::FieldValueType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage, MetadataField};
+use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage, MetadataField};
 use arroyo_types::*;
 
 use super::{Context, SourceOffset, StreamConsumer};
@@ -151,11 +152,11 @@ impl KafkaSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> Result<SourceFinishType, UserError> {
+    ) -> DataflowResult<SourceFinishType> {
         let consumer = self
             .get_consumer(ctx)
             .await
-            .map_err(|e| UserError::new("Could not create Kafka consumer", format!("{e:?}")))?;
+            .context("creating kafka consumer")?;
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
         let mut offsets = HashMap::new();
@@ -195,8 +196,7 @@ impl KafkaSourceFunc {
                         Ok(msg) => {
                             if let Some(v) = msg.payload() {
                                 let timestamp = msg.timestamp().to_millis()
-                                    .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
-                                        "The message read from Kafka did not contain a message timestamp"))?;
+                                    .ok_or_else(|| connector_err!(External, NoRetry, "Failed to read timestamp from Kafka record: The message read from Kafka did not contain a message timestamp"))?;
 
                                 let topic = msg.topic();
 
@@ -242,8 +242,7 @@ impl KafkaSourceFunc {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
                             let mut topic_partitions = TopicPartitionList::new();
-                            let s = ctx.table_manager.get_global_keyed_state("k").await
-                                .map_err(|err| UserError::new("failed to get global key value", err.to_string()))?;
+                            let s = ctx.table_manager.get_global_keyed_state("k").await?;
                             for (partition, offset) in &offsets {
                                 s.insert(*partition, KafkaState {
                                     partition: *partition,
@@ -297,15 +296,8 @@ impl SourceOperator for KafkaSourceFunc {
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-    ) -> SourceFinishType {
-        match self.run_int(ctx, collector).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_user_error(e.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
+    ) -> DataflowResult<SourceFinishType> {
+        self.run_int(ctx, collector).await
     }
 
     fn name(&self) -> String {

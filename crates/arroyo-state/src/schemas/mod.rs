@@ -1,6 +1,5 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
-use anyhow::{anyhow, bail, Result};
 use arrow::compute::{and, filter, kernels::aggregate, max, min};
 use arrow_array::{
     cast::AsArray,
@@ -8,8 +7,9 @@ use arrow_array::{
     PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
 };
 use arrow_ord::cmp::{gt_eq, lt_eq};
-use arrow_schema::{DataType, Field};
+use arrow_schema::{ArrowError, DataType, Field};
 use arroyo_rpc::df::ArroyoSchemaRef;
+use arroyo_rpc::errors::StateError;
 use arroyo_rpc::get_hasher;
 use arroyo_types::from_nanos;
 use bincode::config;
@@ -68,8 +68,8 @@ impl SchemaWithHashAndOperation {
         (0..self.memory_schema.schema.fields().len()).collect()
     }
 
-    fn project_batch(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        Ok(batch.project(&self.project_indices())?)
+    fn project_batch(&self, batch: RecordBatch) -> Result<RecordBatch, ArrowError> {
+        batch.project(&self.project_indices())
     }
 
     pub(crate) fn timestamp_index(&self) -> usize {
@@ -88,49 +88,67 @@ impl SchemaWithHashAndOperation {
         &self,
         batch: RecordBatch,
         range: &RangeInclusive<u64>,
-    ) -> Result<Option<RecordBatch>> {
+    ) -> Result<Option<RecordBatch>, ArrowError> {
         let hash_array: &PrimitiveArray<UInt64Type> = batch
             .column(self.hash_index)
             .as_primitive_opt()
-            .ok_or_else(|| anyhow!("failed to find key column"))?;
-        let min_hash = aggregate::min(hash_array).ok_or_else(|| anyhow!("should have min hash"))?;
-        let max_hash = aggregate::max(hash_array).ok_or_else(|| anyhow!("should have max hash"))?;
+            .ok_or_else(|| ArrowError::SchemaError("failed to find key column".to_string()))?;
+        let min_hash = aggregate::min(hash_array)
+            .ok_or_else(|| ArrowError::ComputeError("should have min hash".to_string()))?;
+        let max_hash = aggregate::max(hash_array)
+            .ok_or_else(|| ArrowError::ComputeError("should have max hash".to_string()))?;
         if *range.end() < min_hash || *range.start() > max_hash {
             warn!("filtering out a record batch");
             return Ok(None);
         }
+
         // filter batch using arrow kernels
         let filtered_indices = and(
             &gt_eq(&hash_array, &UInt64Array::new_scalar(*range.start()))?,
             &lt_eq(&hash_array, &UInt64Array::new_scalar(*range.end()))?,
         )?;
+
         let columns = batch
             .columns()
             .iter()
-            .map(|column| Ok(filter(column, &filtered_indices)?))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|column| filter(column, &filtered_indices))
+            .collect::<Result<Vec<_>, ArrowError>>()?;
+
         Ok(Some(RecordBatch::try_new(
             self.state_schema.schema.clone(),
             columns,
         )?))
     }
 
-    pub(crate) fn batch_stats_from_state_batch(&self, batch: &RecordBatch) -> Result<ParquetStats> {
+    pub(crate) fn batch_stats_from_state_batch(
+        &self,
+        batch: &RecordBatch,
+    ) -> Result<ParquetStats, ArrowError> {
         if batch.num_rows() == 0 {
-            bail!("unexpected empty batch");
+            return Err(ArrowError::InvalidArgumentError(
+                "unexpected empty batch".to_string(),
+            ));
         }
         let hash_array = batch
             .column(self.hash_index)
             .as_any()
             .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| anyhow!("should be able to convert hash array to UInt64Array"))?;
+            .ok_or_else(|| {
+                ArrowError::InvalidArgumentError(
+                    "should be able to convert hash array to UInt64Array".to_string(),
+                )
+            })?;
         let hash_min = min(hash_array).expect("should have min hash value");
         let hash_max = max(hash_array).expect("should have max hash value");
         let timestamp_array = batch
             .column(self.state_schema.timestamp_index)
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
-            .ok_or_else(|| anyhow!("should be able to extract timestamp array"))?;
+            .ok_or_else(|| {
+                ArrowError::InvalidArgumentError(
+                    "should be able to extract timestamp array".to_string(),
+                )
+            })?;
         let max_timestamp_nanos = max(timestamp_array).expect("should have max timestamp");
         Ok(ParquetStats {
             max_timestamp: from_nanos(max_timestamp_nanos as u128),
@@ -142,7 +160,7 @@ impl SchemaWithHashAndOperation {
     pub(crate) fn annotate_record_batch(
         &mut self,
         record_batch: &RecordBatch,
-    ) -> Result<(RecordBatch, ParquetStats)> {
+    ) -> Result<(RecordBatch, ParquetStats), StateError> {
         let key_batch = self
             .memory_schema
             .routing_keys()
@@ -152,7 +170,13 @@ impl SchemaWithHashAndOperation {
             .unwrap_or_else(|| record_batch.project(&[]).unwrap());
 
         let mut hash_buffer = vec![0u64; key_batch.num_rows()];
-        let _hashes = create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer)?;
+        let _hashes =
+            create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer).map_err(|e| {
+                StateError::Other {
+                    table: "".to_string(),
+                    error: format!("failed to compute hashes: {e:?}"),
+                }
+            });
         let hash_array = PrimitiveArray::<UInt64Type>::from(hash_buffer);
 
         let hash_min = min(&hash_array).unwrap();
@@ -178,7 +202,9 @@ impl SchemaWithHashAndOperation {
         )?));
 
         // TODO: handle other types of updates
-        let op_array = insert_op.to_array_of_size(record_batch.num_rows())?;
+        let op_array = insert_op
+            .to_array_of_size(record_batch.num_rows())
+            .map_err(|e| ArrowError::InvalidArgumentError(e.to_string()))?;
         columns.push(op_array);
 
         let annotated_record_batch =

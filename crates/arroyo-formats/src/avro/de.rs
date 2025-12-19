@@ -1,9 +1,10 @@
 use crate::float_to_json;
 use apache_avro::types::{Value, Value as AvroValue};
 use apache_avro::{from_avro_datum, AvroResult, Reader, Schema};
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::{DataflowError, SourceError};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_types::SourceError;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,7 +16,7 @@ pub(crate) async fn avro_messages(
     schema_registry: &Arc<Mutex<HashMap<u32, Schema>>>,
     resolver: &Arc<dyn SchemaResolver + Sync>,
     mut msg: &[u8],
-) -> Result<Vec<AvroResult<Value>>, SourceError> {
+) -> Result<Vec<AvroResult<Value>>, DataflowError> {
     let id = if format.confluent_schema_registry {
         let magic_byte = msg[0];
         if magic_byte != 0 {
@@ -41,7 +42,7 @@ pub(crate) async fn avro_messages(
             let new_schema = resolver
                 .resolve_schema(id)
                 .await
-                .map_err(|e| SourceError::other("schema registry error", e))?
+                .map_err(|e| connector_err!(External, WithBackoff, "schema registry error: {}", e))?
                 .ok_or_else(|| {
                     SourceError::bad_data(format!(
                         "could not resolve schema for message with id {id}"
@@ -49,9 +50,10 @@ pub(crate) async fn avro_messages(
                 })?;
 
             let new_schema = Schema::parse_str(&new_schema).map_err(|e| {
-                SourceError::other(
-                    "schema registry error",
-                    format!("schema from Confluent Schema registry is not valid: {e:?}"),
+                connector_err!(
+                    User,
+                    NoRetry,
+                    "schema from Confluent Schema registry is not valid: {e:?}"
                 )
             })?;
 
@@ -272,7 +274,7 @@ mod tests {
         let errors = deserializer
             .deserialize_slice(message, SystemTime::now(), None)
             .await;
-        assert_eq!(errors, vec![]);
+        assert!(errors.is_empty());
 
         let batch = deserializer.flush_buffer().0.unwrap();
 

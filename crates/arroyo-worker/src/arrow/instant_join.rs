@@ -7,6 +7,7 @@ use arroyo_operator::operator::{
     ArrowOperator, ConstructedOperator, DisplayableOperator, OperatorConstructor, Registry,
 };
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::{api, rpc::TableConfig},
@@ -31,6 +32,7 @@ use std::{
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::debug;
+
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
 pub struct InstantJoin {
@@ -198,36 +200,31 @@ impl ArrowOperator for InstantJoin {
         }
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         let left_table = ctx
             .table_manager
             .get_expiring_time_key_table("left", watermark)
-            .await
-            .expect("should have left table");
+            .await?;
         let left_batches: Vec<_> = left_table
             .all_batches_for_watermark(watermark)
             .flat_map(|(_time, batches)| batches.clone())
             .collect();
         for batch in left_batches {
-            self.process_left(batch.clone(), ctx)
-                .await
-                .expect("should be able to add left from state");
+            self.process_left(batch.clone(), ctx).await?;
         }
         let right_table = ctx
             .table_manager
             .get_expiring_time_key_table("right", watermark)
-            .await
-            .expect("should have right table");
+            .await?;
         let right_batches: Vec<_> = right_table
             .all_batches_for_watermark(watermark)
             .flat_map(|(_time, batches)| batches.clone())
             .collect();
         for batch in right_batches {
-            self.process_right(batch.clone(), ctx)
-                .await
-                .expect("should be able to add right from state");
+            self.process_right(batch.clone(), ctx).await?;
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -235,7 +232,7 @@ impl ArrowOperator for InstantJoin {
         _: RecordBatch,
         _: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         unreachable!();
     }
 
@@ -246,33 +243,27 @@ impl ArrowOperator for InstantJoin {
         record_batch: RecordBatch,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         match index / (total_inputs / 2) {
-            0 => self
-                .process_left(record_batch, ctx)
-                .await
-                .expect("should process left"),
-            1 => self
-                .process_right(record_batch, ctx)
-                .await
-                .expect("should process right"),
+            0 => self.process_left(record_batch, ctx).await?,
+            1 => self.process_right(record_batch, ctx).await?,
             _ => unreachable!(),
         }
+        Ok(())
     }
     async fn handle_watermark(
         &mut self,
         watermark: Watermark,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) -> Option<Watermark> {
+    ) -> DataflowResult<Option<Watermark>> {
         let Some(watermark) = ctx.last_present_watermark() else {
-            return Some(watermark);
+            return Ok(Some(watermark));
         };
         let futures_to_drain = {
             let mut futures_to_drain = vec![];
-            while !self.execs.is_empty() {
-                let first_watermark = self.execs.first_key_value().unwrap().0;
-                if *first_watermark >= watermark {
+            while let Some(entry) = self.execs.first_key_value() {
+                if *entry.0 >= watermark {
                     break;
                 }
                 let (_time, exec) = self.execs.pop_first().expect("should have exec");
@@ -282,18 +273,11 @@ impl ArrowOperator for InstantJoin {
         };
         for mut future in futures_to_drain {
             while let (_time, Some((batch, new_exec))) = future.await {
-                match batch {
-                    Ok(batch) => {
-                        collector.collect(batch).await;
-                    }
-                    Err(err) => {
-                        panic!("error in future: {err:?}");
-                    }
-                }
+                collector.collect(batch?).await?;
                 future = new_exec;
             }
         }
-        Some(Watermark::EventTime(watermark))
+        Ok(Some(Watermark::EventTime(watermark)))
     }
 
     async fn handle_checkpoint(
@@ -301,22 +285,19 @@ impl ArrowOperator for InstantJoin {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let watermark = ctx.last_present_watermark();
         ctx.table_manager
             .get_expiring_time_key_table("left", watermark)
-            .await
-            .expect("should have left table")
+            .await?
             .flush(watermark)
-            .await
-            .expect("should flush");
+            .await?;
         ctx.table_manager
             .get_expiring_time_key_table("right", watermark)
-            .await
-            .expect("should have right table")
+            .await?
             .flush(watermark)
-            .await
-            .expect("should flush");
+            .await?;
+        Ok(())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
@@ -362,7 +343,7 @@ impl ArrowOperator for InstantJoin {
         result: Box<dyn Any + Send>,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
         if let Some((bin, batch_option)) = *data {
             match batch_option {
@@ -372,9 +353,7 @@ impl ArrowOperator for InstantJoin {
                 Some((batch, future)) => match self.execs.get_mut(&bin) {
                     Some(exec) => {
                         exec.active_exec = future.clone();
-                        collector
-                            .collect(batch.expect("should compute batch in future"))
-                            .await;
+                        collector.collect(batch?).await?;
                         self.futures.lock().await.push(future);
                     }
                     None => unreachable!(
@@ -383,6 +362,8 @@ impl ArrowOperator for InstantJoin {
                 },
             }
         }
+
+        Ok(())
     }
 }
 

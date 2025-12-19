@@ -7,6 +7,7 @@ use arroyo_operator::operator::{
     Registry,
 };
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
@@ -112,12 +113,8 @@ impl ArrowOperator for WatermarkGenerator {
         Some(Duration::from_secs(1))
     }
 
-    async fn on_start(&mut self, ctx: &mut OperatorContext) {
-        let gs = ctx
-            .table_manager
-            .get_global_keyed_state("s")
-            .await
-            .expect("should have watermark table.");
+    async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
+        let gs = ctx.table_manager.get_global_keyed_state("s").await?;
         self.last_event = SystemTime::now();
 
         let state = *(gs
@@ -128,6 +125,7 @@ impl ArrowOperator for WatermarkGenerator {
             }));
 
         self.state_cache = state;
+        Ok(())
     }
 
     async fn on_close(
@@ -135,7 +133,7 @@ impl ArrowOperator for WatermarkGenerator {
         final_message: &Option<SignalMessage>,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
             // send final watermark on close
             collector
@@ -144,8 +142,9 @@ impl ArrowOperator for WatermarkGenerator {
                     // but can still be formatted.
                     Watermark::EventTime(from_nanos(u64::MAX as u128)),
                 )
-                .await;
+                .await?;
         }
+        Ok(())
     }
 
     async fn process_batch(
@@ -153,23 +152,21 @@ impl ArrowOperator for WatermarkGenerator {
         record: RecordBatch,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
-        collector.collect(record.clone()).await;
+    ) -> DataflowResult<()> {
+        collector.collect(record.clone()).await?;
         self.last_event = SystemTime::now();
 
         let timestamp_column = get_timestamp_col(&record, ctx);
         let Some(max_timestamp) = kernels::aggregate::max(timestamp_column) else {
-            return;
+            return Ok(());
         };
         let max_timestamp = from_nanos(max_timestamp as u128);
 
         // calculate watermark using expression
         let watermark = self
             .expression
-            .evaluate(&record)
-            .unwrap()
-            .into_array(record.num_rows())
-            .unwrap();
+            .evaluate(&record)?
+            .into_array(record.num_rows())?;
 
         let watermark = watermark
             .as_any()
@@ -192,10 +189,11 @@ impl ArrowOperator for WatermarkGenerator {
             );
             collector
                 .broadcast_watermark(Watermark::EventTime(watermark))
-                .await;
+                .await?;
             self.state_cache.last_watermark_emitted_at = max_timestamp;
             self.idle = false;
         }
+        Ok(())
     }
 
     async fn handle_checkpoint(
@@ -203,14 +201,11 @@ impl ArrowOperator for WatermarkGenerator {
         _: CheckpointBarrier,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
-    ) {
-        let gs = ctx
-            .table_manager
-            .get_global_keyed_state("s")
-            .await
-            .expect("state");
+    ) -> DataflowResult<()> {
+        let gs = ctx.table_manager.get_global_keyed_state("s").await?;
 
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
+        Ok(())
     }
 
     async fn handle_tick(
@@ -218,16 +213,17 @@ impl ArrowOperator for WatermarkGenerator {
         _: u64,
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         if let Some(idle_time) = self.idle_time {
             if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
                 info!(
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
                 );
-                collector.broadcast_watermark(Watermark::Idle).await;
+                collector.broadcast_watermark(Watermark::Idle).await?;
                 self.idle = true;
             }
         }
+        Ok(())
     }
 }

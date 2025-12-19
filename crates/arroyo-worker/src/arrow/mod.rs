@@ -8,6 +8,7 @@ use arroyo_operator::operator::{
 use arroyo_planner::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_planner::physical::DecodingContext;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
 use datafusion::common::{internal_err, DataFusionError};
@@ -87,12 +88,13 @@ impl ArrowOperator for ValueExecutionOperator {
         record_batch: RecordBatch,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let mut records = self.executor.process_batch(record_batch).await;
         while let Some(batch) = records.next().await {
-            let batch = batch.expect("should be able to compute batch");
-            collector.collect(batch).await;
+            let batch = batch?;
+            collector.collect(batch).await?;
         }
+        Ok(())
     }
 }
 
@@ -158,20 +160,22 @@ impl ArrowOperator for ProjectionOperator {
         record_batch: RecordBatch,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let outputs = self
             .exprs
             .iter()
             .map(|e| {
                 e.evaluate(&record_batch)
                     .and_then(|f| f.into_array(record_batch.num_rows()))
-                    .unwrap()
             })
-            .collect_vec();
+            .try_collect()?;
 
         collector
-            .collect(RecordBatch::try_new(self.output_schema.schema.clone(), outputs).unwrap())
-            .await;
+            .collect(RecordBatch::try_new(
+                self.output_schema.schema.clone(),
+                outputs,
+            )?)
+            .await
     }
 }
 
@@ -296,14 +300,14 @@ impl ArrowOperator for KeyExecutionOperator {
         batch: RecordBatch,
         _: &mut OperatorContext,
         collector: &mut dyn Collector,
-    ) {
+    ) -> DataflowResult<()> {
         let mut records = self.executor.process_batch(batch).await;
         while let Some(batch) = records.next().await {
-            let batch = batch.expect("should be able to compute batch");
             //TODO: sort by the key
             //info!("batch {:?}", batch);
-            collector.collect(batch).await;
+            collector.collect(batch?).await?;
         }
+        Ok(())
     }
 }
 
