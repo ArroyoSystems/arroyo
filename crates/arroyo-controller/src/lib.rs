@@ -6,7 +6,6 @@
 
 use anyhow::Result;
 use arroyo_rpc::config::config;
-use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
@@ -17,8 +16,8 @@ use arroyo_rpc::grpc::rpc::{
     WorkerInitializationCompleteResp,
 };
 use arroyo_rpc::grpc::rpc::{
-    NonfatalErrorReq, RetryHint, SinkDataReq, SinkDataResp, TaskCheckpointEventReq,
-    TaskCheckpointEventResp, WorkerErrorRes,
+    NonfatalErrorReq, SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp,
+    WorkerErrorRes,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::{config, errors};
@@ -43,7 +42,7 @@ use tokio::sync::RwLock;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 //pub mod compiler;
 pub mod job_controller;

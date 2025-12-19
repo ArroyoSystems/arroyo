@@ -27,7 +27,7 @@ use crate::{
     StateMessage,
 };
 use crate::{CheckpointMessage, TableData};
-use arroyo_rpc::errors::{DataflowError, DataflowResult, StateError, TaskError};
+use arroyo_rpc::errors::{DataflowResult, StateError};
 use arroyo_rpc::grpc::rpc::CheckpointMetadata;
 use tracing::{debug, error, info, warn};
 

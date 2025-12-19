@@ -567,7 +567,7 @@ impl RunningJobModel {
     }
 
     pub fn task_failed(&self) -> Option<TaskFailedEvent> {
-        for (_, status) in &self.tasks {
+        for status in self.tasks.values() {
             if let TaskState::Failed(reason) = &status.state {
                 return Some(reason.clone());
             }

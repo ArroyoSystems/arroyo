@@ -21,7 +21,7 @@ use arroyo_operator::ErasedConstructor;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::errors::{DataflowError, TaskError};
+use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::grpc::{
     api,
     rpc::{CheckpointMetadata, TaskAssignment},

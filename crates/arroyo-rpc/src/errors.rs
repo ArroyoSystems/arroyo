@@ -3,7 +3,6 @@ use arrow_schema::ArrowError;
 use datafusion::error::DataFusionError;
 use datafusion::parquet::errors::ParquetError;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -220,11 +219,7 @@ impl From<DataflowError> for TaskError {
                 retry,
                 source,
                 ..
-            } => (
-                domain,
-                retry.clone(),
-                source.as_ref().map(|s| format!("{:?}", s)),
-            ),
+            } => (domain, retry, source.as_ref().map(|s| format!("{s:?}"))),
             DataflowError::ArrowError(_) => (ErrorDomain::Internal, RetryHint::NoRetry, None),
             DataflowError::DataFusionError(df_err) => {
                 let (domain, retry) = classify_datafusion_error(&df_err);
@@ -241,7 +236,7 @@ impl From<DataflowError> for TaskError {
             DataflowError::DataError { details, count } => (
                 ErrorDomain::External,
                 RetryHint::WithBackoff,
-                Some(format!("count: {}, details: {}", count, details)),
+                Some(format!("count: {count}, details: {details}")),
             ),
             DataflowError::UnknownError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
             DataflowError::WithOperator { error, operator_id } => {
