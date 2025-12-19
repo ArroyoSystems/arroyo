@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
-use arrow_schema::{Field, Schema};
+use arrow_schema::{ArrowError, Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
@@ -265,10 +265,7 @@ impl ArrowOperator for AsyncUdfOperator {
                 .into_iter()
                 .map(|t| t.to_data())
                 .collect();
-            self.udf
-                .send(*id, args)
-                .await
-                .expect("failed to send data to async UDF runtime");
+            self.udf.send(*id, args).await?;
         }
 
         self.next_id = self
@@ -307,28 +304,21 @@ impl ArrowOperator for AsyncUdfOperator {
         let arg_batch: Vec<_> = self
             .input_exprs
             .iter()
-            .map(|expr| {
-                expr.evaluate(&batch)
-                    .unwrap()
-                    .into_array(batch.num_rows())
-                    .unwrap()
-            })
-            .collect();
+            .map(|expr| expr.evaluate(&batch)?.into_array(batch.num_rows()))
+            .try_collect()?;
 
-        let rows = self
-            .input_row_converter
-            .convert_columns(batch.columns())
-            .unwrap();
+        let rows = self.input_row_converter.convert_columns(batch.columns())?;
 
         for (i, row) in rows.iter().enumerate() {
             let args: Vec<_> = arg_batch
                 .iter()
                 .map(|v| {
-                    arrow::compute::take(v, &UInt64Array::from(vec![i as u64]), None)
-                        .unwrap()
-                        .to_data()
+                    Result::<_, ArrowError>::Ok(
+                        arrow::compute::take(v, &UInt64Array::from(vec![i as u64]), None)?
+                            .to_data(),
+                    )
                 })
-                .collect();
+                .try_collect()?;
             self.inputs.insert(self.next_id, row.owned());
             self.udf
                 .send(self.next_id, args)
@@ -369,7 +359,7 @@ impl ArrowOperator for AsyncUdfOperator {
         let result: Vec<_> = self
             .final_exprs
             .iter()
-            .map(|expr| expr.evaluate(&batch).unwrap().into_array(batch.num_rows()))
+            .map(|expr| expr.evaluate(&batch)?.into_array(batch.num_rows()))
             .try_collect()?;
 
         // iterate through the batch convert to rows and push into our map
@@ -404,8 +394,7 @@ impl ArrowOperator for AsyncUdfOperator {
         let gs = ctx
             .table_manager
             .get_global_keyed_state::<usize, AsyncUdfState>("a")
-            .await
-            .unwrap();
+            .await?;
 
         let state = AsyncUdfState {
             inputs: self

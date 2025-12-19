@@ -161,7 +161,7 @@ impl OperatorNode {
                     &source_context.task_info,
                 );
 
-                s.operator.on_start(&mut source_context).await.unwrap();
+                s.operator.on_start(&mut source_context).await?;
 
                 ready.wait().await;
                 info!(
