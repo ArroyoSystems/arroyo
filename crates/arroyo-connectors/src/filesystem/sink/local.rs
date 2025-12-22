@@ -109,7 +109,6 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
                     filename = format!("{hive}/{filename}");
                 }
             }
- 
             // make sure the partition directory exists in tmp and final
             let dir = Path::new(&filename).parent().unwrap().to_str().unwrap();
             create_dir_all(format!("{}/{}", self.tmp_dir, dir)).unwrap();
