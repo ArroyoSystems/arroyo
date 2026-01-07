@@ -555,6 +555,9 @@ impl ArrowDeserializer {
     }
 
     fn deserialize_single(&mut self, msg: &[u8]) -> DataflowResult<()> {
+        // NOTE: When adding support for a new input format here, also update the format validation
+        // in arroyo-rpc/src/api_types/connections.rs ConnectionSchema::validate() to allow the format
+        // for ConnectionType::Source and ConnectionType::Lookup
         match &*self.format {
             Format::RawString(_)
             | Format::Json(JsonFormat {

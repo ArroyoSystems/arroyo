@@ -100,19 +100,21 @@ async fn get_and_validate_connector(
 
     let schema: Option<ConnectionSchema> = req.schema.clone();
 
+    let connection_type = connector.table_type(&profile_config, &req.config).unwrap();
+
     let schema = if let Some(schema) = schema {
         let name = connector.name();
         Some(
             expand_schema(
                 &req.name,
                 name,
-                connector.table_type(&profile_config, &req.config).unwrap(),
+                connection_type,
                 schema,
                 &profile_config,
                 &req.config,
             )
             .await?
-            .validate()
+            .validate(Some(connection_type))
             .map_err(|e| bad_request(format!("Invalid schema: {e}")))?,
         )
     } else {

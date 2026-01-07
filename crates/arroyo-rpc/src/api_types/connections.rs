@@ -48,7 +48,7 @@ pub struct ConnectionProfilePost {
     pub config: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq, Hash, PartialOrd)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, ToSchema, PartialEq, Eq, Hash, PartialOrd)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionType {
     Source,
@@ -458,10 +458,48 @@ impl ConnectionSchema {
             primary_keys,
         };
 
-        s.validate()
+        s.validate(None)
     }
 
-    pub fn validate(self) -> anyhow::Result<Self> {
+    pub fn validate(self, connection_type: Option<ConnectionType>) -> anyhow::Result<Self> {
+        // Validate format compatibility
+        if let (Some(format), Some(conn_type)) = (&self.format, connection_type) {
+            match conn_type {
+                ConnectionType::Source | ConnectionType::Lookup => {
+                    // Only allow formats supported for deserialization
+                    // See arroyo-formats/src/de.rs for implementation
+                    match format {
+                        Format::Json(_)
+                        | Format::Avro(_)
+                        | Format::Protobuf(_)
+                        | Format::RawString(_)
+                        | Format::RawBytes(_) => {
+                            // Supported input formats
+                        }
+                        Format::Parquet(_) => {
+                            bail!("parquet format is not supported for source connections");
+                        }
+                    }
+                }
+                ConnectionType::Sink => {
+                    // Only allow formats supported for serialization
+                    // See arroyo-formats/src/ser.rs for implementation
+                    match format {
+                        Format::Json(_)
+                        | Format::Avro(_)
+                        | Format::Parquet(_) // Filesystem sinks only, validated by connector
+                        | Format::RawString(_)
+                        | Format::RawBytes(_) => {
+                            // Supported output formats
+                        }
+                        Format::Protobuf(_) => {
+                            bail!("protobuf format is not yet supported for sink connections");
+                        }
+                    }
+                }
+            }
+        }
+
         let non_metadata_fields: Vec<_> = self
             .fields
             .iter()
@@ -898,5 +936,39 @@ mod tests {
             let back: SourceField = a.try_into().unwrap();
             assert_eq!(back, sf);
         }
+    }
+
+    #[test]
+    fn test_format_validation_for_connection_type() {
+        use crate::formats::{Format, ParquetCompression, ParquetFormat};
+
+        let schema = ConnectionSchema {
+            format: Some(Format::Parquet(ParquetFormat {
+                compression: ParquetCompression::Zstd,
+                row_group_bytes: None,
+            })),
+            bad_data: None,
+            framing: None,
+            fields: vec![],
+            definition: None,
+            inferred: None,
+            primary_keys: Default::default(),
+        };
+
+        // Parquet should be rejected for sources
+        let result = schema.clone().validate(Some(ConnectionType::Source));
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "parquet format is not supported for source connections"
+        );
+
+        // Parquet should be accepted for sinks
+        let result = schema.clone().validate(Some(ConnectionType::Sink));
+        assert!(result.is_ok());
+
+        // No validation when connection_type is None
+        let result = schema.validate(None);
+        assert!(result.is_ok());
     }
 }

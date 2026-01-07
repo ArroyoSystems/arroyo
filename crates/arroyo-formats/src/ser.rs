@@ -115,6 +115,9 @@ impl ArrowSerializer {
             .project(&self.projection)
             .expect("batch has wrong number of columns");
 
+        // NOTE: When adding support for a new output format here, also update the format validation
+        // in arroyo-rpc/src/api_types/connections.rs ConnectionSchema::validate() to allow the format
+        // for ConnectionType::Sink
         match &self.format {
             Format::Json(json) => self.serialize_json(json, &batch),
             Format::Avro(avro) => self.serialize_avro(avro, &batch),
