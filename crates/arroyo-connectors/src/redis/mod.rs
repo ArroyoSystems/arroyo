@@ -288,7 +288,11 @@ impl Connector for RedisConnector {
                 .iter()
                 .any(|f| f.name == column && f.field_type == FieldType::String && f.required)
             {
-                bail!("invalid value '{}' for {}, must be the name of a non-nullable TEXT column on the table", column, sql);
+                bail!(
+                    "invalid value '{}' for {}, must be the name of a non-nullable TEXT column on the table",
+                    column,
+                    sql
+                );
             };
 
             Ok(column)
@@ -341,7 +345,10 @@ impl Connector for RedisConnector {
                             Some("append") | None => ListOperation::Append,
                             Some("prepend") => ListOperation::Prepend,
                             Some(op) => {
-                                bail!("'{}' is not a valid value for target.operation; must be one of 'append' or 'prepend'", op);
+                                bail!(
+                                    "'{}' is not a valid value for target.operation; must be one of 'append' or 'prepend'",
+                                    op
+                                );
                             }
                         },
                     },

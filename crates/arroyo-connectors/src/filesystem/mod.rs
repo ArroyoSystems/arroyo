@@ -10,8 +10,8 @@ use self::sink::{
 use crate::filesystem::config::*;
 use crate::filesystem::sink::partitioning::PartitionerMode;
 use crate::filesystem::source::FileSystemSourceFunc;
-use crate::{render_schema, EmptyConfig};
-use anyhow::{anyhow, bail, Result};
+use crate::{EmptyConfig, render_schema};
+use anyhow::{Result, anyhow, bail};
 use arrow::datatypes::Schema;
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;

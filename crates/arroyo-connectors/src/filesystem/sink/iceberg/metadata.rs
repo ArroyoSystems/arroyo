@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use crate::filesystem::config::IcebergPartitioning;
 use bincode::{Decode, Encode};
 use iceberg::spec::{
-    visit_schema, DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType,
-    Literal, MapType, NestedFieldRef, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema,
-    SchemaVisitor, StructType, Type,
+    DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType, Literal, MapType,
+    NestedFieldRef, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema, SchemaVisitor,
+    StructType, Type, visit_schema,
 };
 use iceberg::transform::create_transform_function;
 use itertools::Itertools;

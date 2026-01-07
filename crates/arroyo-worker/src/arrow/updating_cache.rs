@@ -291,13 +291,15 @@ mod tests {
         let now = Instant::now();
         cache.insert(key.clone(), now, 1, 42);
 
-        assert!(cache
-            .modify(&key, |x| {
-                *x = 43;
-                Ok::<(), ()>(())
-            })
-            .unwrap()
-            .is_ok());
+        assert!(
+            cache
+                .modify(&key, |x| {
+                    *x = 43;
+                    Ok::<(), ()>(())
+                })
+                .unwrap()
+                .is_ok()
+        );
 
         let v = cache.data.get(&Key(key)).unwrap();
         assert_eq!(v.data, 43);

@@ -1,25 +1,25 @@
-use axum::extract::{Path, State};
 use axum::Json;
+use axum::extract::{Path, State};
 use axum_extra::extract::WithRejection;
 use std::collections::BTreeMap;
 
 use arroyo_connectors::connector_for_type;
+use arroyo_rpc::api_types::ConnectionProfileCollection;
 use arroyo_rpc::api_types::connections::{
     ConnectionAutocompleteResp, ConnectionProfile, ConnectionProfilePost, TestSourceMessage,
 };
-use arroyo_rpc::api_types::ConnectionProfileCollection;
 use tracing::warn;
 
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::public_ids::{IdTypes, generate_id};
 
+use crate::AuthData;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnectionProfile;
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, log_and_map, map_delete_err, not_found, ApiError, BearerAuth,
-    ErrorResp,
+    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, log_and_map, map_delete_err,
+    not_found,
 };
-use crate::AuthData;
 use cornucopia_async::Database;
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {

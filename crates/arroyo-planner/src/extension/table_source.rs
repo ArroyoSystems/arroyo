@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use arroyo_datastream::logical::{LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
+use datafusion::common::{DFSchemaRef, Result, TableReference, plan_err};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 

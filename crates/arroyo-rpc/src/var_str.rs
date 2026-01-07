@@ -1,8 +1,8 @@
 use anyhow::bail;
 use regex::Regex;
-use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Visitor;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::borrow::Cow;
 use std::sync::OnceLock;
 use std::{env, fmt};
@@ -105,7 +105,9 @@ mod tests {
 
     #[test]
     fn test_with_placeholders() {
-        unsafe { env::set_var("TEST_VAR", "environment variable"); }
+        unsafe {
+            env::set_var("TEST_VAR", "environment variable");
+        }
         let input = "This is a {{ TEST_VAR }}";
         let expected = "This is a environment variable";
         assert_eq!(

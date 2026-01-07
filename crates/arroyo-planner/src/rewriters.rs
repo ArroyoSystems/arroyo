@@ -1,17 +1,17 @@
 use crate::builder::NamedNode;
+use crate::extension::ArroyoExtension;
 use crate::extension::debezium::DebeziumUnrollingExtension;
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::extension::sink::SinkExtension;
 use crate::extension::table_source::TableSourceExtension;
 use crate::extension::watermark_node::WatermarkNode;
-use crate::extension::ArroyoExtension;
 use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
 use crate::{
-    fields_with_qualifiers, schema_from_df_fields, ArroyoSchemaProvider, DFField,
-    ASYNC_RESULT_FIELD,
+    ASYNC_RESULT_FIELD, ArroyoSchemaProvider, DFField, fields_with_qualifiers,
+    schema_from_df_fields,
 };
 
 use arrow_schema::DataType;
@@ -19,14 +19,14 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::logical_expr::UserDefinedLogicalNode;
 
-use crate::extension::lookup::LookupSource;
 use crate::extension::AsyncUDFExtension;
+use crate::extension::lookup::LookupSource;
 use arroyo_udf_host::parse::{AsyncOptions, UdfType};
 use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    plan_err, Column, DataFusionError, Result as DFResult, ScalarValue, TableReference,
+    Column, DataFusionError, Result as DFResult, ScalarValue, TableReference, plan_err,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::ScalarFunction;
@@ -330,25 +330,25 @@ impl UnnestRewriter {
 
         let expr = expr.transform_up(&mut |e| {
             if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e
-                && udf.name() == "unnest" {
-                    match args.len() {
-                        1 => {
-                            if c.replace(args[0].clone()).is_some() {
-                                return Err(DataFusionError::Plan(
-                                    "Multiple unnests in expression, which is not allowed"
-                                        .to_string(),
-                                ));
-                            };
+                && udf.name() == "unnest"
+            {
+                match args.len() {
+                    1 => {
+                        if c.replace(args[0].clone()).is_some() {
+                            return Err(DataFusionError::Plan(
+                                "Multiple unnests in expression, which is not allowed".to_string(),
+                            ));
+                        };
 
-                            return Ok(Transformed::yes(Expr::Column(Column::new_unqualified(
-                                UNNESTED_COL,
-                            ))));
-                        }
-                        n => {
-                            panic!("Unnest has wrong number of arguments (expected 1, found {n})");
-                        }
+                        return Ok(Transformed::yes(Expr::Column(Column::new_unqualified(
+                            UNNESTED_COL,
+                        ))));
                     }
-                };
+                    n => {
+                        panic!("Unnest has wrong number of arguments (expected 1, found {n})");
+                    }
+                }
+            };
             Ok(Transformed::no(e))
         })?;
 
@@ -380,9 +380,12 @@ impl TreeNodeRewriter for UnnestRewriter {
                 let (expr, opt) = Self::split_unnest(expr)?;
                 let typ = if let Some(e) = opt {
                     if let Some(prev) = unnest.replace((e, i))
-                        && &prev != unnest.as_ref().unwrap() {
-                            return plan_err!("Projection contains multiple unnests, which is not currently supported");
-                        }
+                        && &prev != unnest.as_ref().unwrap()
+                    {
+                        return plan_err!(
+                            "Projection contains multiple unnests, which is not currently supported"
+                        );
+                    }
                     true
                 } else {
                     false
@@ -435,10 +438,10 @@ impl TreeNodeRewriter for UnnestRewriter {
                 .collect::<DFResult<Vec<_>>>()?;
 
             let unnest_node = LogicalPlan::Unnest(Unnest {
-                exec_columns: vec![DFField::from(
-                    produce_list.schema().qualified_field(unnest_idx),
-                )
-                .qualified_column()],
+                exec_columns: vec![
+                    DFField::from(produce_list.schema().qualified_field(unnest_idx))
+                        .qualified_column(),
+                ],
                 input: produce_list,
                 list_type_columns: vec![(
                     unnest_idx,
@@ -498,18 +501,18 @@ impl<'a> AsyncUdfRewriter<'a> {
             if let Expr::ScalarFunction(ScalarFunction { func: udf, args }) = &e
                 && let Some(UdfType::Async(opts)) =
                     provider.udf_defs.get(udf.name()).map(|udf| udf.udf_type)
+            {
+                if c.replace((udf.name().to_string(), opts, args.clone()))
+                    .is_some()
                 {
-                    if c.replace((udf.name().to_string(), opts, args.clone()))
-                        .is_some()
-                    {
-                        return plan_err!(
-                            "multiple async calls in the same expression, which is not allowed"
-                        );
-                    }
-                    return Ok(Transformed::yes(Expr::Column(Column::new_unqualified(
-                        ASYNC_RESULT_FIELD,
-                    ))));
+                    return plan_err!(
+                        "multiple async calls in the same expression, which is not allowed"
+                    );
                 }
+                return Ok(Transformed::yes(Expr::Column(Column::new_unqualified(
+                    ASYNC_RESULT_FIELD,
+                ))));
+            }
             Ok(Transformed::no(e))
         })?;
 
@@ -690,12 +693,13 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
 
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         if let Expr::IsNotNull(expr) = &node
-            && is_time_window(expr).is_some() {
-                return Ok(Transformed::yes(Expr::Literal(
-                    ScalarValue::Boolean(Some(true)),
-                    None,
-                )));
-            }
+            && is_time_window(expr).is_some()
+        {
+            return Ok(Transformed::yes(Expr::Literal(
+                ScalarValue::Boolean(Some(true)),
+                None,
+            )));
+        }
 
         Ok(Transformed::no(node))
     }
@@ -707,15 +711,16 @@ impl TreeNodeRewriter for RowTimeRewriter {
     type Node = Expr;
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         if let Expr::ScalarFunction(func) = &node
-            && func.name() == "row_time" {
-                let transformed = Expr::Column(Column {
-                    relation: None,
-                    name: "_timestamp".to_string(),
-                    spans: Default::default(),
-                })
-                .alias("row_time()");
-                return Ok(Transformed::yes(transformed));
-            }
+            && func.name() == "row_time"
+        {
+            let transformed = Expr::Column(Column {
+                relation: None,
+                name: "_timestamp".to_string(),
+                spans: Default::default(),
+            })
+            .alias("row_time()");
+            return Ok(Transformed::yes(transformed));
+        }
         Ok(Transformed::no(node))
     }
 }
@@ -742,16 +747,17 @@ impl TreeNodeRewriter for SinkInputRewriter<'_> {
     fn f_down(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
         if let LogicalPlan::Extension(extension) = &node
             && let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>()
-                && let Some(named_node) = sink_node.node_name() {
-                    if let Some(inputs) = self.sink_inputs.remove(&named_node) {
-                        let extension = LogicalPlan::Extension(Extension {
-                            node: sink_node.with_exprs_and_inputs(vec![], inputs)?,
-                        });
-                        return Ok(Transformed::new(extension, true, TreeNodeRecursion::Jump));
-                    } else {
-                        self.was_removed = true;
-                    }
-                }
+            && let Some(named_node) = sink_node.node_name()
+        {
+            if let Some(inputs) = self.sink_inputs.remove(&named_node) {
+                let extension = LogicalPlan::Extension(Extension {
+                    node: sink_node.with_exprs_and_inputs(vec![], inputs)?,
+                });
+                return Ok(Transformed::new(extension, true, TreeNodeRecursion::Jump));
+            } else {
+                self.was_removed = true;
+            }
+        }
         Ok(Transformed::no(node))
     }
 }

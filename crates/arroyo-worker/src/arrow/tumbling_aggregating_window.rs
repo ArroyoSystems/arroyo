@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use arrow::compute::{partition, sort_to_indices, take};
-use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
+use arrow_array::{Array, PrimitiveArray, RecordBatch, types::TimestampNanosecondType};
 use arrow_schema::SchemaRef;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
@@ -11,10 +11,10 @@ use arroyo_planner::schemas::add_timestamp_field_arrow;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
-use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
+use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time, to_nanos};
 use datafusion::common::ScalarValue;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use std::any::Any;
 use std::borrow::Cow;
 use std::future::Future;
@@ -28,18 +28,18 @@ use std::{
 
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::SendableRecordBatchStream;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
-    physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
+    physical_plan::{AsExecutionPlan, from_proto::parse_physical_expr},
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use prost::Message;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::warn;
 
 use super::sync::streams::KeyedCloneableStreamFuture;
@@ -279,7 +279,9 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
             let bin_start = from_nanos(typed_bin.value(range.start) as u128);
             let watermark = ctx.last_present_watermark();
 
-            if let Some(watermark) = watermark && bin_start < self.bin_start(watermark) {
+            if let Some(watermark) = watermark
+                && bin_start < self.bin_start(watermark)
+            {
                 warn!(
                     "bin start {} is before watermark {}, skipping",
                     print_time(bin_start),

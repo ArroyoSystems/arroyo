@@ -1,5 +1,5 @@
 use crate::nexmark::operator::{GeneratorConfig, NexmarkConfig, NexmarkGenerator};
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use std::{borrow::BorrowMut, time::SystemTime};
 
 #[tokio::test]

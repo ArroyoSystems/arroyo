@@ -1,16 +1,16 @@
 use anyhow::anyhow;
-use axum::extract::{Path, Query, State};
-use axum::response::sse::Event;
-use axum::response::Sse;
 use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::response::Sse;
+use axum::response::sse::Event;
 use axum_extra::extract::WithRejection;
 use futures_util::stream::Stream;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 
 use arroyo_connectors::confluent::ConfluentProfile;
@@ -24,19 +24,20 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, ProtobufFormat};
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
 };
 
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, internal_server_error, log_and_map, map_delete_err, map_insert_err,
-    not_found, paginate_results, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
+    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, internal_server_error, log_and_map,
+    map_delete_err, map_insert_err, not_found, paginate_results, validate_pagination_params,
 };
 use crate::{
+    AuthData,
     queries::api_queries::{self, DbConnectionTable},
-    to_micros, AuthData,
+    to_micros,
 };
 use arroyo_formats::proto::schema::{protobuf_to_arrow, schema_file_to_descriptor};
 use cornucopia_async::{Database, DatabaseSource};
@@ -77,10 +78,10 @@ async fn get_and_validate_connector(
         })?;
 
         if connection_profile.r#type != req.connector {
-            return Err(
-                bad_request(format!("Stored connection has a different connector than requested (found {}, expected {})", connection_profile.r#type, req.connector))
-
-            );
+            return Err(bad_request(format!(
+                "Stored connection has a different connector than requested (found {}, expected {})",
+                connection_profile.r#type, req.connector
+            )));
         }
 
         (
@@ -89,7 +90,9 @@ async fn get_and_validate_connector(
         )
     } else {
         if connector.metadata().connection_config.is_some() {
-            return Err(bad_request("this connector requires a connection profile, but `connectionProfileId` was not specified"));
+            return Err(bad_request(
+                "this connector requires a connection profile, but `connectionProfileId` was not specified",
+            ));
         }
         (None, json! {{}})
     };

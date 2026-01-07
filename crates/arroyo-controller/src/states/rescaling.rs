@@ -1,6 +1,6 @@
-use crate::{states::stop_if_desired_non_running, JobMessage};
+use crate::{JobMessage, states::stop_if_desired_non_running};
 
-use super::{scheduling::Scheduling, JobContext, State, StateError, Transition};
+use super::{JobContext, State, StateError, Transition, scheduling::Scheduling};
 
 #[derive(Debug)]
 pub struct Rescaling {}

@@ -5,7 +5,7 @@ use arroyo_rpc::grpc::rpc::StopMode;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-use super::{compiling::Compiling, JobContext, State, StateError, Transition};
+use super::{JobContext, State, StateError, Transition, compiling::Compiling};
 
 #[derive(Debug)]
 pub struct Recovering {}

@@ -1,14 +1,14 @@
 use crate::sse::SseTable;
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::{ConstructedOperator, SourceOperator};
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
-use arroyo_types::{string_to_map, SignalMessage, Watermark};
+use arroyo_types::{SignalMessage, Watermark, string_to_map};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, Error, SSE};

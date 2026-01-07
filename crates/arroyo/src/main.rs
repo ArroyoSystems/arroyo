@@ -2,11 +2,11 @@ mod run;
 
 use anyhow::{anyhow, bail};
 use arroyo_planner::{ArroyoSchemaProvider, SqlConfig};
-use arroyo_rpc::config::{config, DatabaseType};
+use arroyo_rpc::config::{DatabaseType, config};
 use arroyo_rpc::{config, log_event};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
 use arroyo_server_common::start_admin_server;
-use arroyo_worker::{utils, WorkerServer};
+use arroyo_worker::{WorkerServer, utils};
 use clap::{Args, Parser, Subcommand};
 use clio::Input;
 use cornucopia_async::DatabaseSource;

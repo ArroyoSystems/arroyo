@@ -13,8 +13,8 @@ use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::nexmark::operator::NexmarkSourceFunc;
 use crate::EmptyConfig;
+use crate::nexmark::operator::NexmarkSourceFunc;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./nexmark.svg");
@@ -162,9 +162,11 @@ impl Connector for NexmarkConnector {
         let runtime = options.pull_opt_f64("runtime")?;
 
         if let Some(schema) = schema
-            && !schema.fields.is_empty() && schema.fields != nexmark_schema().fields {
-                bail!("invalid schema for nexmark source; omit fields to rely on inference");
-            }
+            && !schema.fields.is_empty()
+            && schema.fields != nexmark_schema().fields
+        {
+            bail!("invalid schema for nexmark source; omit fields to rely on inference");
+        }
 
         self.from_config(
             None,

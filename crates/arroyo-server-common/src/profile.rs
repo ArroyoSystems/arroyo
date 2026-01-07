@@ -3,9 +3,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use flate2::write::GzEncoder;
 use flate2::Compression;
-use pprof::{protos::Message, ProfilerGuardBuilder};
+use flate2::write::GzEncoder;
+use pprof::{ProfilerGuardBuilder, protos::Message};
 use std::time::Duration;
 use tokio::time::sleep;
 

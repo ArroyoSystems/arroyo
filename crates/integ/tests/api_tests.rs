@@ -3,12 +3,12 @@ use std::env;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use arroyo_openapi::types::{
-    builder, ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonType,
-    MetricName, PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
-    ValidateUdfPost,
-};
 use arroyo_openapi::Client;
+use arroyo_openapi::types::{
+    ConnectionProfilePost, ConnectionSchema, ConnectionTablePost, Format, JsonType, MetricName,
+    PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
+    ValidateUdfPost, builder,
+};
 use rand::random;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::{ClientConfig, ClientContext};
@@ -143,22 +143,23 @@ async fn start_and_monitor(
             .data
             .iter()
             .find(|c| c.epoch == checkpoints_to_wait as i32)
-            && checkpoint.finish_time.is_some() {
-                // get details
-                let details = api_client
-                    .get_checkpoint_details()
-                    .pipeline_id(&pipeline_id)
-                    .job_id(&job.id)
-                    .epoch(checkpoint.epoch)
-                    .send()
-                    .await
-                    .unwrap()
-                    .into_inner();
+            && checkpoint.finish_time.is_some()
+        {
+            // get details
+            let details = api_client
+                .get_checkpoint_details()
+                .pipeline_id(&pipeline_id)
+                .job_id(&job.id)
+                .epoch(checkpoint.epoch)
+                .send()
+                .await
+                .unwrap()
+                .into_inner();
 
-                assert!(!details.data.is_empty());
+            assert!(!details.data.is_empty());
 
-                return Ok((pipeline_id, job.id.clone(), run_id));
-            }
+            return Ok((pipeline_id, job.id.clone(), run_id));
+        }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

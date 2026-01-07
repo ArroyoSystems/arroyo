@@ -3,38 +3,39 @@ use std::{fmt::Formatter, sync::Arc, time::Duration};
 use arrow::datatypes::IntervalMonthDayNanoType;
 
 use arroyo_datastream::{
-    logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName},
     WindowType,
+    logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName},
 };
 use arroyo_rpc::{
+    TIMESTAMP_FIELD,
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::{
         SessionWindowAggregateOperator, SlidingWindowAggregateOperator,
         TumblingWindowAggregateOperator,
     },
-    TIMESTAMP_FIELD,
 };
 use datafusion::common::{
-    internal_err, plan_err, Column, DFSchema, DFSchemaRef, Result, ScalarValue,
+    Column, DFSchema, DFSchemaRef, Result, ScalarValue, internal_err, plan_err,
 };
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr;
 use datafusion::logical_expr::{
-    expr::ScalarFunction, Aggregate, BinaryExpr, Expr, Extension, LogicalPlan,
-    UserDefinedLogicalNodeCore,
+    Aggregate, BinaryExpr, Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore,
+    expr::ScalarFunction,
 };
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 
 use super::{ArroyoExtension, NodeWithIncomingEdges, TimestampAppendExtension};
 use crate::physical::window;
 use crate::{
+    DFField, WindowBehavior,
     builder::{NamedNode, Planner, SplitPlanOutput},
     fields_with_qualifiers, multifield_partial_ord,
     physical::ArroyoPhysicalExtensionCodec,
-    schema_from_df_fields, schema_from_df_fields_with_metadata, DFField, WindowBehavior,
+    schema_from_df_fields, schema_from_df_fields_with_metadata,
 };
 
 pub(crate) const AGGREGATE_EXTENSION_NAME: &str = "AggregateExtension";
@@ -325,7 +326,7 @@ impl AggregateExtension {
                             window_field,
                             window_index,
                         )),
-                    }))
+                    }));
                 }
                 WindowType::Instant => return Ok(timestamp_append),
             },

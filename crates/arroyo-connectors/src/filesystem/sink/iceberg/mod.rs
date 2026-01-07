@@ -3,9 +3,9 @@ pub mod schema;
 pub mod transforms;
 
 use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
+use crate::filesystem::sink::FinishedFile;
 use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
 use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
-use crate::filesystem::sink::FinishedFile;
 use arrow::datatypes::Schema;
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
@@ -136,9 +136,10 @@ impl IcebergTable {
                 .catalog
                 .create_namespace(self.table_ident.namespace(), HashMap::new())
                 .await
-                && e.kind() != iceberg::ErrorKind::NamespaceAlreadyExists {
-                    return Err(e.into());
-                }
+            && e.kind() != iceberg::ErrorKind::NamespaceAlreadyExists
+        {
+            return Err(e.into());
+        }
 
         let table = if !self.catalog.table_exists(&self.table_ident).await? {
             let schema_with_ids = add_parquet_field_ids(schema);
@@ -239,11 +240,12 @@ impl IcebergTable {
                 .summary()
                 .additional_properties
                 .get(ARROYO_COMMIT_ID)
-                && *existing_tx_id == tx_id {
-                    // we've already committed this epoch (but crashed before it could be records), so we're good
-                    info!("epoch {epoch} already committed to iceberg, skipping");
-                    return Ok(());
-                }
+            && *existing_tx_id == tx_id
+        {
+            // we've already committed this epoch (but crashed before it could be records), so we're good
+            info!("epoch {epoch} already committed to iceberg, skipping");
+            return Ok(());
+        }
 
         let partition_spec_id = table.metadata().default_partition_spec_id();
         let files: Vec<_> = finished_files

@@ -3,12 +3,12 @@ use crate::extension::key_calculation::{KeyCalculationExtension, KeysOrExprs};
 use crate::extension::updating_aggregate::UpdatingAggregateExtension;
 use crate::plan::WindowDetectingVisitor;
 use crate::{
-    fields_with_qualifiers, find_window, schema_from_df_fields_with_metadata, ArroyoSchemaProvider,
-    DFField, WindowBehavior,
+    ArroyoSchemaProvider, DFField, WindowBehavior, fields_with_qualifiers, find_window,
+    schema_from_df_fields_with_metadata,
 };
 use arroyo_rpc::TIMESTAMP_FIELD;
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
-use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
+use datafusion::common::{DFSchema, DataFusionError, Result, not_impl_err, plan_err};
 use datafusion::functions_aggregate::expr_fn::max;
 use datafusion::logical_expr;
 use datafusion::logical_expr::{Aggregate, Expr, Extension, LogicalPlan};

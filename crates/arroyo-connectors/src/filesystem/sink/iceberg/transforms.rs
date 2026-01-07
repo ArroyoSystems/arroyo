@@ -3,15 +3,15 @@
 
 use crate::filesystem::config::Transform;
 use arrow::array::{
-    as_primitive_array, downcast_array, Array, ArrayRef, PrimitiveArray, StringArray,
+    Array, ArrayRef, PrimitiveArray, StringArray, as_primitive_array, downcast_array,
 };
 use arrow::buffer::ScalarBuffer;
-use arrow::compute::{binary, cast, date_part, unary, DatePart};
+use arrow::compute::{DatePart, binary, cast, date_part, unary};
 use arrow::datatypes::{
     DataType, Date32Type, Int16Type, Int32Type, Int64Type, TimeUnit, TimestampMicrosecondType,
 };
 use arrow::error::ArrowError;
-use datafusion::common::{exec_datafusion_err, exec_err, ScalarValue};
+use datafusion::common::{ScalarValue, exec_datafusion_err, exec_err};
 use datafusion::error::Result as DFResult;
 use datafusion::execution::FunctionRegistry;
 use datafusion::functions::{export_functions, make_udf_function};

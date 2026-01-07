@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use arroyo_types::{
-    ChainInfo, BATCHES_RECV, BATCHES_SENT, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS,
+    BATCHES_RECV, BATCHES_SENT, BYTES_RECV, BYTES_SENT, ChainInfo, DESERIALIZATION_ERRORS,
     MESSAGES_RECV, MESSAGES_SENT,
 };
 use lazy_static::lazy_static;
 use prometheus::{
-    labels, register_histogram, register_int_counter_vec, register_int_gauge, Histogram,
-    HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts,
+    Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts, labels,
+    register_histogram, register_int_counter_vec, register_int_gauge,
 };
 
 pub const NODE_ID_LABEL: &str = "node_id";
@@ -149,10 +149,11 @@ impl TaskCounters {
         {
             if let Some((counter, has_connection_id)) =
                 cache.read().unwrap().get(&(*self, chain_info.clone()))
-                && (*has_connection_id || connection_id.is_empty()) {
-                    f(counter);
-                    return;
-                }
+                && (*has_connection_id || connection_id.is_empty())
+            {
+                f(counter);
+                return;
+            }
         }
 
         let counter = self.metric().with_label_values(&[

@@ -6,11 +6,11 @@ use crate::tables::ConnectorTable;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{ConnectorOp, LookupJoinCondition, LookupJoinOperator};
-use datafusion::common::{internal_err, plan_err, Column, DFSchemaRef, JoinType};
+use datafusion::common::{Column, DFSchemaRef, JoinType, internal_err, plan_err};
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion::sql::TableReference;
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use prost::Message;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -115,7 +115,9 @@ impl ArroyoExtension for LookupJoin {
                 JoinType::Inner => arroyo_rpc::grpc::api::JoinType::Inner as i32,
                 JoinType::Left => arroyo_rpc::grpc::api::JoinType::Left as i32,
                 j => {
-                    return plan_err!("unsupported join type '{j}' for lookup join; only inner and left joins are supported");
+                    return plan_err!(
+                        "unsupported join type '{j}' for lookup join; only inner and left joins are supported"
+                    );
                 }
             },
             ttl_micros: self

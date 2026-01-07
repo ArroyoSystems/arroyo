@@ -1,16 +1,16 @@
-use axum::extract::{Path, State};
 use axum::Json;
+use axum::extract::{Path, State};
 
 use crate::pipelines::query_job_by_pub_id;
 use crate::rest::AppState;
-use crate::rest_utils::{authenticate, log_and_map, service_unavailable, BearerAuth, ErrorResp};
-use arroyo_rpc::api_types::metrics::OperatorMetricGroup;
+use crate::rest_utils::{BearerAuth, ErrorResp, authenticate, log_and_map, service_unavailable};
 use arroyo_rpc::api_types::OperatorMetricGroupCollection;
+use arroyo_rpc::api_types::metrics::OperatorMetricGroup;
 use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::rpc::JobMetricsReq;
-use tonic::codec::CompressionEncoding;
+use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use tonic::Code;
+use tonic::codec::CompressionEncoding;
 use tracing::error;
 
 /// Get a job's metrics

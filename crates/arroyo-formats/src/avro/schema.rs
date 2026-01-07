@@ -106,7 +106,7 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
                 "logicalType": "decimal",
                 "scale": scale,
                 "precision": precision,
-            })
+            });
         }
         DataType::Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
         DataType::Map(_, _) => unimplemented!("maps are not supported"),

@@ -1,6 +1,6 @@
 use super::NatsConfig;
 use super::NatsTable;
-use super::{get_nats_client, SinkType};
+use super::{SinkType, get_nats_client};
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};

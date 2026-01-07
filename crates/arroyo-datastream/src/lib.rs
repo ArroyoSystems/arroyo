@@ -4,7 +4,7 @@
 pub mod logical;
 pub mod optimizers;
 
-use arroyo_rpc::config::{config, DefaultSink};
+use arroyo_rpc::config::{DefaultSink, config};
 use arroyo_rpc::grpc::api;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};

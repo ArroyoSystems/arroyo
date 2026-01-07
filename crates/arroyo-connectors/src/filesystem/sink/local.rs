@@ -13,15 +13,15 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 use super::{
-    add_suffix_prefix, delta, two_phase_committer::TwoPhaseCommitterOperator, CommitState,
-    FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
+    CommitState, FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
+    add_suffix_prefix, delta, two_phase_committer::TwoPhaseCommitterOperator,
 };
 use crate::filesystem::config::NamingConfig;
 use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
-use crate::filesystem::{config, sink::two_phase_committer::TwoPhaseCommitter, TableFormat};
-use anyhow::{bail, Result};
+use crate::filesystem::{TableFormat, config, sink::two_phase_committer::TwoPhaseCommitter};
+use anyhow::{Result, bail};
 use arrow::row::OwnedRow;
 
 pub struct LocalFileSystemWriter<V: LocalWriter> {
@@ -105,9 +105,10 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
             );
 
             if let Some(partition) = partition
-                && let Some(hive) = self.partitioner.as_ref().unwrap().hive_path(partition) {
-                    filename = format!("{hive}/{filename}");
-                }
+                && let Some(hive) = self.partitioner.as_ref().unwrap().hive_path(partition)
+            {
+                filename = format!("{hive}/{filename}");
+            }
 
             self.writers.insert(
                 partition.clone(),

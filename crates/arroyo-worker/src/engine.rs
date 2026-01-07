@@ -14,10 +14,10 @@ use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorChain, OperatorName,
 };
-use arroyo_operator::context::{batch_bounded, BatchReceiver, BatchSender, OperatorContext};
+use arroyo_operator::ErasedConstructor;
+use arroyo_operator::context::{BatchReceiver, BatchSender, OperatorContext, batch_bounded};
 use arroyo_operator::operator::Registry;
 use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNode, SourceNode};
-use arroyo_operator::ErasedConstructor;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
@@ -28,19 +28,19 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{range_for_server, TaskInfo, WorkerId};
+use arroyo_types::{TaskInfo, WorkerId, range_for_server};
 use arroyo_udf_host::LocalUdf;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use petgraph::{dot, Direction};
+use petgraph::{Direction, dot};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::{Arc, RwLock};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Barrier;
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tracing::{debug, info, warn};
 
 pub struct SubtaskNode {
@@ -311,7 +311,9 @@ impl Program {
             match edge.edge_type {
                 LogicalEdgeType::Forward => {
                     if from_nodes.len() != to_nodes.len() && !from_nodes.is_empty() {
-                        panic!("cannot create a forward connection between nodes of different parallelism");
+                        panic!(
+                            "cannot create a forward connection between nodes of different parallelism"
+                        );
                     }
                     for (f, t) in from_nodes.iter().zip(&to_nodes) {
                         let (tx, rx) = batch_bounded(queue_size);

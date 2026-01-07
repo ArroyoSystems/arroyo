@@ -3,7 +3,7 @@ use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
     ProgramConfig,
 };
-use arroyo_planner::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
+use arroyo_planner::{ArroyoSchemaProvider, SqlConfig, parse_and_get_arrow_program};
 use arroyo_state::parquet::ParquetBackend;
 use petgraph::algo::has_path_connecting;
 use petgraph::visit::EdgeRef;
@@ -13,14 +13,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, time::SystemTime};
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::{Receiver, channel};
 
 use crate::udfs::get_udfs;
 use arroyo_rpc::config;
 use arroyo_rpc::grpc::rpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::checkpoint_state::CheckpointState;
-use arroyo_types::{to_micros, CheckpointBarrier};
+use arroyo_types::{CheckpointBarrier, to_micros};
 use arroyo_udf_host::LocalUdf;
 use arroyo_worker::engine::Engine;
 use arroyo_worker::engine::{Program, RunningEngine};

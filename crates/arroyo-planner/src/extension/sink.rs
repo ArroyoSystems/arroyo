@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
-    df::{ArroyoSchema, ArroyoSchemaRef},
     UPDATING_META_FIELD,
+    df::{ArroyoSchema, ArroyoSchemaRef},
 };
-use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference};
+use datafusion::common::{DFSchemaRef, Result, TableReference, plan_err};
 
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore};
 
@@ -18,8 +18,8 @@ use crate::{
 };
 
 use super::{
-    debezium::ToDebeziumExtension, remote_table::RemoteTableExtension, ArroyoExtension,
-    NodeWithIncomingEdges,
+    ArroyoExtension, NodeWithIncomingEdges, debezium::ToDebeziumExtension,
+    remote_table::RemoteTableExtension,
 };
 
 pub(crate) const SINK_NODE_NAME: &str = "SinkExtension";
@@ -56,7 +56,9 @@ impl SinkExtension {
                         schema = input.schema().clone();
                     }
                     (true, false) => {
-                        return plan_err!("input is updating, but sink is not configured as an updating sink (hint: use `format = 'debezium_json'`)");
+                        return plan_err!(
+                            "input is updating, but sink is not configured as an updating sink (hint: use `format = 'debezium_json'`)"
+                        );
                     }
                     (false, false) => {}
                 }

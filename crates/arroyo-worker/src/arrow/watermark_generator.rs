@@ -11,12 +11,12 @@ use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
-use arroyo_types::{from_nanos, to_millis, CheckpointBarrier, SignalMessage, Watermark};
+use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark, from_nanos, to_millis};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::physical_expr::PhysicalExpr;
-use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
 use std::borrow::Cow;
@@ -215,14 +215,16 @@ impl ArrowOperator for WatermarkGenerator {
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
         if let Some(idle_time) = self.idle_time
-            && self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
-                info!(
-                    "Setting partition {} to idle after {:?}",
-                    ctx.task_info.task_index, idle_time
-                );
-                collector.broadcast_watermark(Watermark::Idle).await?;
-                self.idle = true;
-            }
+            && self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time
+            && !self.idle
+        {
+            info!(
+                "Setting partition {} to idle after {:?}",
+                ctx.task_info.task_index, idle_time
+            );
+            collector.broadcast_watermark(Watermark::Idle).await?;
+            self.idle = true;
+        }
         Ok(())
     }
 }

@@ -1,11 +1,11 @@
 use crate::float_to_json;
 use apache_avro::types::{Value, Value as AvroValue};
-use apache_avro::{from_avro_datum, AvroResult, Reader, Schema};
+use apache_avro::{AvroResult, Reader, Schema, from_avro_datum};
 use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::{DataflowError, SourceError};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

@@ -7,7 +7,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::select;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::time::error::Elapsed;
 
 pub use arroyo_udf_common::async_udf::{DrainResult, SendableFfiAsyncUdfHandle};
@@ -115,9 +115,9 @@ pub struct AsyncUdf<
 }
 
 impl<
-        F: Future<Output = OutputT> + Send + 'static,
-        FnT: Fn(u64, Duration, Vec<ArrayData>) -> F + Send + 'static,
-    > AsyncUdf<F, FnT>
+    F: Future<Output = OutputT> + Send + 'static,
+    FnT: Fn(u64, Duration, Vec<ArrayData>) -> F + Send + 'static,
+> AsyncUdf<F, FnT>
 {
     pub fn new(
         ordered: bool,

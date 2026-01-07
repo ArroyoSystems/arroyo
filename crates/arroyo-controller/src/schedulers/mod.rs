@@ -7,19 +7,19 @@ use arroyo_rpc::grpc::rpc::{
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
     WorkerFinishedReq,
 };
-use arroyo_types::{MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
+use arroyo_types::{JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId};
 use lazy_static::lazy_static;
-use prometheus::{register_gauge, Gauge};
+use prometheus::{Gauge, register_gauge};
 use std::collections::HashMap;
 use std::env::current_exe;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::process::Command;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tonic::transport::Channel;
 use tonic::{Request, Status};
 use tracing::{info, warn};
@@ -279,8 +279,10 @@ impl NodeStatus {
 
     fn release_slots(&mut self, worker_id: WorkerId, slots: usize) {
         if let Some(freed) = self.scheduled_slots.remove(&worker_id) {
-            assert_eq!(freed, slots,
-                "Controller and node disagree about how many slots are scheduled for worker {worker_id:?} ({freed} != {slots})");
+            assert_eq!(
+                freed, slots,
+                "Controller and node disagree about how many slots are scheduled for worker {worker_id:?} ({freed} != {slots})"
+            );
 
             self.free_slots += slots;
 

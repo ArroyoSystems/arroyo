@@ -8,13 +8,13 @@ use arroyo_datastream::logical::{
 };
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{AsyncUdfOperator, AsyncUdfOrdering};
-use arroyo_rpc::{updating_meta_field, TIMESTAMP_FIELD};
-use datafusion::common::{internal_err, DFSchemaRef, DataFusionError, Result, TableReference};
+use arroyo_rpc::{TIMESTAMP_FIELD, updating_meta_field};
+use datafusion::common::{DFSchemaRef, DataFusionError, Result, TableReference, internal_err};
 use datafusion::logical_expr::{
     Expr, LogicalPlan, UserDefinedLogicalNode, UserDefinedLogicalNodeCore,
 };
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use prost::Message;
 use watermark_node::WatermarkNode;
 
@@ -29,7 +29,7 @@ use crate::builder::{NamedNode, Planner};
 use crate::extension::lookup::LookupJoin;
 use crate::extension::projection::ProjectionExtension;
 use crate::schemas::{add_timestamp_field, has_timestamp_field};
-use crate::{fields_with_qualifiers, schema_from_df_fields, DFField, ASYNC_RESULT_FIELD};
+use crate::{ASYNC_RESULT_FIELD, DFField, fields_with_qualifiers, schema_from_df_fields};
 use join::JoinExtension;
 
 pub(crate) mod aggregate;
@@ -131,7 +131,11 @@ pub(crate) struct TimestampAppendExtension {
 impl TimestampAppendExtension {
     fn new(input: LogicalPlan, qualifier: Option<TableReference>) -> Self {
         if has_timestamp_field(input.schema()) {
-            unreachable!("shouldn't be adding timestamp to a plan that already has it: plan :\n {:?}\n schema: {:?}", input, input.schema());
+            unreachable!(
+                "shouldn't be adding timestamp to a plan that already has it: plan :\n {:?}\n schema: {:?}",
+                input,
+                input.schema()
+            );
         }
         let schema = add_timestamp_field(input.schema().clone(), qualifier.clone()).unwrap();
         Self {

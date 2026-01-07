@@ -4,8 +4,8 @@ use arroyo_operator::context::Collector;
 use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
-    grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
     CheckpointEvent,
+    grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum},
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::{Data, TaskInfo, Watermark};

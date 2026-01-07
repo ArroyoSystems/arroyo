@@ -4,16 +4,16 @@ use std::sync::Arc;
 
 use arrow::array::builder::TimestampNanosecondBuilder;
 use arrow::array::{Int64Builder, RecordBatch};
-use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use arroyo_rpc::ControlMessage;
+use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
 use std::time::{Duration, SystemTime};
 
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_types::{from_millis, print_time, to_millis, to_nanos};
 use tracing::{debug, info};

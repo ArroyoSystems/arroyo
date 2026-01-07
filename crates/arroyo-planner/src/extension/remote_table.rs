@@ -5,7 +5,7 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::ValuePlanOperator,
 };
-use datafusion::common::{internal_err, plan_err, DFSchemaRef, Result, TableReference};
+use datafusion::common::{DFSchemaRef, Result, TableReference, internal_err, plan_err};
 
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};

@@ -1,13 +1,13 @@
 use crate::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use crate::tables::global_keyed_map::GlobalKeyedTable;
 use crate::tables::{CompactionConfig, ErasedTable};
-use crate::{get_storage_provider, BackingStore};
+use crate::{BackingStore, get_storage_provider};
 use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
 };
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
@@ -195,7 +195,7 @@ impl ParquetBackend {
                     return Err(StateError::Other {
                         table: table.clone(),
                         error: "should have table type".to_string(),
-                    })
+                    });
                 }
                 rpc::TableEnum::GlobalKeyValue => {
                     GlobalKeyedTable::compact_data(

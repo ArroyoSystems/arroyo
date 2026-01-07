@@ -7,11 +7,11 @@ use arroyo_rpc::grpc::api::ArrowProgram;
 
 use thiserror::Error;
 use time::OffsetDateTime;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use tracing::{debug, error, info, warn};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use cornucopia_async::DatabaseSource;
 
 use self::checkpoint_stopping::CheckpointStopping;
@@ -27,13 +27,13 @@ use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
 use crate::{
-    queries, schedulers::Scheduler, JobConfig, JobMessage, JobStatus, RunningMessage,
-    TaskFailedEvent,
+    JobConfig, JobMessage, JobStatus, RunningMessage, TaskFailedEvent, queries,
+    schedulers::Scheduler,
 };
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use prost::Message;

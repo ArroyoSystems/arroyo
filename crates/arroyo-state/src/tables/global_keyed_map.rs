@@ -7,7 +7,7 @@ use arroyo_rpc::grpc::rpc::{
     OperatorMetadata, TableEnum,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{to_micros, Data, Key, TaskInfo};
+use arroyo_types::{Data, Key, TaskInfo, to_micros};
 use bincode::config;
 
 use once_cell::sync::Lazy;
@@ -29,7 +29,7 @@ use std::{
 };
 use tokio::sync::mpsc::Sender;
 
-use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpointer};
+use super::{CompactionConfig, Table, TableEpochCheckpointer, table_checkpoint_path};
 static GLOBAL_KEY_VALUE_SCHEMA: Lazy<Arc<Schema>> = Lazy::new(|| {
     let fields = vec![
         Field::new("key", DataType::Binary, false), // non-nullable BinaryArray for 'key'

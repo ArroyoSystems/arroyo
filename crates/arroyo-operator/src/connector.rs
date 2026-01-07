@@ -352,8 +352,12 @@ impl<C: Connector> ErasedConnector for C {
                     let arrow_field: Field = sf.clone().into();
 
                     if !field.data_type.equals_datatype(arrow_field.data_type()) {
-                        bail!("incorrect data type for metadata field '{}'; expected {}, but found {}",
-                        arrow_field.name(), DisplayAsSql(&field.data_type), DisplayAsSql(arrow_field.data_type()));
+                        bail!(
+                            "incorrect data type for metadata field '{}'; expected {}, but found {}",
+                            arrow_field.name(),
+                            DisplayAsSql(&field.data_type),
+                            DisplayAsSql(arrow_field.data_type())
+                        );
                     }
                 }
             }

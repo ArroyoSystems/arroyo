@@ -2,7 +2,7 @@
 mod test;
 
 use anyhow::{anyhow, bail};
-use arrow::array::{make_array, Array, ArrayData, ArrayRef, UInt64Array};
+use arrow::array::{Array, ArrayData, ArrayRef, UInt64Array, make_array};
 use arrow::datatypes::DataType;
 use arrow::ffi::from_ffi;
 use arroyo_udf_common::async_udf::{DrainResult, SendableFfiAsyncUdfHandle};
@@ -12,13 +12,13 @@ use datafusion::common::ScalarValue;
 use datafusion::error::Result as DFResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature};
 use dlopen2::wrapper::{Container, WrapperApi};
-use quote::{format_ident, ToTokens};
+use quote::{ToTokens, format_ident};
 use std::any::Any;
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use syn::{parse_file, Item};
+use syn::{Item, parse_file};
 
 pub use arroyo_udf_common::parse;
 use arroyo_udf_common::parse::ParsedUdf;

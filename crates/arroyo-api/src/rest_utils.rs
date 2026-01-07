@@ -1,12 +1,12 @@
-use crate::{cloud, AuthData};
+use crate::{AuthData, cloud};
 use arroyo_rpc::log_event;
+use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use axum_extra::headers::authorization::Bearer;
-use axum_extra::headers::Authorization;
 use axum_extra::TypedHeader;
+use axum_extra::headers::Authorization;
+use axum_extra::headers::authorization::Bearer;
 use tracing::{error, warn};
 
 use cornucopia_async::{DatabaseSource, DbError};
@@ -148,12 +148,13 @@ pub fn validate_pagination_params(
 ) -> Result<(Option<String>, u32), ErrorResp> {
     // return ErrorResp if limit is less than 1
     if let Some(limit) = limit
-        && limit < 1 {
-            return Err(ErrorResp {
-                status_code: StatusCode::BAD_REQUEST,
-                message: "Limit must be greater than 0".to_string(),
-            });
-        }
+        && limit < 1
+    {
+        return Err(ErrorResp {
+            status_code: StatusCode::BAD_REQUEST,
+            message: "Limit must be greater than 0".to_string(),
+        });
+    }
 
     // increase limit by 1 to determine if there are more results
     let limit = limit.unwrap_or(DEFAULT_ITEMS_PER_PAGE) + 1;

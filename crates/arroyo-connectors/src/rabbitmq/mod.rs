@@ -1,10 +1,10 @@
-use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
 use crate::ConnectionType;
+use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema};
-use arroyo_rpc::{api_types::connections::TestSourceMessage, ConnectorOptions, OperatorConfig};
+use arroyo_rpc::{ConnectorOptions, OperatorConfig, api_types::connections::TestSourceMessage};
 use rabbitmq_stream_client::types::OffsetSpecification;
 use rabbitmq_stream_client::{Environment, TlsConfiguration};
 use serde::{Deserialize, Serialize};

@@ -1,15 +1,15 @@
-use crate::redis::sink::GeneralConnection;
 use crate::redis::RedisClient;
+use crate::redis::sink::GeneralConnection;
 use arrow::array::{Array, ArrayRef, AsArray, RecordBatch};
 use arrow::datatypes::DataType;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_operator::connector::LookupConnector;
-use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::MetadataField;
+use arroyo_rpc::errors::DataflowError;
 use arroyo_types::LOOKUP_KEY_INDEX_FIELD;
 use async_trait::async_trait;
 use redis::aio::ConnectionLike;
-use redis::{cmd, Value};
+use redis::{Value, cmd};
 use std::collections::HashMap;
 
 pub struct RedisLookup {

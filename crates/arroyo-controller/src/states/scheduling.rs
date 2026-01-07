@@ -5,11 +5,11 @@ use std::{
 };
 
 use arroyo_rpc::grpc::rpc::{
-    worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment,
+    StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
 };
 use arroyo_types::{MachineId, WorkerId};
 use tokio::{select, sync::Mutex, task::JoinHandle};
-use tonic::{transport::Channel, Request};
+use tonic::{Request, transport::Channel};
 use tracing::{debug, error, info, warn};
 
 use anyhow::anyhow;
@@ -18,23 +18,23 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc_channel_builder;
 use arroyo_state::{
-    committing_state::CommittingState,
-    tables::{global_keyed_map::GlobalKeyedTable, ErasedTable},
     BackingStore, StateBackend,
+    committing_state::CommittingState,
+    tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
 };
 
 use crate::job_controller::job_metrics::JobMetrics;
+use crate::{JobMessage, schedulers::SchedulerError};
 use crate::{
-    job_controller::JobController, queries::controller_queries,
-    states::stop_if_desired_non_running, RunningMessage,
+    RunningMessage, job_controller::JobController, queries::controller_queries,
+    states::stop_if_desired_non_running,
 };
-use crate::{schedulers::SchedulerError, JobMessage};
 use crate::{
     schedulers::StartPipelineReq,
-    states::{fatal, StateError},
+    states::{StateError, fatal},
 };
 
-use super::{running::Running, JobContext, State, Transition};
+use super::{JobContext, State, Transition, running::Running};
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {

@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use arrow_schema::{DataType, Schema};
 use arroyo_rpc::{
+    TIMESTAMP_FIELD, UPDATING_META_FIELD,
     df::{ArroyoSchema, ArroyoSchemaRef},
-    updating_meta_field, TIMESTAMP_FIELD, UPDATING_META_FIELD,
+    updating_meta_field,
 };
-use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result, TableReference};
+use datafusion::common::{DFSchema, DFSchemaRef, Result, TableReference, internal_err, plan_err};
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion::physical_plan::DisplayAs;

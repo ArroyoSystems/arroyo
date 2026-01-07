@@ -3,8 +3,8 @@ use arrow::datatypes::{DataType, Field, TimeUnit};
 use regex::Regex;
 use std::sync::Arc;
 use std::time::Duration;
-use syn::PathArguments::AngleBracketed;
 use syn::__private::ToTokens;
+use syn::PathArguments::AngleBracketed;
 use syn::{FnArg, GenericArgument, ItemFn, LitInt, LitStr, ReturnType, Type};
 
 /// An Arrow DataType that also carries around its own nullability info
@@ -244,12 +244,13 @@ impl ParsedUdf {
     pub fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
         if let syn::Type::Path(syn::TypePath { path, .. }) = ty
             && let Some(segment) = path.segments.last()
-                && segment.ident == "Vec"
-                    && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-                        && args.args.len() == 1
-                            && let syn::GenericArgument::Type(inner_ty) = &args.args[0] {
-                                return Some(inner_ty.clone());
-                            }
+            && segment.ident == "Vec"
+            && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+            && args.args.len() == 1
+            && let syn::GenericArgument::Type(inner_ty) = &args.args[0]
+        {
+            return Some(inner_ty.clone());
+        }
         None
     }
 
@@ -303,33 +304,34 @@ impl ParsedUdf {
                 .attrs
                 .iter()
                 .find(|attr| attr.path().is_ident("udf"))
-                && attr.meta.require_path_only().is_err() {
-                    attr.parse_nested_meta(|meta| {
-                        if meta.path.is_ident("ordered") {
-                            t.ordered = true;
-                        } else if meta.path.is_ident("unordered") {
-                            t.ordered = false;
-                        } else if meta.path.is_ident("allowed_in_flight") {
-                            let value = meta.value()?;
-                            let s: LitInt = value.parse()?;
-                            let n: usize = s
-                                .base10_digits()
-                                .parse()
-                                .map_err(|_| meta.error("expected number"))?;
-                            t.max_concurrency = n;
-                        } else if meta.path.is_ident("timeout") {
-                            let value = meta.value()?;
-                            let s: LitStr = value.parse()?;
-                            t.timeout = parse_duration(&s.value()).map_err(|e| meta.error(e))?;
-                        } else {
-                            return Err(meta.error(format!(
-                                "unsupported attribute '{}'",
-                                meta.path.to_token_stream()
-                            )));
-                        }
-                        Ok(())
-                    })?;
-                }
+                && attr.meta.require_path_only().is_err()
+            {
+                attr.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("ordered") {
+                        t.ordered = true;
+                    } else if meta.path.is_ident("unordered") {
+                        t.ordered = false;
+                    } else if meta.path.is_ident("allowed_in_flight") {
+                        let value = meta.value()?;
+                        let s: LitInt = value.parse()?;
+                        let n: usize = s
+                            .base10_digits()
+                            .parse()
+                            .map_err(|_| meta.error("expected number"))?;
+                        t.max_concurrency = n;
+                    } else if meta.path.is_ident("timeout") {
+                        let value = meta.value()?;
+                        let s: LitStr = value.parse()?;
+                        t.timeout = parse_duration(&s.value()).map_err(|e| meta.error(e))?;
+                    } else {
+                        return Err(meta.error(format!(
+                            "unsupported attribute '{}'",
+                            meta.path.to_token_stream()
+                        )));
+                    }
+                    Ok(())
+                })?;
+            }
 
             UdfType::Async(t)
         } else {
@@ -356,7 +358,7 @@ pub fn inner_type(dt: &DataType) -> Option<DataType> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{parse_duration, rust_to_arrow, NullableType};
+    use crate::parse::{NullableType, parse_duration, rust_to_arrow};
     use arrow::datatypes::DataType;
     use std::time::Duration;
     use syn::parse_quote;

@@ -20,7 +20,7 @@
 use arrow::array::{array::*, builder::*};
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::DataType;
-use pyo3::{exceptions::PyTypeError, types::PyAnyMethods, IntoPy, PyObject, PyResult, Python};
+use pyo3::{IntoPy, PyObject, PyResult, Python, exceptions::PyTypeError, types::PyAnyMethods};
 use std::sync::Arc;
 
 macro_rules! get_pyobject {
@@ -141,7 +141,7 @@ impl Converter {
             other => {
                 return Err(PyTypeError::new_err(format!(
                     "Unimplemented datatype {other}"
-                )))
+                )));
             }
         })
     }

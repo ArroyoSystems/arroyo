@@ -222,13 +222,13 @@ fn retag_field(arr: &ArrayRef, schema_field: &Field) -> anyhow::Result<ArrayRef>
 
 #[cfg(test)]
 mod tests {
+    use super::{PARQUET_FIELD_ID_META_KEY, normalize_batch_to_schema};
     use super::{add_parquet_field_ids, update_field_ids_to_iceberg};
-    use super::{normalize_batch_to_schema, PARQUET_FIELD_ID_META_KEY};
     use arrow::array::{Int64Array, ListArray, RecordBatch, StringArray, StructArray};
     use arrow::datatypes::{DataType, Field, Fields, Int32Type, Schema, TimeUnit};
     use arrow::json::ReaderBuilder;
-    use iceberg::spec::TableMetadataBuilder;
     use iceberg::TableCreation;
+    use iceberg::spec::TableMetadataBuilder;
     use std::io::Cursor;
     use std::sync::Arc;
 

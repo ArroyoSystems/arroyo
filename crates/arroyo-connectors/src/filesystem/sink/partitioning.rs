@@ -157,8 +157,8 @@ mod tests {
     };
     use arrow::datatypes::{DataType, Field, Int32Type, Schema};
     use arroyo_rpc::df::ArroyoSchema;
-    use datafusion::logical_expr::{col, ColumnarValue};
-    use datafusion::prelude::{lit, Expr};
+    use datafusion::logical_expr::{ColumnarValue, col};
+    use datafusion::prelude::{Expr, lit};
     use std::sync::Arc;
 
     fn make_batch() -> RecordBatch {

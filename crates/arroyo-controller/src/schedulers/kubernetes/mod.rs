@@ -3,9 +3,9 @@ mod quantities;
 use crate::schedulers::kubernetes::quantities::QuantityParser;
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
-use arroyo_rpc::config::{config, KubernetesSchedulerConfig, ResourceMode};
+use arroyo_rpc::config::{KubernetesSchedulerConfig, ResourceMode, config};
 use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
-use arroyo_types::{WorkerId, JOB_ID_ENV, RUN_ID_ENV};
+use arroyo_types::{JOB_ID_ENV, RUN_ID_ENV, WorkerId};
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
@@ -269,9 +269,10 @@ impl Scheduler for KubernetesScheduler {
             .await?;
 
         if let Some(status) = result.right()
-            && status.is_failure() {
-                bail!("Failed to clean cluster: {:?}", status);
-            }
+            && status.is_failure()
+        {
+            bail!("Failed to clean cluster: {:?}", status);
+        }
 
         // wait for workers to stop
         for i in 0..20 {
@@ -320,8 +321,8 @@ mod test {
     use serde_json::json;
     use std::sync::Arc;
 
-    use crate::schedulers::kubernetes::KubernetesScheduler;
     use crate::schedulers::StartPipelineReq;
+    use crate::schedulers::kubernetes::KubernetesScheduler;
 
     #[test]
     fn test_resource_creation() {

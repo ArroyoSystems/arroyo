@@ -9,10 +9,10 @@ use object_store::buffered::BufWriter;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
-use object_store::{
-    aws::AmazonS3Builder, local::LocalFileSystem, MultipartId, ObjectStore, PutPayload, RetryConfig,
-};
 use object_store::{Error, ObjectMeta};
+use object_store::{
+    MultipartId, ObjectStore, PutPayload, RetryConfig, aws::AmazonS3Builder, local::LocalFileSystem,
+};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
@@ -950,7 +950,7 @@ mod tests {
     use object_store::path::Path;
     use std::time::SystemTime;
 
-    use crate::{matchers, BackendConfig, StorageProvider};
+    use crate::{BackendConfig, StorageProvider, matchers};
 
     #[test]
     fn test_regex_compilation() {

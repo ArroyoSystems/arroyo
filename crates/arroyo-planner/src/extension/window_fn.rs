@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use arroyo_datastream::logical::{LogicalEdgeType, LogicalNode, OperatorName};
-use arroyo_rpc::{df::ArroyoSchema, grpc::api::WindowFunctionOperator, TIMESTAMP_FIELD};
-use datafusion::common::{plan_err, Column, DFSchema, DFSchemaRef, Result};
+use arroyo_rpc::{TIMESTAMP_FIELD, df::ArroyoSchema, grpc::api::WindowFunctionOperator};
+use datafusion::common::{Column, DFSchema, DFSchemaRef, Result, plan_err};
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 

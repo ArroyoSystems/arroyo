@@ -5,12 +5,12 @@ use anyhow::bail;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
+use arroyo_rpc::ConnectorOptions;
+use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::ConnectorOptions;
-use arroyo_rpc::OperatorConfig;
 use async_nats::ServerAddr;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};

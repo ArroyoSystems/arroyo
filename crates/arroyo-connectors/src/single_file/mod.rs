@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use arroyo_formats::ser::ArrowSerializer;
 use typify::import_types;
 

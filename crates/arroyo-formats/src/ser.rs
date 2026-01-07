@@ -4,14 +4,14 @@ use crate::{avro, json};
 use arrow_array::cast::AsArray;
 use arrow_array::types::GenericBinaryType;
 use arrow_array::{Array, RecordBatch, StructArray};
-use arrow_json::writer::make_encoder;
 use arrow_json::EncoderOptions;
+use arrow_json::writer::make_encoder;
 use arrow_schema::{ArrowError, DataType, Field};
+use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::formats::{
     AvroFormat, DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat,
     TimestampFormat,
 };
-use arroyo_rpc::TIMESTAMP_FIELD;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -186,7 +186,10 @@ impl ArrowSerializer {
         });
 
         if *batch.schema().field(value_idx).data_type() != DataType::Utf8 {
-            panic!("invalid schema for raw_string serializer: {}; a must have a column VALUE of type TEXT", batch.schema());
+            panic!(
+                "invalid schema for raw_string serializer: {}; a must have a column VALUE of type TEXT",
+                batch.schema()
+            );
         }
 
         let values: Vec<Vec<u8>> = batch
@@ -208,7 +211,10 @@ impl ArrowSerializer {
         });
 
         if *batch.schema().field(value_idx).data_type() != DataType::Binary {
-            panic!("invalid schema for raw_string serializer: {}; a must have a column VALUE of type BYTEA", batch.schema());
+            panic!(
+                "invalid schema for raw_string serializer: {}; a must have a column VALUE of type BYTEA",
+                batch.schema()
+            );
         }
 
         let values: Vec<Vec<u8>> = batch

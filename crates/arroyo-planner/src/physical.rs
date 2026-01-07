@@ -3,17 +3,17 @@ use arrow::{
     buffer::NullBuffer,
     compute::{concat, take},
 };
-use arrow_array::{array, Array, PrimitiveArray, RecordBatch, StringArray, StructArray};
+use arrow_array::{Array, PrimitiveArray, RecordBatch, StringArray, StructArray, array};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use datafusion::common::{
-    not_impl_err, plan_err, DataFusionError, Result, ScalarValue, Statistics, UnnestOptions,
+    DataFusionError, Result, ScalarValue, Statistics, UnnestOptions, not_impl_err, plan_err,
 };
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream};
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
-        memory::MemoryStream, stream::RecordBatchStreamAdapter, DisplayAs, ExecutionPlan,
-        Partitioning,
+        DisplayAs, ExecutionPlan, Partitioning, memory::MemoryStream,
+        stream::RecordBatchStreamAdapter,
     },
 };
 use std::collections::HashMap;
@@ -32,11 +32,12 @@ use crate::{make_udf_function, register_functions};
 use arrow_array::types::{TimestampNanosecondType, UInt64Type};
 use arroyo_operator::operator::Registry;
 use arroyo_rpc::grpc::api::{
-    arroyo_exec_node, ArroyoExecNode, DebeziumEncodeNode, MemExecNode, UnnestExecNode,
+    ArroyoExecNode, DebeziumEncodeNode, MemExecNode, UnnestExecNode, arroyo_exec_node,
 };
 use arroyo_rpc::{
-    grpc::api::{arroyo_exec_node::Node, DebeziumDecodeNode},
-    updating_meta_field, updating_meta_fields, TIMESTAMP_FIELD, UPDATING_META_FIELD,
+    TIMESTAMP_FIELD, UPDATING_META_FIELD,
+    grpc::api::{DebeziumDecodeNode, arroyo_exec_node::Node},
+    updating_meta_field, updating_meta_fields,
 };
 use datafusion::catalog::memory::MemorySourceConfig;
 use datafusion::datasource::memory::DataSourceExec;
@@ -44,9 +45,9 @@ use datafusion::logical_expr::{
     ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
 use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::PlanProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::unnest::{ListUnnest, UnnestExec};
-use datafusion::physical_plan::PlanProperties;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use futures::{
     ready,
@@ -702,7 +703,9 @@ impl ExecutionPlan for ArroyoMemExec {
         _partition: usize,
         _context: Arc<datafusion::execution::TaskContext>,
     ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
-        plan_err!("EmptyPartitionStream cannot be executed, this is only used for physical planning before serialization")
+        plan_err!(
+            "EmptyPartitionStream cannot be executed, this is only used for physical planning before serialization"
+        )
     }
 
     fn statistics(&self) -> Result<datafusion::common::Statistics> {

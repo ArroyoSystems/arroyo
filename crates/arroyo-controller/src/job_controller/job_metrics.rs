@@ -279,7 +279,7 @@ impl<T: Copy, const N: usize> CircularBuffer<T, N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::job_controller::job_metrics::{RateMetric, COLLECTION_RATE, NUM_BUCKETS};
+    use crate::job_controller::job_metrics::{COLLECTION_RATE, NUM_BUCKETS, RateMetric};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]

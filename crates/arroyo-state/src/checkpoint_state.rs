@@ -1,12 +1,12 @@
 use crate::{
+    BackingStore, StateBackend,
     committing_state::CommittingState,
     tables::{
-        expiring_time_key_map::ExpiringTimeKeyTable, global_keyed_map::GlobalKeyedTable,
-        ErasedTable,
+        ErasedTable, expiring_time_key_map::ExpiringTimeKeyTable,
+        global_keyed_map::GlobalKeyedTable,
     },
-    BackingStore, StateBackend,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::{
     self,
@@ -18,7 +18,7 @@ use arroyo_rpc::grpc::{
         TableSubtaskCheckpointMetadata, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
     },
 };
-use arroyo_rpc::{get_event_spans, log_trace_event, TaskEventSpans};
+use arroyo_rpc::{TaskEventSpans, get_event_spans, log_trace_event};
 use arroyo_types::{from_micros, to_micros};
 use std::sync::Arc;
 use std::time::Duration;

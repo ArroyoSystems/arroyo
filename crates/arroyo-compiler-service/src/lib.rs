@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail};
-use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::Engine;
+use base64::prelude::BASE64_STANDARD_NO_PAD;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
@@ -10,8 +10,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use arroyo_rpc::grpc::rpc::{
-    compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
     BuildUdfReq, BuildUdfResp, GetUdfPathReq, GetUdfPathResp, UdfCrate,
+    compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
 };
 use arroyo_rpc::var_str::VarStr;
 
@@ -22,7 +22,7 @@ use dlopen2::utils::PLATFORM_FILE_EXTENSION;
 use serde_json::Value;
 use tokio::time::timeout;
 use tokio::{process::Command, sync::Mutex};
-use toml::{toml, Table};
+use toml::{Table, toml};
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
@@ -137,8 +137,10 @@ impl CompileService {
             install it. To compile UDFs, either manually install rustc or re-run the cluster with\
             `compiler.install-rustc = true`"
             );
-            bail!("Rustc is not installed and compiler service is not configured to automatically install it; \
-            cannot compile UDFs");
+            bail!(
+                "Rustc is not installed and compiler service is not configured to automatically install it; \
+            cannot compile UDFs"
+            );
         }
 
         info!("Rustc is not installed, but is required to compile UDFs. Attempting to install.");
@@ -171,7 +173,9 @@ impl CompileService {
             \nInstall script stderr: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            bail!("UDFs are unavailable because Rust compiler is not installed and was not able to be installed. See controller logs for details.")
+            bail!(
+                "UDFs are unavailable because Rust compiler is not installed and was not able to be installed. See controller logs for details."
+            )
         }
     }
 

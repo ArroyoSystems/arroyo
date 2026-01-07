@@ -1,5 +1,5 @@
 use arrow::array::cast::as_list_array;
-use arrow::array::{new_empty_array, Array, ArrayRef, ListArray};
+use arrow::array::{Array, ArrayRef, ListArray, new_empty_array};
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, FieldRef, IntervalUnit, TimeUnit};
 use arroyo_udf_host::SyncUdfDylib;

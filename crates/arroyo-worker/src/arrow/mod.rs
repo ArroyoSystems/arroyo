@@ -17,14 +17,14 @@ use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::{FunctionRegistry, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
 use datafusion::physical_expr::{LexOrdering, PhysicalExpr};
-use datafusion::physical_plan::{displayable, ExecutionPlan};
+use datafusion::physical_plan::{ExecutionPlan, displayable};
 use datafusion_proto::physical_plan::from_proto::{parse_physical_expr, parse_physical_sort_expr};
 use datafusion_proto::physical_plan::{
     AsExecutionPlan, DefaultPhysicalExtensionCodec, PhysicalExtensionCodec,
 };
 use datafusion_proto::protobuf::physical_aggregate_expr_node::AggregateFunction;
 use datafusion_proto::protobuf::physical_expr_node::ExprType;
-use datafusion_proto::protobuf::{proto_error, PhysicalExprNode, PhysicalPlanNode};
+use datafusion_proto::protobuf::{PhysicalExprNode, PhysicalPlanNode, proto_error};
 use futures::StreamExt;
 use itertools::Itertools;
 use prost::Message as ProstMessage;
@@ -176,7 +176,6 @@ impl ArrowOperator for ProjectionOperator {
             .await
     }
 }
-
 
 pub struct KeyExecutionOperator {
     name: String,

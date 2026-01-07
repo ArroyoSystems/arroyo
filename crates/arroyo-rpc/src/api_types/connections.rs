@@ -1,6 +1,6 @@
+use crate::MetadataField;
 use crate::df::{ArroyoSchema, ArroyoSchemaRef};
 use crate::formats::{BadData, Format, Framing};
-use crate::MetadataField;
 use ahash::HashSet;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
@@ -474,7 +474,9 @@ impl ConnectionSchema {
                     || non_metadata_fields.first().unwrap().field_type != FieldType::String
                     || non_metadata_fields.first().unwrap().name != "value"
                 {
-                    bail!("raw_string format requires a schema with a single field called `value` of type TEXT");
+                    bail!(
+                        "raw_string format requires a schema with a single field called `value` of type TEXT"
+                    );
                 }
             }
             Some(Format::Json(json_format)) => {
@@ -483,7 +485,9 @@ impl ConnectionSchema {
                         || non_metadata_fields.first().unwrap().field_type != FieldType::Json
                         || non_metadata_fields.first().unwrap().name != "value")
                 {
-                    bail!("json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON");
+                    bail!(
+                        "json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON"
+                    );
                 }
             }
             _ => {
@@ -610,7 +614,7 @@ pub struct ConfluentSchemaQueryParams {
 mod tests {
     use super::*;
     use arrow_schema::{DataType, Field as ArrowField, TimeUnit};
-    use serde_json::{json, Value as J};
+    use serde_json::{Value as J, json};
     use std::sync::Arc;
 
     fn af(name: &str, dt: DataType, nullable: bool) -> ArrowField {

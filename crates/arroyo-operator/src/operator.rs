@@ -1,6 +1,6 @@
 use crate::context::{
-    send_checkpoint_event, ArrowCollector, BatchReceiver, BatchSender, Collector, OperatorContext,
-    SourceCollector, SourceContext,
+    ArrowCollector, BatchReceiver, BatchSender, Collector, OperatorContext, SourceCollector,
+    SourceContext, send_checkpoint_event,
 };
 use crate::inq_reader::InQReader;
 use crate::udfs::{ArroyoUdaf, UdafArg};
@@ -29,9 +29,9 @@ use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::logical_expr::{
-    create_udaf, AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
+    AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF, create_udaf,
 };
-use datafusion::physical_plan::{displayable, ExecutionPlan};
+use datafusion::physical_plan::{ExecutionPlan, displayable};
 use dlopen2::wrapper::Container;
 use futures::future::OptionFuture;
 use futures::stream::FuturesUnordered;
@@ -48,10 +48,10 @@ use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Barrier;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, trace, warn, Instrument};
+use tracing::{Instrument, debug, error, info, trace, warn};
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;
@@ -736,8 +736,7 @@ impl ChainedOperator {
     ) -> DataflowResult<()> {
         trace!(
             "handling watermark {:?} for {}",
-            watermark,
-            self.context.task_info,
+            watermark, self.context.task_info,
         );
 
         let watermark = self

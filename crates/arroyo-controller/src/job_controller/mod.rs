@@ -8,31 +8,31 @@ use std::{
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_rpc::grpc::rpc::{
-    worker_grpc_client::WorkerGrpcClient, CheckpointReq, CommitReq, JobFinishedReq, LabelPair,
-    LoadCompactedDataReq, MetricsReq, StopExecutionReq, StopMode, TaskCheckpointEventType,
+    CheckpointReq, CommitReq, JobFinishedReq, LabelPair, LoadCompactedDataReq, MetricsReq,
+    StopExecutionReq, StopMode, TaskCheckpointEventType, worker_grpc_client::WorkerGrpcClient,
 };
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{to_micros, WorkerId};
+use arroyo_types::{WorkerId, to_micros};
 use cornucopia_async::DatabaseSource;
-use rand::{rng, Rng};
+use rand::{Rng, rng};
 
 use time::OffsetDateTime;
 
-use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
+use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
 use crate::types::public::CheckpointState as DbCheckpointState;
-use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage, TaskFailedEvent};
+use crate::{JobConfig, JobMessage, RunningMessage, TaskFailedEvent, queries::controller_queries};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
 use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::config::config;
 use arroyo_rpc::notify_db;
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::committing_state::CommittingState;
 use arroyo_state::parquet::ParquetBackend;
 use futures::future::try_join_all;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
-use tonic::{transport::Channel, Request};
+use tonic::{Request, transport::Channel};
 use tracing::{debug, error, info, warn};
 
 pub mod job_metrics;
@@ -256,9 +256,9 @@ impl RunningJobModel {
                                 .checkpoint_spans
                                 .iter_mut()
                                 .find(|e| e.event == JobCheckpointEventType::CheckpointingOperators)
-                            {
-                                e.finish()
-                            }
+                        {
+                            e.finish()
+                        }
 
                         self.update_db(db).await?;
                     }
@@ -543,7 +543,9 @@ impl RunningJobModel {
     }
 
     pub fn cleanup_needed(&self) -> Option<u32> {
-        if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP && self.epoch.is_multiple_of(COMPACT_EVERY) {
+        if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP
+            && self.epoch.is_multiple_of(COMPACT_EVERY)
+        {
             Some(self.epoch - CHECKPOINTS_TO_KEEP)
         } else {
             None
@@ -831,9 +833,11 @@ impl JobController {
         }
 
         if let Some(new_epoch) = self.model.cleanup_needed()
-            && self.cleanup_task.is_none() && self.model.checkpoint_state.is_none() {
-                self.cleanup_task = Some(self.start_cleanup(new_epoch));
-            }
+            && self.cleanup_task.is_none()
+            && self.model.checkpoint_state.is_none()
+        {
+            self.cleanup_task = Some(self.start_cleanup(new_epoch));
+        }
 
         // check on checkpointing
         if self.model.checkpoint_state.is_some() {

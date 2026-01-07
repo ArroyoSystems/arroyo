@@ -1,7 +1,7 @@
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use crate::mqtt::MqttConfig;
@@ -10,9 +10,9 @@ use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::Format;
-use rumqttc::mqttbytes::QoS;
 use rumqttc::AsyncClient;
 use rumqttc::ConnectionError;
+use rumqttc::mqttbytes::QoS;
 
 #[cfg(test)]
 mod test;

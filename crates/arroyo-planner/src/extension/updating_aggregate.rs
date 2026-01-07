@@ -5,10 +5,10 @@ use crate::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::config::config;
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator};
-use datafusion::common::{plan_err, DFSchemaRef, Result, TableReference, ToDFSchema};
+use datafusion::common::{DFSchemaRef, Result, TableReference, ToDFSchema, plan_err};
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    col, lit, Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore,
+    Expr, Extension, LogicalPlan, UserDefinedLogicalNodeCore, col, lit,
 };
 use datafusion::prelude::named_struct;
 use datafusion::scalar::ScalarValue;

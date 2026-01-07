@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use regex::Regex;
 use std::ops::Mul;

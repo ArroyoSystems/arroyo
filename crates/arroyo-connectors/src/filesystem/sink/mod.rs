@@ -1,6 +1,6 @@
 use ::arrow::record_batch::RecordBatch;
 use ::arrow::row::OwnedRow;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event};
 use arroyo_storage::StorageProvider;
@@ -9,9 +9,9 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use deltalake::DeltaTable;
-use futures::{stream::FuturesUnordered, Future};
-use futures::{stream::StreamExt, TryStreamExt};
-use object_store::{multipart::PartId, path::Path, MultipartId};
+use futures::{Future, stream::FuturesUnordered};
+use futures::{TryStreamExt, stream::StreamExt};
+use object_store::{MultipartId, multipart::PartId, path::Path};
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
@@ -38,7 +38,7 @@ mod two_phase_committer;
 use self::{
     json::{JsonLocalWriter, JsonWriter},
     local::LocalFileSystemWriter,
-    parquet::{representitive_timestamp, ParquetBatchBufferingWriter, ParquetLocalWriter},
+    parquet::{ParquetBatchBufferingWriter, ParquetLocalWriter, representitive_timestamp},
 };
 
 use self::iceberg::metadata::IcebergFileMetadata;
@@ -46,7 +46,7 @@ use crate::filesystem::config::NamingConfig;
 use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::IcebergTable;
 use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
-use crate::filesystem::{config, FilenameStrategy, TableFormat};
+use crate::filesystem::{FilenameStrategy, TableFormat, config};
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
 
 const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
@@ -336,7 +336,10 @@ impl std::fmt::Debug for FileCheckpointData {
                 completed_parts,
                 ..
             } => {
-                write!(f, "MultiPartWriterUploadCompleted {{ multi_part_upload_id: {multi_part_upload_id}, completed_parts: [")?;
+                write!(
+                    f,
+                    "MultiPartWriterUploadCompleted {{ multi_part_upload_id: {multi_part_upload_id}, completed_parts: ["
+                )?;
                 for part in completed_parts {
                     write!(f, "{} bytes, ", part.len())?;
                 }
@@ -866,9 +869,10 @@ where
         );
 
         if let Some(partition) = partition
-            && let Some(hive) = self.partitioner.hive_path(partition) {
-                filename = format!("{hive}/{filename}");
-            }
+            && let Some(hive) = self.partitioner.hive_path(partition)
+        {
+            filename = format!("{hive}/{filename}");
+        }
 
         BatchMultipartWriter::new(
             self.object_store.clone(),
@@ -1606,10 +1610,11 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
                 }
             });
 
-            if let Some(part_size) = existing_part_size && self
-                .multipart_manager
-                .storage_provider
-                .requires_same_part_sizes()
+            if let Some(part_size) = existing_part_size
+                && self
+                    .multipart_manager
+                    .storage_provider
+                    .requires_same_part_sizes()
                 && bytes.len() > existing_part_size.unwrap()
             {
                 // our last part is bigger than our part size, which isn't allowed by some object stores
@@ -1618,8 +1623,12 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
                 let parts = split_into_parts(bytes, part_size);
 
-                debug!("final multipart upload ({}) is bigger than part size ({}) so splitting into {}",
-                    len, part_size, parts.len());
+                debug!(
+                    "final multipart upload ({}) is bigger than part size ({}) so splitting into {}",
+                    len,
+                    part_size,
+                    parts.len()
+                );
 
                 parts
                     .into_iter()
@@ -1829,7 +1838,7 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                             delta_version,
                         },
                         pre_commit_messages,
-                    ))
+                    ));
                 }
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
                     filename,

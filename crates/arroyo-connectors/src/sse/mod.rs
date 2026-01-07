@@ -3,7 +3,7 @@ mod operator;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::{var_str::VarStr, ConnectorOptions, OperatorConfig};
+use arroyo_rpc::{ConnectorOptions, OperatorConfig, var_str::VarStr};
 use arroyo_types::string_to_map;
 use eventsource_client::Client;
 use futures::StreamExt;
@@ -17,8 +17,8 @@ use arroyo_rpc::api_types::connections::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::sse::operator::SSESourceFunc;
 use crate::EmptyConfig;
+use crate::sse::operator::SSESourceFunc;
 
 use arroyo_operator::connector::Connector;
 

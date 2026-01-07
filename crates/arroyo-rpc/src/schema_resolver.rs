@@ -1,14 +1,14 @@
 use crate::var_str::VarStr;
 use ahash::{HashSet, HashSetExt};
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use apache_avro::Schema;
 use async_trait::async_trait;
 use base64::prelude::BASE64_STANDARD;
 use base64::write::EncoderWriter;
+use futures::StreamExt;
 use futures::future;
 use futures::stream::FuturesUnordered;
-use futures::StreamExt;
-use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Client, StatusCode, Url};
 use serde::de::DeserializeOwned;

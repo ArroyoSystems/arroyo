@@ -4,20 +4,20 @@ use arrow::datatypes::Schema;
 use arroyo_storage::{BackendConfig, R2Config, S3Config, StorageProvider};
 use arroyo_types::to_millis;
 use delta_kernel::engine::arrow_conversion::TryFromArrow;
-use deltalake::aws::storage::S3StorageBackend;
 use deltalake::TableProperty::{MinReaderVersion, MinWriterVersion};
+use deltalake::aws::storage::S3StorageBackend;
 use deltalake::{
+    DeltaTable, DeltaTableBuilder, StructType,
     kernel::{Action, Add},
     operations::create::CreateBuilder,
     protocol::SaveMode,
     table::PeekCommit,
-    DeltaTable, DeltaTableBuilder, StructType,
 };
 
 use deltalake::kernel::transaction::CommitBuilder;
 use itertools::Itertools;
-use object_store::path::Path;
 use object_store::ObjectStore;
+use object_store::path::Path;
 use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
@@ -142,9 +142,10 @@ async fn check_existing_files(
     {
         for action in actions {
             if let Action::Add(add) = action
-                && files.contains(&add.path) {
-                    return Ok(Some(version));
-                }
+                && files.contains(&add.path)
+            {
+                return Ok(Some(version));
+            }
         }
         version_to_check = version;
     }
