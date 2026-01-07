@@ -108,6 +108,19 @@ impl State for Running {
                                 Finishing {}
                             ))
                         },
+                        Ok(ControllerProgress::TaskFailed(event)) => {
+                            log_event!("task_error", {
+                                "service": "controller",
+                                "job_id": ctx.config.id,
+                                "operator_id": event.operator_id,
+                                "subtask_index": event.subtask_index,
+                                "error": event.reason,
+                                "domain": event.error_domain.as_str(),
+                                "is_preview": ctx.config.ttl.is_some(),
+                            });
+
+                            return Err(ctx.handle_task_error(self, event).await);
+                        }
                         Err(err) => {
                             error!(message = "error while running", error = format!("{:?}", err), job_id = *ctx.config.id);
                             log_event!("running_error", {

@@ -545,7 +545,7 @@ export function CreatePipeline() {
   } else if (udfValidationApiError) {
     errorMessage = formatError(udfValidationApiError);
   } else if (job?.state == 'Failed') {
-    errorMessage = job.failure_message ?? 'Job failed.';
+    errorMessage = job.failure_reason?.error ?? 'Job failed.';
   } else if (previewError) {
     errorMessage = (
       <Code backgroundColor={'transparent'}>
@@ -571,7 +571,7 @@ export function CreatePipeline() {
   }
 
   let previewCompletedComponent = <></>;
-  if (job?.finish_time && !job?.failure_message) {
+  if (job?.finish_time && !job?.failure_reason) {
     previewCompletedComponent = (
       <Alert status="success" h={8}>
         <AlertIcon boxSize={4} />

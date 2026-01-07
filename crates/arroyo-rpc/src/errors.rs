@@ -1,8 +1,11 @@
+use crate::grpc::rpc;
 use arrow_schema::ArrowError;
 use datafusion::error::DataFusionError;
 use datafusion::parquet::errors::ParquetError;
-use std::time::Duration;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
+use utoipa::ToSchema;
 
 /// Creates a `DataflowError::ConnectorError` with format string support.
 ///
@@ -20,7 +23,7 @@ macro_rules! connector_err {
     // Domain + retry hint + source error
     ($domain:ident, $retry:ident, source: $source:expr, $($arg:tt)+) => {
         $crate::errors::DataflowError::ConnectorError {
-            domain: $crate::errors::ConnectorErrorDomain::$domain,
+            domain: $crate::errors::ErrorDomain::$domain,
             retry: $crate::errors::RetryHint::$retry,
             error: format!($($arg)+),
             source: Some($source),
@@ -29,7 +32,7 @@ macro_rules! connector_err {
 
     ($domain:ident, $retry:ident, $($arg:tt)+) => {
         $crate::errors::DataflowError::ConnectorError {
-            domain: $crate::errors::ConnectorErrorDomain::$domain,
+            domain: $crate::errors::ErrorDomain::$domain,
             retry: $crate::errors::RetryHint::$retry,
             error: format!($($arg)+),
             source: None,
@@ -40,9 +43,9 @@ macro_rules! connector_err {
 #[derive(Error, Debug)]
 #[must_use]
 pub enum DataflowError {
-    #[error("Arrow error: {:0?}", .0)]
+    #[error("Arrow error: {}", .0)]
     ArrowError(#[from] ArrowError),
-    #[error("SQL processing error: {:0?}", .0)]
+    #[error("SQL error: {}", .0.message())]
     DataFusionError(#[from] DataFusionError),
     #[error("operator error: {error} {message}")]
     InternalOperatorError {
@@ -59,7 +62,7 @@ pub enum DataflowError {
     DataError { details: String, count: usize },
     #[error("error in connector: {error}")]
     ConnectorError {
-        domain: ConnectorErrorDomain,
+        domain: ErrorDomain,
         retry: RetryHint,
         error: String,
         source: Option<anyhow::Error>,
@@ -68,20 +71,189 @@ pub enum DataflowError {
     // be removed in later stages of the migration
     #[error("unknown error: {0}")]
     UnknownError(#[from] anyhow::Error),
+    #[error("{error} in {operator_id}")]
+    WithOperator {
+        error: Box<DataflowError>,
+        operator_id: String,
+    },
 }
 
-#[derive(Debug)]
-pub enum ConnectorErrorDomain {
+impl DataflowError {
+    pub fn with_operator(self, operator_id: String) -> Self {
+        match self {
+            DataflowError::WithOperator { error, .. } => {
+                DataflowError::WithOperator { error, operator_id }
+            }
+            e => DataflowError::WithOperator {
+                error: Box::new(e),
+                operator_id,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorDomain {
     User,
     External,
+    #[default]
     Internal,
 }
 
-#[derive(Debug)]
+impl ErrorDomain {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::External => "external",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+impl FromStr for ErrorDomain {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "user" => Self::User,
+            "external" => Self::External,
+            "internal" => Self::Internal,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl From<ErrorDomain> for rpc::ErrorDomain {
+    fn from(value: ErrorDomain) -> Self {
+        match value {
+            ErrorDomain::User => Self::User,
+            ErrorDomain::External => Self::External,
+            ErrorDomain::Internal => Self::Internal,
+        }
+    }
+}
+
+impl From<rpc::ErrorDomain> for ErrorDomain {
+    fn from(value: rpc::ErrorDomain) -> Self {
+        match value {
+            rpc::ErrorDomain::User => Self::User,
+            rpc::ErrorDomain::External => Self::External,
+            rpc::ErrorDomain::Internal => Self::Internal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RetryHint {
     NoRetry,
     WithBackoff,
-    After(Duration),
+}
+
+impl From<RetryHint> for rpc::RetryHint {
+    fn from(value: RetryHint) -> Self {
+        match value {
+            RetryHint::NoRetry => rpc::RetryHint::NoRetry,
+            RetryHint::WithBackoff => rpc::RetryHint::WithBackoff,
+        }
+    }
+}
+
+impl From<rpc::RetryHint> for RetryHint {
+    fn from(value: rpc::RetryHint) -> Self {
+        match value {
+            rpc::RetryHint::NoRetry => RetryHint::NoRetry,
+            rpc::RetryHint::WithBackoff => RetryHint::WithBackoff,
+        }
+    }
+}
+
+impl RetryHint {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RetryHint::NoRetry => "no_retry",
+            RetryHint::WithBackoff => "with_backoff",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskError {
+    pub message: String,
+    pub domain: ErrorDomain,
+    pub retry_hint: RetryHint,
+    pub operator_id: Option<String>,
+    pub details: Option<String>,
+}
+
+fn classify_datafusion_error(err: &DataFusionError) -> (ErrorDomain, RetryHint) {
+    match err {
+        DataFusionError::SQL(_, _)
+        | DataFusionError::Plan(_)
+        | DataFusionError::Configuration(_)
+        | DataFusionError::SchemaError(_, _)
+        | DataFusionError::Execution(_)
+        | DataFusionError::ArrowError(_, _) => (ErrorDomain::User, RetryHint::NoRetry),
+
+        DataFusionError::IoError(_)
+        | DataFusionError::ObjectStore(_)
+        | DataFusionError::ResourcesExhausted(_)
+        | DataFusionError::External(_)
+        | DataFusionError::ParquetError(_) => (ErrorDomain::External, RetryHint::WithBackoff),
+
+        DataFusionError::Context(_, inner) | DataFusionError::Diagnostic(_, inner) => {
+            classify_datafusion_error(inner)
+        }
+
+        // Internal or unknown: default
+        _ => (ErrorDomain::Internal, RetryHint::WithBackoff),
+    }
+}
+
+impl From<DataflowError> for TaskError {
+    fn from(value: DataflowError) -> Self {
+        let message = value.to_string();
+        let (domain, retry_hint, details) = match value {
+            DataflowError::ConnectorError {
+                domain,
+                retry,
+                source,
+                ..
+            } => (domain, retry, source.as_ref().map(|s| format!("{s:?}"))),
+            DataflowError::ArrowError(_) => (ErrorDomain::Internal, RetryHint::NoRetry, None),
+            DataflowError::DataFusionError(df_err) => {
+                let (domain, retry) = classify_datafusion_error(&df_err);
+                (domain, retry, None)
+            }
+            DataflowError::InternalOperatorError { .. } => {
+                (ErrorDomain::Internal, RetryHint::NoRetry, None)
+            }
+            DataflowError::StateError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
+            DataflowError::ArgumentError(_) => (ErrorDomain::User, RetryHint::NoRetry, None),
+            DataflowError::ExternalError(_) => {
+                (ErrorDomain::External, RetryHint::WithBackoff, None)
+            }
+            DataflowError::DataError { details, count } => (
+                ErrorDomain::External,
+                RetryHint::WithBackoff,
+                Some(format!("count: {count}, details: {details}")),
+            ),
+            DataflowError::UnknownError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
+            DataflowError::WithOperator { error, operator_id } => {
+                let mut inner: TaskError = (*error).into();
+                inner.operator_id = Some(operator_id);
+                return inner;
+            }
+        };
+
+        Self {
+            message,
+            domain,
+            retry_hint,
+            operator_id: None,
+            details,
+        }
+    }
 }
 
 pub type DataflowResult<T> = Result<T, DataflowError>;

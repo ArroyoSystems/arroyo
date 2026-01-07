@@ -599,9 +599,8 @@ impl State for Scheduling {
                         }) => {
                             started_tasks.insert((node_id, operator_subtask));
                         }
-                        Some(JobMessage::RunningMessage(RunningMessage::TaskFailed {worker_id, node_id, subtask_index, reason})) => {
-                            return Err(ctx.retryable(self, "task failed on startup",
-                                anyhow!("task failed on job startup on {:?}: {}:{}: {}", worker_id, node_id, subtask_index, reason), 10));
+                        Some(JobMessage::RunningMessage(RunningMessage::TaskFailed(event))) => {
+                            return Err(ctx.handle_task_error(self, event).await);
                         }
                         Some(JobMessage::ConfigUpdate(c)) => {
                             stop_if_desired_non_running!(self, &c);

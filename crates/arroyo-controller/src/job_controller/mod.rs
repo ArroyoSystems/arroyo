@@ -20,7 +20,7 @@ use time::OffsetDateTime;
 
 use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
 use crate::types::public::CheckpointState as DbCheckpointState;
-use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
+use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage, TaskFailedEvent};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
 use arroyo_rpc::api_types::metrics::MetricName;
@@ -79,7 +79,7 @@ impl WorkerStatus {
 pub enum TaskState {
     Running,
     Finished,
-    Failed(String),
+    Failed(TaskFailedEvent),
 }
 
 #[derive(Debug)]
@@ -288,22 +288,17 @@ impl RunningJobModel {
                     );
                 }
             }
-            RunningMessage::TaskFailed {
-                node_id,
-                subtask_index,
-                reason,
-                ..
-            } => {
-                let key = (node_id, subtask_index);
+            RunningMessage::TaskFailed(event) => {
+                let key = (event.node_id, event.subtask_index);
                 if let Some(status) = self.tasks.get_mut(&key) {
-                    status.state = TaskState::Failed(reason);
+                    status.state = TaskState::Failed(event);
                 } else {
                     warn!(
                         message = "Received task failed message for unknown task",
                         job_id = *self.job_id,
-                        operator_id = key.0,
-                        subtask_index,
-                        reason,
+                        node_id = key.0,
+                        subtask_idx = key.1,
+                        reason = event.reason,
                     );
                 }
             }
@@ -556,7 +551,7 @@ impl RunningJobModel {
         }
     }
 
-    pub fn failed(&self) -> bool {
+    pub fn worker_timedout(&self) -> bool {
         for (worker, status) in &self.workers {
             if status.heartbeat_timeout() {
                 error!(
@@ -568,20 +563,17 @@ impl RunningJobModel {
             }
         }
 
-        for ((operator_id, subtask), status) in &self.tasks {
+        false
+    }
+
+    pub fn task_failed(&self) -> Option<TaskFailedEvent> {
+        for status in self.tasks.values() {
             if let TaskState::Failed(reason) = &status.state {
-                error!(
-                    message = "task failed",
-                    job_id = *self.job_id,
-                    operator_id,
-                    subtask,
-                    reason,
-                );
-                return true;
+                return Some(reason.clone());
             }
         }
 
-        false
+        None
     }
 
     pub fn any_finished_sources(&self) -> bool {
@@ -628,6 +620,7 @@ impl std::fmt::Debug for JobController {
 pub enum ControllerProgress {
     Continue,
     Finishing,
+    TaskFailed(TaskFailedEvent),
 }
 
 impl JobController {
@@ -788,8 +781,13 @@ impl JobController {
 
     pub async fn progress(&mut self) -> anyhow::Result<ControllerProgress> {
         // have any of our workers failed?
-        if self.model.failed() {
+        if self.model.worker_timedout() {
             bail!("worker failed");
+        }
+
+        // have any tasks failed?
+        if let Some(event) = self.model.task_failed() {
+            return Ok(ControllerProgress::TaskFailed(event));
         }
 
         // have any of our tasks finished?

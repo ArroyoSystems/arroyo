@@ -148,7 +148,7 @@ impl OperatorNode {
         in_qs: &mut [BatchReceiver],
         ready: Arc<Barrier>,
         mut collector: ArrowCollector,
-    ) {
+    ) -> DataflowResult<()> {
         match self {
             OperatorNode::Source(mut s) => {
                 let mut source_context =
@@ -161,7 +161,7 @@ impl OperatorNode {
                     &source_context.task_info,
                 );
 
-                s.operator.on_start(&mut source_context).await.unwrap();
+                s.operator.on_start(&mut source_context).await?;
 
                 ready.wait().await;
                 info!(
@@ -179,17 +179,11 @@ impl OperatorNode {
                     .await
                     .unwrap();
 
-                let result = s
-                    .operator
-                    .run(&mut source_context, &mut collector)
-                    .await
-                    // TODO: propogate this properly
-                    .unwrap();
+                let result = s.operator.run(&mut source_context, &mut collector).await?;
 
                 s.operator
                     .on_close(&mut source_context, &mut collector)
-                    .await
-                    .unwrap();
+                    .await?;
 
                 if let Some(final_message) = result.into() {
                     collector.broadcast(final_message).await;
@@ -204,12 +198,14 @@ impl OperatorNode {
                     &mut collector,
                     ready,
                 )
-                .await;
+                .await?;
                 if let Some(final_message) = result {
                     collector.broadcast(final_message).await;
                 }
             }
         }
+
+        Ok(())
     }
 
     fn node_id(&self) -> u32 {
@@ -251,28 +247,50 @@ impl OperatorNode {
 
         let collector = ArrowCollector::new(chain_info.clone(), out_schema, out_qs);
 
-        self.run_behavior(
-            &chain_info,
-            control_tx.clone(),
-            control_rx,
-            &mut in_qs,
-            ready,
-            collector,
-        )
-        .await;
-
-        info!(
-            "Task finished {}-{} ({})",
-            chain_info.node_id, chain_info.task_index, chain_info.description
-        );
-
-        control_tx
-            .send(ControlResp::TaskFinished {
-                node_id: chain_info.node_id,
-                task_index: chain_info.task_index as usize,
-            })
+        match self
+            .run_behavior(
+                &chain_info,
+                control_tx.clone(),
+                control_rx,
+                &mut in_qs,
+                ready,
+                collector,
+            )
             .await
-            .expect("control response unwrap");
+        {
+            Ok(()) => {
+                error!(
+                    node_id = chain_info.node_id,
+                    subtask_index = chain_info.task_index,
+                    description = chain_info.description,
+                    "Task finished"
+                );
+
+                control_tx
+                    .send(ControlResp::TaskFinished {
+                        node_id: chain_info.node_id,
+                        task_index: chain_info.task_index as usize,
+                    })
+                    .await
+                    .expect("control response unwrap");
+            }
+            Err(e) => {
+                error!(node_id = chain_info.node_id,
+                    subtask_index = chain_info.task_index,
+                    description = chain_info.description,
+                    error = ?e,
+                    "Task failed");
+
+                control_tx
+                    .send(ControlResp::TaskFailed {
+                        node_id: chain_info.node_id,
+                        task_index: chain_info.task_index as usize,
+                        error: e.into(),
+                    })
+                    .await
+                    .expect("control response unwrap");
+            }
+        }
     }
 }
 
@@ -370,14 +388,14 @@ macro_rules! call_with_collector {
                     .operator
                     .$name($arg, &mut $self.context, &mut collector)
                     .await
-                    .unwrap();
+                    .map_err(|e| e.with_operator($self.context.task_info.operator_id.clone()))?;
             }
             None => {
                 $self
                     .operator
                     .$name($arg, &mut $self.context, $final_collector)
                     .await
-                    .unwrap();
+                    .map_err(|e| e.with_operator($self.context.task_info.operator_id.clone()))?;
             }
         }
     };
@@ -514,7 +532,7 @@ impl ChainedOperator {
         &mut self,
         control_message: &ControlMessage,
         shutdown_after_commit: bool,
-    ) -> bool {
+    ) -> DataflowResult<bool> {
         match control_message {
             ControlMessage::Checkpoint(_) => {
                 error!("shouldn't receive checkpoint")
@@ -530,8 +548,8 @@ impl ChainedOperator {
                 self.operator
                     .handle_commit(*epoch, commit_data, &mut self.context)
                     .await
-                    .unwrap();
-                return shutdown_after_commit;
+                    .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))?;
+                return Ok(shutdown_after_commit);
             }
             ControlMessage::LoadCompacted { compacted } => {
                 self.iter_mut()
@@ -549,7 +567,7 @@ impl ChainedOperator {
             ControlMessage::NoOp => {}
         }
 
-        false
+        Ok(false)
     }
 
     pub fn iter(&self) -> ChainIterator {
@@ -575,10 +593,14 @@ impl ChainedOperator {
         self.iter().filter_map(|(op, _)| op.tick_interval()).min()
     }
 
-    async fn on_start(&mut self) {
+    async fn on_start(&mut self) -> DataflowResult<()> {
         for (op, ctx) in self.iter_mut() {
-            op.on_start(ctx).await.unwrap();
+            op.on_start(ctx)
+                .await
+                .map_err(|e| e.with_operator(ctx.task_info.operator_id.clone()))?;
         }
+
+        Ok(())
     }
 
     async fn process_batch_index<'a, 'b>(
@@ -587,7 +609,8 @@ impl ChainedOperator {
         in_partitions: usize,
         batch: RecordBatch,
         final_collector: &'b mut ArrowCollector,
-    ) where
+    ) -> DataflowResult<()>
+    where
         'a: 'b,
     {
         let mut collector = ChainedCollector {
@@ -597,7 +620,10 @@ impl ChainedOperator {
             final_collector,
         };
 
-        collector.collect(batch).await.unwrap();
+        collector
+            .collect(batch)
+            .await
+            .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))
     }
 
     #[allow(clippy::type_complexity)]
@@ -640,7 +666,7 @@ impl ChainedOperator {
         control_tx: &Sender<ControlResp>,
         chain_info: &ChainInfo,
         collector: &mut ArrowCollector,
-    ) -> ControlOutcome {
+    ) -> DataflowResult<ControlOutcome> {
         match message {
             SignalMessage::Barrier(t) => {
                 debug!("received barrier in {}[{}]", chain_info, idx);
@@ -662,7 +688,9 @@ impl ChainedOperator {
                 if counter.mark(idx, t) {
                     debug!("Checkpointing {chain_info}");
 
-                    self.run_checkpoint(t, control_tx, collector).await;
+                    self.run_checkpoint(t, control_tx, collector)
+                        .await
+                        .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))?;
 
                     collector.broadcast(SignalMessage::Barrier(*t)).await;
 
@@ -670,9 +698,9 @@ impl ChainedOperator {
                         // if this is a committing operator, we need to wait for the commit message
                         // before shutting down; otherwise we just stop
                         return if self.operator.is_committing() {
-                            ControlOutcome::StopAfterCommit
+                            Ok(ControlOutcome::StopAfterCommit)
                         } else {
-                            return ControlOutcome::Stop;
+                            Ok(ControlOutcome::Stop)
                         };
                     }
                 }
@@ -682,22 +710,22 @@ impl ChainedOperator {
 
                 self.handle_watermark(*watermark, idx, collector)
                     .await
-                    .unwrap();
+                    .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))?;
             }
             SignalMessage::Stop => {
                 closed.insert(idx);
                 if closed.len() == in_partitions {
-                    return ControlOutcome::StopAndSendStop;
+                    return Ok(ControlOutcome::StopAndSendStop);
                 }
             }
             SignalMessage::EndOfData => {
                 closed.insert(idx);
                 if closed.len() == in_partitions {
-                    return ControlOutcome::Finish;
+                    return Ok(ControlOutcome::Finish);
                 }
             }
         }
-        ControlOutcome::Continue
+        Ok(ControlOutcome::Continue)
     }
 
     async fn handle_watermark(
@@ -738,9 +766,10 @@ impl ChainedOperator {
                 let watermark = self
                     .operator
                     .handle_watermark(watermark, &mut self.context, &mut collector)
-                    .await;
+                    .await
+                    .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))?;
 
-                if let Some(watermark) = watermark? {
+                if let Some(watermark) = watermark {
                     Box::pin(next.handle_watermark(watermark, 0, final_collector)).await?;
                 }
             }
@@ -748,7 +777,8 @@ impl ChainedOperator {
                 let watermark = self
                     .operator
                     .handle_watermark(watermark, &mut self.context, final_collector)
-                    .await?;
+                    .await
+                    .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))?;
                 if let Some(watermark) = watermark {
                     final_collector
                         .broadcast(SignalMessage::Watermark(watermark))
@@ -777,7 +807,8 @@ impl ChainedOperator {
             None => {
                 op.operator
                     .handle_future_result(result, &mut op.context, final_collector)
-                    .await?;
+                    .await
+                    .map_err(|e| e.with_operator(op.context.task_info.operator_id.clone()))?;
             }
             Some(next) => {
                 let mut collector = ChainedCollector {
@@ -788,7 +819,8 @@ impl ChainedOperator {
                 };
                 op.operator
                     .handle_future_result(result, &mut op.context, &mut collector)
-                    .await?;
+                    .await
+                    .map_err(|e| e.with_operator(op.context.task_info.operator_id.clone()))?;
             }
         }
 
@@ -800,7 +832,7 @@ impl ChainedOperator {
         t: &CheckpointBarrier,
         control_tx: &Sender<ControlResp>,
         final_collector: &mut ArrowCollector,
-    ) {
+    ) -> DataflowResult<()> {
         send_checkpoint_event(
             control_tx,
             &self.context.task_info,
@@ -831,11 +863,17 @@ impl ChainedOperator {
         .await;
 
         if let Some(next) = &mut self.next {
-            Box::pin(next.run_checkpoint(t, control_tx, final_collector)).await;
+            Box::pin(next.run_checkpoint(t, control_tx, final_collector)).await?;
         }
+
+        Ok(())
     }
 
-    async fn handle_tick(&mut self, tick: u64, final_collector: &mut ArrowCollector) {
+    async fn handle_tick(
+        &mut self,
+        tick: u64,
+        final_collector: &mut ArrowCollector,
+    ) -> DataflowResult<()> {
         match &mut self.next {
             Some(next) => {
                 let mut collector = ChainedCollector {
@@ -846,24 +884,24 @@ impl ChainedOperator {
                 };
                 self.operator
                     .handle_tick(tick, &mut self.context, &mut collector)
-                    .await
-                    .unwrap();
-                Box::pin(next.handle_tick(tick, final_collector)).await;
+                    .await?;
+                Box::pin(next.handle_tick(tick, final_collector)).await?;
             }
             None => {
                 self.operator
                     .handle_tick(tick, &mut self.context, final_collector)
-                    .await
-                    .unwrap();
+                    .await?;
             }
         }
+
+        Ok(())
     }
 
     async fn on_close(
         &mut self,
         final_message: &Option<SignalMessage>,
         final_collector: &mut ArrowCollector,
-    ) {
+    ) -> DataflowResult<()> {
         match &mut self.next {
             Some(next) => {
                 let mut collector = ChainedCollector {
@@ -875,18 +913,18 @@ impl ChainedOperator {
 
                 self.operator
                     .on_close(final_message, &mut self.context, &mut collector)
-                    .await
-                    .unwrap();
+                    .await?;
 
-                Box::pin(next.on_close(final_message, final_collector)).await;
+                Box::pin(next.on_close(final_message, final_collector)).await?;
             }
             None => {
                 self.operator
                     .on_close(final_message, &mut self.context, final_collector)
-                    .await
-                    .unwrap();
+                    .await?;
             }
         }
+
+        Ok(())
     }
 }
 
@@ -897,8 +935,8 @@ async fn operator_run_behavior(
     mut control_rx: Receiver<ControlMessage>,
     collector: &mut ArrowCollector,
     ready: Arc<Barrier>,
-) -> Option<SignalMessage> {
-    this.on_start().await;
+) -> DataflowResult<Option<SignalMessage>> {
+    this.on_start().await?;
 
     let chain_info = &mut collector.chain_info.clone();
 
@@ -944,7 +982,7 @@ async fn operator_run_behavior(
         let operator_future: OptionFuture<_> = this.future_to_poll().into();
         tokio::select! {
             Some(control_message) = control_rx.recv() => {
-                if this.handle_controller_message(&control_message, shutdown_after_commit).await {
+                if this.handle_controller_message(&control_message, shutdown_after_commit).await? {
                     break;
                 }
             }
@@ -967,11 +1005,11 @@ async fn operator_run_behavior(
                                         name,
                                         node_id = chain_info.node_id,
                                         subtask_idx = chain_info.task_index)
-                                ).await;
+                                ).await?;
                             }
                             ArrowMessage::Signal(signal) => {
                                 match this.handle_control_message(idx, &signal, &mut counter, &mut closed, in_partitions,
-                                    &control_tx, chain_info, collector).await {
+                                    &control_tx, chain_info, collector).await? {
                                     ControlOutcome::Continue => {}
                                     ControlOutcome::Stop => {
                                         // just stop; the stop will have already been broadcast for example by
@@ -1013,16 +1051,17 @@ async fn operator_run_behavior(
                 }
             }
             Some(val) = operator_future => {
-                this.handle_future_result(val.0, val.1, collector).await.unwrap();
+                this.handle_future_result(val.0, val.1, collector).await?;
             }
             _ = interval.tick() => {
-                this.handle_tick(ticks, collector).await;
+                this.handle_tick(ticks, collector).await?;
                 ticks += 1;
             }
         }
     }
-    this.on_close(&final_message, collector).await;
-    final_message
+
+    this.on_close(&final_message, collector).await?;
+    Ok(final_message)
 }
 
 pub enum AsDisplayable<'a> {
