@@ -246,12 +246,16 @@ impl MaybeLocalDb {
 
         let local_path = if !provider.config().is_local() {
             let local_path = temp_dir().join(format!("arroyo-local-{}.sqlite", random::<u32>()));
-            let db = provider
-                .get_if_present(REMOTE_STATE_KEY)
-                .await
-                .unwrap_or_else(|e| {
-                    panic!("Failed to fetch database from configured state directory '{s}': {e}");
-                });
+            let db = retry!(
+                provider.get_if_present(REMOTE_STATE_KEY).await,
+                20,
+                Duration::from_millis(100),
+                Duration::from_secs(15),
+                |e| {
+                    warn!("Failed to fetch database from configured state directory '{s}': {e}")
+                }
+            )
+            .unwrap();
 
             if let Some(db) = db {
                 tokio::fs::write(&local_path, db).await.unwrap_or_else(|e| {

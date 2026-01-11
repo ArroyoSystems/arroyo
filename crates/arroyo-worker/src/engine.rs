@@ -21,6 +21,7 @@ use arroyo_operator::ErasedConstructor;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::grpc::{
     api,
     rpc::{CheckpointMetadata, TaskAssignment},
@@ -519,6 +520,7 @@ impl Engine {
         let mut senders = Senders::new();
 
         let ready = Arc::new(Barrier::new(self.local_task_count()));
+        let stop_barrier = Arc::new(Barrier::new(self.local_task_count()));
         {
             let mut futures = FuturesUnordered::new();
 
@@ -527,6 +529,7 @@ impl Engine {
                     self.program.control_tx.as_ref().unwrap(),
                     idx,
                     ready.clone(),
+                    stop_barrier.clone(),
                 ));
             }
 
@@ -556,6 +559,7 @@ impl Engine {
         control_tx: &Sender<ControlResp>,
         idx: NodeIndex,
         ready: Arc<Barrier>,
+        stop: Arc<Barrier>,
     ) -> Senders {
         let (node, control_rx) = self
             .program
@@ -580,7 +584,7 @@ impl Engine {
         let mut senders = Senders::new();
 
         if assignment.worker_id == self.worker_id.0 {
-            self.run_locally(control_tx, idx, node, control_rx, ready)
+            self.run_locally(control_tx, idx, node, control_rx, ready, stop)
                 .await;
         } else {
             self.connect_to_remote_task(
@@ -669,6 +673,7 @@ impl Engine {
         node: SubtaskNode,
         control_rx: Receiver<ControlMessage>,
         ready: Arc<Barrier>,
+        stop: Arc<Barrier>,
     ) {
         info!(
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
@@ -715,6 +720,7 @@ impl Engine {
             graph.node_weight(idx).unwrap().as_queue().task_info.clone()
         };
 
+        let node_id = node.node_id;
         let task_index = task_info.task_index;
 
         let in_qs: Vec<_> = in_qs_map.into_values().flatten().collect();
@@ -738,6 +744,16 @@ impl Engine {
                         ready,
                     )
                     .await;
+
+                // wait for all other tasks to finish
+                debug!(
+                    node = node_id,
+                    subtask_idx = task_index,
+                    "waiting for tasks to finish"
+                );
+                if stop.wait().await.is_leader() {
+                    debug!("all tasks finished");
+                }
             })
         };
 
@@ -748,7 +764,12 @@ impl Engine {
                     .send(ControlResp::TaskFailed {
                         node_id: node.node_id,
                         task_index: task_index as usize,
-                        error: error.to_string(),
+                        error: DataflowError::InternalOperatorError {
+                            error: "task panicked",
+                            message: error.to_string(),
+                        }
+                        .with_operator(task_info.operator_id.clone())
+                        .into(),
                     })
                     .await
                     .ok();

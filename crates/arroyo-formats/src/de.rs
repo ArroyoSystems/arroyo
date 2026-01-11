@@ -3,6 +3,7 @@ use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
 use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
+use arrow::json::reader::FailureKind;
 use arrow_array::builder::{
     make_builder, ArrayBuilder, BinaryBuilder, GenericByteBuilder, StringBuilder,
     TimestampNanosecondBuilder, UInt64Builder,
@@ -13,6 +14,7 @@ use arrow_schema::{DataType, Schema, SchemaRef};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, SourceError};
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
+use arroyo_rpc::log_event;
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
 use arroyo_types::{to_nanos, LOOKUP_KEY_INDEX_FIELD};
@@ -115,6 +117,15 @@ impl<'a> Iterator for FramingIterator<'a> {
     }
 }
 
+fn failure_kind_to_str(kind: FailureKind) -> &'static str {
+    match kind {
+        FailureKind::MissingField => "missing_field",
+        FailureKind::NullValue => "null_value",
+        FailureKind::TypeMismatch => "type_mismatch",
+        FailureKind::ParseFailure => "parse_failure",
+    }
+}
+
 enum BufferDecoder {
     Buffer(ContextBuffer),
     JsonDecoder {
@@ -171,8 +182,23 @@ impl BufferDecoder {
                                 "Something went wrong decoding JSON: {e:?}"
                             ))
                         })
-                        .transpose()?
-                        .map(|(batch, mask, _)| (batch.columns().to_vec(), Some(mask))),
+                        .map(|opt| {
+                            opt.map(|(batch, mask, _invalid_records, validation_errors)| {
+                                // Report validation errors
+                                for verr in validation_errors {
+                                    log_event!(
+                                        "user_error",
+                                        {
+                                            "error_family": "deserialization",
+                                            "error_type": failure_kind_to_str(verr.failure_kind),
+                                            "details": verr.to_string(),
+                                        }
+                                    );
+                                }
+                                (batch.columns().to_vec(), Some(mask))
+                            })
+                        })
+                        .transpose()?,
                 })
             }
         }

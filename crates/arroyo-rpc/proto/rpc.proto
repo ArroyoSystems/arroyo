@@ -90,18 +90,36 @@ message TaskFinishedReq {
 message TaskFinishedResp {
 }
 
+enum ErrorDomain {
+  USER = 0;
+  INTERNAL = 1;
+  EXTERNAL = 2;
+}
+
+enum RetryHint {
+  NO_RETRY = 0;
+  WITH_BACKOFF = 1;
+}
+
+message TaskError {
+  string job_id = 3;
+  uint32 node_id = 4;
+  string operator_id = 9;
+  uint64 operator_subtask = 5;
+  string error = 6;
+  ErrorDomain error_domain = 7;
+  RetryHint retry_hint = 8;
+  string details = 10;
+}
+
 message TaskFailedReq {
   uint64 worker_id = 1;
   uint64 time = 2;
-  string job_id = 3;
-  uint32 node_id = 4;
-  uint64 operator_subtask = 5;
-  string error = 6;
+  TaskError error = 3;
 }
 
 message TaskFailedResp {
 }
-
 
 message TaskStartedReq {
   uint64 worker_id = 1;
@@ -165,13 +183,10 @@ message OutputData {
   bool done = 6;
 }
 
-message WorkerErrorReq {
-  string job_id = 1;
-  uint32 node_id = 6;
-  string operator_id = 2;
-  uint32 task_index = 3;
-  string message = 4;
-  string details = 5;
+message NonfatalErrorReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  TaskError error = 3;
 }
 
 message WorkerErrorRes {
@@ -230,7 +245,7 @@ service ControllerGrpc {
   rpc WorkerInitializationComplete(WorkerInitializationCompleteReq) returns (WorkerInitializationCompleteResp);
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
-  rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
+  rpc NonfatalError(NonfatalErrorReq) returns (WorkerErrorRes);
   rpc JobMetrics(JobMetricsReq) returns (JobMetricsResp);
 }
 

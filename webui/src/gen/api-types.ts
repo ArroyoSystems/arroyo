@@ -552,7 +552,19 @@ export interface components {
         };
         /** @enum {string} */
         DecimalEncoding: "number" | "string" | "bytes";
+        DecimalField: {
+            /** Format: int32 */
+            precision: number;
+            /** Format: int32 */
+            scale: number;
+        };
+        /** @enum {string} */
+        ErrorDomain: "user" | "external" | "internal";
         ErrorResp: {
+            error: string;
+        };
+        FailureReason: {
+            domain: components["schemas"]["ErrorDomain"];
             error: string;
         };
         FieldType: {
@@ -563,17 +575,22 @@ export interface components {
             type: "int64";
         } | {
             /** @enum {string} */
-            type: "u_int32";
+            type: "uint32";
         } | {
             /** @enum {string} */
-            type: "u_int64";
+            type: "uint64";
         } | {
             /** @enum {string} */
-            type: "f32";
+            type: "float32";
         } | {
             /** @enum {string} */
-            type: "f64";
-        } | {
+            type: "float64";
+        } | ({
+            type: "FieldType";
+        } & (components["schemas"]["DecimalField"] & {
+            /** @enum {string} */
+            type: "decimal128";
+        })) | {
             /** @enum {string} */
             type: "bool";
         } | {
@@ -657,7 +674,7 @@ export interface components {
         Job: {
             /** Format: int64 */
             created_at: number;
-            failure_message?: string | null;
+            failure_reason?: components["schemas"]["FailureReason"] | null;
             /** Format: int64 */
             finish_time?: number | null;
             id: string;
@@ -679,6 +696,7 @@ export interface components {
             /** Format: int64 */
             created_at: number;
             details: string;
+            error_domain?: components["schemas"]["ErrorDomain"] | null;
             id: string;
             level: components["schemas"]["JobLogLevel"];
             message: string;
@@ -701,8 +719,15 @@ export interface components {
             unstructured?: boolean;
         };
         ListField: {
-            items: components["schemas"]["SourceField"];
+            items: components["schemas"]["ListFieldItem"];
         };
+        ListFieldItem: {
+            type: "ListFieldItem";
+        } & (Omit<components["schemas"]["FieldType"], "type"> & {
+            name?: string;
+            required?: boolean;
+            readonly sql_name?: string | null;
+        });
         Metric: {
             /** Format: int64 */
             time: number;
@@ -755,7 +780,7 @@ export interface components {
             starting_after?: string | null;
         };
         /** @enum {string} */
-        ParquetCompression: "uncompressed" | "snappy" | "gzip" | "zstd" | "lz4";
+        ParquetCompression: "uncompressed" | "snappy" | "gzip" | "zstd" | "lz4" | "lz4_raw";
         ParquetFormat: {
             compression?: components["schemas"]["ParquetCompression"];
             /** Format: int64 */
@@ -862,13 +887,12 @@ export interface components {
             metadata_key?: string | null;
             name: string;
             required?: boolean;
-            sql_name?: string;
+            readonly sql_name?: string | null;
         });
         /** @enum {string} */
         StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
         StructField: {
             fields: components["schemas"]["SourceField"][];
-            name?: string | null;
         };
         SubtaskCheckpointGroup: {
             /** Format: int64 */

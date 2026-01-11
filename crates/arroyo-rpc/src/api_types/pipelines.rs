@@ -1,4 +1,5 @@
 use crate::api_types::udfs::Udf;
+use crate::errors::ErrorDomain;
 use crate::grpc as grpc_proto;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -105,6 +106,13 @@ pub enum StopType {
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "snake_case")]
+pub struct FailureReason {
+    pub error: String,
+    pub domain: ErrorDomain,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct Job {
     pub id: String,
     pub running_desired: bool,
@@ -113,7 +121,7 @@ pub struct Job {
     pub start_time: Option<u64>,
     pub finish_time: Option<u64>,
     pub tasks: Option<u64>,
-    pub failure_message: Option<String>,
+    pub failure_reason: Option<FailureReason>,
     pub created_at: u64,
 }
 
@@ -135,6 +143,7 @@ pub struct JobLogMessage {
     pub level: JobLogLevel,
     pub message: String,
     pub details: String,
+    pub error_domain: Option<ErrorDomain>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

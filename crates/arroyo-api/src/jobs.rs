@@ -15,6 +15,7 @@ use axum::response::sse::{Event, Sse};
 use axum::Json;
 use futures_util::stream::Stream;
 use std::convert::Infallible;
+use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
@@ -33,6 +34,7 @@ use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
+use arroyo_rpc::errors::ErrorDomain;
 use cornucopia_async::DatabaseSource;
 
 pub(crate) async fn create_job(
@@ -157,6 +159,10 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
         ("Failed", true) => ("Failed", Option::None, Stable),
         ("Failed", false) => ("Start", Some(None), Stable),
 
+        // Failing is a transient state during graceful shutdown before Failed
+        ("Failing", true) => ("Failing", Option::None, InProgress),
+        ("Failing", false) => ("Failing", Option::None, InProgress),
+
         _ => panic!("unhandled state {state}"),
     };
 
@@ -234,6 +240,7 @@ impl From<DbLogMessage> for JobLogMessage {
             level,
             message: val.message,
             details: val.details,
+            error_domain: ErrorDomain::from_str(&val.error_domain).ok(),
         }
     }
 }

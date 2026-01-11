@@ -9,10 +9,10 @@ use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq, GetWorkerPhaseResp,
     HeartbeatReq, JobFinishedReq, JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes,
-    MetricFamily, MetricsReq, MetricsResp, RegisterWorkerReq, StartExecutionReq,
+    MetricFamily, MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq,
     StartExecutionResp, StopExecutionReq, StopExecutionResp, TaskCheckpointCompletedReq,
-    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq,
-    WorkerInfo, WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
+    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerInfo,
+    WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
     from_millis, to_micros, CheckpointBarrier, MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
@@ -36,6 +36,7 @@ use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
+use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
@@ -359,23 +360,35 @@ impl WorkerServer {
                             controller.task_failed(Request::new(
                                 TaskFailedReq {
                                     worker_id: worker_id.0,
-                                    job_id: job_id.clone(),
                                     time: to_micros(SystemTime::now()),
-                                    node_id,
-                                    operator_subtask: task_index as u64,
-                                    error,
+                                    error: Some(rpc::TaskError {
+                                        job_id: job_id.clone(),
+                                        node_id,
+                                        operator_subtask: task_index as u64,
+                                        error: error.message,
+                                        error_domain: rpc::ErrorDomain::from(error.domain) as i32,
+                                        retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
+                                        operator_id: error.operator_id.unwrap_or_default(),
+                                        details: error.details.unwrap_or_default(),
+                                    }),
                                 }
                             )).await.err()
                         }
                         Some(ControlResp::Error { node_id, operator_id, task_index, message, details}) => {
-                            controller.worker_error(Request::new(
-                                WorkerErrorReq {
-                                    job_id: job_id.clone(),
-                                    node_id,
-                                    operator_id,
-                                    task_index: task_index as u32,
-                                    message,
-                                    details
+                            controller.nonfatal_error(Request::new(
+                                NonfatalErrorReq {
+                                    worker_id: worker_id.0,
+                                    time: to_micros(SystemTime::now()),
+                                    error: Some(rpc::TaskError {
+                                        job_id: job_id.clone(),
+                                        node_id,
+                                        operator_id,
+                                        operator_subtask: task_index as u64,
+                                        error: message,
+                                        error_domain: rpc::ErrorDomain::External as i32,
+                                        retry_hint: rpc::RetryHint::NoRetry as i32,
+                                        details,
+                                    }),
                                 }
                             )).await.err()
                         }

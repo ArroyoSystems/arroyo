@@ -42,6 +42,7 @@ use crate::rest_utils::{service_unavailable, ErrorResp};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::config::{config, ApiAuthMode};
+use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::formats::*;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_server_common::shutdown::ShutdownGuard;
@@ -287,6 +288,8 @@ impl IntoResponse for HttpError {
         PipelineNode,
         PipelineEdge,
         Job,
+        FailureReason,
+        ErrorDomain,
         StopType,
         PipelineCollection,
         JobCollection,
