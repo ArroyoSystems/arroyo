@@ -163,6 +163,6 @@ impl LocalWriter for JsonLocalWriter {
     }
 
     fn stats(&self) -> MultiPartWriterStats {
-        self.stats.clone().unwrap()
+        self.stats.unwrap()
     }
 }

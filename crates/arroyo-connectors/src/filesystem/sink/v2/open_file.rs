@@ -1,6 +1,6 @@
 use super::checkpoint::{FileToCommit, FileToCommitType, InProgressFile, InProgressFileState};
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::sink::v2::SINGLE_FILE_MAX_SIZE;
+use crate::filesystem::sink::v2::SinkConfig;
 use crate::filesystem::sink::v2::uploads::{
     FsResponseData, UploadFuture, create_multipart_finalize_future, create_multipart_init_future,
     create_part_upload_future, create_single_file_upload_future,
@@ -42,13 +42,9 @@ pub enum OpenFileState<BBW: BatchBufferingWriter> {
         multipart_id: Arc<MultipartId>,
         parts: Vec<Part>,
     },
-    /// Recovered from checkpoint - has trailing bytes that need to be uploaded before finalizing.
-    /// This state is only entered via `from_checkpoint` during recovery.
     Recovering {
         multipart_id: Arc<MultipartId>,
-        /// Parts already uploaded (all have content_id set)
         parts: Vec<Part>,
-        /// Trailing bytes that need to be uploaded as additional part(s)
         trailing_bytes: Bytes,
         iceberg_metadata: Option<IcebergFileMetadata>,
         total_size: usize,
@@ -154,6 +150,7 @@ pub struct OpenFile<BBW: BatchBufferingWriter> {
     pub logger: FsEventLogger,
     pub state: OpenFileState<BBW>,
     pub target_part_size_bytes: usize,
+    pub minimum_multipart_size: usize,
     pub storage_provider: Arc<StorageProvider>,
 }
 
@@ -164,7 +161,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
         logger: FsEventLogger,
         storage_provider: Arc<StorageProvider>,
         representative_timestamp: SystemTime,
-        target_part_size_bytes: usize,
+        config: &SinkConfig,
     ) -> Self {
         OpenFile {
             path,
@@ -177,7 +174,8 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
             },
             logger,
             state: OpenFileState::New { writer },
-            target_part_size_bytes,
+            target_part_size_bytes: config.target_part_size(),
+            minimum_multipart_size: config.minimum_multipart_size(),
             storage_provider,
         }
     }
@@ -185,7 +183,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
     pub fn from_checkpoint(
         file: InProgressFile,
         storage_provider: Arc<StorageProvider>,
-        target_part_size_bytes: usize,
+        config: &SinkConfig,
         logger: FsEventLogger,
     ) -> DataflowResult<Self> {
         let path = Path::parse(&file.path).map_err(|e| {
@@ -250,7 +248,8 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
             },
             logger,
             state,
-            target_part_size_bytes,
+            target_part_size_bytes: config.target_part_size(),
+            minimum_multipart_size: config.minimum_multipart_size(),
             storage_provider,
         })
     }
@@ -258,7 +257,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
     pub fn from_commit(
         file: FileToCommit,
         storage_provider: Arc<StorageProvider>,
-        target_part_size_bytes: usize,
+        config: &SinkConfig,
         logger: FsEventLogger,
     ) -> DataflowResult<Self> {
         let path = Path::parse(&file.path).map_err(|e| {
@@ -304,7 +303,8 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
                     iceberg_metadata: file.iceberg_metadata,
                 },
             },
-            target_part_size_bytes,
+            target_part_size_bytes: config.target_part_size(),
+            minimum_multipart_size: config.minimum_multipart_size(),
             storage_provider,
         })
     }
@@ -366,7 +366,8 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
         self.state = match mem::take(&mut self.state) {
             OpenFileState::New { writer } => {
                 if should_flush
-                    || writer.unflushed_bytes() + writer.buffered_bytes() >= SINGLE_FILE_MAX_SIZE
+                    || writer.unflushed_bytes() + writer.buffered_bytes()
+                        >= self.minimum_multipart_size
                 {
                     future = Some(create_multipart_init_future(
                         self.storage_provider.clone(),
@@ -449,7 +450,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
                     self.path
                 ));
             }
-            OpenFileState::Failed { .. } => {
+            OpenFileState::Failed => {
                 return Err(connector_err!(
                     Internal,
                     WithBackoff,
@@ -787,7 +788,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
 
     // Callers are responsible for first calling read_to_finalize() to determine that the file is
     // ready to be finalized
-    pub fn to_commit_file(self) -> DataflowResult<FileToCommit> {
+    pub fn into_commit_file(self) -> DataflowResult<FileToCommit> {
         Ok(match self.state {
             OpenFileState::ClosingMulti {
                 multipart_id,

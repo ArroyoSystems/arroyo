@@ -804,7 +804,7 @@ impl StorageProvider {
 
     pub async fn put_bytes(&self, path: &Path, bytes: Bytes) -> Result<(), StorageError> {
         let bytes = PutPayload::from(bytes);
-        let path = self.qualify_path(&path);
+        let path = self.qualify_path(path);
         storage_retry!(self.object_store.put(&path, bytes.clone()).await)?;
 
         Ok(())

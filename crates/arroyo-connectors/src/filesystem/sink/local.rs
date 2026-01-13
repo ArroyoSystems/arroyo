@@ -21,7 +21,6 @@ use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
 use crate::filesystem::{TableFormat, config, sink::two_phase_committer::TwoPhaseCommitter};
-use anyhow::{Result, bail};
 use arrow::row::OwnedRow;
 use arroyo_rpc::errors::{DataflowError, DataflowResult};
 

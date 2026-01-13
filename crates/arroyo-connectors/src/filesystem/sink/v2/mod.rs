@@ -5,12 +5,8 @@ mod uploads;
 use super::delta::{commit_files_to_delta, load_or_create_table};
 use super::parquet::representitive_timestamp;
 use super::partitioning::{Partitioner, PartitionerMode};
-use super::two_phase_committer::CommitStrategy;
 use super::v2::checkpoint::{FileToCommit, FilesCheckpointV2};
-use super::v2::uploads::{
-    FsResponse, FsResponseData, UploadFuture, create_part_upload_future,
-    create_single_file_upload_future,
-};
+use super::v2::uploads::{FsResponse, UploadFuture};
 use super::{
     BatchBufferingWriter, CommitState, FinishedFile, FsEventLogger, RollingPolicy,
     add_suffix_prefix, map_storage_error,
@@ -48,10 +44,6 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
-// files under this size will be written as single files rather than as multiparts -- note that
-// single file content is currently sent through the commit process, which means that it must be
-// smaller than the max gRPC size
-pub(crate) const SINGLE_FILE_MAX_SIZE: usize = 2 * 1024 * 1024;
 
 pub struct ActiveState<BBW: BatchBufferingWriter> {
     max_file_index: usize,
@@ -79,6 +71,13 @@ impl SinkConfig {
             .map(|s| s as usize)
             .unwrap_or(DEFAULT_TARGET_PART_SIZE)
     }
+
+    fn minimum_multipart_size(&self) -> usize {
+        self.config
+            .multipart
+            .minimum_multipart_size
+            .unwrap_or_default() as usize
+    }
 }
 
 pub struct SinkContext {
@@ -92,13 +91,12 @@ pub struct SinkContext {
 
 /// test utility to precisely cause failures
 fn maybe_cause_failure(test_case: &str) {
-    if env::var("FS_FAILURE_TESTING").is_ok() {
-        if fs::read("/tmp/fail")
+    if env::var("FS_FAILURE_TESTING").is_ok()
+        && fs::read("/tmp/fail")
             .unwrap_or_default()
             .starts_with(test_case.as_bytes())
-        {
-            panic!("intentionally failing due to {test_case}");
-        }
+    {
+        panic!("intentionally failing due to {test_case}");
     }
 }
 
@@ -231,7 +229,7 @@ impl<BBW: BatchBufferingWriter> ActiveState<BBW> {
                 logger,
                 context.storage_provider.clone(),
                 representative_ts,
-                config.target_part_size(),
+                config,
             );
 
             self.active_partitions
@@ -342,7 +340,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
 
         if file.ready_to_finalize() {
             let file = self.active.open_files.remove(&result.path).unwrap();
-            self.upload.files_to_commit.push(file.to_commit_file()?);
+            self.upload.files_to_commit.push(file.into_commit_file()?);
         }
 
         Ok(())
@@ -436,7 +434,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     let mut open_file = OpenFile::from_checkpoint(
                         f,
                         self.context.as_ref().unwrap().storage_provider.clone(),
-                        self.config.target_part_size(),
+                        &self.config,
                         self.event_logger.clone(),
                     )?;
                     self.upload
@@ -460,7 +458,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                 let open_file = OpenFile::from_commit(
                     f,
                     self.context.as_ref().unwrap().storage_provider.clone(),
-                    self.config.target_part_size(),
+                    &self.config,
                     self.event_logger.clone(),
                 )?;
                 self.active
@@ -629,7 +627,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     .open_files
                     .remove(&path)
                     .unwrap()
-                    .to_commit_file()?,
+                    .into_commit_file()?,
             );
         }
 
@@ -676,14 +674,13 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     })
                 })?
                 .values()
-                .map(|serialized| {
+                .flat_map(|serialized| {
                     let v: Vec<FileToCommit> =
                         bincode::decode_from_slice(serialized, bincode_config::standard())
                             .unwrap()
                             .0;
                     v
                 })
-                .flatten()
                 .collect();
 
             // finalize the finals
@@ -695,7 +692,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                 let mut file: OpenFile<BBW> = OpenFile::from_commit(
                     file,
                     self.context.as_ref().unwrap().storage_provider.clone(),
-                    self.config.target_part_size(),
+                    &self.config,
                     self.event_logger.clone(),
                 )?;
                 futures.push(file.finalize()?);

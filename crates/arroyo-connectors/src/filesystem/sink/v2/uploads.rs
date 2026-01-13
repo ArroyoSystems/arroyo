@@ -1,11 +1,3 @@
-//! Upload futures with retry logic for the filesystem sink.
-//!
-//! This module provides functions to create futures for various upload operations
-//! (multipart init, part upload, single-file upload) with built-in retry logic.
-
-// Some variants and functions are not yet used but kept for future use
-#![allow(dead_code)]
-
 use super::map_storage_error;
 use crate::filesystem::sink::FsEventLogger;
 use arroyo_rpc::connector_err;
@@ -17,13 +9,7 @@ use object_store::path::Path;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-/// Maximum number of retries for upload operations.
-const UPLOAD_MAX_RETRIES: usize = 10;
-
-/// Base delay between retries (uses exponential backoff).
-const UPLOAD_BASE_DELAY: Duration = Duration::from_millis(100);
+use std::time::Instant;
 
 #[derive(Debug)]
 pub enum FsResponseData {
@@ -50,10 +36,8 @@ fn handle_error(started: Instant, logger: &FsEventLogger, error: StorageError) -
     map_storage_error(error)
 }
 
-/// Type alias for upload futures.
 pub type UploadFuture = Pin<Box<dyn Future<Output = DataflowResult<FsResponse>> + Send>>;
 
-/// Create a future that initializes a multipart upload.
 pub fn create_multipart_init_future(
     storage: Arc<StorageProvider>,
     path: Arc<Path>,
@@ -73,7 +57,6 @@ pub fn create_multipart_init_future(
     })
 }
 
-/// Create a future that uploads a part of a multipart upload.
 pub fn create_part_upload_future(
     storage: Arc<StorageProvider>,
     path: Arc<Path>,
