@@ -1,9 +1,6 @@
-use crate::filesystem::sink::MultiPartWriterStats;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use bincode::{Decode, Encode};
-use bytes::Bytes;
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct FilesCheckpointV2 {

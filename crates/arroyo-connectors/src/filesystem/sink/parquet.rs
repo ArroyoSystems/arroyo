@@ -220,7 +220,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
     }
 
     fn close(&mut self) -> (Bytes, Option<IcebergFileMetadata>) {
-        let mut writer = self.writer.take().unwrap();
+        let writer = self.writer.take().unwrap();
 
         let metadata = writer.close().unwrap();
         let metadata = self
@@ -354,7 +354,7 @@ impl LocalWriter for ParquetLocalWriter {
     }
 
     fn stats(&self) -> MultiPartWriterStats {
-        self.stats.as_ref().unwrap().clone()
+        *self.stats.as_ref().unwrap()
     }
 }
 

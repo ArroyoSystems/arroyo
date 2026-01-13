@@ -449,7 +449,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
                     self.path
                 ));
             }
-            OpenFileState::Failed { .. } => {
+            OpenFileState::Failed => {
                 return Err(connector_err!(
                     Internal,
                     WithBackoff,
@@ -787,7 +787,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
 
     // Callers are responsible for first calling read_to_finalize() to determine that the file is
     // ready to be finalized
-    pub fn to_commit_file(self) -> DataflowResult<FileToCommit> {
+    pub fn into_commit_file(self) -> DataflowResult<FileToCommit> {
         Ok(match self.state {
             OpenFileState::ClosingMulti {
                 multipart_id,

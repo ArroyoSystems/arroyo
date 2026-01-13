@@ -5,12 +5,8 @@ mod uploads;
 use super::delta::{commit_files_to_delta, load_or_create_table};
 use super::parquet::representitive_timestamp;
 use super::partitioning::{Partitioner, PartitionerMode};
-use super::two_phase_committer::CommitStrategy;
 use super::v2::checkpoint::{FileToCommit, FilesCheckpointV2};
-use super::v2::uploads::{
-    FsResponse, FsResponseData, UploadFuture, create_part_upload_future,
-    create_single_file_upload_future,
-};
+use super::v2::uploads::{FsResponse, UploadFuture};
 use super::{
     BatchBufferingWriter, CommitState, FinishedFile, FsEventLogger, RollingPolicy,
     add_suffix_prefix, map_storage_error,
@@ -92,13 +88,12 @@ pub struct SinkContext {
 
 /// test utility to precisely cause failures
 fn maybe_cause_failure(test_case: &str) {
-    if env::var("FS_FAILURE_TESTING").is_ok() {
-        if fs::read("/tmp/fail")
+    if env::var("FS_FAILURE_TESTING").is_ok()
+        && fs::read("/tmp/fail")
             .unwrap_or_default()
             .starts_with(test_case.as_bytes())
-        {
-            panic!("intentionally failing due to {test_case}");
-        }
+    {
+        panic!("intentionally failing due to {test_case}");
     }
 }
 
@@ -342,7 +337,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
 
         if file.ready_to_finalize() {
             let file = self.active.open_files.remove(&result.path).unwrap();
-            self.upload.files_to_commit.push(file.to_commit_file()?);
+            self.upload.files_to_commit.push(file.into_commit_file()?);
         }
 
         Ok(())
@@ -629,7 +624,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     .open_files
                     .remove(&path)
                     .unwrap()
-                    .to_commit_file()?,
+                    .into_commit_file()?,
             );
         }
 
@@ -676,14 +671,13 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     })
                 })?
                 .values()
-                .map(|serialized| {
+                .flat_map(|serialized| {
                     let v: Vec<FileToCommit> =
                         bincode::decode_from_slice(serialized, bincode_config::standard())
                             .unwrap()
                             .0;
                     v
                 })
-                .flatten()
                 .collect();
 
             // finalize the finals

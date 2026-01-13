@@ -1634,7 +1634,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     }
 
     fn stats(&self) -> Option<MultiPartWriterStats> {
-        self.stats.clone()
+        self.stats
     }
 
     fn get_finished_file(&mut self) -> FileToFinish {
@@ -1664,7 +1664,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
 
         let (bytes, metadata) = self.batch_buffering_writer.close();
 
-        if bytes.len() > 0 {
+        if !bytes.is_empty() {
             self.metadata = metadata;
             let existing_part_size = self.stats.as_ref().and_then(|s| {
                 if s.bytes_written > 0 {
