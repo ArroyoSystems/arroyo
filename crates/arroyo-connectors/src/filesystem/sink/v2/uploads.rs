@@ -138,8 +138,8 @@ pub fn create_multipart_finalize_future(
                         NoRetry,
                         "file written to {} should have length of {}, not {}",
                         path,
+                        expected_size,
                         meta.size,
-                        expected_size
                     ));
                 }
             } else {

@@ -33,7 +33,6 @@ use prost::Message;
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -91,6 +90,10 @@ pub struct SinkContext {
 
 /// test utility to precisely cause failures
 fn maybe_cause_failure(test_case: &str) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+
     if env::var("FS_FAILURE_TESTING").is_ok()
         && fs::read("/tmp/fail")
             .unwrap_or_default()
@@ -255,8 +258,6 @@ pub struct FileSystemSinkV2<BBW: BatchBufferingWriter> {
 
     event_logger: FsEventLogger,
     watermark: Option<SystemTime>,
-
-    _marker: PhantomData<BBW>,
 }
 
 struct UploadState {
@@ -270,17 +271,18 @@ impl UploadState {
         policies: &[RollingPolicy],
         watermark: Option<SystemTime>,
         f: &mut OpenFile<BBW>,
-    ) -> DataflowResult<()> {
-        if f.is_writable() && policies.iter().any(|p| p.should_roll(&f.stats, watermark)) {
-            let futures = f.close()?;
+    ) -> DataflowResult<bool> {
+        Ok(
+            if f.is_writable() && policies.iter().any(|p| p.should_roll(&f.stats, watermark)) {
+                let futures = f.close()?;
 
-            let ps = self.pending_uploads.lock().await;
-            for f in futures {
-                ps.push(f);
-            }
-        }
-
-        Ok(())
+                let mut ps = self.pending_uploads.lock().await;
+                ps.extend(futures.into_iter());
+                true
+            } else {
+                false
+            },
+        )
     }
 }
 
@@ -323,7 +325,6 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
                 connection_id: connection_id_str.into(),
             },
             watermark: None,
-            _marker: PhantomData,
         }
     }
 
@@ -516,9 +517,13 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                 futures.push(future);
             }
 
-            self.upload
+            if self
+                .upload
                 .roll_file_if_ready(&self.config.rolling_policies, self.watermark, file)
-                .await?;
+                .await?
+            {
+                self.active.active_partitions.remove(&partition_key);
+            }
         }
 
         Ok(())
@@ -784,10 +789,25 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         _ctx: &mut OperatorContext,
         _collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        for of in self.active.open_files.values_mut() {
-            self.upload
+        let mut to_remove = vec![];
+        for (partition, path) in self.active.active_partitions.iter() {
+            let Some(of) = self.active.open_files.get_mut(path) else {
+                warn!(file = ?path, "file referenced in active_partitions is missing from open_files!");
+                to_remove.push(partition.clone());
+                continue;
+            };
+
+            if self
+                .upload
                 .roll_file_if_ready(&self.config.rolling_policies, self.watermark, of)
-                .await?;
+                .await?
+            {
+                to_remove.push(partition.clone());
+            }
+        }
+
+        for p in to_remove {
+            self.active.active_partitions.remove(&p);
         }
 
         Ok(())

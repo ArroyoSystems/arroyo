@@ -655,6 +655,10 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
     ) -> Vec<UploadFuture> {
         let len = bytes.len();
 
+        if len == 0 {
+            return vec![];
+        }
+
         let futures = if self.storage_provider.requires_same_part_sizes()
             && bytes.len() > self.target_part_size_bytes
         {
