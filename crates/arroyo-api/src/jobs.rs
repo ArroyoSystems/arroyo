@@ -8,17 +8,17 @@ use arroyo_rpc::api_types::{
     OperatorCheckpointGroupCollection, PaginationQueryParams,
 };
 use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::{get_event_spans, grpc};
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
-use axum::Json;
 use futures_util::stream::Stream;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Code, Request};
 use tracing::info;
 
@@ -27,11 +27,11 @@ const PREVIEW_TTL: Duration = Duration::from_secs(60);
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, log_and_map, not_found, paginate_results,
-    validate_pagination_params, BearerAuth, ErrorResp,
+    BearerAuth, ErrorResp, authenticate, bad_request, log_and_map, not_found, paginate_results,
+    validate_pagination_params,
 };
 use crate::types::public::LogLevel;
-use crate::{queries::api_queries, to_micros, types::public, AuthData};
+use crate::{AuthData, queries::api_queries, to_micros, types::public};
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
 use arroyo_rpc::errors::ErrorDomain;

@@ -1,9 +1,9 @@
 use std::{sync::Arc, time::SystemTime};
 
 use arrow::datatypes::{DataType, Field};
-use datafusion::common::{plan_datafusion_err, plan_err, Result};
+use datafusion::common::{Result, plan_datafusion_err, plan_err};
 
-use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
+use arrow_schema::{DECIMAL_DEFAULT_SCALE, DECIMAL128_MAX_PRECISION, IntervalUnit, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
 use datafusion::error::DataFusionError;
 use datafusion::sql::sqlparser::ast::{
@@ -76,7 +76,7 @@ fn convert_simple_data_type(
                     "unsupported precision {} -- supported precisions are 0 (seconds), \
             3 (milliseconds), 6 (microseconds), and 9 (nanoseconds)",
                     precision
-                )
+                );
             }
         },
         SQLDataType::Date => Ok(DataType::Date32),

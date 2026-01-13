@@ -19,14 +19,14 @@ use arroyo_rpc::grpc::rpc::{
     NonfatalErrorReq, SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp,
     WorkerErrorRes,
 };
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::{config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{from_micros, MachineId, WorkerId};
+use arroyo_types::{MachineId, WorkerId, from_micros};
 use cornucopia_async::DatabaseSource;
 use lazy_static::lazy_static;
-use prometheus::{register_gauge, Gauge};
+use prometheus::{Gauge, register_gauge};
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -36,9 +36,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};

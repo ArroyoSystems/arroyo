@@ -1,10 +1,10 @@
 use arrow_schema::DataType;
-use arroyo_udf_common::parse::{is_vec_u8, ParsedUdf};
+use arroyo_udf_common::parse::{ParsedUdf, is_vec_u8};
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{parse_quote, FnArg, ItemFn};
+use syn::{FnArg, ItemFn, parse_quote};
 
 fn data_type_to_arrow_type_token(data_type: &DataType) -> TokenStream {
     match data_type {
@@ -32,8 +32,8 @@ impl Parse for ParsedFunction {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let function: ItemFn = input.parse()?;
 
-        if function.sig.asyncness.is_some() {
-            if let Some(vec) = function.sig.inputs.iter().find_map(|t| match t {
+        if function.sig.asyncness.is_some()
+            && let Some(vec) = function.sig.inputs.iter().find_map(|t| match t {
                 FnArg::Receiver(_) => None,
                 FnArg::Typed(t) => {
                     if ParsedUdf::vec_inner_type(&t.ty).is_some() && !is_vec_u8(&t.ty) {
@@ -42,12 +42,12 @@ impl Parse for ParsedFunction {
                         None
                     }
                 }
-            }) {
-                return Err(syn::Error::new(
-                    vec.span(),
-                    "Async UDAFs are not supported (hint: remove the Vec<_> args)",
-                ));
-            }
+            })
+        {
+            return Err(syn::Error::new(
+                vec.span(),
+                "Async UDAFs are not supported (hint: remove the Vec<_> args)",
+            ));
         }
 
         Ok(ParsedFunction(

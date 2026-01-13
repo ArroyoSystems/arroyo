@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use arc_swap::ArcSwapOption;
-use figment::providers::{Env, Format, Json, Toml, Yaml};
 use figment::Figment;
+use figment::providers::{Env, Format, Json, Toml, Yaml};
 use k8s_openapi::api::core::v1::{
     EnvVar, LocalObjectReference, ResourceRequirements, Toleration, Volume, VolumeMount,
 };
@@ -9,7 +9,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use log::warn;
 use regex::Regex;
 use serde::de::DeserializeOwned;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fmt::{Debug, Formatter};
@@ -871,7 +871,7 @@ impl TlsConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{load_config, Config, DatabaseType, Scheduler, SqliteConfig};
+    use crate::config::{Config, DatabaseType, Scheduler, SqliteConfig, load_config};
     use url::Url;
 
     #[test]

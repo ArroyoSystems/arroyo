@@ -1,4 +1,4 @@
-use anyhow::{bail, Context as _};
+use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::FutureExt;
@@ -14,14 +14,14 @@ use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
 use arroyo_formats::de::FieldValueType;
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage, MetadataField};
+use arroyo_rpc::{ControlMessage, MetadataField, connector_err, grpc::rpc::StopMode};
 use arroyo_types::*;
 
 use super::{Context, SourceOffset, StreamConsumer};
@@ -59,7 +59,9 @@ impl KafkaSourceFunc {
         let group_id = match (&self.group_id, &self.group_id_prefix) {
             (Some(group_id), prefix) => {
                 if prefix.is_some() {
-                    warn!("both group_id and group_id_prefix are set for Kafka source; using group_id");
+                    warn!(
+                        "both group_id and group_id_prefix are set for Kafka source; using group_id"
+                    );
                 }
                 group_id.clone()
             }
@@ -162,8 +164,10 @@ impl KafkaSourceFunc {
         let mut offsets = HashMap::new();
 
         if consumer.assignment().unwrap().count() == 0 {
-            warn!("Kafka Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
-                ctx.task_info.operator_id, ctx.task_info.task_index);
+            warn!(
+                "Kafka Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
+                ctx.task_info.operator_id, ctx.task_info.task_index
+            );
             collector
                 .broadcast(SignalMessage::Watermark(Watermark::Idle))
                 .await;

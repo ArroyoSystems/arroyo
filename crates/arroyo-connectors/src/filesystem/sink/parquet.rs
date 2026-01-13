@@ -1,6 +1,6 @@
 use super::{
-    local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
     BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
+    local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
 };
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;

@@ -1,11 +1,11 @@
 use arroyo_rpc::grpc;
 use tracing::debug;
 
-use crate::{states::StateError, JobMessage};
+use crate::{JobMessage, states::StateError};
 
 use super::{
-    stopping::{StopBehavior, Stopping},
     JobContext, State, Stopped, Transition,
+    stopping::{StopBehavior, Stopping},
 };
 
 #[derive(Debug)]
@@ -25,7 +25,12 @@ impl State for CheckpointStopping {
         loop {
             match job_controller.checkpoint_finished().await {
                 Ok(done) => {
-                    debug!("checked checkpoint, got {}, job_controller.finished(): {}, final_checkpoint_started: {}", done, job_controller.finished(), final_checkpoint_started);
+                    debug!(
+                        "checked checkpoint, got {}, job_controller.finished(): {}, final_checkpoint_started: {}",
+                        done,
+                        job_controller.finished(),
+                        final_checkpoint_started
+                    );
 
                     if done && job_controller.finished() && final_checkpoint_started {
                         return Ok(Transition::next(*self, Stopped {}));

@@ -24,17 +24,17 @@ use arroyo_datastream::WindowType;
 
 use builder::NamedNode;
 use datafusion::common::tree_node::TreeNode;
-use datafusion::common::{not_impl_err, plan_err, Column, DFSchema, Result, ScalarValue};
+use datafusion::common::{Column, DFSchema, Result, ScalarValue, not_impl_err, plan_err};
 use datafusion::datasource::DefaultTableSource;
 #[allow(deprecated)]
 use datafusion::prelude::SessionConfig;
 
-use datafusion::sql::{planner::ContextProvider, TableReference};
+use datafusion::sql::{TableReference, planner::ContextProvider};
 
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    create_udaf, ColumnarValue, Expr, Extension, LogicalPlan, ScalarFunctionArgs, ScalarUDF,
-    ScalarUDFImpl, Signature, UserDefinedLogicalNode, Volatility, WindowUDF,
+    ColumnarValue, Expr, Extension, LogicalPlan, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl,
+    Signature, UserDefinedLogicalNode, Volatility, WindowUDF, create_udaf,
 };
 
 use datafusion::logical_expr::{AggregateUDF, TableSource};
@@ -65,9 +65,9 @@ use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::{duration_from_sql, TIMESTAMP_FIELD};
-use arroyo_udf_host::parse::{inner_type, UdfDef};
+use arroyo_rpc::{TIMESTAMP_FIELD, duration_from_sql};
 use arroyo_udf_host::ParsedUdfFile;
+use arroyo_udf_host::parse::{UdfDef, inner_type};
 use arroyo_udf_python::PythonUDF;
 use datafusion::execution::{FunctionRegistry, SessionStateBuilder, SessionStateDefaults};
 use datafusion::functions_aggregate::variance::var_samp_udaf;
@@ -664,17 +664,16 @@ pub fn rewrite_plan(
 fn build_sink_inputs(extensions: &[LogicalPlan]) -> HashMap<NamedNode, Vec<LogicalPlan>> {
     let mut sink_inputs = HashMap::<NamedNode, Vec<LogicalPlan>>::new();
     for extension in extensions.iter() {
-        if let LogicalPlan::Extension(extension) = extension {
-            if let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>() {
-                if let Some(named_node) = sink_node.node_name() {
-                    let inputs = sink_node
-                        .inputs()
-                        .into_iter()
-                        .cloned()
-                        .collect::<Vec<LogicalPlan>>();
-                    sink_inputs.entry(named_node).or_default().extend(inputs);
-                }
-            }
+        if let LogicalPlan::Extension(extension) = extension
+            && let Some(sink_node) = extension.node.as_any().downcast_ref::<SinkExtension>()
+            && let Some(named_node) = sink_node.node_name()
+        {
+            let inputs = sink_node
+                .inputs()
+                .into_iter()
+                .cloned()
+                .collect::<Vec<LogicalPlan>>();
+            sink_inputs.entry(named_node).or_default().extend(inputs);
         }
     }
     sink_inputs
@@ -892,7 +891,9 @@ pub async fn parse_and_get_arrow_program(
                         plan_err!("lookup (temporary) tables cannot be inserted into")
                     }
                     Table::TableFromQuery { .. } => {
-                        plan_err!("shouldn't be inserting more data into a table made with CREATE TABLE AS")
+                        plan_err!(
+                            "shouldn't be inserting more data into a table made with CREATE TABLE AS"
+                        )
                     }
                     Table::PreviewSink { .. } => {
                         plan_err!("queries shouldn't be able insert into preview sink.")

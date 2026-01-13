@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use arrow::row::{OwnedRow, RowConverter, SortField};
-use arrow_array::{make_array, Array, RecordBatch, UInt64Array};
+use arrow_array::{Array, RecordBatch, UInt64Array, make_array};
 use arrow_schema::{ArrowError, Field, Schema};
 use arroyo_datastream::logical::DylibUdfConfig;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -18,8 +18,8 @@ use arroyo_udf_host::AsyncUdfDylib;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::physical_expr::PhysicalExpr;
-use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use itertools::Itertools;
 use prost::Message;
@@ -115,7 +115,7 @@ impl ArrowOperator for AsyncUdfOperator {
         self.name.clone()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("AsyncUdfOperator"),
             fields: vec![

@@ -4,7 +4,7 @@
 pub mod logical;
 pub mod optimizers;
 
-use arroyo_rpc::config::{config, DefaultSink};
+use arroyo_rpc::config::{DefaultSink, config};
 use arroyo_rpc::grpc::api;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -66,11 +66,11 @@ fn format_duration(duration: Duration) -> String {
         format!("{}ms", duration.as_millis())
     } else if secs.floor() != secs {
         format!("{secs}s")
-    } else if secsi % (60 * 60 * 24) == 0 {
+    } else if secsi.is_multiple_of(60 * 60 * 24) {
         format!("{}d", secsi / 60 / 60 / 24)
-    } else if secsi % (60 * 60) == 0 {
+    } else if secsi.is_multiple_of(60 * 60) {
         format!("{}h", secsi / 60 / 60)
-    } else if secsi % 60 == 0 {
+    } else if secsi.is_multiple_of(60) {
         format!("{}m", secsi / 60)
     } else {
         format!("{secsi}s")

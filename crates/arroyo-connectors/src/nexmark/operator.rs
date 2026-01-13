@@ -1,19 +1,19 @@
-use crate::nexmark::{auction_fields, bid_fields, person_fields, NexmarkTable};
+use crate::nexmark::{NexmarkTable, auction_fields, bid_fields, person_fields};
 use arrow::array::{
     Int64Builder, RecordBatch, StringBuilder, StructBuilder, TimestampNanosecondBuilder,
 };
 use arroyo_formats::should_flush;
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
-use arroyo_rpc::{connector_err, ControlMessage};
+use arroyo_rpc::{ControlMessage, connector_err};
 use arroyo_types::{to_millis, to_nanos};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use rand::prelude::IndexedRandom;
-use rand::{distr::Alphanumeric, distr::SampleString, rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, distr::Alphanumeric, distr::SampleString, rngs::SmallRng};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};

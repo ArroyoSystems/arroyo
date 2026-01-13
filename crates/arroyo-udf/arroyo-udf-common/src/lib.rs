@@ -6,7 +6,7 @@ use arrow::array::{
     Int32Builder, Int64Builder, StringBuilder, TimestampNanosecondBuilder, UInt32Builder,
     UInt64Builder,
 };
-use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray, FFI_ArrowSchema};
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema, from_ffi, to_ffi};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[repr(C)]

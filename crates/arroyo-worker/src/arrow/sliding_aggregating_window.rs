@@ -1,6 +1,6 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use arrow::compute::{partition, sort_to_indices, take};
-use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
+use arrow_array::{Array, PrimitiveArray, RecordBatch, types::TimestampNanosecondType};
 use arrow_schema::SchemaRef;
 use arroyo_operator::{
     context::OperatorContext,
@@ -9,7 +9,7 @@ use arroyo_operator::{
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
-use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
+use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time, to_nanos};
 use datafusion::common::ScalarValue;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use std::borrow::Cow;
@@ -27,17 +27,17 @@ use arroyo_operator::context::Collector;
 use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::SendableRecordBatchStream;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
-    physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
+    physical_plan::{AsExecutionPlan, from_proto::parse_physical_expr},
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use prost::Message;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 use tracing::info;
 
@@ -344,7 +344,7 @@ impl TieredRecordBatchHolder {
         for i in 0..tier_widths.len() - 1 {
             let width = tier_widths[i];
             let next_width = tier_widths[i + 1];
-            if next_width.as_nanos() % width.as_nanos() != 0 {
+            if !next_width.as_nanos().is_multiple_of(width.as_nanos()) {
                 bail!(
                     "tier width {} does not evenly divide next tier width {}",
                     width.as_nanos(),
@@ -534,7 +534,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
         "sliding_window".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("SlidingAggregatingWindowFunc"),
             fields: vec![

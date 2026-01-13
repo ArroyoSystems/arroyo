@@ -1,7 +1,7 @@
 use super::{
+    BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
-    BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
 };
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;

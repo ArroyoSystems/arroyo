@@ -13,14 +13,14 @@ use arroyo_rpc::{
     grpc::{api, rpc::TableConfig},
 };
 use arroyo_state::timestamp_table_config;
-use arroyo_types::{from_nanos, print_time, CheckpointBarrier, Watermark};
+use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time};
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
-use futures::{lock::Mutex, stream::FuturesUnordered, Future};
+use futures::{Future, lock::Mutex, stream::FuturesUnordered};
 use prost::Message;
 use std::borrow::Cow;
 use std::{
@@ -30,7 +30,7 @@ use std::{
     sync::{Arc, RwLock},
     time::{Duration, SystemTime},
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::debug;
 
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
@@ -155,7 +155,9 @@ impl InstantJoin {
             .collect();
         let sorted = RecordBatch::try_new(batch.schema(), columns).unwrap();
         let sorted_timestamps = take(time_column, &indices, None).unwrap();
-        let ranges = partition(&[sorted_timestamps.clone()]).unwrap().ranges();
+        let ranges = partition(std::slice::from_ref(&sorted_timestamps))
+            .unwrap()
+            .ranges();
         let typed_timestamps = sorted_timestamps
             .as_any()
             .downcast_ref::<TimestampNanosecondArray>()
@@ -193,7 +195,7 @@ impl ArrowOperator for InstantJoin {
         "InstantJoin".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("InstantJoin"),
             fields: vec![("join_execution_plan", self.join_exec.as_ref().into())],

@@ -1,8 +1,8 @@
-use crate::{db_source, RunArgs};
+use crate::{RunArgs, db_source};
 use anyhow::{anyhow, bail};
-use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_openapi::Client;
-use arroyo_rpc::config::{config, ApiAuthMode, DatabaseType, DefaultSink, Scheduler};
+use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
+use arroyo_rpc::config::{ApiAuthMode, DatabaseType, DefaultSink, Scheduler, config};
 use arroyo_rpc::log_event;
 use arroyo_rpc::{config, init_db_notifier, notify_db, retry};
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
@@ -11,7 +11,7 @@ use arroyo_types::to_millis;
 use async_trait::async_trait;
 use rand::random;
 use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{header, ClientBuilder};
+use reqwest::{ClientBuilder, header};
 use rusqlite::{Connection, DatabaseName, OpenFlags};
 use std::env;
 use std::env::{set_var, temp_dir};
@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
 use tokio::task::spawn_blocking;
-use tokio::time::{interval, timeout, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval, timeout};
 use tracing::level_filters::LevelFilter;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -192,8 +192,7 @@ async fn run_pipeline(
             // or create it, unless there are other pipelines, which would indicate that this is
             // a DB for another query
             if !client.get_pipelines().send().await?.data.is_empty() {
-                let msg =
-                    "The specified state is for a different pipeline; this likely means either \
+                let msg = "The specified state is for a different pipeline; this likely means either \
                     the state directory is incorrect or the query is incorrect.";
                 if force {
                     warn!("{}", msg);
@@ -402,7 +401,7 @@ pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging_with_filter(
         "pipeline",
         if env::var("RUST_LOG").is_err() {
-            set_var("RUST_LOG", "WARN");
+            unsafe { set_var("RUST_LOG", "WARN") };
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::WARN.into())
                 .from_env_lossy()

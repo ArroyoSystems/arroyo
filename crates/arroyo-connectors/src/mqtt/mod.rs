@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use crate::mqtt::sink::MqttSinkFunc;
@@ -16,8 +16,8 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::to_nanos;
-use rumqttc::mqttbytes::QoS;
 use rumqttc::Outgoing;
+use rumqttc::mqttbytes::QoS;
 use rumqttc::{AsyncClient, Event as MqttEvent, EventLoop, Incoming, MqttOptions};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use rustls_native_certs::load_native_certs;

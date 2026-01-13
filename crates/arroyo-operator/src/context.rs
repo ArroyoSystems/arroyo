@@ -1,16 +1,16 @@
-use crate::{server_for_hash_array, RateLimiter};
+use crate::{RateLimiter, server_for_hash_array};
 use arrow::array::{Array, PrimitiveArray, RecordBatch};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::UInt64Type;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
-use arroyo_metrics::{register_queue_gauge, QueueGauges, TaskCounters};
+use arroyo_metrics::{QueueGauges, TaskCounters, register_queue_gauge};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp, MetadataField};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, MetadataField, get_hasher};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, Watermark,
@@ -20,12 +20,12 @@ use datafusion::common::hash_utils;
 use rand::Rng;
 use std::collections::HashMap;
 use std::mem::size_of_val;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::SystemTime;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{trace, warn};
 
 pub type QueueItem = ArrowMessage;

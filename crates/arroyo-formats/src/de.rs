@@ -5,8 +5,8 @@ use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
 use arrow::json::reader::FailureKind;
 use arrow_array::builder::{
-    make_builder, ArrayBuilder, BinaryBuilder, GenericByteBuilder, StringBuilder,
-    TimestampNanosecondBuilder, UInt64Builder,
+    ArrayBuilder, BinaryBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
+    UInt64Builder, make_builder,
 };
 use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
@@ -17,7 +17,7 @@ use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, Prot
 use arroyo_rpc::log_event;
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
-use arroyo_types::{to_nanos, LOOKUP_KEY_INDEX_FIELD};
+use arroyo_types::{LOOKUP_KEY_INDEX_FIELD, to_nanos};
 use prost_reflect::DescriptorPool;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -766,12 +766,12 @@ mod tests {
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
     use arrow_schema::{DataType, Schema, TimeUnit};
+    use arroyo_rpc::MetadataField;
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::errors::DataflowError;
     use arroyo_rpc::formats::{
         BadData, Format, Framing, JsonFormat, NewlineDelimitedFraming, RawBytesFormat,
     };
-    use arroyo_rpc::MetadataField;
     use arroyo_types::to_nanos;
     use serde_json::json;
     use std::sync::Arc;
@@ -878,14 +878,18 @@ mod tests {
 
         let now = SystemTime::now();
 
-        assert!(deserializer
-            .deserialize_slice(json!({ "x": 5 }).to_string().as_bytes(), now, None,)
-            .await
-            .is_empty());
-        assert!(deserializer
-            .deserialize_slice(json!({ "x": "hello" }).to_string().as_bytes(), now, None,)
-            .await
-            .is_empty());
+        assert!(
+            deserializer
+                .deserialize_slice(json!({ "x": 5 }).to_string().as_bytes(), now, None,)
+                .await
+                .is_empty()
+        );
+        assert!(
+            deserializer
+                .deserialize_slice(json!({ "x": "hello" }).to_string().as_bytes(), now, None,)
+                .await
+                .is_empty()
+        );
 
         let batch = deserializer.flush_buffer().0.unwrap();
         assert_eq!(batch.num_rows(), 1);
@@ -902,22 +906,26 @@ mod tests {
     async fn test_bad_data_fail() {
         let mut deserializer = setup_deserializer(BadData::Fail {});
 
-        assert!(deserializer
-            .deserialize_slice(
-                json!({ "x": 5 }).to_string().as_bytes(),
-                SystemTime::now(),
-                None,
-            )
-            .await
-            .is_empty());
-        assert!(deserializer
-            .deserialize_slice(
-                json!({ "x": "hello" }).to_string().as_bytes(),
-                SystemTime::now(),
-                None,
-            )
-            .await
-            .is_empty());
+        assert!(
+            deserializer
+                .deserialize_slice(
+                    json!({ "x": 5 }).to_string().as_bytes(),
+                    SystemTime::now(),
+                    None,
+                )
+                .await
+                .is_empty()
+        );
+        assert!(
+            deserializer
+                .deserialize_slice(
+                    json!({ "x": "hello" }).to_string().as_bytes(),
+                    SystemTime::now(),
+                    None,
+                )
+                .await
+                .is_empty()
+        );
 
         let err = deserializer.flush_buffer().1.remove(0);
 

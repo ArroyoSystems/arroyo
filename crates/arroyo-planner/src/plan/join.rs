@@ -4,20 +4,20 @@ use crate::extension::lookup::{LookupJoin, LookupSource};
 use crate::plan::WindowDetectingVisitor;
 use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
-use crate::{fields_with_qualifiers, schema_from_df_fields_with_metadata, ArroyoSchemaProvider};
+use crate::{ArroyoSchemaProvider, fields_with_qualifiers, schema_from_df_fields_with_metadata};
 use arroyo_datastream::WindowType;
 use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    not_impl_err, plan_err, Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue,
-    Spans, TableReference,
+    Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue, Spans, TableReference,
+    not_impl_err, plan_err,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::Alias;
 use datafusion::logical_expr::{
-    build_join_schema, BinaryExpr, Case, Expr, Extension, Join, LogicalPlan, Projection,
+    BinaryExpr, Case, Expr, Extension, Join, LogicalPlan, Projection, build_join_schema,
 };
 use datafusion::prelude::coalesce;
 use datafusion::sql::unparser::expr_to_sql;
@@ -263,7 +263,9 @@ fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
     }
 
     if join.filter.is_some() {
-        return plan_err!("filter join conditions are not supported for lookup joins; must have an equality condition");
+        return plan_err!(
+            "filter join conditions are not supported for lookup joins; must have an equality condition"
+        );
     }
 
     let mut lookup = FindLookupExtension::default();

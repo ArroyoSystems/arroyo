@@ -1,5 +1,5 @@
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
-use futures::{ready, Stream, StreamExt};
+use futures::{Stream, StreamExt, ready};
 use std::fmt;
 use std::fmt::Debug;
 use std::pin::Pin;

@@ -11,7 +11,7 @@ use arroyo_rpc::formats::TimestampFormat;
 use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::rpc::{SinkDataReq, TableConfig};
 use arroyo_state::global_table_config;
-use arroyo_types::{from_nanos, to_micros, CheckpointBarrier, SignalMessage};
+use arroyo_types::{CheckpointBarrier, SignalMessage, from_nanos, to_micros};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::transport::Channel;

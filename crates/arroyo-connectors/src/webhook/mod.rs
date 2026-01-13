@@ -19,7 +19,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Semaphore};
 use typify::import_types;
 
-use crate::{construct_http_client, EmptyConfig};
+use crate::{EmptyConfig, construct_http_client};
 
 use crate::webhook::operator::WebhookSinkFunc;
 use arroyo_operator::connector::Connector;

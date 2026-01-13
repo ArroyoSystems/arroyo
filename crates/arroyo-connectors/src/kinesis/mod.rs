@@ -1,11 +1,11 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use std::collections::HashMap;
 use typify::import_types;
 
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, TestSourceMessage};
-use arroyo_rpc::{api_types, ConnectorOptions, OperatorConfig};
+use arroyo_rpc::{ConnectorOptions, OperatorConfig, api_types};
 use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionSchema, ConnectionType, EmptyConfig};

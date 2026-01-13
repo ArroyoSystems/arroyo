@@ -15,9 +15,9 @@ use crate::webhook::MAX_INFLIGHT;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_rpc::ControlResp;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::ControlResp;
 use arroyo_state::global_table_config;
 
 pub struct WebhookSinkFunc {
@@ -78,34 +78,30 @@ impl ArrowOperator for WebhookSinkFunc {
                     match client.execute(req).await {
                         Ok(_) => break,
                         Err(e) => {
-                            if let Ok(mut last_reported) = error_lock.try_lock() {
-                                if last_reported.elapsed().unwrap_or_default()
+                            if let Ok(mut last_reported) = error_lock.try_lock()
+                                && last_reported.elapsed().unwrap_or_default()
                                     > Duration::from_secs(1)
-                                {
-                                    warn!("websink request failed: {:?}", e);
+                            {
+                                warn!("websink request failed: {:?}", e);
 
-                                    let details = if let Some(status) = e.status() {
-                                        format!(
-                                            "server responded with error code: {}",
-                                            status.as_u16()
-                                        )
-                                    } else {
-                                        e.to_string()
-                                    };
+                                let details = if let Some(status) = e.status() {
+                                    format!("server responded with error code: {}", status.as_u16())
+                                } else {
+                                    e.to_string()
+                                };
 
-                                    control_tx
-                                        .send(ControlResp::Error {
-                                            node_id,
-                                            operator_id: operator_id.clone(),
-                                            task_index,
-                                            message: format!("webhook failed (retry {retries})"),
-                                            details,
-                                        })
-                                        .await
-                                        .unwrap();
+                                control_tx
+                                    .send(ControlResp::Error {
+                                        node_id,
+                                        operator_id: operator_id.clone(),
+                                        task_index,
+                                        message: format!("webhook failed (retry {retries})"),
+                                        details,
+                                    })
+                                    .await
+                                    .unwrap();
 
-                                    *last_reported = SystemTime::now();
-                                }
+                                *last_reported = SystemTime::now();
                             }
 
                             retries += 1;

@@ -1,14 +1,14 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use arrow::{
     compute::{
-        concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices, max,
-        partition, take, SortColumn,
+        SortColumn, concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices,
+        max, partition, take,
     },
     row::{RowConverter, SortField},
 };
 use arrow_array::{
-    types::TimestampNanosecondType, Array, BooleanArray, PrimitiveArray, RecordBatch, StructArray,
-    TimestampNanosecondArray,
+    Array, BooleanArray, PrimitiveArray, RecordBatch, StructArray, TimestampNanosecondArray,
+    types::TimestampNanosecondType,
 };
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_operator::{
@@ -18,13 +18,13 @@ use arroyo_operator::{
 use arroyo_planner::schemas::window_arrow_struct;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
-    grpc::{api, rpc::TableConfig},
     Converter,
+    grpc::{api, rpc::TableConfig},
 };
 use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
 };
-use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
+use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time, to_nanos};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use std::borrow::Cow;
 use std::{
@@ -37,12 +37,12 @@ use arroyo_operator::context::Collector;
 use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::SendableRecordBatchStream;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 use tracing::{debug, warn};
 // TODO: advance futures outside of method calls.
@@ -138,10 +138,16 @@ impl SessionAggregatingWindowFunc {
 
                     let next_watermark_action = key_computation.next_watermark_action().unwrap();
                     if next_watermark_action == _next_watermark_action {
-                        bail!(" processed a watermark at {} and next watermark action stayed at {}. batches by start time {:?}, active_session date_end():{:?} ",
+                        bail!(
+                            " processed a watermark at {} and next watermark action stayed at {}. batches by start time {:?}, active_session date_end():{:?} ",
                             print_time(watermark),
-                            print_time(next_watermark_action), key_computation.batches_by_start_time,
-                            key_computation.active_session.as_ref().map(|session| print_time(session.data_end)));
+                            print_time(next_watermark_action),
+                            key_computation.batches_by_start_time,
+                            key_computation
+                                .active_session
+                                .as_ref()
+                                .map(|session| print_time(session.data_end))
+                        );
                     }
                     self.keys_by_next_watermark_action
                         .entry(next_watermark_action)
@@ -447,7 +453,9 @@ impl ActiveSession {
         }
 
         if start < to_nanos(self.data_start - gap) as i64 {
-            bail!("received a batch that starts before the current data_start - gap, this should not have happened.");
+            bail!(
+                "received a batch that starts before the current data_start - gap, this should not have happened."
+            );
         }
         if start < to_nanos(self.data_start) as i64 {
             self.data_start = from_nanos(start as u128);
@@ -774,7 +782,7 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
         "session_window".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("SessionAggregatingWindowFunc"),
             fields: vec![

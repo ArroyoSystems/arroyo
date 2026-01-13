@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::BTreeMap, sync::RwLock, time::SystemTime};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use arrow::compute::{max, min};
 use arrow_array::RecordBatch;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -16,10 +16,10 @@ use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};
 use arroyo_state::timestamp_table_config;
-use arroyo_types::{from_nanos, CheckpointBarrier, Watermark};
+use arroyo_types::{CheckpointBarrier, Watermark, from_nanos};
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::execution::context::SessionContext;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
@@ -62,10 +62,10 @@ impl WindowFunctionOperator {
         let max_timestamp = from_nanos(max(timestamp_column).unwrap() as u128);
 
         // early exit if all rows should be filtered.
-        if let Some(watermark) = watermark {
-            if max_timestamp < watermark {
-                return Ok(vec![]);
-            }
+        if let Some(watermark) = watermark
+            && max_timestamp < watermark
+        {
+            return Ok(vec![]);
         }
 
         if min_timestamp == max_timestamp {

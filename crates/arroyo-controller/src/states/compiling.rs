@@ -1,6 +1,6 @@
 use crate::states::StateError;
 
-use super::{scheduling::Scheduling, JobContext, State, Transition};
+use super::{JobContext, State, Transition, scheduling::Scheduling};
 
 #[derive(Debug)]
 pub struct Compiling;

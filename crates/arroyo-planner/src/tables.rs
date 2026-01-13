@@ -1,30 +1,32 @@
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
+    ArroyoSchemaProvider, DFField,
     external::{ProcessingMode, SqlSource},
-    fields_with_qualifiers, multifield_partial_ord, parse_sql, ArroyoSchemaProvider, DFField,
+    fields_with_qualifiers, multifield_partial_ord, parse_sql,
 };
-use crate::{rewrite_plan, DEFAULT_IDLE_TIME};
+use crate::{DEFAULT_IDLE_TIME, rewrite_plan};
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
+use arroyo_rpc::ConnectorOptions;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
-use arroyo_rpc::ConnectorOptions;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
+use datafusion::common::{Column, DataFusionError, plan_err};
 use datafusion::common::{
-    config::ConfigOptions, plan_datafusion_err, DFSchema, Result, ScalarValue,
+    DFSchema, Result, ScalarValue, config::ConfigOptions, plan_datafusion_err,
 };
-use datafusion::common::{plan_err, Column, DataFusionError};
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, ExprSchemable, Extension,
     LogicalPlan, WriteOp,
 };
+use datafusion::optimizer::OptimizerRule;
 use datafusion::optimizer::common_subexpr_eliminate::CommonSubexprEliminate;
 use datafusion::optimizer::decorrelate_lateral_join::DecorrelateLateralJoin;
 use datafusion::optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery;
@@ -45,11 +47,10 @@ use datafusion::optimizer::push_down_limit::PushDownLimit;
 use datafusion::optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggregate;
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
-use datafusion::optimizer::OptimizerRule;
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::{CreateTable, Query};
 use datafusion::{
-    optimizer::{optimizer::Optimizer, OptimizerContext},
+    optimizer::{OptimizerContext, optimizer::Optimizer},
     sql::{
         planner::SqlToRel,
         sqlparser::ast::{ColumnDef, ColumnOption, Statement},
@@ -268,12 +269,14 @@ impl ConnectorTable {
         let framing = Framing::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
 
-        if temporary {
-            if let Some(t) = options.insert_str("type", "lookup")? {
-                if t != "lookup" {
-                    return plan_err!("Cannot have a temporary table with type '{}'; temporary tables must be type 'lookup'", t);
-                }
-            }
+        if temporary
+            && let Some(t) = options.insert_str("type", "lookup")?
+            && t != "lookup"
+        {
+            return plan_err!(
+                "Cannot have a temporary table with type '{}'; temporary tables must be type 'lookup'",
+                t
+            );
         }
 
         let mut input_to_schema_fields = fields.clone();
@@ -616,25 +619,25 @@ impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
     type Node = Expr;
 
     fn f_down(&mut self, node: &'a Self::Node) -> Result<TreeNodeRecursion> {
-        if let Expr::ScalarFunction(func) = node {
-            if func.name() == "metadata" {
-                if self.depth > 0 {
-                    return plan_err!(
-                        "Metadata columns must have only a single call to 'metadata'"
-                    );
-                }
-
-                return if let &[arg] = &func.args.as_slice() {
-                    if let Expr::Literal(ScalarValue::Utf8(Some(key)), _) = &arg {
-                        self.key = Some(key.clone());
-                        Ok(TreeNodeRecursion::Stop)
-                    } else {
-                        plan_err!("For metadata columns, metadata call must have a literal string argument")
-                    }
-                } else {
-                    plan_err!("For metadata columns, metadata call must have a single argument")
-                };
+        if let Expr::ScalarFunction(func) = node
+            && func.name() == "metadata"
+        {
+            if self.depth > 0 {
+                return plan_err!("Metadata columns must have only a single call to 'metadata'");
             }
+
+            return if let &[arg] = &func.args.as_slice() {
+                if let Expr::Literal(ScalarValue::Utf8(Some(key)), _) = &arg {
+                    self.key = Some(key.clone());
+                    Ok(TreeNodeRecursion::Stop)
+                } else {
+                    plan_err!(
+                        "For metadata columns, metadata call must have a literal string argument"
+                    )
+                }
+            } else {
+                plan_err!("For metadata columns, metadata call must have a single argument")
+            };
         }
         self.depth += 1;
         Ok(TreeNodeRecursion::Continue)
@@ -792,14 +795,18 @@ impl Table {
             match connector.as_deref() {
                 Some("memory") | None => {
                     if fields.iter().any(|f| f.is_virtual()) {
-                        return plan_err!("Virtual fields are not supported in memory tables; instead write a query");
+                        return plan_err!(
+                            "Virtual fields are not supported in memory tables; instead write a query"
+                        );
                     }
 
                     if !connector_opts.is_empty() {
                         if connector.is_some() {
                             return plan_err!("Memory tables do not allow with options");
                         } else {
-                            return plan_err!("Memory tables do not allow with options; to create a connection table set the 'connector' option");
+                            return plan_err!(
+                                "Memory tables do not allow with options; to create a connection table set the 'connector' option"
+                            );
                         }
                     }
 
@@ -813,20 +820,21 @@ impl Table {
                     }))
                 }
                 Some(connector) => {
-                    let connection_profile =
-                        match connector_opts.pull_opt_str("connection_profile")? {
-                            Some(connection_profile_name) => Some(
-                                schema_provider
-                                    .profiles
-                                    .get(&connection_profile_name)
-                                    .ok_or_else(|| {
-                                        DataFusionError::Plan(format!(
+                    let connection_profile = match connector_opts
+                        .pull_opt_str("connection_profile")?
+                    {
+                        Some(connection_profile_name) => Some(
+                            schema_provider
+                                .profiles
+                                .get(&connection_profile_name)
+                                .ok_or_else(|| {
+                                    DataFusionError::Plan(format!(
                                         "connection profile '{connection_profile_name}' not found"
                                     ))
-                                    })?,
-                            ),
-                            None => None,
-                        };
+                                })?,
+                        ),
+                        None => None,
+                    };
 
                     let watermark_constraints: Vec<_> = constraints
                         .iter()

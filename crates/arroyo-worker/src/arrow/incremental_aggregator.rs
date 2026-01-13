@@ -1,6 +1,6 @@
 use crate::arrow::decode_aggregate;
 use crate::arrow::updating_cache::{Key, UpdatingCache};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use arrow::compute::max_array;
 use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{
@@ -23,17 +23,17 @@ use arroyo_operator::{
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::{api::UpdatingAggregateOperator, rpc::TableConfig};
-use arroyo_rpc::{updating_meta_fields, TIMESTAMP_FIELD, UPDATING_META_FIELD};
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD, updating_meta_fields};
 use arroyo_state::timestamp_table_config;
-use arroyo_types::{to_nanos, CheckpointBarrier, SignalMessage};
+use arroyo_types::{CheckpointBarrier, SignalMessage, to_nanos};
 use datafusion::common::{Result as DFResult, ScalarValue};
 use datafusion::physical_plan::udaf::AggregateFunctionExpr;
 use datafusion::physical_plan::{Accumulator, PhysicalExpr};
-use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
-use datafusion_proto::protobuf::physical_plan_node::PhysicalPlanType;
+use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use datafusion_proto::protobuf::PhysicalPlanNode;
+use datafusion_proto::protobuf::physical_plan_node::PhysicalPlanType;
 use futures::StreamExt;
 use itertools::Itertools;
 use prost::Message;
@@ -496,6 +496,8 @@ impl IncrementalAggregatingFunc {
             }
         }
 
+        drop(stream);
+
         // initialize the batch accumulator cache, if there are batch accumulators
         if self
             .aggregates
@@ -566,7 +568,9 @@ impl IncrementalAggregatingFunc {
 
                     let IncrementalState::Batch { data, .. } = &mut accumulators[accumulator_idx]
                     else {
-                        bail!("expected aggregate {accumulator_idx} to be a batch accumulator, but was sliding");
+                        bail!(
+                            "expected aggregate {accumulator_idx} to be a batch accumulator, but was sliding"
+                        );
                     };
 
                     if let Some(existing) = data.get_mut(args_row) {
@@ -734,7 +738,7 @@ impl IncrementalAggregatingFunc {
     }
 
     fn get_retracts(batch: &RecordBatch) -> Option<&BooleanArray> {
-        let retracts = if let Some(meta_col) = batch.column_by_name(UPDATING_META_FIELD) {
+        if let Some(meta_col) = batch.column_by_name(UPDATING_META_FIELD) {
             let meta_struct = meta_col
                 .as_any()
                 .downcast_ref::<StructArray>()
@@ -751,8 +755,7 @@ impl IncrementalAggregatingFunc {
             Some(is_retract)
         } else {
             None
-        };
-        retracts
+        }
     }
 
     fn make_accumulators(&self) -> Vec<IncrementalState> {
@@ -880,8 +883,7 @@ impl IncrementalAggregatingFunc {
     }
 
     fn compute_inputs(&self, batch: &&RecordBatch) -> Vec<Vec<ArrayRef>> {
-        let aggregate_input_cols = self
-            .aggregates
+        self.aggregates
             .iter()
             .map(|agg| {
                 agg.func
@@ -895,8 +897,7 @@ impl IncrementalAggregatingFunc {
                     })
                     .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>();
-        aggregate_input_cols
+            .collect::<Vec<_>>()
     }
 }
 
@@ -906,7 +907,7 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         "UpdatingAggregatingFunc".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         let aggregates = self
             .aggregates
             .iter()
@@ -1008,10 +1009,10 @@ impl ArrowOperator for IncrementalAggregatingFunc {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        if let Some(SignalMessage::EndOfData) = final_message {
-            if let Some(batch) = self.flush(ctx).await? {
-                collector.collect(batch).await?;
-            }
+        if let Some(SignalMessage::EndOfData) = final_message
+            && let Some(batch) = self.flush(ctx).await?
+        {
+            collector.collect(batch).await?;
         }
         Ok(())
     }

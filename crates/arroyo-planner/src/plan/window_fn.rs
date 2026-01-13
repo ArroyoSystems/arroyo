@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use arroyo_datastream::WindowType;
 use datafusion::common::tree_node::Transformed;
-use datafusion::common::{plan_err, tree_node::TreeNodeRewriter, Result as DFResult};
+use datafusion::common::{Result as DFResult, plan_err, tree_node::TreeNodeRewriter};
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::WindowFunctionParams;
 use datafusion::logical_expr::{
-    expr::WindowFunction, Expr, Extension, LogicalPlan, Projection, Sort, Window,
+    Expr, Extension, LogicalPlan, Projection, Sort, Window, expr::WindowFunction,
 };
 use tracing::debug;
 

@@ -5,20 +5,20 @@ pub mod schema_resolver;
 pub mod var_str;
 
 use crate::api_types::checkpoints::CheckpointEventSpan;
-use crate::config::{config, TlsConfig};
+use crate::config::{TlsConfig, config};
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::api::TaskCheckpointDetail;
 use crate::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{ArrowError, DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use datafusion::common::{
-    not_impl_err, plan_datafusion_err, plan_err, DFSchema, Result as DFResult, ScalarValue,
-    TableReference,
+    DFSchema, Result as DFResult, ScalarValue, TableReference, not_impl_err, plan_datafusion_err,
+    plan_err,
 };
 use datafusion::config::ConfigOptions;
 use datafusion::error::DataFusionError;
@@ -43,7 +43,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 use std::{fs, time::SystemTime};
 use tokio::sync::{
-    mpsc::{channel, Receiver, Sender},
+    mpsc::{Receiver, Sender, channel},
     oneshot,
 };
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint, Identity};
@@ -369,7 +369,7 @@ impl Converter {
                 Ok(row_converter.convert_columns(columns)?.row(0).owned())
             }
             Converter::Empty(row_converter, array) => Ok(row_converter
-                .convert_columns(&[array.clone()])?
+                .convert_columns(std::slice::from_ref(array))?
                 .row(0)
                 .owned()),
         }
@@ -814,7 +814,9 @@ impl ConnectorOptions {
                 value: SqlValue::SingleQuotedString(s),
                 span: _,
             })) => {
-                warn!("Referred to a field in `{name}` with a string—this is deprecated and will be unsupported after Arroyo 0.14");
+                warn!(
+                    "Referred to a field in `{name}` with a string—this is deprecated and will be unsupported after Arroyo 0.14"
+                );
                 Ok(Some(s))
             }
             Some(Expr::Identifier(ident)) => Ok(Some(ident.value)),
@@ -1167,7 +1169,7 @@ pub trait FromOpts: Sized {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_expr, DataSizeUnit};
+    use crate::{DataSizeUnit, parse_expr};
 
     #[test]
     fn test_parse_expr() {

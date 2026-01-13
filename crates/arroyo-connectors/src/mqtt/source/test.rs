@@ -1,24 +1,24 @@
 use arrow::array::UInt64Array;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
-use crate::mqtt::{create_connection, MqttConfig, Tls};
+use crate::mqtt::{MqttConfig, Tls, create_connection};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arroyo_operator::context::{
-    batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext,
+    ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext, batch_bounded,
 };
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_types::{to_nanos, ArrowMessage, ChainInfo, TaskInfo};
+use arroyo_types::{ArrowMessage, ChainInfo, TaskInfo, to_nanos};
 use rand::random;
 use rumqttc::mqttbytes::QoS;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use super::MqttSourceFunc;
 

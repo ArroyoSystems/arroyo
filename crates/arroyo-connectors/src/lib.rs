@@ -5,8 +5,8 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::var_str::VarStr;
 use arroyo_types::string_to_map;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
@@ -133,25 +133,24 @@ fn sanitize_schema(mut schema: Value) -> Value {
                 obj.remove("default");
 
                 // collapse schemars's type | null types
-                if let Some(Value::Array(types)) = obj.get_mut("type") {
-                    if types.len() == 2
-                        && types.iter().any(|t| t == "null")
-                        && types.iter().all(|t| t.is_string())
-                    {
-                        let non_null = types
-                            .iter()
-                            .find_map(|t| t.as_str().filter(|s| *s != "null"))
-                            .unwrap()
-                            .to_owned();
-                        *obj.get_mut("type").unwrap() = Value::String(non_null);
-                    }
+                if let Some(Value::Array(types)) = obj.get_mut("type")
+                    && types.len() == 2
+                    && types.iter().any(|t| t == "null")
+                    && types.iter().all(|t| t.is_string())
+                {
+                    let non_null = types
+                        .iter()
+                        .find_map(|t| t.as_str().filter(|s| *s != "null"))
+                        .unwrap()
+                        .to_owned();
+                    *obj.get_mut("type").unwrap() = Value::String(non_null);
                 }
 
                 // remove null from enums
-                if let Some(Value::Array(values)) = obj.get_mut("enum") {
-                    if let Some(i) = values.iter().position(|v| v.is_null()) {
-                        values.remove(i);
-                    }
+                if let Some(Value::Array(values)) = obj.get_mut("enum")
+                    && let Some(i) = values.iter().position(|v| v.is_null())
+                {
+                    values.remove(i);
                 }
 
                 // change anyOf to oneOf

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -12,9 +12,9 @@ use arroyo_rpc::retry;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
 use aws_config::{BehaviorVersion, Region};
+use aws_sdk_kinesis::Client as KinesisClient;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::types::PutRecordsRequestEntry;
-use aws_sdk_kinesis::Client as KinesisClient;
 use tracing::warn;
 use uuid::Uuid;
 

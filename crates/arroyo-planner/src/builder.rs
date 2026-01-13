@@ -10,7 +10,7 @@ use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use async_trait::async_trait;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{
-    plan_err, DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, Spans, TableReference,
+    DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, Spans, TableReference, plan_err,
 };
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
@@ -24,8 +24,9 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::runtime::Builder;
 use tokio::sync::oneshot;
 
+use crate::ArroyoSchemaProvider;
 use crate::extension::debezium::{
-    DebeziumUnrollingExtension, DEBEZIUM_UNROLLING_EXTENSION_NAME, TO_DEBEZIUM_EXTENSION_NAME,
+    DEBEZIUM_UNROLLING_EXTENSION_NAME, DebeziumUnrollingExtension, TO_DEBEZIUM_EXTENSION_NAME,
 };
 use crate::extension::key_calculation::KeyCalculationExtension;
 use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
@@ -34,12 +35,11 @@ use crate::physical::{
     ToDebeziumExec,
 };
 use crate::schemas::add_timestamp_field_arrow;
-use crate::ArroyoSchemaProvider;
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
-    protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode},
+    protobuf::{AggregateMode, physical_plan_node::PhysicalPlanType},
 };
 use prost::Message;
 
@@ -245,26 +245,26 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
         _session_state: &SessionState,
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
         let schema = node.schema().as_ref().into();
-        if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into() {
-            if arroyo_extension.transparent() {
-                match node.name() {
-                    DEBEZIUM_UNROLLING_EXTENSION_NAME => {
-                        let node = node
-                            .as_any()
-                            .downcast_ref::<DebeziumUnrollingExtension>()
-                            .unwrap();
-                        let input = physical_inputs[0].clone();
-                        return Ok(Some(Arc::new(DebeziumUnrollingExec::try_new(
-                            input,
-                            node.primary_keys.clone(),
-                        )?)));
-                    }
-                    TO_DEBEZIUM_EXTENSION_NAME => {
-                        let input = physical_inputs[0].clone();
-                        return Ok(Some(Arc::new(ToDebeziumExec::try_new(input)?)));
-                    }
-                    _ => return Ok(None),
+        if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into()
+            && arroyo_extension.transparent()
+        {
+            match node.name() {
+                DEBEZIUM_UNROLLING_EXTENSION_NAME => {
+                    let node = node
+                        .as_any()
+                        .downcast_ref::<DebeziumUnrollingExtension>()
+                        .unwrap();
+                    let input = physical_inputs[0].clone();
+                    return Ok(Some(Arc::new(DebeziumUnrollingExec::try_new(
+                        input,
+                        node.primary_keys.clone(),
+                    )?)));
                 }
+                TO_DEBEZIUM_EXTENSION_NAME => {
+                    let input = physical_inputs[0].clone();
+                    return Ok(Some(Arc::new(ToDebeziumExec::try_new(input)?)));
+                }
+                _ => return Ok(None),
             }
         };
         let name =
@@ -302,14 +302,14 @@ impl PlanToGraphVisitor<'_> {
         input_nodes: Vec<NodeIndex>,
         extension: &dyn ArroyoExtension,
     ) -> Result<()> {
-        if let Some(node_name) = extension.node_name() {
-            if self.named_nodes.contains_key(&node_name) {
-                // we should've short circuited
-                return plan_err!(
-                    "extension {:?} has already been planned, shouldn't try again.",
-                    node_name
-                );
-            }
+        if let Some(node_name) = extension.node_name()
+            && self.named_nodes.contains_key(&node_name)
+        {
+            // we should've short circuited
+            return plan_err!(
+                "extension {:?} has already been planned, shouldn't try again.",
+                node_name
+            );
         }
 
         let input_schemas = input_nodes
@@ -359,11 +359,11 @@ impl TreeNodeVisitor<'_> for PlanToGraphVisitor<'_> {
             return Ok(TreeNodeRecursion::Continue);
         }
 
-        if let Some(name) = arroyo_extension.node_name() {
-            if let Some(node_index) = self.named_nodes.get(&name) {
-                self.add_index_to_traversal(*node_index);
-                return Ok(TreeNodeRecursion::Jump);
-            }
+        if let Some(name) = arroyo_extension.node_name()
+            && let Some(node_index) = self.named_nodes.get(&name)
+        {
+            self.add_index_to_traversal(*node_index);
+            return Ok(TreeNodeRecursion::Jump);
         }
 
         if !node.inputs().is_empty() {
@@ -387,10 +387,10 @@ impl TreeNodeVisitor<'_> for PlanToGraphVisitor<'_> {
             return Ok(TreeNodeRecursion::Continue);
         }
 
-        if let Some(name) = arroyo_extension.node_name() {
-            if self.named_nodes.contains_key(&name) {
-                return Ok(TreeNodeRecursion::Continue);
-            }
+        if let Some(name) = arroyo_extension.node_name()
+            && self.named_nodes.contains_key(&name)
+        {
+            return Ok(TreeNodeRecursion::Continue);
         }
 
         let input_nodes = if !node.inputs().is_empty() {

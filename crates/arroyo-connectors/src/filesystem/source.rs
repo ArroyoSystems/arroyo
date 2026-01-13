@@ -1,5 +1,5 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::future::ready;
 use std::hash::{Hash, Hasher};
 use std::time::SystemTime;
@@ -15,25 +15,25 @@ use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
 use futures::StreamExt;
-use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use parquet::arrow::async_reader::ParquetObjectReader;
 
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::select;
-use tokio_stream::wrappers::LinesStream;
 use tokio_stream::Stream;
+use tokio_stream::wrappers::LinesStream;
 use tracing::info;
 
 use crate::filesystem::config;
 use crate::filesystem::config::SourceFileCompressionFormat;
-use arroyo_operator::operator::SourceOperator;
 use arroyo_operator::SourceFinishType;
+use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::errors::DataflowError;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage};
+use arroyo_rpc::{ControlMessage, connector_err, grpc::rpc::StopMode};
 use arroyo_storage::StorageProvider;
 use arroyo_types::to_nanos;
 
@@ -148,12 +148,14 @@ impl SourceOperator for FileSystemSourceFunc {
 }
 
 impl FileSystemSourceFunc {
-    async fn get_newline_separated_stream(
+    async fn get_newline_separated_stream<'a>(
         &mut self,
-        storage_provider: &StorageProvider,
+        storage_provider: &'a StorageProvider,
         path: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, DataflowError>> + Unpin + Send>, DataflowError>
-    {
+    ) -> Result<
+        Box<dyn Stream<Item = Result<String, DataflowError>> + Unpin + Send + 'a>,
+        DataflowError,
+    > {
         match &self.format {
             Format::Json(_) => {
                 let stream_reader = storage_provider.get_as_stream(path).await.unwrap();

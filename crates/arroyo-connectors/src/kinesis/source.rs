@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::{HashMap, hash_map::DefaultHasher},
     fmt::Debug,
     hash::{Hash, Hasher},
     pin::Pin,
@@ -7,26 +7,26 @@ use std::{
 };
 
 use super::SourceOffset;
-use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
+use anyhow::{Context as AnyhowContext, Result, anyhow, bail};
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
+use arroyo_rpc::{ControlMessage, grpc::rpc::StopMode};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::from_nanos;
 use async_trait::async_trait;
 use aws_config::{BehaviorVersion, Region};
+use aws_sdk_kinesis::Client as KinesisClient;
 use aws_sdk_kinesis::error::SdkError;
 use aws_sdk_kinesis::operation::get_records::GetRecordsOutput;
 use aws_sdk_kinesis::operation::get_shard_iterator::builders::GetShardIteratorFluentBuilder;
 use aws_sdk_kinesis::types::{Shard, ShardIteratorType};
-use aws_sdk_kinesis::Client as KinesisClient;
 use bincode::{Decode, Encode};
-use futures::{stream::FuturesUnordered, Future, StreamExt};
+use futures::{Future, StreamExt, stream::FuturesUnordered};
 use tokio::{
     select,
     time::{Duration, MissedTickBehavior},

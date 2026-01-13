@@ -5,12 +5,12 @@ use tokio::time::MissedTickBehavior;
 
 use tracing::error;
 
+use crate::JobMessage;
 use crate::states::finishing::Finishing;
 use crate::states::recovering::Recovering;
 use crate::states::rescaling::Rescaling;
 use crate::states::restarting::Restarting;
 use crate::states::{fatal, stop_if_desired_running};
-use crate::JobMessage;
 use crate::{job_controller::ControllerProgress, states::StateError};
 use arroyo_rpc::config::config;
 use arroyo_rpc::log_event;
@@ -61,14 +61,13 @@ impl State for Running {
                             let job_controller = ctx.job_controller.as_mut().unwrap();
 
                             for (node_id, p) in &c.parallelism_overrides {
-                                if let Some(actual) = job_controller.operator_parallelism(*node_id){
-                                    if actual != *p {
+                                if let Some(actual) = job_controller.operator_parallelism(*node_id)
+                                    && actual != *p {
                                         return Ok(Transition::next(
                                             *self,
                                             Rescaling {}
                                         ));
                                     }
-                                }
                             }
 
                             job_controller.update_config(c);

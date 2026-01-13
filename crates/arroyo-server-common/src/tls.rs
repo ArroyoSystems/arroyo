@@ -1,5 +1,5 @@
-use anyhow::{anyhow, bail, Result};
-use arroyo_rpc::config::{config, ApiAuthMode, TlsConfig};
+use anyhow::{Result, anyhow, bail};
+use arroyo_rpc::config::{ApiAuthMode, TlsConfig, config};
 use arroyo_rpc::native_cert_store;
 use axum_server::tls_rustls::RustlsConfig;
 use rustls::pki_types::pem::PemObject;
@@ -133,8 +133,10 @@ pub async fn create_tcp_client_tls_config(tls_config: &TlsConfig) -> Result<Arc<
 
         config_builder
             .with_client_auth_cert(
-                vec![CertificateDer::from_pem_slice(&tls_config.cert)
-                    .map_err(|e| anyhow!("invalid worker TLS cert: {:?}", e))?],
+                vec![
+                    CertificateDer::from_pem_slice(&tls_config.cert)
+                        .map_err(|e| anyhow!("invalid worker TLS cert: {:?}", e))?,
+                ],
                 PrivateKeyDer::from_pem_slice(&tls_config.key)
                     .map_err(|e| anyhow!("invalid worker TLS key: {:?}", e))?,
             )

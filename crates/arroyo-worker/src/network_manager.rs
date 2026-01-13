@@ -1,5 +1,5 @@
 #![allow(clippy::redundant_slicing)]
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use arrow::buffer::MutableBuffer;
 use arrow::ipc::reader::read_record_batch;
 use arrow::ipc::writer::{DictionaryTracker, EncodedData, IpcDataGenerator, IpcWriteOptions};
@@ -26,12 +26,12 @@ use tokio::{
 };
 
 use arroyo_operator::context::{BatchReceiver, BatchSender};
-use tokio::time::{interval, Interval};
+use tokio::time::{Interval, interval};
 use tokio_rustls::rustls::pki_types::{IpAddr, ServerName};
 use tokio_stream::StreamExt;
 
 use arroyo_operator::inq_reader::InQReader;
-use arroyo_rpc::config::{config, TlsConfig};
+use arroyo_rpc::config::{TlsConfig, config};
 use arroyo_rpc::intern;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use url::{Host, Url};
@@ -485,7 +485,7 @@ impl NetworkManager {
 
                 match &mut *s {
                     InStreamsOrSenders::InStreams(streams) => streams.push(network_stream),
-                    InStreamsOrSenders::Senders(ref senders) => {
+                    InStreamsOrSenders::Senders(senders) => {
                         let senders = senders.clone();
 
                         tokio::spawn(async move {
@@ -505,7 +505,7 @@ impl NetworkManager {
         let mut sockets = self.in_streams.lock().await;
 
         match &mut *sockets {
-            InStreamsOrSenders::InStreams(ref mut in_streams) => {
+            InStreamsOrSenders::InStreams(in_streams) => {
                 for s in in_streams.drain(..) {
                     let senders = senders.clone();
                     tokio::spawn(async move {
@@ -554,7 +554,7 @@ pub async fn write_message_and_header<W: AsyncWrite + AsyncWriteExt>(
     encoded: EncodedData,
 ) -> Result<(), ArrowError> {
     let arrow_data_len = encoded.arrow_data.len();
-    if arrow_data_len % 8 != 0 {
+    if !arrow_data_len.is_multiple_of(8) {
         return Err(ArrowError::MemoryError(
             "Arrow data not aligned".to_string(),
         ));
@@ -645,7 +645,7 @@ mod test {
 
     use arroyo_operator::context::batch_bounded;
     use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
-    use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
+    use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, to_nanos};
     use tokio::time::timeout;
 
     use crate::network_manager::{MessageType, Quad};

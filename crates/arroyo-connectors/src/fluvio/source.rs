@@ -1,12 +1,12 @@
 use super::SourceOffset;
 use anyhow::anyhow;
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::{connector_err, grpc::rpc::StopMode, ControlMessage};
+use arroyo_rpc::{ControlMessage, connector_err, grpc::rpc::StopMode};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::*;
@@ -15,7 +15,7 @@ use bincode::{Decode, Encode};
 use fluvio::dataplane::link::ErrorCode;
 use fluvio::metadata::objects::Metadata;
 use fluvio::metadata::topic::TopicSpec;
-use fluvio::{consumer::Record as ConsumerRecord, Fluvio, FluvioConfig, Offset};
+use fluvio::{Fluvio, FluvioConfig, Offset, consumer::Record as ConsumerRecord};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::select;
@@ -68,7 +68,8 @@ impl FluvioSourceFunc {
     async fn get_consumer(
         &mut self,
         ctx: &mut SourceContext,
-    ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>>>> {
+    ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>> + use<>>>
+    {
         info!("Creating Fluvio consumer for {:?}", self.endpoint);
 
         let config: Option<FluvioConfig> = self.endpoint.as_ref().map(FluvioConfig::new);
@@ -147,8 +148,10 @@ impl FluvioSourceFunc {
         let mut streams = self.get_consumer(ctx).await?;
 
         if streams.is_empty() {
-            warn!("Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
-                ctx.task_info.operator_id, ctx.task_info.task_index);
+            warn!(
+                "Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
+                ctx.task_info.operator_id, ctx.task_info.task_index
+            );
             collector
                 .broadcast(SignalMessage::Watermark(Watermark::Idle))
                 .await;

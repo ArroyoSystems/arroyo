@@ -2,7 +2,7 @@ use crate::StorageError;
 use aws_config::timeout::TimeoutConfig;
 use aws_config::{BehaviorVersion, SdkConfig};
 use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
-use object_store::{aws::AwsCredential, CredentialProvider};
+use object_store::{CredentialProvider, aws::AwsCredential};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::OnceCell;

@@ -18,7 +18,7 @@
 
 #[allow(deprecated)]
 use pyo3::GILPool;
-use pyo3::{ffi::*, prepare_freethreaded_python, PyErr, Python};
+use pyo3::{PyErr, Python, ffi::*, prepare_freethreaded_python};
 use std::ffi::CStr;
 
 /// A Python sub-interpreter with its own GIL.

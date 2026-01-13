@@ -7,13 +7,13 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
-use crate::{render_schema, EmptyConfig};
+use crate::{EmptyConfig, render_schema};
 
 use crate::filesystem::config::{
     DeltaLakeSink, DeltaLakeTable, DeltaLakeTableType, FileSystemSink,
 };
 use crate::filesystem::sink::partitioning::PartitionerMode;
-use crate::filesystem::{make_sink, TableFormat};
+use crate::filesystem::{TableFormat, make_sink};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 

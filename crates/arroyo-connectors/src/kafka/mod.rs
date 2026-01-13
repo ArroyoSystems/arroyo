@@ -9,16 +9,16 @@ use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, SchemaResolver,
 };
-use arroyo_rpc::{schema_resolver, var_str::VarStr, ConnectorOptions, OperatorConfig};
+use arroyo_rpc::{ConnectorOptions, OperatorConfig, schema_resolver, var_str::VarStr};
 use arroyo_types::string_to_map;
 use aws_config::Region;
 use aws_msk_iam_sasl_signer::generate_auth_token;
 use futures::TryFutureExt;
 use rdkafka::{
+    ClientConfig, ClientContext, Message, Offset, TopicPartitionList,
     client::OAuthToken,
     consumer::{Consumer, ConsumerContext},
     producer::ProducerContext,
-    ClientConfig, ClientContext, Message, Offset, TopicPartitionList,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,7 +36,7 @@ use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
 
-use crate::{send, ConnectionType};
+use crate::{ConnectionType, send};
 
 use crate::kafka::sink::KafkaSinkFunc;
 use crate::kafka::source::KafkaSourceFunc;
@@ -60,7 +60,7 @@ import_types!(
 import_types!(schema = "src/kafka/table.json");
 
 impl KafkaTable {
-    pub fn subject(&self) -> Cow<str> {
+    pub fn subject(&self) -> Cow<'_, str> {
         match &self.value_subject {
             None => Cow::Owned(format!("{}-value", self.topic)),
             Some(s) => Cow::Borrowed(s),
@@ -288,11 +288,11 @@ impl Connector for KafkaConnector {
 
             let mut message = tester.test_connection().await;
 
-            if !message.error {
-                if let Err(e) = tester.test_schema_registry().await {
-                    message.error = true;
-                    message.message = format!("Failed to connect to schema registry: {e:?}");
-                }
+            if !message.error
+                && let Err(e) = tester.test_schema_registry().await
+            {
+                message.error = true;
+                message.message = format!("Failed to connect to schema registry: {e:?}");
             }
 
             message.done = true;
@@ -608,12 +608,16 @@ impl KafkaTester {
             }) => {
                 if *confluent_schema_registry {
                     if msg[0] != 0 {
-                        bail!("Message appears to be encoded as normal JSON, rather than SR-JSON, but the schema registry is enabled. Ensure that the format and schema type are correct.");
+                        bail!(
+                            "Message appears to be encoded as normal JSON, rather than SR-JSON, but the schema registry is enabled. Ensure that the format and schema type are correct."
+                        );
                     }
                     serde_json::from_slice::<Value>(&msg[5..]).map_err(|e|
                         anyhow!("Failed to parse message as schema-registry JSON (SR-JSON): {:?}. Ensure that the format and schema type are correct.", e))?;
                 } else if msg[0] == 0 {
-                    bail!("Message is not valid JSON. It may be encoded as SR-JSON, but the schema registry is not enabled. Ensure that the format and schema type are correct.");
+                    bail!(
+                        "Message is not valid JSON. It may be encoded as SR-JSON, but the schema registry is not enabled. Ensure that the format and schema type are correct."
+                    );
                 } else {
                     serde_json::from_slice::<Value>(&msg).map_err(|e|
                         anyhow!("Failed to parse message as JSON: {:?}. Ensure that the format and schema type are correct.", e))?;
@@ -641,7 +645,9 @@ impl KafkaTester {
                     .map_err(|e| anyhow!("Failed to construct schema registry: {:?}", e))?;
 
                     if msg[0] != 0 {
-                        bail!("Message appears to be encoded as normal Avro, rather than SR-Avro, but the schema registry is enabled. Ensure that the format and schema type are correct.");
+                        bail!(
+                            "Message appears to be encoded as normal Avro, rather than SR-Avro, but the schema registry is enabled. Ensure that the format and schema type are correct."
+                        );
                     }
 
                     let aschema: ArroyoSchema = schema.clone().into();
@@ -664,7 +670,10 @@ impl KafkaTester {
                     }
 
                     if let Some(error) = error {
-                        bail!("Failed to parse message as schema-registry Avro (SR-Avro): {}. Ensure that the format and schema type are correct.", error);
+                        bail!(
+                            "Failed to parse message as schema-registry Avro (SR-Avro): {}. Ensure that the format and schema type are correct.",
+                            error
+                        );
                     }
                 } else {
                     let aschema: ArroyoSchema = schema.clone().into();
@@ -687,9 +696,14 @@ impl KafkaTester {
 
                     if let Some(error) = error {
                         if msg[0] == 0 {
-                            bail!("Failed to parse message as regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct.");
+                            bail!(
+                                "Failed to parse message as regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct."
+                            );
                         } else {
-                            bail!("Failed to parse message as Avro: {}. Ensure that the format and schema type are correct.", error);
+                            bail!(
+                                "Failed to parse message as Avro: {}. Ensure that the format and schema type are correct.",
+                                error
+                            );
                         };
                     }
                 }

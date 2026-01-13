@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
 
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::TableConfig;
-use arroyo_rpc::{grpc::rpc::StopMode, ControlMessage};
+use arroyo_rpc::{ControlMessage, grpc::rpc::StopMode};
 use arroyo_state::global_table_config;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::{SignalMessage, Watermark};

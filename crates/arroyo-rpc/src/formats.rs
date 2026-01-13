@@ -1,5 +1,5 @@
 use crate::ConnectorOptions;
-use datafusion::common::{plan_datafusion_err, plan_err, Result as DFResult};
+use datafusion::common::{Result as DFResult, plan_datafusion_err, plan_err};
 use datafusion::error::DataFusionError;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -98,7 +98,9 @@ impl JsonFormat {
         let include_schema = opts.pull_opt_bool("json.include_schema")?.unwrap_or(false);
 
         if include_schema && confluent_schema_registry {
-            return plan_err!("at most one of `json.confluent_schema_registry` and `json.include_schema` may be set");
+            return plan_err!(
+                "at most one of `json.confluent_schema_registry` and `json.include_schema` may be set"
+            );
         }
 
         let unstructured = opts.pull_opt_bool("json.unstructured")?.unwrap_or(false);
@@ -448,7 +450,7 @@ impl BadData {
                 return plan_err!(
                     "invalid value for 'bad_data': `{}`; expected one of 'drop' or 'fail'",
                     f
-                )
+                );
             }
         };
 

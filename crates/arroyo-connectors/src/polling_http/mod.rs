@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arroyo_rpc::{var_str::VarStr, ConnectorOptions, OperatorConfig};
+use arroyo_rpc::{ConnectorOptions, OperatorConfig, var_str::VarStr};
 use arroyo_types::string_to_map;
 use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
@@ -16,7 +16,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{construct_http_client, EmptyConfig};
+use crate::{EmptyConfig, construct_http_client};
 
 use crate::polling_http::operator::{PollingHttpSourceFunc, PollingHttpSourceState};
 use arroyo_operator::connector::Connector;

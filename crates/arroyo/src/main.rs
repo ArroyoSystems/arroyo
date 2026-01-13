@@ -2,11 +2,11 @@ mod run;
 
 use anyhow::{anyhow, bail};
 use arroyo_planner::{ArroyoSchemaProvider, SqlConfig};
-use arroyo_rpc::config::{config, DatabaseType};
+use arroyo_rpc::config::{DatabaseType, config};
 use arroyo_rpc::{config, log_event};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
 use arroyo_server_common::start_admin_server;
-use arroyo_worker::{utils, WorkerServer};
+use arroyo_worker::{WorkerServer, utils};
 use clap::{Args, Parser, Subcommand};
 use clio::Input;
 use cornucopia_async::DatabaseSource;
@@ -38,7 +38,7 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 #[allow(non_upper_case_globals)]
-#[export_name = "malloc_conf"]
+#[unsafe(export_name = "malloc_conf")]
 pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 
 #[derive(Parser)]

@@ -1,7 +1,7 @@
 use crate::ArroyoSchemaProvider;
 use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
-use arrow_array::cast::{as_string_array, AsArray};
+use arrow_array::cast::{AsArray, as_string_array};
 use arrow_array::types::{Float64Type, Int64Type};
 use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
 use arrow_schema::{DataType, Field, UnionFields, UnionMode};
@@ -10,10 +10,10 @@ use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr::{Alias, ScalarFunction};
 use datafusion::logical_expr::{
-    create_udf, ColumnarValue, LogicalPlan, Projection, ScalarFunctionArgs, ScalarUDFImpl,
-    Signature, TypeSignature, Volatility,
+    ColumnarValue, LogicalPlan, Projection, ScalarFunctionArgs, ScalarUDFImpl, Signature,
+    TypeSignature, Volatility, create_udf,
 };
-use datafusion::prelude::{col, Expr};
+use datafusion::prelude::{Expr, col};
 use serde_json_path::JsonPath;
 use std::any::Any;
 use std::collections::HashMap;
@@ -228,7 +228,7 @@ where
         }
         (ColumnarValue::Scalar(value), ColumnarValue::Scalar(path)) => {
             let path = parse_path(name, path)?;
-            let ScalarValue::Utf8(ref value) = value else {
+            let ScalarValue::Utf8(value) = value else {
                 return Err(DataFusionError::Execution(format!(
                     "The value argument to {name} must be of type TEXT"
                 )));
@@ -242,7 +242,7 @@ where
         _ => {
             return Err(DataFusionError::Execution(
                 "The path argument to {name} must be a literal".to_string(),
-            ))
+            ));
         }
     })
 }
@@ -276,7 +276,7 @@ pub fn extract_json(args: &[ColumnarValue]) -> Result<ColumnarValue> {
         }
         (ColumnarValue::Scalar(value), ColumnarValue::Scalar(path)) => {
             let path = parse_path("extract_json", path)?;
-            let ScalarValue::Utf8(ref v) = value else {
+            let ScalarValue::Utf8(v) = value else {
                 return Err(DataFusionError::Execution(
                     "The value argument to extract_json must be of type TEXT".to_string(),
                 ));
@@ -291,7 +291,7 @@ pub fn extract_json(args: &[ColumnarValue]) -> Result<ColumnarValue> {
         _ => {
             return Err(DataFusionError::Execution(
                 "The path argument to extract_json must be a literal".to_string(),
-            ))
+            ));
         }
     })
 }
@@ -471,8 +471,8 @@ pub(crate) fn serialize_outgoing_json(
 
 #[cfg(test)]
 mod test {
-    use arrow_array::builder::{ListBuilder, StringBuilder};
     use arrow_array::StringArray;
+    use arrow_array::builder::{ListBuilder, StringBuilder};
     use datafusion::common::ScalarValue;
     use std::sync::Arc;
 

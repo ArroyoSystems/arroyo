@@ -1,6 +1,6 @@
 use arrow::datatypes::{Field, Fields};
 use arrow_schema::DataType;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 pub mod encoders;
@@ -116,7 +116,7 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
                 "field": field.name().clone(),
                 "optional": field.is_nullable(),
                 "name": "org.apache.kafka.connect.data.Date"
-            }}
+            }};
         }
         Duration(_) => "int64",
         Interval(_) => "int64",
@@ -146,7 +146,7 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
                 "optional": field.is_nullable(),
                 "name": "org.apache.kafka.connect.data.Decimal",
                 "scale": scale
-            }}
+            }};
         }
         Decimal256(_, _) => todo!(),
         Map(_, _) => todo!(),

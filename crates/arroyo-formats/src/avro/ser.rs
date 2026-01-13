@@ -1,9 +1,9 @@
-use apache_avro::types::{Record, Value};
 use apache_avro::Schema;
+use apache_avro::types::{Record, Value};
 use arrow_array::cast::AsArray;
 use arrow_array::types::{
-    Decimal128Type, Float16Type, Float32Type, Float64Type, Int32Type, Int64Type, Int8Type,
-    TimestampNanosecondType, UInt32Type, UInt64Type, UInt8Type,
+    Decimal128Type, Float16Type, Float32Type, Float64Type, Int8Type, Int32Type, Int64Type,
+    TimestampNanosecondType, UInt8Type, UInt32Type, UInt64Type,
 };
 use arrow_array::{Array, ArrayRef, RecordBatch};
 use arrow_schema::{DataType, TimeUnit};
@@ -293,8 +293,8 @@ pub fn serialize(schema: &Schema, batch: &RecordBatch) -> Vec<Value> {
 mod tests {
     use crate::avro::schema::to_avro;
     use crate::avro::ser::serialize;
-    use arrow_array::builder::{Int64Builder, ListBuilder, StringBuilder, StructBuilder};
     use arrow_array::RecordBatch;
+    use arrow_array::builder::{Int64Builder, ListBuilder, StringBuilder, StructBuilder};
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
 

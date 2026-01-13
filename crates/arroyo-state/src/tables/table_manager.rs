@@ -2,16 +2,16 @@ use std::any::Any;
 
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use arroyo_rpc::CompactionResult;
 use arroyo_rpc::{
+    CheckpointCompleted, ControlResp,
     grpc::rpc::{
         SubtaskCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata,
     },
-    CheckpointCompleted, ControlResp,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo};
+use arroyo_types::{CheckpointBarrier, Data, Key, TaskInfo, from_micros, to_micros};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
@@ -23,8 +23,8 @@ use super::expiring_time_key_map::{
 use super::global_keyed_map::GlobalKeyedView;
 use super::{ErasedCheckpointer, ErasedTable};
 use crate::{
-    get_storage_provider, tables::global_keyed_map::GlobalKeyedTable, BackingStore, StateBackend,
-    StateMessage,
+    BackingStore, StateBackend, StateMessage, get_storage_provider,
+    tables::global_keyed_map::GlobalKeyedTable,
 };
 use crate::{CheckpointMessage, TableData};
 use arroyo_rpc::errors::{DataflowResult, StateError};
@@ -157,7 +157,10 @@ impl BackendFlusher {
                     )?;
                     metadatas.insert(table_name, new_metadata);
                 } else {
-                    warn!("received compaction map for operator {} table {} but no metadata. no checkpoint emitted, as we trust the subtask. map is {:?}", self.task_info.operator_id, table_name, compacted_metadata);
+                    warn!(
+                        "received compaction map for operator {} table {} but no metadata. no checkpoint emitted, as we trust the subtask. map is {:?}",
+                        self.task_info.operator_id, table_name, compacted_metadata
+                    );
                 }
             }
         }

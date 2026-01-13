@@ -1,16 +1,17 @@
 use axum::response::{Html, IntoResponse, Response};
 use axum::{
-    routing::{delete, get, patch, post},
     Json, Router,
+    routing::{delete, get, patch, post},
 };
 
-use http::{header, HeaderMap, HeaderName, StatusCode, Uri};
+use http::{HeaderMap, HeaderName, StatusCode, Uri, header};
 use rust_embed::RustEmbed;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::ApiDoc;
 use crate::connection_profiles::{
     create_connection_profile, delete_connection_profile, get_connection_profile_autocomplete,
     get_connection_profiles, test_connection_profile,
@@ -30,7 +31,6 @@ use crate::pipelines::{
 };
 use crate::rest_utils::not_found;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
-use crate::ApiDoc;
 use arroyo_rpc::config::config;
 use cornucopia_async::DatabaseSource;
 

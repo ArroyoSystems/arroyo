@@ -4,7 +4,7 @@ use crate::filesystem::config::{
 use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 use crate::filesystem::sink::iceberg::transforms;
 use crate::filesystem::sink::partitioning::PartitionerMode;
-use crate::filesystem::{make_sink, sink, TableFormat};
+use crate::filesystem::{TableFormat, make_sink, sink};
 use crate::render_schema;
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::Connection;
@@ -18,8 +18,8 @@ use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use datafusion::common::plan_datafusion_err;
 use datafusion::execution::FunctionRegistry;
 use iceberg::Catalog;
-use reqwest::header::{HeaderMap, AUTHORIZATION};
 use reqwest::Client;
+use reqwest::header::{AUTHORIZATION, HeaderMap};
 use std::collections::HashMap;
 
 pub struct IcebergConnector {}

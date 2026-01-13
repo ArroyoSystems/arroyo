@@ -1,8 +1,8 @@
+use crate::JobMessage;
 use crate::states::recovering::Recovering;
 use crate::states::scheduling::Scheduling;
 use crate::states::stop_if_desired_non_running;
 use crate::types::public::RestartMode;
-use crate::JobMessage;
 
 use super::{JobContext, State, StateError, Transition};
 

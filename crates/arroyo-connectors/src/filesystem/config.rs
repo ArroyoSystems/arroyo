@@ -6,10 +6,10 @@ use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
 use core::slice::Iter;
 use datafusion::common::{
-    plan_datafusion_err, plan_err, DFSchema, DataFusionError, Result, ScalarValue,
+    DFSchema, DataFusionError, Result, ScalarValue, plan_datafusion_err, plan_err,
 };
 use datafusion::logical_expr::sqlparser::ast::Function;
-use datafusion::prelude::{col, concat, lit, to_char, Expr};
+use datafusion::prelude::{Expr, col, concat, lit, to_char};
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::{
     Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
@@ -383,10 +383,10 @@ impl FromOpts for FileSystemSource {
     fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
         let regex_pattern = opts.pull_opt_str("source.regex_pattern")?;
 
-        if let Some(regex) = &regex_pattern {
-            if let Err(e) = Regex::new(regex) {
-                return plan_err!("could not parse regex_pattern '{regex}': {:?}", e);
-            }
+        if let Some(regex) = &regex_pattern
+            && let Err(e) = Regex::new(regex)
+        {
+            return plan_err!("could not parse regex_pattern '{regex}': {:?}", e);
         }
 
         Ok(Self {

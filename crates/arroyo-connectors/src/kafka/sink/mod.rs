@@ -229,7 +229,7 @@ impl ArrowOperator for KafkaSinkFunc {
         format!("kafka-producer-{}", self.topic)
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("KafkaSinkFunc"),
             fields: vec![
@@ -356,7 +356,9 @@ impl ArrowOperator for KafkaSinkFunc {
         };
 
         let Some(committing_producer) = producer_to_complete.take() else {
-            error!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
+            error!(
+                "received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented"
+            );
             return Ok(());
         };
 

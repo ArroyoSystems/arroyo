@@ -19,8 +19,7 @@ use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
 #[cfg(not(feature = "python-enabled"))]
-const NOT_ENABLED_ERROR: &str =
-    "Python is not enabled in this build of Arroyo. See https://doc.arroyo.dev/udfs/python/udfs \
+const NOT_ENABLED_ERROR: &str = "Python is not enabled in this build of Arroyo. See https://doc.arroyo.dev/udfs/python/udfs \
             for more information on how to obtain a Python-enabled build.";
 
 #[cfg(feature = "python-enabled")]

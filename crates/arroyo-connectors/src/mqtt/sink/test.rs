@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use super::MqttSinkFunc;
-use crate::mqtt::{create_connection, MqttConfig, Tls};
+use crate::mqtt::{MqttConfig, Tls, create_connection};
 use crate::test::DummyCollector;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arroyo_operator::context::OperatorContext;
@@ -16,7 +16,7 @@ use arroyo_rpc::{
 };
 use arroyo_types::{get_test_task_info, to_nanos};
 use parquet::data_type::AsBytes;
-use rumqttc::{mqttbytes::QoS, Event, Incoming, Outgoing};
+use rumqttc::{Event, Incoming, Outgoing, mqttbytes::QoS};
 use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 

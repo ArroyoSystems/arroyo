@@ -1,14 +1,13 @@
 use std::{collections::HashMap, time::SystemTime};
 
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
-    connector_err,
+    ControlMessage, connector_err,
     errors::DataflowResult,
     formats::{BadData, Format, Framing},
     grpc::rpc::{StopMode, TableConfig},
-    ControlMessage,
 };
 use async_trait::async_trait;
 use tokio::{

@@ -1,16 +1,16 @@
 use anyhow::bail;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{
-    node_grpc_server::NodeGrpc, node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp,
-    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq,
-    StopWorkerResp, StopWorkerStatus, WorkerFinishedReq, WorkerInfo,
+    GetWorkersReq, GetWorkersResp, HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq,
+    StartWorkerResp, StopWorkerReq, StopWorkerResp, StopWorkerStatus, WorkerFinishedReq,
+    WorkerInfo, node_grpc_server::NodeGrpc, node_grpc_server::NodeGrpcServer,
 };
 use arroyo_rpc::{controller_client, local_address};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{to_millis, MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV};
+use arroyo_types::{JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId, to_millis};
 use lazy_static::lazy_static;
-use prometheus::{register_gauge, Gauge};
+use prometheus::{Gauge, register_gauge};
 use rand::random;
 use std::env::current_exe;
 use std::ffi::OsString;
@@ -23,7 +23,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{Sender, channel};
 use tokio::{process::Command, select};
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};

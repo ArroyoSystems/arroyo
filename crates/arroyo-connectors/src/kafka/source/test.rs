@@ -1,7 +1,7 @@
 use arrow::datatypes::{DataType, Field, Schema};
 
-use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::tables::ErasedTable;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::{BackingStore, StateBackend};
 use rand::random;
 
@@ -10,7 +10,7 @@ use arrow::array::{Array, StringArray};
 use arrow::datatypes::DataType::UInt64;
 use arrow::datatypes::TimeUnit;
 use arroyo_operator::context::{
-    batch_bounded, ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext,
+    ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext, batch_bounded,
 };
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
@@ -18,18 +18,18 @@ use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp, MetadataField};
 use arroyo_types::{
-    single_item_hash_map, to_micros, ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage,
-    TaskInfo,
+    ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, single_item_hash_map,
+    to_micros,
 };
+use rdkafka::ClientConfig;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
-use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use super::KafkaSourceFunc;
 use crate::kafka::Context;

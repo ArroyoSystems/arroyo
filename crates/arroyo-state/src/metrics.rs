@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use prometheus::{register_gauge_vec, GaugeVec};
+use prometheus::{GaugeVec, register_gauge_vec};
 
 lazy_static! {
     pub static ref WORKER_LABELS_NAMES: Vec<&'static str> = vec!["node_id", "task_id"];

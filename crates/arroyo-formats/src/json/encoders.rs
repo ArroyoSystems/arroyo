@@ -9,9 +9,9 @@ use arrow_json::{Encoder, EncoderFactory, EncoderOptions};
 use arrow_schema::{ArrowError, DataType, FieldRef, TimeUnit};
 use arroyo_rpc::formats::{DecimalEncoding, TimestampFormat};
 use arroyo_types::ArroyoExtensionType;
+use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use base64::write::EncoderWriter;
-use base64::Engine;
 use std::io::Write;
 
 /// Custom JSON encoder factory that adds some Arroyo-specific features:

@@ -2,23 +2,23 @@ use arroyo_datastream::WindowType;
 use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{
-    plan_err,
+    Column, DataFusionError, Result, Spans, TableReference, plan_err,
     tree_node::{TreeNode, TreeNodeRewriter, TreeNodeVisitor},
-    Column, DataFusionError, Result, Spans, TableReference,
 };
 use std::{collections::HashSet, sync::Arc};
 
 use aggregate::AggregateRewriter;
 use datafusion::logical_expr::{
-    expr::Alias, Aggregate, Expr, Extension, Filter, LogicalPlan, SubqueryAlias,
+    Aggregate, Expr, Extension, Filter, LogicalPlan, SubqueryAlias, expr::Alias,
 };
 use join::JoinRewriter;
 
 use self::window_fn::WindowFunctionRewriter;
 use crate::rewriters::TimeWindowNullCheckRemover;
 use crate::{
+    ArroyoSchemaProvider, DFField, WindowBehavior,
     extension::{
-        aggregate::{AggregateExtension, AGGREGATE_EXTENSION_NAME},
+        aggregate::{AGGREGATE_EXTENSION_NAME, AggregateExtension},
         join::JOIN_NODE_NAME,
     },
     fields_with_qualifiers, find_window,
@@ -26,10 +26,9 @@ use crate::{
     rewriters::SourceRewriter,
     schema_from_df_fields_with_metadata,
     schemas::{add_timestamp_field, has_timestamp_field},
-    ArroyoSchemaProvider, DFField, WindowBehavior,
 };
 use crate::{
-    extension::{remote_table::RemoteTableExtension, ArroyoExtension},
+    extension::{ArroyoExtension, remote_table::RemoteTableExtension},
     rewriters::AsyncUdfRewriter,
 };
 

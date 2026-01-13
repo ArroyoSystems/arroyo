@@ -15,7 +15,7 @@ use arroyo_rpc::grpc::rpc::{
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
-    from_millis, to_micros, CheckpointBarrier, MachineId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    CheckpointBarrier, JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId, from_millis, to_micros,
 };
 use rand::random;
 
@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
@@ -37,7 +37,7 @@ use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::{local_address, retry, CompactionResult, ControlMessage, ControlResp};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, local_address, retry};
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 pub use ordered_float::OrderedFloat;
@@ -469,8 +469,8 @@ impl WorkerServer {
             }
         };
 
-        if let Ok(mut client) = controller_client("worker", &config().worker.tls).await {
-            if let Err(e) = client
+        if let Ok(mut client) = controller_client("worker", &config().worker.tls).await
+            && let Err(e) = client
                 .worker_initialization_complete(Request::new(WorkerInitializationCompleteReq {
                     worker_id: worker_id.0,
                     job_id,
@@ -479,12 +479,11 @@ impl WorkerServer {
                     error_message,
                 }))
                 .await
-            {
-                error!(
-                    "failed to notify controller of schedule completion: {:?}",
-                    e
-                );
-            }
+        {
+            error!(
+                "failed to notify controller of schedule completion: {:?}",
+                e
+            );
         }
     }
 

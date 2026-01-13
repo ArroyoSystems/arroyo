@@ -8,10 +8,10 @@ use arroyo_rpc::api_types::pipelines::{PipelineEdge, PipelineGraph, PipelineNode
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{ArrowProgram, ArrowProgramConfig, ConnectorOp, EdgeType};
+use petgraph::Direction;
 use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
-use petgraph::Direction;
 use prost::Message;
 use rand::distr::Alphanumeric;
 use rand::prelude::SmallRng;

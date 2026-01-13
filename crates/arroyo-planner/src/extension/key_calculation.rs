@@ -4,7 +4,7 @@ use arroyo_rpc::{
     df::{ArroyoSchema, ArroyoSchemaRef},
     grpc::api::KeyPlanOperator,
 };
-use datafusion::common::{internal_err, plan_err, DFSchema, DFSchemaRef, Result};
+use datafusion::common::{DFSchema, DFSchemaRef, Result, internal_err, plan_err};
 use std::{fmt::Formatter, sync::Arc};
 
 use super::{ArroyoExtension, NodeWithIncomingEdges};
@@ -17,8 +17,8 @@ use crate::{
 use arroyo_rpc::grpc::api::ProjectionOperator;
 use datafusion::logical_expr::{Expr, ExprSchemable, LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion::prelude::col;
-use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use itertools::Itertools;
 use prost::Message;

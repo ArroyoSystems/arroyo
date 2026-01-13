@@ -4,7 +4,7 @@ use crate::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::JoinOperator;
-use datafusion::common::{plan_err, DFSchemaRef, Result};
+use datafusion::common::{DFSchemaRef, Result, plan_err};
 use datafusion::logical_expr::expr::Expr;
 use datafusion::logical_expr::{LogicalPlan, UserDefinedLogicalNodeCore};
 use datafusion_proto::generated::datafusion::PhysicalPlanNode;

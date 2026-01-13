@@ -36,7 +36,7 @@ mod my_median2 {
     fn my_median(mut args: Vec<u64>) -> f64 {
         args.sort();
         let mid = args.len() / 2;
-        if args.len() % 2 == 0 {
+        if args.len().is_multiple_of(2) {
             (args[mid] + args[mid - 1]) as f64 / 2.0
         } else {
             args[mid] as f64

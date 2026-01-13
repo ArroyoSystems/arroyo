@@ -1,8 +1,8 @@
 // https://github.com/rust-lang/rust-clippy/issues/12908
 #![allow(clippy::needless_lifetimes)]
 
-use axum::response::IntoResponse;
 use axum::Json;
+use axum::response::IntoResponse;
 use cornucopia_async::DatabaseSource;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -38,10 +38,10 @@ use crate::pipelines::{
     __path_validate_query,
 };
 use crate::rest::__path_ping;
-use crate::rest_utils::{service_unavailable, ErrorResp};
+use crate::rest_utils::{ErrorResp, service_unavailable};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
-use arroyo_rpc::config::{config, ApiAuthMode};
+use arroyo_rpc::config::{ApiAuthMode, config};
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::formats::*;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;

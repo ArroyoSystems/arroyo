@@ -18,7 +18,7 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tungstenite::http::Request;
 use typify::import_types;
 
-use crate::{header_map, EmptyConfig};
+use crate::{EmptyConfig, header_map};
 
 use crate::websocket::operator::{WebsocketSourceFunc, WebsocketSourceState};
 use arroyo_operator::connector::Connector;

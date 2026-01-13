@@ -1,9 +1,9 @@
 use crate::test::get_test_schema_provider;
-use crate::{parse_and_get_program, SqlConfig};
+use crate::{SqlConfig, parse_and_get_program};
 use rstest::rstest;
 use std::path::{Path, PathBuf};
-use tokio_stream::wrappers::ReadDirStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReadDirStream;
 
 #[rstest]
 fn for_each_file(#[files("src/test/queries/*.sql")] path: PathBuf) {

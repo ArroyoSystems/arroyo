@@ -136,7 +136,7 @@ impl ArrowOperator for JoinWithExpiration {
         "JoinWithExpiration".to_string()
     }
 
-    fn display(&self) -> DisplayableOperator {
+    fn display(&self) -> DisplayableOperator<'_> {
         DisplayableOperator {
             name: Cow::Borrowed("JoinWithExpiration"),
             fields: vec![

@@ -1,5 +1,5 @@
 use anyhow::bail;
-use arroyo_rpc::{connector_err, ControlMessage};
+use arroyo_rpc::{ControlMessage, connector_err};
 use arroyo_types::{SignalMessage, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -14,9 +14,9 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 
 use crate::polling_http::EmitBehavior;
+use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{StopMode, TableConfig};
@@ -130,7 +130,9 @@ impl PollingHttpSourceFunc {
         if resp.status().is_success() {
             let content_len = resp.content_length().unwrap_or(0);
             if content_len > MAX_BODY_SIZE as u64 {
-                bail!("content length sent by server exceeds maximum limit ({content_len} > {MAX_BODY_SIZE})");
+                bail!(
+                    "content length sent by server exceeds maximum limit ({content_len} > {MAX_BODY_SIZE})"
+                );
             }
 
             let mut buf = Vec::with_capacity(content_len as usize);

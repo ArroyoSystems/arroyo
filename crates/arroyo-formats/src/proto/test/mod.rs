@@ -1,6 +1,6 @@
 use crate::proto::schema::{
-    protobuf_to_arrow, schema_file_to_descriptor, schema_file_to_descriptor_with_resolver,
-    ProtoSchemaResolver,
+    ProtoSchemaResolver, protobuf_to_arrow, schema_file_to_descriptor,
+    schema_file_to_descriptor_with_resolver,
 };
 use arrow_schema::{DataType, Field, Schema};
 use arroyo_types::ArroyoExtensionType;

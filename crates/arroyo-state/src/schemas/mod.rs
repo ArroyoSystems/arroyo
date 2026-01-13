@@ -2,9 +2,9 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use arrow::compute::{and, filter, kernels::aggregate, max, min};
 use arrow_array::{
+    PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
     cast::AsArray,
     types::{TimestampNanosecondType, UInt64Type},
-    PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
 };
 use arrow_ord::cmp::{gt_eq, lt_eq};
 use arrow_schema::{ArrowError, DataType, Field};
@@ -13,10 +13,10 @@ use arroyo_rpc::errors::StateError;
 use arroyo_rpc::get_hasher;
 use arroyo_types::from_nanos;
 use bincode::config;
-use datafusion::common::{hash_utils::create_hashes, ScalarValue};
+use datafusion::common::{ScalarValue, hash_utils::create_hashes};
 use tracing::warn;
 
-use crate::{parquet::ParquetStats, DataOperation};
+use crate::{DataOperation, parquet::ParquetStats};
 
 #[allow(unused)]
 #[derive(Debug, Clone)]

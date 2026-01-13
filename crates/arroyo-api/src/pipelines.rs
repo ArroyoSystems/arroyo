@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use arrow_schema::SchemaRef;
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
-use axum::{debug_handler, Json};
+use axum::{Json, debug_handler};
 use axum_extra::extract::WithRejection;
 use http::StatusCode;
 
@@ -31,26 +31,26 @@ use arroyo_formats::ser::ArrowSerializer;
 use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
-use arroyo_rpc::{error_chain, log_event, OperatorConfig};
+use arroyo_rpc::{OperatorConfig, error_chain, log_event};
 use arroyo_udf_host::ParsedUdfFile;
 use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
 use tracing::warn;
 
+use crate::AuthData;
 use crate::jobs::get_action;
 use crate::queries::api_queries;
-use crate::queries::api_queries::{fetch_get_udfs, DbPipeline, DbPipelineJob};
+use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, log_and_map, not_found, paginate_results, required_field,
-    validate_pagination_params, ApiError, BearerAuth, ErrorResp,
+    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, log_and_map, not_found,
+    paginate_results, required_field, validate_pagination_params,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
-use crate::AuthData;
 use crate::{connection_tables, to_micros};
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
@@ -696,12 +696,12 @@ pub async fn patch_pipeline(
         StopType::Force => types::public::StopMode::force,
     });
 
-    if let Some(interval) = interval {
-        if interval < Duration::from_secs(1) || interval > Duration::from_secs(24 * 60 * 60) {
-            return Err(bad_request(
-                "checkpoint_interval_micros must be between 1 second and 1 day".to_string(),
-            ));
-        }
+    if let Some(interval) = interval
+        && (interval < Duration::from_secs(1) || interval > Duration::from_secs(24 * 60 * 60))
+    {
+        return Err(bad_request(
+            "checkpoint_interval_micros must be between 1 second and 1 day".to_string(),
+        ));
     }
 
     let parallelism_overrides = if let Some(parallelism) = pipeline_patch.parallelism {

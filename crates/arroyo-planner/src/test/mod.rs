@@ -2,14 +2,14 @@ mod plan_tests;
 
 use arrow_schema::DataType;
 use arroyo_connectors::{
-    nexmark::{NexmarkConnector, NexmarkTable},
     EmptyConfig,
+    nexmark::{NexmarkConnector, NexmarkTable},
 };
 use arroyo_operator::connector::Connector;
 use arroyo_udf_host::parse::NullableType;
 use test_log::test;
 
-use crate::{parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
+use crate::{ArroyoSchemaProvider, SqlConfig, parse_and_get_program};
 
 fn get_test_schema_provider() -> ArroyoSchemaProvider {
     let mut schema_provider = ArroyoSchemaProvider::new();
