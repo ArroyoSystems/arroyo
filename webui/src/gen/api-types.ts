@@ -845,6 +845,7 @@ export interface components {
         };
         PipelineRestart: {
             force?: boolean | null;
+            ignore_state?: boolean | null;
         };
         PreviewPost: {
             enable_sinks?: boolean;
