@@ -226,7 +226,7 @@ impl From<DataflowError> for TaskError {
                 (domain, retry, None)
             }
             DataflowError::InternalOperatorError { .. } => {
-                (ErrorDomain::Internal, RetryHint::NoRetry, None)
+                (ErrorDomain::Internal, RetryHint::WithBackoff, None)
             }
             DataflowError::StateError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
             DataflowError::ArgumentError(_) => (ErrorDomain::User, RetryHint::NoRetry, None),
