@@ -1,9 +1,11 @@
 use ::arrow::record_batch::RecordBatch;
 use ::arrow::row::OwnedRow;
-use anyhow::{Result, bail};
 use arroyo_operator::context::OperatorContext;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::{DataflowError, DataflowResult as Result, StorageError};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event};
 use arroyo_storage::StorageProvider;
+use arroyo_types::*;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
@@ -24,8 +26,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 use uuid::Uuid;
-
-use arroyo_types::*;
 pub mod arrow;
 mod delta;
 pub(crate) mod iceberg;
@@ -34,6 +34,7 @@ pub mod local;
 pub mod parquet;
 pub(crate) mod partitioning;
 mod two_phase_committer;
+pub mod v2;
 
 use self::{
     json::{JsonLocalWriter, JsonWriter},
@@ -64,13 +65,12 @@ pub struct FileSystemSink<BBW: BatchBufferingWriter> {
     _ts: PhantomData<BBW>,
 }
 
-pub type ParquetFileSystemSink = FileSystemSink<ParquetBatchBufferingWriter>;
-
-pub type JsonFileSystemSink = FileSystemSink<JsonWriter>;
-
 pub type LocalParquetFileSystemSink = LocalFileSystemWriter<ParquetLocalWriter>;
 
 pub type LocalJsonFileSystemSink = LocalFileSystemWriter<JsonLocalWriter>;
+
+pub type ParquetFileSystemSink = FileSystemSink<ParquetBatchBufferingWriter>;
+pub type JsonFileSystemSink = FileSystemSink<JsonWriter>;
 
 impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
     pub fn create_and_start(
@@ -143,6 +143,42 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             writer.run().await.unwrap();
         });
         Ok(())
+    }
+}
+
+fn map_storage_error(storage_error: StorageError) -> DataflowError {
+    match storage_error {
+        // User errors: configuration/input mistakes by the user
+        StorageError::InvalidUrl
+        | StorageError::PathError(_)
+        | StorageError::NoKeyInUrl
+        | StorageError::CredentialsError(_) => {
+            connector_err!(User, NoRetry, "{}", storage_error)
+        }
+        // Object store errors need to be inspected to determine the domain
+        StorageError::ObjectStore(ref obj_err) => map_object_store_error(obj_err),
+    }
+}
+
+fn map_object_store_error(obj_err: &object_store::Error) -> DataflowError {
+    use object_store::Error;
+    match obj_err {
+        // User errors: authentication, authorization, bad paths, misconfiguration
+        Error::NotFound { .. }
+        | Error::InvalidPath { .. }
+        | Error::Unauthenticated { .. }
+        | Error::PermissionDenied { .. }
+        | Error::AlreadyExists { .. } => {
+            connector_err!(User, NoRetry, "{}", obj_err)
+        }
+        // External errors: permanent issues that won't be fixed by retrying
+        Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented => {
+            connector_err!(External, NoRetry, "{}", obj_err)
+        }
+        // External errors: transient issues worth retrying
+        _ => {
+            connector_err!(External, WithBackoff, "{}", obj_err)
+        }
     }
 }
 
@@ -421,13 +457,14 @@ async fn from_checkpoint(
             let multipart_id = object_store
                 .start_multipart(path)
                 .await
-                .expect("failed to create multipart upload");
+                .map_err(map_storage_error)?;
 
             for (part_index, data) in parts_to_add.into_iter().enumerate() {
                 pushed_size += data.len();
                 let upload_part = object_store
                     .add_multipart(path, &multipart_id, part_index, data.into())
-                    .await?;
+                    .await
+                    .map_err(map_storage_error)?;
                 parts.push(upload_part);
             }
 
@@ -463,7 +500,8 @@ async fn from_checkpoint(
                     InFlightPartCheckpoint::InProgressPart { part, data } => {
                         let upload_part = object_store
                             .add_multipart(path, &multi_part_upload_id, part, data.into())
-                            .await?;
+                            .await
+                            .map_err(map_storage_error)?;
                         parts.push(upload_part);
                     }
                 }
@@ -501,7 +539,7 @@ async fn from_checkpoint(
                         let upload_part = object_store
                             .add_multipart(path, &multi_part_upload_id, part_index, data.into())
                             .await
-                            .unwrap();
+                            .map_err(map_storage_error)?;
                         parts.push(upload_part);
                     }
                 }
@@ -558,18 +596,21 @@ async fn write_trailing_bytes(
             parts.push(
                 object_store
                     .add_multipart(path, multipart_id, parts.len(), part1)
-                    .await?,
+                    .await
+                    .map_err(map_storage_error)?,
             );
             parts.push(
                 object_store
                     .add_multipart(path, multipart_id, parts.len(), part2)
-                    .await?,
+                    .await
+                    .map_err(map_storage_error)?,
             );
         } else {
             parts.push(
                 object_store
                     .add_multipart(path, multipart_id, parts.len(), trailing_bytes.into())
-                    .await?,
+                    .await
+                    .map_err(map_storage_error)?,
             );
         }
     }
@@ -664,7 +705,7 @@ impl RollingPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct MultiPartWriterStats {
     bytes_written: usize,
     parts_written: usize,
@@ -755,7 +796,7 @@ where
                             self.task_info = Some(task_info);
                             for recovered_file in recovered_files {
                                 let file_to_finish = from_checkpoint(
-                                    &Path::parse(&recovered_file.filename)?,
+                                    &Path::parse(&recovered_file.filename).map_err(|e| connector_err!(Internal, NoRetry, "invalid path ({}) in recovery: {}",  recovered_file.filename, e))?,
                                     recovered_file.data,
                                     recovered_file.pushed_size,
                                     self.object_store.clone(),
@@ -777,7 +818,7 @@ where
                             self.take_checkpoint(subtask_id).await?;
                             let delta_version = self.delta_version();
                             self.checkpoint_sender.send({CheckpointData::Finished {  max_file_index: self.max_file_index,
-                            delta_version}}).await?;
+                            delta_version}}).await.unwrap();
                         },
                         FileSystemMessages::FilesToFinish{ files, epoch }  =>{
                             self.finish_files(epoch, files).await?;
@@ -816,7 +857,7 @@ where
                         self.max_file_index += 1;
                     }
                     for (partition, remove_writer) in removed_partitions {
-                        let file = self.active_writers.remove(&partition).ok_or_else(|| anyhow::anyhow!("can't find writer {:?}", partition))?;
+                        let file = self.active_writers.remove(&partition).ok_or_else(|| connector_err!(Internal, NoRetry, "can't find writer {:?}", partition))?;
                         if remove_writer {
                             self.writers.remove(&file);
                         }
@@ -971,7 +1012,7 @@ where
             max_file_index: self.max_file_index,
             delta_version: self.delta_version(),
         };
-        self.checkpoint_sender.send(finished_message).await?;
+        self.checkpoint_sender.send(finished_message).await.unwrap();
         Ok(())
     }
 
@@ -996,7 +1037,15 @@ where
                 content_id: content_id.clone(),
             })
             .collect();
-        let location = Path::parse(&file.filename)?;
+        let location = Path::parse(&file.filename).map_err(|e| {
+            connector_err!(
+                Internal,
+                NoRetry,
+                "invalid path ({}) in finishing: {}",
+                file.filename,
+                e
+            )
+        })?;
 
         let start = Instant::now();
         match self
@@ -1028,7 +1077,12 @@ where
                 );
 
                 // check if the file is already there with the correct size.
-                if let Some(contents) = self.object_store.get_if_present(location).await? {
+                if let Some(contents) = self
+                    .object_store
+                    .get_if_present(location)
+                    .await
+                    .map_err(map_storage_error)?
+                {
                     if contents.len() == file.size {
                         Ok(Some(FinishedFile {
                             filename: file.filename,
@@ -1037,19 +1091,17 @@ where
                             metadata: file.metadata,
                         }))
                     } else {
-                        bail!(
+                        Err(connector_err!(
+                            External,
+                            NoRetry,
                             "file written to {} should have length of {}, not {}",
                             file.filename,
                             file.size,
                             contents.len()
-                        );
+                        ))
                     }
                 } else {
-                    bail!(
-                        "failed to complete file {}, received an error: {}",
-                        file.filename,
-                        err
-                    );
+                    Err(map_storage_error(err))
                 }
             }
         }
@@ -1083,7 +1135,10 @@ where
                     data,
                     pushed_size: writer.stats().as_ref().unwrap().bytes_written,
                 });
-            self.checkpoint_sender.send(in_progress_checkpoint).await?;
+            self.checkpoint_sender
+                .send(in_progress_checkpoint)
+                .await
+                .unwrap();
         }
         for file_to_finish in self.files_to_finish.drain(..) {
             self.checkpoint_sender
@@ -1099,7 +1154,8 @@ where
                         pushed_size: file_to_finish.size,
                     },
                 ))
-                .await?;
+                .await
+                .unwrap();
         }
 
         Ok(())
@@ -1187,7 +1243,7 @@ impl MultipartManager {
         let multipart_id = self
             .multipart_id
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("missing multipart id"))?;
+            .ok_or_else(|| connector_err!(Internal, NoRetry, "missing multipart id"))?;
         let object_store = self.storage_provider.clone();
 
         let event_logger = self.event_logger.clone();
@@ -1213,7 +1269,7 @@ impl MultipartManager {
                 name: location.to_string(),
                 callback: MultipartCallback::CompletedPart {
                     part_idx: part_to_upload.part_index,
-                    upload_part: upload_part?,
+                    upload_part: upload_part.map_err(map_storage_error)?,
                 },
             })
         }))
@@ -1225,7 +1281,10 @@ impl MultipartManager {
         let object_store = self.storage_provider.clone();
         let location = self.location.clone();
         Ok(Box::pin(async move {
-            let multipart_id = object_store.start_multipart(&location).await?;
+            let multipart_id = object_store
+                .start_multipart(&location)
+                .await
+                .map_err(map_storage_error)?;
             Ok(MultipartCallbackWithName {
                 name: location.to_string(),
                 callback: MultipartCallback::InitializedMultipart { multipart_id },
@@ -1263,7 +1322,9 @@ impl MultipartManager {
                 multi_part_upload_id: self
                     .multipart_id
                     .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("need multipart id to complete"))?
+                    .ok_or_else(|| {
+                        connector_err!(Internal, NoRetry, "need multipart id to complete")
+                    })?
                     .clone(),
                 completed_parts: self
                     .pushed_parts
@@ -1272,9 +1333,11 @@ impl MultipartManager {
                         PartIdOrBufferedData::PartId(upload_part) => {
                             Ok(upload_part.content_id.clone())
                         }
-                        PartIdOrBufferedData::BufferedData { .. } => {
-                            bail!("unfinished part in get_complete_multipart_future")
-                        }
+                        PartIdOrBufferedData::BufferedData { .. } => Err(connector_err!(
+                            Internal,
+                            NoRetry,
+                            "unfinished part in get_complete_multipart_future"
+                        )),
                     })
                     .collect::<Result<Vec<_>>>()?,
                 size: self.pushed_size,
@@ -1353,7 +1416,7 @@ impl MultipartManager {
 
     fn get_in_progress_checkpoint(
         &mut self,
-        trailing_bytes: Option<Vec<u8>>,
+        trailing_bytes: Vec<u8>,
         metadata: Option<IcebergFileMetadata>,
     ) -> FileCheckpointData {
         if self.closed {
@@ -1366,7 +1429,7 @@ impl MultipartManager {
                     .iter()
                     .map(|val| val.byte_data.to_vec())
                     .collect(),
-                trailing_bytes,
+                trailing_bytes: Some(trailing_bytes),
                 metadata,
             };
         }
@@ -1391,7 +1454,7 @@ impl MultipartManager {
         FileCheckpointData::MultiPartInFlight {
             multi_part_upload_id: multi_part_id,
             in_flight_parts,
-            trailing_bytes,
+            trailing_bytes: Some(trailing_bytes),
             metadata,
         }
     }
@@ -1434,6 +1497,10 @@ pub trait BatchBufferingWriter: Send {
     ) -> Self;
     fn suffix() -> String;
     fn add_batch_data(&mut self, data: &RecordBatch);
+    /// approximate number of bytes that are internally buffered in the underlying writer;
+    /// unflushed_bytes() + buffered_bytes() should give approximately the size of the buffer
+    /// that would be produced by calling close()
+    fn unflushed_bytes(&self) -> usize;
     fn buffered_bytes(&self) -> usize;
     /// Splits currently written data from the buffer (up to pos) and returns it. Note there may
     /// still be additional interally-buffered data that has not been written out into the
@@ -1442,13 +1509,8 @@ pub trait BatchBufferingWriter: Send {
     ///
     /// Panics if pos > `self.buffered_bytes()`
     fn split_to(&mut self, pos: usize) -> Bytes;
-    fn get_trailing_bytes_for_checkpoint(
-        &mut self,
-    ) -> (Option<Vec<u8>>, Option<IcebergFileMetadata>);
-    fn close(
-        &mut self,
-        final_batch: Option<RecordBatch>,
-    ) -> Option<(Bytes, Option<IcebergFileMetadata>)>;
+    fn get_trailing_bytes_for_checkpoint(&mut self) -> (Vec<u8>, Option<IcebergFileMetadata>);
+    fn close(&mut self) -> (Bytes, Option<IcebergFileMetadata>);
 }
 
 pub struct BatchMultipartWriter<BBW: BatchBufferingWriter> {
@@ -1572,7 +1634,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     }
 
     fn stats(&self) -> Option<MultiPartWriterStats> {
-        self.stats.clone()
+        self.stats
     }
 
     fn get_finished_file(&mut self) -> FileToFinish {
@@ -1580,7 +1642,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     }
 }
 
-fn split_into_parts(mut bytes: Bytes, part_size: usize) -> Vec<Bytes> {
+pub(crate) fn split_into_parts(mut bytes: Bytes, part_size: usize) -> Vec<Bytes> {
     let mut parts = Vec::new();
     while bytes.len() > part_size {
         let mut part = bytes;
@@ -1600,7 +1662,9 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
     ) -> Result<Vec<BoxedTryFuture<MultipartCallbackWithName>>> {
         self.multipart_manager.closed = true;
 
-        if let Some((bytes, metadata)) = self.batch_buffering_writer.close(None) {
+        let (bytes, metadata) = self.batch_buffering_writer.close();
+
+        if !bytes.is_empty() {
             self.metadata = metadata;
             let existing_part_size = self.stats.as_ref().and_then(|s| {
                 if s.bytes_written > 0 {
@@ -1749,7 +1813,8 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                 task_info: ctx.task_info.clone(),
                 recovered_files,
             })
-            .await?;
+            .await
+            .expect("queue closed");
         Ok(())
     }
 
@@ -1762,7 +1827,8 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                     value: record,
                     partition: None,
                 })
-                .await?;
+                .await
+                .unwrap();
         } else {
             for (partition, batch) in self.partitioner.as_ref().unwrap().partition(&record)? {
                 self.sender
@@ -1772,7 +1838,8 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                         value: batch,
                         partition: Some(partition),
                     })
-                    .await?;
+                    .await
+                    .unwrap();
             }
         }
         Ok(())
@@ -1791,7 +1858,8 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                 files: pre_commit,
                 epoch,
             })
-            .await?;
+            .await
+            .unwrap();
         // loop over checkpoint receiver until finished received
         if let Some(checkpoint_message) = self.checkpoint_receiver.as_mut().unwrap().recv().await {
             match checkpoint_message {
@@ -1800,11 +1868,19 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                     delta_version: _,
                 } => return Ok(()),
                 _ => {
-                    bail!("unexpected checkpoint message")
+                    return Err(connector_err!(
+                        Internal,
+                        NoRetry,
+                        "unexpected checkpoint message"
+                    ));
                 }
             }
         }
-        bail!("checkpoint receiver closed unexpectedly")
+        Err(connector_err!(
+            Internal,
+            NoRetry,
+            "checkpoint receiver closed unexpectedly"
+        ))
     }
 
     async fn checkpoint(
@@ -1821,7 +1897,8 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                 watermark,
                 then_stop: stopping,
             })
-            .await?;
+            .await
+            .unwrap();
         let mut pre_commit_messages = HashMap::new();
         let mut active_files = Vec::new();
         while let Some(checkpoint_message) = self.checkpoint_receiver.as_mut().unwrap().recv().await
@@ -1874,7 +1951,11 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
                 }
             }
         }
-        bail!("checkpoint receiver closed unexpectedly")
+        Err(connector_err!(
+            Internal,
+            NoRetry,
+            "checkpoint receiver closed unexpectedly"
+        ))
     }
 }
 
