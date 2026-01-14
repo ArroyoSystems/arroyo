@@ -105,7 +105,7 @@ Then, load the Web UI at http://localhost:5115.
 
 For a more in-depth guide, see the [getting started guide](https://doc.arroyo.dev/getting-started).
 
-Once you have Arroyo running, follow the [tutorial](https://doc.arroyo.dev/tutorial) to create your first real-time
+Once you have Arroyo running, follow the [tutorial]([https://doc.arroyo.dev/tutorial/first-pipeline/)) to create your first real-time
 pipeline.
 
 
