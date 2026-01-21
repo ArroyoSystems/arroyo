@@ -600,7 +600,7 @@ impl State for Scheduling {
                             started_tasks.insert((node_id, operator_subtask));
                         }
                         Some(JobMessage::RunningMessage(RunningMessage::TaskFailed(event))) => {
-                            return Err(ctx.handle_task_error(self, event).await);
+                            return ctx.handle_task_error(self, event).await;
                         }
                         Some(JobMessage::ConfigUpdate(c)) => {
                             stop_if_desired_non_running!(self, &c);

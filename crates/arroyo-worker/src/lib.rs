@@ -784,11 +784,12 @@ impl WorkerGrpc for WorkerServer {
 
         let req = request.into_inner();
         for s in sources {
-            s.send(ControlMessage::Stop {
-                mode: req.stop_mode(),
-            })
-            .await
-            .unwrap();
+            // if this fails, it means the source has already shut down
+            let _ = s
+                .send(ControlMessage::Stop {
+                    mode: req.stop_mode(),
+                })
+                .await;
         }
 
         Ok(Response::new(StopExecutionResp {}))

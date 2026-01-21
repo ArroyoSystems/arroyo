@@ -1,14 +1,20 @@
-use std::time::{Duration, Instant};
-
+use super::{
+    JobContext, State, StateError, Transition, compiling::Compiling, fatal, state_backoff,
+};
 use anyhow::bail;
+use arroyo_rpc::config::config;
+use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc::StopMode;
+use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-use super::{JobContext, State, StateError, Transition, compiling::Compiling};
-
 #[derive(Debug)]
-pub struct Recovering {}
+pub struct Recovering {
+    pub source: anyhow::Error,
+    pub reason: String,
+    pub domain: ErrorDomain,
+}
 
 impl Recovering {
     // tries, with increasing levels of force, to tear down the existing cluster
@@ -91,6 +97,35 @@ impl State for Recovering {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        let pipeline_config = &config().pipeline;
+
+        // only allow one restart for preview pipelines
+        if ctx.config.ttl.is_some() {
+            return Err(fatal(
+                "Job encountered a fatal error; see worker logs for details",
+                self.source,
+            ));
+        }
+
+        if pipeline_config.allowed_restarts != -1
+            && ctx.status.restarts >= pipeline_config.allowed_restarts
+        {
+            return Err(StateError::FatalError {
+                message: format!("Exhausted retries: {}", self.reason),
+                domain: self.domain,
+                source: self.source,
+            });
+        }
+
+        // backoff
+        state_backoff(ctx.status.restarts as usize).await;
+
+        info!(
+            job_id = *ctx.config.id,
+            retries_remaining = pipeline_config.allowed_restarts - ctx.status.restarts,
+            "recovering pipeline"
+        );
+
         // tear down the existing cluster
         if let Err(e) = Self::cleanup(ctx).await {
             return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 10));

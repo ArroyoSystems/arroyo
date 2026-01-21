@@ -10,9 +10,10 @@ use crate::states::finishing::Finishing;
 use crate::states::recovering::Recovering;
 use crate::states::rescaling::Rescaling;
 use crate::states::restarting::Restarting;
-use crate::states::{fatal, stop_if_desired_running};
+use crate::states::stop_if_desired_running;
 use crate::{job_controller::ControllerProgress, states::StateError};
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::log_event;
 
 use super::{JobContext, State, Transition};
@@ -118,7 +119,7 @@ impl State for Running {
                                 "is_preview": ctx.config.ttl.is_some(),
                             });
 
-                            return Err(ctx.handle_task_error(self, event).await);
+                            return ctx.handle_task_error(self, event).await;
                         }
                         Err(err) => {
                             error!(message = "error while running", error = format!("{:?}", err), job_id = *ctx.config.id);
@@ -129,20 +130,13 @@ impl State for Running {
                                 "is_preview": ctx.config.ttl.is_some(),
                             });
 
-                            // only allow one restart for preview pipelines
-                            if ctx.config.ttl.is_some() {
-                                return Err(fatal("Job encountered a fatal error; see worker logs for details", err));
-                            }
-
-                            if pipeline_config.allowed_restarts != -1 && ctx.status.restarts >= pipeline_config.allowed_restarts {
-                                return Err(fatal(
-                                    "Job has restarted too many times",
-                                    err
-                                ));
-                            }
                             return Ok(Transition::next(
                                 *self,
-                                Recovering {}
+                                Recovering {
+                                    source: err,
+                                    reason: "error while running".to_string(),
+                                    domain: ErrorDomain::Internal,
+                                }
                             ))
                         }
                     }
