@@ -215,6 +215,14 @@ impl TransitionTo<Recovering> for Running {
         })
     }
 }
+impl TransitionTo<Recovering> for Scheduling {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restarts += 1;
+        })
+    }
+}
+
 impl TransitionTo<Rescaling> for Running {}
 
 impl TransitionTo<Scheduling> for Rescaling {
@@ -404,11 +412,11 @@ impl JobContext<'_> {
         }
     }
 
-    pub async fn handle_task_error(
+    pub async fn handle_task_error<T: State + TransitionTo<Recovering>>(
         &self,
-        state: Box<dyn State>,
+        state: Box<T>,
         event: TaskFailedEvent,
-    ) -> StateError {
+    ) -> Result<Transition, StateError> {
         error!(
             job_id = self.config.id.as_str(),
             node_id = event.node_id,
@@ -439,18 +447,19 @@ impl JobContext<'_> {
         }
 
         match event.retry_hint {
-            errors::RetryHint::NoRetry => StateError::FatalError {
+            errors::RetryHint::NoRetry => Err(StateError::FatalError {
                 source: anyhow!("task failed: {}", event.reason),
                 message: event.reason,
                 domain: event.error_domain,
-            },
-            errors::RetryHint::WithBackoff => StateError::RetryableError {
-                state,
-                source: anyhow!("task failed: {}", event.reason),
-                message: event.reason,
-                domain: event.error_domain,
-                retries: 20,
-            },
+            }),
+            errors::RetryHint::WithBackoff => Ok(Transition::next(
+                *state,
+                Recovering {
+                    source: anyhow!("task failed: {}", event.reason),
+                    reason: event.reason,
+                    domain: event.error_domain,
+                },
+            )),
         }
     }
 }
@@ -609,17 +618,7 @@ async fn execute_state<'a>(
                 ["retries" => retries]
             );
 
-            let pipeline_config = &config().pipeline;
-            let base = *pipeline_config.state_initial_backoff;
-            let max = *pipeline_config.state_max_backoff;
-            let exp_backoff = max.min(base * 2u32.pow(ctx.retries_attempted as u32));
-
-            let backoff = exp_backoff / 2
-                + Duration::from_micros(rand::Rng::random_range(
-                    &mut rand::rng(),
-                    0..exp_backoff.as_micros() as u64 / 2,
-                ));
-            tokio::time::sleep(backoff).await;
+            state_backoff(ctx.retries_attempted).await;
 
             ctx.retries_attempted += 1;
             Some(state)
@@ -636,6 +635,22 @@ async fn execute_state<'a>(
     }
 
     (next, ctx)
+}
+
+pub(crate) async fn state_backoff(retries_attempted: usize) {
+    let pipeline_config = &config().pipeline;
+    let base = *pipeline_config.state_initial_backoff;
+    let max = *pipeline_config.state_max_backoff;
+    let exp_backoff = max.min(base * 2u32.pow(retries_attempted as u32));
+
+    let backoff = exp_backoff / 2
+        + Duration::from_micros(rand::Rng::random_range(
+            &mut rand::rng(),
+            0..exp_backoff.as_micros() as u64 / 2,
+        ));
+
+    debug!("waiting {}ms to retry", backoff.as_millis());
+    tokio::time::sleep(backoff).await;
 }
 
 #[allow(clippy::too_many_arguments)]
