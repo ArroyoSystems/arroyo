@@ -176,13 +176,14 @@ SET
    parallelism_overrides = COALESCE(:parallelism_overrides, parallelism_overrides)
 WHERE id = :job_id AND organization_id = :organization_id;
 
---! restart_job(mode)
+--! restart_job(mode, ignore_state_before_epoch?)
 UPDATE job_configs
 SET
    updated_at = :updated_at,
    updated_by = :updated_by,
    restart_nonce = restart_nonce + 1,
-   restart_mode = :mode
+   restart_mode = :mode,
+   ignore_state_before_epoch = :ignore_state_before_epoch
 WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
@@ -234,6 +235,12 @@ FROM job_configs
 WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id;
 
 --: DbCheckpoint (finish_time?, operators?)
+--: MaxCheckpointEpoch (max_epoch?)
+
+--! max_checkpoint_epoch : MaxCheckpointEpoch
+SELECT MAX(epoch) as max_epoch
+FROM checkpoints
+WHERE job_id = :job_id AND organization_id = :organization_id;
 
 --! get_job_checkpoints: DbCheckpoint
 SELECT epoch, state_backend, start_time, finish_time, event_spans, operators FROM checkpoints

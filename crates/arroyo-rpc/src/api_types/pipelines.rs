@@ -49,6 +49,7 @@ pub struct PipelinePatch {
 #[serde(rename_all = "snake_case")]
 pub struct PipelineRestart {
     pub force: Option<bool>,
+    pub ignore_state: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

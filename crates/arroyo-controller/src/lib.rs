@@ -90,6 +90,7 @@ pub struct JobConfig {
     parallelism_overrides: HashMap<u32, usize>,
     restart_nonce: i32,
     restart_mode: RestartMode,
+    ignore_state_before_epoch: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -629,6 +630,7 @@ impl ControllerServer {
                             .collect(),
                         restart_nonce: p.config_restart_nonce,
                         restart_mode: p.restart_mode,
+                        ignore_state_before_epoch: p.ignore_state_before_epoch,
                     };
 
                     let mut jobs = jobs.lock().await;

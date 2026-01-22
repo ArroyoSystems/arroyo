@@ -507,14 +507,14 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     await mutate();
   };
 
-  const restartPipeline = async () => {
+  const restartPipeline = async (ignoreState?: boolean) => {
     if (!pipelineId) {
       return;
     }
 
     await post('/v1/pipelines/{id}/restart', {
       params: { path: { id: pipelineId } },
-      body: {},
+      body: { ignore_state: ignoreState ?? false },
     });
     await mutate();
   };

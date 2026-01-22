@@ -1,4 +1,4 @@
---! all_jobs : Job(ttl_micros?, state?, start_time?, finish_time?, tasks?, failure_message?, failure_domain?, run_id?, pipeline_path?, wasm_path?)
+--! all_jobs : Job(ttl_micros?, state?, start_time?, finish_time?, tasks?, failure_message?, failure_domain?, run_id?, pipeline_path?, wasm_path?, ignore_state_before_epoch?)
 SELECT
     c.id as id,
     c.organization_id as org_id,
@@ -20,7 +20,8 @@ SELECT
     wasm_path,
     c.restart_nonce as config_restart_nonce,
     s.restart_nonce as status_restart_nonce,
-    restart_mode
+    restart_mode,
+    ignore_state_before_epoch
 FROM job_configs c
 INNER JOIN job_statuses s ON c.id = s.id;
 

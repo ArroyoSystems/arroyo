@@ -332,29 +332,64 @@ impl State for Scheduling {
             needs_commits: bool,
         }
 
-        let checkpoint_info = controller_queries::fetch_last_successful_checkpoint(
-            &ctx.db.client().await.unwrap(),
-            &*ctx.config.id,
-        )
-        .await
-        .unwrap()
-        .into_iter()
-        .next()
-        .map(|r| {
-            info!(
-                message = "restoring checkpoint",
-                job_id = *ctx.config.id,
-                epoch = r.epoch,
-                min_epoch = r.min_epoch
-            );
+        let checkpoint_info = {
+            let client = match ctx.db.client().await {
+                Ok(c) => c,
+                Err(e) => {
+                    return Err(ctx.retryable(self, "failed to get db client", e.into(), 10));
+                }
+            };
 
-            CheckpointInfo {
-                epoch: r.epoch as u32,
-                min_epoch: r.min_epoch as u32,
-                id: r.pub_id,
-                needs_commits: r.needs_commits,
-            }
-        });
+            let checkpoint_result = match controller_queries::fetch_last_successful_checkpoint(
+                &client,
+                &*ctx.config.id,
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(ctx.retryable(
+                        self,
+                        "failed to fetch last checkpoint",
+                        e.into(),
+                        10,
+                    ));
+                }
+            };
+
+            checkpoint_result.into_iter().next().and_then(|r| {
+                // Filter checkpoint based on ignore_state_before_epoch threshold
+                let should_restore = ctx
+                    .config
+                    .ignore_state_before_epoch
+                    .map(|threshold| r.epoch >= threshold)
+                    .unwrap_or(true); // If no threshold, restore any checkpoint
+
+                if should_restore {
+                    info!(
+                        message = "restoring checkpoint",
+                        job_id = *ctx.config.id,
+                        epoch = r.epoch,
+                        min_epoch = r.min_epoch
+                    );
+
+                    Some(CheckpointInfo {
+                        epoch: r.epoch as u32,
+                        min_epoch: r.min_epoch as u32,
+                        id: r.pub_id,
+                        needs_commits: r.needs_commits,
+                    })
+                } else {
+                    info!(
+                        message = "skipping checkpoint due to ignore_state_before_epoch threshold",
+                        job_id = *ctx.config.id,
+                        checkpoint_epoch = r.epoch,
+                        threshold = ctx.config.ignore_state_before_epoch.unwrap()
+                    );
+                    None
+                }
+            })
+        };
 
         {
             // mark in-progress checkpoints as failed
@@ -362,13 +397,33 @@ impl State for Scheduling {
                 .as_ref()
                 .map(|checkpoint_info| checkpoint_info.epoch)
                 .unwrap_or(0);
-            controller_queries::execute_mark_failed(
-                &ctx.db.client().await.unwrap(),
+
+            let client = match ctx.db.client().await {
+                Ok(c) => c,
+                Err(e) => {
+                    return Err(ctx.retryable(
+                        self,
+                        "failed to get db client for mark_failed",
+                        e.into(),
+                        10,
+                    ));
+                }
+            };
+
+            if let Err(e) = controller_queries::execute_mark_failed(
+                &client,
                 &*ctx.config.id,
                 &(last_epoch as i32 + 1),
             )
             .await
-            .unwrap();
+            {
+                return Err(ctx.retryable(
+                    self,
+                    "failed to mark in-progress checkpoints as failed",
+                    e.into(),
+                    10,
+                ));
+            }
         }
 
         let mut committing_state = None;

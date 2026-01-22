@@ -4,6 +4,12 @@ import { useParams } from 'react-router-dom';
 import {
   Alert,
   AlertDescription,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   AlertIcon,
   AlertTitle,
   Badge,
@@ -14,6 +20,11 @@ import {
   Grid,
   Heading,
   Icon,
+  Popover,
+  PopoverArrow,
+  PopoverBody,
+  PopoverContent,
+  PopoverTrigger,
   Spacer,
   Spinner,
   Stack,
@@ -25,7 +36,7 @@ import {
   Text,
   useDisclosure,
 } from '@chakra-ui/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import 'reactflow/dist/style.css';
 import 'metrics-graphics/dist/mg.css';
 import PipelineConfigModal from './PipelineConfigModal';
@@ -59,6 +70,12 @@ export function PipelineDetails() {
     onOpen: onConfigModalOpen,
     onClose: onConfigModalClose,
   } = useDisclosure();
+  const {
+    isOpen: restartWithoutStateModalIsOpen,
+    onOpen: onRestartWithoutStateModalOpen,
+    onClose: onRestartWithoutStateModalClose,
+  } = useDisclosure();
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   let { pipelineId: id } = useParams();
 
@@ -253,13 +270,25 @@ export function PipelineDetails() {
     editPipelineButton = <Button onClick={onConfigModalOpen}>Edit</Button>;
     if (job.state == 'Failed') {
       actionButton = (
-        <Button
-          onClick={async () => {
-            await restartPipeline();
-          }}
-        >
-          Restart
-        </Button>
+        <Popover trigger="hover" placement="bottom-start">
+          <PopoverTrigger>
+            <Button
+              onClick={async () => {
+                await restartPipeline(false);
+              }}
+            >
+              Restart
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent width="auto">
+            <PopoverArrow />
+            <PopoverBody p={4}>
+              <Button size="sm" colorScheme="red" onClick={onRestartWithoutStateModalOpen}>
+                Restart Without State
+              </Button>
+            </PopoverBody>
+          </PopoverContent>
+        </Popover>
       );
     } else {
       actionButton = (
@@ -300,6 +329,43 @@ export function PipelineDetails() {
         {inner}
       </Grid>
       {configModal}
+      <AlertDialog
+        isOpen={restartWithoutStateModalIsOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={onRestartWithoutStateModalClose}
+        isCentered
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Restart Without State
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              <Text>
+                Restarting without state could lead to data loss, duplication, and incorrect
+                results. Are you sure you want to continue?
+              </Text>
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={onRestartWithoutStateModalClose}>
+                Cancel
+              </Button>
+              <Button
+                colorScheme="red"
+                onClick={async () => {
+                  await restartPipeline(true);
+                  onRestartWithoutStateModalClose();
+                }}
+                ml={3}
+              >
+                Restart Without State
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </>
   );
 }

@@ -777,11 +777,24 @@ pub async fn restart_pipeline(
         RestartMode::safe
     };
 
+    // If user wants to ignore state, query max checkpoint epoch and compute threshold
+    let ignore_before_epoch = if req.ignore_state.unwrap_or(false) {
+        api_queries::fetch_max_checkpoint_epoch(&db, &job_id, &auth_data.organization_id)
+            .await?
+            .into_iter()
+            .next()
+            .and_then(|r| r.max_epoch)
+            .map(|max_epoch| max_epoch + 1)
+    } else {
+        None
+    };
+
     let res = api_queries::execute_restart_job(
         &db,
         &OffsetDateTime::now_utc(),
         &auth_data.user_id,
         &mode,
+        &ignore_before_epoch,
         &job_id,
         &auth_data.organization_id,
     )
