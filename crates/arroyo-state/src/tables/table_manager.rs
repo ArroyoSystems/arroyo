@@ -21,7 +21,7 @@ use super::expiring_time_key_map::{
     ExpiringTimeKeyTable, ExpiringTimeKeyView, KeyTimeView, UncachedKeyValueView,
 };
 use super::global_keyed_map::GlobalKeyedView;
-use super::{ErasedCheckpointer, ErasedTable};
+use super::{ErasedCheckpointer, ErasedTable, MigratableState};
 use crate::{
     BackingStore, StateBackend, StateMessage, get_storage_provider,
     tables::global_keyed_map::GlobalKeyedTable,
@@ -417,6 +417,48 @@ impl TableManager {
             let saved_data = global_keyed_table
                 .memory_view::<K, V>(self.writer.sender.clone())
                 .await?;
+
+            let cache: Box<dyn Any + Send> = Box::new(saved_data);
+            e.insert(cache);
+        }
+
+        let cache = self.caches.get_mut(table_name).unwrap();
+        let cache: &mut GlobalKeyedView<K, V> =
+            cache
+                .downcast_mut()
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "global_keyed_state",
+                })?;
+        Ok(cache)
+    }
+
+    pub async fn get_global_keyed_state_migratable<K: Key, V: MigratableState>(
+        &mut self,
+        table_name: &str,
+    ) -> Result<&mut GlobalKeyedView<K, V>, StateError> {
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            self.caches.entry(table_name.to_string())
+        {
+            let table_implementation =
+                self.tables
+                    .get(table_name)
+                    .ok_or_else(|| StateError::NoRegisteredTable {
+                        table: table_name.to_string(),
+                    })?;
+
+            let global_keyed_table = table_implementation
+                .as_any()
+                .downcast_ref::<GlobalKeyedTable>()
+                .ok_or_else(|| StateError::WrongTableKind {
+                    table: table_name.to_string(),
+                    expected: "global_keyed_state",
+                })?;
+
+            let saved_data = global_keyed_table
+                .memory_view_migratable::<K, V>(self.writer.sender.clone())
+                .await?;
+
             let cache: Box<dyn Any + Send> = Box::new(saved_data);
             e.insert(cache);
         }

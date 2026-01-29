@@ -183,7 +183,7 @@ fn map_object_store_error(obj_err: &object_store::Error) -> DataflowError {
 }
 
 #[derive(Clone)]
-pub(crate) struct FsEventLogger {
+pub struct FsEventLogger {
     task_info: Option<Arc<TaskInfo>>,
     connection_id: Arc<String>,
 }
@@ -253,7 +253,7 @@ enum CheckpointData {
 }
 
 #[derive(Decode, Encode, Clone, PartialEq, Eq)]
-struct InProgressFileCheckpoint {
+pub struct InProgressFileCheckpoint {
     filename: String,
     // unused, retained for backwards compatibility
     partition: Option<String>,
@@ -621,11 +621,11 @@ async fn write_trailing_bytes(
 pub struct FileToFinish {
     filename: String,
     // unused -- retained for backwards compatibility
-    partition: Option<String>,
-    multi_part_upload_id: String,
-    completed_parts: Vec<String>,
-    size: usize,
-    metadata: Option<IcebergFileMetadata>,
+    pub partition: Option<String>,
+    pub multi_part_upload_id: String,
+    pub completed_parts: Vec<String>,
+    pub size: usize,
+    pub metadata: Option<IcebergFileMetadata>,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
@@ -1763,9 +1763,9 @@ impl Debug for MultipartCallback {
 
 #[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
 pub struct FileSystemDataRecovery {
-    next_file_index: usize,
-    active_files: Vec<InProgressFileCheckpoint>,
-    delta_version: i64,
+    pub next_file_index: usize,
+    pub active_files: Vec<InProgressFileCheckpoint>,
+    pub delta_version: i64,
 }
 
 #[async_trait]

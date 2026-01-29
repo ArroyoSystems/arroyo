@@ -30,7 +30,11 @@ use std::{
 };
 use tokio::sync::mpsc::Sender;
 
-use super::{CompactionConfig, Table, TableEpochCheckpointer, table_checkpoint_path};
+use super::{
+    CheckpointParquetMetadata, CompactionConfig, MigratableState, Table, TableEpochCheckpointer,
+    table_checkpoint_path,
+};
+use tracing::info;
 static GLOBAL_KEY_VALUE_SCHEMA: Lazy<Arc<Schema>> = Lazy::new(|| {
     let fields = vec![
         Field::new("key", DataType::Binary, false), // non-nullable BinaryArray for 'key'
@@ -45,6 +49,7 @@ pub struct GlobalKeyedTable {
     pub task_info: Arc<TaskInfo>,
     storage_provider: StorageProviderRef,
     pub files: Vec<String>,
+    pub state_version: u32,
 }
 
 impl GlobalKeyedTable {
@@ -82,9 +87,11 @@ impl GlobalKeyedTable {
             })?;
         Ok(cast_key_column.into_iter().zip(cast_value_column))
     }
-    pub async fn memory_view<K: Key, V: Data>(
+
+    async fn load_with_version<K: Key, V: Data>(
         &self,
         state_tx: Sender<StateMessage>,
+        version: u32,
     ) -> Result<GlobalKeyedView<K, V>, StateError> {
         let mut data = HashMap::new();
         for file in &self.files {
@@ -112,6 +119,86 @@ impl GlobalKeyedTable {
             table_name: self.table_name.to_string(),
             data,
             state_tx,
+            version,
+        })
+    }
+
+    pub async fn memory_view<K: Key, V: Data>(
+        &self,
+        state_tx: Sender<StateMessage>,
+    ) -> Result<GlobalKeyedView<K, V>, StateError> {
+        self.load_with_version(state_tx, 0).await
+    }
+
+    /// Load state with version-aware migration support.
+    pub async fn memory_view_migratable<K: Key, V: MigratableState>(
+        &self,
+        state_tx: Sender<StateMessage>,
+    ) -> Result<GlobalKeyedView<K, V>, StateError> {
+        let mut data = HashMap::new();
+        for file in &self.files {
+            let contents = self.storage_provider.get(file.as_str()).await?;
+            let reader = ParquetRecordBatchReaderBuilder::try_new(contents)?;
+
+            let metadata = CheckpointParquetMetadata::from(
+                reader.metadata().file_metadata().key_value_metadata(),
+            );
+
+            let migrating = if metadata.state_version == V::VERSION {
+                false
+            } else if metadata.state_version + 1 == V::VERSION {
+                info!(
+                    "Migrating state for table '{}' in {} from version {} to version {}",
+                    self.table_name,
+                    file,
+                    metadata.state_version,
+                    V::VERSION
+                );
+                true
+            } else {
+                // we only support 1 step migration at this point
+                return Err(StateError::UnsupportedStateVersion {
+                    table: self.table_name.clone(),
+                    found: metadata.state_version,
+                    expected: V::VERSION,
+                });
+            };
+
+            for batch in reader.build()? {
+                for (key, value) in self.get_key_value_iterator(&batch?)? {
+                    let key = key.ok_or_else(|| StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "unexpected null key from record batch".to_string(),
+                    })?;
+                    let value = value.ok_or_else(|| StateError::Other {
+                        table: self.table_name.clone(),
+                        error: "unexpected null value from record batch".to_string(),
+                    })?;
+
+                    let (k, v) = if migrating {
+                        let decoded_key: K = bincode::decode_from_slice(key, config::standard())?.0;
+                        let old_value: V::PreviousVersion =
+                            bincode::decode_from_slice(value, config::standard())?.0;
+
+                        let new_value = V::migrate(old_value)?;
+                        (decoded_key, new_value)
+                    } else {
+                        (
+                            bincode::decode_from_slice(key, config::standard())?.0,
+                            bincode::decode_from_slice(value, config::standard())?.0,
+                        )
+                    };
+
+                    data.insert(k, v);
+                }
+            }
+        }
+
+        Ok(GlobalKeyedView {
+            table_name: self.table_name.to_string(),
+            data,
+            state_tx,
+            version: V::VERSION,
         })
     }
 }
@@ -138,6 +225,7 @@ impl Table for GlobalKeyedTable {
             storage_provider: self.storage_provider.clone(),
             commit_data: None,
             latest_values: BTreeMap::new(),
+            state_version: self.state_version,
         })
     }
 
@@ -146,6 +234,7 @@ impl Table for GlobalKeyedTable {
         task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
+        state_version: u32,
     ) -> Result<Self, StateError> {
         Ok(Self {
             table_name: config.table_name,
@@ -154,6 +243,7 @@ impl Table for GlobalKeyedTable {
             files: checkpoint_message
                 .map(|checkpoint| checkpoint.files)
                 .unwrap_or_default(),
+            state_version,
         })
     }
 
@@ -250,6 +340,7 @@ pub struct GlobalKeyedCheckpointer {
     storage_provider: StorageProviderRef,
     latest_values: BTreeMap<Vec<u8>, Vec<u8>>,
     commit_data: Option<Vec<u8>>,
+    state_version: u32,
 }
 
 #[async_trait::async_trait]
@@ -302,7 +393,14 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         let props = WriterProperties::builder()
             .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::default()))
             .set_statistics_enabled(EnabledStatistics::None)
+            .set_key_value_metadata(
+                CheckpointParquetMetadata {
+                    state_version: self.state_version,
+                }
+                .into(),
+            )
             .build();
+
         let cursor = Vec::new();
         let mut writer = ArrowWriter::try_new(cursor, batch.schema(), Some(props))?;
         writer.write(&batch)?;
@@ -346,16 +444,17 @@ pub struct GlobalKeyedView<K: Key, V: Data> {
     table_name: String,
     data: HashMap<K, V>,
     state_tx: Sender<StateMessage>,
+    version: u32,
 }
 
 impl<K: Key, V: Data> GlobalKeyedView<K, V> {
-    pub fn new(table_name: String, data: HashMap<K, V>, state_tx: Sender<StateMessage>) -> Self {
-        Self {
-            table_name,
-            data,
-            state_tx,
-        }
+    /// Get the table name and version for sending to the checkpointer.
+    /// This allows the caller to send the version message without
+    /// holding a reference to self across an await point.
+    pub fn version_info(&self) -> (String, u32, Sender<StateMessage>) {
+        (self.table_name.clone(), self.version, self.state_tx.clone())
     }
+
     pub async fn insert(&mut self, key: K, value: V) {
         self.state_tx
             .send(StateMessage::TableData {

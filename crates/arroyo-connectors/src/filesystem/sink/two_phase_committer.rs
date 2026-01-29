@@ -152,6 +152,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
                     uses_two_phase_commit: true,
                 }
                 .encode_to_vec(),
+                state_version: 0,
             },
         );
         tables
