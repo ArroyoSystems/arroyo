@@ -1,5 +1,7 @@
 use super::checkpoint::{FileToCommit, FileToCommitType, InProgressFile, InProgressFileState};
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::filesystem::sink::map_storage_error;
+use crate::filesystem::sink::two_phase_committer::CommitStrategy;
 use crate::filesystem::sink::v2::SinkConfig;
 use crate::filesystem::sink::v2::uploads::{
     FsResponseData, UploadFuture, create_multipart_finalize_future, create_multipart_init_future,
@@ -13,6 +15,8 @@ use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_storage::StorageProvider;
 use bytes::Bytes;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use object_store::MultipartId;
 use object_store::path::Path;
 use std::fmt::{Debug, Formatter};
@@ -20,6 +24,59 @@ use std::mem;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tracing::{debug, warn};
+
+/// A single file that's ready for local commit (used with PerSubtask strategy).
+/// This is a minimal type that holds just what's needed to finalize the upload.
+pub struct PendingSingleFile {
+    pub path: Arc<Path>,
+    bytes: Bytes,
+    iceberg_metadata: Option<IcebergFileMetadata>,
+    storage_provider: Arc<StorageProvider>,
+    logger: FsEventLogger,
+}
+
+impl PendingSingleFile {
+    /// Returns checkpoint data for this pending file
+    pub fn as_checkpoint(&self) -> InProgressFile {
+        InProgressFile {
+            path: self.path.to_string(),
+            total_size: self.bytes.len(),
+            data: self.bytes.to_vec(),
+            metadata: self.iceberg_metadata.clone(),
+            state: InProgressFileState::SingleFileToFinish,
+        }
+    }
+
+    /// Upload the file to storage and return commit data
+    pub async fn finalize(self) -> DataflowResult<FileToCommit> {
+        let started = Instant::now();
+        let total_size = self.bytes.len();
+
+        self.storage_provider
+            .put_bytes(&self.path, self.bytes.clone())
+            .await
+            .map_err(map_storage_error)?;
+
+        self.logger
+            .log_fs_event(total_size, 1, started.elapsed(), 0, None, 0, 0, 0);
+
+        Ok(FileToCommit {
+            path: self.path.to_string(),
+            typ: FileToCommitType::Single { total_size },
+            iceberg_metadata: self.iceberg_metadata,
+        })
+    }
+}
+
+/// What to do with a file that's ready for commit
+pub enum CommitPreparation {
+    /// Ready to serialize into commit data (multipart files, already uploaded)
+    Serializable(FileToCommit),
+    /// Needs upload first, then becomes serializable (PerOperator single files)
+    UploadThenSerialize(BoxFuture<'static, DataflowResult<FileToCommit>>),
+    /// Hold locally, finalize during commit phase (PerSubtask single files)
+    LocalCommit(PendingSingleFile),
+}
 
 #[derive(Debug, Clone)]
 pub struct Part {
@@ -72,7 +129,7 @@ pub enum OpenFileState<BBW: BatchBufferingWriter> {
     Failed,
 }
 
-impl<BBW: BatchBufferingWriter> Debug for OpenFileState<BBW> {
+impl<BBW: BatchBufferingWriter + 'static> Debug for OpenFileState<BBW> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             OpenFileState::New { writer } => write!(
@@ -144,7 +201,7 @@ impl<BBW: BatchBufferingWriter> Debug for OpenFileState<BBW> {
     }
 }
 
-pub struct OpenFile<BBW: BatchBufferingWriter> {
+pub struct OpenFile<BBW: BatchBufferingWriter + 'static> {
     pub path: Arc<Path>,
     pub stats: MultiPartWriterStats,
     pub logger: FsEventLogger,
@@ -154,7 +211,7 @@ pub struct OpenFile<BBW: BatchBufferingWriter> {
     pub storage_provider: Arc<StorageProvider>,
 }
 
-impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
+impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
     pub fn new(
         path: Arc<Path>,
         writer: BBW,
@@ -235,6 +292,10 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
                     }
                 }
             }
+            InProgressFileState::SingleFileToFinish => OpenFileState::ClosingSingle {
+                bytes: trailing_bytes,
+                iceberg_metadata: file.metadata,
+            },
         };
 
         Ok(Self {
@@ -298,10 +359,14 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
                         .collect(),
                     iceberg_metadata: file.iceberg_metadata,
                 },
-                FileToCommitType::Single { data } => OpenFileState::ClosingSingle {
-                    bytes: data.into(),
-                    iceberg_metadata: file.iceberg_metadata,
-                },
+                FileToCommitType::Single { .. } => {
+                    return Err(connector_err!(
+                        Internal,
+                        WithBackoff,
+                        "cannot restore a Single file from a commit; these should be handled outside\
+                        of the commit system"
+                    ));
+                }
             },
             target_part_size_bytes: config.target_part_size(),
             minimum_multipart_size: config.minimum_multipart_size(),
@@ -790,9 +855,9 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
         Ok(futures)
     }
 
-    // Callers are responsible for first calling read_to_finalize() to determine that the file is
+    // Callers are responsible for first calling ready_to_finalize() to determine that the file is
     // ready to be finalized
-    pub fn into_commit_file(self) -> DataflowResult<FileToCommit> {
+    fn into_commit_file(self) -> DataflowResult<FileToCommit> {
         Ok(match self.state {
             OpenFileState::ClosingMulti {
                 multipart_id,
@@ -820,7 +885,7 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
             } => FileToCommit {
                 path: self.path.to_string(),
                 typ: FileToCommitType::Single {
-                    data: bytes.to_vec(),
+                    total_size: bytes.len(),
                 },
                 iceberg_metadata,
             },
@@ -834,6 +899,52 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
                 ));
             }
         })
+    }
+
+    fn into_pending_single(self) -> DataflowResult<PendingSingleFile> {
+        match self.state {
+            OpenFileState::ClosingSingle {
+                bytes,
+                iceberg_metadata,
+            } => Ok(PendingSingleFile {
+                path: self.path,
+                bytes,
+                iceberg_metadata,
+                storage_provider: self.storage_provider,
+                logger: self.logger,
+            }),
+            s => Err(connector_err!(
+                Internal,
+                WithBackoff,
+                "tried to create pending single file {} in invalid state {:?}",
+                self.path,
+                s
+            )),
+        }
+    }
+
+    pub fn prepare_for_commit(self, strategy: CommitStrategy) -> DataflowResult<CommitPreparation> {
+        match (&self.state, strategy) {
+            (OpenFileState::ClosingMulti { .. }, _) => {
+                Ok(CommitPreparation::Serializable(self.into_commit_file()?))
+            }
+            (OpenFileState::ClosingSingle { .. }, CommitStrategy::PerOperator) => {
+                let pending = self.into_pending_single()?;
+                Ok(CommitPreparation::UploadThenSerialize(
+                    async move { pending.finalize().await }.boxed(),
+                ))
+            }
+            (OpenFileState::ClosingSingle { .. }, CommitStrategy::PerSubtask) => {
+                Ok(CommitPreparation::LocalCommit(self.into_pending_single()?))
+            }
+            (s, _) => Err(connector_err!(
+                Internal,
+                WithBackoff,
+                "prepare_for_commit called on file {} in invalid state {:?}",
+                self.path,
+                s
+            )),
+        }
     }
 
     pub fn finalize(&mut self) -> DataflowResult<UploadFuture> {
@@ -936,8 +1047,15 @@ impl<BBW: BatchBufferingWriter> OpenFile<BBW> {
                     },
                 )
             }
+            OpenFileState::ClosingSingle {
+                bytes,
+                iceberg_metadata,
+            } => (
+                bytes.to_vec(),
+                iceberg_metadata.clone(),
+                InProgressFileState::SingleFileToFinish,
+            ),
             OpenFileState::Recovering { .. }
-            | OpenFileState::ClosingSingle { .. }
             | OpenFileState::ClosingMulti { .. }
             | OpenFileState::Finishing { .. }
             | OpenFileState::Closed { .. }
