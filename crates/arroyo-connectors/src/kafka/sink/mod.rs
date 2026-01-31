@@ -261,6 +261,7 @@ impl ArrowOperator for KafkaSinkFunc {
                         uses_two_phase_commit: true,
                     }
                     .encode_to_vec(),
+                    state_version: 0,
                 },
             )
         } else {

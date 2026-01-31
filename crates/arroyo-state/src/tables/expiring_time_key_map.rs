@@ -252,6 +252,8 @@ impl Table for ExpiringTimeKeyTable {
         task_info: Arc<TaskInfo>,
         storage_provider: arroyo_storage::StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
+        // TODO: implement versioning for time key tables
+        _state_version: u32,
     ) -> Result<Self, StateError> {
         let schema: ArroyoSchema = config
             .schema

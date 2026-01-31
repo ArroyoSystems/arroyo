@@ -57,6 +57,14 @@ pub fn global_table_config(
     name: impl Into<String>,
     description: impl Into<String>,
 ) -> HashMap<String, TableConfig> {
+    global_table_config_with_version(name, description, 0)
+}
+
+pub fn global_table_config_with_version(
+    name: impl Into<String>,
+    description: impl Into<String>,
+    state_version: u32,
+) -> HashMap<String, TableConfig> {
     let name = name.into();
     single_item_hash_map(
         name.clone(),
@@ -68,6 +76,7 @@ pub fn global_table_config(
                 uses_two_phase_commit: false,
             }
             .encode_to_vec(),
+            state_version,
         },
     )
 }
@@ -89,6 +98,7 @@ pub fn timestamp_table_config(
             schema: Some(schema.into()),
         }
         .encode_to_vec(),
+        state_version: 0,
     }
 }
 

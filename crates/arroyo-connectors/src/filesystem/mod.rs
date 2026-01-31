@@ -1,7 +1,7 @@
 mod config;
 pub mod delta;
 pub(crate) mod iceberg;
-mod sink;
+pub mod sink;
 mod source;
 
 use self::sink::{
@@ -209,11 +209,14 @@ impl Connector for FileSystemConnector {
                 ("FileSystem".to_string(), ConnectionType::Source, None)
             }
             FileSystemTableType::Sink(FileSystemSink {
-                path, partitioning, ..
+                path,
+                partitioning,
+                version,
+                ..
             }) => {
                 BackendConfig::parse_url(path, true)?;
 
-                let description = format!("FileSystemSink<{format}, {path}>");
+                let description = format!("FileSystemSink{:?}<{format}, {path}>", version);
 
                 let exprs = partitioning
                     .partition_expr(&schema.arroyo_schema().schema)?

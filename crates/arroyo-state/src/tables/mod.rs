@@ -5,10 +5,12 @@ use arroyo_rpc::grpc::rpc::{
     TableSubtaskCheckpointMetadata,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::TaskInfo;
+use arroyo_types::{Data, TaskInfo};
+use parquet::format::KeyValue;
 use prost::Message;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::debug;
@@ -16,6 +18,43 @@ use tracing::debug;
 pub mod expiring_time_key_map;
 pub mod global_keyed_map;
 pub mod table_manager;
+
+/// Trait for bincode'd state struct that can be migrated from earlier versions
+pub trait MigratableState: Data {
+    const VERSION: u32;
+
+    type PreviousVersion: Data;
+
+    fn migrate(previous: Self::PreviousVersion) -> Result<Self, StateError>;
+}
+
+#[derive(Default)]
+pub struct CheckpointParquetMetadata {
+    pub state_version: u32,
+}
+
+const VERSION_KEY: &str = "version";
+
+impl From<CheckpointParquetMetadata> for Option<Vec<KeyValue>> {
+    fn from(value: CheckpointParquetMetadata) -> Self {
+        Some(vec![KeyValue::new(
+            VERSION_KEY.to_string(),
+            value.state_version.to_string(),
+        )])
+    }
+}
+
+impl From<Option<&Vec<KeyValue>>> for CheckpointParquetMetadata {
+    fn from(value: Option<&Vec<KeyValue>>) -> Self {
+        let state_version = value
+            .and_then(|v| v.iter().find(|f| f.key == VERSION_KEY))
+            .and_then(|kv| kv.value.as_ref())
+            .and_then(|v| u32::from_str(v).ok())
+            .unwrap_or_default();
+
+        Self { state_version }
+    }
+}
 
 pub(crate) fn table_checkpoint_path(
     job_id: &str,
@@ -83,6 +122,7 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
         task_info: Arc<TaskInfo>,
         storage_provider: StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
+        state_version: u32,
     ) -> Result<Self, StateError>
     where
         Self: Sized;
@@ -259,6 +299,7 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
     where
         Self: Sized,
     {
+        let state_version = config.state_version;
         let config = Self::checked_proto_decode(config.table_type(), config.config)?;
         let checkpoint_message = checkpoint_message
             .map(|metadata| Self::checked_proto_decode(metadata.table_type(), metadata.data))
@@ -267,7 +308,13 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
             "restoring from checkpoint message:\n{:#?}",
             checkpoint_message
         );
-        T::from_config(config, task_info, storage_provider, checkpoint_message)
+        T::from_config(
+            config,
+            task_info,
+            storage_provider,
+            checkpoint_message,
+            state_version,
+        )
     }
 
     fn epoch_checkpointer(

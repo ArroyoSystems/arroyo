@@ -235,7 +235,10 @@ impl Connector for IcebergConnector {
             bail!("'format' must be parquet for Iceberg sink")
         };
 
-        let description = format!("IcebergSink<{}.{}>", sink.namespace, sink.table_name);
+        let description = format!(
+            "IcebergSink{:?}<{}.{}>",
+            sink.version, sink.namespace, sink.table_name
+        );
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),

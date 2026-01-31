@@ -290,6 +290,16 @@ pub enum StateError {
         table: String,
         expected: &'static str,
     },
+    #[error(
+        "unsupported state version for table {table}: found version {found}, expected {expected}"
+    )]
+    UnsupportedStateVersion {
+        table: String,
+        found: u32,
+        expected: u32,
+    },
+    #[error("failed to migrate state for table {table}: {error}")]
+    MigrationFailed { table: String, error: String },
     #[error("unexpected state error: [{table}] {error}")]
     Other { table: String, error: String },
     #[error("storage error: {0}")]

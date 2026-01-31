@@ -1,4 +1,5 @@
 mod checkpoint;
+pub mod migration;
 mod open_file;
 mod uploads;
 
@@ -387,7 +388,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
-        let mut tables = arroyo_state::global_table_config("r", "recovery data");
+        let mut tables = arroyo_state::global_table_config_with_version("r", "recovery data", 1);
         tables.insert(
             "p".into(),
             TableConfig {
@@ -398,6 +399,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     uses_two_phase_commit: true,
                 }
                 .encode_to_vec(),
+                state_version: 1,
             },
         );
         tables
@@ -417,10 +419,11 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         self.context =
             Some(SinkContext::new(&mut self.config, schema, ctx.task_info.clone()).await?);
 
-        let recovery_state: &mut GlobalKeyedView<usize, FilesCheckpointV2> =
-            ctx.table_manager.get_global_keyed_state("r").await?;
-
-        let state = recovery_state.take();
+        let state: HashMap<usize, FilesCheckpointV2> = ctx
+            .table_manager
+            .get_global_keyed_state_migratable("r")
+            .await?
+            .take();
 
         for s in state.values() {
             self.active.max_file_index = self.active.max_file_index.max(s.file_index);
@@ -451,7 +454,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
 
             let pre_commit_state: &mut GlobalKeyedView<String, FileToCommit> = ctx
                 .table_manager
-                .get_global_keyed_state("p")
+                .get_global_keyed_state_migratable("p")
                 .await
                 .expect("should be able to get table");
 

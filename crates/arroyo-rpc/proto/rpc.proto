@@ -337,6 +337,7 @@ message OperatorMetadata {
 message TableConfig {
   TableEnum table_type = 1;
   bytes config = 2;
+  uint32 state_version = 3;
 }
 
 message TableCheckpointMetadata {
