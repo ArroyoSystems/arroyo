@@ -379,6 +379,12 @@ impl SourceCollector {
                                 .unwrap();
                         })
                         .await;
+
+                    TaskCounters::DeserializationErrors.for_connection(
+                        &self.collector.chain_info,
+                        self.connection_id.as_deref().unwrap_or_default(),
+                        |c| c.inc_by(count as u64),
+                    );
                 }
                 (_, e) => {
                     return Err(e);
