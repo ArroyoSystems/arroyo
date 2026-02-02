@@ -438,7 +438,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         if ctx.task_info.task_index == 0 {
             for s in state.into_values() {
                 for f in s.open_files {
-                    debug!(path = f.path, buffered_size = f.data.len(),
+                    debug!(path = f.path, buffered_size = f.data.0.len(),
                         state = ?f.state, "recovering and finishing open file");
 
                     let mut open_file = OpenFile::from_checkpoint(

@@ -11,8 +11,8 @@ use crate::filesystem::sink::{
     BatchBufferingWriter, FsEventLogger, MultiPartWriterStats, split_into_parts,
 };
 use arrow::record_batch::RecordBatch;
-use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
+use arroyo_rpc::{SerializableBytes, connector_err};
 use arroyo_storage::StorageProvider;
 use bytes::Bytes;
 use futures::FutureExt;
@@ -41,7 +41,7 @@ impl PendingSingleFile {
         InProgressFile {
             path: self.path.to_string(),
             total_size: self.bytes.len(),
-            data: self.bytes.to_vec(),
+            data: SerializableBytes(self.bytes.clone()),
             metadata: self.iceberg_metadata.clone(),
             state: InProgressFileState::SingleFileToFinish,
         }
@@ -253,7 +253,7 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
             )
         })?;
 
-        let trailing_bytes: Bytes = file.data.into();
+        let trailing_bytes: Bytes = file.data.0;
 
         let state = match file.state {
             InProgressFileState::New => OpenFileState::ClosingSingle {
@@ -1073,7 +1073,7 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
         Ok(InProgressFile {
             path: self.path.to_string(),
             total_size: self.stats.bytes_written,
-            data,
+            data: SerializableBytes(data.into()),
             metadata,
             state,
         })

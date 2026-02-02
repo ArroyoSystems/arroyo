@@ -1,11 +1,11 @@
+use super::migration;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::{FileSystemDataRecovery, FileToFinish};
+use arroyo_rpc::SerializableBytes;
 use arroyo_rpc::errors::StateError;
 use arroyo_state::tables::MigratableState;
 use bincode::{Decode, Encode};
 use std::fmt::Debug;
-
-use super::migration;
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct FilesCheckpointV2 {
@@ -39,7 +39,7 @@ impl MigratableState for FileToCommit {
 pub struct InProgressFile {
     pub path: String,
     pub total_size: usize,
-    pub data: Vec<u8>,
+    pub data: SerializableBytes,
     pub metadata: Option<IcebergFileMetadata>,
     pub state: InProgressFileState,
 }

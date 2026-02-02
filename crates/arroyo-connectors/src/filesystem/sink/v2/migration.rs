@@ -1,5 +1,5 @@
-use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
+use arroyo_rpc::{SerializableBytes, connector_err};
 use tracing::info;
 
 use super::checkpoint::{
@@ -109,7 +109,7 @@ fn migrate_file_checkpoint(v1: InProgressFileCheckpoint) -> DataflowResult<InPro
     Ok(InProgressFile {
         path: v1.filename,
         total_size: v1.pushed_size,
-        data,
+        data: SerializableBytes(data.into()),
         metadata,
         state,
     })
@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(file.path, "file2.parquet");
         assert_eq!(file.total_size, 100);
         // parts_to_add flattened + trailing_bytes
-        assert_eq!(file.data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(file.data.0.to_vec(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!(file.state, InProgressFileState::New);
     }
 
@@ -311,7 +311,7 @@ mod tests {
         let file = &v2.open_files[0];
         assert_eq!(file.path, "inflight.parquet");
         assert_eq!(file.total_size, 500);
-        assert_eq!(file.data, vec![99, 100]); // trailing bytes become data
+        assert_eq!(file.data.0.to_vec(), vec![99, 100]); // trailing bytes become data
         assert_eq!(
             file.state,
             InProgressFileState::MultipartStarted {
@@ -346,7 +346,7 @@ mod tests {
         let file = &v2.open_files[0];
         assert_eq!(file.path, "closed.parquet");
         assert_eq!(file.total_size, 1000);
-        assert!(file.data.is_empty()); // closed writer has no trailing bytes
+        assert!(file.data.0.is_empty()); // closed writer has no trailing bytes
         assert!(file.metadata.is_some());
         assert_eq!(
             file.state,

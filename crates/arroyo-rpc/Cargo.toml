@@ -47,6 +47,7 @@ smallvec = "1"
 thiserror = "2"
 object_store = { workspace = true, features = ["aws", "gcp", "azure"] }
 bincode = { workspace = true }
+bytes = "1"
 
 [build-dependencies]
 tonic-build = { workspace = true }
