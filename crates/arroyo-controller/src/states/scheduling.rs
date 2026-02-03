@@ -436,14 +436,18 @@ impl State for Scheduling {
             needs_commits,
         }) = checkpoint_info.clone()
         {
-            let mut metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
-                .await
-                .map_err(|err| {
-                    fatal(
-                        format!("Failed to restore job; checkpoint {epoch} not found."),
-                        err.into(),
-                    )
-                })?;
+            let mut metadata =
+                match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch).await {
+                    Ok(m) => m,
+                    Err(err) => {
+                        return Err(ctx.retryable(
+                            self,
+                            format!("Failed to load checkpoint metadata for epoch {epoch}"),
+                            err.into(),
+                            10,
+                        ));
+                    }
+                };
 
             if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
                 return Err(ctx.retryable(
@@ -460,17 +464,23 @@ impl State for Scheduling {
                 let mut committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>> =
                     HashMap::new();
                 for operator_id in &metadata.operator_ids {
-                    let operator_metadata =
-                        StateBackend::load_operator_metadata(&ctx.config.id, operator_id, epoch)
-                            .await
-                            .map_err(|err| {
-                                fatal(
-                                    format!(
-                                "Failed to restore job; operator metadata for {operator_id} not found."
-                            ),
-                                    err.into(),
-                                )
-                            })?;
+                    let operator_metadata = match StateBackend::load_operator_metadata(
+                        &ctx.config.id,
+                        operator_id,
+                        epoch,
+                    )
+                    .await
+                    {
+                        Ok(m) => m,
+                        Err(err) => {
+                            return Err(ctx.retryable(
+                                self,
+                                format!("Failed to load operator metadata for {operator_id} in epoch {epoch}"),
+                                err.into(),
+                                10,
+                            ));
+                        }
+                    };
                     let Some(operator_metadata) = operator_metadata else {
                         return Err(fatal(
                             "missing operator metadata",
@@ -527,14 +537,14 @@ impl State for Scheduling {
                 }
                 committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
             }
-            StateBackend::write_checkpoint_metadata(metadata)
-                .await
-                .map_err(|err| {
-                    fatal(
-                        format!("Failed to write checkpoint metadata for epoch {epoch}."),
-                        err.into(),
-                    )
-                })?;
+            if let Err(err) = StateBackend::write_checkpoint_metadata(metadata).await {
+                return Err(ctx.retryable(
+                    self,
+                    format!("Failed to write checkpoint metadata for epoch {epoch}"),
+                    err.into(),
+                    10,
+                ));
+            }
         }
 
         let assignments = compute_assignments(workers.values().collect(), &*ctx.program);
