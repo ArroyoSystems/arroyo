@@ -19,7 +19,7 @@ arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 anyhow = "1.0.71"
 arrow = { workspace = true, features = ["ffi"] }
 async-trait = "0.1.68"
-bincode = "2.0.0-rc.3"
+bincode = { workspace = true }
 datafusion = { workspace = true }
 futures = "0.3"
 prost = {workspace = true}

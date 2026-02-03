@@ -11,7 +11,7 @@ arrow-schema = { workspace = true, features = ["serde"] }
 petgraph = {workspace = true, features = ["serde-1"]}
 serde = {version = "1", features = ["derive"]}
 syn = {version = "2", features = ["full"]}
-bincode = { version = "2.0.0-rc.3", features = ["serde"]}
+bincode = { workspace = true, features = ["serde"]}
 rand = { workspace = true }
 anyhow = "1.0.70"
 prost = {workspace = true}
