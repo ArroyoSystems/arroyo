@@ -562,8 +562,7 @@ impl KeyComputingHolder {
         // If it is, we need to finish the current session and start a new one.
         let mut results = vec![];
         loop {
-            if self.active_session.is_some() {
-                let active_session = self.active_session.as_mut().unwrap();
+            if let Some(active_session) = &mut self.active_session {
                 if active_session.data_end + self.session_window_config.gap < watermark {
                     let result = self
                         .active_session

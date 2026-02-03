@@ -284,7 +284,9 @@ impl LocalWriter for ParquetLocalWriter {
     }
 
     fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize> {
-        if self.stats.is_none() {
+        if let Some(stats) = &mut self.stats {
+            stats.last_write_at = Instant::now();
+        } else {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
                 parts_written: 0,
@@ -294,8 +296,6 @@ impl LocalWriter for ParquetLocalWriter {
                     batch.column(self.schema.timestamp_index),
                 )?,
             });
-        } else {
-            self.stats.as_mut().unwrap().last_write_at = Instant::now();
         }
         let mut batch = batch.clone();
         self.schema.remove_timestamp_column(&mut batch);
