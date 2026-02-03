@@ -1,11 +1,11 @@
+use super::migration;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::{FileSystemDataRecovery, FileToFinish};
+use arroyo_rpc::SerializableBytes;
 use arroyo_rpc::errors::StateError;
 use arroyo_state::tables::MigratableState;
 use bincode::{Decode, Encode};
-use std::fmt::{Debug, Formatter};
-
-use super::migration;
+use std::fmt::Debug;
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct FilesCheckpointV2 {
@@ -39,7 +39,7 @@ impl MigratableState for FileToCommit {
 pub struct InProgressFile {
     pub path: String,
     pub total_size: usize,
-    pub data: Vec<u8>,
+    pub data: SerializableBytes,
     pub metadata: Option<IcebergFileMetadata>,
     pub state: InProgressFileState,
 }
@@ -51,9 +51,10 @@ pub enum InProgressFileState {
         multipart_id: String,
         parts: Vec<String>,
     },
+    SingleFileToFinish,
 }
 
-#[derive(Clone, Encode, Decode, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub enum FileToCommitType {
     Multipart {
         multipart_id: String,
@@ -61,29 +62,8 @@ pub enum FileToCommitType {
         total_size: usize,
     },
     Single {
-        data: Vec<u8>,
+        total_size: usize,
     },
-}
-
-impl Debug for FileToCommitType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FileToCommitType::Multipart {
-                multipart_id,
-                parts,
-                total_size,
-            } => f
-                .debug_struct("Multipart")
-                .field("multipart_id", multipart_id)
-                .field("parts", parts)
-                .field("total_size", total_size)
-                .finish(),
-            FileToCommitType::Single { data } => f
-                .debug_struct("Single")
-                .field("data.len", &data.len())
-                .finish(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]

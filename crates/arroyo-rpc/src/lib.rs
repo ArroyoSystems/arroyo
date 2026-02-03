@@ -16,6 +16,10 @@ use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{ArrowError, DataType, Field, Fields};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::{Decode, Encode, impl_borrow_decode};
 use datafusion::common::{
     DFSchema, Result as DFResult, ScalarValue, TableReference, not_impl_err, plan_datafusion_err,
     plan_err,
@@ -31,6 +35,7 @@ use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::sqlparser::tokenizer::Span;
 use grpc::rpc::{StopMode, TableCheckpointMetadata, TaskCheckpointEventType};
 use log::{debug, warn};
+use prost::bytes::Bytes;
 use regex::Regex;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
@@ -1167,9 +1172,29 @@ pub trait FromOpts: Sized {
     fn from_opts(opts: &mut ConnectorOptions) -> std::result::Result<Self, DataFusionError>;
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct SerializableBytes(pub Bytes);
+
+impl Encode for SerializableBytes {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.0.as_ref().encode(encoder)
+    }
+}
+
+impl<Context> Decode<Context> for SerializableBytes {
+    fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let vec = Vec::<u8>::decode(decoder)?;
+        Ok(SerializableBytes(Bytes::from(vec)))
+    }
+}
+
+impl_borrow_decode!(SerializableBytes);
+
 #[cfg(test)]
 mod tests {
-    use crate::{DataSizeUnit, parse_expr};
+    use crate::{DataSizeUnit, SerializableBytes, parse_expr};
+    use bincode::{Decode, Encode, config};
+    use bytes::Bytes;
 
     #[test]
     fn test_parse_expr() {
@@ -1195,5 +1220,30 @@ mod tests {
 
         assert!(DataSizeUnit::parse("-14G").is_err());
         assert!(DataSizeUnit::parse("G").is_err());
+    }
+
+    #[derive(Debug, Eq, PartialEq, Encode, Decode)]
+    struct Test {
+        a: u32,
+        b: SerializableBytes,
+        c: String,
+    }
+
+    #[test]
+    fn test_serializable_bytes() {
+        let bytes: Bytes = "hello".as_bytes().to_vec().into();
+
+        let s = Test {
+            a: 31,
+            b: SerializableBytes(bytes),
+            c: "blah".to_string(),
+        };
+
+        let encoded = bincode::encode_to_vec(&s, config::standard()).unwrap();
+        let decoded: Test = bincode::decode_from_slice(&encoded, config::standard())
+            .unwrap()
+            .0;
+
+        assert_eq!(s, decoded);
     }
 }

@@ -125,7 +125,8 @@ impl FromOpts for MultipartConfig {
                 })
                 .transpose()?,
             max_parts: opts.pull_opt_nonzero_u64("multipart.max_parts")?,
-            minimum_multipart_size: opts.pull_opt_u64("multipart.minimum_multipart_size")?,
+            minimum_multipart_size: opts
+                .pull_opt_data_size_bytes("multipart.minimum_multipart_size")?,
         })
     }
 }

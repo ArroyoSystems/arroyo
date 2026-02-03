@@ -14,7 +14,8 @@ use super::{
 };
 use crate::filesystem::TableFormat;
 use crate::filesystem::config::{self, FilenameStrategy, NamingConfig};
-use crate::filesystem::sink::v2::open_file::OpenFile;
+use crate::filesystem::sink::two_phase_committer::CommitStrategy;
+use crate::filesystem::sink::v2::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
 use arrow::record_batch::RecordBatch;
 use arrow::row::OwnedRow;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -45,12 +46,14 @@ use uuid::Uuid;
 
 const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
 
-pub struct ActiveState<BBW: BatchBufferingWriter> {
+pub struct ActiveState<BBW: BatchBufferingWriter + 'static> {
     max_file_index: usize,
     // partition -> filename
     active_partitions: HashMap<Option<OwnedRow>, Arc<Path>>,
     // filename -> file writer
     open_files: HashMap<Arc<Path>, OpenFile<BBW>>,
+    // single files pending local commit (PerSubtask strategy)
+    pending_local_commits: Vec<PendingSingleFile>,
 }
 
 pub struct SinkConfig {
@@ -248,7 +251,7 @@ impl<BBW: BatchBufferingWriter> ActiveState<BBW> {
     }
 }
 
-pub struct FileSystemSinkV2<BBW: BatchBufferingWriter> {
+pub struct FileSystemSinkV2<BBW: BatchBufferingWriter + 'static> {
     config: SinkConfig,
 
     context: Option<SinkContext>,
@@ -316,6 +319,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
                 active_partitions: HashMap::new(),
                 open_files: HashMap::new(),
                 max_file_index: 0,
+                pending_local_commits: vec![],
             },
             upload: UploadState {
                 pending_uploads: Arc::new(Mutex::new(FuturesUnordered::new())),
@@ -329,6 +333,13 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
         }
     }
 
+    fn commit_strategy(&self) -> CommitStrategy {
+        match self.context.as_ref().unwrap().commit_state {
+            CommitState::DeltaLake { .. } | CommitState::Iceberg(_) => CommitStrategy::PerOperator,
+            CommitState::VanillaParquet => CommitStrategy::PerSubtask,
+        }
+    }
+
     async fn process_upload_result(&mut self, result: FsResponse) -> DataflowResult<()> {
         let Some(file) = self.active.open_files.get_mut(&result.path) else {
             warn!("received multipart init for unknown file: {}", result.path);
@@ -338,11 +349,6 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
         let futures = self.upload.pending_uploads.lock().await;
         for future in file.handle_event(result.data)? {
             futures.push(future);
-        }
-
-        if file.ready_to_finalize() {
-            let file = self.active.open_files.remove(&result.path).unwrap();
-            self.upload.files_to_commit.push(file.into_commit_file()?);
         }
 
         Ok(())
@@ -432,7 +438,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         if ctx.task_info.task_index == 0 {
             for s in state.into_values() {
                 for f in s.open_files {
-                    debug!(path = f.path, buffered_size = f.data.len(),
+                    debug!(path = f.path, buffered_size = f.data.0.len(),
                         state = ?f.state, "recovering and finishing open file");
 
                     let mut open_file = OpenFile::from_checkpoint(
@@ -600,6 +606,8 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
             }
         }
 
+        let commit_strategy = self.commit_strategy();
+
         maybe_cause_failure("checkpoint_start");
 
         // then we wait for all pending uploads to finish
@@ -608,11 +616,11 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         maybe_cause_failure("after_flush");
 
         let mut open_files = vec![];
-        let mut to_commit = vec![];
+        let mut files_ready_to_commit = vec![];
 
         for (file_path, file) in &mut self.active.open_files {
             if file.ready_to_finalize() {
-                to_commit.push(file.path.clone());
+                files_ready_to_commit.push(file.path.clone());
             } else {
                 let chk = file.as_checkpoint()?;
                 debug!(
@@ -629,14 +637,27 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         let mut files_to_commit = vec![];
         mem::swap(&mut self.upload.files_to_commit, &mut files_to_commit);
 
-        for path in to_commit {
-            files_to_commit.push(
-                self.active
-                    .open_files
-                    .remove(&path)
-                    .unwrap()
-                    .into_commit_file()?,
-            );
+        let mut upload_futures = FuturesUnordered::new();
+
+        for path in files_ready_to_commit {
+            let file = self.active.open_files.remove(&path).unwrap();
+            match file.prepare_for_commit(commit_strategy)? {
+                CommitPreparation::Serializable(ftc) => {
+                    files_to_commit.push(ftc);
+                }
+                CommitPreparation::UploadThenSerialize(fut) => {
+                    upload_futures.push(fut);
+                }
+                CommitPreparation::LocalCommit(pending) => {
+                    open_files.push(pending.as_checkpoint());
+                    self.active.pending_local_commits.push(pending);
+                }
+            }
+        }
+
+        // Wait for PerOperator single file uploads to complete
+        while let Some(result) = upload_futures.next().await {
+            files_to_commit.push(result?);
         }
 
         let checkpoint = FilesCheckpointV2 {
@@ -673,6 +694,17 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         ctx: &mut OperatorContext,
     ) -> DataflowResult<()> {
         maybe_cause_failure("commit_start");
+
+        // upload single files in PerSubtask mode
+        let mut uploads = FuturesUnordered::new();
+        for pending in self.active.pending_local_commits.drain(..) {
+            uploads.push(pending.finalize());
+        }
+
+        while let Some(result) = uploads.next().await {
+            let _ = result?;
+        }
+
         if ctx.task_info.task_index == 0 {
             let files_to_commit: Vec<_> = commit_data
                 .get("p")
@@ -691,12 +723,35 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                 })
                 .collect();
 
-            // finalize the finals
+            // Separate single files (already uploaded) from multipart files (need finalization)
+            let mut finished_files = vec![];
+            let mut multipart_files = vec![];
+
+            for file in files_to_commit {
+                debug!(path = ?file.path, data = ?file.typ, "Processing file for commit");
+
+                match file.typ {
+                    checkpoint::FileToCommitType::Single { total_size } => {
+                        // Single files are already uploaded during checkpoint,
+                        // just add them directly to finished_files
+                        finished_files.push(FinishedFile {
+                            filename: file.path,
+                            // unused, retained for backwards compatibility
+                            partition: None,
+                            size: total_size,
+                            metadata: file.iceberg_metadata,
+                        });
+                    }
+                    checkpoint::FileToCommitType::Multipart { .. } => {
+                        multipart_files.push(file);
+                    }
+                }
+            }
+
+            // Finalize multipart uploads
             let mut futures = FuturesUnordered::new();
             let mut files = HashMap::new();
-            for file in files_to_commit {
-                debug!(path = ?file.path, data = ?file.typ, "Finalizing file");
-
+            for file in multipart_files {
                 let mut file: OpenFile<BBW> = OpenFile::from_commit(
                     file,
                     self.context.as_ref().unwrap().storage_provider.clone(),
@@ -707,7 +762,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                 files.insert(file.path.clone(), file);
             }
 
-            // wait for them to be finalized
+            // wait for multipart files to be finalized
             while let Some(event) = futures.next().await {
                 let event = event?;
                 let file = files.get_mut(&event.path).ok_or_else(|| {
@@ -723,14 +778,13 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
 
             maybe_cause_failure("commit_middle");
 
-            let mut finished_files = vec![];
+            // Add finalized multipart files to finished_files
             for f in files.into_values() {
                 let filename = f.path.to_string();
                 let (total_size, metadata) = f.metadata_for_closed()?;
 
                 finished_files.push(FinishedFile {
                     filename,
-                    // not used
                     partition: None,
                     size: total_size,
                     metadata,
