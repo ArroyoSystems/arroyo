@@ -26,7 +26,7 @@ tokio = { version = "1", features = ["full"] }
 serde = "1"
 serde_json = "1"
 tracing = "0.1"
-tracing-subscriber = {version = "0.3", features = [ "env-filter", "json" ]}
+tracing-subscriber = {version = "0.3.20", features = [ "env-filter", "json" ]}
 
 tokio-postgres = { version = "*", features = ["with-serde_json-1", "with-time-0_3", "with-uuid-1"] }
 deadpool-postgres = { workspace = true }

@@ -36,7 +36,7 @@ tracing = "0.1.37"
 regress = "0.10.0"
 futures = "0.3.28"
 rand = { workspace = true }
-bytes = "1.5.0"
+bytes = "1.11.1"
 url = "2.5.0"
 itertools = "0.14.0"
 regex = "1"
@@ -86,7 +86,7 @@ redis = { version = "0.28", features = [
 fluvio = { version = "0.24", features = ["openssl"] }
 
 # Kinesis
-aws-sdk-kinesis = { version = "1.44" }
+aws-sdk-kinesis = { version = "1.95" }
 aws-config = { workspace = true }
 
 # Filesystem
