@@ -697,15 +697,34 @@ impl State for Scheduling {
             .await
             .insert(ctx.config.id.clone(), metrics.clone());
 
+        // Use ignore_state_before_epoch as default so new checkpoints exceed the threshold
+        let default_epoch = ctx
+            .config
+            .ignore_state_before_epoch
+            .filter(|&t| t > 0)
+            .map(|t| {
+                let epoch = (t - 1) as u32;
+                info!(
+                    message = "starting from ignore_state_before_epoch threshold",
+                    job_id = *ctx.config.id,
+                    default_epoch = epoch,
+                );
+                epoch
+            })
+            .unwrap_or(0);
+
         let mut controller = JobController::new(
             ctx.db.clone(),
             ctx.config.clone(),
             program,
-            checkpoint_info.as_ref().map(|info| info.epoch).unwrap_or(0),
+            checkpoint_info
+                .as_ref()
+                .map(|info| info.epoch)
+                .unwrap_or(default_epoch),
             checkpoint_info
                 .as_ref()
                 .map(|info| info.min_epoch)
-                .unwrap_or(0),
+                .unwrap_or(default_epoch),
             worker_connects,
             committing_state,
             metrics,
