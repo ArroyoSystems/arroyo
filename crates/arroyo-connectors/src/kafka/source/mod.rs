@@ -141,8 +141,9 @@ impl KafkaSourceFunc {
         }
 
         // Handle single topic (existing behavior with manual partition assignment)
-        let topic = self.topic.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Either 'topic' or 'topic_pattern' must be specified"))?;
+        let topic = self.topic.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Either 'topic' or 'topic_pattern' must be specified")
+        })?;
 
         let state: Vec<_> = ctx
             .table_manager

@@ -65,7 +65,9 @@ impl KafkaTable {
             None => {
                 // For single topic, use the standard subject naming convention
                 // For patterns, the value_subject should be explicitly set
-                let topic = self.topic.as_ref()
+                let topic = self
+                    .topic
+                    .as_ref()
                     .map(|t| format!("{}-value", t))
                     .unwrap_or_else(|| "unknown-value".to_string());
                 Cow::Owned(topic)
