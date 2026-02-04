@@ -812,10 +812,14 @@ impl KafkaTester {
 
         self.info(&mut tx, "Connected to Kafka").await;
 
-        let topic = table.topic.clone();
+        // For testing, topic must be specified (not topic_pattern)
+        let topic = table
+            .topic
+            .as_ref()
+            .ok_or_else(|| anyhow!("Testing requires a specific topic, not a pattern"))?;
 
         let metadata = client
-            .fetch_metadata(Some(&topic), Duration::from_secs(10))
+            .fetch_metadata(Some(topic.as_str()), Duration::from_secs(10))
             .map_err(|e| anyhow!("Failed to fetch metadata: {:?}", e))?;
 
         self.info(&mut tx, "Fetched topic metadata").await;
