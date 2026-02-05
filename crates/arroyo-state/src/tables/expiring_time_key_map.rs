@@ -307,10 +307,6 @@ impl Table for ExpiringTimeKeyTable {
             .values()
             .filter_map(|metadata| metadata.watermark)
             .min();
-        let _max_watermark = subtask_metadata
-            .values()
-            .filter_map(|metadata| metadata.watermark)
-            .min();
         let cutoff = min_watermark
             .map(|min_watermark| min_watermark - config.retention_micros)
             .unwrap_or_default();
