@@ -176,7 +176,7 @@ impl SchemaWithHashAndOperation {
                     table: "".to_string(),
                     error: format!("failed to compute hashes: {e:?}"),
                 }
-            });
+            })?;
         let hash_array = PrimitiveArray::<UInt64Type>::from(hash_buffer);
 
         let hash_min = min(&hash_array).unwrap();
