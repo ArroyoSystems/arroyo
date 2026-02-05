@@ -92,7 +92,7 @@ impl OperatorState {
             }
             None => Some(from_micros(c.finish_time)),
         };
-        self.bytes += self.bytes;
+        self.bytes += c.bytes as usize;
         for (table, table_metadata) in c.table_metadata {
             self.table_state
                 .entry(table)
@@ -286,7 +286,7 @@ impl CheckpointState {
             .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?;
 
         debug!(
-            message = "Checkpoint finished", 
+            message = "Checkpoint finished",
             checkpoint_id = self.checkpoint_id,
             job_id = *self.job_id,
             epoch = self.epoch,
