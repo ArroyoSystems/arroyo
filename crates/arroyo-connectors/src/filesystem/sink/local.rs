@@ -61,7 +61,7 @@ impl<V: LocalWriter> LocalFileSystemWriter<V> {
 
         let mut file_naming = table_properties.file_naming.clone();
         if file_naming.suffix.is_none() {
-            file_naming.suffix = Some(V::file_suffix().to_string());
+            file_naming.suffix = Some(V::file_suffix_for_format(&format).to_owned());
         }
 
         let writer = Self {
@@ -139,7 +139,8 @@ pub trait LocalWriter: Send + 'static {
         format: Format,
         schema: ArroyoSchemaRef,
     ) -> Self;
-    fn file_suffix() -> &'static str;
+    /// Returns the file suffix based on the format configuration.
+    fn file_suffix_for_format(format: &Format) -> &str;
     fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize>;
     // returns the total size of the file
     fn sync(&mut self) -> anyhow::Result<usize>;

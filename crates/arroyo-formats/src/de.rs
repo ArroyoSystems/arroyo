@@ -903,6 +903,7 @@ mod tests {
                 unstructured: false,
                 timestamp_format: Default::default(),
                 decimal_encoding: Default::default(),
+                compression: Default::default(),
             }),
             schema,
             &[],
@@ -1039,6 +1040,7 @@ mod tests {
                 unstructured: false,
                 timestamp_format: Default::default(),
                 decimal_encoding: Default::default(),
+                compression: Default::default(),
             }),
             arroyo_schema,
             &[

@@ -498,6 +498,7 @@ async fn connection_table() {
     let connection_schema = ConnectionSchema::builder()
         .fields(vec![])
         .format(Format::Json {
+            compression: None,
             confluent_schema_registry: None,
             debezium: None,
             decimal_encoding: None,

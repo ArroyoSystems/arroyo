@@ -327,6 +327,7 @@ impl IntoResponse for HttpError {
         SchemaDefinition,
         TestSourceMessage,
         JsonFormat,
+        JsonCompression,
         AvroFormat,
         ProtobufFormat,
         ParquetFormat,
