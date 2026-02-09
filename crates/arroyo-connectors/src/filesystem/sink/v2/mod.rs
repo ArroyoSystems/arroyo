@@ -300,7 +300,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
     ) -> Self {
         let mut file_naming = config.file_naming.clone();
         if file_naming.suffix.is_none() {
-            file_naming.suffix = Some(BBW::suffix());
+            file_naming.suffix = Some(BBW::suffix_for_format(&format).to_owned());
         }
 
         let connection_id_str = connection_id.clone().unwrap_or_default();

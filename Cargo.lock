@@ -589,6 +589,7 @@ dependencies = [
  "delta_kernel",
  "deltalake",
  "eventsource-client",
+ "flate2",
  "fluvio",
  "futures",
  "glob",

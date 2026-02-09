@@ -374,6 +374,7 @@ mod tests {
             unstructured: false,
             timestamp_format: Default::default(),
             decimal_encoding: Default::default(),
+            compression: Default::default(),
         }));
 
         let text: Vec<_> = ["a", "b", "blah", "whatever"]
@@ -427,6 +428,7 @@ mod tests {
             unstructured: false,
             timestamp_format: TimestampFormat::UnixMillis,
             decimal_encoding: Default::default(),
+            compression: Default::default(),
         }));
 
         let mut timestamp_array = TimestampNanosecondBuilder::new();
@@ -479,6 +481,7 @@ mod tests {
             unstructured: false,
             timestamp_format: TimestampFormat::UnixMillis,
             decimal_encoding: DecimalEncoding::Number,
+            compression: Default::default(),
         }));
 
         let mut decimal_array = Decimal128Builder::new()
