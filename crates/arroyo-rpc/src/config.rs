@@ -524,6 +524,9 @@ pub struct PipelineConfig {
     #[serde(default)]
     pub default_sink: DefaultSink,
 
+    /// Whether to persist deserialization errors to job_log_messages
+    pub store_deserialization_errors: bool,
+
     pub chaining: ChainingConfig,
 
     pub compaction: CompactionConfig,
