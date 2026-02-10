@@ -1,10 +1,11 @@
 use cornucopia::{CodegenSettings, Error};
 use postgres::{Client, NoTls};
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 fn ensure_webui_built() {
-    let webui_dir = Path::new("../../webui");
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let webui_dir = manifest_dir.join("../../webui");
     let dist_index = webui_dir.join("dist/index.html");
 
     // Only re-run this build script when dist/ changes (or is created).
@@ -12,7 +13,10 @@ fn ensure_webui_built() {
     // build toolchain. Developers who modify the frontend should run
     // `pnpm build` in webui/ themselves; this block only bootstraps
     // an initial build so that `cargo build` works out of the box.
-    println!("cargo:rerun-if-changed=../../webui/dist");
+    println!(
+        "cargo:rerun-if-changed={}",
+        webui_dir.join("dist").display()
+    );
 
     if dist_index.exists() {
         return;
@@ -35,7 +39,7 @@ fn ensure_webui_built() {
     // Install dependencies (frozen so the lockfile is never mutated by a Rust build)
     let install = Command::new("pnpm")
         .args(["install", "--frozen-lockfile"])
-        .current_dir(webui_dir)
+        .current_dir(&webui_dir)
         .status()
         .expect("failed to spawn `pnpm install`");
 
@@ -46,7 +50,7 @@ fn ensure_webui_built() {
     // Build the frontend
     let build = Command::new("pnpm")
         .arg("build")
-        .current_dir(webui_dir)
+        .current_dir(&webui_dir)
         .status()
         .expect("failed to spawn `pnpm build`");
 
