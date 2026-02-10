@@ -13,6 +13,7 @@ task-startup-time = "2m"
 state-initial-backoff = "500ms"
 state-max-backoff = "1m"
 chaining.enabled = true
+store-deserialization-errors = true
 
 [pipeline.compaction]
 enabled = false
