@@ -24,15 +24,15 @@ use tracing::debug;
 const COMPRESSION_CHUNK_SIZE: usize = 5 * 1024 * 1024; // 5MB
 
 /// Compresses a chunk of data using the specified [`JsonCompression`].
-/// Note that [`JsonCompression::Uncompressed]` can be used, the data won't transformed.
-fn compress_chunk(data: Bytes, compression: JsonCompression) -> anyhow::Result<Bytes> {
+/// Note that [`None`] can be used and the data won't transformed.
+fn compress_chunk(data: Bytes, compression: Option<JsonCompression>) -> anyhow::Result<Bytes> {
     match compression {
-        JsonCompression::Uncompressed => Ok(data),
-        JsonCompression::Gzip => {
+        Some(JsonCompression::Gzip) => {
             let mut encoder = GzEncoder::new(Vec::new(), GzipCompression::default());
             encoder.write_all(&data)?;
             Ok(Bytes::from(encoder.finish()?))
         }
+        None => Ok(data),
     }
 }
 
@@ -42,7 +42,7 @@ pub struct JsonWriter {
     /// Staging buffer for uncompressed JSON data (compressed in 5MB chunks)
     uncompressed_buffer: BytesMut,
     serializer: ArrowSerializer,
-    compression: JsonCompression,
+    compression: Option<JsonCompression>,
     event_logger: FsEventLogger,
 }
 
@@ -72,8 +72,8 @@ impl BatchBufferingWriter for JsonWriter {
     fn suffix_for_format(format: &Format) -> &str {
         if let Format::Json(json) = format {
             match json.compression {
-                JsonCompression::Uncompressed => "json",
-                JsonCompression::Gzip => "json.gz",
+                Some(JsonCompression::Gzip) => "json.gz",
+                None => "json",
             }
         } else {
             panic!("JsonLocalWriter configured with non-json format {format:?}");
@@ -277,14 +277,14 @@ mod tests {
     #[test]
     fn test_compress_chunk_uncompressed() {
         let data = Bytes::from("Hello, World!");
-        let compressed = compress_chunk(data.clone(), JsonCompression::Uncompressed).unwrap();
+        let compressed = compress_chunk(data.clone(), None).unwrap();
         assert_eq!(compressed, data);
     }
 
     #[test]
     fn test_compress_chunk_gzip() {
         let data = Bytes::from("Hello, World!");
-        let compressed = compress_chunk(data.clone(), JsonCompression::Gzip).unwrap();
+        let compressed = compress_chunk(data.clone(), Some(JsonCompression::Gzip)).unwrap();
 
         // Verify it's actually compressed (should have gzip header)
         assert_eq!(&compressed[0..2], &[0x1f, 0x8b]); // gzip magic number
@@ -300,14 +300,14 @@ mod tests {
     fn test_suffix_for_format() {
         // Test uncompressed
         let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Uncompressed,
+            compression: None,
             ..Default::default()
         });
         assert_eq!(JsonWriter::suffix_for_format(&format), "json");
 
         // Test gzip
         let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Gzip,
+            compression: Some(JsonCompression::Gzip),
             ..Default::default()
         });
         assert_eq!(JsonWriter::suffix_for_format(&format), "json.gz");
@@ -319,8 +319,8 @@ mod tests {
         let part1 = Bytes::from("{\"field\":\"value1\"}\n");
         let part2 = Bytes::from("{\"field\":\"value2\"}\n");
 
-        let compressed1 = compress_chunk(part1.clone(), JsonCompression::Gzip).unwrap();
-        let compressed2 = compress_chunk(part2.clone(), JsonCompression::Gzip).unwrap();
+        let compressed1 = compress_chunk(part1.clone(), Some(JsonCompression::Gzip)).unwrap();
+        let compressed2 = compress_chunk(part2.clone(), Some(JsonCompression::Gzip)).unwrap();
 
         // Concatenate the two gzip members (simulating multipart upload)
         let mut multi_member = Vec::new();
@@ -345,7 +345,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![Field::new("data", DataType::Utf8, false)]));
 
         let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Gzip,
+            compression: Some(JsonCompression::Gzip),
             ..Default::default()
         });
 
@@ -353,7 +353,7 @@ mod tests {
             compressed_buffer: BytesMut::new(),
             uncompressed_buffer: BytesMut::new(),
             serializer: ArrowSerializer::new(format.clone()),
-            compression: JsonCompression::Gzip,
+            compression: Some(JsonCompression::Gzip),
             event_logger: FsEventLogger {
                 task_info: Some(Arc::new(TaskInfo {
                     job_id: "test_job".to_string(),
@@ -423,7 +423,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![Field::new("data", DataType::Utf8, false)]));
 
         let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Gzip,
+            compression: Some(JsonCompression::Gzip),
             ..Default::default()
         });
 
@@ -431,7 +431,7 @@ mod tests {
             compressed_buffer: BytesMut::new(),
             uncompressed_buffer: BytesMut::new(),
             serializer: ArrowSerializer::new(format.clone()),
-            compression: JsonCompression::Gzip,
+            compression: Some(JsonCompression::Gzip),
             event_logger: FsEventLogger {
                 task_info: Some(Arc::new(TaskInfo {
                     job_id: "test_job".to_string(),
