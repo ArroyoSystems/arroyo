@@ -499,7 +499,7 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         if let Some(f) = self.window_functions.get(name) {
             Ok(Arc::clone(f))
         } else {
-            plan_err!("No UDAF with name {name}")
+            plan_err!("No UDWF with name {name}")
         }
     }
 

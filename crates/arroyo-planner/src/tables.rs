@@ -408,7 +408,7 @@ impl ConnectorTable {
         table.idle_time = options
             .pull_opt_i64("idle_micros")?
             .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
-            .filter(|t| *t <= 0)
+            .filter(|t| *t > 0)
             .map(|t| Duration::from_micros(t as u64));
 
         table.lookup_cache_max_bytes = options.pull_opt_u64("lookup.cache.max_bytes")?;

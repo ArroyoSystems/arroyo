@@ -694,7 +694,7 @@ async fn expand_json_schema(
                         schema_response.0.schema_type
                     )));
                 }
-                confluent_schema_id.replace(schema_response.0.version);
+                confluent_schema_id.replace(schema_response.0.id);
 
                 schema.definition = Some(SchemaDefinition::JsonSchema {
                     schema: schema_response.0.schema,
