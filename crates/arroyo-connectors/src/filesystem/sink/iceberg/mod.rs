@@ -161,8 +161,8 @@ impl IcebergTable {
         task_info: Arc<TaskInfo>,
         schema: &Schema,
     ) -> Result<&Table, DataflowError> {
-        if self.table.is_some() {
-            return Ok(self.table.as_ref().unwrap());
+        if let Some(ref table) = self.table {
+            return Ok(table);
         }
 
         self.task_info = Some(task_info);

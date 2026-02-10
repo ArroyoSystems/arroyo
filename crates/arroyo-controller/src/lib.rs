@@ -25,8 +25,6 @@ use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{MachineId, WorkerId, from_micros};
 use cornucopia_async::DatabaseSource;
-use lazy_static::lazy_static;
-use prometheus::{Gauge, register_gauge};
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -59,24 +57,6 @@ use types::public::LogLevel;
 use types::public::{RestartMode, StopMode};
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
-
-lazy_static! {
-    static ref ACTIVE_PIPELINES: Gauge = register_gauge!(
-        "arroyo_controller_active_pipelines",
-        "number of active pipelines in arroyo-controller"
-    )
-    .unwrap();
-    pub static ref COMPACTION_TUPLES_IN: Gauge = register_gauge!(
-        "arroyo_controller_compaction_tuples_in",
-        "Number of tuples being considered for compaction"
-    )
-    .unwrap();
-    static ref COMPACTION_TUPLES_OUT: Gauge = register_gauge!(
-        "arroyo_controller_compaction_tuples_in",
-        "Number of tuples being considered for compaction"
-    )
-    .unwrap();
-}
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct JobConfig {

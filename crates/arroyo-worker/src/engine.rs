@@ -306,7 +306,7 @@ impl Program {
                 .node_indices()
                 .filter(|n| physical.node_weight(*n).unwrap().id() == logical_out_node.node_id)
                 .collect();
-            assert_ne!(from_nodes.len(), 0, "failed to find to nodes");
+            assert_ne!(to_nodes.len(), 0, "failed to find to nodes");
 
             match edge.edge_type {
                 LogicalEdgeType::Forward => {
