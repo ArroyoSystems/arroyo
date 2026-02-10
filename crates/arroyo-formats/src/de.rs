@@ -3,7 +3,7 @@ use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
 use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
-use arrow::json::reader::FailureKind;
+use arrow::json::reader::{FailureKind, JsonType, ValidationError};
 use arrow_array::builder::{
     ArrayBuilder, BinaryBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
     UInt64Builder, make_builder,
@@ -126,6 +126,45 @@ fn failure_kind_to_str(kind: FailureKind) -> &'static str {
     }
 }
 
+/// Format a validation error without exposing raw data values.
+fn format_validation_error(verr: &ValidationError) -> String {
+    let field = &verr.field_path;
+    let expected = &verr.expected_type;
+
+    match verr.failure_kind {
+        FailureKind::MissingField => {
+            format!("field '{field}': required field is missing (expected {expected})")
+        }
+        FailureKind::NullValue => {
+            format!("field '{field}': null value for non-nullable field (expected {expected})")
+        }
+        FailureKind::TypeMismatch | FailureKind::ParseFailure => {
+            let type_info = match (verr.actual_type, &verr.actual_value) {
+                (Some(actual_type), Some(val)) => match actual_type {
+                    JsonType::String => {
+                        let inner_len = val.len().saturating_sub(2);
+                        format!("got {actual_type} (length: {inner_len})")
+                    }
+                    JsonType::Number => {
+                        format!("got {actual_type} (length: {})", val.len())
+                    }
+                    _ => format!("got {actual_type}"),
+                },
+                (Some(actual_type), None) => format!("got {actual_type}"),
+                _ => "got incompatible type".to_string(),
+            };
+
+            let suffix = if matches!(verr.failure_kind, FailureKind::ParseFailure) {
+                " - parse failure"
+            } else {
+                ""
+            };
+
+            format!("field '{field}': expected {expected}, {type_info}{suffix}")
+        }
+    }
+}
+
 enum BufferDecoder {
     Buffer(ContextBuffer),
     JsonDecoder {
@@ -191,7 +230,7 @@ impl BufferDecoder {
                                         {
                                             "error_family": "deserialization",
                                             "error_type": failure_kind_to_str(verr.failure_kind),
-                                            "details": verr.to_string(),
+                                            "details": format_validation_error(&verr),
                                         }
                                     );
                                 }
@@ -1044,5 +1083,162 @@ mod tests {
                 .value(0),
             to_nanos(time) as i64
         );
+    }
+
+    #[test]
+    fn test_format_validation_error() {
+        use super::format_validation_error;
+        use arrow::json::reader::{FailureKind, JsonType, ValidationError};
+        use arrow_schema::DataType;
+
+        let cases = vec![
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "user_id".to_string(),
+                    failure_kind: FailureKind::MissingField,
+                    expected_type: Arc::new(DataType::Int64),
+                    actual_type: None,
+                    actual_value: None,
+                },
+                "field 'user_id': required field is missing (expected Int64)",
+            ),
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "age".to_string(),
+                    failure_kind: FailureKind::NullValue,
+                    expected_type: Arc::new(DataType::Int32),
+                    actual_type: Some(JsonType::Null),
+                    actual_value: Some("null".to_string()),
+                },
+                "field 'age': null value for non-nullable field (expected Int32)",
+            ),
+            // type_mismatch with string — length excludes quotes
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "user_id".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Int64),
+                    actual_type: Some(JsonType::String),
+                    actual_value: Some("\"john.doe@company.com\"".to_string()),
+                },
+                "field 'user_id': expected Int64, got string (length: 20)",
+            ),
+            // type_mismatch with number
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "name".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Utf8),
+                    actual_type: Some(JsonType::Number),
+                    actual_value: Some("12345".to_string()),
+                },
+                "field 'name': expected Utf8, got number (length: 5)",
+            ),
+            // type_mismatch with object — no length
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "value".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Int64),
+                    actual_type: Some(JsonType::Object),
+                    actual_value: Some("{...}".to_string()),
+                },
+                "field 'value': expected Int64, got object",
+            ),
+            // type_mismatch with array — no length
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "count".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Int32),
+                    actual_type: Some(JsonType::Array),
+                    actual_value: Some("[...]".to_string()),
+                },
+                "field 'count': expected Int32, got array",
+            ),
+            // type_mismatch with boolean — no length
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "score".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Float64),
+                    actual_type: Some(JsonType::Boolean),
+                    actual_value: Some("true".to_string()),
+                },
+                "field 'score': expected Float64, got boolean",
+            ),
+            // parse_failure with string
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "created_at".to_string(),
+                    failure_kind: FailureKind::ParseFailure,
+                    expected_type: Arc::new(DataType::Utf8),
+                    actual_type: Some(JsonType::String),
+                    actual_value: Some("\"not-a-date\"".to_string()),
+                },
+                "field 'created_at': expected Utf8, got string (length: 10) - parse failure",
+            ),
+            // type_mismatch with no actual_value
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "field_a".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Int64),
+                    actual_type: Some(JsonType::String),
+                    actual_value: None,
+                },
+                "field 'field_a': expected Int64, got string",
+            ),
+            // type_mismatch with no type or value
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "field_b".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Int64),
+                    actual_type: None,
+                    actual_value: None,
+                },
+                "field 'field_b': expected Int64, got incompatible type",
+            ),
+            // array index field path
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "items[2]".to_string(),
+                    failure_kind: FailureKind::TypeMismatch,
+                    expected_type: Arc::new(DataType::Int32),
+                    actual_type: Some(JsonType::String),
+                    actual_value: Some("\"hello\"".to_string()),
+                },
+                "field 'items[2]': expected Int32, got string (length: 5)",
+            ),
+            // empty string — length 0
+            (
+                ValidationError {
+                    row_index: 0,
+                    field_path: "name".to_string(),
+                    failure_kind: FailureKind::ParseFailure,
+                    expected_type: Arc::new(DataType::Int64),
+                    actual_type: Some(JsonType::String),
+                    actual_value: Some("\"\"".to_string()),
+                },
+                "field 'name': expected Int64, got string (length: 0) - parse failure",
+            ),
+        ];
+
+        for (i, (input, expected)) in cases.iter().enumerate() {
+            let result = format_validation_error(input);
+            assert_eq!(&result, expected, "case {i} failed");
+        }
     }
 }
