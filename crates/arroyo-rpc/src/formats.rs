@@ -62,6 +62,25 @@ impl TryFrom<&str> for DecimalEncoding {
     }
 }
 
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JsonCompression {
+    Gzip,
+}
+
+impl FromStr for JsonCompression {
+    type Err = DataFusionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "gzip" => JsonCompression::Gzip,
+            _ => {
+                return plan_err!("invalid json compression '{s}'");
+            }
+        })
+    }
+}
+
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
@@ -87,6 +106,9 @@ pub struct JsonFormat {
 
     #[serde(default)]
     pub decimal_encoding: DecimalEncoding,
+
+    #[serde(default)]
+    pub compression: Option<JsonCompression>,
 }
 
 impl JsonFormat {
@@ -131,6 +153,8 @@ impl JsonFormat {
                 }
             });
 
+        let compression: Option<JsonCompression> = opts.pull_opt_parsed("json.compression")?;
+
         Ok(Self {
             confluent_schema_registry,
             schema_id: None,
@@ -139,6 +163,7 @@ impl JsonFormat {
             unstructured,
             timestamp_format,
             decimal_encoding,
+            compression,
         })
     }
 }
