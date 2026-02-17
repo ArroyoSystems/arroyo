@@ -138,9 +138,19 @@ impl BatchSender {
                     }
                 }
             } else {
-                // not enough room in the queue, wait to be notified that the receiver has
-                // consumed
-                self.notify.notified().await;
+                // first register the notify listener
+                let notified = self.notify.notified();
+
+                // then recheck -- there may now be space since we checked
+                let cur = self.queued_messages.load(Ordering::Acquire);
+                if cur as usize + count as usize <= self.size as usize {
+                    // space is now available, retry immediately
+                    continue;
+                }
+
+                // if not, we're now guaranteed to receive the notification if space is made
+                // available
+                notified.await;
             }
         }
     }
