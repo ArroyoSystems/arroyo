@@ -52,12 +52,12 @@ fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, u
 /// A buffer with interior mutability shared by the [`ArrowWriter`] and
 /// [`AsyncArrowWriter`]. From Arrow. This lets us write data from the buffer to S3.
 #[derive(Clone)]
-struct SharedBuffer {
+pub(crate) struct SharedBuffer {
     /// The inner buffer for reading and writing
     ///
     /// The lock is used to obtain shared internal mutability, so no worry about the
     /// lock contention.
-    buffer: Arc<Mutex<bytes::buf::Writer<BytesMut>>>,
+    pub(crate) buffer: Arc<Mutex<bytes::buf::Writer<BytesMut>>>,
 }
 
 impl SharedBuffer {

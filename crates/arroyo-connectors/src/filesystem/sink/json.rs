@@ -3,46 +3,28 @@ use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
 };
-use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::filesystem::{config, sink::parquet::SharedBuffer};
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::{
     df::ArroyoSchemaRef,
-    formats::{Format, JsonCompression},
+    formats::{Format, JsonCompression, JsonFormat},
 };
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use flate2::Compression as GzipCompression;
 use flate2::write::GzEncoder;
 use std::time::Duration;
 use std::{fs::File, io::Write, time::Instant};
-use tracing::debug;
-
-/// Size of uncompressed chunks to compress at once.
-/// Larger chunks = better compression ratio, but more memory usage.
-/// 5MB provides good compression while keeping memory reasonable.
-const COMPRESSION_CHUNK_SIZE: usize = 5 * 1024 * 1024; // 5MB
-
-/// Compresses a chunk of data using the specified [`JsonCompression`].
-/// Note that [`None`] can be used and the data won't transformed.
-fn compress_chunk(data: Bytes, compression: Option<JsonCompression>) -> anyhow::Result<Bytes> {
-    match compression {
-        Some(JsonCompression::Gzip) => {
-            let mut encoder = GzEncoder::new(Vec::new(), GzipCompression::default());
-            encoder.write_all(&data)?;
-            Ok(Bytes::from(encoder.finish()?))
-        }
-        None => Ok(data),
-    }
-}
+use tracing::trace;
 
 pub struct JsonWriter {
-    /// Buffer holding compressed data ready for upload
-    compressed_buffer: BytesMut,
-    /// Staging buffer for uncompressed JSON data (compressed in 5MB chunks)
-    uncompressed_buffer: BytesMut,
+    /// Shared buffer holding data ready for upload (compressed if compression enabled)
+    current_buffer: SharedBuffer,
+    /// Streaming encoder for gzip compression (None for uncompressed mode)
+    // TODO: Move to a trait if we decide to support more encoders
+    encoder: Option<GzEncoder<SharedBuffer>>,
     serializer: ArrowSerializer,
-    compression: Option<JsonCompression>,
     event_logger: FsEventLogger,
 }
 
@@ -60,41 +42,58 @@ impl BatchBufferingWriter for JsonWriter {
             panic!("JsonWriter configured with non-json format {format:?}");
         };
 
+        let buffer = SharedBuffer::new(0);
+
+        let encoder = match compression {
+            JsonCompression::Uncompressed => None,
+            JsonCompression::Gzip => {
+                Some(GzEncoder::new(buffer.clone(), GzipCompression::default()))
+            }
+        };
+
         Self {
-            compressed_buffer: BytesMut::new(),
-            uncompressed_buffer: BytesMut::new(),
+            current_buffer: buffer,
+            encoder,
             serializer: ArrowSerializer::new(format),
-            compression,
             event_logger,
         }
     }
 
     fn suffix_for_format(format: &Format) -> &str {
-        if let Format::Json(json) = format {
-            match json.compression {
-                Some(JsonCompression::Gzip) => "json.gz",
-                None => "json",
-            }
-        } else {
-            panic!("JsonLocalWriter configured with non-json format {format:?}");
+        match format {
+            Format::Json(JsonFormat {
+                compression: JsonCompression::Gzip,
+                ..
+            }) => "json.gz",
+            Format::Json(_) => "json",
+            _ => panic!("JsonWriter configured with non-json format {format:?}"),
         }
     }
 
     fn add_batch_data(&mut self, batch: &RecordBatch) {
         let mut size = 0;
+
         for k in self.serializer.serialize(batch) {
             size += k.len() + 1;
-            self.uncompressed_buffer.extend(k);
-            self.uncompressed_buffer.extend(b"\n");
-        }
 
-        // Compress uncompressed buffer in chunks
-        self.flush_uncompressed_to_compressed();
-        debug!(
-            "uncompressed_buffer: {} bytes, compressed_buffer: {} bytes",
-            self.uncompressed_buffer.len(),
-            self.compressed_buffer.len()
-        );
+            match &mut self.encoder {
+                Some(encoder) => {
+                    // Compressed mode: write to streaming encoder (compresses immediately)
+                    encoder
+                        .write_all(&k)
+                        .expect("Failed to write to gzip encoder");
+                    encoder
+                        .write_all(b"\n")
+                        .expect("Failed to write newline to gzip encoder");
+                }
+                None => {
+                    // Uncompressed mode: write directly to shared buffer
+                    let mut buffer = self.current_buffer.buffer.lock().unwrap();
+                    buffer.get_mut().extend(k);
+                    buffer.get_mut().extend(b"\n");
+                }
+            }
+        }
 
         self.event_logger.log_fs_event(
             0,
@@ -109,62 +108,59 @@ impl BatchBufferingWriter for JsonWriter {
     }
 
     fn unflushed_bytes(&self) -> usize {
-        self.uncompressed_buffer.len()
+        0
     }
 
     fn buffered_bytes(&self) -> usize {
-        // NOTE: Currently only retuns the compressed size, which is un under-estimate of the
-        // total buffered data. The uncompressed data that have up to [`COMPRESSION_CHUNK_SIZE`]
-        // bytes that are waiting to be compressed.
-        self.compressed_buffer.len()
+        self.current_buffer.buffer.lock().unwrap().get_ref().len()
     }
 
     fn split_to(&mut self, pos: usize) -> Bytes {
-        self.compressed_buffer.split_to(pos).freeze()
+        let mut buf = self.current_buffer.buffer.lock().unwrap();
+        buf.get_mut().split_to(pos).freeze()
     }
 
     /// The bytes stored in the checkpoint are bytes that we are ready to uploaded as-is.
-    /// This means that if compression is enabled, we first compress, then return the compressed buffer.
+    /// For compressed mode, we finish the current gzip member to ensure all data is complete.
     fn get_trailing_bytes_for_checkpoint(&mut self) -> (Vec<u8>, Option<IcebergFileMetadata>) {
-        self.flush_all_uncompressed();
+        // Finish current gzip member if in compressed mode
+        if let Some(encoder) = self.encoder.take() {
+            encoder
+                .finish()
+                .expect("Failed to finish gzip encoder at checkpoint");
 
-        // Store compressed bytes in checkpoint (required because recovery
-        // uploads trailing_bytes directly without re-processing)
-        (self.compressed_buffer.to_vec(), None)
+            // Create new encoder for next gzip member
+            self.encoder = Some(GzEncoder::new(
+                self.current_buffer.clone(),
+                GzipCompression::default(),
+            ));
+
+            trace!("Finished gzip member at checkpoint, created new encoder");
+        }
+
+        // Return all buffered data (already compressed if compression is enabled)
+        let bytes = self
+            .current_buffer
+            .buffer
+            .lock()
+            .unwrap()
+            .get_ref()
+            .to_vec();
+        (bytes, None)
     }
 
     fn close(&mut self) -> (Bytes, Option<IcebergFileMetadata>) {
-        self.flush_all_uncompressed();
+        // Finish and close encoder if in compressed mode
+        if let Some(encoder) = self.encoder.take() {
+            encoder
+                .finish()
+                .expect("Failed to finish gzip encoder at close");
+            trace!("Finished final gzip member at close");
+        }
 
-        let data = self.compressed_buffer.split().freeze();
+        let mut buf = self.current_buffer.buffer.lock().unwrap();
+        let data = buf.get_mut().split().freeze();
         (data, None)
-    }
-}
-
-impl JsonWriter {
-    /// Compresses full COMPRESSION_CHUNK_SIZE chunks from uncompressed_buffer
-    /// and appends them to compressed_buffer. Leaves remainder in uncompressed_buffer.
-    fn flush_uncompressed_to_compressed(&mut self) {
-        while self.uncompressed_buffer.len() >= COMPRESSION_CHUNK_SIZE {
-            let chunk = self
-                .uncompressed_buffer
-                .split_to(COMPRESSION_CHUNK_SIZE)
-                .freeze();
-            let compressed = compress_chunk(chunk, self.compression)
-                .expect("Failed to compress JSON chunk - this should never happen with valid data");
-            self.compressed_buffer.extend_from_slice(&compressed);
-        }
-    }
-
-    /// Compresses ALL remaining data in uncompressed_buffer, regardless of size.
-    /// Used when closing file or creating checkpoint.
-    fn flush_all_uncompressed(&mut self) {
-        if !self.uncompressed_buffer.is_empty() {
-            let chunk = self.uncompressed_buffer.split().freeze();
-            let compressed = compress_chunk(chunk, self.compression)
-                .expect("Failed to compress final JSON chunk");
-            self.compressed_buffer.extend_from_slice(&compressed);
-        }
     }
 }
 
@@ -269,45 +265,62 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arroyo_rpc::formats::JsonFormat;
     use arroyo_types::TaskInfo;
-    use bytes::Bytes;
-    use flate2::read::{GzDecoder, MultiGzDecoder};
+    use flate2::read::MultiGzDecoder;
     use std::io::Read;
     use std::sync::Arc;
 
-    #[test]
-    fn test_compress_chunk_uncompressed() {
-        let data = Bytes::from("Hello, World!");
-        let compressed = compress_chunk(data.clone(), None).unwrap();
-        assert_eq!(compressed, data);
-    }
+    /// Helper function to create a JsonWriter with the given schema and compression
+    fn create_test_writer(schema: Arc<Schema>, compression: JsonCompression) -> JsonWriter {
+        let format = Format::Json(JsonFormat {
+            compression,
+            ..Default::default()
+        });
 
-    #[test]
-    fn test_compress_chunk_gzip() {
-        let data = Bytes::from("Hello, World!");
-        let compressed = compress_chunk(data.clone(), Some(JsonCompression::Gzip)).unwrap();
+        let event_logger = FsEventLogger {
+            task_info: Some(Arc::new(TaskInfo {
+                job_id: "test_job".to_string(),
+                node_id: 0,
+                operator_name: "test_operator".to_string(),
+                operator_id: "test_op_id".to_string(),
+                task_index: 0,
+                parallelism: 1,
+                key_range: 0..=u64::MAX,
+            })),
+            connection_id: Arc::new(String::from("test")),
+        };
 
-        // Verify it's actually compressed (should have gzip header)
-        assert_eq!(&compressed[0..2], &[0x1f, 0x8b]); // gzip magic number
+        let config = config::FileSystemSink {
+            path: String::new(),
+            storage_options: Default::default(),
+            rolling_policy: Default::default(),
+            file_naming: Default::default(),
+            partitioning: Default::default(),
+            multipart: Default::default(),
+            version: Default::default(),
+        };
 
-        // Verify we can decompress it
-        let mut decoder = GzDecoder::new(&compressed[..]);
-        let mut decompressed = Vec::new();
-        decoder.read_to_end(&mut decompressed).unwrap();
-        assert_eq!(decompressed, data);
+        let arroyo_schema = Arc::new(arroyo_rpc::df::ArroyoSchema::new(
+            schema.clone(),
+            0,
+            None,
+            None,
+        ));
+
+        JsonWriter::new(&config, format, arroyo_schema, None, event_logger)
     }
 
     #[test]
     fn test_suffix_for_format() {
         // Test uncompressed
         let format = Format::Json(JsonFormat {
-            compression: None,
+            compression: JsonCompression::Uncompressed,
             ..Default::default()
         });
         assert_eq!(JsonWriter::suffix_for_format(&format), "json");
 
         // Test gzip
         let format = Format::Json(JsonFormat {
-            compression: Some(JsonCompression::Gzip),
+            compression: JsonCompression::Gzip,
             ..Default::default()
         });
         assert_eq!(JsonWriter::suffix_for_format(&format), "json.gz");
@@ -315,60 +328,60 @@ mod tests {
 
     #[test]
     fn test_multi_member_gzip() {
-        // Simulate what happens when we compress multiple parts
-        let part1 = Bytes::from("{\"field\":\"value1\"}\n");
-        let part2 = Bytes::from("{\"field\":\"value2\"}\n");
+        // Test that checkpoints create multi-member gzip files
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "field",
+            DataType::Utf8,
+            false,
+        )]));
 
-        let compressed1 = compress_chunk(part1.clone(), Some(JsonCompression::Gzip)).unwrap();
-        let compressed2 = compress_chunk(part2.clone(), Some(JsonCompression::Gzip)).unwrap();
+        let mut writer = create_test_writer(schema.clone(), JsonCompression::Gzip);
 
-        // Concatenate the two gzip members (simulating multipart upload)
-        let mut multi_member = Vec::new();
-        multi_member.extend_from_slice(&compressed1);
-        multi_member.extend_from_slice(&compressed2);
+        // Write first batch
+        let batch1 = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(StringArray::from(vec!["value1"]))],
+        )
+        .unwrap();
+        writer.add_batch_data(&batch1);
+
+        // Checkpoint (finishes first gzip member)
+        let (checkpoint1, _) = writer.get_trailing_bytes_for_checkpoint();
+
+        // Write second batch
+        let batch2 = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(StringArray::from(vec!["value2"]))],
+        )
+        .unwrap();
+        writer.add_batch_data(&batch2);
+
+        // Close (finishes second gzip member)
+        let (final_data, _) = writer.close();
+
+        // Combine both parts
+        let mut combined = checkpoint1;
+        combined.extend_from_slice(&final_data);
 
         // Verify we can decompress the entire multi-member file
-        // Note: MultiGzDecoder is required to handle multiple gzip members in one file
-        let mut decoder = MultiGzDecoder::new(&multi_member[..]);
+        let mut decoder = MultiGzDecoder::new(&combined[..]);
         let mut decompressed = Vec::new();
         decoder.read_to_end(&mut decompressed).unwrap();
 
-        let mut expected = Vec::new();
-        expected.extend_from_slice(&part1);
-        expected.extend_from_slice(&part2);
-        assert_eq!(decompressed, expected);
+        // Verify both values are present
+        let text = std::str::from_utf8(&decompressed).unwrap();
+        assert!(text.contains("value1"));
+        assert!(text.contains("value2"));
     }
 
     #[test]
-    fn test_staged_compression() {
-        // Create a writer with gzip compression
+    fn test_streaming_compression() {
+        // Test streaming compression with large data
         let schema = Arc::new(Schema::new(vec![Field::new("data", DataType::Utf8, false)]));
 
-        let format = Format::Json(JsonFormat {
-            compression: Some(JsonCompression::Gzip),
-            ..Default::default()
-        });
+        let mut writer = create_test_writer(schema.clone(), JsonCompression::Gzip);
 
-        let mut writer = JsonWriter {
-            compressed_buffer: BytesMut::new(),
-            uncompressed_buffer: BytesMut::new(),
-            serializer: ArrowSerializer::new(format.clone()),
-            compression: Some(JsonCompression::Gzip),
-            event_logger: FsEventLogger {
-                task_info: Some(Arc::new(TaskInfo {
-                    job_id: "test_job".to_string(),
-                    node_id: 0,
-                    operator_name: "test_operator".to_string(),
-                    operator_id: "test_op_id".to_string(),
-                    task_index: 0,
-                    parallelism: 1,
-                    key_range: 0..=u64::MAX,
-                })),
-                connection_id: Arc::new(String::from("test")),
-            },
-        };
-
-        // Create data that will exceed COMPRESSION_CHUNK_SIZE when serialized
+        // Create large data
         let data_str = "x".repeat(100_000); // 100KB per row
         let mut rows = Vec::new();
         for _ in 0..60 {
@@ -379,28 +392,24 @@ mod tests {
         let array = StringArray::from(rows);
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(array)]).unwrap();
 
-        // Add batch - should trigger compression
+        // Add batch - data is compressed immediately with streaming encoder
         writer.add_batch_data(&batch);
 
-        // Verify compressed buffer has data
+        // Verify buffer has data
         assert!(
-            !writer.compressed_buffer.is_empty(),
-            "Compressed buffer should have data"
+            writer.buffered_bytes() > 0,
+            "Buffer should have compressed data"
         );
-
-        // Flush any remaining data in uncompressed buffer
-        writer.flush_all_uncompressed();
-        assert!(writer.uncompressed_buffer.is_empty());
 
         // Verify compressed data is smaller than uncompressed
         let total_uncompressed = 6_000_000; // Approximate
         assert!(
-            writer.compressed_buffer.len() < total_uncompressed,
+            writer.buffered_bytes() < total_uncompressed,
             "Compressed size should be less than uncompressed"
         );
 
-        // Verify we can decompress it
-        let compressed = writer.compressed_buffer.clone().freeze();
+        // Close and verify we can decompress it
+        let (compressed, _) = writer.close();
         let mut decoder = MultiGzDecoder::new(&compressed[..]);
         let mut decompressed = Vec::new();
         decoder.read_to_end(&mut decompressed).unwrap();
@@ -422,29 +431,7 @@ mod tests {
         // Create a writer with gzip compression
         let schema = Arc::new(Schema::new(vec![Field::new("data", DataType::Utf8, false)]));
 
-        let format = Format::Json(JsonFormat {
-            compression: Some(JsonCompression::Gzip),
-            ..Default::default()
-        });
-
-        let mut writer = JsonWriter {
-            compressed_buffer: BytesMut::new(),
-            uncompressed_buffer: BytesMut::new(),
-            serializer: ArrowSerializer::new(format.clone()),
-            compression: Some(JsonCompression::Gzip),
-            event_logger: FsEventLogger {
-                task_info: Some(Arc::new(TaskInfo {
-                    job_id: "test_job".to_string(),
-                    node_id: 0,
-                    operator_name: "test_operator".to_string(),
-                    operator_id: "test_op_id".to_string(),
-                    task_index: 0,
-                    parallelism: 1,
-                    key_range: 0..=u64::MAX,
-                })),
-                connection_id: Arc::new(String::from("test")),
-            },
-        };
+        let mut writer = create_test_writer(schema.clone(), JsonCompression::Gzip);
 
         // Add some data
         let data = vec!["test1".to_string(), "test2".to_string()];

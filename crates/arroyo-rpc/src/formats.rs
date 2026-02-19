@@ -62,9 +62,13 @@ impl TryFrom<&str> for DecimalEncoding {
     }
 }
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[derive(
+    Serialize, Deserialize, Default, Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum JsonCompression {
+    #[default]
+    Uncompressed,
     Gzip,
 }
 
@@ -73,6 +77,7 @@ impl FromStr for JsonCompression {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
+            "uncompressed" => JsonCompression::Uncompressed,
             "gzip" => JsonCompression::Gzip,
             _ => {
                 return plan_err!("invalid json compression '{s}'");
@@ -108,7 +113,7 @@ pub struct JsonFormat {
     pub decimal_encoding: DecimalEncoding,
 
     #[serde(default)]
-    pub compression: Option<JsonCompression>,
+    pub compression: JsonCompression,
 }
 
 impl JsonFormat {
@@ -153,7 +158,11 @@ impl JsonFormat {
                 }
             });
 
-        let compression: Option<JsonCompression> = opts.pull_opt_parsed("json.compression")?;
+        let compression = opts
+            .pull_opt_str("json.compression")?
+            .map(|c| JsonCompression::from_str(&c))
+            .transpose()?
+            .unwrap_or_default();
 
         Ok(Self {
             confluent_schema_registry,

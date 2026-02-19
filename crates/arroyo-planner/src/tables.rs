@@ -14,7 +14,7 @@ use arroyo_rpc::ConnectorOptions;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
-use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
+use arroyo_rpc::formats::{BadData, Format, Framing, JsonCompression, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
@@ -271,7 +271,7 @@ impl ConnectorTable {
             .map_err(|e| DataFusionError::Plan(format!("invalid format: '{e}'")))?;
 
         if let Some(Format::Json(JsonFormat { compression, .. })) = &format
-            && compression.is_some()
+            && !matches!(compression, JsonCompression::Uncompressed)
             && connector_name != "filesystem"
         {
             return plan_err!("'json.compression' is only supported for the filesystem connector");
