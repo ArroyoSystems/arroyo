@@ -40,6 +40,14 @@ pub enum TableFormat {
 }
 
 impl TableFormat {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TableFormat::None => "none",
+            TableFormat::Delta => "delta",
+            TableFormat::Iceberg(_) => "iceberg",
+        }
+    }
+
     pub async fn get_storage_provider(
         &mut self,
         task_info: Arc<TaskInfo>,

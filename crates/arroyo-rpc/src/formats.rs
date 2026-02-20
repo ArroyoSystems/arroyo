@@ -376,22 +376,22 @@ pub enum Format {
 
 impl Display for Format {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Format::Json(_) => "json",
-                Format::Avro(_) => "avro",
-                Format::Protobuf(_) => "protobuf",
-                Format::Parquet(_) => "parquet",
-                Format::RawString(_) => "raw_string",
-                Format::RawBytes(_) => "raw_bytes",
-            }
-        )
+        f.write_str(self.name())
     }
 }
 
 impl Format {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Format::Json(_) => "json",
+            Format::Avro(_) => "avro",
+            Format::Protobuf(_) => "protobuf",
+            Format::Parquet(_) => "parquet",
+            Format::RawString(_) => "raw_string",
+            Format::RawBytes(_) => "raw_bytes",
+        }
+    }
+
     pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Option<Self>> {
         let Some(name) = opts.pull_opt_str("format")? else {
             return Ok(None);

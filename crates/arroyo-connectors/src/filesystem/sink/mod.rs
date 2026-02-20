@@ -80,6 +80,8 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
         partitioner_mode: PartitionerMode,
         connection_id: Option<String>,
     ) -> TwoPhaseCommitterOperator<Self> {
+        let output_format = format.name();
+        let table_format_name = table_format.name();
         TwoPhaseCommitterOperator::new(Self {
             sender: None,
             checkpoint_receiver: None,
@@ -95,6 +97,8 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             event_logger: FsEventLogger {
                 task_info: None,
                 connection_id: connection_id.unwrap_or_default().into(),
+                output_format,
+                table_format: table_format_name,
             },
             _ts: Default::default(),
         })
@@ -186,6 +190,8 @@ fn map_object_store_error(obj_err: &object_store::Error) -> DataflowError {
 pub struct FsEventLogger {
     task_info: Option<Arc<TaskInfo>>,
     connection_id: Arc<String>,
+    output_format: &'static str,
+    table_format: &'static str,
 }
 
 impl FsEventLogger {
@@ -209,6 +215,8 @@ impl FsEventLogger {
             "connection_id": self.connection_id.as_str(),
             "write_error_reason": failure_message.as_deref().unwrap_or(""),
             "subtask_idx": task_info.task_index,
+            "output_format": self.output_format,
+            "table_format": self.table_format,
         }, [
             "bytes_written" => bytes as f64,
             "files_written" => files as f64,
