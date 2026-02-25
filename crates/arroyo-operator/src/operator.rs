@@ -230,7 +230,7 @@ impl OperatorNode {
         out_qs: Vec<Vec<BatchSender>>,
         out_schema: Option<Arc<ArroyoSchema>>,
         ready: Arc<Barrier>,
-    ) {
+    ) -> Vec<BatchReceiver> {
         info!(
             "Starting node {}-{} ({})",
             self.node_id(),
@@ -291,6 +291,8 @@ impl OperatorNode {
                     .expect("control response unwrap");
             }
         }
+
+        in_qs
     }
 }
 
