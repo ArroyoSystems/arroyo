@@ -304,6 +304,8 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
         }
 
         let connection_id_str = connection_id.clone().unwrap_or_default();
+        let output_format = format.name();
+        let table_format_name = table_format.name();
 
         Self {
             config: SinkConfig {
@@ -328,6 +330,8 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
             event_logger: FsEventLogger {
                 task_info: None,
                 connection_id: connection_id_str.into(),
+                output_format,
+                table_format: table_format_name,
             },
             watermark: None,
         }
