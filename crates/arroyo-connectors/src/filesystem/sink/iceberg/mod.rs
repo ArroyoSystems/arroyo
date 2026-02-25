@@ -18,6 +18,7 @@ use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::{Catalog, ErrorKind, TableCreation, TableIdent};
 use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
 use itertools::Itertools;
+use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::error::Error;
@@ -77,6 +78,16 @@ fn transaction_id(task_info: &TaskInfo, epoch: u32, table_uuid: Uuid) -> String 
     format!("tx-{}", to_hex(short))
 }
 
+fn extract_catalog_status(display: &str) -> Option<u16> {
+    let re = Regex::new(r"status: (\d{3})").unwrap();
+    re.captures(display).and_then(|c| c[1].parse().ok())
+}
+
+fn extract_catalog_message(display: &str) -> Option<String> {
+    let re = Regex::new(r#""message"\s*:\s*"([^"]+)""#).unwrap();
+    re.captures(display).map(|c| c[1].to_string())
+}
+
 fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
     let (domain, msg) = match error.kind() {
         ErrorKind::PreconditionFailed => (ErrorDomain::Internal, error.to_string()),
@@ -84,18 +95,40 @@ fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
             (ErrorDomain::User, error.to_string())
         }
         ErrorKind::Unexpected => {
-            if let Some(source) = error.source() {
-                if let Some(err) = source.downcast_ref::<reqwest::Error>() {
-                    match err.status().map(|c| c.as_u16()) {
-                        Some(401) | Some(403) | Some(404) => (ErrorDomain::User, err.to_string()),
-                        _ => (ErrorDomain::External, err.to_string()),
+            // For Unexpected errors from iceberg-catalog-rest, the HTTP status and response
+            // body are embedded in the error's Display output as context fields. Extract the
+            // status to determine the domain, and try to pull out a clean error message.
+            let display = error.to_string();
+            let status = extract_catalog_status(&display);
+
+            let domain = match status {
+                Some(400..=499) => ErrorDomain::User,
+                Some(_) => ErrorDomain::External,
+                // No status found — could be a transport error or something else
+                None => {
+                    if let Some(source) = error.source() {
+                        if let Some(err) = source.downcast_ref::<reqwest::Error>() {
+                            if err.status().map(|c| c.is_client_error()).unwrap_or(false) {
+                                ErrorDomain::User
+                            } else {
+                                ErrorDomain::External
+                            }
+                        } else {
+                            ErrorDomain::External
+                        }
+                    } else {
+                        ErrorDomain::External
                     }
-                } else {
-                    (ErrorDomain::External, source.to_string())
                 }
+            };
+
+            let msg = if let Some(catalog_msg) = extract_catalog_message(&display) {
+                format!("Iceberg catalog error: {catalog_msg}")
             } else {
-                (ErrorDomain::External, error.to_string())
-            }
+                format!("Iceberg catalog error: {}", error.message())
+            };
+
+            (domain, msg)
         }
         _ => (ErrorDomain::External, error.to_string()),
     };
@@ -347,5 +380,95 @@ impl IcebergTable {
         self.table = Some(self.catalog.load_table(&self.table_ident).await?);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_map_iceberg_error_catalog_424() {
+        let error = iceberg::Error::new(
+            ErrorKind::Unexpected,
+            "Received response with unexpected status code",
+        )
+        .with_context("status", "424 Failed Dependency")
+        .with_context("headers", r#"{"date": "Tue, 24 Feb 2026 17:27:50 GMT"}"#)
+        .with_context(
+            "json",
+            r#"{"error":{"message":"Failed to list files in location. Please check the storage credentials.","type":"List","code":424}}"#,
+        );
+
+        match map_iceberg_error(error) {
+            DataflowError::ConnectorError {
+                domain, error: msg, ..
+            } => {
+                assert_eq!(domain, ErrorDomain::User);
+                assert_eq!(
+                    msg,
+                    "Iceberg catalog error: Failed to list files in location. Please check the storage credentials."
+                );
+            }
+            other => panic!("expected ConnectorError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_iceberg_error_catalog_403_bare_body() {
+        // Simulates a 403 from the catalog with a bare string body (no JSON structure)
+        let error = iceberg::Error::new(
+            ErrorKind::Unexpected,
+            "Received response with unexpected status code",
+        )
+        .with_context("status", "403 Forbidden")
+        .with_context("headers", r#"{"date": "Wed, 25 Feb 2026 16:16:50 GMT"}"#)
+        .with_context("json", "Unauthenticated");
+
+        match map_iceberg_error(error) {
+            DataflowError::ConnectorError {
+                domain, error: msg, ..
+            } => {
+                assert_eq!(domain, ErrorDomain::User);
+                // Falls back to error.message() since no JSON "message" field
+                assert!(
+                    msg.contains("Received response with unexpected status code"),
+                    "{msg}"
+                );
+            }
+            other => panic!("expected ConnectorError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_iceberg_error_catalog_500() {
+        let error = iceberg::Error::new(
+            ErrorKind::Unexpected,
+            "Received response with unexpected status code",
+        )
+        .with_context("status", "500 Internal Server Error")
+        .with_context(
+            "json",
+            r#"{"error":{"message":"Internal server error","type":"ServerError","code":500}}"#,
+        );
+
+        match map_iceberg_error(error) {
+            DataflowError::ConnectorError { domain, .. } => {
+                assert_eq!(domain, ErrorDomain::External);
+            }
+            other => panic!("expected ConnectorError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_iceberg_error_no_status_falls_back() {
+        let error = iceberg::Error::new(ErrorKind::Unexpected, "some opaque error");
+
+        match map_iceberg_error(error) {
+            DataflowError::ConnectorError { domain, .. } => {
+                assert_eq!(domain, ErrorDomain::External);
+            }
+            other => panic!("expected ConnectorError, got: {other:?}"),
+        }
     }
 }

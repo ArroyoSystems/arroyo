@@ -736,7 +736,9 @@ impl Engine {
         let join_task = {
             let control_tx = control_tx.clone();
             tokio::spawn(async move {
-                operator
+                // keep in_qs around until all operators are stopped to prevent upstream panics
+                // trying to write to the queues
+                let in_qs = operator
                     .start(
                         control_tx.clone(),
                         control_rx,
@@ -747,7 +749,12 @@ impl Engine {
                     )
                     .await;
 
-                // wait for all other tasks to finish
+                // drain in the background to prevent potential deadlocks
+                let drain_handles: Vec<_> = in_qs
+                    .into_iter()
+                    .map(|mut q| tokio::spawn(async move { while q.recv().await.is_some() {} }))
+                    .collect();
+
                 debug!(
                     node = node_id,
                     subtask_idx = task_index,
@@ -755,6 +762,10 @@ impl Engine {
                 );
                 if stop.wait().await.is_leader() {
                     debug!("all tasks finished");
+                }
+
+                for h in drain_handles {
+                    h.abort();
                 }
             })
         };
