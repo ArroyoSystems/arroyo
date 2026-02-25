@@ -757,7 +757,7 @@ where
         let mut file_naming = sink_config.file_naming.clone();
 
         if file_naming.suffix.is_none() {
-            file_naming.suffix = Some(BBW::suffix());
+            file_naming.suffix = Some(BBW::suffix_for_format(&format).to_owned());
         }
 
         Ok(Self {
@@ -1503,7 +1503,12 @@ pub trait BatchBufferingWriter: Send {
         iceberg_schema: Option<::iceberg::spec::SchemaRef>,
         event_logger: FsEventLogger,
     ) -> Self;
-    fn suffix() -> String;
+
+    /// Returns the file suffix based on the format configuration.
+    /// This allows writers to customize the suffix based on format options
+    /// (e.g., "json.gz" for compressed JSON, "json" for uncompressed).
+    fn suffix_for_format(format: &Format) -> &str;
+
     fn add_batch_data(&mut self, data: &RecordBatch);
     /// approximate number of bytes that are internally buffered in the underlying writer;
     /// unflushed_bytes() + buffered_bytes() should give approximately the size of the buffer

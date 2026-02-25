@@ -52,12 +52,12 @@ fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, u
 /// A buffer with interior mutability shared by the [`ArrowWriter`] and
 /// [`AsyncArrowWriter`]. From Arrow. This lets us write data from the buffer to S3.
 #[derive(Clone)]
-struct SharedBuffer {
+pub(crate) struct SharedBuffer {
     /// The inner buffer for reading and writing
     ///
     /// The lock is used to obtain shared internal mutability, so no worry about the
     /// lock contention.
-    buffer: Arc<Mutex<bytes::buf::Writer<BytesMut>>>,
+    pub(crate) buffer: Arc<Mutex<bytes::buf::Writer<BytesMut>>>,
 }
 
 impl SharedBuffer {
@@ -139,8 +139,12 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         }
     }
 
-    fn suffix() -> String {
-        "parquet".to_string()
+    fn suffix_for_format(format: &Format) -> &str {
+        if matches!(format, Format::Parquet(_)) {
+            "parquet"
+        } else {
+            panic!("ParquetBatchBufferingWriter configured with non-parquet format {format:?}");
+        }
     }
 
     fn add_batch_data(&mut self, data: &RecordBatch) {
@@ -279,8 +283,12 @@ impl LocalWriter for ParquetLocalWriter {
         }
     }
 
-    fn file_suffix() -> &'static str {
-        "parquet"
+    fn file_suffix_for_format(format: &Format) -> &str {
+        if matches!(format, Format::Parquet(_)) {
+            "parquet"
+        } else {
+            panic!("ParquetBatchBufferingWriter configured with non-parquet format {format:?}");
+        }
     }
 
     fn write_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<usize> {

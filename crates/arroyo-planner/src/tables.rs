@@ -14,7 +14,7 @@ use arroyo_rpc::ConnectorOptions;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
-use arroyo_rpc::formats::{BadData, Format, Framing, JsonFormat};
+use arroyo_rpc::formats::{BadData, Format, Framing, JsonCompression, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
@@ -231,7 +231,7 @@ impl ConnectorTable {
     #[allow(clippy::too_many_arguments)]
     fn from_options(
         name: &str,
-        connector: &str,
+        connector_name: &str,
         temporary: bool,
         mut fields: Vec<FieldSpec>,
         primary_keys: Vec<String>,
@@ -241,7 +241,7 @@ impl ConnectorTable {
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
-        if connector == "delta" || connector == "iceberg" {
+        if connector_name == "delta" || connector_name == "iceberg" {
             fields = fields
                 .into_iter()
                 .map(|field_spec| match &field_spec {
@@ -254,17 +254,28 @@ impl ConnectorTable {
                         _ => field_spec,
                     },
                     FieldSpec::Metadata { .. } | FieldSpec::Virtual { .. } => {
-                        unreachable!("{} is only a sink, can't have virtual fields", connector)
+                        unreachable!(
+                            "{} is only a sink, can't have virtual fields",
+                            connector_name
+                        )
                     }
                 })
                 .collect();
         }
 
-        let connector = connector_for_type(connector)
-            .ok_or_else(|| DataFusionError::Plan(format!("Unknown connector '{connector}'")))?;
+        let connector = connector_for_type(connector_name).ok_or_else(|| {
+            DataFusionError::Plan(format!("Unknown connector '{connector_name}'"))
+        })?;
 
         let format = Format::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid format: '{e}'")))?;
+
+        if let Some(Format::Json(JsonFormat { compression, .. })) = &format
+            && !matches!(compression, JsonCompression::Uncompressed)
+            && connector_name != "filesystem"
+        {
+            return plan_err!("'json.compression' is only supported for the filesystem connector");
+        }
 
         let framing = Framing::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid framing: '{e}'")))?;
