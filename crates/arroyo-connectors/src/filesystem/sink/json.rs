@@ -3,27 +3,69 @@ use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
 };
+use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::{config, sink::parquet::SharedBuffer};
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::{
     df::ArroyoSchemaRef,
     formats::{Format, JsonCompression, JsonFormat},
 };
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use flate2::Compression as GzipCompression;
 use flate2::write::GzEncoder;
 use std::time::Duration;
 use std::{fs::File, io::Write, time::Instant};
-use tracing::trace;
+
+/// Buffer for JSON data, either uncompressed or wrapped in a gzip encoder.
+///
+/// The `Gzipped` variant uses an `Option` so that the encoder can be temporarily
+/// taken out (via `.take()`) for operations that consume it (like `finish()`).
+/// In addition, `None` is used to indicate that the `JsonWriter` has been closed.
+enum JsonBuffer {
+    Uncompressed(BytesMut),
+    Gzipped(Option<GzEncoder<bytes::buf::Writer<BytesMut>>>),
+}
+
+impl JsonBuffer {
+    /// Returns a reference to the underlying buffer.
+    fn buf(&self) -> &BytesMut {
+        match self {
+            JsonBuffer::Uncompressed(buf) => buf,
+            JsonBuffer::Gzipped(Some(encoder)) => encoder.get_ref().get_ref(),
+            JsonBuffer::Gzipped(None) => panic!("encoder was not restored after take()"),
+        }
+    }
+
+    /// Returns a mutable reference to the underlying buffer.
+    fn buf_mut(&mut self) -> &mut BytesMut {
+        match self {
+            JsonBuffer::Uncompressed(buf) => buf,
+            JsonBuffer::Gzipped(Some(encoder)) => encoder.get_mut().get_mut(),
+            JsonBuffer::Gzipped(None) => panic!("encoder was not restored after take()"),
+        }
+    }
+
+    /// Takes the encoder out of the `Gzipped` variant, leaving `None` in its place.
+    /// Panics if called on `Uncompressed` or if the encoder was already taken.
+    fn take_encoder(&mut self) -> GzEncoder<bytes::buf::Writer<BytesMut>> {
+        match self {
+            JsonBuffer::Gzipped(encoder @ Some(_)) => encoder.take().unwrap(),
+            _ => panic!("take_encoder called on non-Gzipped or already-taken buffer"),
+        }
+    }
+
+    /// Restores an encoder into the `Gzipped` variant after a previous `take_encoder`.
+    fn restore_encoder(&mut self, new_encoder: GzEncoder<bytes::buf::Writer<BytesMut>>) {
+        match self {
+            JsonBuffer::Gzipped(slot @ None) => *slot = Some(new_encoder),
+            _ => panic!("restore_encoder called on non-Gzipped or non-empty buffer"),
+        }
+    }
+}
 
 pub struct JsonWriter {
-    /// Shared buffer holding data ready for upload (compressed if compression enabled)
-    current_buffer: SharedBuffer,
-    /// Streaming encoder for gzip compression (None for uncompressed mode)
-    // TODO: Move to a trait if we decide to support more encoders
-    encoder: Option<GzEncoder<SharedBuffer>>,
+    buffer: JsonBuffer,
     serializer: ArrowSerializer,
     event_logger: FsEventLogger,
 }
@@ -42,18 +84,16 @@ impl BatchBufferingWriter for JsonWriter {
             panic!("JsonWriter configured with non-json format {format:?}");
         };
 
-        let buffer = SharedBuffer::new(0);
-
-        let encoder = match compression {
-            JsonCompression::Uncompressed => None,
-            JsonCompression::Gzip => {
-                Some(GzEncoder::new(buffer.clone(), GzipCompression::default()))
-            }
+        let buffer = match compression {
+            JsonCompression::Uncompressed => JsonBuffer::Uncompressed(BytesMut::new()),
+            JsonCompression::Gzip => JsonBuffer::Gzipped(Some(GzEncoder::new(
+                BytesMut::new().writer(),
+                GzipCompression::default(),
+            ))),
         };
 
         Self {
-            current_buffer: buffer,
-            encoder,
+            buffer,
             serializer: ArrowSerializer::new(format),
             event_logger,
         }
@@ -76,9 +116,10 @@ impl BatchBufferingWriter for JsonWriter {
         for k in self.serializer.serialize(batch) {
             size += k.len() + 1;
 
-            match &mut self.encoder {
-                Some(encoder) => {
-                    // Compressed mode: write to streaming encoder (compresses immediately)
+            match &mut self.buffer {
+                JsonBuffer::Gzipped(Some(encoder)) => {
+                    // These writes are infallible, the Writer<BytesMut>::write() always returns `Ok`.
+                    // Ref: https://docs.rs/crate/bytes/1.11.1/source/src/buf/writer.rs#78-83
                     encoder
                         .write_all(&k)
                         .expect("Failed to write to gzip encoder");
@@ -86,11 +127,12 @@ impl BatchBufferingWriter for JsonWriter {
                         .write_all(b"\n")
                         .expect("Failed to write newline to gzip encoder");
                 }
-                None => {
-                    // Uncompressed mode: write directly to shared buffer
-                    let mut buffer = self.current_buffer.buffer.lock().unwrap();
-                    buffer.get_mut().extend(k);
-                    buffer.get_mut().extend(b"\n");
+                JsonBuffer::Gzipped(None) => {
+                    panic!("add_batch_data called after `JsonWriter::close()` was called");
+                }
+                JsonBuffer::Uncompressed(buf) => {
+                    buf.extend_from_slice(&k);
+                    buf.put_u8(b'\n');
                 }
             }
         }
@@ -112,54 +154,55 @@ impl BatchBufferingWriter for JsonWriter {
     }
 
     fn buffered_bytes(&self) -> usize {
-        self.current_buffer.buffer.lock().unwrap().get_ref().len()
+        self.buffer.buf().len()
     }
 
     fn split_to(&mut self, pos: usize) -> Bytes {
-        let mut buf = self.current_buffer.buffer.lock().unwrap();
-        buf.get_mut().split_to(pos).freeze()
+        self.buffer.buf_mut().split_to(pos).freeze()
     }
 
     /// The bytes stored in the checkpoint are bytes that we are ready to uploaded as-is.
     /// For compressed mode, we finish the current gzip member to ensure all data is complete.
     fn get_trailing_bytes_for_checkpoint(&mut self) -> (Vec<u8>, Option<IcebergFileMetadata>) {
-        // Finish current gzip member if in compressed mode
-        if let Some(encoder) = self.encoder.take() {
-            encoder
-                .finish()
-                .expect("Failed to finish gzip encoder at checkpoint");
+        let bytes = match &self.buffer {
+            JsonBuffer::Uncompressed(buf) => buf.to_vec(),
+            JsonBuffer::Gzipped(_) => {
+                // finish() consumes the encoder, so we take it out temporarily.
+                let encoder = self.buffer.take_encoder();
+                // Finish infallible, since the underlying Writer<BytesMut>::write() always returns `Ok`.
+                // Ref: https://docs.rs/crate/bytes/1.11.1/source/src/buf/writer.rs#78-83
+                let inner = encoder
+                    .finish()
+                    .expect("Failed to finish gzip encoder at checkpoint");
 
-            // Create new encoder for next gzip member
-            self.encoder = Some(GzEncoder::new(
-                self.current_buffer.clone(),
-                GzipCompression::default(),
-            ));
+                let bytes = inner.get_ref().to_vec();
 
-            trace!("Finished gzip member at checkpoint, created new encoder");
-        }
+                // Reuse the buffer (retaining the data) for the new gzip member.
+                self.buffer
+                    .restore_encoder(GzEncoder::new(inner, GzipCompression::default()));
 
-        // Return all buffered data (already compressed if compression is enabled)
-        let bytes = self
-            .current_buffer
-            .buffer
-            .lock()
-            .unwrap()
-            .get_ref()
-            .to_vec();
+                bytes
+            }
+        };
+
         (bytes, None)
     }
 
     fn close(&mut self) -> (Bytes, Option<IcebergFileMetadata>) {
-        // Finish and close encoder if in compressed mode
-        if let Some(encoder) = self.encoder.take() {
-            encoder
-                .finish()
-                .expect("Failed to finish gzip encoder at close");
-            trace!("Finished final gzip member at close");
-        }
+        let data = match &self.buffer {
+            JsonBuffer::Uncompressed(_) => self.buffer.buf_mut().split().freeze(),
+            JsonBuffer::Gzipped(_) => {
+                let encoder = self.buffer.take_encoder();
+                // Finish infallible, since the underlying Writer<BytesMut>::write() always returns `Ok`.
+                // Ref: https://docs.rs/crate/bytes/1.11.1/source/src/buf/writer.rs#78-83
+                let inner = encoder
+                    .finish()
+                    .expect("Failed to finish gzip encoder at close");
 
-        let mut buf = self.current_buffer.buffer.lock().unwrap();
-        let data = buf.get_mut().split().freeze();
+                inner.into_inner().split().freeze()
+            }
+        };
+
         (data, None)
     }
 }
@@ -259,6 +302,8 @@ impl LocalWriter for JsonLocalWriter {
 
 #[cfg(test)]
 mod tests {
+    use crate::filesystem::TableFormat;
+
     use super::super::BatchBufferingWriter;
     use super::*;
     use arrow::array::{RecordBatch, StringArray};
@@ -287,6 +332,8 @@ mod tests {
                 key_range: 0..=u64::MAX,
             })),
             connection_id: Arc::new(String::from("test")),
+            output_format: format.name(),
+            table_format: TableFormat::None.name(),
         };
 
         let config = config::FileSystemSink {
