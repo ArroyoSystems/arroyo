@@ -60,6 +60,35 @@
                         }
                     },
                     "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "SSL",
+                    "required": ["cert", "key"],
+                    "sensitive": ["key", "keyPassword"],
+                    "properties": {
+                        "ca": {
+                            "type": "string",
+                            "description": "PEM-encoded CA certificate or path to a PEM file to verify the broker",
+                            "format": "var-str"
+                        },
+                        "cert": {
+                            "type": "string",
+                            "description": "PEM-encoded client certificate or path to a PEM file for mTLS",
+                            "format": "var-str"
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "PEM-encoded client private key or path to a PEM file",
+                            "format": "var-str"
+                        },
+                        "keyPassword": {
+                            "type": "string",
+                            "description": "Passphrase for the client private key, if encrypted",
+                            "format": "var-str"
+                        }
+                    },
+                    "additionalProperties": false
                 }
             ]
         },
