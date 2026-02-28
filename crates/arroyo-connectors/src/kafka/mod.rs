@@ -62,9 +62,28 @@ import_types!(schema = "src/kafka/table.json");
 impl KafkaTable {
     pub fn subject(&self) -> Cow<'_, str> {
         match &self.value_subject {
-            None => Cow::Owned(format!("{}-value", self.topic)),
+            None => {
+                // For single topic, use the standard subject naming convention
+                // For patterns, the value_subject should be explicitly set
+                let topic = self
+                    .topic
+                    .as_ref()
+                    .map(|t| format!("{}-value", t))
+                    .unwrap_or_else(|| "unknown-value".to_string());
+                Cow::Owned(topic)
+            }
             Some(s) => Cow::Borrowed(s),
         }
+    }
+
+    /// Returns the topic name or pattern for display purposes
+    pub fn topic_display(&self) -> String {
+        self.topic.clone().unwrap_or_else(|| {
+            self.topic_pattern
+                .clone()
+                .map(|p| format!("pattern:{}", p))
+                .unwrap_or_else(|| "unknown".to_string())
+        })
     }
 }
 
@@ -150,8 +169,29 @@ impl KafkaConnector {
             }
         };
 
+        let topic = options.pull_opt_str("topic")?;
+        let topic_pattern = options.pull_opt_str("topic_pattern")?;
+
+        // Validate: exactly one of topic or topic_pattern must be set
+        match (&topic, &topic_pattern) {
+            (None, None) => bail!("Either 'topic' or 'topic_pattern' must be specified"),
+            (Some(_), Some(_)) => bail!("Cannot specify both 'topic' and 'topic_pattern'"),
+            _ => {}
+        }
+
+        // Validate: topic_pattern can only be used with source tables
+        if topic_pattern.is_some() {
+            match &table_type {
+                TableType::Source { .. } => {}
+                TableType::Sink { .. } => {
+                    bail!("'topic_pattern' can only be used with source tables, not sinks")
+                }
+            }
+        }
+
         Ok(KafkaTable {
-            topic: options.pull_str("topic")?,
+            topic,
+            topic_pattern,
             type_: table_type,
             client_configs: options
                 .pull_opt_str("client_configs")?
@@ -207,9 +247,12 @@ impl Connector for KafkaConnector {
         let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
                 ConnectionType::Source,
-                format!("KafkaSource<{}>", table.topic),
+                format!("KafkaSource<{}>", table.topic_display()),
             ),
-            TableType::Sink { .. } => (ConnectionType::Sink, format!("KafkaSink<{}>", table.topic)),
+            TableType::Sink { .. } => (
+                ConnectionType::Sink,
+                format!("KafkaSink<{}>", table.topic_display()),
+            ),
         };
 
         let schema = schema
@@ -408,7 +451,8 @@ impl Connector for KafkaConnector {
 
                 Ok(ConstructedOperator::from_source(Box::new(
                     KafkaSourceFunc {
-                        topic: table.topic,
+                        topic: table.topic.clone(),
+                        topic_pattern: table.topic_pattern.clone(),
                         bootstrap_servers: profile.bootstrap_servers.to_string(),
                         group_id: group_id.clone(),
                         group_id_prefix: group_id_prefix.clone(),
@@ -446,7 +490,8 @@ impl Connector for KafkaConnector {
                     write_futures: vec![],
                     client_config: client_configs(&profile, Some(table.clone()))?,
                     context: Context::new(Some(profile.clone())),
-                    topic: table.topic,
+                    // Safe to unwrap: validation ensures sink tables have a topic
+                    topic: table.topic.clone().expect("Sink tables must have a topic"),
                     serializer: ArrowSerializer::new(
                         config.format.expect("Format must be defined for KafkaSink"),
                     ),
@@ -767,10 +812,14 @@ impl KafkaTester {
 
         self.info(&mut tx, "Connected to Kafka").await;
 
-        let topic = table.topic.clone();
+        // For testing, topic must be specified (not topic_pattern)
+        let topic = table
+            .topic
+            .as_ref()
+            .ok_or_else(|| anyhow!("Testing requires a specific topic, not a pattern"))?;
 
         let metadata = client
-            .fetch_metadata(Some(&topic), Duration::from_secs(10))
+            .fetch_metadata(Some(topic.as_str()), Duration::from_secs(10))
             .map_err(|e| anyhow!("Failed to fetch metadata: {:?}", e))?;
 
         self.info(&mut tx, "Fetched topic metadata").await;
