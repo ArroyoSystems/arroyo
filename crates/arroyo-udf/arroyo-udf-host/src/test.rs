@@ -1,6 +1,6 @@
 use crate::{AsyncUdfDylib, AsyncUdfDylibInterface, SyncUdfDylib};
 use arrow::array::{
-    Array, ArrayRef, BinaryArray, BinaryBuilder, Int32Array, StringArray, UInt64Array,
+    Array, ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, Int32Array, StringArray, UInt64Array,
 };
 use arrow::datatypes::{DataType, Field};
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl};
@@ -40,6 +40,42 @@ mod test_udf_optional_binary_return {
     fn my_udf(v: Option<&[u8]>) -> Option<Vec<u8>> {
         v.map(|v| v.to_owned())
     }
+}
+
+mod test_bool_udf {
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
+
+    #[local_udf]
+    fn my_udf(a: bool, b: Option<bool>) -> Option<bool> {
+        if a { b } else { Some(false) }
+    }
+}
+
+#[test]
+fn test_bool() {
+    let udf = test_bool_udf::__local().config;
+    let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
+
+    let args = ScalarFunctionArgs {
+        args: vec![
+            ColumnarValue::Array(Arc::new(BooleanArray::from(vec![true, false, true]))),
+            ColumnarValue::Array(Arc::new(BooleanArray::from(vec![Some(true), None, Some(false)]))),
+        ],
+        arg_fields: vec![],
+        number_rows: 3,
+        return_field: Field::new("return", (*sync_udf.return_type).clone(), false).into(),
+    };
+
+    let result = sync_udf.invoke_with_args(args).unwrap();
+    let ColumnarValue::Array(a) = result else {
+        panic!("not an array");
+    };
+    let result = a.as_any().downcast_ref::<BooleanArray>().unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result.value(0), true);
+    assert!(result.is_null(1));
+    assert_eq!(result.value(2), false);
 }
 
 #[test]
@@ -148,11 +184,58 @@ mod test_async_udf {
     }
 }
 
+mod test_async_bool {
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
+
+    #[local_udf(ordered)]
+    async fn my_udf(a: bool) -> bool {
+        a
+    }
+}
+
 use arrow::array::PrimitiveArray;
 use arrow::datatypes::{UInt32Type, UInt64Type};
 use datafusion::common::ScalarValue;
 use std::time::Duration;
 use tokio::time::Instant;
+
+#[tokio::test]
+async fn test_async_bool() {
+    let interface = AsyncUdfDylibInterface {
+        __start: test_async_bool::__start,
+        __send: test_async_bool::__send,
+        __drain_results: test_async_bool::__drain_results,
+        __stop_runtime: test_async_bool::__stop_runtime,
+    };
+    let mut udf = AsyncUdfDylib::new("my_udf".to_string(), DataType::Boolean, interface);
+    udf.start(false, Duration::from_secs(1), 100);
+
+    let arg1 = BooleanArray::from(vec![true]);
+    udf.send(1, vec![arg1.to_data()])
+        .await
+        .unwrap();
+
+    let start_time = Instant::now();
+    loop {
+        match udf.drain_results().unwrap() {
+            Some((ids, values)) => {
+                let values = BooleanArray::from(values);
+                assert_eq!(values.len(), 1);
+                assert_eq!(values.value(0), true);
+                assert_eq!(ids.len(), 1);
+                assert_eq!(ids.value(0), 1);
+                break;
+            }
+            None => {
+                if start_time.elapsed() > Duration::from_secs(1) {
+                    panic!("no results after 1 second");
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
+}
 
 #[tokio::test]
 async fn test_async() {
