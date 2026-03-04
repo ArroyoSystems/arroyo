@@ -60,7 +60,11 @@ fn test_bool() {
     let args = ScalarFunctionArgs {
         args: vec![
             ColumnarValue::Array(Arc::new(BooleanArray::from(vec![true, false, true]))),
-            ColumnarValue::Array(Arc::new(BooleanArray::from(vec![Some(true), None, Some(false)]))),
+            ColumnarValue::Array(Arc::new(BooleanArray::from(vec![
+                Some(true),
+                None,
+                Some(false),
+            ]))),
         ],
         arg_fields: vec![],
         number_rows: 3,
@@ -212,9 +216,7 @@ async fn test_async_bool() {
     udf.start(false, Duration::from_secs(1), 100);
 
     let arg1 = BooleanArray::from(vec![true]);
-    udf.send(1, vec![arg1.to_data()])
-        .await
-        .unwrap();
+    udf.send(1, vec![arg1.to_data()]).await.unwrap();
 
     let start_time = Instant::now();
     loop {
