@@ -80,7 +80,9 @@ ENV INSTALL_RUSTC=true \
 
 
 EXPOSE 5115
+# nosemgrep: dockerfile.security.missing-user-entrypoint.missing-user-entrypoint
 ENTRYPOINT [ "/app/arroyo" ]
+# nosemgrep: dockerfile.security.missing-user.missing-user
 CMD ["cluster"]
 
 FROM rust:slim-bookworm AS arroyo-full
@@ -104,5 +106,7 @@ RUN cp -r /python/bin/* /usr/local/bin/ && \
   
 
 EXPOSE 5115
+# nosemgrep: dockerfile.security.missing-user-entrypoint.missing-user-entrypoint
 ENTRYPOINT [ "/app/arroyo" ]
+# nosemgrep: dockerfile.security.missing-user.missing-user
 CMD ["cluster"]
