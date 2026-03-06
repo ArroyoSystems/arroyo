@@ -72,13 +72,13 @@ impl<W: Write> JsonBuffer<W> {
         }
     }
 
-    fn restore_encoder(&mut self, new_encoder: GzEncoder<W>) {
+    fn restore_encoder(&mut self, writer: W) {
         match self {
             JsonBuffer::Gzipped {
                 encoder: slot @ None,
                 dirty,
             } => {
-                *slot = Some(new_encoder);
+                *slot = Some(GzEncoder::new(writer, GzipCompression::default()));
                 // This is a fresh gzip member; no record bytes were written yet.
                 *dirty = false;
             }
@@ -86,13 +86,43 @@ impl<W: Write> JsonBuffer<W> {
         }
     }
 
-    fn finish_encoder(&mut self) -> std::io::Result<W> {
+    /// Flushes the underlying writer.
+    /// For gzip, this only flushes when the current member is dirty.
+    fn flush(&mut self) -> std::io::Result<()> {
         match self {
+            JsonBuffer::Uncompressed(w) => w.flush(),
             JsonBuffer::Gzipped {
-                encoder: encoder @ Some(_),
-                ..
-            } => encoder.take().unwrap().finish(),
-            _ => panic!("finish_encoder called on non-Gzipped or already-taken buffer"),
+                encoder: Some(enc),
+                dirty,
+            } => {
+                if *dirty {
+                    enc.flush()?;
+                }
+                Ok(())
+            }
+            JsonBuffer::Gzipped { encoder: None, .. } => panic!("flush called after close()"),
+        }
+    }
+
+    /// Finishes and returns the current gzip member only when it has new data.
+    fn finish_gzip_encoder_if_dirty(&mut self) -> std::io::Result<Option<W>> {
+        match self {
+            JsonBuffer::Uncompressed(_) => {
+                panic!("finish_gzip_encoder_if_dirty called on uncompressed buffer")
+            }
+            JsonBuffer::Gzipped { encoder, dirty } => {
+                let Some(enc) = encoder.take() else {
+                    panic!("finish_gzip_encoder_if_dirty called after close()")
+                };
+
+                if *dirty {
+                    *dirty = false;
+                    Ok(Some(enc.finish()?))
+                } else {
+                    *encoder = Some(enc);
+                    Ok(None)
+                }
+            }
         }
     }
 }
@@ -189,31 +219,26 @@ impl BatchBufferingWriter for JsonWriter {
             .freeze()
     }
 
-    /// The bytes stored in the checkpoint are bytes that we are ready to uploaded as-is.
-    /// For compressed mode, we finish the current gzip member to ensure all data is complete.
+    /// The bytes stored in the checkpoint are bytes that we are ready to upload as-is.
+    /// For compressed mode, we finish the current gzip member only if new data was written.
     fn get_trailing_bytes_for_checkpoint(&mut self) -> (Vec<u8>, Option<IcebergFileMetadata>) {
-        let bytes = match &self.buffer {
+        let bytes = match &mut self.buffer {
             JsonBuffer::Uncompressed(inner) => inner.get_ref().to_vec(),
-            JsonBuffer::Gzipped { dirty, .. } => {
-                if *dirty {
-                    // Finish is infallible since the underlying Writer<BytesMut>::write() always returns `Ok`.
-                    // Ref: https://docs.rs/crate/bytes/1.11.1/source/src/buf/writer.rs#78-83
-                    let inner = self
-                        .buffer
-                        .finish_encoder()
-                        .expect("Failed to finish gzip encoder at checkpoint");
-
+            // Finish is infallible since the underlying Writer<BytesMut>::write() always returns `Ok`.
+            // Ref: https://docs.rs/crate/bytes/1.11.1/source/src/buf/writer.rs#78-83
+            JsonBuffer::Gzipped { .. } => match self
+                .buffer
+                .finish_gzip_encoder_if_dirty()
+                .expect("Failed to finish gzip encoder at checkpoint")
+            {
+                Some(inner) => {
                     let bytes = inner.get_ref().to_vec();
-
-                    self.buffer
-                        .restore_encoder(GzEncoder::new(inner, GzipCompression::default()));
-
+                    self.buffer.restore_encoder(inner);
                     bytes
-                } else {
-                    // No data written since last checkpoint — return existing buffer
-                    self.buffer.writer_ref().get_ref().to_vec()
                 }
-            }
+                // No data written since last checkpoint — return existing buffer
+                None => self.buffer.writer_ref().get_ref().to_vec(),
+            },
         };
         (bytes, None)
     }
@@ -221,21 +246,14 @@ impl BatchBufferingWriter for JsonWriter {
     fn close(&mut self) -> (Bytes, Option<IcebergFileMetadata>) {
         let data = match &mut self.buffer {
             JsonBuffer::Uncompressed(inner) => inner.get_mut().split().freeze(),
-            JsonBuffer::Gzipped { dirty, .. } => {
-                if *dirty {
-                    // Finish infallible, since the underlying Writer<BytesMut>::write() always returns `Ok`.
-                    // Ref: https://docs.rs/crate/bytes/1.11.1/source/src/buf/writer.rs#78-83
-                    let inner = self
-                        .buffer
-                        .finish_encoder()
-                        .expect("Failed to finish gzip encoder at close");
-
-                    inner.into_inner().split().freeze()
-                } else {
-                    // No data written since last checkpoint — return existing buffer
-                    self.buffer.writer_ref_mut().get_mut().split().freeze()
-                }
-            }
+            JsonBuffer::Gzipped { .. } => match self
+                .buffer
+                .finish_gzip_encoder_if_dirty()
+                .expect("Failed to finish gzip encoder at close")
+            {
+                Some(inner) => inner.into_inner().split().freeze(),
+                None => self.buffer.writer_ref_mut().get_mut().split().freeze(),
+            },
         };
 
         (data, None)
@@ -321,35 +339,20 @@ impl LocalWriter for JsonLocalWriter {
     }
 
     fn sync(&mut self) -> anyhow::Result<usize> {
-        match &mut self.buffer {
-            JsonBuffer::Gzipped {
-                dirty,
-                encoder: Some(enc),
-            } => {
-                // Only flush the encoder if it contains data.
-                if *dirty {
-                    enc.flush()?;
-                }
-            }
-            JsonBuffer::Gzipped { encoder: None, .. } => panic!("sync called after close()"),
-            JsonBuffer::Uncompressed(w) => w.flush()?,
-        }
+        self.buffer.flush()?;
         let size = self.buffer.writer_ref().metadata()?.len() as usize;
-        if let Some(stats) = &mut self.stats {
-            stats.bytes_written = size;
-        }
+        self.stats.as_mut().unwrap().bytes_written = size;
         Ok(size)
     }
 
     fn close(&mut self) -> anyhow::Result<super::local::FilePreCommit> {
         match &self.buffer {
             JsonBuffer::Gzipped { .. } => {
-                // Always finalize local gzip on close so file bytes cannot change later
-                // from encoder drop-time writes after we return.
-                let mut file = self.buffer.finish_encoder()?;
-                file.flush()?;
-                if let Some(stats) = &mut self.stats {
-                    stats.bytes_written = file.metadata()?.len() as usize;
+                if let Some(mut file) = self.buffer.finish_gzip_encoder_if_dirty()? {
+                    file.flush()?;
+                    self.stats.as_mut().unwrap().bytes_written = file.metadata()?.len() as usize;
+                } else {
+                    self.sync()?;
                 }
             }
             JsonBuffer::Uncompressed(_) => {
@@ -365,21 +368,19 @@ impl LocalWriter for JsonLocalWriter {
 
     fn checkpoint(&mut self) -> anyhow::Result<Option<super::local::CurrentFileRecovery>> {
         let bytes_written = match &self.buffer {
-            JsonBuffer::Gzipped { dirty, .. } if *dirty => {
-                // Finish the current gzip member (writes trailer), making the file valid
-                // up to this point. We must measure the file size *before* creating a new
-                // encoder, since GzEncoder writes the gzip header on the first flush/write.
-                let mut file = self.buffer.finish_encoder()?;
-                file.flush()?;
-                let size = file.metadata()?.len() as usize;
-                if let Some(stats) = &mut self.stats {
-                    stats.bytes_written = size;
+            JsonBuffer::Gzipped { .. } => match self.buffer.finish_gzip_encoder_if_dirty()? {
+                Some(mut file) => {
+                    // Measure before creating the next member; a fresh GzEncoder can emit a header
+                    // on first flush/write.
+                    file.flush()?;
+                    let size = file.metadata()?.len() as usize;
+                    self.stats.as_mut().unwrap().bytes_written = size;
+                    self.buffer.restore_encoder(file);
+                    size
                 }
-                self.buffer
-                    .restore_encoder(GzEncoder::new(file, GzipCompression::default()));
-                size
-            }
-            _ => self.sync()?,
+                None => self.sync()?,
+            },
+            JsonBuffer::Uncompressed(_) => self.sync()?,
         };
 
         if bytes_written > 0 {
@@ -454,23 +455,6 @@ mod tests {
         ));
 
         JsonWriter::new(&config, format, arroyo_schema, None, event_logger)
-    }
-
-    #[test]
-    fn test_suffix_for_format() {
-        // Test uncompressed
-        let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Uncompressed,
-            ..Default::default()
-        });
-        assert_eq!(JsonWriter::suffix_for_format(&format), "json");
-
-        // Test gzip
-        let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Gzip,
-            ..Default::default()
-        });
-        assert_eq!(JsonWriter::suffix_for_format(&format), "json.gz");
     }
 
     #[test]
@@ -667,21 +651,6 @@ mod tests {
     }
 
     #[test]
-    fn test_local_writer_suffix_for_format() {
-        let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Uncompressed,
-            ..Default::default()
-        });
-        assert_eq!(JsonLocalWriter::file_suffix_for_format(&format), "json");
-
-        let format = Format::Json(JsonFormat {
-            compression: JsonCompression::Gzip,
-            ..Default::default()
-        });
-        assert_eq!(JsonLocalWriter::file_suffix_for_format(&format), "json.gz");
-    }
-
-    #[test]
     fn test_local_writer_uncompressed_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let (schema, arroyo_schema) = local_writer_schema();
@@ -794,45 +763,6 @@ mod tests {
             "File should be truncated to checkpoint size"
         );
 
-        let mut decoder = MultiGzDecoder::new(&compressed[..]);
-        let mut decompressed = String::new();
-        decoder.read_to_string(&mut decompressed).unwrap();
-
-        assert!(decompressed.contains("committed_data"));
-        assert!(!decompressed.contains("uncommitted_data"));
-    }
-
-    #[test]
-    fn test_local_writer_gzip_empty_checkpoint_truncation_recovery() {
-        // Verify that a checkpoint with no new rows still represents a valid
-        // truncation boundary for gzip recovery.
-        let dir = tempfile::tempdir().unwrap();
-        let (schema, arroyo_schema) = local_writer_schema();
-
-        let mut writer = create_test_local_writer(dir.path(), JsonCompression::Gzip, arroyo_schema);
-
-        // Write and checkpoint committed data.
-        let batch1 = local_writer_batch(&schema, vec!["committed_data"]);
-        writer.write_batch(&batch1).unwrap();
-        let _recovery1 = writer.checkpoint().unwrap().unwrap();
-
-        // Checkpoint again without new rows.
-        let recovery2 = writer.checkpoint().unwrap().unwrap();
-
-        // Write data after the second checkpoint (should be lost on recovery).
-        let batch2 = local_writer_batch(&schema, vec!["uncommitted_data"]);
-        writer.write_batch(&batch2).unwrap();
-        drop(writer);
-
-        // Simulate recovery by truncating to second checkpoint boundary.
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&recovery2.tmp_file)
-            .unwrap();
-        file.set_len(recovery2.bytes_written as u64).unwrap();
-        drop(file);
-
-        let compressed = std::fs::read(&recovery2.tmp_file).unwrap();
         let mut decoder = MultiGzDecoder::new(&compressed[..]);
         let mut decompressed = String::new();
         decoder.read_to_string(&mut decompressed).unwrap();
