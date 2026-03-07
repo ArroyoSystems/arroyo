@@ -89,6 +89,8 @@ fn extract_catalog_message(display: &str) -> Option<String> {
 }
 
 fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
+    debug!(error = ?error, "iceberg catalog error");
+
     let (domain, msg) = match error.kind() {
         ErrorKind::PreconditionFailed => (ErrorDomain::Internal, error.to_string()),
         ErrorKind::DataInvalid | ErrorKind::NamespaceNotFound | ErrorKind::TableNotFound => {
@@ -125,7 +127,7 @@ fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
             let msg = if let Some(catalog_msg) = extract_catalog_message(&display) {
                 format!("Iceberg catalog error: {catalog_msg}")
             } else {
-                format!("Iceberg catalog error: {}", error.message())
+                format!("Iceberg catalog error: {error}")
             };
 
             (domain, msg)

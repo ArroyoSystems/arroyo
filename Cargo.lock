@@ -622,6 +622,7 @@ dependencies = [
  "sha2",
  "strum 0.27.2",
  "strum_macros 0.27.1",
+ "tempfile",
  "thrift",
  "tokio",
  "tokio-rustls 0.25.0",
