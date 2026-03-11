@@ -4,12 +4,14 @@ use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, StorageError};
 use arroyo_storage::StorageProvider;
 use bytes::Bytes;
+use futures::future::try_join_all;
 use object_store::MultipartId;
 use object_store::path::Path;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::debug;
 
 #[derive(Debug)]
 pub enum FsResponseData {
@@ -20,8 +22,13 @@ pub enum FsResponseData {
         part_index: usize,
         content_id: String,
     },
+    PartsFinished {
+        first_part_index: usize,
+        content_ids: Vec<String>,
+    },
     SingleFileFinished,
     MultipartFinalized,
+    MultipartAlreadyComplete,
 }
 
 #[derive(Debug)]
@@ -84,6 +91,58 @@ pub fn create_part_upload_future(
     })
 }
 
+// writes (possibly) multiple final parts of a file, gracefully handling the case that in
+// recovery the file may have already been completed
+pub fn create_last_parts_upload_future(
+    storage: Arc<StorageProvider>,
+    path: Arc<Path>,
+    multipart_id: Arc<MultipartId>,
+    first_part_index: usize,
+    data: Vec<Bytes>,
+    existing_size: u64,
+    logger: FsEventLogger,
+) -> UploadFuture {
+    debug!("uploading last parts for {:?}", path);
+    let new_bytes = data.iter().map(|f| f.len()).sum();
+
+    Box::pin(async move {
+        let started = Instant::now();
+
+        let uploads = data.into_iter().enumerate().map(|(i, data)| {
+            storage.add_multipart(&path, &multipart_id, first_part_index + i, data)
+        });
+
+        match try_join_all(uploads).await {
+            Ok(parts) => {
+                logger.log_fs_event(new_bytes, 0, started.elapsed(), 0, None, 0, 0, 0);
+
+                Ok(FsResponse {
+                    path,
+                    data: FsResponseData::PartsFinished {
+                        first_part_index,
+                        content_ids: parts.into_iter().map(|p| p.content_id).collect(),
+                    },
+                })
+            }
+            Err(e) => {
+                validate_already_there(
+                    &storage,
+                    &path,
+                    existing_size + new_bytes as u64,
+                    started,
+                    &logger,
+                    e,
+                )
+                .await?;
+                Ok(FsResponse {
+                    path,
+                    data: FsResponseData::MultipartAlreadyComplete,
+                })
+            }
+        }
+    })
+}
+
 pub fn create_single_file_upload_future(
     storage: Arc<StorageProvider>,
     path: Arc<Path>,
@@ -106,6 +165,41 @@ pub fn create_single_file_upload_future(
     })
 }
 
+async fn validate_already_there(
+    storage: &StorageProvider,
+    path: &Path,
+    expected_size: u64,
+    started: Instant,
+    logger: &FsEventLogger,
+    e: StorageError,
+) -> DataflowResult<()> {
+    // check if the file is already there with the correct size -- in which case it means
+    // that we've already finalized it
+    if let Ok(meta) = storage.head(path.as_ref()).await.map_err(map_storage_error) {
+        if meta.size != expected_size {
+            Err(connector_err!(
+                External,
+                NoRetry,
+                "file written to {} should have length of {}, not {}",
+                path,
+                expected_size,
+                meta.size,
+            ))
+        } else {
+            debug!(
+                path = %path,
+                size = expected_size,
+                original_error = %e,
+                "file already exists with expected size; \
+                 treating as successful recovery from prior finalization"
+            );
+            Ok(())
+        }
+    } else {
+        Err(handle_error(started, logger, e))
+    }
+}
+
 pub fn create_multipart_finalize_future(
     storage: Arc<StorageProvider>,
     path: Arc<Path>,
@@ -125,30 +219,13 @@ pub fn create_multipart_finalize_future(
             .close_multipart(&path, &multipart_id, parts.clone())
             .await
         {
-            // check if the file is already there with the correct size -- in which case it means
-            // that we've already finalized it
-            if let Ok(meta) = storage
-                .head(path.as_ref().clone())
-                .await
-                .map_err(map_storage_error)
-            {
-                if meta.size != expected_size as u64 {
-                    return Err(connector_err!(
-                        External,
-                        NoRetry,
-                        "file written to {} should have length of {}, not {}",
-                        path,
-                        expected_size,
-                        meta.size,
-                    ));
-                }
-            } else {
-                return Err(handle_error(started, &logger, e));
-            }
+            // if we fail to close the multipart, check if it's because we've already finalized this
+            // multipart
+            validate_already_there(&storage, &path, expected_size as u64, started, &logger, e)
+                .await?;
         }
 
         logger.log_fs_event(0, 1, started.elapsed(), 0, None, 0, 0, 0);
-
         Ok(FsResponse {
             path,
             data: FsResponseData::MultipartFinalized,
