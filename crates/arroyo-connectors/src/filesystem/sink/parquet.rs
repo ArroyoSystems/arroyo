@@ -10,8 +10,9 @@ use crate::filesystem::sink::iceberg::schema::{
 use anyhow::Result;
 use arrow::array::{Array, RecordBatch, TimestampNanosecondArray};
 use arrow::datatypes::SchemaRef;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::formats::{ParquetCompression, ParquetFormat};
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
+use arroyo_rpc::{connector_err, df::ArroyoSchemaRef, formats::Format};
 use arroyo_types::from_nanos;
 use bytes::{BufMut, Bytes, BytesMut};
 use parquet::{
@@ -104,7 +105,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         schema: ArroyoSchemaRef,
         iceberg_schema: Option<iceberg::spec::SchemaRef>,
         event_logger: FsEventLogger,
-    ) -> Self {
+    ) -> DataflowResult<Self> {
         let Format::Parquet(parquet) = format else {
             panic!("ParquetBatchBufferingWriter configured with non-parquet format {format:?}");
         };
@@ -116,7 +117,8 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         let mut writer_schema = schema.schema_without_timestamp();
         if let Some(iceberg) = &iceberg_schema {
             writer_schema = update_field_ids_to_iceberg(&writer_schema, iceberg)
-                .expect("failed to assign iceberg ids to schema")
+                .map_err(|e|
+                    connector_err!(User, NoRetry, source: e, "schema in Iceberg table has been modified: {}", e))?;
         };
 
         let writer_schema = Arc::new(writer_schema);
@@ -128,7 +130,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         )
         .unwrap();
 
-        Self {
+        Ok(Self {
             writer: Some(writer),
             buffer,
             row_group_size_bytes,
@@ -136,7 +138,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
             schema,
             iceberg_schema,
             event_logger,
-        }
+        })
     }
 
     fn suffix_for_format(format: &Format) -> &str {

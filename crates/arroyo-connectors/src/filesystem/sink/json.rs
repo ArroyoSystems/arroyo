@@ -7,6 +7,7 @@ use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
+use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
     df::ArroyoSchemaRef,
     formats::{Format, JsonCompression, JsonFormat},
@@ -140,7 +141,7 @@ impl BatchBufferingWriter for JsonWriter {
         _schema: ArroyoSchemaRef,
         _: Option<::iceberg::spec::SchemaRef>,
         event_logger: FsEventLogger,
-    ) -> Self {
+    ) -> DataflowResult<Self> {
         let compression = if let Format::Json(ref json) = format {
             json.compression
         } else {
@@ -158,11 +159,11 @@ impl BatchBufferingWriter for JsonWriter {
             },
         };
 
-        Self {
+        Ok(Self {
             buffer,
             serializer: ArrowSerializer::new(format),
             event_logger,
-        }
+        })
     }
 
     fn suffix_for_format(format: &Format) -> &str {
@@ -454,7 +455,7 @@ mod tests {
             None,
         ));
 
-        JsonWriter::new(&config, format, arroyo_schema, None, event_logger)
+        JsonWriter::new(&config, format, arroyo_schema, None, event_logger).unwrap()
     }
 
     #[test]

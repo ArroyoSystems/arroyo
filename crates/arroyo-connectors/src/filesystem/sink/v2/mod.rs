@@ -212,7 +212,7 @@ impl<BBW: BatchBufferingWriter> ActiveState<BBW> {
         context: &SinkContext,
         partition: &Option<OwnedRow>,
         representative_ts: SystemTime,
-    ) -> &mut OpenFile<BBW> {
+    ) -> DataflowResult<&mut OpenFile<BBW>> {
         let file = self
             .active_partitions
             .get(partition)
@@ -228,7 +228,7 @@ impl<BBW: BatchBufferingWriter> ActiveState<BBW> {
                 context.schema.clone(),
                 context.iceberg_schema.clone(),
                 logger.clone(),
-            );
+            )?;
 
             let open_file = OpenFile::new(
                 path.clone(),
@@ -247,7 +247,7 @@ impl<BBW: BatchBufferingWriter> ActiveState<BBW> {
         }
 
         let file_path = self.active_partitions.get(partition).unwrap();
-        self.open_files.get_mut(file_path).unwrap()
+        Ok(self.open_files.get_mut(file_path).unwrap())
     }
 }
 
@@ -522,7 +522,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                 self.context.as_ref().unwrap(),
                 &partition_key,
                 representative_timestamp,
-            );
+            )?;
             let future = file.add_batch(&sub_batch)?;
 
             if let Some(future) = future {
@@ -812,15 +812,13 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     )
                         .await
                         .map_err(
-                            |e| connector_err!(External, WithBackoff, source: e, "failed to commit to delta"),
+                            |e| connector_err!(External, WithBackoff, source: e, "failed to commit to delta: {e}"),
                         )? {
                         *last_version = new_version;
                     }
                 }
                 CommitState::Iceberg(table) => {
-                    table.commit(epoch, &finished_files).await.map_err(
-                        |e| connector_err!(External, WithBackoff, source: e, "failed to commit to iceberg"),
-                    )?;
+                    table.commit(epoch, &finished_files).await?;
                 }
                 CommitState::VanillaParquet => {
                     // Nothing to do

@@ -9,7 +9,7 @@ use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
 use anyhow::anyhow;
 use arrow::datatypes::Schema;
 use arroyo_rpc::connector_err;
-use arroyo_rpc::errors::{DataflowError, ErrorDomain, RetryHint};
+use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, RetryHint};
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use iceberg::spec::ManifestFile;
@@ -310,7 +310,7 @@ impl IcebergTable {
         &mut self,
         epoch: u32,
         finished_files: &[FinishedFile],
-    ) -> anyhow::Result<()> {
+    ) -> DataflowResult<()> {
         if finished_files.is_empty() {
             debug!("no new files, skipping commit");
             return Ok(());
@@ -373,13 +373,19 @@ impl IcebergTable {
             )
             .add_data_files(files)
             .with_check_duplicate(false)
-            .apply(tx)?;
+            .apply(tx)
+            .map_err(map_iceberg_error)?;
 
-        tx.commit(&self.catalog).await?;
+        tx.commit(&self.catalog).await.map_err(map_iceberg_error)?;
         debug!("finished iceberg commit");
         // the tx.commit call returns the table but the FileIO somehow ends up misconfigured in such
         // a way that breaks future IO operations
-        self.table = Some(self.catalog.load_table(&self.table_ident).await?);
+        self.table = Some(
+            self.catalog
+                .load_table(&self.table_ident)
+                .await
+                .map_err(map_iceberg_error)?,
+        );
 
         Ok(())
     }
