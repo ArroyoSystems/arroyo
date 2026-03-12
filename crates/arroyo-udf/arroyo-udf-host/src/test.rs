@@ -77,9 +77,9 @@ fn test_bool() {
     };
     let result = a.as_any().downcast_ref::<BooleanArray>().unwrap();
     assert_eq!(result.len(), 3);
-    assert_eq!(result.value(0), true);
+    assert!(result.value(0));
     assert!(result.is_null(1));
-    assert_eq!(result.value(2), false);
+    assert!(!result.value(2));
 }
 
 #[test]
@@ -224,7 +224,7 @@ async fn test_async_bool() {
             Some((ids, values)) => {
                 let values = BooleanArray::from(values);
                 assert_eq!(values.len(), 1);
-                assert_eq!(values.value(0), true);
+                assert!(values.value(0));
                 assert_eq!(ids.len(), 1);
                 assert_eq!(ids.value(0), 1);
                 break;
