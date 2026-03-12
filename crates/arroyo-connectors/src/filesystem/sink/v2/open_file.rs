@@ -4,8 +4,9 @@ use crate::filesystem::sink::map_storage_error;
 use crate::filesystem::sink::two_phase_committer::CommitStrategy;
 use crate::filesystem::sink::v2::SinkConfig;
 use crate::filesystem::sink::v2::uploads::{
-    FsResponseData, UploadFuture, create_multipart_finalize_future, create_multipart_init_future,
-    create_part_upload_future, create_single_file_upload_future,
+    FsResponseData, UploadFuture, create_last_parts_upload_future,
+    create_multipart_finalize_future, create_multipart_init_future, create_part_upload_future,
+    create_single_file_upload_future,
 };
 use crate::filesystem::sink::{
     BatchBufferingWriter, FsEventLogger, MultiPartWriterStats, split_into_parts,
@@ -563,6 +564,15 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
                 self.part_upload_completed(part_index, content_id)?;
                 Ok(vec![])
             }
+            FsResponseData::PartsFinished {
+                first_part_index,
+                content_ids,
+            } => {
+                for (i, id) in content_ids.into_iter().enumerate() {
+                    self.part_upload_completed(first_part_index + i, id)?;
+                }
+                Ok(vec![])
+            }
             FsResponseData::SingleFileFinished => {
                 let OpenFileState::Finishing {
                     iceberg_metadata,
@@ -607,6 +617,20 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
                     }
                 };
 
+                Ok(vec![])
+            }
+            FsResponseData::MultipartAlreadyComplete => {
+                self.state = match mem::take(&mut self.state) {
+                    OpenFileState::ClosingMulti {
+                        iceberg_metadata,
+                        total_size,
+                        ..
+                    } => OpenFileState::Closed {
+                        iceberg_metadata,
+                        total_size,
+                    },
+                    other => other,
+                };
                 Ok(vec![])
             }
         }
@@ -714,6 +738,7 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
 
     fn write_last_parts(
         &mut self,
+        bytes_already_written: u64,
         bytes: Bytes,
         multipart_id: Arc<MultipartId>,
         parts: &mut Vec<Part>,
@@ -724,7 +749,7 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
             return vec![];
         }
 
-        let futures = if self.storage_provider.requires_same_part_sizes()
+        let part_bytes = if self.storage_provider.requires_same_part_sizes()
             && bytes.len() > self.target_part_size_bytes
         {
             // our last part is bigger than our part size, which isn't allowed by some object stores
@@ -740,41 +765,30 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
             );
 
             part_bytes
-                .into_iter()
-                .enumerate()
-                .map(|(i, part)| {
-                    create_part_upload_future(
-                        self.storage_provider.clone(),
-                        self.path.clone(),
-                        multipart_id.clone(),
-                        parts.len() + i,
-                        part,
-                        self.logger.clone(),
-                    )
-                })
-                .collect()
         } else {
-            vec![create_part_upload_future(
-                self.storage_provider.clone(),
-                self.path.clone(),
-                multipart_id.clone(),
-                parts.len(),
-                bytes,
-                self.logger.clone(),
-            )]
+            vec![bytes]
         };
 
-        self.stats.parts_written += futures.len();
+        self.stats.parts_written += part_bytes.len();
         self.stats.bytes_written += len;
 
-        for _ in futures.iter() {
+        let first_part_index = parts.len();
+        for _ in part_bytes.iter() {
             parts.push(Part {
                 part_index: parts.len(),
                 content_id: None,
             });
         }
 
-        futures
+        vec![create_last_parts_upload_future(
+            self.storage_provider.clone(),
+            self.path.clone(),
+            multipart_id.clone(),
+            first_part_index,
+            part_bytes,
+            bytes_already_written,
+            self.logger.clone(),
+        )]
     }
 
     pub fn close(&mut self) -> DataflowResult<Vec<UploadFuture>> {
@@ -807,7 +821,12 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
             } => {
                 // write our last parts
                 let (bytes, iceberg_metadata) = writer.close();
-                futures = self.write_last_parts(bytes, multipart_id.clone(), &mut parts);
+                futures = self.write_last_parts(
+                    self.stats.bytes_written as u64,
+                    bytes,
+                    multipart_id.clone(),
+                    &mut parts,
+                );
 
                 OpenFileState::ClosingMulti {
                     multipart_id: multipart_id.clone(),
@@ -823,8 +842,12 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
                 iceberg_metadata,
                 total_size,
             } => {
-                futures =
-                    self.write_last_parts(trailing_bytes.clone(), multipart_id.clone(), &mut parts);
+                futures = self.write_last_parts(
+                    total_size as u64,
+                    trailing_bytes.clone(),
+                    multipart_id.clone(),
+                    &mut parts,
+                );
 
                 OpenFileState::ClosingMulti {
                     multipart_id,
