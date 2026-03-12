@@ -2,6 +2,8 @@ use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 
 use crate::filesystem::config::IcebergPartitioning;
+use arroyo_rpc::connector_err;
+use arroyo_rpc::errors::DataflowResult;
 use bincode::{Decode, Encode};
 use iceberg::spec::{
     DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType, Literal, MapType,
@@ -124,7 +126,7 @@ pub fn build_datafile_from_meta(
     file_path: String,
     file_size_bytes: u64,
     partition_spec_id: i32,
-) -> anyhow::Result<DataFile> {
+) -> DataflowResult<DataFile> {
     let mut column_sizes: HashMap<i32, u64> = HashMap::new();
     let mut value_counts: HashMap<i32, u64> = HashMap::new();
     let mut null_counts: HashMap<i32, u64> = HashMap::new();
@@ -146,11 +148,13 @@ pub fn build_datafile_from_meta(
         };
 
         if let Some(min) = &acc.bounds.min {
-            lower_bounds.insert(*fid, Datum::try_from_bytes(min, pt.clone())?);
+            lower_bounds.insert(*fid, Datum::try_from_bytes(min, pt.clone())
+                .map_err(|e| connector_err!(Internal, WithBackoff, source: e.into(), "error computing lower bound"))?);
         }
 
         if let Some(max) = &acc.bounds.max {
-            upper_bounds.insert(*fid, Datum::try_from_bytes(max, pt.clone())?);
+            upper_bounds.insert(*fid, Datum::try_from_bytes(max, pt.clone())
+                .map_err(|e| connector_err!(Internal, WithBackoff, source: e.into(), "error computing upper bound"))?);
         }
     }
 
@@ -165,15 +169,15 @@ pub fn build_datafile_from_meta(
                 .get(&f_id)
                 .ok_or_else(|| anyhow!("no metadata for partition field '{}'", f.field))?;
             let fun = create_transform_function(&f.transform_fn.into())?;
-            let result = fun
-                .transform_literal_result(v)
-                .map_err(|_| anyhow!("failed to compute partition function {}", f))?;
+            let result = fun.transform_literal_result(v)?;
 
             Ok(Some(Literal::Primitive(result.literal().clone())))
         })
         .collect();
 
-    let partition = iceberg::spec::Struct::from_iter(partition?);
+    let partition = iceberg::spec::Struct::from_iter(partition.map_err(
+        |e| connector_err!(Internal, WithBackoff, source: e, "error computing partition"),
+    )?);
 
     let df = DataFileBuilder::default()
         .file_path(file_path)
@@ -189,7 +193,8 @@ pub fn build_datafile_from_meta(
         .null_value_counts(null_counts)
         .lower_bounds(lower_bounds)
         .upper_bounds(upper_bounds)
-        .build()?;
+        .build()
+        .expect("missing required field in DataFileBuilder");
 
     Ok(df)
 }

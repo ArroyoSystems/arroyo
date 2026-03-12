@@ -2,7 +2,7 @@ use ::arrow::record_batch::RecordBatch;
 use ::arrow::row::OwnedRow;
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::connector_err;
-use arroyo_rpc::errors::{DataflowError, DataflowResult as Result, StorageError};
+use arroyo_rpc::errors::{DataflowError, DataflowResult as Result, DataflowResult, StorageError};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event};
 use arroyo_storage::StorageProvider;
 use arroyo_types::*;
@@ -794,7 +794,7 @@ where
                 Some(message) = self.receiver.recv() => {
                     match message {
                         FileSystemMessages::Data{value, partition} => {
-                            if let Some(future) = self.get_or_insert_writer(&partition).insert_batch(value).await? {
+                            if let Some(future) = self.get_or_insert_writer(&partition)?.insert_batch(value).await? {
                                 self.futures.push(future);
                             }
                         },
@@ -882,19 +882,23 @@ where
     fn get_or_insert_writer(
         &mut self,
         partition: &Option<OwnedRow>,
-    ) -> &mut BatchMultipartWriter<BBW> {
+    ) -> DataflowResult<&mut BatchMultipartWriter<BBW>> {
         if !self.active_writers.contains_key(partition) {
-            let new_writer = self.new_writer(partition);
+            let new_writer = self.new_writer(partition)?;
             self.active_writers
                 .insert(partition.clone(), new_writer.name());
             self.writers.insert(new_writer.name(), new_writer);
         }
-        self.writers
+        Ok(self
+            .writers
             .get_mut(self.active_writers.get(partition).unwrap())
-            .unwrap()
+            .unwrap())
     }
 
-    fn new_writer(&mut self, partition: &Option<OwnedRow>) -> BatchMultipartWriter<BBW> {
+    fn new_writer(
+        &mut self,
+        partition: &Option<OwnedRow>,
+    ) -> DataflowResult<BatchMultipartWriter<BBW>> {
         let filename_strategy = self.file_naming.strategy.unwrap_or_default();
 
         // This forms the base for naming files depending on strategy
@@ -1502,7 +1506,9 @@ pub trait BatchBufferingWriter: Send {
         schema: ArroyoSchemaRef,
         iceberg_schema: Option<::iceberg::spec::SchemaRef>,
         event_logger: FsEventLogger,
-    ) -> Self;
+    ) -> DataflowResult<Self>
+    where
+        Self: Sized;
 
     /// Returns the file suffix based on the format configuration.
     /// This allows writers to customize the suffix based on format options
@@ -1544,16 +1550,16 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
         schema: ArroyoSchemaRef,
         iceberg_schema: Option<::iceberg::spec::SchemaRef>,
         event_logger: FsEventLogger,
-    ) -> Self {
+    ) -> DataflowResult<Self> {
         let batch_buffering_writer = BBW::new(
             config,
             format,
             schema.clone(),
             iceberg_schema,
             event_logger.clone(),
-        );
+        )?;
 
-        Self {
+        Ok(Self {
             batch_buffering_writer,
             multipart_manager: MultipartManager::new(object_store, path, event_logger),
             stats: None,
@@ -1564,7 +1570,7 @@ impl<BBW: BatchBufferingWriter> BatchMultipartWriter<BBW> {
                 .map(|t| t as usize)
                 .unwrap_or(DEFAULT_TARGET_PART_SIZE),
             metadata: None,
-        }
+        })
     }
 
     fn name(&self) -> String {
