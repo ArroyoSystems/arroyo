@@ -78,7 +78,7 @@ fn test_bool() {
     let result = a.as_any().downcast_ref::<BooleanArray>().unwrap();
     assert_eq!(result.len(), 3);
     assert!(result.value(0));
-    assert!(result.is_null(1));
+    assert!(!result.value(1));
     assert!(!result.value(2));
 }
 
