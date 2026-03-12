@@ -780,6 +780,10 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                 futures.extend(file.handle_event(event.data)?);
             }
 
+            if !files.is_empty() {
+                maybe_cause_failure("commit_after_finalize");
+            }
+
             maybe_cause_failure("commit_middle");
 
             // Add finalized multipart files to finished_files
