@@ -137,10 +137,10 @@ fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
 
     DataflowError::ConnectorError {
         domain,
-        retry: if error.retryable() {
-            RetryHint::WithBackoff
-        } else {
+        retry: if matches!(domain, ErrorDomain::User) {
             RetryHint::NoRetry
+        } else {
+            RetryHint::WithBackoff
         },
         error: msg,
         source: error.source().map(|e| anyhow!("{}", e)),
