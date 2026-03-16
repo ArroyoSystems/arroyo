@@ -66,6 +66,15 @@ pub struct RollingPolicy {
         range(min = 1)
     )]
     pub inactivity_seconds: Option<u64>,
+
+    /// If enabled, roll time-partitioned files once the event-time watermark
+    /// advances to a different `partitioning.time_pattern` bucket.
+    #[schemars(
+        title = "Watermark Expiration",
+        description = "Close time-partitioned files when the event-time watermark moves past their partition bucket"
+    )]
+    #[serde(default)]
+    pub watermark_expiration: bool,
 }
 
 impl FromOpts for RollingPolicy {
@@ -78,6 +87,9 @@ impl FromOpts for RollingPolicy {
             inactivity_seconds: opts
                 .pull_opt_duration("rolling_policy.inactivity_interval")?
                 .map(|f| f.as_secs()),
+            watermark_expiration: opts
+                .pull_opt_bool("rolling_policy.watermark_expiration")?
+                .unwrap_or_default(),
         })
     }
 }

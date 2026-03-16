@@ -703,7 +703,9 @@ impl RollingPolicy {
             policies.push(RollingPolicy::RolloverDuration(Duration::from_secs(s)));
         }
 
-        if let Some(pattern) = &table.partitioning.time_pattern {
+        if table.rolling_policy.watermark_expiration
+            && let Some(pattern) = &table.partitioning.time_pattern
+        {
             policies.push(RollingPolicy::WatermarkExpiration {
                 pattern: pattern.clone(),
             });
