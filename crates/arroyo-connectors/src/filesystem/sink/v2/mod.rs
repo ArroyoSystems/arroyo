@@ -277,7 +277,11 @@ impl UploadState {
         f: &mut OpenFile<BBW>,
     ) -> DataflowResult<bool> {
         Ok(
-            if f.is_writable() && policies.iter().any(|p| p.should_roll(&f.stats, watermark)) {
+            if f.is_writable()
+                && let Some(p) = policies.iter().find(|p| p.should_roll(&f.stats, watermark))
+            {
+                debug!(file = ?f.path, policy = ?p, message = "rolling file due to policy");
+
                 let futures = f.close()?;
 
                 let mut ps = self.pending_uploads.lock().await;
