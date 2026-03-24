@@ -11,14 +11,15 @@ use arroyo_rpc::grpc::rpc::{
     HeartbeatReq, JobFinishedReq, JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes,
     MetricFamily, MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq,
     StartExecutionResp, StopExecutionReq, StopExecutionResp, TaskCheckpointCompletedReq,
-    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerInfo,
+    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq,
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
-    CheckpointBarrier, JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId, from_millis, to_micros,
+    CheckpointBarrier, JOB_ID_ENV, JobId, MachineId, RUN_ID_ENV, WorkerId, from_millis, to_micros,
 };
 use rand::random;
 
+use arroyo_rpc::worker_types::WorkerContext;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::net::SocketAddr;
@@ -124,9 +125,8 @@ impl LocalRunner {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let name = format!("{}-0", self.program.name);
         let total_nodes = self.program.total_nodes();
-        let engine = Engine::for_local(self.program, name).await?;
+        let engine = Engine::for_local(self.program, "job-local".to_string()).await?;
 
         let _running_engine = engine.start().await;
 
@@ -136,8 +136,8 @@ impl LocalRunner {
             while let Some(control_message) = self.control_rx.recv().await {
                 debug!("received {:?}", control_message);
                 if let ControlResp::TaskFinished {
-                    node_id,
-                    task_index,
+                    task_id: node_id,
+                    subtask_idx: task_index,
                 } = control_message
                 {
                     finished_nodes.insert((node_id, task_index));
@@ -151,10 +151,7 @@ impl LocalRunner {
 }
 
 pub struct WorkerServer {
-    id: WorkerId,
-    job_id: String,
-    run_id: u64,
-    name: &'static str,
+    worker_context: WorkerContext,
     phase: Arc<Mutex<WorkerExecutionPhase>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
     shutdown_guard: ShutdownGuard,
@@ -163,8 +160,16 @@ pub struct WorkerServer {
 impl WorkerServer {
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
         let id = WorkerId(config().worker.id.unwrap_or_else(random));
-        let job_id =
-            std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{JOB_ID_ENV} is not set"));
+        let machine_id = MachineId(Arc::new(
+            config()
+                .worker
+                .machine_id
+                .clone()
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        ));
+        let job_id = JobId(Arc::new(
+            std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{JOB_ID_ENV} is not set")),
+        ));
 
         let run_id = std::env::var(RUN_ID_ENV)
             .unwrap_or_else(|_| panic!("{RUN_ID_ENV} is not set"))
@@ -172,7 +177,7 @@ impl WorkerServer {
             .unwrap_or_else(|_| panic!("{RUN_ID_ENV} must be an unsigned int"));
 
         Ok(WorkerServer::new(
-            "program",
+            machine_id,
             id,
             job_id,
             run_id,
@@ -181,17 +186,19 @@ impl WorkerServer {
     }
 
     pub fn new(
-        name: &'static str,
+        machine_id: MachineId,
         worker_id: WorkerId,
-        job_id: String,
+        job_id: JobId,
         run_id: u64,
         shutdown_guard: ShutdownGuard,
     ) -> Self {
         Self {
-            id: worker_id,
-            name,
-            job_id,
-            run_id,
+            worker_context: WorkerContext {
+                machine_id,
+                worker_id,
+                job_id,
+                run_id,
+            },
             phase: Arc::new(Mutex::new(WorkerExecutionPhase::Idle)),
             network: Arc::new(Mutex::new(None)),
             shutdown_guard,
@@ -199,22 +206,14 @@ impl WorkerServer {
     }
 
     pub fn id(&self) -> WorkerId {
-        self.id
+        self.worker_context.worker_id
     }
 
     pub fn job_id(&self) -> &str {
-        &self.job_id
+        &self.worker_context.job_id
     }
 
     pub async fn start_async(self) -> Result<()> {
-        let machine_id = MachineId(Arc::new(
-            config()
-                .worker
-                .machine_id
-                .clone()
-                .unwrap_or_else(|| Uuid::new_v4().to_string()),
-        ));
-
         let config = config();
         let listener = TcpListener::bind(SocketAddr::new(
             config.worker.bind_address,
@@ -238,14 +237,11 @@ impl WorkerServer {
 
         *self.network.lock().unwrap() = Some(network);
 
-        let id = self.id;
-
         let hostname = local_address(config.worker.bind_address);
         let rpc_address = format!("http://{}:{}", hostname, local_addr.port());
 
         let data_address = format!("{hostname}:{data_port}");
-        let job_id = self.job_id.clone();
-        let run_id = self.run_id;
+        let worker_context = self.worker_context.clone();
 
         self.shutdown_guard
             .child("grpc")
@@ -254,15 +250,18 @@ impl WorkerServer {
                 local_addr,
                 if let Some(tls) = config.get_tls_config(&config.worker.tls) {
                     info!(
-                        "Started worker-rpc with TLS for {} on {}",
-                        self.name, local_addr
+                        "Started worker-rpc with TLS for {:?} on {}",
+                        self.worker_context.worker_id, local_addr
                     );
                     arroyo_server_common::grpc_server_with_tls(tls)
                         .await?
                         .add_service(WorkerGrpcServer::new(self))
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 } else {
-                    info!("Started worker-rpc for {} on {}", self.name, local_addr);
+                    info!(
+                        "Started worker-rpc for {:?} on {}",
+                        self.worker_context.worker_id, local_addr
+                    );
                     arroyo_server_common::grpc_server()
                         .add_service(WorkerGrpcServer::new(self))
                         .serve_with_incoming(TcpListenerStream::new(listener))
@@ -274,12 +273,8 @@ impl WorkerServer {
 
         client
             .register_worker(Request::new(RegisterWorkerReq {
-                worker_info: Some(WorkerInfo {
-                    worker_id: id.0,
-                    machine_id: machine_id.to_string(),
-                    job_id,
-                    run_id,
-                }),
+                worker_context: Some(worker_context.as_proto()),
+                time: to_micros(SystemTime::now()),
                 rpc_address,
                 data_address,
                 resources: Some(WorkerResources {
@@ -301,8 +296,7 @@ impl WorkerServer {
     async fn run_control_loop(
         cancel_token: CancellationToken,
         control_rx: Receiver<ControlResp>,
-        worker_id: WorkerId,
-        job_id: String,
+        worker_context: WorkerContext,
     ) -> Result<()> {
         let mut controller = controller_client("worker", &config().worker.tls)
             .await
@@ -319,12 +313,10 @@ impl WorkerServer {
                         Some(ControlResp::CheckpointEvent(c)) => {
                             controller.task_checkpoint_event(Request::new(
                                 TaskCheckpointEventReq {
-                                    worker_id: worker_id.0,
+                                    worker_context: Some(worker_context.as_proto()),
                                     time: to_micros(c.time),
-                                    job_id: job_id.clone(),
-                                    node_id: c.node_id,
                                     operator_id: c.operator_id,
-                                    subtask_index: c.subtask_index,
+                                    subtask_idx: c.subtask_idx,
                                     epoch: c.checkpoint_epoch,
                                     event_type: c.event_type as i32,
                                 }
@@ -333,10 +325,8 @@ impl WorkerServer {
                         Some(ControlResp::CheckpointCompleted(c)) => {
                             controller.task_checkpoint_completed(Request::new(
                                 TaskCheckpointCompletedReq {
-                                    worker_id: worker_id.0,
+                                    worker_context: Some(worker_context.as_proto()),
                                     time: c.subtask_metadata.finish_time,
-                                    job_id: job_id.clone(),
-                                    node_id: c.node_id,
                                     operator_id: c.operator_id,
                                     epoch: c.checkpoint_epoch,
                                     needs_commit: false,
@@ -344,27 +334,25 @@ impl WorkerServer {
                                 }
                             )).await.err()
                         }
-                        Some(ControlResp::TaskFinished { node_id, task_index }) => {
-                            info!(message = "Task finished", node_id, task_index);
+                        Some(ControlResp::TaskFinished { task_id, subtask_idx }) => {
+                            info!(message = "Task finished", task_id, subtask_idx);
                             controller.task_finished(Request::new(
                                 TaskFinishedReq {
-                                    worker_id: worker_id.0,
-                                    job_id: job_id.clone(),
+                                    worker_context: Some(worker_context.as_proto()),
                                     time: to_micros(SystemTime::now()),
-                                    node_id,
-                                    operator_subtask: task_index as u64,
+                                    task_id,
+                                    subtask_idx,
                                 }
                             )).await.err()
                         }
-                        Some(ControlResp::TaskFailed { node_id, task_index, error }) => {
+                        Some(ControlResp::TaskFailed { task_id, subtask_idx, error }) => {
                             controller.task_failed(Request::new(
                                 TaskFailedReq {
-                                    worker_id: worker_id.0,
+                                    worker_context: Some(worker_context.as_proto()),
                                     time: to_micros(SystemTime::now()),
                                     error: Some(rpc::TaskError {
-                                        job_id: job_id.clone(),
-                                        node_id,
-                                        operator_subtask: task_index as u64,
+                                        task_id,
+                                        subtask_idx,
                                         error: error.message,
                                         error_domain: rpc::ErrorDomain::from(error.domain) as i32,
                                         retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
@@ -374,16 +362,15 @@ impl WorkerServer {
                                 }
                             )).await.err()
                         }
-                        Some(ControlResp::Error { node_id, operator_id, task_index, message, details}) => {
+                        Some(ControlResp::Error { task_id, operator_id, subtask_idx, message, details}) => {
                             controller.nonfatal_error(Request::new(
                                 NonfatalErrorReq {
-                                    worker_id: worker_id.0,
+                                    worker_context: Some(worker_context.as_proto()),
                                     time: to_micros(SystemTime::now()),
                                     error: Some(rpc::TaskError {
-                                        job_id: job_id.clone(),
-                                        node_id,
+                                        task_id,
                                         operator_id,
-                                        operator_subtask: task_index as u64,
+                                        subtask_idx,
                                         error: message,
                                         error_domain: rpc::ErrorDomain::External as i32,
                                         retry_hint: rpc::RetryHint::NoRetry as i32,
@@ -392,14 +379,13 @@ impl WorkerServer {
                                 }
                             )).await.err()
                         }
-                        Some(ControlResp::TaskStarted {node_id, task_index, start_time}) => {
+                        Some(ControlResp::TaskStarted {task_id, subtask_idx, start_time}) => {
                             controller.task_started(Request::new(
                                 TaskStartedReq {
-                                    worker_id: worker_id.0,
-                                    job_id: job_id.clone(),
+                                    worker_context: Some(worker_context.as_proto()),
                                     time: to_micros(start_time),
-                                    node_id,
-                                    operator_subtask: task_index as u64,
+                                    task_id,
+                                    subtask_idx,
                                 }
                             )).await.err()
                         }
@@ -416,9 +402,8 @@ impl WorkerServer {
                 }
                 _ = tick.tick() => {
                     let result = controller.heartbeat(Request::new(HeartbeatReq {
-                        job_id: job_id.clone(),
+                        worker_context: Some(worker_context.as_proto()),
                         time: to_micros(SystemTime::now()),
-                        worker_id: worker_id.0,
                     })).await;
                     if let Err(err) = result {
                         error!("heartbeat failed {:?}", err);
@@ -430,24 +415,17 @@ impl WorkerServer {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn initialize(
         phase: Arc<Mutex<WorkerExecutionPhase>>,
         network: Arc<Mutex<Option<NetworkManager>>>,
         shutdown_guard: ShutdownGuard,
-        worker_id: WorkerId,
-        job_id: String,
-        run_id: u64,
-        name: &'static str,
+        worker_context: WorkerContext,
         req: StartExecutionReq,
     ) {
         let error_message = match Self::initialize_inner(
             Arc::clone(&network),
             shutdown_guard,
-            worker_id,
-            &job_id,
-            run_id,
-            name,
+            worker_context.clone(),
             req,
         )
         .await
@@ -472,8 +450,7 @@ impl WorkerServer {
         if let Ok(mut client) = controller_client("worker", &config().worker.tls).await
             && let Err(e) = client
                 .worker_initialization_complete(Request::new(WorkerInitializationCompleteReq {
-                    worker_id: worker_id.0,
-                    job_id,
+                    worker_context: Some(worker_context.as_proto()),
                     time: to_micros(SystemTime::now()),
                     success: error_message.is_none(),
                     error_message,
@@ -490,10 +467,7 @@ impl WorkerServer {
     async fn initialize_inner(
         network: Arc<Mutex<Option<NetworkManager>>>,
         shutdown_guard: ShutdownGuard,
-        worker_id: WorkerId,
-        job_id: &str,
-        run_id: u64,
-        name: &'static str,
+        worker_context: WorkerContext,
         req: StartExecutionReq,
     ) -> Result<EngineState> {
         let mut registry = new_registry();
@@ -539,8 +513,7 @@ impl WorkerServer {
             };
 
             let program = Program::from_logical(
-                name.to_string(),
-                job_id,
+                &worker_context.job_id,
                 &logical.graph,
                 &req.tasks,
                 registry,
@@ -549,24 +522,17 @@ impl WorkerServer {
             )
             .await;
 
-            let engine = Engine::new(
-                program,
-                worker_id,
-                job_id.to_string(),
-                run_id,
-                network_manager,
-                req.tasks,
-            );
+            let engine = Engine::new(program, worker_context.clone(), network_manager, req.tasks);
             engine.start().await
         };
 
-        let job_id_owned = job_id.to_string();
         let cancel_token = shutdown_guard.token();
+        let wc = worker_context.clone();
         shutdown_guard
             .child("control-thread")
-            .into_spawn_task(async move {
-                Self::run_control_loop(cancel_token, control_rx, worker_id, job_id_owned).await
-            });
+            .into_spawn_task(
+                async move { Self::run_control_loop(cancel_token, control_rx, wc).await },
+            );
 
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
@@ -581,7 +547,10 @@ impl WorkerServer {
             shutdown_guard: shutdown_guard.child("engine-state"),
         };
 
-        info!("[{:?}] Initialization completed successfully", worker_id);
+        info!(
+            "[{:?}] Initialization completed successfully",
+            worker_context.worker_id
+        );
         Ok(engine_state)
     }
 }
@@ -603,24 +572,11 @@ impl WorkerGrpc for WorkerServer {
                 let phase = Arc::clone(&self.phase);
                 let network = Arc::clone(&self.network);
                 let shutdown_guard = self.shutdown_guard.clone_temporary();
-                let worker_id = self.id;
-                let job_id = self.job_id.clone();
-                let run_id = self.run_id;
-                let name = self.name;
+                let worker_context = self.worker_context.clone();
                 let req = request.into_inner();
 
                 self.shutdown_guard.spawn_temporary(async move {
-                    Self::initialize(
-                        phase,
-                        network,
-                        shutdown_guard,
-                        worker_id,
-                        job_id,
-                        run_id,
-                        name,
-                        req,
-                    )
-                    .await;
+                    Self::initialize(phase, network, shutdown_guard, worker_context, req).await;
                     Ok(())
                 });
 
@@ -741,11 +697,13 @@ impl WorkerGrpc for WorkerServer {
                     return Err(Status::failed_precondition("Worker not in running phase"));
                 }
             };
-            engine_state
-                .operator_controls
-                .get(&req.node_id)
-                .unwrap()
-                .clone()
+            let node_id = engine_state
+                .operator_to_node
+                .get(&req.operator_id)
+                .ok_or_else(|| {
+                    Status::not_found(format!("No node found for operator_id {}", req.operator_id))
+                })?;
+            engine_state.operator_controls.get(node_id).unwrap().clone()
         };
 
         let compacted: CompactionResult = req.into();

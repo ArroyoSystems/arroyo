@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
-use std::ops::RangeInclusive;
+use std::ops::{Deref, RangeInclusive};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -28,10 +28,43 @@ pub const HASH_SEEDS: [u64; 4] = [
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub struct WorkerId(pub u64);
 
+impl Deref for WorkerId {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct MachineId(pub Arc<String>);
 
+impl Deref for MachineId {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl Display for MachineId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+pub struct JobId(pub Arc<String>);
+
+impl Deref for JobId {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for JobId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -298,7 +331,7 @@ impl Display for TaskInfo {
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
 pub struct ChainInfo {
     pub job_id: String,
-    pub node_id: u32,
+    pub task_id: u32,
     pub description: String,
     pub task_index: u32,
 }
@@ -308,7 +341,7 @@ impl Display for ChainInfo {
         write!(
             f,
             "TaskChain{}-{} ({})",
-            self.node_id, self.task_index, self.description
+            self.task_id, self.task_index, self.description
         )
     }
 }
@@ -316,7 +349,7 @@ impl Display for ChainInfo {
 impl ChainInfo {
     pub fn metric_label_map(&self) -> HashMap<String, String> {
         let mut labels = HashMap::new();
-        labels.insert("node_id".to_string(), self.node_id.to_string());
+        labels.insert("node_id".to_string(), self.task_id.to_string());
         labels.insert("subtask_idx".to_string(), self.task_index.to_string());
         labels.insert("node_description".to_string(), self.description.to_string());
         labels

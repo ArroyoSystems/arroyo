@@ -61,8 +61,8 @@ impl ArrowOperator for WebhookSinkFunc {
 
             // these are just used for (potential) error reporting and we don't need to clone them
             let operator_id = ctx.task_info.operator_id.clone();
-            let task_index = ctx.task_info.task_index as usize;
-            let node_id = ctx.task_info.node_id;
+            let subtask_idx = ctx.task_info.task_index;
+            let task_id = ctx.task_info.node_id;
 
             tokio::task::spawn(async move {
                 // move the permit into the task
@@ -92,9 +92,9 @@ impl ArrowOperator for WebhookSinkFunc {
 
                                 control_tx
                                     .send(ControlResp::Error {
-                                        node_id,
+                                        task_id,
                                         operator_id: operator_id.clone(),
-                                        task_index,
+                                        subtask_idx,
                                         message: format!("webhook failed (retry {retries})"),
                                         details,
                                     })

@@ -113,7 +113,7 @@ impl State for Running {
                                 "service": "controller",
                                 "job_id": ctx.config.id,
                                 "operator_id": event.operator_id,
-                                "subtask_index": event.subtask_index,
+                                "subtask_idx": event.subtask_idx,
                                 "error": event.reason,
                                 "domain": event.error_domain.as_str(),
                                 "is_preview": ctx.config.ttl.is_some(),

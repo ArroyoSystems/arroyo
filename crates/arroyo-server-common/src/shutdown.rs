@@ -105,7 +105,7 @@ impl ShutdownGuard {
             let output = select! {
                 output = task => {
                     if let Err(e) = &output {
-                        error!("{}", e);
+                        error!("[{}] encountered error: {:?}", self.name, e);
                         ERROR_CODE.store(1, Ordering::Relaxed);
                         token.cancel();
                     }

@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use arroyo_rpc::config::config;
+use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
@@ -20,6 +21,7 @@ use arroyo_rpc::grpc::rpc::{
     WorkerErrorRes,
 };
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
+use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
@@ -31,7 +33,7 @@ use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
@@ -126,37 +128,6 @@ fn job_in_final_state(config: &JobConfig, status: &JobStatus) -> bool {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct TaskFailedEvent {
-    worker_id: WorkerId,
-    node_id: u32,
-    operator_id: String,
-    subtask_index: u32,
-    reason: String,
-    error_domain: errors::ErrorDomain,
-    retry_hint: errors::RetryHint,
-}
-
-#[derive(Debug)]
-pub enum RunningMessage {
-    TaskCheckpointEvent(TaskCheckpointEventReq),
-    TaskCheckpointFinished(TaskCheckpointCompletedReq),
-    TaskFinished {
-        worker_id: WorkerId,
-        time: SystemTime,
-        node_id: u32,
-        subtask_index: u32,
-    },
-    TaskFailed(TaskFailedEvent),
-    WorkerHeartbeat {
-        worker_id: WorkerId,
-        time: Instant,
-    },
-    WorkerFinished {
-        worker_id: WorkerId,
-    },
-}
-
 #[derive(Debug)]
 pub enum JobMessage {
     ConfigUpdate(JobConfig),
@@ -175,8 +146,8 @@ pub enum JobMessage {
     },
     TaskStarted {
         worker_id: WorkerId,
-        node_id: u32,
-        operator_subtask: u64,
+        task_id: u32,
+        subtask_idx: u32,
     },
     RunningMessage(RunningMessage),
 }
@@ -203,16 +174,16 @@ impl ControllerGrpc for ControllerServer {
         );
 
         let req = request.into_inner();
-        let worker = req
-            .worker_info
-            .ok_or_else(|| Status::invalid_argument("missing worker_info"))?;
+        let ctx = req
+            .worker_context
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
 
         self.send_to_job_queue(
-            &worker.job_id,
+            &ctx.job_id,
             JobMessage::WorkerConnect {
-                worker_id: WorkerId(worker.worker_id),
-                machine_id: MachineId(worker.machine_id.into()),
-                run_id: worker.run_id,
+                worker_id: WorkerId(ctx.worker_id),
+                machine_id: MachineId(ctx.machine_id.into()),
+                run_id: ctx.run_id,
                 rpc_address: req.rpc_address,
                 data_address: req.data_address,
                 slots: req.slots as usize,
@@ -228,11 +199,15 @@ impl ControllerGrpc for ControllerServer {
         request: Request<HeartbeatReq>,
     ) -> Result<Response<HeartbeatResp>, Status> {
         let req = request.into_inner();
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
 
         self.send_to_job_queue(
-            &req.job_id,
+            &ctx.job_id,
             JobMessage::RunningMessage(RunningMessage::WorkerHeartbeat {
-                worker_id: WorkerId(req.worker_id),
+                worker_id: WorkerId(ctx.worker_id),
                 time: Instant::now(),
             }),
         )
@@ -248,12 +223,17 @@ impl ControllerGrpc for ControllerServer {
         let req = request.into_inner();
         info!("task started: {:?}", req);
 
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+
         self.send_to_job_queue(
-            &req.job_id,
+            &ctx.job_id,
             JobMessage::TaskStarted {
-                worker_id: WorkerId(req.worker_id),
-                node_id: req.node_id,
-                operator_subtask: req.operator_subtask,
+                worker_id: WorkerId(ctx.worker_id),
+                task_id: req.task_id,
+                subtask_idx: req.subtask_idx,
             },
         )
         .await?;
@@ -268,7 +248,7 @@ impl ControllerGrpc for ControllerServer {
         let req = request.into_inner();
 
         debug!("received task checkpoint event {:?}", req);
-        let job_id = req.job_id.clone();
+        let job_id = job_id_from_context(&req.worker_context)?;
         self.send_to_job_queue(
             &job_id,
             JobMessage::RunningMessage(RunningMessage::TaskCheckpointEvent(req)),
@@ -285,7 +265,7 @@ impl ControllerGrpc for ControllerServer {
         let req = request.into_inner();
 
         debug!("received task checkpoint completed {:?}", req);
-        let job_id = req.job_id.clone();
+        let job_id = job_id_from_context(&req.worker_context)?;
 
         self.send_to_job_queue(
             &job_id,
@@ -301,14 +281,18 @@ impl ControllerGrpc for ControllerServer {
         request: Request<TaskFinishedReq>,
     ) -> Result<Response<TaskFinishedResp>, Status> {
         let req = request.into_inner();
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
 
         self.send_to_job_queue(
-            &req.job_id,
+            &ctx.job_id,
             JobMessage::RunningMessage(RunningMessage::TaskFinished {
-                worker_id: WorkerId(req.worker_id),
+                worker_id: WorkerId(ctx.worker_id),
                 time: from_micros(req.time),
-                node_id: req.node_id,
-                subtask_index: req.operator_subtask as u32,
+                task_id: req.task_id,
+                subtask_idx: req.subtask_idx,
             }),
         )
         .await?;
@@ -321,20 +305,25 @@ impl ControllerGrpc for ControllerServer {
         request: Request<TaskFailedReq>,
     ) -> Result<Response<TaskFailedResp>, Status> {
         let req = request.into_inner();
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         let err = req
             .error
             .ok_or_else(|| Status::invalid_argument("TaskFailedReq missing error"))?;
 
         self.send_to_job_queue(
-            &err.job_id,
+            &ctx.job_id,
             JobMessage::RunningMessage(RunningMessage::TaskFailed(TaskFailedEvent {
-                worker_id: WorkerId(req.worker_id),
-                node_id: err.node_id,
-                subtask_index: err.operator_subtask as u32,
+                worker_id: WorkerId(ctx.worker_id),
+                task_id: err.task_id,
+                subtask_idx: err.subtask_idx,
                 error_domain: err.error_domain().into(),
                 retry_hint: err.retry_hint().into(),
                 operator_id: err.operator_id,
                 reason: err.error,
+                details: err.details,
             })),
         )
         .await?;
@@ -382,7 +371,7 @@ impl ControllerGrpc for ControllerServer {
         if let Some(v) = data_txs.get_mut(&req.job_id) {
             let output = OutputData {
                 operator_id: req.operator_id,
-                subtask_idx: req.subtask_index,
+                subtask_idx: req.subtask_idx,
                 timestamps: req.timestamps,
                 batch: req.batch,
                 start_id: req.start_id,
@@ -448,12 +437,16 @@ impl ControllerGrpc for ControllerServer {
         request: Request<NonfatalErrorReq>,
     ) -> Result<Response<WorkerErrorRes>, Status> {
         let req = request.into_inner();
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         let err = req
             .error
             .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing error"))?;
 
         info!(
-            job_id = err.job_id,
+            job_id = ctx.job_id,
             operator_id = err.operator_id,
             message = "operator error",
             error_message = err.error,
@@ -464,9 +457,9 @@ impl ControllerGrpc for ControllerServer {
         match queries::controller_queries::execute_create_job_log_message(
             &client,
             &generate_id(IdTypes::JobLogMessage),
-            &err.job_id,
+            &ctx.job_id,
             &err.operator_id,
-            &(err.operator_subtask as i64),
+            &(err.subtask_idx as i64),
             &LogLevel::error,
             &err.error,
             &err.details,
@@ -495,7 +488,7 @@ impl ControllerGrpc for ControllerServer {
 
         // TODO: send this over in a more efficient format like protobuf
         Ok(Response::new(JobMetricsResp {
-            metrics: serde_json::to_string(&metrics.get_groups().await).unwrap(),
+            metrics: serde_json::to_string(&metrics.get_groups()).unwrap(),
         }))
     }
 
@@ -504,15 +497,19 @@ impl ControllerGrpc for ControllerServer {
         request: Request<WorkerInitializationCompleteReq>,
     ) -> Result<Response<WorkerInitializationCompleteResp>, Status> {
         let req = request.into_inner();
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         info!(
             "Worker {} initialization completed: success={}, error={:?}",
-            req.worker_id, req.success, req.error_message
+            ctx.worker_id, req.success, req.error_message
         );
 
         self.send_to_job_queue(
-            &req.job_id,
+            &ctx.job_id,
             JobMessage::WorkerInitializationComplete {
-                worker_id: WorkerId(req.worker_id),
+                worker_id: WorkerId(ctx.worker_id),
                 success: req.success,
                 error_message: req.error_message,
             },
@@ -521,6 +518,15 @@ impl ControllerGrpc for ControllerServer {
 
         Ok(Response::new(WorkerInitializationCompleteResp {}))
     }
+}
+
+#[allow(clippy::result_large_err)]
+fn job_id_from_context(worker_context: &Option<rpc::WorkerContext>) -> Result<String, Status> {
+    Ok(worker_context
+        .as_ref()
+        .ok_or_else(|| Status::invalid_argument("missing worker_context"))?
+        .job_id
+        .clone())
 }
 
 impl ControllerServer {

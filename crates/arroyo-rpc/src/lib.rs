@@ -3,6 +3,7 @@ pub mod formats;
 pub mod public_ids;
 pub mod schema_resolver;
 pub mod var_str;
+pub mod worker_types;
 
 use crate::api_types::checkpoints::CheckpointEventSpan;
 use crate::config::{TlsConfig, config};
@@ -202,7 +203,7 @@ impl From<LoadCompactedDataReq> for CompactionResult {
 #[derive(Debug, Clone)]
 pub struct CheckpointCompleted {
     pub checkpoint_epoch: u32,
-    pub node_id: u32,
+    pub operator_idx: u32,
     pub operator_id: String,
     pub subtask_metadata: SubtaskCheckpointMetadata,
 }
@@ -210,9 +211,9 @@ pub struct CheckpointCompleted {
 #[derive(Debug, Clone)]
 pub struct CheckpointEvent {
     pub checkpoint_epoch: u32,
-    pub node_id: u32,
+    pub operator_idx: u32,
     pub operator_id: String,
-    pub subtask_index: u32,
+    pub subtask_idx: u32,
     pub time: SystemTime,
     pub event_type: TaskCheckpointEventType,
 }
@@ -222,23 +223,23 @@ pub enum ControlResp {
     CheckpointEvent(CheckpointEvent),
     CheckpointCompleted(CheckpointCompleted),
     TaskStarted {
-        node_id: u32,
-        task_index: usize,
+        task_id: u32,
+        subtask_idx: u32,
         start_time: SystemTime,
     },
     TaskFinished {
-        node_id: u32,
-        task_index: usize,
+        task_id: u32,
+        subtask_idx: u32,
     },
     TaskFailed {
-        node_id: u32,
-        task_index: usize,
+        task_id: u32,
+        subtask_idx: u32,
         error: crate::errors::TaskError,
     },
     Error {
-        node_id: u32,
+        task_id: u32,
         operator_id: String,
-        task_index: usize,
+        subtask_idx: u32,
         message: String,
         details: String,
     },
@@ -1043,12 +1044,17 @@ pub async fn connect_grpc(
         .await?)
 }
 
+/// Connect a raw gRPC channel to the controller endpoint.
+pub async fn connect_controller(our_name: &str, our_tls: &Option<TlsConfig>) -> Result<Channel> {
+    let endpoint = config().controller_endpoint();
+    connect_grpc(our_name, endpoint, our_tls, &config().controller.tls).await
+}
+
 pub async fn controller_client(
     our_name: &str,
     our_tls: &Option<TlsConfig>,
 ) -> Result<ControllerGrpcClient<Channel>> {
-    let endpoint = config().controller_endpoint();
-    let channel = connect_grpc(our_name, endpoint, our_tls, &config().controller.tls).await?;
+    let channel = connect_controller(our_name, our_tls).await?;
     Ok(ControllerGrpcClient::new(channel))
 }
 

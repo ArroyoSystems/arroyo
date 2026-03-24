@@ -14,9 +14,7 @@ impl State for Failing {
     }
 
     async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        if ctx.job_controller.is_some()
-            && let Err(e) = Recovering::cleanup(ctx).await
-        {
+        if let Err(e) = Recovering::cleanup(ctx).await {
             warn!(
                 message = "failed to gracefully tear down cluster during failure",
                 error = format!("{:?}", e),

@@ -86,7 +86,7 @@ impl ArrowOperator for PreviewSink {
             .send_sink_data(SinkDataReq {
                 job_id: ctx.task_info.job_id.clone(),
                 operator_id: ctx.task_info.operator_id.clone(),
-                subtask_index: ctx.task_info.task_index,
+                subtask_idx: ctx.task_info.task_index,
                 timestamps,
                 batch: String::from_utf8(buf).unwrap_or_else(|_| String::new()),
                 start_id: self.row as u64,
@@ -127,7 +127,7 @@ impl ArrowOperator for PreviewSink {
             .send_sink_data(SinkDataReq {
                 job_id: ctx.task_info.job_id.clone(),
                 operator_id: ctx.task_info.operator_id.clone(),
-                subtask_index: ctx.task_info.task_index,
+                subtask_idx: ctx.task_info.task_index,
                 timestamps: vec![],
                 batch: "[]".to_string(),
                 start_id: self.row as u64,

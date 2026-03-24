@@ -1,7 +1,7 @@
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
-use arroyo_types::WorkerId;
+use arroyo_types::{JobId, MachineId, WorkerId};
 use arroyo_worker::WorkerServer;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -53,8 +53,13 @@ impl Scheduler for EmbeddedScheduler {
         let run_id = req.run_id;
         let worker_id = WorkerId(self.worker_counter.fetch_add(1, Ordering::SeqCst));
         let handle = tokio::task::spawn(async move {
-            let server =
-                WorkerServer::new("job", worker_id, (*req.job_id).clone(), req.run_id, guard);
+            let server = WorkerServer::new(
+                MachineId(Arc::new("job".to_string())),
+                worker_id,
+                JobId(req.job_id.clone()),
+                req.run_id,
+                guard,
+            );
 
             match tokio::task::spawn(async move {
                 if let Err(e) = server.start_async().await {

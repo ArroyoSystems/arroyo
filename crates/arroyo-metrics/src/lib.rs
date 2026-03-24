@@ -157,7 +157,7 @@ impl TaskCounters {
         }
 
         let counter = self.metric().with_label_values(&[
-            chain_info.node_id.to_string().as_str(),
+            chain_info.task_id.to_string().as_str(),
             chain_info.task_index.to_string().as_str(),
             chain_info.description.as_str(),
             connection_id,

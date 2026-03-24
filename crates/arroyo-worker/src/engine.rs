@@ -26,9 +26,10 @@ use arroyo_rpc::grpc::{
     api,
     rpc::{CheckpointMetadata, TaskAssignment},
 };
+use arroyo_rpc::worker_types::WorkerContext;
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{TaskInfo, WorkerId, range_for_server};
+use arroyo_types::{JobId, MachineId, TaskInfo, WorkerId, range_for_server};
 use arroyo_udf_host::LocalUdf;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -158,7 +159,6 @@ impl SubtaskOrQueueNode {
 }
 
 pub struct Program {
-    pub name: String,
     pub graph: Arc<RwLock<DiGraph<SubtaskOrQueueNode, PhysicalGraphEdge>>>,
     pub control_tx: Option<Sender<ControlResp>>,
 }
@@ -179,10 +179,11 @@ impl Program {
             .node_weights()
             .flat_map(|weight| {
                 (0..weight.parallelism).map(|index| TaskAssignment {
-                    node_id: weight.node_id,
+                    task_id: weight.node_id,
                     subtask_idx: index as u32,
                     worker_id: 0,
                     worker_addr: "".into(),
+                    worker_rpc: "".into(),
                 })
             })
             .collect();
@@ -192,7 +193,6 @@ impl Program {
             registry.add_local_udf(udf);
         }
         Self::from_logical(
-            "local".to_string(),
             &job_id,
             logical,
             &assignments,
@@ -204,7 +204,6 @@ impl Program {
     }
 
     pub async fn from_logical(
-        name: String,
         job_id: &str,
         logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
@@ -233,7 +232,7 @@ impl Program {
 
         let mut parallelism_map = HashMap::new();
         for task in assignments {
-            *(parallelism_map.entry(&task.node_id).or_insert(0usize)) += 1;
+            *(parallelism_map.entry(&task.task_id).or_insert(0usize)) += 1;
         }
 
         for idx in logical.node_indices() {
@@ -352,7 +351,6 @@ impl Program {
         }
 
         Program {
-            name,
             graph: Arc::new(RwLock::new(physical)),
             control_tx: Some(control_tx),
         }
@@ -361,10 +359,7 @@ impl Program {
 
 pub struct Engine {
     program: Program,
-    worker_id: WorkerId,
-    #[allow(unused)]
-    run_id: u64,
-    job_id: String,
+    worker_context: WorkerContext,
     network_manager: NetworkManager,
     assignments: HashMap<(u32, usize), TaskAssignment>,
 }
@@ -376,7 +371,7 @@ pub struct StreamConfig {
 pub struct RunningEngine {
     program: Program,
     assignments: HashMap<(u32, usize), TaskAssignment>,
-    worker_id: WorkerId,
+    worker_context: WorkerContext,
 }
 
 impl RunningEngine {
@@ -390,7 +385,7 @@ impl RunningEngine {
                     .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
-                    == self.worker_id.0
+                    == self.worker_context.worker_id.0
             })
             .map(|idx| graph.node_weight(idx).unwrap().as_queue().tx.clone())
             .collect()
@@ -406,7 +401,7 @@ impl RunningEngine {
                     .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
-                    == self.worker_id.0
+                    == self.worker_context.worker_id.0
             })
             .map(|idx| graph.node_weight(idx).unwrap().as_queue().tx.clone())
             .collect()
@@ -424,14 +419,14 @@ impl RunningEngine {
                     .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
-                    == self.worker_id.0
+                    == self.worker_context.worker_id.0
             })
             .for_each(|idx| {
                 let w = graph.node_weight(idx).unwrap();
                 let assignment = self.assignments.get(&(w.id(), w.subtask_idx())).unwrap();
                 let tx = graph.node_weight(idx).unwrap().as_queue().tx.clone();
                 controls
-                    .entry(assignment.node_id)
+                    .entry(assignment.task_id)
                     .or_insert(vec![])
                     .push(tx);
             });
@@ -454,22 +449,18 @@ impl RunningEngine {
 impl Engine {
     pub fn new(
         program: Program,
-        worker_id: WorkerId,
-        job_id: String,
-        run_id: u64,
+        worker_context: WorkerContext,
         network_manager: NetworkManager,
         assignments: Vec<TaskAssignment>,
     ) -> Self {
         let assignments = assignments
             .into_iter()
-            .map(|a| ((a.node_id, a.subtask_idx as usize), a))
+            .map(|a| ((a.task_id, a.subtask_idx as usize), a))
             .collect();
 
         Self {
             program,
-            worker_id,
-            job_id,
-            run_id,
+            worker_context,
             network_manager,
             assignments,
         }
@@ -478,7 +469,7 @@ impl Engine {
     fn local_task_count(&self) -> usize {
         self.assignments
             .iter()
-            .filter(|(_, a)| a.worker_id == self.worker_id.0)
+            .filter(|(_, a)| a.worker_id == self.worker_context.worker_id.0)
             .count()
     }
 
@@ -493,10 +484,11 @@ impl Engine {
                 (
                     (n.id(), n.subtask_idx()),
                     TaskAssignment {
-                        node_id: n.id(),
+                        task_id: n.id(),
                         subtask_idx: n.subtask_idx() as u32,
                         worker_id: worker_id.0,
                         worker_addr: "locahost:0".to_string(),
+                        worker_rpc: "http://localhost:0".to_string(),
                     },
                 )
             })
@@ -504,20 +496,23 @@ impl Engine {
 
         Ok(Self {
             program,
-            worker_id,
-            job_id,
-            run_id: 0,
+            worker_context: WorkerContext {
+                machine_id: MachineId(Arc::new("local".to_string())),
+                worker_id,
+                job_id: JobId(Arc::new(job_id)),
+                run_id: 0,
+            },
             network_manager: NetworkManager::new(0).await?,
             assignments,
         })
     }
 
     pub async fn start(mut self) -> RunningEngine {
-        info!("Starting job {}", self.job_id);
+        info!("Starting job {}", self.worker_context.job_id);
 
         let node_indexes: Vec<_> = self.program.graph.read().unwrap().node_indices().collect();
 
-        let worker_id = self.worker_id;
+        let _worker_id = self.worker_context.worker_id;
 
         let mut senders = Senders::new();
 
@@ -552,7 +547,7 @@ impl Engine {
         RunningEngine {
             program: self.program,
             assignments: self.assignments,
-            worker_id,
+            worker_context: self.worker_context,
         }
     }
 
@@ -585,7 +580,7 @@ impl Engine {
 
         let mut senders = Senders::new();
 
-        if assignment.worker_id == self.worker_id.0 {
+        if assignment.worker_id == self.worker_context.worker_id.0 {
             self.run_locally(control_tx, idx, node, control_rx, ready, stop)
                 .await;
         } else {
@@ -679,7 +674,7 @@ impl Engine {
     ) {
         info!(
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
-            self.worker_id,
+            self.worker_context.worker_id,
             node.node.name(),
             node.node_id,
             node.subtask_idx,
@@ -709,7 +704,7 @@ impl Engine {
                         .get(&(target.id(), target.subtask_idx()))
                         .unwrap()
                         .worker_id
-                        == self.worker_id.0
+                        == self.worker_context.worker_id.0
                 };
 
                 let tx = edge.weight().tx.as_ref().unwrap().clone();
@@ -775,8 +770,8 @@ impl Engine {
             if let Err(error) = join_task.await {
                 send_copy
                     .send(ControlResp::TaskFailed {
-                        node_id: node.node_id,
-                        task_index: task_index as usize,
+                        task_id: node.node_id,
+                        subtask_idx: task_index,
                         error: DataflowError::InternalOperatorError {
                             error: "task panicked",
                             message: error.to_string(),
