@@ -147,12 +147,10 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
         match c {
             ControlResp::CheckpointEvent(c) => {
                 let req = TaskCheckpointEventReq {
-                    worker_id: 1,
+                    worker_context: None,
                     time: to_micros(c.time),
-                    job_id: (*ctx.job_id).clone(),
-                    node_id: c.node_id,
                     operator_id: c.operator_id,
-                    subtask_index: c.subtask_index,
+                    subtask_idx: c.subtask_idx,
                     epoch: c.checkpoint_epoch,
                     event_type: c.event_type as i32,
                 };
@@ -160,10 +158,8 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
             }
             ControlResp::CheckpointCompleted(c) => {
                 let req = TaskCheckpointCompletedReq {
-                    worker_id: 1,
+                    worker_context: None,
                     time: c.subtask_metadata.finish_time,
-                    job_id: (*ctx.job_id).clone(),
-                    node_id: c.node_id,
                     operator_id: c.operator_id,
                     epoch: c.checkpoint_epoch,
                     needs_commit: false,

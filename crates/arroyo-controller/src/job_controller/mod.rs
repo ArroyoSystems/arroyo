@@ -20,13 +20,14 @@ use time::OffsetDateTime;
 
 use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
 use crate::types::public::CheckpointState as DbCheckpointState;
-use crate::{JobConfig, JobMessage, RunningMessage, TaskFailedEvent, queries::controller_queries};
+use crate::{JobConfig, JobMessage, queries::controller_queries};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
 use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::config::config;
 use arroyo_rpc::notify_db;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
+use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::committing_state::CommittingState;
 use arroyo_state::parquet::ParquetBackend;
@@ -217,7 +218,7 @@ impl RunningJobModel {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
                                 {
                                     committing_state
-                                        .subtask_committed(c.operator_id.clone(), c.subtask_index);
+                                        .subtask_committed(c.operator_id.clone(), c.subtask_idx);
                                     self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())
@@ -272,30 +273,30 @@ impl RunningJobModel {
             RunningMessage::TaskFinished {
                 worker_id: _,
                 time: _,
-                node_id,
-                subtask_index,
+                task_id,
+                subtask_idx,
             } => {
-                let key = (node_id, subtask_index);
+                let key = (task_id, subtask_idx);
                 if let Some(status) = self.tasks.get_mut(&key) {
                     status.state = TaskState::Finished;
                 } else {
                     warn!(
                         message = "Received task finished for unknown task",
                         job_id = *self.job_id,
-                        node_id = key.0,
-                        subtask_index
+                        task_id = key.0,
+                        subtask_idx
                     );
                 }
             }
             RunningMessage::TaskFailed(event) => {
-                let key = (event.node_id, event.subtask_index);
+                let key = (event.task_id, event.subtask_idx);
                 if let Some(status) = self.tasks.get_mut(&key) {
                     status.state = TaskState::Failed(event);
                 } else {
                     warn!(
                         message = "Received task failed message for unknown task",
                         job_id = *self.job_id,
-                        node_id = key.0,
+                        task_id = key.0,
                         subtask_idx = key.1,
                         reason = event.reason,
                     );
@@ -437,7 +438,6 @@ impl RunningJobModel {
                 for worker_client in &mut worker_clients {
                     worker_client
                         .load_compacted_data(LoadCompactedDataReq {
-                            node_id: node.node_id,
                             operator_id: op.operator_id.clone(),
                             compacted_metadata: compacted_tables.clone(),
                         })
@@ -775,7 +775,7 @@ impl JobController {
             }
 
             for ((operator_idx, subtask_idx), values) in metrics {
-                job_metrics.update(operator_idx, subtask_idx, &values).await;
+                job_metrics.update(operator_idx, subtask_idx, &values);
             }
         }));
     }

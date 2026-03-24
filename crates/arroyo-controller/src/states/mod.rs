@@ -26,14 +26,12 @@ use self::stopping::Stopping;
 use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
-use crate::{
-    JobConfig, JobMessage, JobStatus, RunningMessage, TaskFailedEvent, queries,
-    schedulers::Scheduler,
-};
+use crate::{JobConfig, JobMessage, JobStatus, queries, schedulers::Scheduler};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
+use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use prost::Message;
@@ -419,8 +417,8 @@ impl JobContext<'_> {
     ) -> Result<Transition, StateError> {
         error!(
             job_id = self.config.id.as_str(),
-            node_id = event.node_id,
-            operator_subtask = event.subtask_index,
+            task_id = event.task_id,
+            subtask_idx = event.subtask_idx,
             operator_id = event.operator_id,
             error_domain = event.error_domain.as_str(),
             retry_hint = event.retry_hint.as_str(),
@@ -434,7 +432,7 @@ impl JobContext<'_> {
             &generate_id(IdTypes::JobLogMessage),
             &self.config.id.as_str(),
             &event.operator_id,
-            &(event.subtask_index as i64),
+            &(event.subtask_idx as i64),
             &LogLevel::error,
             &"task failed",
             &event.reason,

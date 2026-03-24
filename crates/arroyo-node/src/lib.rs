@@ -2,13 +2,13 @@ use anyhow::bail;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{
     GetWorkersReq, GetWorkersResp, HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq,
-    StartWorkerResp, StopWorkerReq, StopWorkerResp, StopWorkerStatus, WorkerFinishedReq,
-    WorkerInfo, node_grpc_server::NodeGrpc, node_grpc_server::NodeGrpcServer,
+    StartWorkerResp, StopWorkerReq, StopWorkerResp, StopWorkerStatus, WorkerContext,
+    WorkerFinishedReq, node_grpc_server::NodeGrpc, node_grpc_server::NodeGrpcServer,
 };
 use arroyo_rpc::{controller_client, local_address};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId, to_millis};
+use arroyo_types::{JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId, to_micros, to_millis};
 use lazy_static::lazy_static;
 use prometheus::{Gauge, register_gauge};
 use rand::random;
@@ -150,12 +150,13 @@ impl NodeServer {
             WORKERS.dec();
             finished_tx
                 .send(WorkerFinishedReq {
-                    worker_info: Some(WorkerInfo {
+                    worker_context: Some(WorkerContext {
                         machine_id: machine_id.0.to_string(),
                         worker_id: worker_id.0,
                         job_id,
                         run_id: req.run_id,
                     }),
+                    time: to_micros(SystemTime::now()),
                     slots,
                 })
                 .await

@@ -77,8 +77,8 @@ impl BackendFlusher {
                         error!("Failed to flush state file: {:?}", err);
                         self.control_tx
                             .send(ControlResp::TaskFailed {
-                                node_id: self.task_info.node_id,
-                                task_index: self.task_info.task_index as usize,
+                                task_id: self.task_info.node_id,
+                                subtask_idx: self.task_info.task_index,
                                 error: err.with_operator(self.task_info.operator_id.clone()).into(),
                             })
                             .await
@@ -180,7 +180,7 @@ impl BackendFlusher {
         self.control_tx
             .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
                 checkpoint_epoch: cp.epoch,
-                node_id: self.task_info.node_id,
+                operator_idx: self.task_info.node_id,
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_metadata,
             }))

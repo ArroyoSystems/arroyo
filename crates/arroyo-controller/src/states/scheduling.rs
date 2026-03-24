@@ -26,13 +26,13 @@ use arroyo_state::{
 use crate::job_controller::job_metrics::JobMetrics;
 use crate::{JobMessage, schedulers::SchedulerError};
 use crate::{
-    RunningMessage, job_controller::JobController, queries::controller_queries,
-    states::stop_if_desired_non_running,
+    job_controller::JobController, queries::controller_queries, states::stop_if_desired_non_running,
 };
 use crate::{
     schedulers::StartPipelineReq,
     states::{StateError, fatal},
 };
+use arroyo_rpc::worker_types::RunningMessage;
 
 use super::{JobContext, State, Transition, running::Running};
 
@@ -40,6 +40,7 @@ use super::{JobContext, State, Transition, running::Running};
 struct WorkerStatus {
     id: WorkerId,
     machine_id: MachineId,
+    rpc_address: String,
     data_address: String,
     slots: usize,
     state: WorkerState,
@@ -75,10 +76,11 @@ fn compute_assignments(
 
         for i in 0..node.parallelism {
             assignments.push(TaskAssignment {
-                node_id: node.node_id,
+                task_id: node.node_id,
                 subtask_idx: i as u32,
                 worker_id: workers[worker_idx].id.0,
                 worker_addr: workers[worker_idx].data_address.clone(),
+                worker_rpc: workers[worker_idx].rpc_address.clone(),
             });
             current_count += 1;
 
@@ -126,6 +128,7 @@ async fn handle_worker_connect<'a>(
                 WorkerStatus {
                     id: worker_id,
                     machine_id: machine_id.clone(),
+                    rpc_address: rpc_address.clone(),
                     data_address,
                     slots,
                     state: WorkerState::Connected,
@@ -658,11 +661,11 @@ impl State for Scheduling {
                             }
                         }
                         Some(JobMessage::TaskStarted {
-                            node_id,
-                            operator_subtask,
+                            task_id,
+                            subtask_idx,
                             ..
                         }) => {
-                            started_tasks.insert((node_id, operator_subtask));
+                            started_tasks.insert((task_id, subtask_idx));
                         }
                         Some(JobMessage::RunningMessage(RunningMessage::TaskFailed(event))) => {
                             return ctx.handle_task_error(self, event).await;
