@@ -93,3 +93,4 @@ nonblocking = false
 enable-file-line = false
 enable-file-name = false 
 buffered-lines-limit = 4096
+min-level = "INFO" # option: trace / debug / info / debug / error / all (i.e. trace) / off
