@@ -17,13 +17,16 @@ use tokio::sync::mpsc::{Receiver, channel};
 
 use crate::udfs::get_udfs;
 use arroyo_rpc::config;
-use arroyo_rpc::grpc::rpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
+use arroyo_rpc::grpc::rpc::{
+    StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq, WorkerContext,
+};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
-use arroyo_state::checkpoint_state::CheckpointState;
+use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{CheckpointBarrier, to_micros};
 use arroyo_udf_host::LocalUdf;
 use arroyo_worker::engine::Engine;
 use arroyo_worker::engine::{Program, RunningEngine};
+use arroyo_worker::job_controller::checkpoint_state::CheckpointState;
 use petgraph::{Direction, Graph};
 use serde_json::Value;
 use test_log::test as test_log;
@@ -147,10 +150,15 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
         match c {
             ControlResp::CheckpointEvent(c) => {
                 let req = TaskCheckpointEventReq {
-                    worker_context: None,
+                    worker_context: Some(WorkerContext {
+                        machine_id: "test".to_string(),
+                        worker_id: 1,
+                        job_id: (*ctx.job_id).clone(),
+                        run_id: 0,
+                    }),
                     time: to_micros(c.time),
                     operator_id: c.operator_id,
-                    subtask_idx: c.subtask_idx,
+                    subtask_index: c.subtask_idx,
                     epoch: c.checkpoint_epoch,
                     event_type: c.event_type as i32,
                 };
@@ -158,20 +166,33 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
             }
             ControlResp::CheckpointCompleted(c) => {
                 let req = TaskCheckpointCompletedReq {
-                    worker_context: None,
+                    worker_context: Some(WorkerContext {
+                        machine_id: "test".to_string(),
+                        worker_id: 1,
+                        job_id: (*ctx.job_id).clone(),
+                        run_id: 0,
+                    }),
                     time: c.subtask_metadata.finish_time,
                     operator_id: c.operator_id,
                     epoch: c.checkpoint_epoch,
                     needs_commit: false,
                     metadata: Some(c.subtask_metadata),
                 };
-                checkpoint_state.checkpoint_finished(req).await.unwrap();
+                if let Some(operator_metadata) = checkpoint_state.checkpoint_finished(req).unwrap()
+                {
+                    StateBackend::write_operator_checkpoint_metadata(operator_metadata)
+                        .await
+                        .unwrap();
+                }
             }
             _ => {}
         }
     }
 
-    checkpoint_state.write_metadata().await.unwrap();
+    let checkpoint_metadata = checkpoint_state.build_metadata();
+    StateBackend::write_checkpoint_metadata(checkpoint_metadata)
+        .await
+        .unwrap();
 
     info!("Smoke test checkpoint completed");
 }

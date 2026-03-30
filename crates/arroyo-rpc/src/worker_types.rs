@@ -1,6 +1,6 @@
 use crate::errors;
 use crate::grpc::rpc;
-use crate::grpc::rpc::{TaskCheckpointCompletedReq, TaskCheckpointEventReq};
+use crate::grpc::rpc::{JobStopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
 use arroyo_types::{JobId, MachineId, WorkerId};
 use std::time::{Instant, SystemTime};
 
@@ -35,6 +35,19 @@ pub struct TaskFailedEvent {
     pub retry_hint: errors::RetryHint,
 }
 
+impl From<TaskFailedEvent> for rpc::JobFailure {
+    fn from(value: TaskFailedEvent) -> Self {
+        Self {
+            operator_id: Some(value.operator_id),
+            task_id: Some(value.task_id),
+            subtask_index: Some(value.subtask_idx),
+            message: value.reason,
+            error_domain: rpc::ErrorDomain::from(value.error_domain).into(),
+            retry_hint: rpc::RetryHint::from(value.retry_hint).into(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum RunningMessage {
     TaskCheckpointEvent(TaskCheckpointEventReq),
@@ -52,5 +65,8 @@ pub enum RunningMessage {
     },
     WorkerFinished {
         worker_id: WorkerId,
+    },
+    Stop {
+        stop_mode: JobStopMode,
     },
 }

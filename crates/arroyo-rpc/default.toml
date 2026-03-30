@@ -1,5 +1,6 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
 default-checkpoint-interval = "10s"
+job-controller = "controller"
 
 [pipeline]
 source-batch-size = 512
@@ -18,6 +19,8 @@ store-deserialization-errors = true
 [pipeline.compaction]
 enabled = false
 checkpoints-to-compact = 4
+
+[pipeline.checkpoint]
 
 # Services
 

@@ -9,6 +9,7 @@ use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructo
 use crate::arrow::watermark_generator::WatermarkGeneratorConstructor;
 use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ProjectionConstructor, ValueExecutionConstructor};
+use crate::job_controller::WorkerContext;
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{
@@ -26,7 +27,6 @@ use arroyo_rpc::grpc::{
     api,
     rpc::{CheckpointMetadata, TaskAssignment},
 };
-use arroyo_rpc::worker_types::WorkerContext;
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{JobId, MachineId, TaskInfo, WorkerId, range_for_server};
@@ -371,7 +371,7 @@ pub struct StreamConfig {
 pub struct RunningEngine {
     program: Program,
     assignments: HashMap<(u32, usize), TaskAssignment>,
-    worker_context: WorkerContext,
+    worker_id: WorkerId,
 }
 
 impl RunningEngine {
@@ -385,7 +385,7 @@ impl RunningEngine {
                     .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
-                    == self.worker_context.worker_id.0
+                    == self.worker_id.0
             })
             .map(|idx| graph.node_weight(idx).unwrap().as_queue().tx.clone())
             .collect()
@@ -401,7 +401,7 @@ impl RunningEngine {
                     .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
-                    == self.worker_context.worker_id.0
+                    == self.worker_id.0
             })
             .map(|idx| graph.node_weight(idx).unwrap().as_queue().tx.clone())
             .collect()
@@ -419,7 +419,7 @@ impl RunningEngine {
                     .get(&(w.id(), w.subtask_idx()))
                     .unwrap()
                     .worker_id
-                    == self.worker_context.worker_id.0
+                    == self.worker_id.0
             })
             .for_each(|idx| {
                 let w = graph.node_weight(idx).unwrap();
@@ -512,7 +512,7 @@ impl Engine {
 
         let node_indexes: Vec<_> = self.program.graph.read().unwrap().node_indices().collect();
 
-        let _worker_id = self.worker_context.worker_id;
+        let worker_id = self.worker_context.worker_id;
 
         let mut senders = Senders::new();
 
@@ -547,7 +547,7 @@ impl Engine {
         RunningEngine {
             program: self.program,
             assignments: self.assignments,
-            worker_context: self.worker_context,
+            worker_id,
         }
     }
 

@@ -18,6 +18,12 @@ use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
 use self::failing::Failing;
 use self::finishing::Finishing;
+use self::leader_checkpoint_stopping::LeaderCheckpointStopping;
+use self::leader_finishing::LeaderFinishing;
+use self::leader_rescaling::LeaderRescaling;
+use self::leader_restarting::LeaderRestarting;
+use self::leader_running::LeaderRunning;
+use self::leader_stopping::LeaderStopping;
 use self::recovering::Recovering;
 use self::rescaling::Rescaling;
 use self::running::Running;
@@ -36,16 +42,22 @@ use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use prost::Message;
 
-mod checkpoint_stopping;
-mod compiling;
-mod failing;
-mod finishing;
-mod recovering;
-mod rescaling;
-mod restarting;
-mod running;
-mod scheduling;
-mod stopping;
+pub(crate) mod checkpoint_stopping;
+pub(crate) mod compiling;
+pub(crate) mod failing;
+pub(crate) mod finishing;
+pub(crate) mod leader_checkpoint_stopping;
+pub(crate) mod leader_finishing;
+pub(crate) mod leader_rescaling;
+pub(crate) mod leader_restarting;
+pub(crate) mod leader_running;
+pub(crate) mod leader_stopping;
+pub(crate) mod recovering;
+pub(crate) mod rescaling;
+pub(crate) mod restarting;
+pub(crate) mod running;
+pub(crate) mod scheduling;
+pub(crate) mod stopping;
 
 pub enum Transition {
     Stop,
@@ -200,13 +212,32 @@ impl TransitionTo<Running> for Scheduling {
     }
 }
 
+impl TransitionTo<LeaderRunning> for Scheduling {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            if ctx.status.start_time.is_none() || ctx.status.finish_time.is_some() {
+                ctx.status.start_time = Some(OffsetDateTime::now_utc());
+                ctx.status.finish_time = None;
+            }
+        })
+    }
+}
+
 impl TransitionTo<CheckpointStopping> for Running {}
 impl TransitionTo<Stopping> for Running {}
+impl TransitionTo<Stopping> for LeaderRunning {}
 impl TransitionTo<Stopping> for Scheduling {}
 impl TransitionTo<Stopping> for Compiling {}
 impl TransitionTo<Stopping> for Rescaling {}
 impl TransitionTo<Finishing> for Running {}
 impl TransitionTo<Recovering> for Running {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restarts += 1;
+        })
+    }
+}
+impl TransitionTo<Recovering> for LeaderRunning {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
             ctx.status.restarts += 1;
@@ -256,6 +287,100 @@ impl TransitionTo<Stopped> for Stopping {
         Box::new(done_transition)
     }
 }
+
+impl TransitionTo<LeaderCheckpointStopping> for LeaderRunning {}
+impl TransitionTo<LeaderStopping> for LeaderRunning {}
+impl TransitionTo<LeaderFinishing> for LeaderRunning {}
+impl TransitionTo<LeaderRestarting> for LeaderRunning {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restart_nonce = ctx.config.restart_nonce;
+        })
+    }
+}
+impl TransitionTo<LeaderRescaling> for LeaderRunning {}
+
+impl TransitionTo<Stopped> for LeaderStopping {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(done_transition)
+    }
+}
+
+impl TransitionTo<LeaderStopping> for LeaderStopping {}
+
+impl TransitionTo<Stopping> for LeaderStopping {}
+impl TransitionTo<Recovering> for LeaderStopping {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restarts += 1;
+        })
+    }
+}
+
+impl TransitionTo<LeaderStopping> for LeaderCheckpointStopping {}
+impl TransitionTo<Stopping> for LeaderCheckpointStopping {}
+impl TransitionTo<Stopped> for LeaderCheckpointStopping {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(done_transition)
+    }
+}
+impl TransitionTo<Recovering> for LeaderCheckpointStopping {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restarts += 1;
+        })
+    }
+}
+
+impl TransitionTo<Finished> for LeaderFinishing {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(done_transition)
+    }
+}
+impl TransitionTo<Recovering> for LeaderFinishing {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restarts += 1;
+        })
+    }
+}
+impl TransitionTo<LeaderStopping> for LeaderFinishing {}
+impl TransitionTo<Stopping> for LeaderFinishing {}
+
+impl TransitionTo<LeaderCheckpointStopping> for LeaderRestarting {}
+impl TransitionTo<LeaderRestarting> for LeaderRestarting {}
+impl TransitionTo<Scheduling> for LeaderRestarting {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.run_id += 1;
+        })
+    }
+}
+
+impl TransitionTo<Recovering> for LeaderRestarting {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restarts += 1;
+        })
+    }
+}
+impl TransitionTo<LeaderStopping> for LeaderRestarting {}
+
+impl TransitionTo<Scheduling> for LeaderRescaling {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.run_id += 1;
+        })
+    }
+}
+impl TransitionTo<Recovering> for LeaderRescaling {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restarts += 1;
+        })
+    }
+}
+impl TransitionTo<LeaderStopping> for LeaderRescaling {}
 
 impl TransitionTo<Stopping> for CheckpointStopping {}
 impl TransitionTo<Stopped> for CheckpointStopping {
@@ -365,22 +490,67 @@ macro_rules! stop_if_desired_non_running {
     };
 }
 
+macro_rules! leader_stop_if_desired_running {
+    ($self:ident, $config:expr, $ctx:expr) => {
+        use crate::states::leader_checkpoint_stopping::LeaderCheckpointStopping;
+        use crate::states::leader_stopping::{LeaderStopBehavior, LeaderStopping};
+        use crate::types::public::StopMode;
+        use arroyo_rpc::grpc::rpc::JobStopMode;
+
+        match $config.stop_mode {
+            StopMode::force => {
+                return Ok(Transition::next(
+                    *$self,
+                    LeaderStopping {
+                        stop_behavior: LeaderStopBehavior::StopWorkers,
+                    },
+                ));
+            }
+            StopMode::checkpoint => {
+                return Ok(Transition::next(*$self, LeaderCheckpointStopping {}));
+            }
+            StopMode::graceful => {
+                return Ok(Transition::next(
+                    *$self,
+                    LeaderStopping {
+                        stop_behavior: LeaderStopBehavior::StopJob(JobStopMode::JobStopGraceful),
+                    },
+                ));
+            }
+            StopMode::immediate => {
+                return Ok(Transition::next(
+                    *$self,
+                    LeaderStopping {
+                        stop_behavior: LeaderStopBehavior::StopJob(JobStopMode::JobStopImmediate),
+                    },
+                ));
+            }
+            StopMode::none => {
+                // do nothing
+            }
+        }
+    };
+}
+
 use crate::job_controller::job_metrics::JobMetrics;
+use crate::job_controller::leader_manager::LeaderManager;
 use crate::states::restarting::Restarting;
+pub(crate) use leader_stop_if_desired_running;
 pub(crate) use stop_if_desired_non_running;
 pub(crate) use stop_if_desired_running;
 
 pub struct JobContext<'a> {
-    config: JobConfig,
-    status: &'a mut JobStatus,
-    program: &'a mut LogicalProgram,
-    db: DatabaseSource,
-    scheduler: Arc<dyn Scheduler>,
-    rx: &'a mut Receiver<JobMessage>,
-    retries_attempted: usize,
-    job_controller: Option<JobController>,
-    last_transitioned_at: Instant,
-    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
+    pub config: JobConfig,
+    pub status: &'a mut JobStatus,
+    pub program: &'a mut LogicalProgram,
+    pub db: DatabaseSource,
+    pub scheduler: Arc<dyn Scheduler>,
+    pub rx: &'a mut Receiver<JobMessage>,
+    pub retries_attempted: usize,
+    pub job_controller: Option<JobController>,
+    pub leader_manager: Option<LeaderManager>,
+    pub last_transitioned_at: Instant,
+    pub metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 }
 
 impl JobContext<'_> {
@@ -418,7 +588,7 @@ impl JobContext<'_> {
         error!(
             job_id = self.config.id.as_str(),
             task_id = event.task_id,
-            subtask_idx = event.subtask_idx,
+            operator_subtask = event.subtask_idx,
             operator_id = event.operator_id,
             error_domain = event.error_domain.as_str(),
             retry_hint = event.retry_hint.as_str(),
@@ -459,6 +629,76 @@ impl JobContext<'_> {
                 },
             )),
         }
+    }
+
+    pub async fn handle_job_failure<T: State + TransitionTo<Recovering>>(
+        &self,
+        state: T,
+        failure: arroyo_rpc::grpc::rpc::JobFailure,
+    ) -> Result<Transition, StateError> {
+        let error_domain = errors::ErrorDomain::from(failure.error_domain());
+        let retry_hint = errors::RetryHint::from(failure.retry_hint());
+        let operator_id = failure
+            .operator_id
+            .clone()
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let subtask_index = failure.subtask_index.unwrap_or_default();
+        let reason = failure.message.clone();
+
+        error!(
+            job_id = self.config.id.as_str(),
+            task_id = format!("{:?}", failure.task_id),
+            operator_subtask = subtask_index,
+            operator_id,
+            error_domain = error_domain.as_str(),
+            retry_hint = retry_hint.as_str(),
+            message = "job failed",
+            reason,
+        );
+
+        if let (Some(operator_id), Some(subtask_index)) =
+            (failure.operator_id.as_ref(), failure.subtask_index)
+        {
+            let client = self.db.client().await.unwrap();
+            if let Err(db_err) = queries::controller_queries::execute_create_job_log_message(
+                &client,
+                &generate_id(IdTypes::JobLogMessage),
+                &self.config.id.as_str(),
+                operator_id,
+                &(subtask_index as i64),
+                &LogLevel::error,
+                &"job failed",
+                &failure.message,
+                &error_domain.as_str(),
+                &retry_hint.as_str(),
+            )
+            .await
+            {
+                warn!("Failed to log job failure to database: {:?}", db_err);
+            }
+        }
+
+        match retry_hint {
+            errors::RetryHint::NoRetry => Err(StateError::FatalError {
+                source: anyhow!("job failed: {}", failure.message),
+                message: failure.message,
+                domain: error_domain,
+            }),
+            errors::RetryHint::WithBackoff => Ok(Transition::next(
+                state,
+                Recovering {
+                    source: anyhow!("job failed: {}", failure.message),
+                    reason: failure.message,
+                    domain: error_domain,
+                },
+            )),
+        }
+    }
+
+    pub fn leader_manager(&mut self) -> &mut LeaderManager {
+        self.leader_manager
+            .as_mut()
+            .expect("requested leader_manager but was not initialized")
     }
 }
 
@@ -671,6 +911,7 @@ async fn run_to_completion(
         rx: &mut rx,
         retries_attempted: 0,
         job_controller: None,
+        leader_manager: None,
         last_transitioned_at: Instant::now(),
         metrics,
     };
@@ -771,7 +1012,7 @@ impl StateMachine {
             "Stopped" => Some(Box::new(Stopped {})),
             "Finished" => Some(Box::new(Finished {})),
             "Failed" => Some(Box::new(Failed {})),
-            "Compiling" | "Scheduling" | "Running" | "Recovering" | "Rescaling" => {
+            "Compiling" | "Scheduling" | "Running" | "Recovering" | "Rescaling" | "Restarting" => {
                 Some(Box::new(Compiling {}))
             }
             "Failing" => {
@@ -888,7 +1129,8 @@ impl StateMachine {
         shutdown_guard: &ShutdownGuard,
     ) {
         match (applied, status.state.as_str()) {
-            (_, "Running" | "Recovering" | "Rescaling") | (AppliedStatus::NotApplied, _) => {
+            (_, "Running" | "Recovering" | "Rescaling" | "Restarting")
+            | (AppliedStatus::NotApplied, _) => {
                 // done() means there isn't a task running, but these states
                 // need to be advanced.
                 if self.done() {

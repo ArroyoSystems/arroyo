@@ -7,23 +7,15 @@ use std::{
 use arroyo_rpc::grpc::rpc::{
     StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
 };
-use arroyo_types::{MachineId, WorkerId};
+use arroyo_types::{JobId, MachineId, WorkerId};
 use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{Request, transport::Channel};
 use tracing::{debug, error, info, warn};
 
-use anyhow::anyhow;
-use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc_channel_builder;
-use arroyo_state::{
-    BackingStore, StateBackend,
-    committing_state::CommittingState,
-    tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
-};
-
+use super::{JobContext, State, Transition, leader_running::LeaderRunning, running::Running};
+use crate::job_controller::checkpoint_store::DbCheckpointMetadataStore;
 use crate::job_controller::job_metrics::JobMetrics;
+use crate::job_controller::leader_manager::LeaderManager;
 use crate::{JobMessage, schedulers::SchedulerError};
 use crate::{
     job_controller::JobController, queries::controller_queries, states::stop_if_desired_non_running,
@@ -32,9 +24,17 @@ use crate::{
     schedulers::StartPipelineReq,
     states::{StateError, fatal},
 };
+use anyhow::anyhow;
+use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::config::{JobControllerMode, config};
+use arroyo_rpc::grpc::api;
+use arroyo_rpc::grpc_channel_builder;
 use arroyo_rpc::worker_types::RunningMessage;
-
-use super::{JobContext, State, Transition, running::Running};
+use arroyo_state::{
+    BackingStore, StateBackend,
+    committing_state::CommittingState,
+    tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
+};
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {
@@ -281,13 +281,17 @@ impl State for Scheduling {
         let worker_connects = Arc::new(Mutex::new(HashMap::new()));
         let mut handles = vec![];
 
-        let config = &config().pipeline;
+        let pipeline_config = &config().pipeline;
 
         let start = Instant::now();
         loop {
-            let timeout = config
+            let timeout = pipeline_config
                 .worker_startup_time
-                .min(ctx.config.ttl.unwrap_or(*config.worker_startup_time))
+                .min(
+                    ctx.config
+                        .ttl
+                        .unwrap_or(*pipeline_config.worker_startup_time),
+                )
                 .checked_sub(start.elapsed())
                 .unwrap_or(Duration::ZERO);
 
@@ -308,7 +312,7 @@ impl State for Scheduling {
                 _ = tokio::time::sleep(timeout) => {
                     return Err(ctx.retryable(self,
                         "timed out while waiting for workers to start",
-                        anyhow!("timed out after {:?} while waiting for worker startup", *config.worker_startup_time), 3));
+                        anyhow!("timed out after {:?} while waiting for worker startup", *pipeline_config.worker_startup_time), 3));
                 }
             }
 
@@ -554,6 +558,43 @@ impl State for Scheduling {
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();
         let program = api::ArrowProgram::from(ctx.program.clone());
 
+        // Use ignore_state_before_epoch as default so new checkpoints exceed the threshold
+        let default_epoch = ctx
+            .config
+            .ignore_state_before_epoch
+            .filter(|&t| t > 0)
+            .map(|t| {
+                let epoch = (t - 1) as u32;
+                info!(
+                    message = "starting from ignore_state_before_epoch threshold",
+                    job_id = *ctx.config.id,
+                    default_epoch = epoch,
+                );
+                epoch
+            })
+            .unwrap_or(0);
+
+        let start_epoch = checkpoint_info
+            .as_ref()
+            .map(|info| info.epoch)
+            .unwrap_or(default_epoch);
+        let min_epoch = checkpoint_info
+            .as_ref()
+            .map(|info| info.min_epoch)
+            .unwrap_or(default_epoch);
+
+        let (leader_id, leader_addr) = matches!(config().job_controller, JobControllerMode::Worker)
+            .then(|| {
+                workers
+                    .iter()
+                    .min_by_key(|w| w.0.0)
+                    .map(|(id, status)| (*id, status.rpc_address.clone()))
+                    .unwrap()
+            })
+            .unzip();
+
+        let checkpoint_interval_micros = ctx.config.checkpoint_interval.as_micros() as u64;
+
         let tasks: Vec<_> = worker_connects
             .into_iter()
             .map(|(id, mut c)| {
@@ -562,6 +603,7 @@ impl State for Scheduling {
                 let restore_epoch = checkpoint_info.as_ref().map(|info| info.epoch);
                 let program = program.clone();
                 let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
+                let leader_addr = leader_addr.clone();
 
                 tokio::spawn(async move {
                     info!(
@@ -574,8 +616,14 @@ impl State for Scheduling {
                     match c
                         .start_execution(Request::new(StartExecutionReq {
                             restore_epoch,
+                            start_epoch,
+                            min_epoch,
                             program: Some(program.clone()),
                             tasks: assignments.clone(),
+                            job_controller_addr: leader_addr,
+                            is_leader: leader_id.is_some_and(|l| l == id),
+                            wait_for_leader: leader_id.is_some(),
+                            checkpoint_interval_micros,
                         }))
                         .await
                     {
@@ -622,9 +670,9 @@ impl State for Scheduling {
         let start = Instant::now();
         let mut started_tasks = HashSet::new();
         while started_tasks.len() < ctx.program.task_count() {
-            let timeout = config
+            let timeout = pipeline_config
                 .task_startup_time
-                .min(ctx.config.ttl.unwrap_or(*config.task_startup_time))
+                .min(ctx.config.ttl.unwrap_or(*pipeline_config.task_startup_time))
                 .checked_sub(start.elapsed())
                 .unwrap_or(Duration::ZERO);
 
@@ -684,7 +732,7 @@ impl State for Scheduling {
                 _ = tokio::time::sleep(timeout) => {
                     return Err(ctx.retryable(self,
                         "timed out while waiting for tasks to start",
-                        anyhow!("timed out after {:?} while waiting for worker startup", *config.task_startup_time), 3));
+                        anyhow!("timed out after {:?} while waiting for worker startup", *pipeline_config.task_startup_time), 3));
                 }
             }
         }
@@ -700,47 +748,65 @@ impl State for Scheduling {
             .await
             .insert(ctx.config.id.clone(), metrics.clone());
 
-        // Use ignore_state_before_epoch as default so new checkpoints exceed the threshold
-        let default_epoch = ctx
-            .config
-            .ignore_state_before_epoch
-            .filter(|&t| t > 0)
-            .map(|t| {
-                let epoch = (t - 1) as u32;
-                info!(
-                    message = "starting from ignore_state_before_epoch threshold",
-                    job_id = *ctx.config.id,
-                    default_epoch = epoch,
+        match leader_addr {
+            None => {
+                let checkpoint_store = Arc::new(DbCheckpointMetadataStore {
+                    organization_id: ctx.config.organization_id.clone(),
+                    job_id: ctx.config.id.clone(),
+                    state_backend: StateBackend::name(),
+                    db: ctx.db.clone(),
+                });
+                let mut controller = JobController::new(
+                    checkpoint_store,
+                    ctx.config.clone(),
+                    program,
+                    start_epoch,
+                    min_epoch,
+                    worker_connects,
+                    committing_state,
+                    metrics,
                 );
-                epoch
-            })
-            .unwrap_or(0);
+                if needs_commit {
+                    info!("restored checkpoint was in committing phase, sending commits");
+                    controller
+                        .send_commit_messages()
+                        .await
+                        .expect("failed to send commit messages");
+                }
 
-        let mut controller = JobController::new(
-            ctx.db.clone(),
-            ctx.config.clone(),
-            program,
-            checkpoint_info
-                .as_ref()
-                .map(|info| info.epoch)
-                .unwrap_or(default_epoch),
-            checkpoint_info
-                .as_ref()
-                .map(|info| info.min_epoch)
-                .unwrap_or(default_epoch),
-            worker_connects,
-            committing_state,
-            metrics,
-        );
-        if needs_commit {
-            info!("restored checkpoint was in committing phase, sending commits");
-            controller
-                .send_commit_messages()
+                ctx.job_controller = Some(controller);
+                Ok(Transition::next(*self, Running {}))
+            }
+            Some(leader_addr) => {
+                ctx.job_controller = None;
+
+                let leader_manager = match LeaderManager::connect(
+                    JobId(ctx.config.id.clone()),
+                    ctx.status.run_id,
+                    leader_addr,
+                )
                 .await
-                .expect("failed to send commit messages");
-        }
+                {
+                    Ok(m) => m,
+                    Err(e) => {
+                        return Err(ctx.retryable(
+                            self,
+                            "failed to connect to worker leader",
+                            e,
+                            10,
+                        ));
+                    }
+                };
 
-        ctx.job_controller = Some(controller);
-        Ok(Transition::next(*self, Running {}))
+                ctx.leader_manager = Some(leader_manager);
+
+                Ok(Transition::next(
+                    *self,
+                    LeaderRunning {
+                        started: Instant::now(),
+                    },
+                ))
+            }
+        }
     }
 }

@@ -6,6 +6,7 @@ import "api.proto";
 
 // Controller
 
+
 message WorkerContext {
   string machine_id = 1;
   uint64 worker_id = 2;
@@ -50,11 +51,12 @@ enum TaskCheckpointEventType {
   FINISHED_COMMIT = 4;
 }
 
+
 message TaskCheckpointEventReq {
   WorkerContext worker_context = 1;
   uint64 time = 2;
   string operator_id = 8;
-  uint32 subtask_idx = 5;
+  uint32 subtask_index = 5;
   uint32 epoch = 6;
   TaskCheckpointEventType event_type = 7;
 }
@@ -64,7 +66,7 @@ message TaskCheckpointEventResp {
 
 message TaskCheckpointCompletedReq {
   WorkerContext worker_context = 1;
-  uint64 time = 2;
+  uint64  time = 2;
   string operator_id = 4;
   uint32 epoch = 5;
   SubtaskCheckpointMetadata metadata = 6;
@@ -107,7 +109,7 @@ message TaskError {
 
 message TaskFailedReq {
   WorkerContext worker_context = 1;
-  uint64 time = 2;
+  uint64  time = 2;
   TaskError error = 3;
 }
 
@@ -156,7 +158,7 @@ message SinkDataResp {
 
 message WorkerFinishedReq {
   WorkerContext worker_context = 1;
-  uint64 time = 2;
+  uint64  time = 2;
   uint64 slots = 3;
 }
 
@@ -190,6 +192,7 @@ enum WorkerPhase {
   INITIALIZING = 1;
   RUNNING = 2;
   FAILED = 3;
+  WAITING_ON_LEADER = 4;
 }
 
 message GetWorkerPhaseReq {
@@ -225,20 +228,81 @@ service ControllerGrpc {
   rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
   rpc HeartbeatNode(HeartbeatNodeReq) returns (HeartbeatNodeResp);
   rpc RegisterWorker(RegisterWorkerReq) returns (RegisterWorkerResp);
-  rpc Heartbeat(HeartbeatReq) returns (HeartbeatResp);
   rpc TaskStarted(TaskStartedReq) returns (TaskStartedResp);
-  rpc TaskCheckpointEvent(TaskCheckpointEventReq) returns (TaskCheckpointEventResp);
-  rpc TaskCheckpointCompleted(TaskCheckpointCompletedReq) returns (TaskCheckpointCompletedResp);
-  rpc TaskFinished(TaskFinishedReq) returns (TaskFinishedResp);
-  rpc TaskFailed(TaskFailedReq) returns (TaskFailedResp);
   rpc SendSinkData(SinkDataReq) returns (SinkDataResp);
   // sent from the node to the controller when a worker process exits
   rpc WorkerFinished(WorkerFinishedReq) returns (WorkerFinishedResp);
   rpc WorkerInitializationComplete(WorkerInitializationCompleteReq) returns (WorkerInitializationCompleteResp);
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
+}
+
+service JobControllerGrpc {
+  rpc TaskCheckpointEvent(TaskCheckpointEventReq) returns (TaskCheckpointEventResp);
+  rpc TaskCheckpointCompleted(TaskCheckpointCompletedReq) returns (TaskCheckpointCompletedResp);
   rpc NonfatalError(NonfatalErrorReq) returns (WorkerErrorRes);
   rpc JobMetrics(JobMetricsReq) returns (JobMetricsResp);
+  rpc Heartbeat(HeartbeatReq) returns (HeartbeatResp);
+  rpc TaskFinished(TaskFinishedReq) returns (TaskFinishedResp);
+  rpc TaskFailed(TaskFailedReq) returns (TaskFailedResp);
+}
+
+message JobStatusReq {
+  string job_id = 1;
+}
+
+message CheckpointStatus {
+  uint32 epoch = 1;
+  uint64 started_at = 2;
+  optional uint64 finished_at = 3;
+  uint64 size_bytes = 4;
+}
+
+enum JobState {
+  JOB_UNKNOWN = 0;
+  JOB_INITIALIZING = 1;
+  JOB_RUNNING = 2;
+  JOB_STOPPING = 3;
+  JOB_STOPPED = 4;
+  JOB_FINISHING = 5;
+  JOB_FINISHED = 6;
+  JOB_FAILING = 7;
+  JOB_FAILED = 8;
+}
+
+message JobFailure {
+  optional string operator_id = 1;
+  optional uint32 task_id = 2;
+  optional uint32 subtask_index = 3;
+  string message = 4;
+  ErrorDomain error_domain = 5;
+  RetryHint retry_hint = 6;
+}
+
+message JobStatus {
+  JobState job_state = 1;
+  uint64 updated_at = 2;
+  uint64 transitioned_at = 3;
+  optional CheckpointStatus last_checkpoint = 4;
+  optional JobFailure job_failure = 5;
+}
+
+message JobStatusResp {
+  string job_id = 1;
+  uint64 run_id = 2;
+  JobStatus job_status = 3;
+}
+
+message StopJobReq {
+  JobStopMode stop_mode = 1;
+}
+
+message StopJobResp {
+}
+
+service JobStatusGrpc {
+  rpc GetJobStatus(JobStatusReq) returns (JobStatusResp);
+  rpc StopJob(StopJobReq) returns (StopJobResp);
 }
 
 // Checkpoint metadata
@@ -364,7 +428,16 @@ message TaskAssignment {
 message StartExecutionReq {
   api.ArrowProgram program = 1;
   optional uint32 restore_epoch = 2;
+  uint32 start_epoch = 6;
+  uint32 min_epoch = 7;
   repeated TaskAssignment tasks = 3;
+  // if none, clients should use the controller address
+  optional string job_controller_addr = 4;
+  bool is_leader = 5;
+  // if set, the worker should wait for a job_controller_init message before starting
+  // (used in worker leader mode)
+  bool wait_for_leader = 8;
+  uint64 checkpoint_interval_micros = 9;
 }
 
 message StartExecutionResp {
@@ -415,6 +488,12 @@ enum StopMode {
   IMMEDIATE = 1;
 }
 
+enum JobStopMode {
+  JOB_STOP_GRACEFUL = 0;
+  JOB_STOP_IMMEDIATE = 1;
+  JOB_STOP_CHECKPOINT = 2;
+}
+
 message StopExecutionReq {
   StopMode stop_mode = 1;
 }
@@ -435,7 +514,16 @@ message MetricsResp {
   repeated MetricFamily metrics = 1;
 }
 
+// Sent from the Job Controller when running in a worker to all workers to start
+// execution
+message JobControllerInitReq {
+}
+
+message JobControllerInitResp {}
+
+
 service WorkerGrpc {
+  rpc GetWorkerPhase(GetWorkerPhaseReq) returns (GetWorkerPhaseResp);
   rpc StartExecution(StartExecutionReq) returns (StartExecutionResp);
   rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
   rpc Commit(CommitReq) returns (CommitResp);
@@ -443,7 +531,7 @@ service WorkerGrpc {
   rpc StopExecution(StopExecutionReq) returns (StopExecutionResp);
   rpc JobFinished(JobFinishedReq) returns (JobFinishedResp);
   rpc GetMetrics(MetricsReq) returns (MetricsResp);
-  rpc GetWorkerPhase(GetWorkerPhaseReq) returns (GetWorkerPhaseResp);
+  rpc JobControllerInit(JobControllerInitReq) returns (JobControllerInitResp);
 }
 
 // Node

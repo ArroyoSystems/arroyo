@@ -54,7 +54,7 @@ impl Scheduler for EmbeddedScheduler {
         let worker_id = WorkerId(self.worker_counter.fetch_add(1, Ordering::SeqCst));
         let handle = tokio::task::spawn(async move {
             let server = WorkerServer::new(
-                MachineId(Arc::new("job".to_string())),
+                MachineId(Arc::new("embedded".to_string())),
                 worker_id,
                 JobId(req.job_id.clone()),
                 req.run_id,

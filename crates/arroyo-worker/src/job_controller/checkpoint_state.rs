@@ -1,31 +1,21 @@
-use crate::{
-    BackingStore, StateBackend,
-    committing_state::CommittingState,
-    tables::{
-        ErasedTable, expiring_time_key_map::ExpiringTimeKeyTable,
-        global_keyed_map::GlobalKeyedTable,
-    },
-};
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::grpc::{
-    self,
-    api::{self, OperatorCheckpointDetail},
-    rpc,
-    rpc::{
-        CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata,
-        SubtaskCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
-        TableSubtaskCheckpointMetadata, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
-    },
+use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
+use arroyo_rpc::grpc::rpc::{
+    CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata, SubtaskCheckpointMetadata,
+    TableCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata,
+    TaskCheckpointCompletedReq, TaskCheckpointEventReq,
 };
-use arroyo_rpc::{TaskEventSpans, get_event_spans, log_trace_event};
+use arroyo_rpc::grpc::{api, rpc};
+use arroyo_rpc::{TaskEventSpans, get_event_spans, grpc, log_trace_event};
+use arroyo_state::committing_state::CommittingState;
+use arroyo_state::tables::ErasedTable;
+use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_types::{from_micros, to_micros};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
-use std::{
-    collections::{HashMap, HashSet},
-    time::SystemTime,
-};
+use std::time::{Duration, SystemTime};
 use tracing::{debug, warn};
 
 #[derive(Debug, Clone)]
@@ -225,7 +215,7 @@ impl CheckpointState {
     }
 
     pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) -> anyhow::Result<()> {
-        debug!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_idx = c.subtask_idx, operator_id = ?c.operator_id);
+        debug!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_index = c.subtask_index, operator_id = ?c.operator_id);
 
         if grpc::rpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
             bail!(
@@ -246,9 +236,9 @@ impl CheckpointState {
                 tasks: HashMap::new(),
             })
             .tasks
-            .entry(c.subtask_idx)
+            .entry(c.subtask_index)
             .or_insert_with(|| api::TaskCheckpointDetail {
-                subtask_index: c.subtask_idx,
+                subtask_index: c.subtask_index,
                 start_time: c.time,
                 finish_time: None,
                 bytes: None,
@@ -278,7 +268,10 @@ impl CheckpointState {
         Ok(())
     }
 
-    pub async fn checkpoint_finished(&mut self, c: TaskCheckpointCompletedReq) -> Result<()> {
+    pub fn checkpoint_finished(
+        &mut self,
+        c: TaskCheckpointCompletedReq,
+    ) -> anyhow::Result<Option<OperatorCheckpointMetadata>> {
         // TODO: UI management
         let metadata = c
             .metadata
@@ -395,7 +388,7 @@ impl CheckpointState {
             }
 
             operator_detail.started_metadata_write = Some(to_micros(SystemTime::now()));
-            StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
+            let metadata = OperatorCheckpointMetadata {
                 start_time: to_micros(operator_state.start_time.unwrap()),
                 finish_time: to_micros(operator_state.finish_time.unwrap()),
                 table_checkpoint_metadata,
@@ -408,13 +401,12 @@ impl CheckpointState {
                     max_watermark,
                     parallelism: operator_state.subtasks_checkpointed as u64,
                 }),
-            })
-            .await
-            .expect("Should be able to write operator checkpoint metadata");
+            };
 
             operator_detail.finish_time = Some(to_micros(SystemTime::now()));
+            return Ok(Some(metadata));
         }
-        Ok(())
+        Ok(None)
     }
 
     pub fn done(&self) -> bool {
@@ -429,7 +421,7 @@ impl CheckpointState {
         )
     }
 
-    pub async fn write_metadata(&mut self) -> Result<()> {
+    pub fn build_metadata(&mut self) -> CheckpointMetadata {
         let finish_time = SystemTime::now();
 
         for (op, details) in &self.operator_details {
@@ -471,7 +463,7 @@ impl CheckpointState {
             Default::default(),
         );
 
-        StateBackend::write_checkpoint_metadata(CheckpointMetadata {
+        CheckpointMetadata {
             job_id: self.job_id.to_string(),
             epoch: self.epoch,
             min_epoch: self.min_epoch,
@@ -482,8 +474,6 @@ impl CheckpointState {
                 .keys()
                 .map(|key| key.to_string())
                 .collect(),
-        })
-        .await?;
-        Ok(())
+        }
     }
 }
