@@ -112,7 +112,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
 
         let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
             checkpoint_epoch: epoch,
-            operator_idx: ctx.task_info.node_id,
+            operator_idx: ctx.task_info.operator_idx,
             operator_id: ctx.task_info.operator_id.clone(),
             subtask_idx: ctx.task_info.task_index,
             time: SystemTime::now(),

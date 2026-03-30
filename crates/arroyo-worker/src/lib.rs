@@ -425,7 +425,7 @@ impl WorkerServer {
         let error_message = match Self::initialize_inner(
             Arc::clone(&network),
             shutdown_guard,
-            worker_context.clone(),
+            &worker_context,
             req,
         )
         .await
@@ -467,7 +467,7 @@ impl WorkerServer {
     async fn initialize_inner(
         network: Arc<Mutex<Option<NetworkManager>>>,
         shutdown_guard: ShutdownGuard,
-        worker_context: WorkerContext,
+        worker_context: &WorkerContext,
         req: StartExecutionReq,
     ) -> Result<EngineState> {
         let mut registry = new_registry();

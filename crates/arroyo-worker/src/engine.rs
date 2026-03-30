@@ -132,7 +132,7 @@ impl SubtaskOrQueueNode {
     pub fn id(&self) -> u32 {
         match self {
             SubtaskOrQueueNode::SubtaskNode(n) => n.node_id,
-            SubtaskOrQueueNode::QueueNode(n) => n.task_info.node_id,
+            SubtaskOrQueueNode::QueueNode(n) => n.task_info.operator_idx,
         }
     }
 
@@ -439,7 +439,7 @@ impl RunningEngine {
         let mut result = HashMap::new();
         for n in program.node_weights() {
             for id in &n.as_queue().operator_ids {
-                result.insert(id.clone(), n.as_queue().task_info.node_id);
+                result.insert(id.clone(), n.as_queue().task_info.operator_idx);
             }
         }
         result
@@ -810,7 +810,7 @@ pub async fn construct_node(
 
         let task_info = Arc::new(TaskInfo {
             job_id: job_id.to_string(),
-            node_id,
+            operator_idx: node_id,
             operator_name: head.operator_name.to_string(),
             operator_id: head.operator_id.clone(),
             task_index: subtask_idx,
@@ -845,7 +845,7 @@ pub async fn construct_node(
             let ctx = OperatorContext::new(
                 Arc::new(TaskInfo {
                     job_id: job_id.to_string(),
-                    node_id,
+                    operator_idx: node_id,
                     operator_name: node.operator_name.to_string(),
                     operator_id: node.operator_id.clone(),
                     task_index: subtask_idx,

@@ -10,7 +10,7 @@ message WorkerContext {
   string machine_id = 1;
   uint64 worker_id = 2;
   string job_id = 3;
-  uint64 run_id = 5;
+  uint64 run_id = 4;
 }
 
 message WorkerResources {

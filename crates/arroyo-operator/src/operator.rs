@@ -172,7 +172,7 @@ impl OperatorNode {
                 source_context
                     .control_tx
                     .send(ControlResp::TaskStarted {
-                        task_id: source_context.task_info.node_id,
+                        task_id: source_context.task_info.operator_idx,
                         subtask_idx: source_context.task_info.task_index,
                         start_time: SystemTime::now(),
                     })
@@ -210,8 +210,8 @@ impl OperatorNode {
 
     fn node_id(&self) -> u32 {
         match self {
-            OperatorNode::Source(s) => s.context.task_info.node_id,
-            OperatorNode::Chained(s) => s.context.task_info.node_id,
+            OperatorNode::Source(s) => s.context.task_info.operator_idx,
+            OperatorNode::Chained(s) => s.context.task_info.operator_idx,
         }
     }
 

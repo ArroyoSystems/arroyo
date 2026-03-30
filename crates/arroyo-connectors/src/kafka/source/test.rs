@@ -135,7 +135,7 @@ impl KafkaTopicTester {
 
         let chain_info = Arc::new(ChainInfo {
             job_id: ctx.task_info.job_id.clone(),
-            task_id: ctx.task_info.node_id,
+            task_id: ctx.task_info.operator_idx,
             description: "kafka source".to_string(),
             task_index: ctx.task_info.task_index,
         });
@@ -438,7 +438,7 @@ async fn test_kafka_with_metadata_fields() {
 
     let chain_info = Arc::new(ChainInfo {
         job_id: ctx.task_info.job_id.clone(),
-        task_id: ctx.task_info.node_id,
+        task_id: ctx.task_info.operator_idx,
         description: "kafka source".to_string(),
         task_index: ctx.task_info.task_index,
     });

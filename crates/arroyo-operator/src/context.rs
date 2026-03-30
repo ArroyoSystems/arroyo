@@ -249,7 +249,7 @@ impl SourceContext {
     pub async fn report_nonfatal_error(&mut self, error: DataflowError) {
         self.control_tx
             .send(ControlResp::Error {
-                task_id: self.task_info.node_id,
+                task_id: self.task_info.operator_idx,
                 subtask_idx: self.task_info.task_index,
                 operator_id: self.task_info.operator_id.clone(),
                 message: "".to_string(),
@@ -380,7 +380,7 @@ impl SourceCollector {
                                 warn!("Dropping invalid data ({count}): {details}");
                                 self.control_tx
                                     .send(ControlResp::Error {
-                                        task_id: self.task_info.node_id,
+                                        task_id: self.task_info.operator_idx,
                                         operator_id: self.task_info.operator_id.clone(),
                                         subtask_idx: self.task_info.task_index,
                                         message: format!("Dropping invalid data ({count})"),
@@ -444,7 +444,7 @@ pub async fn send_checkpoint_event(
     // which then sends a TaskCheckpointEventReq to the controller.
     tx.send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
         checkpoint_epoch: barrier.epoch,
-        operator_idx: info.node_id,
+        operator_idx: info.operator_idx,
         operator_id: info.operator_id.clone(),
         subtask_idx: info.task_index,
         time: SystemTime::now(),
@@ -474,7 +474,7 @@ impl ErrorReporter {
     pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
         self.tx
             .send(ControlResp::Error {
-                task_id: self.task_info.node_id,
+                task_id: self.task_info.operator_idx,
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_idx: self.task_info.task_index,
                 message: message.into(),

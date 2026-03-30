@@ -426,7 +426,7 @@ mod tests {
         let event_logger = FsEventLogger {
             task_info: Some(Arc::new(TaskInfo {
                 job_id: "test_job".to_string(),
-                node_id: 0,
+                operator_idx: 0,
                 operator_name: "test_operator".to_string(),
                 operator_id: "test_op_id".to_string(),
                 task_index: 0,

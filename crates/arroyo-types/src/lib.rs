@@ -310,7 +310,7 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
 pub struct TaskInfo {
     pub job_id: String,
-    pub node_id: u32,
+    pub operator_idx: u32,
     pub operator_name: String,
     pub operator_id: String,
     pub task_index: u32,
@@ -360,7 +360,7 @@ impl TaskInfo {
     pub fn for_test(job_id: &str, operator_id: &str) -> Self {
         Self {
             job_id: job_id.to_string(),
-            node_id: 1,
+            operator_idx: 1,
             operator_name: "op".to_string(),
             operator_id: operator_id.to_string(),
             task_index: 0,
@@ -373,7 +373,7 @@ impl TaskInfo {
 pub fn get_test_task_info() -> TaskInfo {
     TaskInfo {
         job_id: "instance-1".to_string(),
-        node_id: 1,
+        operator_idx: 1,
         operator_name: "test-operator".to_string(),
         operator_id: "test-operator-1".to_string(),
         task_index: 0,
