@@ -454,13 +454,13 @@ impl Scheduler for NodeScheduler {
 
     async fn worker_finished(&self, req: WorkerFinishedReq) {
         let mut state = self.state.lock().await;
-        let Some(worker_info) = req.worker_info else {
-            warn!("Got worker finished with no worker info");
+        let Some(worker_context) = req.worker_context else {
+            warn!("Got worker finished with no worker context");
             return;
         };
 
-        let worker_id = WorkerId(worker_info.worker_id);
-        let machine_id = MachineId(Arc::new(worker_info.machine_id));
+        let worker_id = WorkerId(worker_context.worker_id);
+        let machine_id = MachineId(Arc::new(worker_context.machine_id));
 
         if let Some(node) = state.nodes.get_mut(&machine_id) {
             node.release_slots(worker_id, req.slots as usize);

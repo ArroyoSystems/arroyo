@@ -165,7 +165,7 @@ impl MqttTopicTester {
 
         let chain_info = Arc::new(ChainInfo {
             job_id: ctx.task_info.job_id.clone(),
-            node_id: ctx.task_info.node_id,
+            task_id: ctx.task_info.operator_idx,
             description: "mqtt source".to_string(),
             task_index: ctx.task_info.task_index,
         });

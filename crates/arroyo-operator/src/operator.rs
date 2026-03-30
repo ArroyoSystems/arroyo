@@ -172,8 +172,8 @@ impl OperatorNode {
                 source_context
                     .control_tx
                     .send(ControlResp::TaskStarted {
-                        node_id: source_context.task_info.node_id,
-                        task_index: source_context.task_info.task_index as usize,
+                        task_id: source_context.task_info.operator_idx,
+                        subtask_idx: source_context.task_info.task_index,
                         start_time: SystemTime::now(),
                     })
                     .await
@@ -210,8 +210,8 @@ impl OperatorNode {
 
     fn node_id(&self) -> u32 {
         match self {
-            OperatorNode::Source(s) => s.context.task_info.node_id,
-            OperatorNode::Chained(s) => s.context.task_info.node_id,
+            OperatorNode::Source(s) => s.context.task_info.operator_idx,
+            OperatorNode::Chained(s) => s.context.task_info.operator_idx,
         }
     }
 
@@ -240,7 +240,7 @@ impl OperatorNode {
 
         let chain_info = Arc::new(ChainInfo {
             job_id: self.task_info().job_id.clone(),
-            node_id: self.node_id(),
+            task_id: self.node_id(),
             description: self.name(),
             task_index: self.task_index(),
         });
@@ -260,7 +260,7 @@ impl OperatorNode {
         {
             Ok(()) => {
                 info!(
-                    node_id = chain_info.node_id,
+                    task_id = chain_info.task_id,
                     subtask_index = chain_info.task_index,
                     description = chain_info.description,
                     "Task finished"
@@ -268,14 +268,14 @@ impl OperatorNode {
 
                 control_tx
                     .send(ControlResp::TaskFinished {
-                        node_id: chain_info.node_id,
-                        task_index: chain_info.task_index as usize,
+                        task_id: chain_info.task_id,
+                        subtask_idx: chain_info.task_index,
                     })
                     .await
                     .expect("control response unwrap");
             }
             Err(e) => {
-                error!(node_id = chain_info.node_id,
+                error!(task_id = chain_info.task_id,
                     subtask_index = chain_info.task_index,
                     description = chain_info.description,
                     error = ?e,
@@ -283,8 +283,8 @@ impl OperatorNode {
 
                 control_tx
                     .send(ControlResp::TaskFailed {
-                        node_id: chain_info.node_id,
-                        task_index: chain_info.task_index as usize,
+                        task_id: chain_info.task_id,
+                        subtask_idx: chain_info.task_index,
                         error: e.into(),
                     })
                     .await
@@ -677,9 +677,9 @@ impl ChainedOperator {
                     control_tx
                         .send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
                             checkpoint_epoch: t.epoch,
-                            node_id: chain_info.node_id,
+                            operator_idx: chain_info.task_id,
                             operator_id: self.context.task_info.operator_id.clone(),
-                            subtask_index: chain_info.task_index,
+                            subtask_idx: chain_info.task_index,
                             time: SystemTime::now(),
                             event_type: TaskCheckpointEventType::StartedAlignment,
                         }))
@@ -947,8 +947,8 @@ async fn operator_run_behavior(
 
     control_tx
         .send(ControlResp::TaskStarted {
-            node_id: chain_info.node_id,
-            task_index: chain_info.task_index as usize,
+            task_id: chain_info.task_id,
+            subtask_idx: chain_info.task_index,
             start_time: SystemTime::now(),
         })
         .await
@@ -994,7 +994,7 @@ async fn operator_run_behavior(
                         let local_idx = idx;
 
                         trace!("[{}] Handling message {}-{}, {:?}",
-                            chain_info.node_id, 0, local_idx, message);
+                            chain_info.task_id, 0, local_idx, message);
 
                         match message {
                             ArrowMessage::Data(record) => {
@@ -1004,7 +1004,7 @@ async fn operator_run_behavior(
                                 this.process_batch_index(idx, in_partitions, record, collector)
                                     .instrument(tracing::trace_span!("handle_fn",
                                         name,
-                                        node_id = chain_info.node_id,
+                                        task_id = chain_info.task_id,
                                         subtask_idx = chain_info.task_index)
                                 ).await?;
                             }

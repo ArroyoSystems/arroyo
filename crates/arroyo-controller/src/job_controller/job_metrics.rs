@@ -6,9 +6,8 @@ use arroyo_types::to_micros;
 use petgraph::prelude::NodeIndex;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
 use tracing::warn;
 
 pub const COLLECTION_RATE: Duration = Duration::from_secs(2);
@@ -60,14 +59,14 @@ impl JobMetrics {
         }
     }
 
-    pub async fn update(&self, node_id: u32, subtask_idx: u32, values: &HashMap<MetricName, u64>) {
+    pub fn update(&self, node_id: u32, subtask_idx: u32, values: &HashMap<MetricName, u64>) {
         let now = SystemTime::now();
 
         let key = TaskKey {
             node_id,
             subtask_idx,
         };
-        let mut tasks = self.tasks.write().await;
+        let mut tasks = self.tasks.write().unwrap();
         let Some(task) = tasks.get_mut(&key) else {
             warn!(
                 "Task not found for operator_id: {}, subtask_idx: {}",
@@ -96,11 +95,11 @@ impl JobMetrics {
         task.update_backpressure(now, backpressure);
     }
 
-    pub async fn get_groups(&self) -> Vec<OperatorMetricGroup> {
+    pub fn get_groups(&self) -> Vec<OperatorMetricGroup> {
         let mut metric_groups: HashMap<u32, HashMap<MetricName, Vec<SubtaskMetrics>>> =
             HashMap::new();
 
-        for (k, v) in self.tasks.read().await.iter() {
+        for (k, v) in self.tasks.read().unwrap().iter() {
             let op = metric_groups.entry(k.node_id).or_default();
 
             for (metric, rate) in &v.rates {
