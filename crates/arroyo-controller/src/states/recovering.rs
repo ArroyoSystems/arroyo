@@ -1,11 +1,15 @@
 use super::{
     JobContext, State, StateError, Transition, compiling::Compiling, fatal, state_backoff,
 };
-use anyhow::bail;
+use crate::JobMessage;
+use crate::job_controller::JobController;
+use crate::job_controller::leader_manager::LeaderManager;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
-use arroyo_rpc::grpc::rpc::StopMode;
+use arroyo_rpc::grpc::rpc::{JobState, JobStopMode, StopMode};
+use arroyo_rpc::retry;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
@@ -18,29 +22,27 @@ pub struct Recovering {
 
 impl Recovering {
     // tries, with increasing levels of force, to tear down the existing cluster
-    pub async fn cleanup<'a>(ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
-        let job_controller = ctx.job_controller.as_mut().unwrap();
-
+    pub async fn cleanup_job_controller(
+        job_controller: &mut JobController,
+        job_id: &str,
+        rx: &mut Receiver<JobMessage>,
+    ) {
         // first try to stop it gracefully
         if job_controller.finished() {
-            return Ok(());
+            return;
         }
 
         // stop the job
-        info!(message = "stopping job", job_id = *ctx.config.id);
+        info!(message = "stopping job", job_id);
         let start = Instant::now();
         match job_controller.stop_job(StopMode::Immediate).await {
             Ok(_) => {
-                if (timeout(
-                    Duration::from_secs(5),
-                    job_controller.wait_for_finish(ctx.rx),
-                )
-                .await)
+                if (timeout(Duration::from_secs(5), job_controller.wait_for_finish(rx)).await)
                     .is_ok()
                 {
                     info!(
                         message = "job stopped",
-                        job_id = *ctx.config.id,
+                        job_id,
                         duration = start.elapsed().as_secs_f32()
                     );
                 }
@@ -49,44 +51,122 @@ impl Recovering {
                 warn!(
                     message = "failed to stop job",
                     error = format!("{:?}", e),
-                    job_id = *ctx.config.id
+                    job_id,
                 );
             }
         }
+    }
 
-        // tell the processes to stop
-
-        for i in 0..10 {
-            if ctx
-                .scheduler
-                .workers_for_job(&ctx.config.id, Some(ctx.status.run_id))
-                .await?
-                .is_empty()
-            {
-                return Ok(());
+    pub async fn cleanup_leader(leader_manager: &mut LeaderManager, job_id: &str) {
+        let status = match leader_manager.poll_leader_status().await {
+            Ok(status) => status,
+            Err(e) => {
+                warn!(job_id, error =? e, "failed to get leader status while recovering");
+                return;
             }
+        };
 
-            info!(
-                message = "sending SIGKILL to workers",
-                job_id = *ctx.config.id
-            );
-
-            if let Err(e) = ctx
-                .scheduler
-                .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
-                .await
-            {
+        let expected_state = match JobState::try_from(status.job_state) {
+            Ok(JobState::JobFailed) => {
+                return;
+            }
+            Ok(JobState::JobUnknown) | Err(_) => {
                 warn!(
-                    message = "error while stopping workers",
-                    error = format!("{:?}", e),
-                    job_id = *ctx.config.id
+                    job_id,
+                    "received unknown job state {} while cleaning job", status.job_state
                 );
+                return;
             }
+            Ok(JobState::JobInitializing) => {
+                warn!(job_id, "job is in initializing while cleaning");
+                return;
+            }
+            Ok(JobState::JobRunning) => {
+                // shutdown
+                info!(job_id, "job is still running in recovering, shutting down");
+                if retry!(
+                    leader_manager
+                        .stop_leader(JobStopMode::JobStopImmediate)
+                        .await,
+                    10,
+                    Duration::from_millis(200),
+                    Duration::from_secs(2),
+                    |e| warn!(job_id, err = ?e, "failed to stop job")
+                )
+                .is_err()
+                {
+                    return;
+                }
+                JobState::JobStopped
+            }
+            Ok(JobState::JobStopping) => {
+                // wait for job to be stopped
+                JobState::JobStopped
+            }
+            Ok(JobState::JobStopped) => {
+                return;
+            }
+            Ok(JobState::JobFinishing) => {
+                // wait for job to be finished
+                JobState::JobFinished
+            }
+            Ok(JobState::JobFinished) => {
+                return;
+            }
+            Ok(JobState::JobFailing) => {
+                // wait for job to be failed
+                JobState::JobFailed
+            }
+        };
 
-            tokio::time::sleep(Duration::from_millis(i * 50)).await;
+        if let Err(e) = timeout(
+            Duration::from_secs(60),
+            leader_manager.wait_for_state(expected_state),
+        )
+        .await
+        {
+            warn!(job_id, error = ?e, ?expected_state, "timed out waiting for state during cleanup");
+        }
+    }
+
+    async fn tear_down_workers<'a>(ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
+        if ctx
+            .scheduler
+            .workers_for_job(&ctx.config.id, Some(ctx.status.run_id))
+            .await?
+            .is_empty()
+        {
+            return Ok(());
         }
 
-        bail!("Failed to clean up cluster")
+        info!(message = "tearing down workers", job_id = *ctx.config.id);
+
+        ctx.scheduler
+            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+            .await
+    }
+
+    pub async fn cleanup<'a>(ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
+        // attempt to shutdown the job cleanly
+        match (ctx.job_controller.as_mut(), ctx.leader_manager.as_mut()) {
+            (Some(jc), None) => Self::cleanup_job_controller(jc, &ctx.config.id, ctx.rx).await,
+            (None, Some(lm)) => Self::cleanup_leader(lm, &ctx.config.id).await,
+            (Some(_), Some(_)) => unreachable!("both job controller and leader manager are set!"),
+            (None, None) => {
+                // somehow we got here before scheduling set the job controller / leader manager
+            }
+        };
+
+        // then tear down the workers
+        retry!(
+            Self::tear_down_workers(ctx).await,
+            10,
+            Duration::from_millis(200),
+            Duration::from_secs(10),
+            |e| warn!(job_id = *ctx.config.id, error =? e, "failed to tear down cluster")
+        )?;
+
+        Ok(())
     }
 }
 
@@ -126,11 +206,9 @@ impl State for Recovering {
             "recovering pipeline"
         );
 
-        // tear down the existing cluster
-        if let Err(e) = Self::cleanup(ctx).await {
-            return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 10));
+        match Self::cleanup(ctx).await {
+            Ok(()) => Ok(Transition::next(*self, Compiling)),
+            Err(e) => Err(ctx.retryable(self, "failed to tear down existing cluster", e, 3)),
         }
-
-        Ok(Transition::next(*self, Compiling))
     }
 }

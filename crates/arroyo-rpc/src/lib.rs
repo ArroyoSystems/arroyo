@@ -1,4 +1,5 @@
 pub mod api_types;
+pub mod checkpoints;
 pub mod formats;
 pub mod public_ids;
 pub mod schema_resolver;
@@ -1056,6 +1057,31 @@ pub async fn controller_client(
 ) -> Result<ControllerGrpcClient<Channel>> {
     let channel = connect_controller(our_name, our_tls).await?;
     Ok(ControllerGrpcClient::new(channel))
+}
+
+pub async fn job_controller_client(
+    our_name: &str,
+    our_tls: &Option<TlsConfig>,
+    addr: String,
+    is_worker_job_controller: bool,
+) -> Result<crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient<Channel>> {
+    let their_tls = if is_worker_job_controller {
+        &config().worker.tls
+    } else {
+        &config().controller.tls
+    };
+
+    let channel = connect_grpc(our_name, addr, our_tls, their_tls).await?;
+    Ok(crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient::new(channel))
+}
+
+pub async fn job_status_client(
+    our_name: &str,
+    our_tls: &Option<TlsConfig>,
+    addr: String,
+) -> Result<crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient<Channel>> {
+    let channel = connect_grpc(our_name, addr, our_tls, &config().controller.tls).await?;
+    Ok(crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient::new(channel))
 }
 
 pub fn local_address(bind_address: IpAddr) -> String {
