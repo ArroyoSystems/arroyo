@@ -32,6 +32,7 @@ http-port = 5115
 bind-address = "0.0.0.0"
 rpc-port = 5116
 scheduler = "process"
+leader-poll-interval = "500ms"
 
 [compiler]
 bind-address = "0.0.0.0"

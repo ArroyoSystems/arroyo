@@ -427,7 +427,7 @@ impl WorkerState {
                                     worker_context: Some(self.worker_context.as_proto()),
                                     time: to_micros(c.time),
                                     operator_id: c.operator_id,
-                                    subtask_index: c.subtask_idx,
+                                    subtask_idx: c.subtask_idx,
                                     epoch: c.checkpoint_epoch,
                                     event_type: c.event_type as i32,
                                 }

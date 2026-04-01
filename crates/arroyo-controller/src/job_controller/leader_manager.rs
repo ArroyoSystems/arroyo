@@ -66,6 +66,14 @@ impl LeaderManager {
             );
         }
 
+        if response.run_id != self.run_id {
+            bail!(
+                "leader returned job status for wrong run: expected {}, got {}",
+                self.run_id,
+                response.run_id
+            );
+        }
+
         let status = response
             .job_status
             .ok_or_else(|| anyhow!("leader returned empty job status"))?;

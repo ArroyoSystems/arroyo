@@ -56,7 +56,7 @@ message TaskCheckpointEventReq {
   WorkerContext worker_context = 1;
   uint64 time = 2;
   string operator_id = 8;
-  uint32 subtask_index = 5;
+  uint32 subtask_idx = 5;
   uint32 epoch = 6;
   TaskCheckpointEventType event_type = 7;
 }

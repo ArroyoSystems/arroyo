@@ -106,7 +106,12 @@ impl RunningJobModel {
         checkpoint_id: &str,
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
-        info!("finishing committing");
+        info!(
+            message = "Finishing committing",
+            epoch = self.epoch,
+            job_id = *self.job_id,
+        );
+
         store
             .finish_checkpoint(FinishCheckpointReq {
                 checkpoint_id: checkpoint_id.to_string(),
@@ -142,7 +147,7 @@ impl RunningJobModel {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
                                 {
                                     committing_state
-                                        .subtask_committed(c.operator_id.clone(), c.subtask_index);
+                                        .subtask_committed(c.operator_id.clone(), c.subtask_idx);
                                     self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())

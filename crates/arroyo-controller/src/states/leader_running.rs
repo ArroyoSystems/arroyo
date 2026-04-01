@@ -14,8 +14,6 @@ use std::time::{Duration, Instant};
 use tokio::time::MissedTickBehavior;
 use tracing::{error, warn};
 
-const LEADER_POLL_INTERVAL: Duration = Duration::from_millis(500);
-
 #[derive(Debug)]
 pub struct LeaderRunning {
     pub started: Instant,
@@ -33,7 +31,7 @@ impl State for LeaderRunning {
         let mut log_interval = tokio::time::interval(Duration::from_secs(60));
         log_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut poll_interval = tokio::time::interval(LEADER_POLL_INTERVAL);
+        let mut poll_interval = tokio::time::interval(*config().controller.leader_poll_interval);
         poll_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         leader_stop_if_desired_running!(self, ctx.config, ctx);

@@ -370,6 +370,9 @@ pub struct ControllerConfig {
     /// TLS configuration for controller gRPC service
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+
+    /// Poll interval for leader status
+    pub leader_poll_interval: HumanReadableDuration,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

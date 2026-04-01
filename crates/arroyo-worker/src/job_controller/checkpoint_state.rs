@@ -215,7 +215,7 @@ impl CheckpointState {
     }
 
     pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) -> anyhow::Result<()> {
-        debug!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_index = c.subtask_index, operator_id = ?c.operator_id);
+        debug!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_idx = c.subtask_idx, operator_id = ?c.operator_id);
 
         if grpc::rpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
             bail!(
@@ -236,9 +236,9 @@ impl CheckpointState {
                 tasks: HashMap::new(),
             })
             .tasks
-            .entry(c.subtask_index)
+            .entry(c.subtask_idx)
             .or_insert_with(|| api::TaskCheckpointDetail {
-                subtask_index: c.subtask_index,
+                subtask_index: c.subtask_idx,
                 start_time: c.time,
                 finish_time: None,
                 bytes: None,
