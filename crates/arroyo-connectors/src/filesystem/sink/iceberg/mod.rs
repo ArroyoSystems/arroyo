@@ -357,6 +357,15 @@ impl IcebergTable {
             })
             .try_collect()?;
 
+        // Workaround for iceberg-rust 0.6.0 bug: SnapshotProducer drains added_data_files
+        // before computing the summary, producing all-zero added-* stats. We inject the
+        // correct values via set_snapshot_properties so they appear in the snapshot summary.
+        // Fixed upstream in 0.8.0 (https://github.com/apache/iceberg-rust/pull/1767);
+        // this workaround can be removed when iceberg-rust is upgraded.
+        let added_data_files = files.len().to_string();
+        let added_records: u64 = files.iter().map(|f| f.record_count()).sum();
+        let added_files_size: u64 = files.iter().map(|f| f.file_size_in_bytes()).sum();
+
         // commit the transaction in the rest catalog
         debug!(
             message = "starting iceberg commit",
@@ -367,9 +376,14 @@ impl IcebergTable {
         let tx = tx
             .fast_append()
             .set_snapshot_properties(
-                [(ARROYO_COMMIT_ID.to_string(), tx_id)]
-                    .into_iter()
-                    .collect(),
+                [
+                    (ARROYO_COMMIT_ID.to_string(), tx_id),
+                    ("added-data-files".to_string(), added_data_files),
+                    ("added-records".to_string(), added_records.to_string()),
+                    ("added-files-size".to_string(), added_files_size.to_string()),
+                ]
+                .into_iter()
+                .collect(),
             )
             .add_data_files(files)
             .with_check_duplicate(false)
