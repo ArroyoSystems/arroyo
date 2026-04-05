@@ -81,7 +81,8 @@ impl KafkaTopicTester {
     ) -> KafkaSourceWithReads {
         let mut kafka = Box::new(KafkaSourceFunc {
             bootstrap_servers: self.server.clone(),
-            topic: self.topic.clone(),
+            topic: Some(self.topic.clone()),
+            topic_pattern: None,
             group_id: self.group_id.clone(),
             group_id_prefix: None,
             offset_mode: SourceOffset::Earliest,
@@ -394,7 +395,8 @@ async fn test_kafka_with_metadata_fields() {
     // Set metadata fields in KafkaSourceFunc
     let mut kafka = KafkaSourceFunc {
         bootstrap_servers: kafka_topic_tester.server.clone(),
-        topic: kafka_topic_tester.topic.clone(),
+        topic: Some(kafka_topic_tester.topic.clone()),
+        topic_pattern: None,
         group_id: kafka_topic_tester.group_id.clone(),
         group_id_prefix: None,
         offset_mode: SourceOffset::Earliest,
