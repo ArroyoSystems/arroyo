@@ -579,6 +579,71 @@ pub struct DatabaseConfig {
     pub sqlite: SqliteConfig,
 }
 
+/// A validated Postgres schema name. Only allows `[a-zA-Z0-9_]`.
+#[derive(Clone, Eq, PartialEq)]
+pub struct SchemaName(String);
+
+impl SchemaName {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for SchemaName {
+    fn default() -> Self {
+        Self("public".to_string())
+    }
+}
+
+impl PartialEq<&str> for SchemaName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl std::fmt::Display for SchemaName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl std::fmt::Debug for SchemaName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl Serialize for SchemaName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for SchemaName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s.is_empty() {
+            return Err(de::Error::custom(
+                "database.postgres.schema must not be empty",
+            ));
+        }
+        if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(de::Error::custom(format!(
+                "database.postgres.schema '{}' contains invalid characters; \
+                only alphanumerics and underscores are allowed",
+                s
+            )));
+        }
+        Ok(Self(s))
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PostgresConfig {
@@ -587,6 +652,8 @@ pub struct PostgresConfig {
     pub port: u16,
     pub user: String,
     pub password: Sensitive<String>,
+    #[serde(default)]
+    pub schema: SchemaName,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -898,8 +965,32 @@ impl TlsConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{Config, DatabaseType, Scheduler, SqliteConfig, load_config};
+    use crate::config::{Config, DatabaseType, Scheduler, SchemaName, SqliteConfig, load_config};
     use url::Url;
+
+    #[test]
+    fn schema_name_accepts_valid_identifiers() {
+        for name in ["public", "arroyo", "arroyo_v2", "A_1"] {
+            let result: Result<SchemaName, _> = serde_json::from_value(serde_json::json!(name));
+            assert!(result.is_ok(), "expected {name:?} to be accepted");
+        }
+    }
+
+    #[test]
+    fn schema_name_rejects_invalid_identifiers() {
+        for name in [
+            "",                 // empty
+            "my schema",        // whitespace
+            "my-schema",        // hyphen
+            "drop;",            // semicolon
+            "schema\"quoted\"", // embedded quotes
+            "schema'",          // single quote
+            "sché",             // non-ASCII
+        ] {
+            let result: Result<SchemaName, _> = serde_json::from_value(serde_json::json!(name));
+            assert!(result.is_err(), "expected {name:?} to be rejected");
+        }
+    }
 
     #[test]
     fn test_config() {

@@ -196,6 +196,7 @@ async fn pg_pool() -> Pool {
     cfg.port = Some(config.port);
     cfg.user = Some(config.user.clone());
     cfg.password = Some((*config.password).clone());
+    cfg.options = Some(format!("-csearch_path={}", config.schema));
     cfg.manager = Some(ManagerConfig {
         recycling_method: RecyclingMethod::Fast,
     });
@@ -326,6 +327,7 @@ async fn connect(
     Connection<impl AsyncRead + AsyncWrite + Unpin, impl AsyncRead + AsyncWrite + Unpin>,
 )> {
     let config = &config().database.postgres;
+    let options = format!("-csearch_path={}", config.schema);
 
     loop {
         match tokio_postgres::config::Config::new()
@@ -334,6 +336,7 @@ async fn connect(
             .user(&config.user)
             .password(&*config.password)
             .dbname(&config.database_name)
+            .options(&options)
             .connect(NoTls)
             .await
         {
