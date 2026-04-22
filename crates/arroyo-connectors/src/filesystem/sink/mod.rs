@@ -171,15 +171,15 @@ fn map_object_store_error(obj_err: &object_store::Error) -> DataflowError {
         Error::NotFound { .. }
         | Error::InvalidPath { .. }
         | Error::Unauthenticated { .. }
-        | Error::PermissionDenied { .. }
-        | Error::AlreadyExists { .. } => {
+        | Error::PermissionDenied { .. } => {
             connector_err!(User, NoRetry, "{}", obj_err)
         }
         // External errors: permanent issues that won't be fixed by retrying
         Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented => {
             connector_err!(External, NoRetry, "{}", obj_err)
         }
-        // External errors: transient issues worth retrying
+        // External errors: transient issues worth retrying.
+        // AlreadyExists falls here and is expected to be transient.
         _ => {
             connector_err!(External, WithBackoff, "{}", obj_err)
         }
