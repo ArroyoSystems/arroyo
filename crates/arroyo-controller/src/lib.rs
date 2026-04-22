@@ -65,7 +65,7 @@ pub struct JobConfig {
     id: Arc<String>,
     organization_id: String,
     pipeline_name: String,
-    pipeline_id: i64,
+    pipeline_id: String,
     stop_mode: StopMode,
     checkpoint_interval: Duration,
     ttl: Option<Duration>,
@@ -78,7 +78,7 @@ pub struct JobConfig {
 #[derive(Clone, Debug)]
 pub struct JobStatus {
     id: Arc<String>,
-    run_id: u64,
+    generation: u64,
     state: String,
     start_time: Option<OffsetDateTime>,
     finish_time: Option<OffsetDateTime>,
@@ -105,7 +105,7 @@ impl JobStatus {
             &self.restarts,
             &self.pipeline_path,
             &self.wasm_path,
-            &(self.run_id as i64),
+            &(self.generation as i64),
             &self.restart_nonce,
             &*self.id,
         )
@@ -621,7 +621,7 @@ impl ControllerServer {
 
                     let status = JobStatus {
                         id: id.clone(),
-                        run_id: p.run_id.unwrap_or(0).max(0) as u64,
+                        generation: p.run_id.unwrap_or(0).max(0) as u64,
                         state: p.state.unwrap_or_else(|| Created {}.name().to_string()),
                         start_time: p.start_time,
                         finish_time: p.finish_time,

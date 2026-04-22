@@ -132,7 +132,7 @@ impl Recovering {
     async fn tear_down_workers<'a>(ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
         if ctx
             .scheduler
-            .workers_for_job(&ctx.config.id, Some(ctx.status.run_id))
+            .workers_for_job(&ctx.config.id, Some(ctx.status.generation))
             .await?
             .is_empty()
         {
@@ -142,7 +142,7 @@ impl Recovering {
         info!(message = "tearing down workers", job_id = *ctx.config.id);
 
         ctx.scheduler
-            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+            .stop_workers(&ctx.config.id, Some(ctx.status.generation), true)
             .await
     }
 

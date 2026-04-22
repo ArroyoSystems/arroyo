@@ -54,6 +54,24 @@ impl Display for MachineId {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
+pub struct PipelineId(pub Arc<String>);
+
+impl Deref for PipelineId {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for PipelineId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct JobId(pub Arc<String>);
 
 impl Deref for JobId {

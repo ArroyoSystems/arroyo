@@ -3,7 +3,7 @@ SELECT
     c.id as id,
     c.organization_id as org_id,
     pipeline_name,
-    pipeline_id,
+    P.pub_id as pipeline_id,
     checkpoint_interval_micros,
     ttl_micros,
     parallelism_overrides,
@@ -23,7 +23,8 @@ SELECT
     restart_mode,
     ignore_state_before_epoch
 FROM job_configs c
-INNER JOIN job_statuses s ON c.id = s.id;
+INNER JOIN job_statuses s ON c.id = s.id
+INNER JOIN pipelines P ON pipeline_id = P.id;
 
 --! update_job_status (start_time?, finish_time?, tasks?, failure_message?, failure_domain?, pipeline_path?, wasm_path?)
 UPDATE job_statuses

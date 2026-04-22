@@ -3,11 +3,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
+use std::time::SystemTime;
 use arroyo_rpc::grpc::rpc::{
     StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
 };
-use arroyo_types::{JobId, MachineId, WorkerId};
+use arroyo_types::{to_micros, JobId, MachineId, WorkerId};
 use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{Request, transport::Channel};
 use tracing::{debug, error, info, warn};
@@ -26,9 +26,11 @@ use crate::{
 };
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::checkpoint_protocol::CurrentGeneration;
 use arroyo_rpc::config::{JobControllerMode, config};
+use arroyo_rpc::errors::StorageError;
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc_channel_builder;
+use arroyo_rpc::{checkpoint_protocol, grpc_channel_builder};
 use arroyo_rpc::worker_types::RunningMessage;
 use arroyo_state::{
     BackingStore, StateBackend,
@@ -113,7 +115,7 @@ async fn handle_worker_connect<'a>(
         } => {
             let job_id = ctx.config.id.clone();
 
-            if ctx.status.run_id != run_id {
+            if ctx.status.generation != run_id {
                 info!(
                     message = "worker connect from wrong run; ignoring",
                     job_id = *job_id,
@@ -205,7 +207,7 @@ impl Scheduling {
                     program: ctx.program.clone(),
                     wasm_path: "".to_string(),
                     job_id: ctx.config.id.clone(),
-                    run_id: ctx.status.run_id,
+                    run_id: ctx.status.generation,
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
@@ -250,6 +252,23 @@ impl Scheduling {
     }
 }
 
+pub async fn write_generation_manifest(pipeline_id: &str, job_id: &str, generation: u64) -> Result<(), StorageError> {
+    let manifest = CurrentGeneration {
+        version: checkpoint_protocol::METADATA_VERSION,
+        pipeline_id: pipeline_id.to_string(),
+        job_id: job_id.to_string(),
+        job_generation: generation,
+        generation_manifest_ref: checkpoint_protocol::paths::generation_manifest(pipeline_id, job_id, generation),
+        updated_at_micros: to_micros(SystemTime::now()),
+    };
+
+    let storage_client = arroyo_state::get_storage_provider().await?;
+    let path = checkpoint_protocol::paths::current_generation(pipeline_id, job_id);
+    
+    storage_client.put(path, serde_json::to_vec(&manifest).expect("failed to serialize JSON"))
+}
+
+
 #[async_trait::async_trait]
 impl State for Scheduling {
     fn name(&self) -> &'static str {
@@ -275,6 +294,13 @@ impl State for Scheduling {
 
         let slots_needed: usize = slots_for_job(&*ctx.program);
         self = self.start_workers(ctx, slots_needed).await?;
+
+        let leader_mode = matches!(config().job_controller, JobControllerMode::Worker);
+        
+        // if this is a leader cluster, write the generation metadata
+        if leader_mode {
+            write_generation_manifest(ctx.config.pipeline_name)
+        }
 
         // wait for them to connect and make outbound RPC connections
         let mut workers = HashMap::new();
@@ -583,7 +609,7 @@ impl State for Scheduling {
             .map(|info| info.min_epoch)
             .unwrap_or(default_epoch);
 
-        let (leader_id, leader_addr) = matches!(config().job_controller, JobControllerMode::Worker)
+        let (leader_id, leader_addr) = leader_mode
             .then(|| {
                 workers
                     .iter()
@@ -782,7 +808,7 @@ impl State for Scheduling {
 
                 let leader_manager = match LeaderManager::connect(
                     JobId(ctx.config.id.clone()),
-                    ctx.status.run_id,
+                    ctx.status.generation,
                     leader_addr,
                 )
                 .await

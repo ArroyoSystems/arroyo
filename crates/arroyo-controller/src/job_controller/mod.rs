@@ -120,6 +120,7 @@ impl JobController {
                 last_updated_metrics: Instant::now(),
                 program,
                 checkpoint_spans: vec![],
+                worker_leader_mode: false,
             },
             config,
             cleanup_task: None,

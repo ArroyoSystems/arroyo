@@ -1,9 +1,6 @@
 use arrow_array::RecordBatch;
-use arroyo_rpc::errors::StateError;
-use arroyo_rpc::grpc::rpc::{
-    CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
-    OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
-};
+use arroyo_rpc::errors::{StateError, StorageError};
+use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig, OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum};
 use arroyo_types::single_item_hash_map;
 use async_trait::async_trait;
 use bincode::config::Configuration;
@@ -163,6 +160,9 @@ pub trait BackingStore {
     /// writes the checkpoint metadata to the backing store
     async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<(), StateError>;
 
+    /// writes checkpoint manifest for checkpoint metadata v1
+    async fn write_checkpoint_manifest(manifest: CheckpointManifest) -> Result<(), StateError>;
+
     /// cleans up a checkpoint by deleting data that is no longer needed
     async fn cleanup_checkpoint(
         metadata: CheckpointMetadata,
@@ -180,7 +180,7 @@ pub fn hash_key<K: Hash>(key: &K) -> u64 {
 static STORAGE_PROVIDER: tokio::sync::OnceCell<Arc<StorageProvider>> =
     tokio::sync::OnceCell::const_new();
 
-pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>, StateError> {
+pub async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>, StorageError> {
     // TODO: this should be encoded in the config so that the controller doesn't need
     // to be synchronized with the workers
 

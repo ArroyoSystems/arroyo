@@ -107,7 +107,7 @@ impl State for Created {
 async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
     if let Err(e) = ctx
         .scheduler
-        .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+        .stop_workers(&ctx.config.id, Some(ctx.status.generation), true)
         .await
     {
         warn!(
@@ -194,7 +194,7 @@ impl TransitionTo<Compiling> for Scheduling {}
 impl TransitionTo<Scheduling> for Compiling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -257,7 +257,7 @@ impl TransitionTo<Rescaling> for Running {}
 impl TransitionTo<Scheduling> for Rescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -352,7 +352,7 @@ impl TransitionTo<LeaderRestarting> for LeaderRestarting {}
 impl TransitionTo<Scheduling> for LeaderRestarting {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -369,7 +369,7 @@ impl TransitionTo<LeaderStopping> for LeaderRestarting {}
 impl TransitionTo<Scheduling> for LeaderRescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -406,7 +406,7 @@ impl TransitionTo<Restarting> for Restarting {}
 impl TransitionTo<Scheduling> for Restarting {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }

@@ -122,7 +122,9 @@ impl WorkerJobController {
         Ok(Self {
             checkpoint_interval,
             model: RunningJobModel {
+                pipeline_id: worker_context.pipeline_id.0.clone(),
                 job_id: worker_context.job_id.0.clone(),
+                generation: 0,
                 state: JobState::Running,
                 checkpoint_state: None,
                 epoch,
@@ -135,6 +137,8 @@ impl WorkerJobController {
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
                 checkpoint_spans: vec![],
+                worker_leader_mode: true,
+                finished_operators: vec![],
             },
             status,
             worker_context,

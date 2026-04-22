@@ -3,9 +3,7 @@ use crate::tables::global_keyed_map::GlobalKeyedTable;
 use crate::tables::{CompactionConfig, ErasedTable};
 use crate::{BackingStore, get_storage_provider};
 use arroyo_rpc::errors::StateError;
-use arroyo_rpc::grpc::rpc::{
-    CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
-};
+use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 
@@ -17,6 +15,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::{debug, info, warn};
+use arroyo_rpc::checkpoint_protocol::paths;
 
 pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
 pub const GENERATIONS_TO_COMPACT: u32 = 1; // only compact generation 0 files
@@ -89,6 +88,19 @@ impl BackingStore for ParquetBackend {
         // TODO: propagate error
         Ok(())
     }
+
+    // used in worker leader mode / checkpoint metadata v1
+    async fn write_checkpoint_manifest(manifest: CheckpointManifest) -> Result<(), StateError> {
+        debug!("writing checkpoint manifest for epoch {:?}", manifest.epoch);
+        let storage_client = get_storage_provider().await?;
+        let path = paths::checkpoint_manifest(&manifest.pipeline_id, &manifest.job_id, manifest.generation, manifest.epoch);
+        
+        storage_client
+            .put(path.as_str(), manifest.encode_to_vec())
+            .await?;
+        Ok(())
+    }
+
 
     async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<(), StateError> {
         debug!("writing checkpoint {:?}", metadata);

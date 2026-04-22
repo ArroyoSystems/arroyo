@@ -9,9 +9,7 @@ use arroyo_rpc::checkpoints::{
 };
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
-use arroyo_rpc::grpc::rpc::{
-    CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq, TaskCheckpointEventType,
-};
+use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq, OperatorCheckpointMetadata, TaskCheckpointEventType};
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::committing_state::CommittingState;
 use arroyo_state::parquet::ParquetBackend;
@@ -27,7 +25,9 @@ use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 
 pub struct RunningJobModel {
+    pub pipeline_id: Arc<String>,
     pub job_id: Arc<String>,
+    pub generation: u64,
     pub state: JobState,
     pub program: Arc<LogicalProgram>,
     pub checkpoint_state: Option<CheckpointingOrCommittingState>,
@@ -39,6 +39,10 @@ pub struct RunningJobModel {
     pub operator_parallelism: HashMap<u32, usize>,
     pub metric_update_task: Option<JoinHandle<()>>,
     pub last_updated_metrics: Instant,
+
+    pub finished_operators: Vec<OperatorCheckpointMetadata>,
+
+    pub worker_leader_mode: bool,
 
     // checkpoint-wide events
     pub checkpoint_spans: Vec<JobCheckpointSpan>,
@@ -180,8 +184,12 @@ impl RunningJobModel {
                             bail!("Received checkpoint finished but not checkpointing");
                         };
                         if let Some(operator_metadata) = checkpoint_state.checkpoint_finished(c)? {
-                            StateBackend::write_operator_checkpoint_metadata(operator_metadata)
-                                .await?;
+                            if self.worker_leader_mode {
+                                self.finished_operators.push(operator_metadata);
+                            } else {
+                                StateBackend::write_operator_checkpoint_metadata(operator_metadata)
+                                    .await?;
+                            }
                         }
 
                         if checkpoint_state.done()
@@ -394,13 +402,36 @@ impl RunningJobModel {
             let state = self.checkpoint_state.take().unwrap();
             match state {
                 CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
+                    let pipeline_id = (*self.pipeline_id).clone();
+                    let generation = self.generation;
+                    let worker_leader_mode = self.worker_leader_mode;
+                    let operators = self.finished_operators.drain(..).collect();
                     let metadata_span =
                         self.start_or_get_span(JobCheckpointEventType::WritingMetadata);
-                    let checkpoint_metadata = checkpointing.build_metadata();
-                    StateBackend::write_checkpoint_metadata(checkpoint_metadata).await?;
+
+                    let metadata = checkpointing.build_metadata();
+                    let committing_state = checkpointing.committing_state();
+
+                    if worker_leader_mode {
+                        let manifest = CheckpointManifest {
+                            pipeline_id,
+                            job_id: metadata.job_id,
+                            generation,
+                            epoch: metadata.epoch as u64,
+                            min_epoch: metadata.min_epoch as u64,
+                            start_time: metadata.start_time,
+                            finish_time: metadata.finish_time,
+                            needs_commit: !committing_state.done(),
+                            committed: false,
+                            operators,
+                        };
+                        StateBackend::write_checkpoint_manifest(manifest).await?;
+                    } else {
+                        StateBackend::write_checkpoint_metadata(metadata).await?;
+                    }
+
                     metadata_span.finish();
 
-                    let committing_state = checkpointing.committing_state();
                     let duration = checkpointing
                         .start_time()
                         .elapsed()

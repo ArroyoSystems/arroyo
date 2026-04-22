@@ -316,6 +316,19 @@ message CheckpointMetadata {
   repeated string operator_ids = 6;
 }
 
+message CheckpointManifest {
+  string pipeline_id = 1;
+  string job_id = 2;
+  uint64 generation = 3;
+  uint64 epoch = 4;
+  uint64 min_epoch = 5;
+  uint64 start_time = 6;
+  uint64 finish_time = 7;
+  bool needs_commit = 8;
+  bool committed = 9;
+  repeated OperatorCheckpointMetadata operators = 10;
+}
+
 message SubtaskCheckpointMetadata {
   uint32 subtask_index = 1;
   uint64 start_time = 2;

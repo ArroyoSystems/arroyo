@@ -62,7 +62,7 @@ impl State for Stopping {
             (_, StopBehavior::StopWorkers) | (None, _) => {
                 if let Err(e) = ctx
                     .scheduler
-                    .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+                    .stop_workers(&ctx.config.id, Some(ctx.status.generation), true)
                     .await
                 {
                     return Err(ctx.retryable(self, "failed while stopping workers", e, 20));

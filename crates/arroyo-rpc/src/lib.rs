@@ -1,4 +1,5 @@
 pub mod api_types;
+pub mod checkpoint_protocol;
 pub mod checkpoints;
 pub mod formats;
 pub mod public_ids;
