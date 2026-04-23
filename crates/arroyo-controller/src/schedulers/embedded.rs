@@ -1,7 +1,7 @@
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
-use arroyo_types::{JobId, MachineId, PipelineId, WorkerId};
+use arroyo_types::{JobId, MachineId, WorkerId};
 use arroyo_worker::WorkerServer;
 use async_trait::async_trait;
 use std::collections::HashMap;

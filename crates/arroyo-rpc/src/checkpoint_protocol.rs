@@ -12,7 +12,11 @@
 //! - `P/J/generations/G/generation_manifest.json`
 //! - `P/J/epochs/epoch-{E:07}.lock`
 
+use arroyo_types::to_micros;
+use std::time::SystemTime;
+use anyhow::{anyhow, bail};
 use serde::{Deserialize, Serialize};
+use crate::grpc::rpc::{CheckpointManifest, CheckpointMetadata};
 
 /// Current version of the metadata files used for the checkpoint protocol
 pub const METADATA_VERSION: u32 = 1;
@@ -47,12 +51,51 @@ pub struct GenerationManifest {
     pub version: u32,
     pub pipeline_id: String,
     pub job_id: String,
-    pub job_generation: u64,
+    pub generation: u64,
     #[serde(default)]
     pub base_checkpoint_ref: Option<String>,
     #[serde(default)]
     pub latest_checkpoint_ref: Option<String>,
     pub updated_at_micros: u64,
+}
+
+impl GenerationManifest {
+    pub fn new(
+        pipeline_id: String,
+        job_id: String,
+        generation: u64,
+        base_checkpoint_ref: Option<String>,
+    ) -> Self {
+        Self {
+            version: METADATA_VERSION,
+            pipeline_id,
+            job_id,
+            generation,
+            base_checkpoint_ref,
+            latest_checkpoint_ref: None,
+            updated_at_micros: to_micros(SystemTime::now()),
+        }
+    }
+
+    /// Returns the checkpoint reference that this generation would be
+    /// recovered from: `latest_checkpoint_ref` if this generation has
+    /// published its own checkpoint, otherwise `base_checkpoint_ref` (the
+    /// checkpoint this generation restored from).
+    ///
+    /// Returns `None` for a brand-new generation that has no base and has
+    /// not yet checkpointed.
+    pub fn recovery_ref(&self) -> Option<&str> {
+        self.latest_checkpoint_ref
+            .as_deref()
+            .or(self.base_checkpoint_ref.as_deref())
+    }
+
+}
+
+/// Abstracts over the two types of checkpoint metadata we have, for metadata v0 and v1
+pub enum MetadataOrManifest {
+    Metadata(CheckpointMetadata),
+    Manifest(CheckpointManifest),
 }
 
 /// The epoch lock. Created with a conditional `put-if-not-exists` write; this

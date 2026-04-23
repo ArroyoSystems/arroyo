@@ -342,9 +342,10 @@ impl WorkerState {
                 &req.tasks,
                 registry,
                 req.restore_epoch,
+                req.checkpoint_manifest_ref,
                 control_tx.clone(),
             )
-            .await;
+            .await?;
 
             let engine = Engine::new(
                 program,

@@ -118,10 +118,6 @@ impl BackingStore for ParquetBackend {
         Ok(())
     }
 
-    async fn prepare_checkpoint_load(_metadata: &CheckpointMetadata) -> Result<(), StateError> {
-        Ok(())
-    }
-
     async fn cleanup_checkpoint(
         mut metadata: CheckpointMetadata,
         old_min_epoch: u32,

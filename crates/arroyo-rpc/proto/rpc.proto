@@ -452,6 +452,8 @@ message StartExecutionReq {
   // (used in worker leader mode)
   bool wait_for_leader = 8;
   uint64 checkpoint_interval_micros = 9;
+  // for leader mode, this gives the path to load the restore checkpoint manifest from
+  optional string checkpoint_manifest_ref = 10;
 }
 
 message StartExecutionResp {

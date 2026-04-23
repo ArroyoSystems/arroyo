@@ -25,7 +25,7 @@ use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
+use arroyo_types::{MachineId, WorkerId, from_micros};
 use cornucopia_async::DatabaseSource;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};

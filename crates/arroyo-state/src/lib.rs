@@ -133,9 +133,6 @@ pub enum DataOperation {
 }
 #[async_trait]
 pub trait BackingStore {
-    /// prepares a checkpoint to be loaded, e.g., by deleting future data
-    async fn prepare_checkpoint_load(metadata: &CheckpointMetadata) -> Result<(), StateError>;
-
     /// loads the checkpoint metadata for a given job id and epoch
     async fn load_checkpoint_metadata(
         job_id: &str,

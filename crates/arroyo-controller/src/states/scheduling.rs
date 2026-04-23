@@ -1,8 +1,7 @@
 use arroyo_rpc::grpc::rpc::{
-    JobFailure, StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
+    StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
 };
-use arroyo_types::{JobId, MachineId, WorkerId, retry, to_micros};
-use std::time::SystemTime;
+use arroyo_types::{JobId, MachineId, WorkerId, retry};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -26,14 +25,17 @@ use crate::{
 };
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::checkpoint_protocol::CurrentGeneration;
+use arroyo_rpc::checkpoint_protocol::{
+    CurrentGeneration, GenerationManifest, get_checkpoint_manifest,
+};
 use arroyo_rpc::config::{JobControllerMode, config};
-use arroyo_rpc::grpc::{api, rpc};
+use arroyo_rpc::grpc::api;
+use arroyo_rpc::grpc_channel_builder;
 use arroyo_rpc::worker_types::RunningMessage;
-use arroyo_rpc::{checkpoint_protocol, grpc_channel_builder};
 use arroyo_state::{
     BackingStore, StateBackend,
     committing_state::CommittingState,
+    get_storage_provider,
     tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
 };
 
@@ -200,7 +202,17 @@ struct CheckpointInfo {
     needs_commits: bool,
 }
 
-async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobContext<'a>) -> Result<(Box<Scheduling>, Option<CheckpointInfo>, Option<CommittingState>), StateError> {
+async fn get_checkpoint_info_legacy<'a>(
+    state: Box<Scheduling>,
+    ctx: &'a JobContext<'a>,
+) -> Result<
+    (
+        Box<Scheduling>,
+        Option<CheckpointInfo>,
+        Option<CommittingState>,
+    ),
+    StateError,
+> {
     let checkpoint_info = {
         let client = match ctx.db.client().await {
             Ok(c) => c,
@@ -209,22 +221,20 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
             }
         };
 
-        let checkpoint_result = match controller_queries::fetch_last_successful_checkpoint(
-            &client,
-            &*ctx.config.id,
-        )
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                return Err(ctx.retryable(
-                    state,
-                    "failed to fetch last checkpoint",
-                    e.into(),
-                    10,
-                ));
-            }
-        };
+        let checkpoint_result =
+            match controller_queries::fetch_last_successful_checkpoint(&client, &*ctx.config.id)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(ctx.retryable(
+                        state,
+                        "failed to fetch last checkpoint",
+                        e.into(),
+                        10,
+                    ));
+                }
+            };
 
         checkpoint_result.into_iter().next().and_then(|r| {
             // Filter checkpoint based on ignore_state_before_epoch threshold
@@ -236,25 +246,25 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
 
             if should_restore {
                 info!(
-                        message = "restoring checkpoint",
-                        job_id = *ctx.config.id,
-                        epoch = r.epoch,
-                        min_epoch = r.min_epoch
-                    );
+                    message = "restoring checkpoint",
+                    job_id = *ctx.config.id,
+                    epoch = r.epoch,
+                    min_epoch = r.min_epoch
+                );
 
                 Some(CheckpointInfo {
+                    id: r.pub_id,
                     epoch: r.epoch as u32,
                     min_epoch: r.min_epoch as u32,
-                    id: r.pub_id,
                     needs_commits: r.needs_commits,
                 })
             } else {
                 info!(
-                        message = "skipping checkpoint due to ignore_state_before_epoch threshold",
-                        job_id = *ctx.config.id,
-                        checkpoint_epoch = r.epoch,
-                        threshold = ctx.config.ignore_state_before_epoch.unwrap()
-                    );
+                    message = "skipping checkpoint due to ignore_state_before_epoch threshold",
+                    job_id = *ctx.config.id,
+                    checkpoint_epoch = r.epoch,
+                    threshold = ctx.config.ignore_state_before_epoch.unwrap()
+                );
                 None
             }
         })
@@ -284,7 +294,7 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
             &*ctx.config.id,
             &(last_epoch as i32 + 1),
         )
-            .await
+        .await
         {
             return Err(ctx.retryable(
                 state,
@@ -299,33 +309,25 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
 
     // clear all of the epochs after the one we're loading so that we don't read in-progress data
     if let Some(CheckpointInfo {
-                    epoch,
-                    min_epoch,
-                    id,
-                    needs_commits,
-                }) = checkpoint_info.clone()
+        id,
+        epoch,
+        min_epoch,
+        needs_commits,
+    }) = checkpoint_info.clone()
     {
-        let mut metadata =
-            match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch).await {
-                Ok(m) => m,
-                Err(err) => {
-                    return Err(ctx.retryable(
-                        state,
-                        format!("Failed to load checkpoint metadata for epoch {epoch}"),
-                        err.into(),
-                        10,
-                    ));
-                }
-            };
+        let mut metadata = match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch).await
+        {
+            Ok(m) => m,
+            Err(err) => {
+                return Err(ctx.retryable(
+                    state,
+                    format!("Failed to load checkpoint metadata for epoch {epoch}"),
+                    err.into(),
+                    10,
+                ));
+            }
+        };
 
-        if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
-            return Err(ctx.retryable(
-                state,
-                "failed to prepare checkpoint for loading",
-                e.into(),
-                10,
-            ));
-        }
         metadata.min_epoch = min_epoch;
         if needs_commits {
             let mut commit_subtasks = HashSet::new();
@@ -338,7 +340,7 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
                     operator_id,
                     epoch,
                 )
-                    .await
+                .await
                 {
                     Ok(m) => m,
                     Err(err) => {
@@ -354,14 +356,13 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
                     return Err(fatal(
                         "missing operator metadata",
                         anyhow!(
-                                "operator metadata for {} not found for job {}",
-                                operator_id,
-                                ctx.config.id
-                            ),
+                            "operator metadata for {} not found for job {}",
+                            operator_id,
+                            ctx.config.id
+                        ),
                     ));
                 };
-                for (table_name, table_metadata) in &operator_metadata.table_checkpoint_metadata
-                {
+                for (table_name, table_metadata) in &operator_metadata.table_checkpoint_metadata {
                     let config =
                         operator_metadata
                             .table_configs
@@ -394,9 +395,7 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
                             .program
                             .graph
                             .node_weights()
-                            .find(|node| {
-                                node.operator_chain.first().operator_id == *operator_id
-                            })
+                            .find(|node| node.operator_chain.first().operator_id == *operator_id)
                             .unwrap();
                         for subtask_index in 0..program_node.parallelism {
                             commit_subtasks.insert((operator_id.clone(), subtask_index as u32));
@@ -406,6 +405,7 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
             }
             committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
         }
+
         if let Err(err) = StateBackend::write_checkpoint_metadata(metadata).await {
             return Err(ctx.retryable(
                 state,
@@ -419,8 +419,75 @@ async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobCont
     Ok((state, checkpoint_info, committing_state))
 }
 
-async fn get_checkpoint_info_leader<'a>(state: Box<Scheduling>, ctx: &'a JobContext<'a>) -> Result<(Box<Scheduling>, Option<CheckpointInfo>), StateError> {
-    
+async fn load_checkpoint_info<'a>(
+    ctx: &'a JobContext<'a>,
+) -> anyhow::Result<Option<CheckpointInfo>> {
+    let provider = get_storage_provider().await?;
+    let Some(generation_manifest) = GenerationManifest::resolve_latest(
+        &provider,
+        &ctx.pipeline_id,
+        &ctx.config.id,
+        ctx.status.generation,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    let Some(checkpoint_path) = generation_manifest.recovery_ref() else {
+        return Ok(None);
+    };
+
+    let checkpoint_manifest = get_checkpoint_manifest(provider, checkpoint_path).await?;
+
+    let should_restore = ctx
+        .config
+        .ignore_state_before_epoch
+        .map(|threshold| checkpoint_manifest.epoch as i64 >= threshold as i64)
+        .unwrap_or(true); // If no threshold, restore any checkpoint
+
+    Ok(if should_restore {
+        info!(
+            message = "restoring checkpoint",
+            job_id = *ctx.config.id,
+            epoch = checkpoint_manifest.epoch,
+            min_epoch = checkpoint_manifest.min_epoch
+        );
+
+        Some(CheckpointInfo {
+            id: checkpoint_path.to_string(),
+            epoch: checkpoint_manifest.epoch as u32,
+            min_epoch: checkpoint_manifest.min_epoch as u32,
+            needs_commits: checkpoint_manifest.needs_commit,
+        })
+    } else {
+        info!(
+            message = "skipping checkpoint due to ignore_state_before_epoch threshold",
+            job_id = *ctx.config.id,
+            checkpoint_epoch = checkpoint_manifest.epoch,
+            threshold = ctx.config.ignore_state_before_epoch.unwrap()
+        );
+        None
+    })
+}
+
+async fn get_and_register_checkpoint_info_leader<'a>(
+    ctx: &'a JobContext<'a>,
+) -> anyhow::Result<Option<CheckpointInfo>> {
+    // in the future, this should likely move to the leader
+    let checkpoint_info = load_checkpoint_info(ctx).await?;
+
+    // write the new generation manifest
+    let next_generation = GenerationManifest::new(
+        ctx.pipeline_id.to_string(),
+        ctx.config.id.to_string(),
+        ctx.status.generation,
+        checkpoint_info.as_ref().map(|c| c.id.clone()),
+    );
+
+    next_generation.write(get_storage_provider().await?).await?;
+
+    Ok(checkpoint_info)
 }
 
 impl Scheduling {
@@ -511,6 +578,17 @@ impl State for Scheduling {
 
         let leader_mode = matches!(config().job_controller, JobControllerMode::Worker);
 
+        let (self, checkpoint_info, committing_state) = if leader_mode {
+            match get_and_register_checkpoint_info_leader(&ctx).await {
+                Ok(ci) => (self, ci, None),
+                Err(e) => {
+                    return Err(ctx.retryable(self, "failed to load checkpoint metadata", e, 20));
+                }
+            }
+        } else {
+            get_checkpoint_info_legacy(self, &ctx).await?
+        };
+
         // if this is a leader cluster, write the generation metadata
         if leader_mode {
             let manifest =
@@ -590,15 +668,6 @@ impl State for Scheduling {
 
         // Compute assignments and send to workers
 
-        // TODO: better error handling
-
-        let (self, checkpoint_info, committing_state) = if leader_mode {
-            let (self, checkpoint_info) = get_checkpoint_info_leader(self, &ctx).await?;
-            (self, checkpoint_info, None)
-        } else {
-            get_checkpoint_info_legacy(self, &ctx).await?
-        };
-
         let assignments = compute_assignments(workers.values().collect(), &*ctx.program);
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();
         let program = api::ArrowProgram::from(ctx.program.clone());
@@ -649,6 +718,8 @@ impl State for Scheduling {
                 let program = program.clone();
                 let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
                 let leader_addr = leader_addr.clone();
+                let checkpoint_manifest_ref =
+                    leader_id.and(checkpoint_info.as_ref().map(|ci| ci.id.clone()));
 
                 tokio::spawn(async move {
                     info!(
@@ -669,6 +740,7 @@ impl State for Scheduling {
                             is_leader: leader_id.is_some_and(|l| l == id),
                             wait_for_leader: leader_id.is_some(),
                             checkpoint_interval_micros,
+                            checkpoint_manifest_ref: checkpoint_manifest_ref.clone(),
                         }))
                         .await
                     {

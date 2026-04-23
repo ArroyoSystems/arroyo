@@ -20,15 +20,13 @@ use arroyo_operator::context::{BatchReceiver, BatchSender, OperatorContext, batc
 use arroyo_operator::operator::Registry;
 use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNode, SourceNode};
 use arroyo_planner::physical::new_registry;
+use arroyo_rpc::checkpoint_protocol::{MetadataOrManifest, get_checkpoint_manifest};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::errors::DataflowError;
-use arroyo_rpc::grpc::{
-    api,
-    rpc::{CheckpointMetadata, TaskAssignment},
-};
+use arroyo_rpc::errors::{DataflowError, StateError};
+use arroyo_rpc::grpc::{api, rpc::TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_state::{BackingStore, StateBackend};
+use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
 use arroyo_types::{JobId, MachineId, PipelineId, TaskInfo, WorkerId, range_for_server};
 use arroyo_udf_host::LocalUdf;
 use futures::StreamExt;
@@ -198,9 +196,11 @@ impl Program {
             &assignments,
             registry,
             restore_epoch,
+            None,
             control_tx,
         )
         .await
+        .expect("could not load")
     }
 
     pub async fn from_logical(
@@ -209,19 +209,24 @@ impl Program {
         assignments: &Vec<TaskAssignment>,
         registry: Registry,
         restore_epoch: Option<u32>,
+        checkpoint_manifest_ref: Option<String>,
         control_tx: Sender<ControlResp>,
-    ) -> Program {
+    ) -> Result<Program, StateError> {
         let mut physical = DiGraph::new();
 
-        let checkpoint_metadata = if let Some(epoch) = restore_epoch {
+        let checkpoint_metadata = if let Some(path) = checkpoint_manifest_ref {
+            info!(
+                manifest_ref = path,
+                job_id, "restoring checkpoint in leader mode"
+            );
+            let manifest = get_checkpoint_manifest(get_storage_provider().await?, &path).await?;
+
+            Some(MetadataOrManifest::Manifest(manifest))
+        } else if let Some(epoch) = restore_epoch {
             info!("Restoring checkpoint {} for job {}", epoch, job_id);
-            Some(
-                StateBackend::load_checkpoint_metadata(job_id, epoch)
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!("failed to load checkpoint metadata for epoch {epoch}")
-                    }),
-            )
+            Some(MetadataOrManifest::Metadata(
+                StateBackend::load_checkpoint_metadata(job_id, epoch).await?,
+            ))
         } else {
             None
         };
@@ -350,10 +355,10 @@ impl Program {
             }
         }
 
-        Program {
+        Ok(Program {
             graph: Arc::new(RwLock::new(physical)),
             control_tx: Some(control_tx),
-        }
+        })
     }
 }
 
@@ -801,7 +806,7 @@ pub async fn construct_node(
     input_partitions: u32,
     in_schemas: Vec<Arc<ArroyoSchema>>,
     out_schema: Option<Arc<ArroyoSchema>>,
-    restore_from: Option<&CheckpointMetadata>,
+    restore_from: Option<&MetadataOrManifest>,
     control_tx: Sender<ControlResp>,
     registry: Arc<Registry>,
 ) -> OperatorNode {

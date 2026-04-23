@@ -27,8 +27,9 @@ use crate::{
     tables::global_keyed_map::GlobalKeyedTable,
 };
 use crate::{CheckpointMessage, TableData};
+use arroyo_rpc::checkpoint_protocol::MetadataOrManifest;
 use arroyo_rpc::errors::{DataflowResult, StateError};
-use arroyo_rpc::grpc::rpc::CheckpointMetadata;
+use arroyo_rpc::grpc::rpc::OperatorCheckpointMetadata;
 use tracing::{debug, error, info, warn};
 
 #[allow(unused)]
@@ -232,33 +233,46 @@ impl BackendWriter {
     }
 }
 
+async fn load_operator_metadata(
+    m: &MetadataOrManifest,
+    operator_id: &str,
+) -> Result<OperatorCheckpointMetadata, anyhow::Error> {
+    match m {
+        MetadataOrManifest::Metadata(m) => {
+            StateBackend::load_operator_metadata(&m.job_id, &operator_id, m.epoch)
+                .await?
+                .ok_or_else(|| anyhow!("missing metadata field in checkpoint; invalid protobuf"))
+        }
+        MetadataOrManifest::Manifest(manifest) => manifest
+            .operators
+            .iter()
+            .find(|op| {
+                op.operator_metadata
+                    .as_ref()
+                    .map(|op| op.operator_id == operator_id)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .ok_or_else(|| anyhow!("operator is missing from checkpoint metadata")),
+    }
+}
+
 impl TableManager {
     pub async fn load(
         task_info: Arc<TaskInfo>,
         table_configs: HashMap<String, TableConfig>,
         tx: Sender<ControlResp>,
-        restore_from: Option<&CheckpointMetadata>,
+        restore_from: Option<&MetadataOrManifest>,
     ) -> Result<(Self, Option<SystemTime>)> {
         let (watermark, checkpoint_metadata) = if let Some(metadata) = restore_from {
-            let (watermark, operator_metadata) = {
-                let metadata = StateBackend::load_operator_metadata(
-                    &task_info.job_id,
-                    &task_info.operator_id,
-                    metadata.epoch,
-                )
-                .await
-                .expect("lookup should succeed")
-                .expect("require metadata");
-                (
-                    metadata
-                        .operator_metadata
-                        .as_ref()
-                        .unwrap()
-                        .min_watermark
-                        .map(from_micros),
-                    metadata,
-                )
-            };
+            let operator_metadata =
+                load_operator_metadata(metadata, &task_info.operator_id).await?;
+            let watermark = operator_metadata
+                .operator_metadata
+                .as_ref()
+                .unwrap()
+                .min_watermark
+                .map(from_micros);
 
             (watermark, Some(operator_metadata))
         } else {
