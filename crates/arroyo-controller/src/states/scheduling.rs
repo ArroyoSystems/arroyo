@@ -238,7 +238,7 @@ impl Scheduling {
                         self,
                         "encountered error during scheduling",
                         anyhow::anyhow!("scheduling error: {}", s),
-                        10,
+                        20,
                     ));
                 }
             }

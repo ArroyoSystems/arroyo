@@ -208,7 +208,7 @@ impl State for Recovering {
 
         match Self::cleanup(ctx).await {
             Ok(()) => Ok(Transition::next(*self, Compiling)),
-            Err(e) => Err(ctx.retryable(self, "failed to tear down existing cluster", e, 3)),
+            Err(e) => Err(ctx.retryable(self, "failed to tear down existing cluster", e, 20)),
         }
     }
 }

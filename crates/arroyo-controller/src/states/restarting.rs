@@ -73,7 +73,7 @@ impl State for Restarting {
             }
             RestartMode::force => {
                 if let Err(e) = Recovering::cleanup(ctx).await {
-                    return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 10));
+                    return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 20));
                 }
 
                 Ok(Transition::next(*self, Scheduling {}))
