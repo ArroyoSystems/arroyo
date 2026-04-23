@@ -84,6 +84,12 @@ impl KafkaConnector {
             Some("aws_msk_iam") => KafkaConfigAuthentication::AwsMskIam {
                 region: options.pull_str("auth.region")?,
             },
+            Some("ssl") => KafkaConfigAuthentication::Ssl {
+                ca: options.pull_opt_str("auth.ca")?.map(VarStr::new),
+                cert: VarStr::new(options.pull_str("auth.cert")?),
+                key: VarStr::new(options.pull_str("auth.key")?),
+                key_password: options.pull_opt_str("auth.key_password")?.map(VarStr::new),
+            },
             Some(other) => bail!("unknown auth type '{}'", other),
         };
 
@@ -952,6 +958,48 @@ pub fn client_configs(
         KafkaConfigAuthentication::AwsMskIam { region: _ } => {
             client_configs.insert("sasl.mechanism".to_string(), "OAUTHBEARER".to_string());
             client_configs.insert("security.protocol".to_string(), "SASL_SSL".to_string());
+        }
+        KafkaConfigAuthentication::Ssl {
+            ca,
+            cert,
+            key,
+            key_password,
+        } => {
+            client_configs.insert("security.protocol".to_string(), "SSL".to_string());
+
+            client_configs
+                .entry("enable.ssl.certificate.verification".to_string())
+                .or_insert_with(|| "false".to_string());
+            client_configs
+                .entry("ssl.endpoint.identification.algorithm".to_string())
+                .or_insert_with(|| "none".to_string());
+
+            if let Some(ca) = ca {
+                let ca_val = ca.sub_env_vars()?;
+                if ca_val.trim_start().starts_with("-----BEGIN") {
+                    client_configs.insert("ssl.ca.pem".to_string(), ca_val);
+                } else {
+                    client_configs.insert("ssl.ca.location".to_string(), ca_val);
+                }
+            }
+
+            let cert_val = cert.sub_env_vars()?;
+            if cert_val.trim_start().starts_with("-----BEGIN") {
+                client_configs.insert("ssl.certificate.pem".to_string(), cert_val);
+            } else {
+                client_configs.insert("ssl.certificate.location".to_string(), cert_val);
+            }
+
+            let key_val = key.sub_env_vars()?;
+            if key_val.trim_start().starts_with("-----BEGIN") {
+                client_configs.insert("ssl.key.pem".to_string(), key_val);
+            } else {
+                client_configs.insert("ssl.key.location".to_string(), key_val);
+            }
+
+            if let Some(key_password) = key_password {
+                client_configs.insert("ssl.key.password".to_string(), key_password.sub_env_vars()?);
+            }
         }
     };
 
