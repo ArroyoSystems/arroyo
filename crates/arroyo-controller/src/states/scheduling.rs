@@ -192,6 +192,237 @@ async fn handle_worker_connect<'a>(
     Ok(())
 }
 
+#[derive(Clone, Debug)]
+struct CheckpointInfo {
+    epoch: u32,
+    min_epoch: u32,
+    id: String,
+    needs_commits: bool,
+}
+
+async fn get_checkpoint_info_legacy<'a>(state: Box<Scheduling>, ctx: &'a JobContext<'a>) -> Result<(Box<Scheduling>, Option<CheckpointInfo>, Option<CommittingState>), StateError> {
+    let checkpoint_info = {
+        let client = match ctx.db.client().await {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(ctx.retryable(state, "failed to get db client", e.into(), 10));
+            }
+        };
+
+        let checkpoint_result = match controller_queries::fetch_last_successful_checkpoint(
+            &client,
+            &*ctx.config.id,
+        )
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(ctx.retryable(
+                    state,
+                    "failed to fetch last checkpoint",
+                    e.into(),
+                    10,
+                ));
+            }
+        };
+
+        checkpoint_result.into_iter().next().and_then(|r| {
+            // Filter checkpoint based on ignore_state_before_epoch threshold
+            let should_restore = ctx
+                .config
+                .ignore_state_before_epoch
+                .map(|threshold| r.epoch >= threshold)
+                .unwrap_or(true); // If no threshold, restore any checkpoint
+
+            if should_restore {
+                info!(
+                        message = "restoring checkpoint",
+                        job_id = *ctx.config.id,
+                        epoch = r.epoch,
+                        min_epoch = r.min_epoch
+                    );
+
+                Some(CheckpointInfo {
+                    epoch: r.epoch as u32,
+                    min_epoch: r.min_epoch as u32,
+                    id: r.pub_id,
+                    needs_commits: r.needs_commits,
+                })
+            } else {
+                info!(
+                        message = "skipping checkpoint due to ignore_state_before_epoch threshold",
+                        job_id = *ctx.config.id,
+                        checkpoint_epoch = r.epoch,
+                        threshold = ctx.config.ignore_state_before_epoch.unwrap()
+                    );
+                None
+            }
+        })
+    };
+
+    {
+        // mark in-progress checkpoints as failed
+        let last_epoch = checkpoint_info
+            .as_ref()
+            .map(|checkpoint_info| checkpoint_info.epoch)
+            .unwrap_or(0);
+
+        let client = match ctx.db.client().await {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(ctx.retryable(
+                    state,
+                    "failed to get db client for mark_failed",
+                    e.into(),
+                    10,
+                ));
+            }
+        };
+
+        if let Err(e) = controller_queries::execute_mark_failed(
+            &client,
+            &*ctx.config.id,
+            &(last_epoch as i32 + 1),
+        )
+            .await
+        {
+            return Err(ctx.retryable(
+                state,
+                "failed to mark in-progress checkpoints as failed",
+                e.into(),
+                10,
+            ));
+        }
+    }
+
+    let mut committing_state = None;
+
+    // clear all of the epochs after the one we're loading so that we don't read in-progress data
+    if let Some(CheckpointInfo {
+                    epoch,
+                    min_epoch,
+                    id,
+                    needs_commits,
+                }) = checkpoint_info.clone()
+    {
+        let mut metadata =
+            match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch).await {
+                Ok(m) => m,
+                Err(err) => {
+                    return Err(ctx.retryable(
+                        state,
+                        format!("Failed to load checkpoint metadata for epoch {epoch}"),
+                        err.into(),
+                        10,
+                    ));
+                }
+            };
+
+        if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
+            return Err(ctx.retryable(
+                state,
+                "failed to prepare checkpoint for loading",
+                e.into(),
+                10,
+            ));
+        }
+        metadata.min_epoch = min_epoch;
+        if needs_commits {
+            let mut commit_subtasks = HashSet::new();
+            // (operator_id => (table_name => (subtask => data)))
+            let mut committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>> =
+                HashMap::new();
+            for operator_id in &metadata.operator_ids {
+                let operator_metadata = match StateBackend::load_operator_metadata(
+                    &ctx.config.id,
+                    operator_id,
+                    epoch,
+                )
+                    .await
+                {
+                    Ok(m) => m,
+                    Err(err) => {
+                        return Err(ctx.retryable(
+                            state,
+                            format!("Failed to load operator metadata for {operator_id} in epoch {epoch}"),
+                            err.into(),
+                            10,
+                        ));
+                    }
+                };
+                let Some(operator_metadata) = operator_metadata else {
+                    return Err(fatal(
+                        "missing operator metadata",
+                        anyhow!(
+                                "operator metadata for {} not found for job {}",
+                                operator_id,
+                                ctx.config.id
+                            ),
+                    ));
+                };
+                for (table_name, table_metadata) in &operator_metadata.table_checkpoint_metadata
+                {
+                    let config =
+                        operator_metadata
+                            .table_configs
+                            .get(table_name)
+                            .ok_or_else(|| {
+                                fatal(
+                                    format!(
+                                        "Failed to restore job; table config for {table_name} not found."
+                                    ),
+                                    anyhow!("table config for {} not found", table_name),
+                                )
+                            })?;
+                    if let Some(commit_data) = match config.table_type() {
+                        arroyo_rpc::grpc::rpc::TableEnum::MissingTableType => {
+                            return Err(fatal(
+                                "Missing table type",
+                                anyhow!("table type not found"),
+                            ));
+                        }
+                        arroyo_rpc::grpc::rpc::TableEnum::GlobalKeyValue => {
+                            GlobalKeyedTable::committing_data(config.clone(), table_metadata)
+                        }
+                        arroyo_rpc::grpc::rpc::TableEnum::ExpiringKeyedTimeTable => None,
+                    } {
+                        committing_data
+                            .entry(operator_id.clone())
+                            .or_default()
+                            .insert(table_name.to_string(), commit_data);
+                        let program_node = ctx
+                            .program
+                            .graph
+                            .node_weights()
+                            .find(|node| {
+                                node.operator_chain.first().operator_id == *operator_id
+                            })
+                            .unwrap();
+                        for subtask_index in 0..program_node.parallelism {
+                            commit_subtasks.insert((operator_id.clone(), subtask_index as u32));
+                        }
+                    }
+                }
+            }
+            committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
+        }
+        if let Err(err) = StateBackend::write_checkpoint_metadata(metadata).await {
+            return Err(ctx.retryable(
+                state,
+                format!("Failed to write checkpoint metadata for epoch {epoch}"),
+                err.into(),
+                10,
+            ));
+        }
+    }
+
+    Ok((state, checkpoint_info, committing_state))
+}
+
+async fn get_checkpoint_info_leader<'a>(state: Box<Scheduling>, ctx: &'a JobContext<'a>) -> Result<(Box<Scheduling>, Option<CheckpointInfo>), StateError> {
+    
+}
+
 impl Scheduling {
     async fn start_workers<'a>(
         self: Box<Self>,
@@ -361,228 +592,12 @@ impl State for Scheduling {
 
         // TODO: better error handling
 
-        #[derive(Clone, Debug)]
-        struct CheckpointInfo {
-            epoch: u32,
-            min_epoch: u32,
-            id: String,
-            needs_commits: bool,
-        }
-
-        let checkpoint_info = {
-            let client = match ctx.db.client().await {
-                Ok(c) => c,
-                Err(e) => {
-                    return Err(ctx.retryable(self, "failed to get db client", e.into(), 10));
-                }
-            };
-
-            let checkpoint_result = match controller_queries::fetch_last_successful_checkpoint(
-                &client,
-                &*ctx.config.id,
-            )
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    return Err(ctx.retryable(
-                        self,
-                        "failed to fetch last checkpoint",
-                        e.into(),
-                        10,
-                    ));
-                }
-            };
-
-            checkpoint_result.into_iter().next().and_then(|r| {
-                // Filter checkpoint based on ignore_state_before_epoch threshold
-                let should_restore = ctx
-                    .config
-                    .ignore_state_before_epoch
-                    .map(|threshold| r.epoch >= threshold)
-                    .unwrap_or(true); // If no threshold, restore any checkpoint
-
-                if should_restore {
-                    info!(
-                        message = "restoring checkpoint",
-                        job_id = *ctx.config.id,
-                        epoch = r.epoch,
-                        min_epoch = r.min_epoch
-                    );
-
-                    Some(CheckpointInfo {
-                        epoch: r.epoch as u32,
-                        min_epoch: r.min_epoch as u32,
-                        id: r.pub_id,
-                        needs_commits: r.needs_commits,
-                    })
-                } else {
-                    info!(
-                        message = "skipping checkpoint due to ignore_state_before_epoch threshold",
-                        job_id = *ctx.config.id,
-                        checkpoint_epoch = r.epoch,
-                        threshold = ctx.config.ignore_state_before_epoch.unwrap()
-                    );
-                    None
-                }
-            })
+        let (self, checkpoint_info, committing_state) = if leader_mode {
+            let (self, checkpoint_info) = get_checkpoint_info_leader(self, &ctx).await?;
+            (self, checkpoint_info, None)
+        } else {
+            get_checkpoint_info_legacy(self, &ctx).await?
         };
-
-        {
-            // mark in-progress checkpoints as failed
-            let last_epoch = checkpoint_info
-                .as_ref()
-                .map(|checkpoint_info| checkpoint_info.epoch)
-                .unwrap_or(0);
-
-            let client = match ctx.db.client().await {
-                Ok(c) => c,
-                Err(e) => {
-                    return Err(ctx.retryable(
-                        self,
-                        "failed to get db client for mark_failed",
-                        e.into(),
-                        10,
-                    ));
-                }
-            };
-
-            if let Err(e) = controller_queries::execute_mark_failed(
-                &client,
-                &*ctx.config.id,
-                &(last_epoch as i32 + 1),
-            )
-            .await
-            {
-                return Err(ctx.retryable(
-                    self,
-                    "failed to mark in-progress checkpoints as failed",
-                    e.into(),
-                    10,
-                ));
-            }
-        }
-
-        let mut committing_state = None;
-
-        // clear all of the epochs after the one we're loading so that we don't read in-progress data
-        if let Some(CheckpointInfo {
-            epoch,
-            min_epoch,
-            id,
-            needs_commits,
-        }) = checkpoint_info.clone()
-        {
-            let mut metadata =
-                match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch).await {
-                    Ok(m) => m,
-                    Err(err) => {
-                        return Err(ctx.retryable(
-                            self,
-                            format!("Failed to load checkpoint metadata for epoch {epoch}"),
-                            err.into(),
-                            10,
-                        ));
-                    }
-                };
-
-            if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
-                return Err(ctx.retryable(
-                    self,
-                    "failed to prepare checkpoint for loading",
-                    e.into(),
-                    10,
-                ));
-            }
-            metadata.min_epoch = min_epoch;
-            if needs_commits {
-                let mut commit_subtasks = HashSet::new();
-                // (operator_id => (table_name => (subtask => data)))
-                let mut committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>> =
-                    HashMap::new();
-                for operator_id in &metadata.operator_ids {
-                    let operator_metadata = match StateBackend::load_operator_metadata(
-                        &ctx.config.id,
-                        operator_id,
-                        epoch,
-                    )
-                    .await
-                    {
-                        Ok(m) => m,
-                        Err(err) => {
-                            return Err(ctx.retryable(
-                                self,
-                                format!("Failed to load operator metadata for {operator_id} in epoch {epoch}"),
-                                err.into(),
-                                10,
-                            ));
-                        }
-                    };
-                    let Some(operator_metadata) = operator_metadata else {
-                        return Err(fatal(
-                            "missing operator metadata",
-                            anyhow!(
-                                "operator metadata for {} not found for job {}",
-                                operator_id,
-                                ctx.config.id
-                            ),
-                        ));
-                    };
-                    for (table_name, table_metadata) in &operator_metadata.table_checkpoint_metadata
-                    {
-                        let config =
-                            operator_metadata
-                                .table_configs
-                                .get(table_name)
-                                .ok_or_else(|| {
-                                    fatal(
-                                        format!(
-                                            "Failed to restore job; table config for {table_name} not found."
-                                        ),
-                                        anyhow!("table config for {} not found", table_name),
-                                    )
-                                })?;
-                        if let Some(commit_data) = match config.table_type() {
-                            arroyo_rpc::grpc::rpc::TableEnum::MissingTableType => {
-                                return Err(fatal(
-                                    "Missing table type",
-                                    anyhow!("table type not found"),
-                                ));
-                            }
-                            arroyo_rpc::grpc::rpc::TableEnum::GlobalKeyValue => {
-                                GlobalKeyedTable::committing_data(config.clone(), table_metadata)
-                            }
-                            arroyo_rpc::grpc::rpc::TableEnum::ExpiringKeyedTimeTable => None,
-                        } {
-                            committing_data
-                                .entry(operator_id.clone())
-                                .or_default()
-                                .insert(table_name.to_string(), commit_data);
-                            let program_node = ctx
-                                .program
-                                .graph
-                                .node_weights()
-                                .find(|node| {
-                                    node.operator_chain.first().operator_id == *operator_id
-                                })
-                                .unwrap();
-                            for subtask_index in 0..program_node.parallelism {
-                                commit_subtasks.insert((operator_id.clone(), subtask_index as u32));
-                            }
-                        }
-                    }
-                }
-                committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
-            }
-            if let Err(err) = StateBackend::write_checkpoint_metadata(metadata).await {
-                return Err(ctx.retryable(
-                    self,
-                    format!("Failed to write checkpoint metadata for epoch {epoch}"),
-                    err.into(),
-                    10,
-                ));
-            }
-        }
 
         let assignments = compute_assignments(workers.values().collect(), &*ctx.program);
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();

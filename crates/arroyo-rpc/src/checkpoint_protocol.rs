@@ -12,10 +12,7 @@
 //! - `P/J/generations/G/generation_manifest.json`
 //! - `P/J/epochs/epoch-{E:07}.lock`
 
-use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
-use arroyo_types::to_micros;
-use crate::errors::StorageError;
 
 /// Current version of the metadata files used for the checkpoint protocol
 pub const METADATA_VERSION: u32 = 1;
@@ -56,14 +53,6 @@ pub struct GenerationManifest {
     #[serde(default)]
     pub latest_checkpoint_ref: Option<String>,
     pub updated_at_micros: u64,
-}
-
-impl GenerationManifest {
-    pub async fn resolve_latest(
-        pipeline_id: &str,
-        job_id: &str,
-    ) -> Result<Option<Self>, StorageError> {
-    }
 }
 
 /// The epoch lock. Created with a conditional `put-if-not-exists` write; this
