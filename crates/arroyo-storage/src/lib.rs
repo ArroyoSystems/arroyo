@@ -154,6 +154,8 @@ fn should_retry(e: &object_store::Error) -> bool {
             // some operations (like CompleteMultipartUpload)
             !source.to_string().contains("status 404 Not Found")
         }
+        // 409s are expected to be transient.
+        Error::AlreadyExists { .. } => true,
         _ => false,
     }
 }
