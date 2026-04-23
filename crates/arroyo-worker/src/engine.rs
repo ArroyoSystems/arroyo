@@ -505,7 +505,7 @@ impl Engine {
                 worker_id,
                 pipeline_id: PipelineId(Arc::new(pipeline_id)),
                 job_id: JobId(Arc::new(job_id)),
-                run_id: 0,
+                generation: 0,
             },
             network_manager: NetworkManager::new(0).await?,
             assignments,

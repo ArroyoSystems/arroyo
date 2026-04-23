@@ -106,7 +106,7 @@ async fn handle_worker_connect<'a>(
         JobMessage::WorkerConnect {
             worker_id,
             machine_id,
-            run_id,
+            generation: run_id,
             rpc_address,
             data_address,
             slots,
@@ -284,7 +284,8 @@ impl State for Scheduling {
         if leader_mode {
             let manifest =
                 CurrentGeneration::new(&ctx.pipeline_id, &*ctx.config.id, ctx.status.generation);
-            let storage = arroyo_state::get_storage_provider().await
+            let storage = arroyo_state::get_storage_provider()
+                .await
                 // should never happen, indicates something wrong with configuration
                 .map_err(|e| fatal("failed to construct storage provider", e.into()))?;
 

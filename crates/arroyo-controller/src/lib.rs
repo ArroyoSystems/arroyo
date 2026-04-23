@@ -134,7 +134,7 @@ pub enum JobMessage {
     WorkerConnect {
         worker_id: WorkerId,
         machine_id: MachineId,
-        run_id: u64,
+        generation: u64,
         rpc_address: String,
         data_address: String,
         slots: usize,
@@ -192,7 +192,7 @@ impl ControllerGrpc for ControllerServer {
             JobMessage::WorkerConnect {
                 worker_id: WorkerId(worker.worker_id),
                 machine_id: MachineId(worker.machine_id.into()),
-                run_id: worker.run_id,
+                generation: worker.generation,
                 rpc_address: req.rpc_address,
                 data_address: req.data_address,
                 slots: req.slots as usize,

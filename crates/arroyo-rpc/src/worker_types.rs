@@ -10,7 +10,7 @@ pub struct WorkerContext {
     pub worker_id: WorkerId,
     pub pipeline_id: PipelineId,
     pub job_id: JobId,
-    pub run_id: u64,
+    pub generation: u64,
 }
 
 impl WorkerContext {
@@ -20,7 +20,7 @@ impl WorkerContext {
             worker_id: *self.worker_id,
             pipeline_id: (*self.pipeline_id).clone(),
             job_id: (*self.job_id).clone(),
-            run_id: self.run_id,
+            generation: self.generation,
         }
     }
 }

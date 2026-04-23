@@ -590,7 +590,7 @@ impl WorkerServer {
                     machine_id,
                     pipeline_id,
                     job_id,
-                    run_id,
+                    generation: run_id,
                 },
                 job_status: Arc::new(Mutex::new(JobStatus {
                     job_state: rpc::JobState::JobInitializing.into(),
@@ -1194,7 +1194,7 @@ impl JobStatusGrpc for LeaderServer {
 
         Ok(Response::new(JobStatusResp {
             job_id,
-            run_id: self.state.worker_context.run_id,
+            generation: self.state.worker_context.generation,
             job_status: Some((*self.state.job_status.lock().unwrap()).clone()),
         }))
     }

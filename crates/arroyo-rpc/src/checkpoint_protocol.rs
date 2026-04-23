@@ -51,11 +51,19 @@ pub struct GenerationManifest {
     pub pipeline_id: String,
     pub job_id: String,
     pub job_generation: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub base_checkpoint_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub latest_checkpoint_ref: Option<String>,
     pub updated_at_micros: u64,
+}
+
+impl GenerationManifest {
+    pub async fn resolve_latest(
+        pipeline_id: &str,
+        job_id: &str,
+    ) -> Result<Option<Self>, StorageError> {
+    }
 }
 
 /// The epoch lock. Created with a conditional `put-if-not-exists` write; this

@@ -120,7 +120,7 @@ impl NodeServer {
             .env("ARROYO__WORKER__ID", format!("{}", worker_id.0))
             .env(JOB_ID_ENV, req.job_id.clone())
             .env("ARROYO__WORKER__TASK_SLOTS", format!("{slots}"))
-            .env(GENERATION_ENV, format!("{}", req.run_id))
+            .env(GENERATION_ENV, format!("{}", req.generation))
             .env(PIPELINE_ID_ENV, req.pipeline_id.clone())
             .env("ARROYO__ADMIN__HTTP_PORT", "0")
             .kill_on_drop(true)
@@ -159,7 +159,7 @@ impl NodeServer {
                         worker_id: worker_id.0,
                         pipeline_id,
                         job_id,
-                        run_id: req.run_id,
+                        generation: req.generation,
                     }),
                     time: to_micros(SystemTime::now()),
                     slots,

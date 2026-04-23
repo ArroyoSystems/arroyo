@@ -124,7 +124,7 @@ impl WorkerJobController {
             model: RunningJobModel {
                 pipeline_id: worker_context.pipeline_id.clone(),
                 job_id: worker_context.job_id.clone(),
-                generation: 0,
+                generation: worker_context.generation,
                 state: JobState::Running,
                 checkpoint_state: None,
                 epoch,

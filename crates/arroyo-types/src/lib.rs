@@ -326,7 +326,7 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     fn schema(&self) -> SchemaRef;
 }
 
-#[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
+#[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct TaskInfo {
     pub job_id: String,
     pub operator_idx: u32,
@@ -347,7 +347,7 @@ impl Display for TaskInfo {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
+#[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct ChainInfo {
     pub job_id: String,
     pub task_id: u32,

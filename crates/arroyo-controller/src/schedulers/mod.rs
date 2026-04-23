@@ -572,7 +572,7 @@ impl Scheduler for NodeScheduler {
                 job_id: (*start_pipeline_req.job_id).clone(),
                 slots: slots_for_this_one as u64,
                 machine_id: node.id.to_string(),
-                run_id: start_pipeline_req.generation,
+                generation: start_pipeline_req.generation,
                 env_vars: start_pipeline_req.env_vars.clone(),
             };
 
