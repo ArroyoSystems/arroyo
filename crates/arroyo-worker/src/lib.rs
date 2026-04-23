@@ -18,6 +18,7 @@ use arroyo_rpc::grpc::rpc::{
     TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
+use arroyo_rpc::identity::VerifyWorkerId;
 use arroyo_types::{
     CheckpointBarrier, JOB_ID_ENV, JobId, MachineId, RUN_ID_ENV, WorkerId, from_micros,
     from_millis, to_micros,
@@ -644,14 +645,20 @@ impl WorkerServer {
                     info!("Started worker-rpc with TLS on {}", local_addr);
                     arroyo_server_common::grpc_server_with_tls(tls)
                         .await?
-                        .add_service(WorkerGrpcServer::new(self))
+                        .add_service(WorkerGrpcServer::with_interceptor(
+                            self,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
                         .add_service(JobControllerGrpcServer::new(leader.clone()))
                         .add_service(JobStatusGrpcServer::new(leader))
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 } else {
                     info!("Started worker-rpc on {}", local_addr);
                     arroyo_server_common::grpc_server()
-                        .add_service(WorkerGrpcServer::new(self))
+                        .add_service(WorkerGrpcServer::with_interceptor(
+                            self,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
                         .add_service(JobControllerGrpcServer::new(leader.clone()))
                         .add_service(JobStatusGrpcServer::new(leader))
                         .serve_with_incoming(TcpListenerStream::new(listener))

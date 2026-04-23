@@ -5,18 +5,17 @@ use arroyo_rpc::checkpoints::{
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::{ErrorDomain, RetryHint};
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
 use arroyo_rpc::grpc::rpc::{
     JobFailure, JobStatus, SubtaskCheckpointMetadata, TaskCheckpointEventType,
 };
 use arroyo_rpc::grpc_channel_builder;
+use arroyo_rpc::identity::{WorkerClient, worker_client};
 use arroyo_types::WorkerId;
 use arroyo_types::to_micros;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use tonic::transport::Channel;
 use tracing::{error, info};
 
 // Re-export shared types from arroyo-rpc
@@ -94,10 +93,7 @@ pub enum JobControllerEvent {
     },
 }
 
-pub(crate) async fn connect_to_worker(
-    id: WorkerId,
-    addr: String,
-) -> anyhow::Result<WorkerGrpcClient<Channel>> {
+pub(crate) async fn connect_to_worker(id: WorkerId, addr: String) -> anyhow::Result<WorkerClient> {
     info!(
         message = "connecting to worker from job leader",
         worker_id =? id,
@@ -116,7 +112,7 @@ pub(crate) async fn connect_to_worker(
         .connect()
         .await
         {
-            Ok(channel) => return Ok(WorkerGrpcClient::new(channel)),
+            Ok(channel) => return Ok(worker_client(channel, *id)),
             Err(e) => {
                 error!(
                     message = "Failed to connect to worker",

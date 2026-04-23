@@ -4,12 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arroyo_rpc::grpc::rpc::{
-    StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
-};
+use arroyo_rpc::grpc::rpc::{StartExecutionReq, TaskAssignment};
+use arroyo_rpc::identity::{WorkerClient, worker_client};
 use arroyo_types::{JobId, MachineId, WorkerId};
 use tokio::{select, sync::Mutex, task::JoinHandle};
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 use tracing::{debug, error, info, warn};
 
 use super::{JobContext, State, Transition, leader_running::LeaderRunning, running::Running};
@@ -97,7 +96,7 @@ fn compute_assignments(
 async fn handle_worker_connect<'a>(
     msg: JobMessage,
     workers: &mut HashMap<WorkerId, WorkerStatus>,
-    worker_connects: Arc<Mutex<HashMap<WorkerId, WorkerGrpcClient<Channel>>>>,
+    worker_connects: Arc<Mutex<HashMap<WorkerId, WorkerClient>>>,
     handles: &mut Vec<JoinHandle<()>>,
     ctx: &mut JobContext<'a>,
 ) -> Result<(), StateError> {
@@ -162,7 +161,7 @@ async fn handle_worker_connect<'a>(
                         Ok(channel) => {
                             {
                                 let mut connects = connects.lock().await;
-                                connects.insert(worker_id, WorkerGrpcClient::new(channel));
+                                connects.insert(worker_id, worker_client(channel, *worker_id));
                             }
                             return;
                         }
