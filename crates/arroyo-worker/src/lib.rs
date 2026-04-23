@@ -48,6 +48,7 @@ use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
     JobControllerGrpc, JobControllerGrpcServer,
 };
 use arroyo_rpc::grpc::rpc::job_status_grpc_server::{JobStatusGrpc, JobStatusGrpcServer};
+use arroyo_rpc::identity::{JobControllerClient, VerifyWorkerId};
 use arroyo_rpc::{
     CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
     local_address, retry,
@@ -113,6 +114,7 @@ enum WorkerExecutionPhase {
     WaitingOnLeader {
         control_rx: Receiver<ControlResp>,
         job_controller_addr: String,
+        leader_id: u64,
         engine_state: EngineState,
     },
     Running(EngineState),
@@ -370,11 +372,15 @@ impl WorkerState {
             .unwrap_or_else(|| config().controller_endpoint());
 
         if req.wait_for_leader {
+            let leader_id = req
+                .leader_id
+                .ok_or_else(|| anyhow!("leader_id is required when wait_for_leader is set"))?;
             info!("waiting for leader");
             *phase_guard = WorkerExecutionPhase::WaitingOnLeader {
                 control_rx,
                 engine_state,
                 job_controller_addr,
+                leader_id,
             };
             drop(phase_guard);
         } else {
@@ -386,7 +392,7 @@ impl WorkerState {
             shutdown_guard
                 .child("control-thread")
                 .into_spawn_task(async move {
-                    self.run_control_loop(cancel_token, control_rx, job_controller_addr, false)
+                    self.run_control_loop(cancel_token, control_rx, job_controller_addr, None)
                         .await
                 });
         }
@@ -400,16 +406,16 @@ impl WorkerState {
         cancel_token: CancellationToken,
         control_rx: Receiver<ControlResp>,
         job_controller_addr: String,
-        is_worker_job_controller: bool,
+        leader_worker_id: Option<u64>,
     ) -> Result<()> {
         // TODO: We need this just for sending TaskStarted notifications to the actual controller for
         //  scheduling; it would be nicer if we didn't need to retain it for the entire job lifecycle
         let mut controller = controller_client("worker", &config().worker.tls).await?;
-        let mut job_controller = job_controller_client(
+        let mut job_controller: JobControllerClient = job_controller_client(
             "worker",
             &config().worker.tls,
             job_controller_addr,
-            is_worker_job_controller,
+            leader_worker_id,
         )
         .await?;
 
@@ -644,16 +650,34 @@ impl WorkerServer {
                     info!("Started worker-rpc with TLS on {}", local_addr);
                     arroyo_server_common::grpc_server_with_tls(tls)
                         .await?
-                        .add_service(WorkerGrpcServer::new(self))
-                        .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::new(leader))
+                        .add_service(WorkerGrpcServer::with_interceptor(
+                            self,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
+                        .add_service(JobControllerGrpcServer::with_interceptor(
+                            leader.clone(),
+                            VerifyWorkerId(*context.worker_id),
+                        ))
+                        .add_service(JobStatusGrpcServer::with_interceptor(
+                            leader,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 } else {
                     info!("Started worker-rpc on {}", local_addr);
                     arroyo_server_common::grpc_server()
-                        .add_service(WorkerGrpcServer::new(self))
-                        .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::new(leader))
+                        .add_service(WorkerGrpcServer::with_interceptor(
+                            self,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
+                        .add_service(JobControllerGrpcServer::with_interceptor(
+                            leader.clone(),
+                            VerifyWorkerId(*context.worker_id),
+                        ))
+                        .add_service(JobStatusGrpcServer::with_interceptor(
+                            leader,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 },
             ));
@@ -972,7 +996,7 @@ impl WorkerGrpc for WorkerServer {
         let mut tmp_phase = WorkerExecutionPhase::Idle;
         mem::swap(&mut *phase, &mut tmp_phase);
 
-        let (job_controller_addr, control_rx) = match tmp_phase {
+        let (job_controller_addr, leader_id, control_rx) = match tmp_phase {
             WorkerExecutionPhase::Running(e) => {
                 debug!("job_controller_init called on worker but already in running phase");
                 *phase = WorkerExecutionPhase::Running(e);
@@ -982,9 +1006,10 @@ impl WorkerGrpc for WorkerServer {
                 control_rx,
                 engine_state,
                 job_controller_addr,
+                leader_id,
             } => {
                 *phase = WorkerExecutionPhase::Running(engine_state);
-                (job_controller_addr, control_rx)
+                (job_controller_addr, leader_id, control_rx)
             }
             p => {
                 let msg = format!("job_controller_init called on worker in {p} phase");
@@ -1000,7 +1025,12 @@ impl WorkerGrpc for WorkerServer {
             .child("control-thread")
             .into_spawn_task(async move {
                 state
-                    .run_control_loop(cancel_token, control_rx, job_controller_addr, true)
+                    .run_control_loop(
+                        cancel_token,
+                        control_rx,
+                        job_controller_addr,
+                        Some(leader_id),
+                    )
                     .await
             });
 

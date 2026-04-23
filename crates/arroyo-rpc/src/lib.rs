@@ -11,7 +11,10 @@ use crate::config::{TlsConfig, config};
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::api::TaskCheckpointDetail;
 use crate::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
+use crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient;
+use crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
+use crate::identity::{InjectWorkerId, JobControllerClient, JobStatusClient};
 use anyhow::{Context, Result, anyhow};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
@@ -63,6 +66,7 @@ use url::{Host, Url};
 pub mod config;
 pub mod df;
 pub mod errors;
+pub mod identity;
 
 pub mod grpc {
     pub mod rpc {
@@ -1059,29 +1063,44 @@ pub async fn controller_client(
     Ok(ControllerGrpcClient::new(channel))
 }
 
+/// Connect to a JobControllerGrpc server. When `leader_worker_id` is `Some`, the
+/// target is a worker-hosted leader and the identity interceptor attaches
+/// `x-target-worker-id`; when `None`, the target is the central controller
+/// (which does not verify identity) and no header is attached.
 pub async fn job_controller_client(
     our_name: &str,
     our_tls: &Option<TlsConfig>,
     addr: String,
-    is_worker_job_controller: bool,
-) -> Result<crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient<Channel>> {
-    let their_tls = if is_worker_job_controller {
+    leader_worker_id: Option<u64>,
+) -> Result<JobControllerClient> {
+    let their_tls = if leader_worker_id.is_some() {
         &config().worker.tls
     } else {
         &config().controller.tls
     };
-
     let channel = connect_grpc(our_name, addr, our_tls, their_tls).await?;
-    Ok(crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient::new(channel))
+    let interceptor = match leader_worker_id {
+        Some(id) => InjectWorkerId::new(id),
+        None => InjectWorkerId::none(),
+    };
+    Ok(JobControllerGrpcClient::with_interceptor(
+        channel,
+        interceptor,
+    ))
 }
 
+/// Connect to the leader worker's JobStatusGrpc with identity interceptor.
 pub async fn job_status_client(
     our_name: &str,
     our_tls: &Option<TlsConfig>,
     addr: String,
-) -> Result<crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient<Channel>> {
-    let channel = connect_grpc(our_name, addr, our_tls, &config().controller.tls).await?;
-    Ok(crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient::new(channel))
+    leader_worker_id: u64,
+) -> Result<JobStatusClient> {
+    let channel = connect_grpc(our_name, addr, our_tls, &config().worker.tls).await?;
+    Ok(JobStatusGrpcClient::with_interceptor(
+        channel,
+        InjectWorkerId::new(leader_worker_id),
+    ))
 }
 
 pub fn local_address(bind_address: IpAddr) -> String {
