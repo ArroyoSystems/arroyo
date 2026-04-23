@@ -6,13 +6,20 @@
 //! network endpoints are recycled across worker lifetimes. Worker IDs are
 //! 64-bit random values in production, so they are effectively globally
 //! unique across jobs, runs, and clusters.
+//!
+//! `InjectWorkerId::none()` is used when the target server does not verify
+//! identity (e.g. the central controller's legacy JobControllerGrpc); in that
+//! case no header is attached and the server ignores the missing value.
 
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::Interceptor;
 use tonic::service::interceptor::InterceptedService;
 use tonic::transport::Channel;
 use tonic::{Request, Status};
+use tracing::warn;
 
+use crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient;
+use crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use crate::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
 
 /// Target worker_id header, ASCII decimal.
@@ -21,26 +28,41 @@ pub const WORKER_ID_HEADER: &str = "x-target-worker-id";
 /// Worker client with identity interceptor attached.
 pub type WorkerClient = WorkerGrpcClient<InterceptedService<Channel, InjectWorkerId>>;
 
+/// JobController client with identity interceptor attached. The interceptor
+/// is a no-op when the target is the central controller.
+pub type JobControllerClient = JobControllerGrpcClient<InterceptedService<Channel, InjectWorkerId>>;
+
+/// JobStatus client with identity interceptor attached; targets the leader worker.
+pub type JobStatusClient = JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>;
+
 /// Construct a worker client that injects `target` as `x-target-worker-id`.
 pub fn worker_client(channel: Channel, target: u64) -> WorkerClient {
     WorkerGrpcClient::with_interceptor(channel, InjectWorkerId::new(target))
 }
 
-/// Client interceptor: injects target worker_id into request metadata.
+/// Client interceptor: optionally injects target worker_id into request metadata.
 #[derive(Clone, Debug)]
-pub struct InjectWorkerId(MetadataValue<Ascii>);
+pub struct InjectWorkerId(Option<MetadataValue<Ascii>>);
 
 impl InjectWorkerId {
+    /// Attach `target` as the worker_id header on every request.
     pub fn new(target: u64) -> Self {
         // u64 decimal is always ASCII; parse cannot fail.
-        Self(target.to_string().parse().unwrap())
+        Self(Some(target.to_string().parse().unwrap()))
+    }
+
+    /// Attach nothing; for targets that do not verify identity.
+    pub fn none() -> Self {
+        Self(None)
     }
 }
 
 impl Interceptor for InjectWorkerId {
     fn call(&mut self, mut req: Request<()>) -> Result<Request<()>, Status> {
-        // MetadataValue clone is a Bytes refcount bump, not an allocation.
-        req.metadata_mut().insert(WORKER_ID_HEADER, self.0.clone());
+        if let Some(v) = &self.0 {
+            // MetadataValue clone is a Bytes refcount bump, not an allocation.
+            req.metadata_mut().insert(WORKER_ID_HEADER, v.clone());
+        }
         Ok(req)
     }
 }
@@ -62,10 +84,11 @@ impl Interceptor for VerifyWorkerId {
             .map_err(|_| Status::permission_denied("x-target-worker-id is not a valid u64"))?;
 
         if received != self.0 {
-            return Err(Status::permission_denied(format!(
-                "request targets worker {received}, but this worker is {}",
-                self.0
-            )));
+            warn!(
+                expected = self.0,
+                received, "rejecting request with mismatched target worker_id"
+            );
+            return Err(Status::permission_denied("target worker_id does not match"));
         }
 
         Ok(req)
@@ -91,6 +114,12 @@ mod tests {
                 .unwrap();
             assert_eq!(parsed, id);
         }
+    }
+
+    #[test]
+    fn inject_none_writes_no_metadata() {
+        let req = InjectWorkerId::none().call(Request::new(())).unwrap();
+        assert!(req.metadata().get(WORKER_ID_HEADER).is_none());
     }
 
     #[test]
@@ -129,5 +158,12 @@ mod tests {
             .call(Request::new(()))
             .unwrap();
         VerifyWorkerId(1234567890).call(req).unwrap();
+    }
+
+    #[test]
+    fn round_trip_none_rejected_by_verify() {
+        let req = InjectWorkerId::none().call(Request::new(())).unwrap();
+        let err = VerifyWorkerId(42).call(req).unwrap_err();
+        assert_eq!(err.code(), Code::PermissionDenied);
     }
 }

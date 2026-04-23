@@ -623,6 +623,7 @@ impl State for Scheduling {
                             is_leader: leader_id.is_some_and(|l| l == id),
                             wait_for_leader: leader_id.is_some(),
                             checkpoint_interval_micros,
+                            leader_id: leader_id.map(|l| l.0),
                         }))
                         .await
                     {
@@ -747,8 +748,10 @@ impl State for Scheduling {
             .await
             .insert(ctx.config.id.clone(), metrics.clone());
 
-        match leader_addr {
-            None => {
+        // leader_id and leader_addr are always both Some or both None, since they come from
+        // the same .unzip() above. Match them together to avoid a spurious `expect`.
+        match (leader_id, leader_addr) {
+            (None, None) => {
                 let checkpoint_store = Arc::new(DbCheckpointMetadataStore {
                     organization_id: ctx.config.organization_id.clone(),
                     job_id: ctx.config.id.clone(),
@@ -776,12 +779,13 @@ impl State for Scheduling {
                 ctx.job_controller = Some(controller);
                 Ok(Transition::next(*self, Running {}))
             }
-            Some(leader_addr) => {
+            (Some(leader_id), Some(leader_addr)) => {
                 ctx.job_controller = None;
 
                 let leader_manager = match LeaderManager::connect(
                     JobId(ctx.config.id.clone()),
                     ctx.status.run_id,
+                    leader_id.0,
                     leader_addr,
                 )
                 .await
@@ -806,6 +810,7 @@ impl State for Scheduling {
                     },
                 ))
             }
+            _ => unreachable!("leader_id and leader_addr are produced by the same .unzip()"),
         }
     }
 }

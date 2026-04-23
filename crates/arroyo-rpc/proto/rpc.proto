@@ -438,6 +438,9 @@ message StartExecutionReq {
   // (used in worker leader mode)
   bool wait_for_leader = 8;
   uint64 checkpoint_interval_micros = 9;
+  // worker_id of the leader when job_controller_addr points to a leader worker;
+  // used for identity validation on JobControllerGrpc calls
+  optional uint64 leader_id = 10;
 }
 
 message StartExecutionResp {

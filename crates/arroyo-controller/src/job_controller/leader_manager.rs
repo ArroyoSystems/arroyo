@@ -6,25 +6,36 @@ use crate::types::public::StopMode as SqlStopMode;
 use anyhow::{anyhow, bail};
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use arroyo_rpc::grpc::rpc::{JobFailure, JobState, JobStatusReq, JobStopMode, StopJobReq};
+use arroyo_rpc::identity::JobStatusClient;
 use arroyo_rpc::{job_status_client, retry};
 use arroyo_types::JobId;
 use std::time::{Duration, Instant};
-use tonic::transport::Channel;
 use tracing::{info, warn};
 
 pub struct LeaderManager {
-    leader_client: JobStatusGrpcClient<Channel>,
+    leader_client: JobStatusClient,
     pub job_id: JobId,
     pub run_id: u64,
+    pub leader_worker_id: u64,
     pub last_heartbeat: Instant,
 }
 
 impl LeaderManager {
-    pub async fn connect(job_id: JobId, run_id: u64, addr: String) -> anyhow::Result<Self> {
+    pub async fn connect(
+        job_id: JobId,
+        run_id: u64,
+        leader_worker_id: u64,
+        addr: String,
+    ) -> anyhow::Result<Self> {
         let leader_client = retry!(
-            job_status_client("controller", &config().worker.tls, addr.clone()).await,
+            job_status_client(
+                "controller",
+                &config().controller.tls,
+                addr.clone(),
+                leader_worker_id,
+            )
+            .await,
             5,
             Duration::from_millis(100),
             Duration::from_secs(2),
@@ -34,6 +45,7 @@ impl LeaderManager {
         Ok(Self {
             job_id,
             run_id,
+            leader_worker_id,
             leader_client,
             last_heartbeat: Instant::now(),
         })
@@ -55,14 +67,6 @@ impl LeaderManager {
                 "leader returned job status for wrong job: expected {}, got {}",
                 self.job_id,
                 response.job_id
-            );
-        }
-
-        if response.run_id != self.run_id {
-            bail!(
-                "leader returned job status for wrong run: expected {}, got {}",
-                self.run_id,
-                response.run_id
             );
         }
 
