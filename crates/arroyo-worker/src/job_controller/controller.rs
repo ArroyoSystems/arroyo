@@ -6,10 +6,7 @@ use std::{
 
 use anyhow::bail;
 use arroyo_rpc::checkpoints::CheckpointMetadataStore;
-use arroyo_rpc::grpc::rpc::{
-    CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus, JobStopMode,
-    StopExecutionReq, StopMode, TaskAssignment, WorkerPhase,
-};
+use arroyo_rpc::grpc::rpc::{CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus, JobStopMode, StopExecutionReq, StopMode, TaskAssignment, WorkerPhase};
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::WorkerId;
 use futures::future::try_join_all;
@@ -71,6 +68,7 @@ impl WorkerJobController {
         rx: Receiver<RunningMessage>,
         job_status: Arc<Mutex<JobStatus>>,
         checkpoint_interval: Duration,
+        restore_manifest: Option<CheckpointManifest>,
     ) -> anyhow::Result<Self> {
         let mut worker_connects = HashMap::new();
         let mut workers = HashMap::new();
@@ -154,6 +152,8 @@ impl WorkerJobController {
     }
 
     pub async fn start_inner(mut self) -> anyhow::Result<()> {
+        // determine if we need to commit from our recovery checkpoint
+
         // initialize workers
         let futures = self.model.workers.iter_mut().map(|(id, status)| {
             let id = *id;

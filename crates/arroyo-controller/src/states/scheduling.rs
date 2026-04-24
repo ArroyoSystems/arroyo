@@ -485,7 +485,14 @@ async fn get_and_register_checkpoint_info_leader<'a>(
         checkpoint_info.as_ref().map(|c| c.id.clone()),
     );
 
-    next_generation.write(get_storage_provider().await?).await?;
+    let storage_provider = get_storage_provider().await?;
+
+    next_generation.write(storage_provider).await?;
+
+    // write the current generation file
+    let manifest =
+        CurrentGeneration::new(&ctx.pipeline_id, &*ctx.config.id, ctx.status.generation);
+    manifest.write(storage_provider).await?;
 
     Ok(checkpoint_info)
 }
@@ -588,32 +595,6 @@ impl State for Scheduling {
         } else {
             get_checkpoint_info_legacy(self, &ctx).await?
         };
-
-        // if this is a leader cluster, write the generation metadata
-        if leader_mode {
-            let manifest =
-                CurrentGeneration::new(&ctx.pipeline_id, &*ctx.config.id, ctx.status.generation);
-            let storage = arroyo_state::get_storage_provider()
-                .await
-                // should never happen, indicates something wrong with configuration
-                .map_err(|e| fatal("failed to construct storage provider", e.into()))?;
-
-            if let Err(e) = retry!(
-                manifest.write(storage).await,
-                10,
-                Duration::from_millis(200),
-                Duration::from_secs(10),
-                |e| warn!(pipeline_id = *ctx.pipeline_id, job_id = *ctx.config.id, error =? e,
-                    "failed to write generation manifest")
-            ) {
-                return Err(ctx.retryable(
-                    self,
-                    "failed while writing generation manifest",
-                    e.into(),
-                    20,
-                ));
-            }
-        }
 
         // wait for them to connect and make outbound RPC connections
         let mut workers = HashMap::new();

@@ -41,6 +41,7 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tracing::{debug, info, warn};
+use arroyo_rpc::grpc::rpc::CheckpointManifest;
 
 pub struct SubtaskNode {
     pub node_id: u32,
@@ -209,18 +210,12 @@ impl Program {
         assignments: &Vec<TaskAssignment>,
         registry: Registry,
         restore_epoch: Option<u32>,
-        checkpoint_manifest_ref: Option<String>,
+        checkpoint_manifest_ref: Option<CheckpointManifest>,
         control_tx: Sender<ControlResp>,
     ) -> Result<Program, StateError> {
         let mut physical = DiGraph::new();
 
-        let checkpoint_metadata = if let Some(path) = checkpoint_manifest_ref {
-            info!(
-                manifest_ref = path,
-                job_id, "restoring checkpoint in leader mode"
-            );
-            let manifest = get_checkpoint_manifest(get_storage_provider().await?, &path).await?;
-
+        let checkpoint_metadata = if let Some(manifest) = checkpoint_manifest_ref {
             Some(MetadataOrManifest::Manifest(manifest))
         } else if let Some(epoch) = restore_epoch {
             info!("Restoring checkpoint {} for job {}", epoch, job_id);
