@@ -16,6 +16,7 @@ members = [
     "crates/arroyo-server-common",
     "crates/arroyo-sql-testing",
     "crates/arroyo-state",
+    "crates/arroyo-state-protocol",
     "crates/arroyo-storage",
     "crates/arroyo-types",
     "crates/arroyo-udf/arroyo-udf-common",

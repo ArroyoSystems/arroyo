@@ -978,6 +978,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-state-protocol"
+version = "0.16.0-dev"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "arroyo-storage"
 version = "0.16.0-dev"
 dependencies = [
