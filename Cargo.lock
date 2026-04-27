@@ -981,9 +981,15 @@ dependencies = [
 name = "arroyo-state-protocol"
 version = "0.16.0-dev"
 dependencies = [
+ "arroyo-rpc",
+ "arroyo-storage",
+ "arroyo-types",
+ "async-trait",
+ "prost",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
+ "tokio",
 ]
 
 [[package]]

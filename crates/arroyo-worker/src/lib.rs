@@ -7,10 +7,21 @@ use crate::network_manager::NetworkManager;
 use anyhow::{Context, Result, anyhow};
 
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq, GetWorkerPhaseResp, HeartbeatReq, HeartbeatResp, JobControllerInitReq, JobControllerInitResp, JobFinishedReq, JobFinishedResp, JobMetricsReq, JobMetricsResp, JobStatus, JobStatusReq, JobStatusResp, JobStopMode, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily, MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp, StopJobReq, StopJobResp, TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes, WorkerInitializationCompleteReq, WorkerPhase, WorkerResources};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq,
+    GetWorkerPhaseResp, HeartbeatReq, HeartbeatResp, JobControllerInitReq, JobControllerInitResp,
+    JobFinishedReq, JobFinishedResp, JobMetricsReq, JobMetricsResp, JobStatus, JobStatusReq,
+    JobStatusResp, JobStopMode, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily,
+    MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq,
+    StartExecutionResp, StopExecutionReq, StopExecutionResp, StopJobReq, StopJobResp,
+    TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
+    TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq, TaskFailedResp,
+    TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
+    WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
+};
 use arroyo_types::{
     CheckpointBarrier, GENERATION_ENV, JOB_ID_ENV, JobId, MachineId, PIPELINE_ID_ENV, PipelineId,
-    WorkerId, from_micros, from_millis, retry, to_micros,
+    WorkerId, from_micros, from_millis, to_micros,
 };
 use rand::random;
 
@@ -38,19 +49,16 @@ use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
     JobControllerGrpc, JobControllerGrpcServer,
 };
 use arroyo_rpc::grpc::rpc::job_status_grpc_server::{JobStatusGrpc, JobStatusGrpcServer};
-use arroyo_rpc::{
-    CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
-    local_address,
-};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client, local_address, retry};
 
+use arroyo_rpc::checkpoint_protocol::get_checkpoint_manifest;
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
+use arroyo_state::get_storage_provider;
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 use uuid::Uuid;
-use arroyo_rpc::checkpoint_protocol::get_checkpoint_manifest;
-use arroyo_state::get_storage_provider;
 
 pub mod arrow;
 
@@ -260,7 +268,7 @@ impl WorkerState {
             rx,
             self.job_status.clone(),
             checkpoint_interval,
-            restore_manifest
+            restore_manifest,
         )
         .await?
         .start(shutdown);
@@ -310,14 +318,13 @@ impl WorkerState {
         let restore_manifest = if let Some(manifest_ref) = req.checkpoint_manifest_ref {
             info!(
                 manifest_ref,
-                job_id = *self.worker_context.job_id, 
+                job_id = *self.worker_context.job_id,
                 "restoring checkpoint in leader mode"
             );
             Some(get_checkpoint_manifest(get_storage_provider().await?, &manifest_ref).await?)
         } else {
             None
         };
-        
 
         if req.is_leader {
             // TODO: the leader needs to load checkpoint metadata and figure out epochs/min epochs

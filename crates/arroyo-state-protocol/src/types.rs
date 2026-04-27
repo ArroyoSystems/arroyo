@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
 
+pub use arroyo_rpc::grpc::rpc::CheckpointManifest;
+use arroyo_types::{JobId, PipelineId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -112,29 +114,6 @@ fn validate_ref(path: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
-pub(crate) fn validate_path_component(
-    name: &'static str,
-    value: &str,
-) -> Result<(), ProtocolError> {
-    if value.is_empty() {
-        return Err(invalid_path_component(name, value, "component is empty"));
-    }
-
-    if value.contains('/') || value.contains('\\') {
-        return Err(invalid_path_component(
-            name,
-            value,
-            "component must not contain path separators",
-        ));
-    }
-
-    if value == "." || value == ".." {
-        return Err(invalid_path_component(name, value, "component is reserved"));
-    }
-
-    Ok(())
-}
-
 fn invalid_ref(path: &str, reason: &'static str) -> ProtocolError {
     ProtocolError::InvalidCheckpointRef {
         path: path.to_string(),
@@ -142,19 +121,11 @@ fn invalid_ref(path: &str, reason: &'static str) -> ProtocolError {
     }
 }
 
-fn invalid_path_component(name: &'static str, value: &str, reason: &'static str) -> ProtocolError {
-    ProtocolError::InvalidPathComponent {
-        name,
-        value: value.to_string(),
-        reason,
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CurrentGeneration {
     pub version: u32,
-    pub pipeline_id: String,
-    pub job_id: String,
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
     pub generation: Generation,
     pub generation_manifest_ref: CheckpointRef,
     pub updated_at_micros: u64,
@@ -162,16 +133,16 @@ pub struct CurrentGeneration {
 
 impl CurrentGeneration {
     pub fn new(
-        pipeline_id: impl Into<String>,
-        job_id: impl Into<String>,
+        pipeline_id: PipelineId,
+        job_id: JobId,
         generation: Generation,
         generation_manifest_ref: CheckpointRef,
         updated_at_micros: u64,
     ) -> Self {
         Self {
             version: PROTOCOL_VERSION,
-            pipeline_id: pipeline_id.into(),
-            job_id: job_id.into(),
+            pipeline_id,
+            job_id,
             generation,
             generation_manifest_ref,
             updated_at_micros,
@@ -182,8 +153,8 @@ impl CurrentGeneration {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationManifest {
     pub version: u32,
-    pub pipeline_id: String,
-    pub job_id: String,
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
     pub generation: Generation,
     pub base_checkpoint_ref: Option<CheckpointRef>,
     pub latest_checkpoint_ref: Option<CheckpointRef>,
@@ -192,16 +163,16 @@ pub struct GenerationManifest {
 
 impl GenerationManifest {
     pub fn new(
-        pipeline_id: impl Into<String>,
-        job_id: impl Into<String>,
+        pipeline_id: PipelineId,
+        job_id: JobId,
         generation: Generation,
         base_checkpoint_ref: Option<CheckpointRef>,
         updated_at_micros: u64,
     ) -> Self {
         Self {
             version: PROTOCOL_VERSION,
-            pipeline_id: pipeline_id.into(),
-            job_id: job_id.into(),
+            pipeline_id,
+            job_id,
             generation,
             base_checkpoint_ref,
             latest_checkpoint_ref: None,
@@ -217,41 +188,10 @@ impl GenerationManifest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CheckpointManifest {
-    pub job_id: String,
-    pub epoch: Epoch,
-    pub min_epoch: Epoch,
-    pub start_time: u64,
-    pub finish_time: u64,
-    pub parent_checkpoint_ref: Option<CheckpointRef>,
-    pub needs_commit: bool,
-}
-
-impl CheckpointManifest {
-    pub fn new(
-        job_id: impl Into<String>,
-        epoch: Epoch,
-        min_epoch: Epoch,
-        parent_checkpoint_ref: Option<CheckpointRef>,
-        needs_commit: bool,
-    ) -> Self {
-        Self {
-            job_id: job_id.into(),
-            epoch,
-            min_epoch,
-            start_time: 0,
-            finish_time: 0,
-            parent_checkpoint_ref,
-            needs_commit,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedMarker {
     pub version: u32,
-    pub pipeline_id: String,
-    pub job_id: String,
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
     pub epoch: Epoch,
     pub checkpoint_generation: Generation,
     pub writer_generation: Generation,
@@ -260,8 +200,8 @@ pub struct CommittedMarker {
 
 impl CommittedMarker {
     pub fn new(
-        pipeline_id: impl Into<String>,
-        job_id: impl Into<String>,
+        pipeline_id: PipelineId,
+        job_id: JobId,
         epoch: Epoch,
         checkpoint_generation: Generation,
         writer_generation: Generation,
@@ -269,8 +209,8 @@ impl CommittedMarker {
     ) -> Self {
         Self {
             version: PROTOCOL_VERSION,
-            pipeline_id: pipeline_id.into(),
-            job_id: job_id.into(),
+            pipeline_id,
+            job_id,
             epoch,
             checkpoint_generation,
             writer_generation,
@@ -282,8 +222,8 @@ impl CommittedMarker {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EpochRecord {
     pub version: u32,
-    pub pipeline_id: String,
-    pub job_id: String,
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
     pub epoch: Epoch,
     pub generation: Generation,
     pub parent_checkpoint_ref: Option<CheckpointRef>,
@@ -293,23 +233,37 @@ pub struct EpochRecord {
 
 impl EpochRecord {
     pub fn for_checkpoint(
-        pipeline_id: impl Into<String>,
+        pipeline_id: PipelineId,
         generation: Generation,
         checkpoint_ref: CheckpointRef,
         checkpoint: &CheckpointManifest,
         created_at_micros: u64,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ProtocolError> {
+        Ok(Self {
             version: PROTOCOL_VERSION,
             pipeline_id: pipeline_id.into(),
-            job_id: checkpoint.job_id.clone(),
-            epoch: checkpoint.epoch,
+            job_id: JobId::new(&checkpoint.job_id),
+            epoch: checkpoint_epoch(checkpoint),
             generation,
-            parent_checkpoint_ref: checkpoint.parent_checkpoint_ref.clone(),
+            parent_checkpoint_ref: checkpoint_parent_checkpoint_ref(checkpoint)?,
             checkpoint_ref,
             created_at_micros,
-        }
+        })
     }
+}
+
+pub(crate) fn checkpoint_epoch(checkpoint: &CheckpointManifest) -> Epoch {
+    Epoch(checkpoint.epoch)
+}
+
+pub(crate) fn checkpoint_parent_checkpoint_ref(
+    checkpoint: &CheckpointManifest,
+) -> Result<Option<CheckpointRef>, ProtocolError> {
+    checkpoint
+        .parent_checkpoint_ref
+        .as_ref()
+        .map(|checkpoint_ref| CheckpointRef::new(checkpoint_ref.clone()))
+        .transpose()
 }
 
 pub(crate) fn validate_epoch_record_matches_checkpoint(
@@ -317,14 +271,15 @@ pub(crate) fn validate_epoch_record_matches_checkpoint(
     checkpoint: &CheckpointManifest,
     record: &EpochRecord,
 ) -> Result<(), ProtocolError> {
-    if checkpoint.epoch != record.epoch {
+    let checkpoint_epoch = checkpoint_epoch(checkpoint);
+    if checkpoint_epoch != record.epoch {
         return Err(ProtocolError::EpochMismatch {
-            checkpoint_epoch: checkpoint.epoch,
+            checkpoint_epoch,
             record_epoch: record.epoch,
         });
     }
 
-    if checkpoint.parent_checkpoint_ref != record.parent_checkpoint_ref {
+    if checkpoint_parent_checkpoint_ref(checkpoint)? != record.parent_checkpoint_ref {
         return Err(ProtocolError::ParentMismatch);
     }
 
@@ -337,8 +292,8 @@ pub(crate) fn validate_committed_marker_matches_checkpoint(
     checkpoint: &CheckpointManifest,
     marker: &CommittedMarker,
 ) -> Result<(), ProtocolError> {
-    if marker.job_id != checkpoint.job_id
-        || marker.epoch != checkpoint.epoch
+    if *marker.job_id != checkpoint.job_id
+        || marker.epoch != checkpoint_epoch(checkpoint)
         || &marker.checkpoint_ref != checkpoint_ref
     {
         return Err(ProtocolError::CommittedMarkerMismatch);

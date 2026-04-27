@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::bail;
 use arroyo_rpc::checkpoints::CheckpointMetadataStore;
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus, JobStopMode, StopExecutionReq, StopMode, TaskAssignment, WorkerPhase};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
+    JobStopMode, StopExecutionReq, StopMode, TaskAssignment, WorkerPhase,
+};
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::WorkerId;
 use futures::future::try_join_all;

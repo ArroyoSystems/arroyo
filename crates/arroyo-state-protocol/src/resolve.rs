@@ -1,7 +1,9 @@
-use crate::{
-    CheckpointManifest, CheckpointRef, CheckpointState, CommittedMarker, EpochRecord,
-    GenerationManifest, ProtocolError, derive_checkpoint_state,
+use crate::state::{CheckpointState, derive_checkpoint_state};
+use crate::types::{
+    CheckpointRef, CommittedMarker, EpochRecord, GenerationManifest, ProtocolError,
+    checkpoint_parent_checkpoint_ref,
 };
+use arroyo_rpc::grpc::rpc::CheckpointManifest;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParentCheckpointStatus {
@@ -51,7 +53,7 @@ pub fn resolve_candidate(
         return Ok(ResolveDecision::FallbackToBase);
     };
 
-    if checkpoint.parent_checkpoint_ref.is_some()
+    if checkpoint_parent_checkpoint_ref(checkpoint)?.is_some()
         && parent_status != ParentCheckpointStatus::ReadyCanonical
     {
         return Ok(ResolveDecision::Failed(

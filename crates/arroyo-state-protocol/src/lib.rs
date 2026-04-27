@@ -1,28 +1,94 @@
 //! Pure types and decision logic for Arroyo's object-store checkpoint protocol.
 //!
-//! This crate intentionally keeps object-store I/O out of the core protocol
-//! logic. Callers read protocol objects, pass the observed facts into these
-//! functions, and then execute the returned decision.
+//! Object-store I/O is kept at the edge: storage code reads protocol objects,
+//! passes the observed facts into pure decision functions, and then executes the
+//! returned decision.
 
-mod paths;
-mod resolve;
-mod state;
-mod types;
+pub mod resolve;
+pub mod state;
+pub mod store;
+pub mod types;
+pub mod workflow;
 
-pub use paths::ProtocolPaths;
-pub use resolve::{
-    EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure,
-    classify_epoch_record_claim, resolve_candidate,
-};
-pub use state::{CheckpointState, derive_checkpoint_state};
-pub use types::{
-    CheckpointManifest, CheckpointRef, CommittedMarker, CurrentGeneration, Epoch, EpochRecord,
-    Generation, GenerationManifest, PROTOCOL_VERSION, ProtocolError,
-};
+use crate::types::{CheckpointRef, Epoch, Generation};
+use arroyo_types::{JobId, PipelineId};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtocolPaths {
+    pipeline_id: PipelineId,
+    job_id: JobId,
+}
+
+impl ProtocolPaths {
+    pub fn new(pipeline_id: PipelineId, job_id: JobId) -> Self {
+        Self {
+            pipeline_id,
+            job_id,
+        }
+    }
+
+    pub fn current_generation(&self) -> CheckpointRef {
+        self.path("current-generation.json")
+    }
+
+    pub fn generation_manifest(&self, generation: Generation) -> CheckpointRef {
+        self.path(format!("generations/{generation}/generation-manifest.json"))
+    }
+
+    pub fn checkpoint_dir(&self, generation: Generation, epoch: Epoch) -> CheckpointRef {
+        self.path(format!(
+            "generations/{generation}/checkpoints/checkpoint-{epoch:07}"
+        ))
+    }
+
+    pub fn checkpoint_manifest(&self, generation: Generation, epoch: Epoch) -> CheckpointRef {
+        self.path(format!(
+            "generations/{generation}/checkpoints/checkpoint-{epoch:07}/checkpoint-manifest.pb"
+        ))
+    }
+
+    pub fn committed_marker(&self, generation: Generation, epoch: Epoch) -> CheckpointRef {
+        self.path(format!(
+            "generations/{generation}/checkpoints/checkpoint-{epoch:07}/committed.json"
+        ))
+    }
+
+    pub fn epoch_record(&self, epoch: Epoch) -> CheckpointRef {
+        self.path(format!("epochs/epoch-{epoch:07}.record"))
+    }
+
+    fn path(&self, suffix: impl AsRef<str>) -> CheckpointRef {
+        CheckpointRef::from_validated(format!(
+            "{}/{}/{}",
+            self.pipeline_id,
+            self.job_id,
+            suffix.as_ref()
+        ))
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resolve::{
+        EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure,
+        classify_epoch_record_claim, resolve_candidate,
+    };
+    use crate::state::{CheckpointState, derive_checkpoint_state};
+    use crate::store::tests::MemoryProtocolStore;
+    use crate::store::{
+        CreateResult, StorageProviderProtocolStore, StoreError, create_json, put_json,
+        put_protobuf, read_json,
+    };
+    use crate::types::{
+        CommittedMarker, CurrentGeneration, EpochRecord, GenerationManifest, ProtocolError,
+    };
+    use crate::workflow::{
+        ClaimEpochRecordRequest, CommittedMarkerOutcome, GenerationResolution, claim_epoch_record,
+        mark_committed, resolve_generation_manifest,
+    };
+    use arroyo_rpc::grpc::rpc::CheckpointManifest;
+    use arroyo_types::{JobId, PipelineId};
 
     fn checkpoint_ref(path: &str) -> CheckpointRef {
         CheckpointRef::new(path).unwrap()
@@ -33,23 +99,36 @@ mod tests {
         parent_checkpoint_ref: Option<CheckpointRef>,
         needs_commit: bool,
     ) -> CheckpointManifest {
-        CheckpointManifest::new(
-            "J",
-            Epoch(epoch),
-            Epoch(epoch),
-            parent_checkpoint_ref,
+        CheckpointManifest {
+            pipeline_id: "P".to_string(),
+            job_id: "J".to_string(),
+            generation: 1,
+            epoch,
+            min_epoch: epoch,
+            start_time: 0,
+            finish_time: 0,
             needs_commit,
-        )
+            operators: vec![],
+            parent_checkpoint_ref: parent_checkpoint_ref
+                .map(|checkpoint_ref| checkpoint_ref.to_string()),
+        }
     }
 
     fn epoch_record(checkpoint_ref: CheckpointRef, checkpoint: &CheckpointManifest) -> EpochRecord {
-        EpochRecord::for_checkpoint("P", Generation(1), checkpoint_ref, checkpoint, 0)
+        EpochRecord::for_checkpoint(
+            PipelineId::new("P"),
+            Generation(1),
+            checkpoint_ref,
+            checkpoint,
+            0,
+        )
+        .unwrap()
     }
 
     fn committed_marker(checkpoint_ref: CheckpointRef, epoch: u64) -> CommittedMarker {
         CommittedMarker::new(
-            "P",
-            "J",
+            PipelineId::new("P"),
+            JobId::new("J"),
             Epoch(epoch),
             Generation(1),
             Generation(2),
@@ -61,47 +140,33 @@ mod tests {
         base_checkpoint_ref: Option<CheckpointRef>,
         latest_checkpoint_ref: Option<CheckpointRef>,
     ) -> GenerationManifest {
-        let mut manifest = GenerationManifest::new("P", "J", Generation(1), base_checkpoint_ref, 0);
+        let mut manifest = GenerationManifest::new(
+            PipelineId::new("P"),
+            JobId::new("J"),
+            Generation(1),
+            base_checkpoint_ref,
+            0,
+        );
         manifest.latest_checkpoint_ref = latest_checkpoint_ref;
         manifest
     }
 
-    #[test]
-    fn protocol_paths_are_canonical_relative_paths() {
-        let paths = ProtocolPaths::new("P", "J").unwrap();
+    async fn write_current_generation(
+        store: &MemoryProtocolStore,
+        paths: &ProtocolPaths,
+        generation: Generation,
+    ) {
+        let current_generation = CurrentGeneration::new(
+            PipelineId::new("P"),
+            JobId::new("J"),
+            generation,
+            paths.generation_manifest(generation),
+            0,
+        );
 
-        assert_eq!(
-            paths.current_generation().as_str(),
-            "P/J/current-generation.json"
-        );
-        assert_eq!(
-            paths.generation_manifest(Generation(17)).as_str(),
-            "P/J/generations/17/generation-manifest.json"
-        );
-        assert_eq!(
-            paths
-                .checkpoint_manifest(Generation(17), Epoch(44))
-                .as_str(),
-            "P/J/generations/17/checkpoints/checkpoint-0000044/checkpoint-manifest.pb"
-        );
-        assert_eq!(
-            paths.committed_marker(Generation(17), Epoch(44)).as_str(),
-            "P/J/generations/17/checkpoints/checkpoint-0000044/committed.json"
-        );
-        assert_eq!(
-            paths.epoch_record(Epoch(44)).as_str(),
-            "P/J/epochs/epoch-0000044.record"
-        );
-    }
-
-    #[test]
-    fn checkpoint_refs_must_be_relative_object_paths() {
-        assert!(CheckpointRef::new("P/J/checkpoint-manifest.pb").is_ok());
-        assert!(CheckpointRef::new("/P/J/checkpoint-manifest.pb").is_err());
-        assert!(CheckpointRef::new("P//J/checkpoint-manifest.pb").is_err());
-        assert!(CheckpointRef::new("P/../checkpoint-manifest.pb").is_err());
-        assert!(CheckpointRef::new("P/J/").is_err());
-        assert!(ProtocolPaths::new("P/extra", "J").is_err());
+        put_json(store, &paths.current_generation(), &current_generation)
+            .await
+            .unwrap();
     }
 
     #[test]
@@ -347,24 +412,321 @@ mod tests {
         );
     }
 
-    #[test]
-    fn protocol_records_serialize_with_expected_version() {
-        let paths = ProtocolPaths::new("P", "J").unwrap();
-        let current = CurrentGeneration::new(
-            "P",
-            "J",
-            Generation(17),
-            paths.generation_manifest(Generation(17)),
-            123,
-        );
+    #[tokio::test]
+    async fn claim_epoch_record_creates_canonical_record() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        let epoch_record_path = paths.epoch_record(Epoch(1));
 
-        let encoded = serde_json::to_value(&current).unwrap();
+        let outcome = claim_epoch_record(
+            &store,
+            ClaimEpochRecordRequest {
+                epoch_record_path: &epoch_record_path,
+                pipeline_id: &PipelineId::new("P"),
+                generation: Generation(1),
+                checkpoint_ref: &checkpoint_ref,
+                checkpoint: &checkpoint,
+                created_at_micros: 123,
+            },
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(encoded["version"], PROTOCOL_VERSION);
-        assert_eq!(encoded["generation"], 17);
+        assert_eq!(outcome, EpochClaimOutcome::Owned);
+
+        let record: EpochRecord = read_json(&store, &epoch_record_path)
+            .await
+            .unwrap()
+            .expect("epoch record should have been written");
+        assert_eq!(record.checkpoint_ref, checkpoint_ref);
+        assert_eq!(record.epoch, Epoch(1));
+    }
+
+    #[tokio::test]
+    async fn claim_epoch_record_treats_existing_same_record_as_owned() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        let epoch_record_path = paths.epoch_record(Epoch(1));
+        let request = ClaimEpochRecordRequest {
+            epoch_record_path: &epoch_record_path,
+            pipeline_id: &PipelineId::new("P"),
+            generation: Generation(1),
+            checkpoint_ref: &checkpoint_ref,
+            checkpoint: &checkpoint,
+            created_at_micros: 123,
+        };
+
+        claim_epoch_record(&store, request.clone()).await.unwrap();
+        let outcome = claim_epoch_record(&store, request).await.unwrap();
+
+        assert_eq!(outcome, EpochClaimOutcome::Owned);
+    }
+
+    #[tokio::test]
+    async fn claim_epoch_record_orphans_different_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let winner_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let loser_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        let epoch_record_path = paths.epoch_record(Epoch(1));
+
+        claim_epoch_record(
+            &store,
+            ClaimEpochRecordRequest {
+                epoch_record_path: &epoch_record_path,
+                pipeline_id: &PipelineId::new("P"),
+                generation: Generation(1),
+                checkpoint_ref: &winner_ref,
+                checkpoint: &checkpoint,
+                created_at_micros: 123,
+            },
+        )
+        .await
+        .unwrap();
+
+        let outcome = claim_epoch_record(
+            &store,
+            ClaimEpochRecordRequest {
+                epoch_record_path: &epoch_record_path,
+                pipeline_id: &PipelineId::new("P"),
+                generation: Generation(2),
+                checkpoint_ref: &loser_ref,
+                checkpoint: &checkpoint,
+                created_at_micros: 124,
+            },
+        )
+        .await
+        .unwrap();
+
         assert_eq!(
-            encoded["generation_manifest_ref"],
-            "P/J/generations/17/generation-manifest.json"
+            outcome,
+            EpochClaimOutcome::Orphaned {
+                canonical_ref: winner_ref
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_committed_is_idempotent_for_same_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let committed_marker_path = paths.committed_marker(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        let marker = committed_marker(checkpoint_ref, 1);
+
+        let outcome = mark_committed(&store, &committed_marker_path, &marker, &checkpoint)
+            .await
+            .unwrap();
+        assert_eq!(outcome, CommittedMarkerOutcome::Created);
+
+        let outcome = mark_committed(&store, &committed_marker_path, &marker, &checkpoint)
+            .await
+            .unwrap();
+        assert_eq!(outcome, CommittedMarkerOutcome::AlreadyCommitted);
+    }
+
+    #[tokio::test]
+    async fn mark_committed_rejects_existing_marker_for_different_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let winner_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let loser_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
+        let committed_marker_path = paths.committed_marker(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        let winner_marker = committed_marker(winner_ref, 1);
+        let loser_marker = committed_marker(loser_ref, 1);
+
+        mark_committed(&store, &committed_marker_path, &winner_marker, &checkpoint)
+            .await
+            .unwrap();
+
+        let err = mark_committed(&store, &committed_marker_path, &loser_marker, &checkpoint)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            StoreError::Protocol(ProtocolError::CommittedMarkerMismatch)
+        ));
+    }
+
+    #[tokio::test]
+    async fn storage_provider_store_round_trips_conditional_json_create() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "arroyo-state-protocol-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let storage =
+            arroyo_storage::StorageProvider::for_url(&format!("file://{}", temp_dir.display()))
+                .await
+                .unwrap();
+        let store = StorageProviderProtocolStore::from(storage);
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        let record = epoch_record(checkpoint_ref, &checkpoint);
+        let epoch_record_path = paths.epoch_record(Epoch(1));
+
+        let created = create_json(&store, &epoch_record_path, &record)
+            .await
+            .unwrap();
+        assert_eq!(created, CreateResult::Created);
+
+        let existing = create_json(&store, &epoch_record_path, &record)
+            .await
+            .unwrap();
+        assert_eq!(existing, CreateResult::AlreadyExists(record));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn resolve_generation_manifest_claims_unclaimed_current_latest() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        put_protobuf(&store, &checkpoint_ref, &checkpoint)
+            .await
+            .unwrap();
+
+        let manifest = generation_manifest(None, Some(checkpoint_ref.clone()));
+
+        let resolution = resolve_generation_manifest(&store, &manifest, Generation(1))
+            .await
+            .unwrap();
+
+        assert_eq!(resolution, GenerationResolution::Ready { checkpoint_ref });
+        assert!(
+            read_json::<_, EpochRecord>(&store, &paths.epoch_record(Epoch(1)))
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_generation_manifest_claims_unclaimed_commit_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        put_protobuf(&store, &checkpoint_ref, &checkpoint)
+            .await
+            .unwrap();
+
+        let manifest = generation_manifest(None, Some(checkpoint_ref.clone()));
+
+        let resolution = resolve_generation_manifest(&store, &manifest, Generation(1))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resolution,
+            GenerationResolution::ReplayCommit { checkpoint_ref }
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_generation_manifest_falls_back_to_base_for_stale_unclaimed_latest() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(3)).await;
+
+        let base_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let base = checkpoint(1, None, false);
+        put_protobuf(&store, &base_ref, &base).await.unwrap();
+        put_json(
+            &store,
+            &paths.epoch_record(Epoch(1)),
+            &epoch_record(base_ref.clone(), &base),
+        )
+        .await
+        .unwrap();
+
+        let latest_ref = paths.checkpoint_manifest(Generation(2), Epoch(2));
+        let latest = checkpoint(2, Some(base_ref.clone()), false);
+        put_protobuf(&store, &latest_ref, &latest).await.unwrap();
+
+        let manifest = generation_manifest(Some(base_ref.clone()), Some(latest_ref));
+
+        let resolution = resolve_generation_manifest(&store, &manifest, Generation(2))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resolution,
+            GenerationResolution::Ready {
+                checkpoint_ref: base_ref
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_generation_manifest_stops_on_orphaned_latest() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(2)).await;
+
+        let winner_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let loser_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        put_protobuf(&store, &loser_ref, &checkpoint).await.unwrap();
+        put_json(
+            &store,
+            &paths.epoch_record(Epoch(1)),
+            &epoch_record(winner_ref.clone(), &checkpoint),
+        )
+        .await
+        .unwrap();
+
+        let manifest = generation_manifest(None, Some(loser_ref));
+
+        let resolution = resolve_generation_manifest(&store, &manifest, Generation(2))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resolution,
+            GenerationResolution::StopOrphaned {
+                canonical_ref: winner_ref
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_generation_manifest_rejects_checkpoint_with_unready_parent() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let parent_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let child_ref = paths.checkpoint_manifest(Generation(1), Epoch(2));
+        let child = checkpoint(2, Some(parent_ref), false);
+        put_protobuf(&store, &child_ref, &child).await.unwrap();
+
+        let manifest = generation_manifest(None, Some(child_ref));
+
+        let resolution = resolve_generation_manifest(&store, &manifest, Generation(1))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resolution,
+            GenerationResolution::Failed(ResolveFailure::ParentNotReadyCanonical)
         );
     }
 }

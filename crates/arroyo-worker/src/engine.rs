@@ -20,13 +20,14 @@ use arroyo_operator::context::{BatchReceiver, BatchSender, OperatorContext, batc
 use arroyo_operator::operator::Registry;
 use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNode, SourceNode};
 use arroyo_planner::physical::new_registry;
-use arroyo_rpc::checkpoint_protocol::{MetadataOrManifest, get_checkpoint_manifest};
+use arroyo_rpc::checkpoint_protocol::{MetadataOrManifest};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, StateError};
+use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_rpc::grpc::{api, rpc::TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
+use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{JobId, MachineId, PipelineId, TaskInfo, WorkerId, range_for_server};
 use arroyo_udf_host::LocalUdf;
 use futures::StreamExt;
@@ -41,7 +42,6 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tracing::{debug, info, warn};
-use arroyo_rpc::grpc::rpc::CheckpointManifest;
 
 pub struct SubtaskNode {
     pub node_id: u32,

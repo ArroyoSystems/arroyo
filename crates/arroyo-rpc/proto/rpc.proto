@@ -326,8 +326,8 @@ message CheckpointManifest {
   uint64 start_time = 6;
   uint64 finish_time = 7;
   bool needs_commit = 8;
-  bool committed = 9;
   repeated OperatorCheckpointMetadata operators = 10;
+  optional string parent_checkpoint_ref = 11;
 }
 
 message SubtaskCheckpointMetadata {

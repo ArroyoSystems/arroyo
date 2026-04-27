@@ -1,12 +1,13 @@
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use bincode::{Decode, Encode};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::{Deref, RangeInclusive};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -54,8 +55,15 @@ impl Display for MachineId {
     }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct PipelineId(pub Arc<String>);
+
+impl PipelineId {
+    pub fn new(v: impl Into<String>) -> Self {
+        Self(Arc::new(v.into()))
+    }
+}
 
 impl Deref for PipelineId {
     type Target = String;
@@ -71,8 +79,8 @@ impl Display for PipelineId {
     }
 }
 
-
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct JobId(pub Arc<String>);
 
 impl Deref for JobId {
@@ -80,6 +88,12 @@ impl Deref for JobId {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl JobId {
+    pub fn new(v: impl Into<String>) -> Self {
+        Self(Arc::new(v.into()))
     }
 }
 

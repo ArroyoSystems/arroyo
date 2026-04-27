@@ -1,7 +1,7 @@
 use arroyo_rpc::grpc::rpc::{
     StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
 };
-use arroyo_types::{JobId, MachineId, WorkerId, retry};
+use arroyo_types::{JobId, MachineId, WorkerId};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -490,8 +490,7 @@ async fn get_and_register_checkpoint_info_leader<'a>(
     next_generation.write(storage_provider).await?;
 
     // write the current generation file
-    let manifest =
-        CurrentGeneration::new(&ctx.pipeline_id, &*ctx.config.id, ctx.status.generation);
+    let manifest = CurrentGeneration::new(&ctx.pipeline_id, &*ctx.config.id, ctx.status.generation);
     manifest.write(storage_provider).await?;
 
     Ok(checkpoint_info)

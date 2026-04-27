@@ -425,8 +425,8 @@ impl RunningJobModel {
                             start_time: metadata.start_time,
                             finish_time: metadata.finish_time,
                             needs_commit: !committing_state.done(),
-                            committed: false,
                             operators,
+                            parent_checkpoint_ref: None,
                         };
                         StateBackend::write_checkpoint_manifest(manifest).await?;
                     } else {

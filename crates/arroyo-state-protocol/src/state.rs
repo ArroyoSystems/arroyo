@@ -1,7 +1,8 @@
 use crate::types::{
+    CheckpointRef, CommittedMarker, EpochRecord, ProtocolError, checkpoint_epoch,
     validate_committed_marker_matches_checkpoint, validate_epoch_record_matches_checkpoint,
 };
-use crate::{CheckpointManifest, CheckpointRef, CommittedMarker, EpochRecord, ProtocolError};
+use arroyo_rpc::grpc::rpc::CheckpointManifest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckpointState {
@@ -40,9 +41,10 @@ pub fn derive_checkpoint_state(
         return Ok(CheckpointState::Unclaimed);
     };
 
-    if epoch_record.epoch != checkpoint.epoch {
+    let checkpoint_epoch = checkpoint_epoch(checkpoint);
+    if epoch_record.epoch != checkpoint_epoch {
         return Err(ProtocolError::EpochMismatch {
-            checkpoint_epoch: checkpoint.epoch,
+            checkpoint_epoch,
             record_epoch: epoch_record.epoch,
         });
     }
