@@ -40,6 +40,34 @@ pub enum GenerationResolution {
 }
 
 #[derive(Debug, Clone)]
+pub struct InitializeGenerationRequest {
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
+    pub generation: Generation,
+    pub updated_at_micros: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenerationRecovery {
+    NoCheckpoint,
+    Ready { checkpoint_ref: CheckpointRef },
+    ReplayCommit { checkpoint_ref: CheckpointRef },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenerationInitialization {
+    Initialized {
+        generation_manifest: GenerationManifest,
+        recovery: GenerationRecovery,
+    },
+    StaleGeneration,
+    StopOrphaned {
+        canonical_ref: CheckpointRef,
+    },
+    Failed(ResolveFailure),
+}
+
+#[derive(Debug, Clone)]
 pub struct PublishCheckpointRequest<'a> {
     pub generation_manifest: &'a GenerationManifest,
     pub checkpoint_ref: &'a CheckpointRef,
@@ -87,6 +115,171 @@ pub enum CommitCompletion {
     StopOrphaned { canonical_ref: CheckpointRef },
     NotCanonical { checkpoint_ref: CheckpointRef },
     MissingCheckpoint { checkpoint_ref: CheckpointRef },
+}
+
+pub async fn initialize_generation<S>(
+    store: &S,
+    request: InitializeGenerationRequest,
+) -> Result<GenerationInitialization, StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    let paths = ProtocolPaths::new(request.pipeline_id.clone(), request.job_id.clone());
+    let is_current_generation =
+        read_json::<_, CurrentGeneration>(store, &paths.current_generation())
+            .await?
+            .is_some_and(|current_generation| current_generation.generation == request.generation);
+
+    if !is_current_generation {
+        return Ok(GenerationInitialization::StaleGeneration);
+    }
+
+    let recovery = find_recovery_checkpoint(store, &paths, request.generation).await?;
+    let base_checkpoint_ref = match &recovery {
+        RecoverySearch::Found(recovery) => match recovery {
+            GenerationRecovery::NoCheckpoint => None,
+            GenerationRecovery::Ready { checkpoint_ref }
+            | GenerationRecovery::ReplayCommit { checkpoint_ref } => Some(checkpoint_ref.clone()),
+        },
+        RecoverySearch::StopOrphaned { canonical_ref } => {
+            return Ok(GenerationInitialization::StopOrphaned {
+                canonical_ref: canonical_ref.clone(),
+            });
+        }
+        RecoverySearch::Failed(failure) => {
+            return Ok(GenerationInitialization::Failed(failure.clone()));
+        }
+    };
+
+    let generation_manifest = GenerationManifest::new(
+        request.pipeline_id,
+        request.job_id,
+        request.generation,
+        base_checkpoint_ref,
+        request.updated_at_micros,
+    );
+
+    put_json(
+        store,
+        &paths.generation_manifest(request.generation),
+        &generation_manifest,
+    )
+    .await?;
+
+    let RecoverySearch::Found(recovery) = recovery else {
+        unreachable!("handled non-found recovery results above")
+    };
+
+    Ok(GenerationInitialization::Initialized {
+        generation_manifest,
+        recovery,
+    })
+}
+
+async fn find_recovery_checkpoint<S>(
+    store: &S,
+    paths: &ProtocolPaths,
+    generation: Generation,
+) -> Result<RecoverySearch, StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    let Some(previous_generation) = generation.0.checked_sub(1) else {
+        return Ok(RecoverySearch::Found(GenerationRecovery::NoCheckpoint));
+    };
+
+    for previous_generation in (0..=previous_generation).rev() {
+        let manifest_ref = paths.generation_manifest(Generation(previous_generation));
+        let Some(manifest): Option<GenerationManifest> = read_json(store, &manifest_ref).await?
+        else {
+            continue;
+        };
+
+        match resolve_generation_manifest(store, &manifest, generation).await? {
+            GenerationResolution::Ready { checkpoint_ref } => {
+                return Ok(RecoverySearch::Found(GenerationRecovery::Ready {
+                    checkpoint_ref,
+                }));
+            }
+            GenerationResolution::ReplayCommit { checkpoint_ref } => {
+                return Ok(RecoverySearch::Found(GenerationRecovery::ReplayCommit {
+                    checkpoint_ref,
+                }));
+            }
+            GenerationResolution::StopOrphaned { canonical_ref } => {
+                return resolve_canonical_recovery_ref(store, paths, &canonical_ref).await;
+            }
+            GenerationResolution::Failed(
+                ResolveFailure::NoCandidate
+                | ResolveFailure::InvisibleBase
+                | ResolveFailure::UnclaimedBase,
+            ) => continue,
+            GenerationResolution::Failed(failure) => {
+                return Ok(RecoverySearch::Failed(failure));
+            }
+        }
+    }
+
+    Ok(RecoverySearch::Found(GenerationRecovery::NoCheckpoint))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RecoverySearch {
+    Found(GenerationRecovery),
+    StopOrphaned { canonical_ref: CheckpointRef },
+    Failed(ResolveFailure),
+}
+
+async fn resolve_canonical_recovery_ref<S>(
+    store: &S,
+    paths: &ProtocolPaths,
+    checkpoint_ref: &CheckpointRef,
+) -> Result<RecoverySearch, StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    let Some(checkpoint): Option<CheckpointManifest> = read_protobuf(store, checkpoint_ref).await?
+    else {
+        return Ok(RecoverySearch::Failed(ResolveFailure::InvisibleBase));
+    };
+
+    if parent_status(store, paths, Some(&checkpoint)).await?
+        == ParentCheckpointStatus::NotReadyCanonical
+    {
+        return Ok(RecoverySearch::Failed(
+            ResolveFailure::ParentNotReadyCanonical,
+        ));
+    }
+
+    let epoch_record: Option<EpochRecord> =
+        read_json(store, &paths.epoch_record(checkpoint_epoch(&checkpoint))).await?;
+    let committed_marker = if checkpoint.needs_commit {
+        let committed_marker_path = committed_marker_path(paths, &checkpoint);
+        read_json(store, &committed_marker_path).await?
+    } else {
+        None
+    };
+
+    match derive_checkpoint_state(
+        checkpoint_ref,
+        Some(&checkpoint),
+        epoch_record.as_ref(),
+        committed_marker.as_ref(),
+    )? {
+        CheckpointState::Ready => Ok(RecoverySearch::Found(GenerationRecovery::Ready {
+            checkpoint_ref: checkpoint_ref.clone(),
+        })),
+        CheckpointState::Committing => {
+            Ok(RecoverySearch::Found(GenerationRecovery::ReplayCommit {
+                checkpoint_ref: checkpoint_ref.clone(),
+            }))
+        }
+        CheckpointState::Orphaned { canonical_ref } => {
+            Ok(RecoverySearch::StopOrphaned { canonical_ref })
+        }
+        CheckpointState::Invisible => unreachable!("checkpoint was read above"),
+        CheckpointState::Unclaimed => Ok(RecoverySearch::Failed(ResolveFailure::UnclaimedBase)),
+    }
 }
 
 pub async fn prepare_commit<S>(
@@ -390,7 +583,7 @@ where
                 ClaimEpochRecordRequest {
                     epoch_record_path: &paths.epoch_record(checkpoint_epoch(&checkpoint)),
                     pipeline_id: &manifest.pipeline_id,
-                    generation: manifest.generation,
+                    generation: Generation(checkpoint.generation),
                     checkpoint_ref: &checkpoint_ref,
                     checkpoint: &checkpoint,
                     created_at_micros: 0,

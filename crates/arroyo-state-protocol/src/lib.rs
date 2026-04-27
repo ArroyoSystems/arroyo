@@ -27,6 +27,14 @@ impl ProtocolPaths {
         }
     }
 
+    pub fn pipeline_id(&self) -> &PipelineId {
+        &self.pipeline_id
+    }
+
+    pub fn job_id(&self) -> &JobId {
+        &self.job_id
+    }
+
     pub fn current_generation(&self) -> CheckpointRef {
         self.path("current-generation.json")
     }
@@ -84,8 +92,9 @@ mod tests {
     };
     use crate::workflow::{
         CheckpointPublication, ClaimEpochRecordRequest, CommitAuthorization, CommitCompletion,
-        CommittedMarkerOutcome, GenerationResolution, PublishCheckpointRequest, claim_epoch_record,
-        complete_commit, mark_committed, prepare_commit, publish_checkpoint,
+        CommittedMarkerOutcome, GenerationInitialization, GenerationRecovery, GenerationResolution,
+        InitializeGenerationRequest, PublishCheckpointRequest, claim_epoch_record, complete_commit,
+        initialize_generation, mark_committed, prepare_commit, publish_checkpoint,
         resolve_generation_manifest,
     };
     use arroyo_rpc::grpc::rpc::CheckpointManifest;
@@ -100,10 +109,19 @@ mod tests {
         parent_checkpoint_ref: Option<CheckpointRef>,
         needs_commit: bool,
     ) -> CheckpointManifest {
+        checkpoint_for_generation(Generation(1), epoch, parent_checkpoint_ref, needs_commit)
+    }
+
+    fn checkpoint_for_generation(
+        generation: Generation,
+        epoch: u64,
+        parent_checkpoint_ref: Option<CheckpointRef>,
+        needs_commit: bool,
+    ) -> CheckpointManifest {
         CheckpointManifest {
             pipeline_id: "P".to_string(),
             job_id: "J".to_string(),
-            generation: 1,
+            generation: generation.0,
             epoch,
             min_epoch: epoch,
             start_time: 0,
@@ -141,10 +159,22 @@ mod tests {
         base_checkpoint_ref: Option<CheckpointRef>,
         latest_checkpoint_ref: Option<CheckpointRef>,
     ) -> GenerationManifest {
+        generation_manifest_for_generation(
+            Generation(1),
+            base_checkpoint_ref,
+            latest_checkpoint_ref,
+        )
+    }
+
+    fn generation_manifest_for_generation(
+        generation: Generation,
+        base_checkpoint_ref: Option<CheckpointRef>,
+        latest_checkpoint_ref: Option<CheckpointRef>,
+    ) -> GenerationManifest {
         let mut manifest = GenerationManifest::new(
             PipelineId::new("P"),
             JobId::new("J"),
-            Generation(1),
+            generation,
             base_checkpoint_ref,
             0,
         );
@@ -186,6 +216,393 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_without_prior_checkpoint_writes_empty_manifest() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(1),
+                updated_at_micros: 123,
+            },
+        )
+        .await
+        .unwrap();
+
+        let expected_manifest = GenerationManifest::new(
+            PipelineId::new("P"),
+            JobId::new("J"),
+            Generation(1),
+            None,
+            123,
+        );
+        assert_eq!(
+            initialization,
+            GenerationInitialization::Initialized {
+                generation_manifest: expected_manifest.clone(),
+                recovery: GenerationRecovery::NoCheckpoint
+            }
+        );
+
+        let written_manifest: GenerationManifest =
+            read_json(&store, &paths.generation_manifest(Generation(1)))
+                .await
+                .unwrap()
+                .expect("new generation manifest should be written");
+        assert_eq!(written_manifest, expected_manifest);
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_restores_previous_ready_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(2)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint_for_generation(Generation(1), 1, None, false);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+        let previous_manifest =
+            generation_manifest_for_generation(Generation(1), None, Some(checkpoint_ref.clone()));
+        put_json(
+            &store,
+            &paths.generation_manifest(Generation(1)),
+            &previous_manifest,
+        )
+        .await
+        .unwrap();
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(2),
+                updated_at_micros: 456,
+            },
+        )
+        .await
+        .unwrap();
+
+        let expected_manifest = GenerationManifest::new(
+            PipelineId::new("P"),
+            JobId::new("J"),
+            Generation(2),
+            Some(checkpoint_ref.clone()),
+            456,
+        );
+        assert_eq!(
+            initialization,
+            GenerationInitialization::Initialized {
+                generation_manifest: expected_manifest.clone(),
+                recovery: GenerationRecovery::Ready {
+                    checkpoint_ref: checkpoint_ref.clone()
+                }
+            }
+        );
+
+        let written_manifest: GenerationManifest =
+            read_json(&store, &paths.generation_manifest(Generation(2)))
+                .await
+                .unwrap()
+                .expect("new generation manifest should be written");
+        assert_eq!(written_manifest, expected_manifest);
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_restores_previous_checkpoint_requiring_commit_replay() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(2)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint_for_generation(Generation(1), 1, None, true);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+        let previous_manifest =
+            generation_manifest_for_generation(Generation(1), None, Some(checkpoint_ref.clone()));
+        put_json(
+            &store,
+            &paths.generation_manifest(Generation(1)),
+            &previous_manifest,
+        )
+        .await
+        .unwrap();
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(2),
+                updated_at_micros: 456,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            initialization,
+            GenerationInitialization::Initialized {
+                generation_manifest: GenerationManifest::new(
+                    PipelineId::new("P"),
+                    JobId::new("J"),
+                    Generation(2),
+                    Some(checkpoint_ref.clone()),
+                    456,
+                ),
+                recovery: GenerationRecovery::ReplayCommit { checkpoint_ref }
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_skips_missing_previous_manifest() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(3)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint_for_generation(Generation(1), 1, None, false);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+        put_json(
+            &store,
+            &paths.generation_manifest(Generation(1)),
+            &generation_manifest_for_generation(Generation(1), None, Some(checkpoint_ref.clone())),
+        )
+        .await
+        .unwrap();
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(3),
+                updated_at_micros: 789,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            initialization,
+            GenerationInitialization::Initialized {
+                recovery: GenerationRecovery::Ready { .. },
+                ..
+            }
+        ));
+        let written_manifest: GenerationManifest =
+            read_json(&store, &paths.generation_manifest(Generation(3)))
+                .await
+                .unwrap()
+                .expect("new generation manifest should be written");
+        assert_eq!(written_manifest.base_checkpoint_ref, Some(checkpoint_ref));
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_claims_unclaimed_previous_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(2)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint_for_generation(Generation(1), 1, None, false);
+        put_protobuf(&store, &checkpoint_ref, &checkpoint)
+            .await
+            .unwrap();
+        put_json(
+            &store,
+            &paths.generation_manifest(Generation(1)),
+            &generation_manifest_for_generation(Generation(1), None, Some(checkpoint_ref.clone())),
+        )
+        .await
+        .unwrap();
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(2),
+                updated_at_micros: 456,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            initialization,
+            GenerationInitialization::Initialized {
+                recovery: GenerationRecovery::Ready { .. },
+                ..
+            }
+        ));
+        let record: EpochRecord = read_json(&store, &paths.epoch_record(Epoch(1)))
+            .await
+            .unwrap()
+            .expect("unclaimed checkpoint should be claimed during initialization");
+        assert_eq!(record.checkpoint_ref, checkpoint_ref);
+        assert_eq!(record.generation, Generation(1));
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_recovers_canonical_checkpoint_from_orphaned_previous_manifest() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(3)).await;
+
+        let winner_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let loser_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
+        let winner_checkpoint = checkpoint_for_generation(Generation(1), 1, None, false);
+        let loser_checkpoint = checkpoint_for_generation(Generation(2), 1, None, false);
+        put_protobuf(&store, &winner_ref, &winner_checkpoint)
+            .await
+            .unwrap();
+        put_protobuf(&store, &loser_ref, &loser_checkpoint)
+            .await
+            .unwrap();
+        put_json(
+            &store,
+            &paths.epoch_record(Epoch(1)),
+            &epoch_record(winner_ref.clone(), &winner_checkpoint),
+        )
+        .await
+        .unwrap();
+        put_json(
+            &store,
+            &paths.generation_manifest(Generation(2)),
+            &generation_manifest_for_generation(Generation(2), None, Some(loser_ref)),
+        )
+        .await
+        .unwrap();
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(3),
+                updated_at_micros: 456,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            initialization,
+            GenerationInitialization::Initialized {
+                generation_manifest: GenerationManifest::new(
+                    PipelineId::new("P"),
+                    JobId::new("J"),
+                    Generation(3),
+                    Some(winner_ref.clone()),
+                    456,
+                ),
+                recovery: GenerationRecovery::Ready {
+                    checkpoint_ref: winner_ref.clone()
+                }
+            }
+        );
+        let written_manifest: GenerationManifest =
+            read_json(&store, &paths.generation_manifest(Generation(3)))
+                .await
+                .unwrap()
+                .expect("replacement generation manifest should be written");
+        assert_eq!(written_manifest.base_checkpoint_ref, Some(winner_ref));
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_replays_commit_for_canonical_checkpoint_from_orphaned_manifest()
+    {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(3)).await;
+
+        let winner_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let loser_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
+        let winner_checkpoint = checkpoint_for_generation(Generation(1), 1, None, true);
+        let loser_checkpoint = checkpoint_for_generation(Generation(2), 1, None, true);
+        put_protobuf(&store, &winner_ref, &winner_checkpoint)
+            .await
+            .unwrap();
+        put_protobuf(&store, &loser_ref, &loser_checkpoint)
+            .await
+            .unwrap();
+        put_json(
+            &store,
+            &paths.epoch_record(Epoch(1)),
+            &epoch_record(winner_ref.clone(), &winner_checkpoint),
+        )
+        .await
+        .unwrap();
+        put_json(
+            &store,
+            &paths.generation_manifest(Generation(2)),
+            &generation_manifest_for_generation(Generation(2), None, Some(loser_ref)),
+        )
+        .await
+        .unwrap();
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(3),
+                updated_at_micros: 456,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            initialization,
+            GenerationInitialization::Initialized {
+                generation_manifest: GenerationManifest::new(
+                    PipelineId::new("P"),
+                    JobId::new("J"),
+                    Generation(3),
+                    Some(winner_ref.clone()),
+                    456,
+                ),
+                recovery: GenerationRecovery::ReplayCommit {
+                    checkpoint_ref: winner_ref
+                }
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_exits_when_stale() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(3)).await;
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(2),
+                updated_at_micros: 456,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(initialization, GenerationInitialization::StaleGeneration);
+        assert!(
+            read_json::<_, GenerationManifest>(&store, &paths.generation_manifest(Generation(2)))
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
