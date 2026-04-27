@@ -25,7 +25,7 @@ use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{MachineId, WorkerId, from_micros};
+use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
 use cornucopia_async::DatabaseSource;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
@@ -65,7 +65,7 @@ pub struct JobConfig {
     id: Arc<String>,
     organization_id: String,
     pipeline_name: String,
-    pipeline_id: String,
+    pipeline_id: i64,
     stop_mode: StopMode,
     checkpoint_interval: Duration,
     ttl: Option<Duration>,
@@ -596,8 +596,8 @@ impl ControllerServer {
                     let config = JobConfig {
                         id: id.clone(),
                         organization_id: p.org_id,
-                        pipeline_name: p.pipeline_name,
                         pipeline_id: p.pipeline_id,
+                        pipeline_name: p.pipeline_name,
                         stop_mode: p.stop,
                         checkpoint_interval: Duration::from_micros(
                             p.checkpoint_interval_micros as u64,

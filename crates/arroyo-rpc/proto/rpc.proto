@@ -10,6 +10,7 @@ import "api.proto";
 message WorkerContext {
   string machine_id = 1;
   uint64 worker_id = 2;
+  string pipeline_id = 5;
   string job_id = 3;
   uint64 run_id = 4;
 }
@@ -551,6 +552,7 @@ service WorkerGrpc {
 
 message StartWorkerReq {
   string name = 1;
+  string pipeline_id = 11;
   string job_id = 2;
   uint64 slots = 6;
   string machine_id = 7;

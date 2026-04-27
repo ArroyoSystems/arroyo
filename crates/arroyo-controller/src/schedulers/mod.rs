@@ -7,7 +7,9 @@ use arroyo_rpc::grpc::rpc::{
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
     WorkerFinishedReq,
 };
-use arroyo_types::{JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId};
+use arroyo_types::{
+    GENERATION_ENV, JOB_ID_ENV, JobId, MachineId, PIPELINE_ID_ENV, PipelineId, WorkerId,
+};
 use lazy_static::lazy_static;
 use prometheus::{Gauge, register_gauge};
 use std::collections::HashMap;
@@ -66,8 +68,8 @@ pub trait Scheduler: Send + Sync {
 }
 
 pub struct ProcessWorker {
-    job_id: Arc<String>,
-    run_id: u64,
+    job_id: JobId,
+    generation: u64,
     shutdown_tx: oneshot::Sender<()>,
 }
 
@@ -90,9 +92,10 @@ pub struct StartPipelineReq {
     pub name: String,
     pub program: LogicalProgram,
     pub wasm_path: String,
-    pub job_id: Arc<String>,
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
     pub hash: String,
-    pub run_id: u64,
+    pub generation: u64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
 }
@@ -131,13 +134,14 @@ impl Scheduler for ProcessScheduler {
                     WorkerId(worker_id),
                     ProcessWorker {
                         job_id: start_pipeline_req.job_id.clone(),
-                        run_id: start_pipeline_req.run_id,
+                        generation: start_pipeline_req.generation,
                         shutdown_tx: tx,
                     },
                 );
             }
 
             slots_scheduled += slots_here;
+            let pipeline_id = start_pipeline_req.pipeline_id.clone();
             let job_id = start_pipeline_req.job_id.clone();
             let workers = self.workers.clone();
             let env_map = start_pipeline_req.env_vars.clone();
@@ -172,8 +176,9 @@ impl Scheduler for ProcessScheduler {
                     .env("ARROYO__WORKER__ID", format!("{worker_id}")) // start at 100 to make same length
                     .env("ARROYO__CONTROLLER_ENDPOINT", config.controller_endpoint())
                     .env("UNDER_PROCESS_SCHEDULER", "true")
+                    .env(PIPELINE_ID_ENV, &*pipeline_id)
                     .env(JOB_ID_ENV, &*job_id)
-                    .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
+                    .env(GENERATION_ENV, format!("{}", start_pipeline_req.generation))
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();
@@ -213,7 +218,7 @@ impl Scheduler for ProcessScheduler {
             .await
             .iter()
             .filter(|(_, w)| {
-                *w.job_id == job_id && (run_id.is_none() || w.run_id == run_id.unwrap())
+                *w.job_id == job_id && (run_id.is_none() || w.generation == run_id.unwrap())
             })
             .map(|(k, _)| *k)
             .collect())
@@ -298,9 +303,9 @@ impl NodeStatus {
 
 #[derive(Clone)]
 struct NodeWorker {
-    job_id: Arc<String>,
+    job_id: JobId,
     node_id: MachineId,
-    run_id: u64,
+    generation: u64,
     running: bool,
 }
 
@@ -491,7 +496,7 @@ impl Scheduler for NodeScheduler {
             .filter(|(_, v)| {
                 *v.job_id == job_id
                     && v.running
-                    && (run_id.is_none() || v.run_id == run_id.unwrap())
+                    && (run_id.is_none() || v.generation == run_id.unwrap())
             })
             .map(|(w, _)| *w)
             .collect())
@@ -563,10 +568,11 @@ impl Scheduler for NodeScheduler {
 
             let req = StartWorkerReq {
                 name: start_pipeline_req.name.clone(),
+                pipeline_id: "".to_string(),
                 job_id: (*start_pipeline_req.job_id).clone(),
                 slots: slots_for_this_one as u64,
                 machine_id: node.id.to_string(),
-                run_id: start_pipeline_req.run_id,
+                run_id: start_pipeline_req.generation,
                 env_vars: start_pipeline_req.env_vars.clone(),
             };
 
@@ -601,7 +607,7 @@ impl Scheduler for NodeScheduler {
                 WorkerId(res.worker_id),
                 NodeWorker {
                     job_id: start_pipeline_req.job_id.clone(),
-                    run_id: start_pipeline_req.run_id,
+                    generation: start_pipeline_req.generation,
                     node_id: node.id.clone(),
                     running: true,
                 },

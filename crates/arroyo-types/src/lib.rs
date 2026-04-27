@@ -12,7 +12,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // worker configuration
 pub const JOB_ID_ENV: &str = "JOB_ID";
-pub const RUN_ID_ENV: &str = "RUN_ID";
+pub const GENERATION_ENV: &str = "GENERATION";
+pub const PIPELINE_ID_ENV: &str = "PIPELINE_ID";
 
 // telemetry configuration
 pub const TELEMETRY_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";

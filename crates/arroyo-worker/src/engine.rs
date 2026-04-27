@@ -29,7 +29,7 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{JobId, MachineId, TaskInfo, WorkerId, range_for_server};
+use arroyo_types::{JobId, MachineId, PipelineId, TaskInfo, WorkerId, range_for_server};
 use arroyo_udf_host::LocalUdf;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -473,7 +473,11 @@ impl Engine {
             .count()
     }
 
-    pub async fn for_local(program: Program, job_id: String) -> anyhow::Result<Self> {
+    pub async fn for_local(
+        program: Program,
+        pipeline_id: String,
+        job_id: String,
+    ) -> anyhow::Result<Self> {
         let worker_id = WorkerId(0);
         let assignments = program
             .graph
@@ -499,6 +503,7 @@ impl Engine {
             worker_context: WorkerContext {
                 machine_id: MachineId(Arc::new("local".to_string())),
                 worker_id,
+                pipeline_id: PipelineId(Arc::new(pipeline_id)),
                 job_id: JobId(Arc::new(job_id)),
                 run_id: 0,
             },

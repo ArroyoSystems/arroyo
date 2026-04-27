@@ -13,7 +13,7 @@ use arroyo_rpc::grpc::rpc::{
     worker_grpc_client::WorkerGrpcClient,
 };
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::WorkerId;
+use arroyo_types::{JobId, PipelineId, WorkerId};
 use rand::{Rng, rng};
 
 use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
@@ -47,6 +47,7 @@ pub struct JobController {
 impl std::fmt::Debug for JobController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobController")
+            .field("pipeline_id", &self.model.pipeline_id)
             .field("config", &self.config)
             .field("model", &self.model)
             .field("cleaning", &self.cleanup_task.is_some())
@@ -65,6 +66,8 @@ impl JobController {
     pub fn new(
         checkpoint_store: Arc<dyn CheckpointMetadataStore>,
         config: JobConfig,
+        pipeline_id: PipelineId,
+        generation: u64,
         program: Arc<LogicalProgram>,
         epoch: u32,
         min_epoch: u32,
@@ -76,7 +79,9 @@ impl JobController {
             checkpoint_store,
             metrics,
             model: RunningJobModel {
-                job_id: config.id.clone(),
+                pipeline_id,
+                job_id: JobId(config.id.clone()),
+                generation,
                 state: JobState::Running,
                 checkpoint_state: commit_state.map(CheckpointingOrCommittingState::Committing),
                 epoch,
@@ -121,6 +126,7 @@ impl JobController {
                 program,
                 checkpoint_spans: vec![],
                 worker_leader_mode: false,
+                finished_operators: vec![],
             },
             config,
             cleanup_task: None,

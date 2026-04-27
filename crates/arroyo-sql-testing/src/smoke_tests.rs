@@ -153,6 +153,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
                     worker_context: Some(WorkerContext {
                         machine_id: "test".to_string(),
                         worker_id: 1,
+                        pipeline_id: "pipe-test".to_string(),
                         job_id: (*ctx.job_id).clone(),
                         run_id: 0,
                     }),
@@ -168,6 +169,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
                 let req = TaskCheckpointCompletedReq {
                     worker_context: Some(WorkerContext {
                         machine_id: "test".to_string(),
+                        pipeline_id: "pipe-test".to_string(),
                         worker_id: 1,
                         job_id: (*ctx.job_id).clone(),
                         run_id: 0,
@@ -321,7 +323,7 @@ async fn run_and_checkpoint(
     control_rx: &mut Receiver<ControlResp>,
     checkpoint_interval: i32,
 ) {
-    let engine = Engine::for_local(program, job_id.to_string())
+    let engine = Engine::for_local(program, "pipe-test".to_string(), job_id.to_string())
         .await
         .unwrap();
     let running_engine = engine.start().await;
@@ -370,7 +372,7 @@ async fn finish_from_checkpoint(
     program: Program,
     control_rx: &mut Receiver<ControlResp>,
 ) {
-    let engine = Engine::for_local(program, job_id.to_string())
+    let engine = Engine::for_local(program, "pipe-local".to_string(), job_id.to_string())
         .await
         .unwrap();
     let running_engine = engine.start().await;
@@ -474,7 +476,7 @@ async fn run_completely(
     primary_keys: Option<&[&str]>,
     control_rx: &mut Receiver<ControlResp>,
 ) {
-    let engine = Engine::for_local(program, job_id.to_string())
+    let engine = Engine::for_local(program, "pipe-local".to_string(), job_id.to_string())
         .await
         .unwrap();
     let running_engine = engine.start().await;

@@ -9,12 +9,15 @@ use arroyo_rpc::checkpoints::{
 };
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq, OperatorCheckpointMetadata, TaskCheckpointEventType};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq,
+    OperatorCheckpointMetadata, TaskCheckpointEventType,
+};
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::committing_state::CommittingState;
 use arroyo_state::parquet::ParquetBackend;
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{WorkerId, to_micros};
+use arroyo_types::{JobId, PipelineId, WorkerId, to_micros};
 use futures::future::try_join_all;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,8 +28,8 @@ use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 
 pub struct RunningJobModel {
-    pub pipeline_id: Arc<String>,
-    pub job_id: Arc<String>,
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
     pub generation: u64,
     pub state: JobState,
     pub program: Arc<LogicalProgram>,
@@ -331,7 +334,7 @@ impl RunningJobModel {
             .await?;
 
         let state = CheckpointState::new(
-            self.job_id.clone(),
+            self.job_id.0.clone(),
             checkpoint_id,
             self.epoch,
             self.min_epoch,
@@ -362,7 +365,7 @@ impl RunningJobModel {
             for (op, _) in node.operator_chain.iter() {
                 let compacted_tables = ParquetBackend::compact_operator(
                     // compact the operator's state and notify the workers to load the new files
-                    self.job_id.clone(),
+                    self.job_id.0.clone(),
                     &op.operator_id,
                     self.epoch,
                 )

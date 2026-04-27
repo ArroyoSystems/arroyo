@@ -122,8 +122,8 @@ impl WorkerJobController {
         Ok(Self {
             checkpoint_interval,
             model: RunningJobModel {
-                pipeline_id: worker_context.pipeline_id.0.clone(),
-                job_id: worker_context.job_id.0.clone(),
+                pipeline_id: worker_context.pipeline_id.clone(),
+                job_id: worker_context.job_id.clone(),
                 generation: 0,
                 state: JobState::Running,
                 checkpoint_state: None,

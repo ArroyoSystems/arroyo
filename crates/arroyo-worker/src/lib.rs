@@ -19,8 +19,8 @@ use arroyo_rpc::grpc::rpc::{
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
-    CheckpointBarrier, JOB_ID_ENV, JobId, MachineId, RUN_ID_ENV, WorkerId, from_micros,
-    from_millis, to_micros,
+    CheckpointBarrier, GENERATION_ENV, JOB_ID_ENV, JobId, MachineId, PIPELINE_ID_ENV, PipelineId,
+    WorkerId, from_micros, from_millis, retry, to_micros,
 };
 use rand::random;
 
@@ -50,8 +50,9 @@ use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
 use arroyo_rpc::grpc::rpc::job_status_grpc_server::{JobStatusGrpc, JobStatusGrpcServer};
 use arroyo_rpc::{
     CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
-    local_address, retry,
+    local_address,
 };
+
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 pub use ordered_float::OrderedFloat;
@@ -161,7 +162,12 @@ impl LocalRunner {
 
     pub async fn run(mut self) -> anyhow::Result<()> {
         let total_nodes = self.program.total_nodes();
-        let engine = Engine::for_local(self.program, "job-local".to_string()).await?;
+        let engine = Engine::for_local(
+            self.program,
+            "pipe-local".to_string(),
+            "job-local".to_string(),
+        )
+        .await?;
 
         let _running_engine = engine.start().await;
 
@@ -548,14 +554,18 @@ impl WorkerServer {
                 .unwrap_or_else(|| Uuid::new_v4().to_string()),
         ));
 
-        let run_id = std::env::var(RUN_ID_ENV)
-            .unwrap_or_else(|_| panic!("{RUN_ID_ENV} is not set"))
+        let run_id = std::env::var(GENERATION_ENV)
+            .unwrap_or_else(|_| panic!("{GENERATION_ENV} is not set"))
             .parse()
-            .unwrap_or_else(|_| panic!("{RUN_ID_ENV} must be an unsigned int"));
+            .unwrap_or_else(|_| panic!("{GENERATION_ENV} must be an unsigned int"));
+
+        let pipeline_id = std::env::var(PIPELINE_ID_ENV)
+            .unwrap_or_else(|_| panic!("{PIPELINE_ID_ENV} is not set"));
 
         Ok(WorkerServer::new(
             machine_id,
             worker_id,
+            PipelineId(pipeline_id.into()),
             JobId(job_id.into()),
             run_id,
             shutdown_guard,
@@ -565,6 +575,7 @@ impl WorkerServer {
     pub fn new(
         machine_id: MachineId,
         worker_id: WorkerId,
+        pipeline_id: PipelineId,
         job_id: JobId,
         run_id: u64,
         shutdown_guard: ShutdownGuard,
@@ -577,6 +588,7 @@ impl WorkerServer {
                 worker_context: WorkerContext {
                     worker_id,
                     machine_id,
+                    pipeline_id,
                     job_id,
                     run_id,
                 },

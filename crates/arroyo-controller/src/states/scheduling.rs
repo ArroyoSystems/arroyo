@@ -1,13 +1,13 @@
+use arroyo_rpc::grpc::rpc::{
+    JobFailure, StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
+};
+use arroyo_types::{JobId, MachineId, WorkerId, retry, to_micros};
+use std::time::SystemTime;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
-use std::time::SystemTime;
-use arroyo_rpc::grpc::rpc::{
-    StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
-};
-use arroyo_types::{to_micros, JobId, MachineId, WorkerId};
 use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{Request, transport::Channel};
 use tracing::{debug, error, info, warn};
@@ -28,10 +28,9 @@ use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::checkpoint_protocol::CurrentGeneration;
 use arroyo_rpc::config::{JobControllerMode, config};
-use arroyo_rpc::errors::StorageError;
-use arroyo_rpc::grpc::api;
-use arroyo_rpc::{checkpoint_protocol, grpc_channel_builder};
+use arroyo_rpc::grpc::{api, rpc};
 use arroyo_rpc::worker_types::RunningMessage;
+use arroyo_rpc::{checkpoint_protocol, grpc_channel_builder};
 use arroyo_state::{
     BackingStore, StateBackend,
     committing_state::CommittingState,
@@ -206,8 +205,9 @@ impl Scheduling {
                 .start_workers(StartPipelineReq {
                     program: ctx.program.clone(),
                     wasm_path: "".to_string(),
-                    job_id: ctx.config.id.clone(),
-                    run_id: ctx.status.generation,
+                    pipeline_id: ctx.pipeline_id.clone(),
+                    job_id: JobId(ctx.config.id.clone()),
+                    generation: ctx.status.generation,
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
@@ -252,23 +252,6 @@ impl Scheduling {
     }
 }
 
-pub async fn write_generation_manifest(pipeline_id: &str, job_id: &str, generation: u64) -> Result<(), StorageError> {
-    let manifest = CurrentGeneration {
-        version: checkpoint_protocol::METADATA_VERSION,
-        pipeline_id: pipeline_id.to_string(),
-        job_id: job_id.to_string(),
-        job_generation: generation,
-        generation_manifest_ref: checkpoint_protocol::paths::generation_manifest(pipeline_id, job_id, generation),
-        updated_at_micros: to_micros(SystemTime::now()),
-    };
-
-    let storage_client = arroyo_state::get_storage_provider().await?;
-    let path = checkpoint_protocol::paths::current_generation(pipeline_id, job_id);
-    
-    storage_client.put(path, serde_json::to_vec(&manifest).expect("failed to serialize JSON"))
-}
-
-
 #[async_trait::async_trait]
 impl State for Scheduling {
     fn name(&self) -> &'static str {
@@ -296,10 +279,30 @@ impl State for Scheduling {
         self = self.start_workers(ctx, slots_needed).await?;
 
         let leader_mode = matches!(config().job_controller, JobControllerMode::Worker);
-        
+
         // if this is a leader cluster, write the generation metadata
         if leader_mode {
-            write_generation_manifest(ctx.config.pipeline_name)
+            let manifest =
+                CurrentGeneration::new(&ctx.pipeline_id, &*ctx.config.id, ctx.status.generation);
+            let storage = arroyo_state::get_storage_provider().await
+                // should never happen, indicates something wrong with configuration
+                .map_err(|e| fatal("failed to construct storage provider", e.into()))?;
+
+            if let Err(e) = retry!(
+                manifest.write(storage).await,
+                10,
+                Duration::from_millis(200),
+                Duration::from_secs(10),
+                |e| warn!(pipeline_id = *ctx.pipeline_id, job_id = *ctx.config.id, error =? e,
+                    "failed to write generation manifest")
+            ) {
+                return Err(ctx.retryable(
+                    self,
+                    "failed while writing generation manifest",
+                    e.into(),
+                    20,
+                ));
+            }
         }
 
         // wait for them to connect and make outbound RPC connections
@@ -785,6 +788,8 @@ impl State for Scheduling {
                 let mut controller = JobController::new(
                     checkpoint_store,
                     ctx.config.clone(),
+                    ctx.pipeline_id.clone(),
+                    ctx.status.generation,
                     program,
                     start_epoch,
                     min_epoch,
