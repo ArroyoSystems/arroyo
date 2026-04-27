@@ -1,13 +1,12 @@
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use bincode::{Decode, Encode};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::{Deref, RangeInclusive};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

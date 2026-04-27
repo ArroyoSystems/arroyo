@@ -12,15 +12,13 @@
 //! - `P/J/generations/G/generation_manifest.json`
 //! - `P/J/epochs/epoch-{E:07}.lock`
 
-use arroyo_types::to_micros;
-use std::time::SystemTime;
-use anyhow::{anyhow, bail};
-use serde::{Deserialize, Serialize};
 use crate::grpc::rpc::{CheckpointManifest, CheckpointMetadata};
+use arroyo_types::to_micros;
+use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 
 /// Current version of the metadata files used for the checkpoint protocol
 pub const METADATA_VERSION: u32 = 1;
-
 
 /// Written by the controller to identify the latest generation for a job.
 ///
@@ -89,7 +87,6 @@ impl GenerationManifest {
             .as_deref()
             .or(self.base_checkpoint_ref.as_deref())
     }
-
 }
 
 /// Abstracts over the two types of checkpoint metadata we have, for metadata v0 and v1
@@ -130,7 +127,12 @@ pub mod paths {
     }
 
     /// `P/J/generations/G/checkpoints/checkpoint-{E:07}/checkpoint_manifest.pb`
-    pub fn checkpoint_manifest(pipeline_id: &str, job_id: &str, generation: u64, epoch: u64) -> String {
+    pub fn checkpoint_manifest(
+        pipeline_id: &str,
+        job_id: &str,
+        generation: u64,
+        epoch: u64,
+    ) -> String {
         format!(
             "{}/manifest",
             checkpoint_dir(pipeline_id, job_id, generation, epoch)

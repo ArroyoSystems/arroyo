@@ -28,6 +28,8 @@ pub enum ProtocolError {
     ParentMismatch,
     #[error("committed marker does not match checkpoint")]
     CommittedMarkerMismatch,
+    #[error("checkpoint manifest does not match protocol record")]
+    CheckpointManifestMismatch,
 }
 
 #[derive(
@@ -241,7 +243,7 @@ impl EpochRecord {
     ) -> Result<Self, ProtocolError> {
         Ok(Self {
             version: PROTOCOL_VERSION,
-            pipeline_id: pipeline_id.into(),
+            pipeline_id,
             job_id: JobId::new(&checkpoint.job_id),
             epoch: checkpoint_epoch(checkpoint),
             generation,

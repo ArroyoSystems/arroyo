@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
-use arroyo_storage::{StorageProviderRef};
+use crate::types::{CheckpointRef, ProtocolError};
+use arroyo_rpc::errors::StorageError;
+use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use prost::Message;
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
-use arroyo_rpc::errors::StorageError;
-use crate::types::{CheckpointRef, ProtocolError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateResult<T> {
@@ -159,42 +157,17 @@ where
     })
 }
 
-#[derive(Clone)]
-pub struct StorageProviderProtocolStore {
-    storage: StorageProviderRef,
-}
-
-impl StorageProviderProtocolStore {
-    pub fn new(storage: StorageProviderRef) -> Self {
-        Self { storage }
-    }
-}
-
-impl From<StorageProviderRef> for StorageProviderProtocolStore {
-    fn from(storage: StorageProviderRef) -> Self {
-        Self::new(storage)
-    }
-}
-
-impl From<arroyo_storage::StorageProvider> for StorageProviderProtocolStore {
-    fn from(storage: arroyo_storage::StorageProvider) -> Self {
-        Self::new(Arc::new(storage))
-    }
-}
-
 #[async_trait]
-impl ProtocolStore for StorageProviderProtocolStore {
+impl ProtocolStore for StorageProvider {
     async fn read_bytes(&self, path: &CheckpointRef) -> Result<Option<Vec<u8>>, StoreError> {
-        self.storage
-            .get_if_present(path.as_str())
+        self.get_if_present(path.as_str())
             .await
             .map(|bytes| bytes.map(|bytes| bytes.to_vec()))
             .map_err(StoreError::from)
     }
 
     async fn put_bytes(&self, path: &CheckpointRef, bytes: Vec<u8>) -> Result<(), StoreError> {
-        self.storage
-            .put(path.as_str(), bytes)
+        self.put(path.as_str(), bytes)
             .await
             .map_err(StoreError::from)
     }
@@ -204,7 +177,7 @@ impl ProtocolStore for StorageProviderProtocolStore {
         path: &CheckpointRef,
         bytes: Vec<u8>,
     ) -> Result<CreateResult<Vec<u8>>, StoreError> {
-        match self.storage.put_if_not_exists(path.as_str(), bytes).await {
+        match self.put_if_not_exists(path.as_str(), bytes).await {
             Ok(()) => Ok(CreateResult::Created),
             Err(StorageError::AlreadyExists { .. }) => {
                 let existing = self

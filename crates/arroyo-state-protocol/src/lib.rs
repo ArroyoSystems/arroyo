@@ -77,15 +77,16 @@ mod tests {
     use crate::state::{CheckpointState, derive_checkpoint_state};
     use crate::store::tests::MemoryProtocolStore;
     use crate::store::{
-        CreateResult, StorageProviderProtocolStore, StoreError, create_json, put_json,
-        put_protobuf, read_json,
+        CreateResult, StoreError, create_json, put_json, put_protobuf, read_json, read_protobuf,
     };
     use crate::types::{
         CommittedMarker, CurrentGeneration, EpochRecord, GenerationManifest, ProtocolError,
     };
     use crate::workflow::{
-        ClaimEpochRecordRequest, CommittedMarkerOutcome, GenerationResolution, claim_epoch_record,
-        mark_committed, resolve_generation_manifest,
+        CheckpointPublication, ClaimEpochRecordRequest, CommitAuthorization, CommitCompletion,
+        CommittedMarkerOutcome, GenerationResolution, PublishCheckpointRequest, claim_epoch_record,
+        complete_commit, mark_committed, prepare_commit, publish_checkpoint,
+        resolve_generation_manifest,
     };
     use arroyo_rpc::grpc::rpc::CheckpointManifest;
     use arroyo_types::{JobId, PipelineId};
@@ -167,6 +168,24 @@ mod tests {
         put_json(store, &paths.current_generation(), &current_generation)
             .await
             .unwrap();
+    }
+
+    async fn write_canonical_checkpoint(
+        store: &MemoryProtocolStore,
+        paths: &ProtocolPaths,
+        checkpoint_ref: &CheckpointRef,
+        checkpoint: &CheckpointManifest,
+    ) {
+        put_protobuf(store, checkpoint_ref, checkpoint)
+            .await
+            .unwrap();
+        put_json(
+            store,
+            &paths.epoch_record(Epoch(checkpoint.epoch)),
+            &epoch_record(checkpoint_ref.clone(), checkpoint),
+        )
+        .await
+        .unwrap();
     }
 
     #[test]
@@ -557,6 +576,187 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_commit_authorizes_canonical_uncommitted_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+
+        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+
+        assert_eq!(
+            authorization,
+            CommitAuthorization::Authorized {
+                checkpoint_ref,
+                checkpoint
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_commit_reports_already_committed() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+        put_json(
+            &store,
+            &paths.committed_marker(Generation(1), Epoch(1)),
+            &committed_marker(checkpoint_ref.clone(), 1),
+        )
+        .await
+        .unwrap();
+
+        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+
+        assert_eq!(
+            authorization,
+            CommitAuthorization::AlreadyCommitted { checkpoint_ref }
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_commit_rejects_unclaimed_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        put_protobuf(&store, &checkpoint_ref, &checkpoint)
+            .await
+            .unwrap();
+
+        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+
+        assert_eq!(
+            authorization,
+            CommitAuthorization::NotCanonical { checkpoint_ref }
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_commit_stops_orphaned_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let winner_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
+        let loser_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        put_protobuf(&store, &loser_ref, &checkpoint).await.unwrap();
+        put_json(
+            &store,
+            &paths.epoch_record(Epoch(1)),
+            &epoch_record(winner_ref.clone(), &checkpoint),
+        )
+        .await
+        .unwrap();
+
+        let authorization = prepare_commit(&store, &loser_ref).await.unwrap();
+
+        assert_eq!(
+            authorization,
+            CommitAuthorization::StopOrphaned {
+                canonical_ref: winner_ref
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_commit_skips_non_committing_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+
+        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+
+        assert_eq!(
+            authorization,
+            CommitAuthorization::NoCommitNeeded { checkpoint_ref }
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_commit_writes_committed_marker() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+
+        let completion = complete_commit(&store, &checkpoint_ref, Generation(2))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            completion,
+            CommitCompletion::Created {
+                checkpoint_ref: checkpoint_ref.clone()
+            }
+        );
+        let marker: CommittedMarker =
+            read_json(&store, &paths.committed_marker(Generation(1), Epoch(1)))
+                .await
+                .unwrap()
+                .expect("committed marker should be written");
+        assert_eq!(marker.checkpoint_ref, checkpoint_ref);
+        assert_eq!(marker.writer_generation, Generation(2));
+    }
+
+    #[tokio::test]
+    async fn complete_commit_is_idempotent() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+
+        complete_commit(&store, &checkpoint_ref, Generation(2))
+            .await
+            .unwrap();
+        let completion = complete_commit(&store, &checkpoint_ref, Generation(3))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            completion,
+            CommitCompletion::AlreadyCommitted { checkpoint_ref }
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_commit_does_not_mark_unclaimed_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        put_protobuf(&store, &checkpoint_ref, &checkpoint)
+            .await
+            .unwrap();
+
+        let completion = complete_commit(&store, &checkpoint_ref, Generation(2))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            completion,
+            CommitCompletion::NotCanonical {
+                checkpoint_ref: checkpoint_ref.clone()
+            }
+        );
+        assert!(
+            read_json::<_, CommittedMarker>(
+                &store,
+                &paths.committed_marker(Generation(1), Epoch(1)),
+            )
+            .await
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn storage_provider_store_round_trips_conditional_json_create() {
         let temp_dir = std::env::temp_dir().join(format!(
             "arroyo-state-protocol-{}",
@@ -569,7 +769,7 @@ mod tests {
             arroyo_storage::StorageProvider::for_url(&format!("file://{}", temp_dir.display()))
                 .await
                 .unwrap();
-        let store = StorageProviderProtocolStore::from(storage);
+        let store = storage;
         let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
         let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
         let checkpoint = checkpoint(1, None, false);
@@ -727,6 +927,212 @@ mod tests {
         assert_eq!(
             resolution,
             GenerationResolution::Failed(ResolveFailure::ParentNotReadyCanonical)
+        );
+    }
+
+    #[tokio::test]
+    async fn publish_non_committing_checkpoint_writes_protocol_objects() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        let manifest = generation_manifest(None, None);
+
+        let publication = publish_checkpoint(
+            &store,
+            PublishCheckpointRequest {
+                generation_manifest: &manifest,
+                checkpoint_ref: &checkpoint_ref,
+                checkpoint: &checkpoint,
+                created_at_micros: 42,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            publication,
+            CheckpointPublication::Ready {
+                checkpoint_ref: checkpoint_ref.clone()
+            }
+        );
+
+        let written_checkpoint: CheckpointManifest = read_protobuf(&store, &checkpoint_ref)
+            .await
+            .unwrap()
+            .expect("checkpoint manifest should be written");
+        assert_eq!(written_checkpoint, checkpoint);
+
+        let written_generation_manifest: GenerationManifest =
+            read_json(&store, &paths.generation_manifest(Generation(1)))
+                .await
+                .unwrap()
+                .expect("generation manifest should be updated");
+        assert_eq!(
+            written_generation_manifest.latest_checkpoint_ref,
+            Some(checkpoint_ref.clone())
+        );
+
+        let record: EpochRecord = read_json(&store, &paths.epoch_record(Epoch(1)))
+            .await
+            .unwrap()
+            .expect("epoch record should be written");
+        assert_eq!(record.checkpoint_ref, checkpoint_ref);
+    }
+
+    #[tokio::test]
+    async fn publish_committing_checkpoint_requires_commit() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, true);
+        let manifest = generation_manifest(None, None);
+
+        let publication = publish_checkpoint(
+            &store,
+            PublishCheckpointRequest {
+                generation_manifest: &manifest,
+                checkpoint_ref: &checkpoint_ref,
+                checkpoint: &checkpoint,
+                created_at_micros: 42,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            publication,
+            CheckpointPublication::CommitRequired { checkpoint_ref }
+        );
+    }
+
+    #[tokio::test]
+    async fn publish_checkpoint_exits_when_generation_is_stale() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(2)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        let manifest = generation_manifest(None, None);
+
+        let publication = publish_checkpoint(
+            &store,
+            PublishCheckpointRequest {
+                generation_manifest: &manifest,
+                checkpoint_ref: &checkpoint_ref,
+                checkpoint: &checkpoint,
+                created_at_micros: 42,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(publication, CheckpointPublication::StaleGeneration);
+        assert!(
+            read_protobuf::<_, CheckpointManifest>(&store, &checkpoint_ref)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn publish_checkpoint_is_idempotent_for_existing_same_manifest() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        let manifest = generation_manifest(None, None);
+        let request = PublishCheckpointRequest {
+            generation_manifest: &manifest,
+            checkpoint_ref: &checkpoint_ref,
+            checkpoint: &checkpoint,
+            created_at_micros: 42,
+        };
+
+        publish_checkpoint(&store, request.clone()).await.unwrap();
+        let publication = publish_checkpoint(&store, request).await.unwrap();
+
+        assert_eq!(publication, CheckpointPublication::Ready { checkpoint_ref });
+    }
+
+    #[tokio::test]
+    async fn publish_checkpoint_stops_when_epoch_record_points_elsewhere() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let winner_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
+        let loser_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint(1, None, false);
+        put_json(
+            &store,
+            &paths.epoch_record(Epoch(1)),
+            &epoch_record(winner_ref.clone(), &checkpoint),
+        )
+        .await
+        .unwrap();
+
+        let manifest = generation_manifest(None, None);
+        let publication = publish_checkpoint(
+            &store,
+            PublishCheckpointRequest {
+                generation_manifest: &manifest,
+                checkpoint_ref: &loser_ref,
+                checkpoint: &checkpoint,
+                created_at_micros: 42,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            publication,
+            CheckpointPublication::StopOrphaned {
+                canonical_ref: winner_ref
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn publish_checkpoint_rejects_unready_parent() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+
+        let parent_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let child_ref = paths.checkpoint_manifest(Generation(1), Epoch(2));
+        let child = checkpoint(2, Some(parent_ref), false);
+        let manifest = generation_manifest(None, None);
+
+        let publication = publish_checkpoint(
+            &store,
+            PublishCheckpointRequest {
+                generation_manifest: &manifest,
+                checkpoint_ref: &child_ref,
+                checkpoint: &child,
+                created_at_micros: 42,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            publication,
+            CheckpointPublication::Failed(ResolveFailure::ParentNotReadyCanonical)
+        );
+        assert!(
+            read_json::<_, EpochRecord>(&store, &paths.epoch_record(Epoch(2)))
+                .await
+                .unwrap()
+                .is_none()
         );
     }
 }

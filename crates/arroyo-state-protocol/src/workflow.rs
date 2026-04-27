@@ -5,7 +5,8 @@ use crate::resolve::{
 };
 use crate::state::{CheckpointState, derive_checkpoint_state};
 use crate::store::{
-    CreateResult, ProtocolStore, StoreError, create_json, read_json, read_protobuf,
+    CreateResult, ProtocolStore, StoreError, create_json, create_protobuf, put_json, read_json,
+    read_protobuf,
 };
 use crate::types::{
     CheckpointRef, CommittedMarker, CurrentGeneration, Epoch, EpochRecord, Generation,
@@ -36,6 +37,249 @@ pub enum GenerationResolution {
     ReplayCommit { checkpoint_ref: CheckpointRef },
     StopOrphaned { canonical_ref: CheckpointRef },
     Failed(ResolveFailure),
+}
+
+#[derive(Debug, Clone)]
+pub struct PublishCheckpointRequest<'a> {
+    pub generation_manifest: &'a GenerationManifest,
+    pub checkpoint_ref: &'a CheckpointRef,
+    pub checkpoint: &'a CheckpointManifest,
+    pub created_at_micros: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckpointPublication {
+    Ready { checkpoint_ref: CheckpointRef },
+    CommitRequired { checkpoint_ref: CheckpointRef },
+    StopOrphaned { canonical_ref: CheckpointRef },
+    StaleGeneration,
+    Failed(ResolveFailure),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommitAuthorization {
+    Authorized {
+        checkpoint_ref: CheckpointRef,
+        checkpoint: CheckpointManifest,
+    },
+    AlreadyCommitted {
+        checkpoint_ref: CheckpointRef,
+    },
+    NoCommitNeeded {
+        checkpoint_ref: CheckpointRef,
+    },
+    StopOrphaned {
+        canonical_ref: CheckpointRef,
+    },
+    NotCanonical {
+        checkpoint_ref: CheckpointRef,
+    },
+    MissingCheckpoint {
+        checkpoint_ref: CheckpointRef,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitCompletion {
+    Created { checkpoint_ref: CheckpointRef },
+    AlreadyCommitted { checkpoint_ref: CheckpointRef },
+    NoCommitNeeded { checkpoint_ref: CheckpointRef },
+    StopOrphaned { canonical_ref: CheckpointRef },
+    NotCanonical { checkpoint_ref: CheckpointRef },
+    MissingCheckpoint { checkpoint_ref: CheckpointRef },
+}
+
+pub async fn prepare_commit<S>(
+    store: &S,
+    checkpoint_ref: &CheckpointRef,
+) -> Result<CommitAuthorization, StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    let Some(checkpoint): Option<CheckpointManifest> = read_protobuf(store, checkpoint_ref).await?
+    else {
+        return Ok(CommitAuthorization::MissingCheckpoint {
+            checkpoint_ref: checkpoint_ref.clone(),
+        });
+    };
+
+    let paths = ProtocolPaths::new(
+        PipelineId::new(&checkpoint.pipeline_id),
+        checkpoint_job_id(&checkpoint),
+    );
+    let epoch_record: Option<EpochRecord> =
+        read_json(store, &paths.epoch_record(checkpoint_epoch(&checkpoint))).await?;
+    let committed_marker_path = committed_marker_path(&paths, &checkpoint);
+    let committed_marker: Option<CommittedMarker> =
+        read_json(store, &committed_marker_path).await?;
+
+    match derive_checkpoint_state(
+        checkpoint_ref,
+        Some(&checkpoint),
+        epoch_record.as_ref(),
+        committed_marker.as_ref(),
+    )? {
+        CheckpointState::Invisible => unreachable!("checkpoint was read above"),
+        CheckpointState::Unclaimed => Ok(CommitAuthorization::NotCanonical {
+            checkpoint_ref: checkpoint_ref.clone(),
+        }),
+        CheckpointState::Orphaned { canonical_ref } => {
+            Ok(CommitAuthorization::StopOrphaned { canonical_ref })
+        }
+        CheckpointState::Ready if checkpoint.needs_commit => {
+            Ok(CommitAuthorization::AlreadyCommitted {
+                checkpoint_ref: checkpoint_ref.clone(),
+            })
+        }
+        CheckpointState::Ready => Ok(CommitAuthorization::NoCommitNeeded {
+            checkpoint_ref: checkpoint_ref.clone(),
+        }),
+        CheckpointState::Committing => Ok(CommitAuthorization::Authorized {
+            checkpoint_ref: checkpoint_ref.clone(),
+            checkpoint,
+        }),
+    }
+}
+
+pub async fn complete_commit<S>(
+    store: &S,
+    checkpoint_ref: &CheckpointRef,
+    writer_generation: Generation,
+) -> Result<CommitCompletion, StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    let Some(checkpoint): Option<CheckpointManifest> = read_protobuf(store, checkpoint_ref).await?
+    else {
+        return Ok(CommitCompletion::MissingCheckpoint {
+            checkpoint_ref: checkpoint_ref.clone(),
+        });
+    };
+
+    let paths = ProtocolPaths::new(
+        PipelineId::new(&checkpoint.pipeline_id),
+        checkpoint_job_id(&checkpoint),
+    );
+    let committed_marker_path = committed_marker_path(&paths, &checkpoint);
+
+    match prepare_commit(store, checkpoint_ref).await? {
+        CommitAuthorization::Authorized { .. } => {
+            let marker = CommittedMarker::new(
+                PipelineId::new(&checkpoint.pipeline_id),
+                checkpoint_job_id(&checkpoint),
+                checkpoint_epoch(&checkpoint),
+                Generation(checkpoint.generation),
+                writer_generation,
+                checkpoint_ref.clone(),
+            );
+
+            match mark_committed(store, &committed_marker_path, &marker, &checkpoint).await? {
+                CommittedMarkerOutcome::Created => Ok(CommitCompletion::Created {
+                    checkpoint_ref: checkpoint_ref.clone(),
+                }),
+                CommittedMarkerOutcome::AlreadyCommitted => {
+                    Ok(CommitCompletion::AlreadyCommitted {
+                        checkpoint_ref: checkpoint_ref.clone(),
+                    })
+                }
+            }
+        }
+        CommitAuthorization::AlreadyCommitted { .. } => Ok(CommitCompletion::AlreadyCommitted {
+            checkpoint_ref: checkpoint_ref.clone(),
+        }),
+        CommitAuthorization::NoCommitNeeded { .. } => Ok(CommitCompletion::NoCommitNeeded {
+            checkpoint_ref: checkpoint_ref.clone(),
+        }),
+        CommitAuthorization::StopOrphaned { canonical_ref } => {
+            Ok(CommitCompletion::StopOrphaned { canonical_ref })
+        }
+        CommitAuthorization::NotCanonical { .. } => Ok(CommitCompletion::NotCanonical {
+            checkpoint_ref: checkpoint_ref.clone(),
+        }),
+        CommitAuthorization::MissingCheckpoint { .. } => Ok(CommitCompletion::MissingCheckpoint {
+            checkpoint_ref: checkpoint_ref.clone(),
+        }),
+    }
+}
+
+pub async fn publish_checkpoint<S>(
+    store: &S,
+    request: PublishCheckpointRequest<'_>,
+) -> Result<CheckpointPublication, StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    validate_checkpoint_for_generation(request.generation_manifest, request.checkpoint)?;
+
+    let paths = ProtocolPaths::new(
+        request.generation_manifest.pipeline_id.clone(),
+        request.generation_manifest.job_id.clone(),
+    );
+
+    let is_current_generation =
+        read_json::<_, CurrentGeneration>(store, &paths.current_generation())
+            .await?
+            .is_some_and(|current_generation| {
+                current_generation.generation == request.generation_manifest.generation
+            });
+
+    if !is_current_generation {
+        return Ok(CheckpointPublication::StaleGeneration);
+    }
+
+    match create_protobuf(store, request.checkpoint_ref, request.checkpoint).await? {
+        CreateResult::Created => {}
+        CreateResult::AlreadyExists(existing) if existing == *request.checkpoint => {}
+        CreateResult::AlreadyExists(_) => {
+            return Err(StoreError::Protocol(
+                ProtocolError::CheckpointManifestMismatch,
+            ));
+        }
+    }
+
+    if parent_status(store, &paths, Some(request.checkpoint)).await?
+        == ParentCheckpointStatus::NotReadyCanonical
+    {
+        return Ok(CheckpointPublication::Failed(
+            ResolveFailure::ParentNotReadyCanonical,
+        ));
+    }
+
+    let mut updated_generation_manifest = request.generation_manifest.clone();
+    updated_generation_manifest.latest_checkpoint_ref = Some(request.checkpoint_ref.clone());
+    put_json(
+        store,
+        &paths.generation_manifest(request.generation_manifest.generation),
+        &updated_generation_manifest,
+    )
+    .await?;
+
+    let outcome = claim_epoch_record(
+        store,
+        ClaimEpochRecordRequest {
+            epoch_record_path: &paths.epoch_record(checkpoint_epoch(request.checkpoint)),
+            pipeline_id: &request.generation_manifest.pipeline_id,
+            generation: request.generation_manifest.generation,
+            checkpoint_ref: request.checkpoint_ref,
+            checkpoint: request.checkpoint,
+            created_at_micros: request.created_at_micros,
+        },
+    )
+    .await?;
+
+    match outcome {
+        EpochClaimOutcome::Owned if request.checkpoint.needs_commit => {
+            Ok(CheckpointPublication::CommitRequired {
+                checkpoint_ref: request.checkpoint_ref.clone(),
+            })
+        }
+        EpochClaimOutcome::Owned => Ok(CheckpointPublication::Ready {
+            checkpoint_ref: request.checkpoint_ref.clone(),
+        }),
+        EpochClaimOutcome::Orphaned { canonical_ref } => {
+            Ok(CheckpointPublication::StopOrphaned { canonical_ref })
+        }
+    }
 }
 
 pub async fn resolve_generation_manifest<S>(
@@ -302,4 +546,29 @@ fn validate_marker(
     }
 
     Ok(())
+}
+
+fn validate_checkpoint_for_generation(
+    generation_manifest: &GenerationManifest,
+    checkpoint: &CheckpointManifest,
+) -> Result<(), ProtocolError> {
+    if *generation_manifest.pipeline_id != checkpoint.pipeline_id
+        || *generation_manifest.job_id != checkpoint.job_id
+        || generation_manifest.generation.0 != checkpoint.generation
+    {
+        return Err(ProtocolError::CheckpointManifestMismatch);
+    }
+
+    Ok(())
+}
+
+fn checkpoint_job_id(checkpoint: &CheckpointManifest) -> JobId {
+    JobId::new(&checkpoint.job_id)
+}
+
+fn committed_marker_path(paths: &ProtocolPaths, checkpoint: &CheckpointManifest) -> CheckpointRef {
+    paths.committed_marker(
+        Generation(checkpoint.generation),
+        checkpoint_epoch(checkpoint),
+    )
 }
