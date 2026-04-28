@@ -40,7 +40,6 @@ pub struct UdfValidationResult {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum UdfLanguage {
-    Python,
     #[default]
     Rust,
 }

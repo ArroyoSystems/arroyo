@@ -11,7 +11,6 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
-arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 datafusion = { workspace = true }
 datafusion-proto = { workspace = true }

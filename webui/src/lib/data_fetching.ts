@@ -130,7 +130,7 @@ const queryValidationKey = (query?: string, localUdfs?: LocalUdf[]) => {
   return query != undefined ? { key: 'PipelineGraph', query, localUdfs } : null;
 };
 
-const udfValidationKey = (definition: string, language: 'python' | 'rust') => {
+const udfValidationKey = (definition: string, language: 'rust') => {
   return { key: 'UdfValidation', definition, language };
 };
 
@@ -409,7 +409,7 @@ export const useQueryValidation = (query?: string, localUdfs?: LocalUdf[]) => {
 
 const udfValidationFetcher = () => {
   const controller = useRef<AbortController>();
-  return async (params: { key: string; definition: string; language: 'python' | 'rust' }) => {
+  return async (params: { key: string; definition: string; language: 'rust' }) => {
     controller.current?.abort();
     controller.current = new AbortController();
     const { data, error } = await post('/v1/udfs/validate', {
@@ -426,7 +426,7 @@ const udfValidationFetcher = () => {
 export const useUdfValidation = (
   onSuccess: (data: UdfValidationResult, key: any, config: any) => void,
   definition: string,
-  language: 'rust' | 'python'
+  language: 'rust'
 ) => {
   const { data, error, isLoading } = useSWR<schemas['UdfValidationResult']>(
     udfValidationKey(definition, language),
@@ -680,7 +680,7 @@ export const useGlobalUdfs = () => {
   const createGlobalUdf = async (
     prefix: string,
     definition: string,
-    language: 'python' | 'rust',
+    language: 'rust',
     description: string
   ) => {
     const { data, error } = await post('/v1/udfs', {

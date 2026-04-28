@@ -618,6 +618,7 @@ export interface components {
             /** @enum {string} */
             type: "list";
         }));
+        FlatbuffersFormat: Record<string, never>;
         Format: ({
             type: "Format";
         } & (components["schemas"]["JsonFormat"] & {
@@ -628,6 +629,11 @@ export interface components {
         } & (components["schemas"]["AvroFormat"] & {
             /** @enum {string} */
             type: "avro";
+        })) | ({
+            type: "Format";
+        } & (components["schemas"]["FlatbuffersFormat"] & {
+            /** @enum {string} */
+            type: "flatbuffers";
         })) | ({
             type: "Format";
         } & (components["schemas"]["ProtobufFormat"] & {
@@ -708,7 +714,10 @@ export interface components {
             data: components["schemas"]["JobLogMessage"][];
             hasMore: boolean;
         };
+        /** @enum {string} */
+        JsonCompression: "uncompressed" | "gzip";
         JsonFormat: {
+            compression?: components["schemas"]["JsonCompression"];
             confluent_schema_registry?: boolean;
             debezium?: boolean;
             decimal_encoding?: components["schemas"]["DecimalEncoding"];
@@ -924,7 +933,7 @@ export interface components {
             language?: components["schemas"]["UdfLanguage"];
         };
         /** @enum {string} */
-        UdfLanguage: "python" | "rust";
+        UdfLanguage: "rust";
         UdfPost: {
             definition: string;
             description?: string | null;

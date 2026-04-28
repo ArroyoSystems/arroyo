@@ -274,16 +274,8 @@ message DylibUdfConfig {
   bool is_async = 5;
 }
 
-message PythonUdfConfig {
-  string name = 1;
-  repeated bytes arg_types = 2;
-  bytes return_type = 3;
-  string definition = 4;
-}
-
 message ArrowProgramConfig {
   map<string, DylibUdfConfig> udf_dylibs = 1;
-  map<string, PythonUdfConfig> python_udfs = 2; 
 }
 
 // Arrow

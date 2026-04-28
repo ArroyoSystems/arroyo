@@ -17,7 +17,6 @@ arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
-arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 tonic = { workspace = true }
 prost = {workspace = true}

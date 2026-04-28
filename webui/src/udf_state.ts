@@ -6,7 +6,7 @@ import { generate_udf_id } from './lib/util';
 export interface LocalUdf {
   name: string;
   definition: string;
-  language: 'python' | 'rust';
+  language: 'rust';
   id: string;
   open: boolean;
   errors?: string[];
@@ -27,7 +27,7 @@ export const LocalUdfsContext = React.createContext<{
     update: { definition?: string; open?: boolean; name?: string }
   ) => void;
   isGlobal: (udf: LocalUdf | GlobalUdf) => boolean;
-  newUdf: (language: 'python' | 'rust') => void;
+  newUdf: () => void;
   editorTab: number;
   handleEditorTabChange: (index: number) => void;
 }>({
@@ -42,7 +42,7 @@ export const LocalUdfsContext = React.createContext<{
   isOverridden: _ => false,
   updateLocalUdf: (_, __) => {},
   isGlobal: _ => false,
-  newUdf: (language: 'python' | 'rust') => {},
+  newUdf: () => {},
   editorTab: 0,
   handleEditorTabChange: _ => {},
 });
@@ -128,7 +128,7 @@ export const getLocalUdfsContextValue = () => {
     return globalUdfs != undefined && globalUdfs.some(g => g.id === udf.id);
   };
 
-  const newUdf = (language: 'python' | 'rust') => {
+  const newUdf = () => {
     const id = generate_udf_id();
     const functionName = `new_udf`;
 
@@ -146,17 +146,13 @@ fn ${functionName}(x: i64) -> i64 {
     // Tip: rename the function to something descriptive
 }`;
 
-    const defaultPython = `
-from arroyo_udf import udf
-    
-@udf
-def ${functionName}(x: int) -> int:
-    # Write your function here
-    # Tip: rename the function to something descriptive`;
-
-    let definition = language == 'python' ? defaultPython : defaultRust;
-
-    const newUdf = { name: functionName, definition, id, language, open: true };
+    const newUdf: LocalUdf = {
+      name: functionName,
+      definition: defaultRust,
+      id,
+      language: 'rust',
+      open: true,
+    };
     const newLocalUdfs = [...localUdfs, newUdf];
     setLocalUdfs(newLocalUdfs);
     setSelectedUdfId(id);

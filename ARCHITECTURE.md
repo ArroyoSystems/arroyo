@@ -142,7 +142,7 @@ Arroyo is SQL-first, but planning is split into several layers.
 - source and sink schemas
 - connector-provided functions
 - built-in scalar, aggregate, and window functions
-- user-defined Rust and Python UDF definitions
+- user-defined Rust UDF definitions
 
 ### SQL to logical graph
 
@@ -331,7 +331,6 @@ That abstraction is reused by:
 | `arroyo-udf-host` | Runtime loading/parsing of compiled UDFs |
 | `arroyo-udf-plugin` | User-facing proc-macro support |
 | `arroyo-udf-macros` | Macro internals |
-| `arroyo-udf-python` | Python UDF support |
 
 ### Test/support crates
 

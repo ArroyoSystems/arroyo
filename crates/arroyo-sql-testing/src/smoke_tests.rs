@@ -434,7 +434,6 @@ async fn run_pipeline_and_assert_outputs(
             graph.clone(),
             ProgramConfig {
                 udf_dylibs: Default::default(),
-                python_udfs: Default::default(),
             },
         )),
         tasks_per_operator(&graph),

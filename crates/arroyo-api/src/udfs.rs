@@ -15,12 +15,10 @@ use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::rpc::{BuildUdfReq, UdfCrate};
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_udf_host::ParsedUdfFile;
-use arroyo_udf_python::PythonUDF;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum_extra::extract::WithRejection;
 use std::str::FromStr;
-use std::sync::Arc;
 use tonic::transport::Channel;
 use tracing::error;
 
@@ -195,70 +193,56 @@ pub async fn build_udf(
     language: UdfLanguage,
     save: bool,
 ) -> Result<UdfResp, ErrorResp> {
-    match language {
-        UdfLanguage::Python => match PythonUDF::parse(udf_definition).await {
-            Ok(udf) => Ok(UdfResp {
-                errors: vec![],
-                name: Some(Arc::unwrap_or_clone(udf.name)),
-                url: None,
+    debug_assert_eq!(language, UdfLanguage::Rust);
+
+    // use the arroyo-udf lib to do some validation and to get the function name
+    let file = match ParsedUdfFile::try_parse(udf_definition) {
+        Ok(p) => p,
+        Err(e) => return Ok(e.into()),
+    };
+
+    let mut dependencies = file.dependencies;
+    let plugin_dep = if config().compiler.use_local_udf_crate {
+        toml::Value::Table(
+            [(
+                "path".to_string(),
+                toml::Value::String(LOCAL_UDF_LIB_CRATE.to_string()),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    } else {
+        toml::Value::String(PLUGIN_VERSION.to_string())
+    };
+
+    dependencies.insert("arroyo-udf-plugin".to_string(), plugin_dep);
+
+    let check_udfs_resp = match compiler_service
+        .build_udf(BuildUdfReq {
+            udf_crate: Some(UdfCrate {
+                name: file.udf.name.clone(),
+                definition: udf_definition.to_string(),
+                dependencies: dependencies.to_string(),
             }),
-            Err(e) => Ok(UdfResp {
-                errors: vec![e.to_string()],
-                name: None,
-                url: None,
-            }),
-        },
-        UdfLanguage::Rust => {
-            // use the arroyo-udf lib to do some validation and to get the function name
-            let file = match ParsedUdfFile::try_parse(udf_definition) {
-                Ok(p) => p,
-                Err(e) => return Ok(e.into()),
-            };
-
-            let mut dependencies = file.dependencies;
-            let plugin_dep = if config().compiler.use_local_udf_crate {
-                toml::Value::Table(
-                    [(
-                        "path".to_string(),
-                        toml::Value::String(LOCAL_UDF_LIB_CRATE.to_string()),
-                    )]
-                    .into_iter()
-                    .collect(),
-                )
-            } else {
-                toml::Value::String(PLUGIN_VERSION.to_string())
-            };
-
-            dependencies.insert("arroyo-udf-plugin".to_string(), plugin_dep);
-
-            let check_udfs_resp = match compiler_service
-                .build_udf(BuildUdfReq {
-                    udf_crate: Some(UdfCrate {
-                        name: file.udf.name.clone(),
-                        definition: udf_definition.to_string(),
-                        dependencies: dependencies.to_string(),
-                    }),
-                    save,
-                })
-                .await
-            {
-                Ok(resp) => resp.into_inner(),
-                Err(e) => {
-                    error!("compiler service failed to validate UDF: {}", e.message());
-                    return Err(internal_server_error(format!(
-                        "Failed to validate UDF: {}",
-                        e.message()
-                    )));
-                }
-            };
-
-            Ok(UdfResp {
-                errors: check_udfs_resp.errors,
-                name: Some(file.udf.name),
-                url: check_udfs_resp.udf_path,
-            })
+            save,
+        })
+        .await
+    {
+        Ok(resp) => resp.into_inner(),
+        Err(e) => {
+            error!("compiler service failed to validate UDF: {}", e.message());
+            return Err(internal_server_error(format!(
+                "Failed to validate UDF: {}",
+                e.message()
+            )));
         }
-    }
+    };
+
+    Ok(UdfResp {
+        errors: check_udfs_resp.errors,
+        name: Some(file.udf.name),
+        url: check_udfs_resp.udf_path,
+    })
 }
 
 /// Validate UDFs

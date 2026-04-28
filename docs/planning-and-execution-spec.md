@@ -14,7 +14,7 @@ Planning consumes:
 - registered connection profiles and tables
 - connector-specific schemas and validation rules
 - built-in functions
-- user-defined Rust and Python UDFs
+- user-defined Rust UDFs
 
 ### Stages
 
@@ -96,7 +96,6 @@ Connectors provide actual source/sink behavior for systems such as Kafka, filesy
 - `arroyo-udf-plugin` and `arroyo-udf-macros`: authoring support
 - `arroyo-udf-common`: shared ABI/contracts
 - `arroyo-udf-host`: runtime parsing/loading of compiled artifacts
-- `arroyo-udf-python`: Python UDF support
 - `arroyo-compiler-service`: artifact build service
 
 ### Lifecycle

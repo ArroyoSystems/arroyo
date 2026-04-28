@@ -87,10 +87,6 @@ pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
         registry.load_dylib(name, udf).await?;
     }
 
-    for udf in logical.program_config.python_udfs.values() {
-        registry.add_python_udf(udf).await?;
-    }
-
     let registry = Arc::new(registry);
 
     let mut d2 = String::new();

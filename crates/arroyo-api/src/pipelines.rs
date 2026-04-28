@@ -75,22 +75,13 @@ async fn compile_sql(
         .collect::<Vec<GlobalUdf>>();
 
     for udf in global_udfs {
-        match udf.language {
-            UdfLanguage::Python => {
-                if let Err(e) = schema_provider.add_python_udf(&udf.definition).await {
-                    warn!("Invalid global python UDF '{}': {}", udf.name, e);
-                }
-            }
-            UdfLanguage::Rust => {
-                let Some(dylib_url) = &udf.dylib_url else {
-                    warn!("Rust global UDF {} is not compiled", udf.name);
-                    continue;
-                };
+        let Some(dylib_url) = &udf.dylib_url else {
+            warn!("Rust global UDF {} is not compiled", udf.name);
+            continue;
+        };
 
-                if let Err(e) = schema_provider.add_rust_udf(&udf.definition, dylib_url) {
-                    warn!("Invalid global UDF {}: {}", udf.name, e);
-                }
-            }
+        if let Err(e) = schema_provider.add_rust_udf(&udf.definition, dylib_url) {
+            warn!("Invalid global UDF {}: {}", udf.name, e);
         }
     }
 
@@ -98,45 +89,33 @@ async fn compile_sql(
         let mut compiler_service: CompilerGrpcClient<_> = compiler_service().await?;
 
         for udf in local_udfs {
-            match udf.language {
-                UdfLanguage::Python => {
-                    schema_provider
-                        .add_python_udf(&udf.definition)
-                        .await
-                        .map_err(|e| bad_request(format!("invalid Python UDF: {e:?}")))?;
+            let parsed = ParsedUdfFile::try_parse(&udf.definition)
+                .map_err(|e| bad_request(format!("invalid UDF: {e}")))?;
+
+            let url = if !validate_only {
+                let res = build_udf(
+                    &mut compiler_service,
+                    &udf.definition,
+                    UdfLanguage::Rust,
+                    true,
+                )
+                .await?;
+
+                if !res.errors.is_empty() {
+                    return Err(bad_request(format!(
+                        "Failed to build UDF: {}",
+                        res.errors.join("\n")
+                    )));
                 }
-                UdfLanguage::Rust => {
-                    let parsed = ParsedUdfFile::try_parse(&udf.definition)
-                        .map_err(|e| bad_request(format!("invalid UDF: {e}")))?;
 
-                    let url = if !validate_only {
-                        let res = build_udf(
-                            &mut compiler_service,
-                            &udf.definition,
-                            UdfLanguage::Rust,
-                            true,
-                        )
-                        .await?;
+                res.url.expect("valid UDF does not have a URL in response")
+            } else {
+                "".to_string()
+            };
 
-                        if !res.errors.is_empty() {
-                            return Err(bad_request(format!(
-                                "Failed to build UDF: {}",
-                                res.errors.join("\n")
-                            )));
-                        }
-
-                        res.url.expect("valid UDF does not have a URL in response")
-                    } else {
-                        "".to_string()
-                    };
-
-                    schema_provider
-                        .add_rust_udf(&parsed.definition, &url)
-                        .map_err(|e| {
-                            bad_request(format!("Invalid UDF {}: {}", parsed.udf.name, e))
-                        })?;
-                }
-            }
+            schema_provider
+                .add_rust_udf(&parsed.definition, &url)
+                .map_err(|e| bad_request(format!("Invalid UDF {}: {}", parsed.udf.name, e)))?;
         }
     }
 
@@ -447,7 +426,6 @@ pub(crate) async fn create_pipeline_int(
             "parallelism": parallelism,
             "has_udfs": udfs.first().map(|e| !e.definition.trim().is_empty()).unwrap_or(false),
             "rust_udfs": udfs.iter().any(|e| e.language == UdfLanguage::Rust),
-            "python_udfs": udfs.iter().any(|e| e.language == UdfLanguage::Python),
             // TODO: program features
             "features": compiled.program.features(),
         }

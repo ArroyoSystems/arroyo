@@ -297,14 +297,6 @@ impl WorkerState {
             }
         }
 
-        for (udf_name, python_udf) in &logical.program_config.python_udfs {
-            info!("Loading Python UDF {}", udf_name);
-            registry
-                .add_python_udf(python_udf)
-                .await
-                .with_context(|| format!("loading Python UDF {udf_name}"))?;
-        }
-
         let (control_tx, control_rx) = channel(128);
 
         if req.is_leader {

@@ -41,7 +41,6 @@
 | `arroyo-udf-plugin` | User-facing proc-macro support |
 | `arroyo-udf-macros` | Internal macro implementation |
 | `arroyo-udf-host` | Runtime UDF parsing/loading |
-| `arroyo-udf-python` | Python UDF support |
 
 ## Test/support crates
 

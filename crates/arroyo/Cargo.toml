@@ -5,7 +5,6 @@ edition = "2024"
 
 [features]
 profiling = ["tikv-jemallocator/profiling"]
-python = ["arroyo-udf-python/python-enabled"]
 
 [dependencies]
 arroyo-types = { path ="../arroyo-types" }
@@ -18,7 +17,6 @@ arroyo-node = { path = "../arroyo-node" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-openapi = { path ="../arroyo-openapi" }
 arroyo-storage = { path = "../arroyo-storage" }
-arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 arroyo-planner = { path = "../arroyo-planner" }
 
 clap = { version = "4", features = ["derive"] }
