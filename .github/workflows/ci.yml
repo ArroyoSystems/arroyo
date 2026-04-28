@@ -30,7 +30,6 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - '.github/actions/**'
-              - '.github/workflows/**'
 
   lint-console:
     needs: changes
@@ -102,31 +101,8 @@ jobs:
       - name: Check Formatting
         run: cargo fmt -- --check
 
-  build-rust-workspace:
-    needs:
-      - changes
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - uses: ./.github/actions/setup-rust-ci
-        env:
-          DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
-      - name: Build workspace
-        run: cargo build --all-features --workspace
-      - name: Upload workspace build
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-target
-          path: target
-          compression-level: 0
-          if-no-files-found: error
-
   build-rust:
-    needs:
-      - rust-components
-      - build-rust-workspace
+    needs: rust-components
     name: build-rust (${{ matrix.package }})
     runs-on: ubuntu-22.04
     strategy:
@@ -139,20 +115,15 @@ jobs:
       - uses: ./.github/actions/setup-rust-ci
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
-      - name: Download workspace build
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-target
-          path: target
+      - name: Build
+        run: cargo build --all-features --package ${{ matrix.package }}
       - name: Run Clippy
         run: cargo clippy --all-features --all-targets --package ${{ matrix.package }} -- -D warnings
       - name: Run lib tests
         run: cargo nextest run --all-features --package ${{ matrix.package }} -E 'kind(lib)' --no-tests=pass
 
   integ-postgres:
-    needs:
-      - changes
-      - build-rust-workspace
+    needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-22.04
     steps:
@@ -161,13 +132,8 @@ jobs:
       - uses: ./.github/actions/setup-rust-ci
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
-      - name: Download workspace build
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-target
-          path: target
-      - name: Restore Arroyo execute bit
-        run: chmod +x target/debug/arroyo
+      - name: Build Arroyo
+        run: cargo build --all-features --package arroyo
       - name: Integ postgres
         run: |
           killall arroyo || true
@@ -176,9 +142,7 @@ jobs:
           cargo nextest run --package integ -E 'kind(test)'
 
   integ-sqlite:
-    needs:
-      - changes
-      - build-rust-workspace
+    needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-22.04
     steps:
@@ -187,13 +151,8 @@ jobs:
       - uses: ./.github/actions/setup-rust-ci
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
-      - name: Download workspace build
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-target
-          path: target
-      - name: Restore Arroyo execute bit
-        run: chmod +x target/debug/arroyo
+      - name: Build Arroyo
+        run: cargo build --all-features --package arroyo
       - name: Integ sqlite
         run: |
           killall arroyo || true
