@@ -28,6 +28,7 @@ pub const COMPACT_EVERY: u32 = 2;
 pub mod checkpoint_state;
 pub mod controller;
 pub mod model;
+mod committing_state;
 
 #[derive(Debug, Clone)]
 pub struct WorkerRegistration {

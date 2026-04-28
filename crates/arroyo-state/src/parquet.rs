@@ -4,12 +4,11 @@ use crate::tables::{CompactionConfig, ErasedTable};
 use crate::{BackingStore, get_storage_provider};
 use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
-    CheckpointManifest, CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
+    CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
 };
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 
-use arroyo_rpc::checkpoint_protocol::paths;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use prost::Message;
@@ -88,23 +87,6 @@ impl BackingStore for ParquetBackend {
             .put(path.as_str(), metadata.encode_to_vec())
             .await?;
         // TODO: propagate error
-        Ok(())
-    }
-
-    // used in worker leader mode / checkpoint metadata v1
-    async fn write_checkpoint_manifest(manifest: CheckpointManifest) -> Result<(), StateError> {
-        debug!("writing checkpoint manifest for epoch {:?}", manifest.epoch);
-        let storage_client = get_storage_provider().await?;
-        let path = paths::checkpoint_manifest(
-            &manifest.pipeline_id,
-            &manifest.job_id,
-            manifest.generation,
-            manifest.epoch,
-        );
-
-        storage_client
-            .put(path.as_str(), manifest.encode_to_vec())
-            .await?;
         Ok(())
     }
 

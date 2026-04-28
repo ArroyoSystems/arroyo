@@ -13,6 +13,11 @@ pub mod workflow;
 use crate::types::{CheckpointRef, Epoch, Generation};
 use arroyo_types::{JobId, PipelineId};
 
+/// Builds canonical object-store paths for one pipeline/job checkpoint namespace.
+///
+/// All paths are relative to the configured checkpoint storage URI. Callers
+/// should use this rather than formatting protocol paths by hand so that all
+/// readers and writers agree on object names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProtocolPaths {
     pipeline_id: PipelineId,
@@ -20,6 +25,7 @@ pub struct ProtocolPaths {
 }
 
 impl ProtocolPaths {
+    /// Creates path helpers for a pipeline/job pair.
     pub fn new(pipeline_id: PipelineId, job_id: JobId) -> Self {
         Self {
             pipeline_id,
@@ -27,40 +33,48 @@ impl ProtocolPaths {
         }
     }
 
+    /// Returns the pipeline id this path builder is scoped to.
     pub fn pipeline_id(&self) -> &PipelineId {
         &self.pipeline_id
     }
 
+    /// Returns the job id this path builder is scoped to.
     pub fn job_id(&self) -> &JobId {
         &self.job_id
     }
 
+    /// Path to the controller-written current generation fence.
     pub fn current_generation(&self) -> CheckpointRef {
         self.path("current-generation.json")
     }
 
+    /// Path to a generation manifest.
     pub fn generation_manifest(&self, generation: Generation) -> CheckpointRef {
         self.path(format!("generations/{generation}/generation-manifest.json"))
     }
 
+    /// Prefix containing all artifacts for one checkpoint.
     pub fn checkpoint_dir(&self, generation: Generation, epoch: Epoch) -> CheckpointRef {
         self.path(format!(
             "generations/{generation}/checkpoints/checkpoint-{epoch:07}"
         ))
     }
 
+    /// Path to the immutable protobuf checkpoint manifest.
     pub fn checkpoint_manifest(&self, generation: Generation, epoch: Epoch) -> CheckpointRef {
         self.path(format!(
             "generations/{generation}/checkpoints/checkpoint-{epoch:07}/checkpoint-manifest.pb"
         ))
     }
 
+    /// Path to the commit-completion marker for a checkpoint.
     pub fn committed_marker(&self, generation: Generation, epoch: Epoch) -> CheckpointRef {
         self.path(format!(
             "generations/{generation}/checkpoints/checkpoint-{epoch:07}/committed.json"
         ))
     }
 
+    /// Path to the canonical epoch record for an epoch.
     pub fn epoch_record(&self, epoch: Epoch) -> CheckpointRef {
         self.path(format!("epochs/epoch-{epoch:07}.record"))
     }
@@ -77,10 +91,11 @@ impl ProtocolPaths {
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
     use super::*;
     use crate::resolve::{
         EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure,
-        classify_epoch_record_claim, resolve_candidate,
+        resolve_candidate,
     };
     use crate::state::{CheckpointState, derive_checkpoint_state};
     use crate::store::tests::MemoryProtocolStore;
@@ -98,7 +113,7 @@ mod tests {
         resolve_generation_manifest,
     };
     use arroyo_rpc::grpc::rpc::CheckpointManifest;
-    use arroyo_types::{JobId, PipelineId};
+    use arroyo_types::{from_micros, JobId, PipelineId};
 
     fn checkpoint_ref(path: &str) -> CheckpointRef {
         CheckpointRef::new(path).unwrap()
@@ -139,7 +154,7 @@ mod tests {
             Generation(1),
             checkpoint_ref,
             checkpoint,
-            0,
+            SystemTime::UNIX_EPOCH,
         )
         .unwrap()
     }
@@ -811,43 +826,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn classify_claim_treats_existing_same_record_as_success() {
-        let checkpoint_ref = checkpoint_ref(
-            "P/J/generations/1/checkpoints/checkpoint-0000001/checkpoint-manifest.pb",
-        );
-        let checkpoint = checkpoint(1, None, false);
-        let record = epoch_record(checkpoint_ref.clone(), &checkpoint);
-
-        assert_eq!(
-            classify_epoch_record_claim(&checkpoint_ref, None),
-            EpochClaimOutcome::Owned
-        );
-        assert_eq!(
-            classify_epoch_record_claim(&checkpoint_ref, Some(&record)),
-            EpochClaimOutcome::Owned
-        );
-    }
-
-    #[test]
-    fn classify_claim_orphans_different_existing_record() {
-        let loser_ref = checkpoint_ref(
-            "P/J/generations/2/checkpoints/checkpoint-0000001/checkpoint-manifest.pb",
-        );
-        let winner_ref = checkpoint_ref(
-            "P/J/generations/1/checkpoints/checkpoint-0000001/checkpoint-manifest.pb",
-        );
-        let checkpoint = checkpoint(1, None, false);
-        let record = epoch_record(winner_ref.clone(), &checkpoint);
-
-        assert_eq!(
-            classify_epoch_record_claim(&loser_ref, Some(&record)),
-            EpochClaimOutcome::Orphaned {
-                canonical_ref: winner_ref
-            }
-        );
-    }
-
     #[tokio::test]
     async fn claim_epoch_record_creates_canonical_record() {
         let store = MemoryProtocolStore::default();
@@ -864,7 +842,7 @@ mod tests {
                 generation: Generation(1),
                 checkpoint_ref: &checkpoint_ref,
                 checkpoint: &checkpoint,
-                created_at_micros: 123,
+                created_at: from_micros(123),
             },
         )
         .await
@@ -893,7 +871,7 @@ mod tests {
             generation: Generation(1),
             checkpoint_ref: &checkpoint_ref,
             checkpoint: &checkpoint,
-            created_at_micros: 123,
+            created_at: from_micros(123),
         };
 
         claim_epoch_record(&store, request.clone()).await.unwrap();
@@ -919,7 +897,7 @@ mod tests {
                 generation: Generation(1),
                 checkpoint_ref: &winner_ref,
                 checkpoint: &checkpoint,
-                created_at_micros: 123,
+                created_at: from_micros(123),
             },
         )
         .await
@@ -933,7 +911,7 @@ mod tests {
                 generation: Generation(2),
                 checkpoint_ref: &loser_ref,
                 checkpoint: &checkpoint,
-                created_at_micros: 124,
+                created_at: from_micros(124),
             },
         )
         .await
@@ -1363,7 +1341,7 @@ mod tests {
                 generation_manifest: &manifest,
                 checkpoint_ref: &checkpoint_ref,
                 checkpoint: &checkpoint,
-                created_at_micros: 42,
+                created_at: from_micros(42),
             },
         )
         .await
@@ -1415,7 +1393,7 @@ mod tests {
                 generation_manifest: &manifest,
                 checkpoint_ref: &checkpoint_ref,
                 checkpoint: &checkpoint,
-                created_at_micros: 42,
+                created_at: from_micros(42),
             },
         )
         .await
@@ -1443,7 +1421,7 @@ mod tests {
                 generation_manifest: &manifest,
                 checkpoint_ref: &checkpoint_ref,
                 checkpoint: &checkpoint,
-                created_at_micros: 42,
+                created_at: from_micros(42),
             },
         )
         .await
@@ -1471,7 +1449,7 @@ mod tests {
             generation_manifest: &manifest,
             checkpoint_ref: &checkpoint_ref,
             checkpoint: &checkpoint,
-            created_at_micros: 42,
+            created_at: from_micros(42),
         };
 
         publish_checkpoint(&store, request.clone()).await.unwrap();
@@ -1504,7 +1482,7 @@ mod tests {
                 generation_manifest: &manifest,
                 checkpoint_ref: &loser_ref,
                 checkpoint: &checkpoint,
-                created_at_micros: 42,
+                created_at: from_micros(42),
             },
         )
         .await
@@ -1535,7 +1513,7 @@ mod tests {
                 generation_manifest: &manifest,
                 checkpoint_ref: &child_ref,
                 checkpoint: &child,
-                created_at_micros: 42,
+                created_at: from_micros(42),
             },
         )
         .await

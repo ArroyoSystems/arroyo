@@ -11,8 +11,8 @@ use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
 use object_store::{Error, ObjectMeta};
 use object_store::{
-    MultipartId, ObjectStore, PutMode, PutOptions, PutPayload, RetryConfig,
-    aws::AmazonS3Builder, local::LocalFileSystem,
+    MultipartId, ObjectStore, PutMode, PutOptions, PutPayload, RetryConfig, aws::AmazonS3Builder,
+    local::LocalFileSystem,
 };
 use regex::{Captures, Regex};
 use std::borrow::Cow;

@@ -49,9 +49,11 @@ use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
     JobControllerGrpc, JobControllerGrpcServer,
 };
 use arroyo_rpc::grpc::rpc::job_status_grpc_server::{JobStatusGrpc, JobStatusGrpcServer};
-use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client, local_address, retry};
+use arroyo_rpc::{
+    CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
+    local_address, retry,
+};
 
-use arroyo_rpc::checkpoint_protocol::get_checkpoint_manifest;
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 use arroyo_state::get_storage_provider;

@@ -7,11 +7,15 @@ use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Result of a conditional-create operation.
 pub enum CreateResult<T> {
+    /// The object did not exist and was created by this call.
     Created,
+    /// The object already existed; the decoded existing value is returned.
     AlreadyExists(T),
 }
 
+/// Error type for protocol storage and serialization operations.
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("storage error: {0}")]
@@ -37,12 +41,28 @@ pub enum StoreError {
     Protocol(#[from] ProtocolError),
 }
 
+/// Minimal storage interface required by the protocol workflows.
+///
+/// Implementors must provide read-after-write visibility and linearizable
+/// conditional create for [`ProtocolStore::create_bytes`]. Safety decisions are
+/// not made in this trait; workflows read objects through it and then call the
+/// pure protocol logic.
 #[async_trait]
 pub trait ProtocolStore: Send + Sync {
+    /// Reads raw object bytes, returning `None` if the object is absent.
     async fn read_bytes(&self, path: &CheckpointRef) -> Result<Option<Vec<u8>>, StoreError>;
 
+    /// Writes or overwrites raw object bytes.
+    ///
+    /// Use this only for mutable protocol objects such as generation manifests.
+    /// Immutable objects such as epoch records and checkpoint manifests should
+    /// use [`ProtocolStore::create_bytes`] through the typed helpers.
     async fn put_bytes(&self, path: &CheckpointRef, bytes: Vec<u8>) -> Result<(), StoreError>;
 
+    /// Creates raw object bytes only if the object does not already exist.
+    ///
+    /// On conflict, implementations should return the existing object bytes so
+    /// callers can classify idempotent success versus a real ownership conflict.
     async fn create_bytes(
         &self,
         path: &CheckpointRef,
@@ -50,6 +70,7 @@ pub trait ProtocolStore: Send + Sync {
     ) -> Result<CreateResult<Vec<u8>>, StoreError>;
 }
 
+/// Reads and JSON-decodes an optional protocol object.
 pub async fn read_json<S, T>(store: &S, path: &CheckpointRef) -> Result<Option<T>, StoreError>
 where
     S: ProtocolStore + ?Sized,
@@ -67,6 +88,11 @@ where
         })
 }
 
+/// JSON-encodes and writes a protocol object, overwriting any existing object.
+///
+/// This is appropriate for `current-generation.json` and
+/// `generation-manifest.json`. Do not use it for epoch records or commit
+/// markers.
 pub async fn put_json<S, T>(store: &S, path: &CheckpointRef, value: &T) -> Result<(), StoreError>
 where
     S: ProtocolStore + ?Sized,
@@ -76,6 +102,10 @@ where
     store.put_bytes(path, bytes).await
 }
 
+/// JSON-encodes and conditionally creates a protocol object.
+///
+/// Use this for immutable JSON protocol objects such as epoch records and
+/// commit markers.
 pub async fn create_json<S, T>(
     store: &S,
     path: &CheckpointRef,
@@ -98,6 +128,9 @@ where
     }
 }
 
+/// Reads and protobuf-decodes an optional protocol object.
+///
+/// This is used for `checkpoint-manifest.pb`.
 pub async fn read_protobuf<S, T>(store: &S, path: &CheckpointRef) -> Result<Option<T>, StoreError>
 where
     S: ProtocolStore + ?Sized,
@@ -115,6 +148,10 @@ where
         })
 }
 
+/// Protobuf-encodes and writes an object, overwriting any existing object.
+///
+/// Most callers should prefer [`create_protobuf`] for checkpoint manifests so
+/// checkpoint contents remain immutable.
 pub async fn put_protobuf<S, T>(
     store: &S,
     path: &CheckpointRef,
@@ -127,6 +164,11 @@ where
     store.put_bytes(path, value.encode_to_vec()).await
 }
 
+/// Protobuf-encodes and conditionally creates an immutable object.
+///
+/// Use this for checkpoint manifests. On conflict, callers receive the existing
+/// decoded value and should compare it with the intended manifest for
+/// idempotent retry handling.
 pub async fn create_protobuf<S, T>(
     store: &S,
     path: &CheckpointRef,

@@ -1,5 +1,5 @@
 use arroyo_rpc::grpc::rpc::{
-    StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
+    worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment,
 };
 use arroyo_types::{JobId, MachineId, WorkerId};
 use std::{
@@ -8,36 +8,36 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{select, sync::Mutex, task::JoinHandle};
-use tonic::{Request, transport::Channel};
+use tonic::{transport::Channel, Request};
 use tracing::{debug, error, info, warn};
 
-use super::{JobContext, State, Transition, leader_running::LeaderRunning, running::Running};
+use super::{leader_running::LeaderRunning, running::Running, JobContext, State, Transition};
 use crate::job_controller::checkpoint_store::DbCheckpointMetadataStore;
 use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::leader_manager::LeaderManager;
-use crate::{JobMessage, schedulers::SchedulerError};
+use crate::{schedulers::SchedulerError, JobMessage};
 use crate::{
     job_controller::JobController, queries::controller_queries, states::stop_if_desired_non_running,
 };
 use crate::{
     schedulers::StartPipelineReq,
-    states::{StateError, fatal},
+    states::{fatal, StateError},
 };
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::checkpoint_protocol::{
-    CurrentGeneration, GenerationManifest, get_checkpoint_manifest,
+    get_checkpoint_manifest, CurrentGeneration, GenerationManifest,
 };
-use arroyo_rpc::config::{JobControllerMode, config};
+use arroyo_rpc::config::{config, JobControllerMode};
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc_channel_builder;
 use arroyo_rpc::worker_types::RunningMessage;
 use arroyo_state::{
-    BackingStore, StateBackend,
-    committing_state::CommittingState,
-    get_storage_provider,
-    tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
+    get_storage_provider, tables::{global_keyed_map::GlobalKeyedTable, ErasedTable},
+    BackingStore,
+    StateBackend,
 };
+use arroyo_worker::job_controller::committing_state::CommittingState;
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {

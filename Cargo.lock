@@ -1105,6 +1105,7 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
+ "arroyo-state-protocol",
  "arroyo-types",
  "arroyo-udf-host",
  "async-stream",

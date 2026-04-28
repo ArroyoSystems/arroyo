@@ -1,6 +1,9 @@
 use arrow_array::RecordBatch;
 use arroyo_rpc::errors::{StateError, StorageError};
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig, OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
+    OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
+};
 use arroyo_types::single_item_hash_map;
 use async_trait::async_trait;
 use bincode::config::Configuration;
@@ -156,9 +159,6 @@ pub trait BackingStore {
 
     /// writes the checkpoint metadata to the backing store
     async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<(), StateError>;
-
-    /// writes checkpoint manifest for checkpoint metadata v1
-    async fn write_checkpoint_manifest(manifest: CheckpointManifest) -> Result<(), StateError>;
 
     /// cleans up a checkpoint by deleting data that is no longer needed
     async fn cleanup_checkpoint(

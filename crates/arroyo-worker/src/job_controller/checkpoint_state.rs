@@ -8,7 +8,7 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::grpc::{api, rpc};
 use arroyo_rpc::{TaskEventSpans, get_event_spans, grpc, log_trace_event};
-use arroyo_state::committing_state::CommittingState;
+use crate::job_controller::committing_state::CommittingState;
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;

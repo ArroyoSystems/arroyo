@@ -1,12 +1,15 @@
 use std::fmt::{Display, Formatter};
-
+use std::time::SystemTime;
+/// Protobuf checkpoint manifest used as the publication point for checkpoint data.
 pub use arroyo_rpc::grpc::rpc::CheckpointManifest;
-use arroyo_types::{JobId, PipelineId};
+use arroyo_types::{to_micros, JobId, PipelineId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Current version for JSON protocol records written by this crate.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Errors returned when observed protocol objects violate protocol invariants.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ProtocolError {
     #[error("invalid checkpoint ref `{path}`: {reason}")]
@@ -32,6 +35,7 @@ pub enum ProtocolError {
     CheckpointManifestMismatch,
 }
 
+/// Monotonic identifier for a worker cluster generation of a job.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
 )]
@@ -44,6 +48,7 @@ impl Display for Generation {
     }
 }
 
+/// Monotonic identifier for a checkpoint epoch.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
 )]
@@ -56,11 +61,17 @@ impl Display for Epoch {
     }
 }
 
+/// Relative object-store path to a checkpoint/protocol object.
+///
+/// Use [`CheckpointRef::new`] for externally supplied paths. It rejects absolute
+/// paths and parent-directory traversal so protocol records can be safely
+/// relocated under a checkpoint URI.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CheckpointRef(String);
 
 impl CheckpointRef {
+    /// Validates and constructs a checkpoint reference from a relative path.
     pub fn new(path: impl Into<String>) -> Result<Self, ProtocolError> {
         let path = path.into();
         validate_ref(&path)?;
@@ -72,6 +83,7 @@ impl CheckpointRef {
         Self(path)
     }
 
+    /// Returns the underlying relative path string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -123,6 +135,11 @@ fn invalid_ref(path: &str, reason: &'static str) -> ProtocolError {
     }
 }
 
+/// Controller-written fence naming the current generation for a job.
+///
+/// Workers should read this before generation initialization, publication, and
+/// other ownership-sensitive operations. It is advisory; canonical ownership is
+/// still determined by epoch records.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CurrentGeneration {
     pub version: u32,
@@ -134,6 +151,7 @@ pub struct CurrentGeneration {
 }
 
 impl CurrentGeneration {
+    /// Builds a current-generation record with the current protocol version.
     pub fn new(
         pipeline_id: PipelineId,
         job_id: JobId,
@@ -152,6 +170,10 @@ impl CurrentGeneration {
     }
 }
 
+/// Per-generation candidate recovery manifest.
+///
+/// `latest_checkpoint_ref` is only a candidate pointer. Callers must resolve it
+/// through `workflow::resolve_generation_manifest` before restoring from it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationManifest {
     pub version: u32,
@@ -164,6 +186,10 @@ pub struct GenerationManifest {
 }
 
 impl GenerationManifest {
+    /// Creates a new generation manifest with `latest_checkpoint_ref` unset.
+    ///
+    /// New generations should set `base_checkpoint_ref` to the checkpoint
+    /// returned by `workflow::initialize_generation`, if any.
     pub fn new(
         pipeline_id: PipelineId,
         job_id: JobId,
@@ -182,6 +208,10 @@ impl GenerationManifest {
         }
     }
 
+    /// Returns `latest_checkpoint_ref` if present, otherwise `base_checkpoint_ref`.
+    ///
+    /// This value is a candidate only; do not restore from it without resolving
+    /// it against epoch records.
     pub fn candidate_checkpoint_ref(&self) -> Option<&CheckpointRef> {
         self.latest_checkpoint_ref
             .as_ref()
@@ -189,6 +219,10 @@ impl GenerationManifest {
     }
 }
 
+/// Marker written after all external commit work for a checkpoint completes.
+///
+/// This object is immutable and should be created conditionally. If creation
+/// races with a retry, an existing marker for the same checkpoint is success.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedMarker {
     pub version: u32,
@@ -201,6 +235,7 @@ pub struct CommittedMarker {
 }
 
 impl CommittedMarker {
+    /// Builds a commit-completion marker with the current protocol version.
     pub fn new(
         pipeline_id: PipelineId,
         job_id: JobId,
@@ -221,6 +256,11 @@ impl CommittedMarker {
     }
 }
 
+/// Canonical ownership record for an epoch.
+///
+/// Exactly one checkpoint may own an epoch record. For non-committing
+/// checkpoints, this makes the checkpoint recoverable. For committing
+/// checkpoints, it also authorizes sending external commit requests.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EpochRecord {
     pub version: u32,
@@ -234,28 +274,29 @@ pub struct EpochRecord {
 }
 
 impl EpochRecord {
+    /// Builds the epoch record that canonically assigns `checkpoint_ref` to the
+    /// checkpoint's epoch.
+    ///
+    /// Callers should write this with conditional-create semantics, normally via
+    /// `workflow::claim_epoch_record` rather than writing it directly.
     pub fn for_checkpoint(
         pipeline_id: PipelineId,
         generation: Generation,
         checkpoint_ref: CheckpointRef,
         checkpoint: &CheckpointManifest,
-        created_at_micros: u64,
+        created_at: SystemTime,
     ) -> Result<Self, ProtocolError> {
         Ok(Self {
             version: PROTOCOL_VERSION,
             pipeline_id,
             job_id: JobId::new(&checkpoint.job_id),
-            epoch: checkpoint_epoch(checkpoint),
+            epoch: Epoch(checkpoint.epoch),
             generation,
             parent_checkpoint_ref: checkpoint_parent_checkpoint_ref(checkpoint)?,
             checkpoint_ref,
-            created_at_micros,
+            created_at_micros: to_micros(created_at),
         })
     }
-}
-
-pub(crate) fn checkpoint_epoch(checkpoint: &CheckpointManifest) -> Epoch {
-    Epoch(checkpoint.epoch)
 }
 
 pub(crate) fn checkpoint_parent_checkpoint_ref(
@@ -273,7 +314,7 @@ pub(crate) fn validate_epoch_record_matches_checkpoint(
     checkpoint: &CheckpointManifest,
     record: &EpochRecord,
 ) -> Result<(), ProtocolError> {
-    let checkpoint_epoch = checkpoint_epoch(checkpoint);
+    let checkpoint_epoch = Epoch(checkpoint.epoch);
     if checkpoint_epoch != record.epoch {
         return Err(ProtocolError::EpochMismatch {
             checkpoint_epoch,
@@ -295,7 +336,7 @@ pub(crate) fn validate_committed_marker_matches_checkpoint(
     marker: &CommittedMarker,
 ) -> Result<(), ProtocolError> {
     if *marker.job_id != checkpoint.job_id
-        || marker.epoch != checkpoint_epoch(checkpoint)
+        || marker.epoch != Epoch(checkpoint.epoch)
         || &marker.checkpoint_ref != checkpoint_ref
     {
         return Err(ProtocolError::CommittedMarkerMismatch);

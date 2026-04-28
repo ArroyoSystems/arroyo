@@ -5,6 +5,7 @@ use crate::types::{
 };
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 
+/// State of a candidate checkpoint's parent when resolving recovery safety.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParentCheckpointStatus {
     NoParent,
@@ -12,6 +13,10 @@ pub enum ParentCheckpointStatus {
     NotReadyCanonical,
 }
 
+/// Pure decision returned when resolving a generation manifest candidate.
+///
+/// Storage-facing callers usually use `workflow::resolve_generation_manifest`;
+/// this enum is useful for tests and for code that has already read all inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveDecision {
     Ready { checkpoint_ref: CheckpointRef },
@@ -22,6 +27,7 @@ pub enum ResolveDecision {
     Failed(ResolveFailure),
 }
 
+/// Reason a candidate could not be resolved into a recoverable checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveFailure {
     NoCandidate,
@@ -30,12 +36,19 @@ pub enum ResolveFailure {
     ParentNotReadyCanonical,
 }
 
+/// Result of interpreting an epoch-record conditional-create outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EpochClaimOutcome {
-    Owned,
+    Owned { record: EpochRecord, },
     Orphaned { canonical_ref: CheckpointRef },
 }
 
+/// Resolves a generation manifest candidate from already-read protocol objects.
+///
+/// The generation manifest's latest/base pointer is only a candidate. This
+/// function checks the epoch record and commit marker to decide whether the
+/// checkpoint is ready, needs commit replay, should be claimed by the current
+/// generation, should fall back to the base checkpoint, or is orphaned.
 pub fn resolve_candidate(
     manifest: &GenerationManifest,
     candidate_ref: &CheckpointRef,
@@ -90,17 +103,4 @@ pub fn resolve_candidate(
             }
         }
     })
-}
-
-pub fn classify_epoch_record_claim(
-    checkpoint_ref: &CheckpointRef,
-    existing_record: Option<&EpochRecord>,
-) -> EpochClaimOutcome {
-    match existing_record {
-        None => EpochClaimOutcome::Owned,
-        Some(record) if &record.checkpoint_ref == checkpoint_ref => EpochClaimOutcome::Owned,
-        Some(record) => EpochClaimOutcome::Orphaned {
-            canonical_ref: record.checkpoint_ref.clone(),
-        },
-    }
 }

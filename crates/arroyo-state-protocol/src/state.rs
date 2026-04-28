@@ -1,32 +1,43 @@
-use crate::types::{
-    CheckpointRef, CommittedMarker, EpochRecord, ProtocolError, checkpoint_epoch,
-    validate_committed_marker_matches_checkpoint, validate_epoch_record_matches_checkpoint,
-};
+use crate::types::{CheckpointRef, CommittedMarker, EpochRecord, ProtocolError, validate_committed_marker_matches_checkpoint, validate_epoch_record_matches_checkpoint, Epoch};
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 
+/// Derived state of a checkpoint from the checkpoint manifest, epoch record,
+/// and commit marker observed in object storage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckpointState {
+    /// The checkpoint manifest does not exist yet.
     Invisible,
+    /// The checkpoint manifest exists, but no epoch record exists for its epoch.
     Unclaimed,
+    /// The epoch record exists but points at another checkpoint.
     Orphaned { canonical_ref: CheckpointRef },
+    /// The checkpoint is canonical and safe to use for normal recovery.
     Ready,
+    /// The checkpoint is canonical but still requires external commit replay.
     Committing,
 }
 
 impl CheckpointState {
+    /// Returns true when normal execution can restore from this checkpoint.
     pub fn is_ready(&self) -> bool {
         matches!(self, Self::Ready)
     }
 
+    /// Returns true when the checkpoint owns its epoch record.
     pub fn is_canonical(&self) -> bool {
         matches!(self, Self::Ready | Self::Committing)
     }
 
+    /// Returns true when recovery must replay external commit before continuing.
     pub fn requires_commit_replay(&self) -> bool {
         matches!(self, Self::Committing)
     }
 }
 
+/// Computes checkpoint state from already-read protocol objects.
+///
+/// This function performs no I/O. Callers that need storage access should use
+/// the workflow functions, which read the objects and then call this logic.
 pub fn derive_checkpoint_state(
     checkpoint_ref: &CheckpointRef,
     checkpoint: Option<&CheckpointManifest>,
@@ -41,7 +52,7 @@ pub fn derive_checkpoint_state(
         return Ok(CheckpointState::Unclaimed);
     };
 
-    let checkpoint_epoch = checkpoint_epoch(checkpoint);
+    let checkpoint_epoch = Epoch(checkpoint.epoch);
     if epoch_record.epoch != checkpoint_epoch {
         return Err(ProtocolError::EpochMismatch {
             checkpoint_epoch,

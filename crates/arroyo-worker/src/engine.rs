@@ -20,7 +20,7 @@ use arroyo_operator::context::{BatchReceiver, BatchSender, OperatorContext, batc
 use arroyo_operator::operator::Registry;
 use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNode, SourceNode};
 use arroyo_planner::physical::new_registry;
-use arroyo_rpc::checkpoint_protocol::{MetadataOrManifest};
+use arroyo_rpc::checkpoint_protocol::MetadataOrManifest;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, StateError};

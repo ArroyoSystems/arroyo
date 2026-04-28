@@ -21,7 +21,7 @@ use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
-use arroyo_state::committing_state::CommittingState;
+use arroyo_worker::job_controller::committing_state::CommittingState;
 use arroyo_worker::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
     WorkerStatus,

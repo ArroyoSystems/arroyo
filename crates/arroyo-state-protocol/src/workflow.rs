@@ -1,7 +1,8 @@
+use std::time::SystemTime;
 use crate::ProtocolPaths;
 use crate::resolve::{
     EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure,
-    classify_epoch_record_claim, resolve_candidate,
+    resolve_candidate,
 };
 use crate::state::{CheckpointState, derive_checkpoint_state};
 use crate::store::{
@@ -10,11 +11,17 @@ use crate::store::{
 };
 use crate::types::{
     CheckpointRef, CommittedMarker, CurrentGeneration, Epoch, EpochRecord, Generation,
-    GenerationManifest, ProtocolError, checkpoint_epoch, checkpoint_parent_checkpoint_ref,
+    GenerationManifest, ProtocolError, checkpoint_parent_checkpoint_ref,
 };
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_types::{JobId, PipelineId};
 
+/// Request to claim canonical ownership of a checkpoint's epoch.
+///
+/// Callers normally use this through [`publish_checkpoint`] or
+/// [`resolve_generation_manifest`]. Use it directly only when the checkpoint
+/// manifest has already been published and parent safety has already been
+/// checked.
 #[derive(Debug, Clone)]
 pub struct ClaimEpochRecordRequest<'a> {
     pub epoch_record_path: &'a CheckpointRef,
@@ -22,15 +29,23 @@ pub struct ClaimEpochRecordRequest<'a> {
     pub generation: Generation,
     pub checkpoint_ref: &'a CheckpointRef,
     pub checkpoint: &'a CheckpointManifest,
-    pub created_at_micros: u64,
+    pub created_at: SystemTime,
 }
 
+/// Outcome of writing `committed.json` for a checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommittedMarkerOutcome {
+    /// This call created the marker.
     Created,
+    /// The marker already existed for the same checkpoint.
     AlreadyCommitted,
 }
 
+/// Result of resolving a generation manifest candidate.
+///
+/// This is used both during recovery and when initializing a replacement
+/// generation. A `ReplayCommit` result means callers may restore the checkpoint
+/// only to replay external commit before normal execution continues.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerationResolution {
     Ready { checkpoint_ref: CheckpointRef },
@@ -39,6 +54,10 @@ pub enum GenerationResolution {
     Failed(ResolveFailure),
 }
 
+/// Input for starting a new worker generation.
+///
+/// The controller should write `current-generation.json` first. The new leader
+/// then calls [`initialize_generation`] with the same generation id.
 #[derive(Debug, Clone)]
 pub struct InitializeGenerationRequest {
     pub pipeline_id: PipelineId,
@@ -47,6 +66,7 @@ pub struct InitializeGenerationRequest {
     pub updated_at_micros: u64,
 }
 
+/// Checkpoint, if any, that a newly initialized generation should restore from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerationRecovery {
     NoCheckpoint,
@@ -54,6 +74,7 @@ pub enum GenerationRecovery {
     ReplayCommit { checkpoint_ref: CheckpointRef },
 }
 
+/// Result of [`initialize_generation`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerationInitialization {
     Initialized {
@@ -67,23 +88,33 @@ pub enum GenerationInitialization {
     Failed(ResolveFailure),
 }
 
+/// Input for publishing a completed checkpoint.
+///
+/// State files should already be written under the checkpoint directory. This
+/// workflow publishes the immutable checkpoint manifest, updates the generation
+/// manifest candidate pointer, and claims the epoch record.
 #[derive(Debug, Clone)]
 pub struct PublishCheckpointRequest<'a> {
     pub generation_manifest: &'a GenerationManifest,
     pub checkpoint_ref: &'a CheckpointRef,
     pub checkpoint: &'a CheckpointManifest,
-    pub created_at_micros: u64,
+    pub created_at: SystemTime,
 }
 
+/// Result of publishing a checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckpointPublication {
     Ready { checkpoint_ref: CheckpointRef },
-    CommitRequired { checkpoint_ref: CheckpointRef },
+    CommitRequired { checkpoint_ref: CheckpointRef, epoch_record: EpochRecord, },
     StopOrphaned { canonical_ref: CheckpointRef },
     StaleGeneration,
     Failed(ResolveFailure),
 }
 
+/// Result of checking whether a checkpoint may send external `CommitReq`s.
+///
+/// Only `Authorized` permits callers to fan out commit messages. Every other
+/// variant means no commit should be sent for the supplied checkpoint.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommitAuthorization {
     Authorized {
@@ -107,6 +138,7 @@ pub enum CommitAuthorization {
     },
 }
 
+/// Result of completing commit after workers report success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommitCompletion {
     Created { checkpoint_ref: CheckpointRef },
@@ -117,6 +149,17 @@ pub enum CommitCompletion {
     MissingCheckpoint { checkpoint_ref: CheckpointRef },
 }
 
+/// Initializes a newly current generation and writes its generation manifest.
+///
+/// Correct caller sequence:
+/// 1. The controller writes `current-generation.json` for `request.generation`.
+/// 2. The new leader calls this function.
+/// 3. If `Initialized`, restore according to `recovery` and only continue
+///    normal execution after any required commit replay completes.
+///
+/// When older manifests point at orphaned checkpoints, this follows the epoch
+/// record to the canonical checkpoint so replacement generations do not wedge on
+/// the same losing manifest.
 pub async fn initialize_generation<S>(
     store: &S,
     request: InitializeGenerationRequest,
@@ -252,7 +295,7 @@ where
     }
 
     let epoch_record: Option<EpochRecord> =
-        read_json(store, &paths.epoch_record(checkpoint_epoch(&checkpoint))).await?;
+        read_json(store, &paths.epoch_record(Epoch(checkpoint.epoch))).await?;
     let committed_marker = if checkpoint.needs_commit {
         let committed_marker_path = committed_marker_path(paths, &checkpoint);
         read_json(store, &committed_marker_path).await?
@@ -282,30 +325,44 @@ where
     }
 }
 
+/// Checks whether a checkpoint is allowed to perform external commit.
+///
+/// Call this immediately before sending `CommitReq`. It reads the checkpoint
+/// manifest, epoch record, and commit marker. Only `CommitAuthorization::Authorized`
+/// means the checkpoint is canonical, requires commit, and has not already been
+/// committed.
+/// 
+/// If this is being called within a checkpointing pass (as opposed to on recovery),
+/// pass `true` to `assume_not_committed` to avoid an unnecessary object store lookup.
 pub async fn prepare_commit<S>(
     store: &S,
     checkpoint_ref: &CheckpointRef,
+    checkpoint: CheckpointManifest,
+    epoch_record: Option<EpochRecord>,
+    assume_not_committed: bool,
 ) -> Result<CommitAuthorization, StoreError>
 where
     S: ProtocolStore + ?Sized,
 {
-    let Some(checkpoint): Option<CheckpointManifest> = read_protobuf(store, checkpoint_ref).await?
-    else {
-        return Ok(CommitAuthorization::MissingCheckpoint {
-            checkpoint_ref: checkpoint_ref.clone(),
-        });
-    };
-
     let paths = ProtocolPaths::new(
         PipelineId::new(&checkpoint.pipeline_id),
-        checkpoint_job_id(&checkpoint),
+        JobId::new(&checkpoint.job_id),
     );
-    let epoch_record: Option<EpochRecord> =
-        read_json(store, &paths.epoch_record(checkpoint_epoch(&checkpoint))).await?;
-    let committed_marker_path = committed_marker_path(&paths, &checkpoint);
-    let committed_marker: Option<CommittedMarker> =
-        read_json(store, &committed_marker_path).await?;
 
+    let committed_marker_path = committed_marker_path(&paths, &checkpoint);
+    let committed_marker: Option<CommittedMarker> = if assume_not_committed {
+        None
+    } else {
+        read_json(store, &committed_marker_path).await?
+    };
+
+    let epoch_record = match epoch_record {
+        Some(r) => Some(r),
+        None => {
+            read_json::<_, EpochRecord>(store, &paths.epoch_record(Epoch(checkpoint.epoch))).await?
+        }
+    };
+    
     match derive_checkpoint_state(
         checkpoint_ref,
         Some(&checkpoint),
@@ -334,10 +391,20 @@ where
     }
 }
 
+/// Writes `committed.json` after external commit succeeds.
+///
+/// This optionally rechecks commit authorization before writing the marker. Call it only
+/// after all required workers report successful external commit. The write is
+/// conditional and idempotent for retries of the same checkpoint.
+/// 
+/// If the caller has previously written an epoch record, it can pass that in to avoid re-requesting
+/// from storage. 
 pub async fn complete_commit<S>(
     store: &S,
     checkpoint_ref: &CheckpointRef,
     writer_generation: Generation,
+    epoch_record: Option<EpochRecord>,
+    assume_not_committed: bool,
 ) -> Result<CommitCompletion, StoreError>
 where
     S: ProtocolStore + ?Sized,
@@ -351,16 +418,16 @@ where
 
     let paths = ProtocolPaths::new(
         PipelineId::new(&checkpoint.pipeline_id),
-        checkpoint_job_id(&checkpoint),
+        JobId::new(&checkpoint.job_id),
     );
     let committed_marker_path = committed_marker_path(&paths, &checkpoint);
 
-    match prepare_commit(store, checkpoint_ref).await? {
-        CommitAuthorization::Authorized { .. } => {
+    match prepare_commit(store, checkpoint_ref, checkpoint, epoch_record, assume_not_committed).await? {
+        CommitAuthorization::Authorized { checkpoint_ref, checkpoint } => {
             let marker = CommittedMarker::new(
                 PipelineId::new(&checkpoint.pipeline_id),
-                checkpoint_job_id(&checkpoint),
-                checkpoint_epoch(&checkpoint),
+                JobId::new(&checkpoint.job_id),
+                Epoch(checkpoint.epoch),
                 Generation(checkpoint.generation),
                 writer_generation,
                 checkpoint_ref.clone(),
@@ -395,6 +462,15 @@ where
     }
 }
 
+/// Publishes a completed checkpoint and claims its epoch record.
+///
+/// Correct caller sequence:
+/// 1. Write all checkpoint state files.
+/// 2. Call this function with the immutable protobuf checkpoint manifest.
+/// 3. If `Ready`, the checkpoint is recoverable.
+/// 4. If `CommitRequired`, call [`prepare_commit`], send `CommitReq` only if it
+///    returns `Authorized`, then call [`complete_commit`] after workers finish.
+/// 5. If `StopOrphaned` or `StaleGeneration`, stop this generation.
 pub async fn publish_checkpoint<S>(
     store: &S,
     request: PublishCheckpointRequest<'_>,
@@ -450,23 +526,24 @@ where
     let outcome = claim_epoch_record(
         store,
         ClaimEpochRecordRequest {
-            epoch_record_path: &paths.epoch_record(checkpoint_epoch(request.checkpoint)),
+            epoch_record_path: &paths.epoch_record(Epoch(request.checkpoint.epoch)),
             pipeline_id: &request.generation_manifest.pipeline_id,
             generation: request.generation_manifest.generation,
             checkpoint_ref: request.checkpoint_ref,
             checkpoint: request.checkpoint,
-            created_at_micros: request.created_at_micros,
+            created_at: request.created_at,
         },
     )
     .await?;
 
     match outcome {
-        EpochClaimOutcome::Owned if request.checkpoint.needs_commit => {
+        EpochClaimOutcome::Owned { record } if request.checkpoint.needs_commit => {
             Ok(CheckpointPublication::CommitRequired {
                 checkpoint_ref: request.checkpoint_ref.clone(),
+                epoch_record: record,
             })
         }
-        EpochClaimOutcome::Owned => Ok(CheckpointPublication::Ready {
+        EpochClaimOutcome::Owned { .. } => Ok(CheckpointPublication::Ready {
             checkpoint_ref: request.checkpoint_ref.clone(),
         }),
         EpochClaimOutcome::Orphaned { canonical_ref } => {
@@ -475,6 +552,12 @@ where
     }
 }
 
+/// Resolves a generation manifest into a safe recovery action.
+///
+/// `latest_checkpoint_ref` and `base_checkpoint_ref` are candidate pointers, not
+/// proof of recoverability. This workflow reads the candidate checkpoint,
+/// validates epoch ownership and parent readiness, and may claim an unclaimed
+/// candidate if `runner_generation` is still current.
 pub async fn resolve_generation_manifest<S>(
     store: &S,
     manifest: &GenerationManifest,
@@ -537,7 +620,7 @@ where
     let parent_status = parent_status(store, paths, checkpoint.as_ref()).await?;
     let epoch_record = match &checkpoint {
         Some(checkpoint) => {
-            read_json(store, &paths.epoch_record(checkpoint_epoch(checkpoint))).await?
+            read_json(store, &paths.epoch_record(Epoch(checkpoint.epoch))).await?
         }
         None => None,
     };
@@ -581,18 +664,18 @@ where
             let outcome = claim_epoch_record(
                 store,
                 ClaimEpochRecordRequest {
-                    epoch_record_path: &paths.epoch_record(checkpoint_epoch(&checkpoint)),
+                    epoch_record_path: &paths.epoch_record(Epoch(checkpoint.epoch)),
                     pipeline_id: &manifest.pipeline_id,
                     generation: Generation(checkpoint.generation),
                     checkpoint_ref: &checkpoint_ref,
                     checkpoint: &checkpoint,
-                    created_at_micros: 0,
+                    created_at: SystemTime::now(),
                 },
             )
             .await?;
 
             match outcome {
-                EpochClaimOutcome::Owned if checkpoint.needs_commit => {
+                EpochClaimOutcome::Owned { .. } if checkpoint.needs_commit => {
                     let committed_marker_path = paths.committed_marker(
                         Generation(checkpoint.generation),
                         Epoch(checkpoint.epoch),
@@ -610,7 +693,7 @@ where
                         ))
                     }
                 }
-                EpochClaimOutcome::Owned => {
+                EpochClaimOutcome::Owned { .. } => {
                     Ok(CandidateResolution::Done(GenerationResolution::Ready {
                         checkpoint_ref,
                     }))
@@ -645,7 +728,7 @@ where
     };
     let parent_epoch_record: Option<EpochRecord> = read_json(
         store,
-        &paths.epoch_record(checkpoint_epoch(&parent_checkpoint)),
+        &paths.epoch_record(Epoch(parent_checkpoint.epoch)),
     )
     .await?;
     let parent_committed_marker = if parent_checkpoint.needs_commit {
@@ -671,6 +754,11 @@ where
     }
 }
 
+/// Claims an epoch record for a published checkpoint.
+///
+/// A successful conditional create and an existing record for the same
+/// checkpoint both return `Owned`. An existing record for a different checkpoint
+/// returns `Orphaned`; callers must stop using the losing checkpoint.
 pub async fn claim_epoch_record<S>(
     store: &S,
     request: ClaimEpochRecordRequest<'_>,
@@ -683,28 +771,36 @@ where
         request.generation,
         request.checkpoint_ref.clone(),
         request.checkpoint,
-        request.created_at_micros,
+        request.created_at,
     )?;
 
     match create_json(store, request.epoch_record_path, &record).await? {
-        CreateResult::Created => Ok(EpochClaimOutcome::Owned),
+        CreateResult::Created => Ok(EpochClaimOutcome::Owned { record }),
         CreateResult::AlreadyExists(existing) => {
-            let outcome = classify_epoch_record_claim(request.checkpoint_ref, Some(&existing));
-
-            if outcome == EpochClaimOutcome::Owned {
+            if existing.checkpoint_ref == *request.checkpoint_ref {
                 derive_checkpoint_state(
                     request.checkpoint_ref,
                     Some(request.checkpoint),
                     Some(&existing),
                     None,
                 )?;
+                Ok(EpochClaimOutcome::Owned {
+                    record
+                })
+            } else {
+                Ok(EpochClaimOutcome::Orphaned {
+                    canonical_ref: record.checkpoint_ref.clone(),
+                })              
             }
-
-            Ok(outcome)
         }
     }
 }
 
+/// Conditionally writes the commit marker for a checkpoint.
+///
+/// Most callers should use [`complete_commit`] so canonical ownership is checked
+/// before the marker is written. Use this directly only when that check has
+/// already been performed.
 pub async fn mark_committed<S>(
     store: &S,
     committed_marker_path: &CheckpointRef,
@@ -734,7 +830,7 @@ fn validate_marker(
     marker: &CommittedMarker,
     checkpoint: &CheckpointManifest,
 ) -> Result<(), ProtocolError> {
-    if *marker.job_id != checkpoint.job_id || marker.epoch != checkpoint_epoch(checkpoint) {
+    if *marker.job_id != checkpoint.job_id || marker.epoch.0 != checkpoint.epoch {
         return Err(ProtocolError::CommittedMarkerMismatch);
     }
 
@@ -755,13 +851,9 @@ fn validate_checkpoint_for_generation(
     Ok(())
 }
 
-fn checkpoint_job_id(checkpoint: &CheckpointManifest) -> JobId {
-    JobId::new(&checkpoint.job_id)
-}
-
 fn committed_marker_path(paths: &ProtocolPaths, checkpoint: &CheckpointManifest) -> CheckpointRef {
     paths.committed_marker(
         Generation(checkpoint.generation),
-        checkpoint_epoch(checkpoint),
+        Epoch(checkpoint.epoch),
     )
 }
