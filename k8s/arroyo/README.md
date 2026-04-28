@@ -40,7 +40,7 @@ docs for more details.)
 Then you can create the cluster with
 
 ```
-$ helm install arroyo oci://ghcr.io/arroyosystems/charts/arroyo -f values.yaml
+$ helm install arroyo oci://ghcr.io/dream-faster/charts/arroyo -f values.yaml
 ```
 
 Once all of the pods start up (which may take a few minutes if you're deploying Postgres) you should be able to access
@@ -64,8 +64,11 @@ and opening http://localhost:5115.
 The Helm chart provides a number of options, which can be inspected by running
 
 ```
-$ helm show values oci://ghcr.io/arroyosystems/charts/arroyo
+$ helm show values oci://ghcr.io/dream-faster/charts/arroyo
 ```
+
+This fork publishes fork-owned images by default (`ghcr.io/dream-faster/arroyo:tip`). Override `image.namespace`,
+`image.name`, and `image.tag` if you want to pin a different image or consume another fork.
 
 The most important options are:
 
