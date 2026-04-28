@@ -12,6 +12,7 @@ use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
 use serde_json::json;
+use std::cmp::min;
 use std::time::Duration;
 use tonic::Status;
 use tracing::{info, warn};
@@ -36,6 +37,26 @@ impl KubernetesScheduler {
 
     pub fn with_config(client: Option<Client>, config: KubernetesSchedulerConfig) -> Self {
         Self { client, config }
+    }
+
+    fn worker_pod_name(&self, req: &StartPipelineReq, number: usize) -> String {
+        let mut job_name = req
+            .name
+            .to_ascii_lowercase()
+            .replace(|c: char| !c.is_ascii_alphanumeric(), "-");
+        while job_name.contains("--") {
+            job_name = job_name.replace("--", "-");
+        }
+        job_name = job_name.trim_matches('-').to_string();
+        if job_name.is_empty() {
+            job_name = req.job_id.to_ascii_lowercase().replace('_', "-");
+        }
+
+        let prefix = format!("{}-", self.config.worker.name());
+        let suffix = format!("-{}-{}", req.run_id, number);
+        let max_job_name_len = 253usize.saturating_sub(prefix.len() + suffix.len());
+        let trimmed_job_name = &job_name[..min(job_name.len(), max_job_name_len)];
+        format!("{prefix}{trimmed_job_name}{suffix}")
     }
 
     fn make_pod(&self, req: &StartPipelineReq, number: usize, slots: usize) -> Pod {
@@ -84,13 +105,7 @@ impl KubernetesScheduler {
         labels.insert(RUN_ID_LABEL.to_string(), format!("{}", req.run_id));
         labels.insert(JOB_NAME_LABEL.to_string(), req.name.clone());
 
-        let pod_name = format!(
-            "{}-{}-{}-{}",
-            c.worker.name(),
-            req.job_id.to_ascii_lowercase().replace('_', "-"),
-            req.run_id,
-            number
-        );
+        let pod_name = self.worker_pod_name(req, number);
 
         let mut env = json!([
             {
@@ -367,8 +382,12 @@ mod test {
             .unwrap(),
         );
 
-        KubernetesScheduler::with_config(None, config)
-            // test that we don't panic when creating the replicaset
+        let pod = KubernetesScheduler::with_config(None, config)
+            // test that we don't panic when creating the pod
             .make_pod(&req, 3, 4);
+        assert_eq!(
+            pod.metadata.name.as_deref(),
+            Some("arroyo-worker-test-pipeline-1-3")
+        );
     }
 }
