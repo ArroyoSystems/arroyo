@@ -12,6 +12,10 @@ on:
 permissions:
   packages: write
 
+concurrency:
+  group: ${{ github.ref }}-docker
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:

@@ -13,6 +13,10 @@ env:
   REFINERY_VERSION: 0.8.14
   PROTOC_VERSION: 27.3
 
+concurrency:
+  group: ${{ github.ref }}-binaries
+  cancel-in-progress: true
+
 jobs:
   linux:
     strategy:

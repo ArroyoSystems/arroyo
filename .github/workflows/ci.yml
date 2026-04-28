@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.ref }}-ci
+  cancel-in-progress: true
+
 jobs:
   lint-console:
     runs-on: ubuntu-latest
