@@ -203,7 +203,6 @@ Important execution behaviors include:
 
 - Kafka
 - Confluent schema registry-backed sources
-- Fluvio
 - Kinesis
 - MQTT
 - NATS

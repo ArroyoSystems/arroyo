@@ -82,9 +82,6 @@ redis = { version = "0.28", features = [
     "connection-manager",
 ] }
 
-# Fluvio
-fluvio = { version = "0.24", features = ["openssl"] }
-
 # Kinesis
 aws-sdk-kinesis = { version = "1.95" }
 aws-config = { workspace = true }
