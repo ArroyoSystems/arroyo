@@ -14,10 +14,9 @@ use uuid::Uuid;
 
 use super::{
     CommitState, FilenameStrategy, FinishedFile, MultiPartWriterStats, RollingPolicy,
-    add_suffix_prefix, delta, two_phase_committer::TwoPhaseCommitterOperator,
+    add_suffix_prefix, two_phase_committer::TwoPhaseCommitterOperator,
 };
 use crate::filesystem::config::NamingConfig;
-use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
 use crate::filesystem::{TableFormat, config, sink::two_phase_committer::TwoPhaseCommitter};
@@ -251,7 +250,7 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         self.finished_files = recovered_files;
         self.next_file_index = max_file_index;
 
-        let storage_provider = StorageProvider::for_url(&self.final_dir)
+        StorageProvider::for_url(&self.final_dir)
             .await
             .map_err(|e| {
                 connector_err!(
@@ -265,13 +264,6 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         let schema = ctx.in_schemas[0].clone();
 
         self.commit_state = Some(match self.table_format {
-            TableFormat::Delta => CommitState::DeltaLake {
-                last_version: -1,
-                table: Box::new(
-                    load_or_create_table(&storage_provider, &schema.schema_without_timestamp())
-                        .await?,
-                ),
-            },
             TableFormat::None => CommitState::VanillaParquet,
             TableFormat::Iceberg { .. } => todo!(),
         });
@@ -367,16 +359,6 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
         }
 
         match self.commit_state.as_mut().unwrap() {
-            CommitState::DeltaLake {
-                last_version,
-                table,
-            } => {
-                if let Some(version) =
-                    delta::commit_files_to_delta(&finished_files, table, *last_version).await?
-                {
-                    *last_version = version;
-                }
-            }
             CommitState::Iceberg(_) => {
                 unreachable!("Iceberg is not supported for local filesystems");
             }

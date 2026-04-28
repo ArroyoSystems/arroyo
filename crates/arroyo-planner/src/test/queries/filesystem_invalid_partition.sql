@@ -26,7 +26,7 @@ create table events_sink (
      type TEXT NOT NULL,
      properties JSON    
 ) with (
-    connector = 'delta',
+    connector = 'filesystem',
     path = 's3://my-s3-bucket/data/events',
     format = 'parquet',
     'filename.strategy' = 'uuid',

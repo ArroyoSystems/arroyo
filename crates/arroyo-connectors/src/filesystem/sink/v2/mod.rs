@@ -3,7 +3,6 @@ pub mod migration;
 mod open_file;
 mod uploads;
 
-use super::delta::{commit_files_to_delta, load_or_create_table};
 use super::parquet::representitive_timestamp;
 use super::partitioning::{Partitioner, PartitionerMode};
 use super::v2::checkpoint::{FileToCommit, FilesCheckpointV2};
@@ -129,21 +128,6 @@ impl SinkContext {
         let mut iceberg_schema = None;
 
         let commit_state = match table_format {
-            TableFormat::Delta => CommitState::DeltaLake {
-                last_version: -1,
-                table: Box::new(
-                    load_or_create_table(&provider, &schema.schema_without_timestamp())
-                        .await
-                        .map_err(|e| {
-                            connector_err!(
-                                User,
-                                NoRetry,
-                                source: e,
-                                "failed to load or create delta table"
-                            )
-                        })?,
-                ),
-            },
             TableFormat::Iceberg(mut table) => {
                 let t = table
                     .load_or_create(task_info.clone(), &schema.schema)
@@ -343,7 +327,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
 
     fn commit_strategy(&self) -> CommitStrategy {
         match self.context.as_ref().unwrap().commit_state {
-            CommitState::DeltaLake { .. } | CommitState::Iceberg(_) => CommitStrategy::PerOperator,
+            CommitState::Iceberg(_) => CommitStrategy::PerOperator,
             CommitState::VanillaParquet => CommitStrategy::PerSubtask,
         }
     }
@@ -386,12 +370,8 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
         Ok(())
     }
 
-    /// Get the delta version if using Delta Lake.
     fn delta_version(&self) -> i64 {
-        match &self.context.as_ref().unwrap().commit_state {
-            CommitState::DeltaLake { last_version, .. } => *last_version,
-            _ => -1,
-        }
+        -1
     }
 }
 
@@ -805,22 +785,6 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
 
             // finally, commit them if we're using a table format
             match &mut self.context.as_mut().unwrap().commit_state {
-                CommitState::DeltaLake {
-                    last_version,
-                    table,
-                } => {
-                    if let Some(new_version) = commit_files_to_delta(
-                        &finished_files,
-                        table,
-                        *last_version,
-                    )
-                        .await
-                        .map_err(
-                            |e| connector_err!(External, WithBackoff, source: e, "failed to commit to delta: {e}"),
-                        )? {
-                        *last_version = new_version;
-                    }
-                }
                 CommitState::Iceberg(table) => {
                     table.commit(epoch, &finished_files).await?;
                 }

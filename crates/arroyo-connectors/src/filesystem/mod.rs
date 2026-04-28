@@ -1,5 +1,4 @@
 mod config;
-pub mod delta;
 pub(crate) mod iceberg;
 pub mod sink;
 mod source;
@@ -35,7 +34,6 @@ const ICON: &str = include_str!("./filesystem.svg");
 
 pub enum TableFormat {
     None,
-    Delta,
     Iceberg(Box<sink::iceberg::IcebergTable>),
 }
 
@@ -43,7 +41,6 @@ impl TableFormat {
     pub fn name(&self) -> &'static str {
         match self {
             TableFormat::None => "none",
-            TableFormat::Delta => "delta",
             TableFormat::Iceberg(_) => "iceberg",
         }
     }
@@ -55,7 +52,7 @@ impl TableFormat {
         schema: &Schema,
     ) -> Result<StorageProvider, DataflowError> {
         Ok(match self {
-            TableFormat::None | TableFormat::Delta => {
+            TableFormat::None => {
                 StorageProvider::for_url_with_options(&config.path, config.storage_options.clone())
                     .await
                     .map_err(|e| {
@@ -79,7 +76,7 @@ pub fn make_sink(
     connection_id: Option<String>,
 ) -> Result<ConstructedOperator> {
     let is_local = match table_format {
-        TableFormat::None | TableFormat::Delta => {
+        TableFormat::None => {
             let backend_config = BackendConfig::parse_url(&sink.path, true)?;
             backend_config.is_local()
         }

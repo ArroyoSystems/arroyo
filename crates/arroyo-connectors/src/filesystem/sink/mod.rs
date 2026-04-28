@@ -10,7 +10,6 @@ use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use deltalake::DeltaTable;
 use futures::{Future, stream::FuturesUnordered};
 use futures::{TryStreamExt, stream::StreamExt};
 use object_store::{MultipartId, multipart::PartId, path::Path};
@@ -27,7 +26,6 @@ use tracing::{debug, info, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 pub mod arrow;
-mod delta;
 pub(crate) mod iceberg;
 pub mod json;
 pub mod local;
@@ -44,7 +42,6 @@ use self::{
 
 use self::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::config::NamingConfig;
-use crate::filesystem::sink::delta::load_or_create_table;
 use crate::filesystem::sink::iceberg::IcebergTable;
 use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
 use crate::filesystem::{FilenameStrategy, TableFormat, config};
@@ -89,7 +86,7 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
             format,
             commit_strategy: match &table_format {
                 TableFormat::None => CommitStrategy::PerSubtask,
-                TableFormat::Delta | TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
+                TableFormat::Iceberg(_) => CommitStrategy::PerOperator,
             },
             table_format: Some(table_format),
             partitioner: None,
@@ -423,10 +420,6 @@ struct AsyncMultipartFileSystemWriter<BBW: BatchBufferingWriter> {
 
 #[derive(Debug)]
 pub enum CommitState {
-    DeltaLake {
-        last_version: i64,
-        table: Box<DeltaTable>,
-    },
     Iceberg(Box<IcebergTable>),
     VanillaParquet,
 }
@@ -434,7 +427,6 @@ pub enum CommitState {
 impl CommitState {
     fn name(&self) -> &'static str {
         match self {
-            CommitState::DeltaLake { .. } => "delta",
             CommitState::Iceberg(_) => "iceberg",
             CommitState::VanillaParquet => "none",
         }
@@ -743,12 +735,6 @@ where
     ) -> Result<Self> {
         let mut iceberg_schema = None;
         let commit_state = match table_format {
-            TableFormat::Delta => CommitState::DeltaLake {
-                last_version: -1,
-                table: Box::new(
-                    load_or_create_table(&object_store, &schema.schema_without_timestamp()).await?,
-                ),
-            },
             TableFormat::None => CommitState::VanillaParquet,
             TableFormat::Iceberg(mut table) => {
                 let t = table.load_or_create(task_info, &schema.schema).await?;
@@ -999,16 +985,6 @@ where
         );
 
         match &mut self.commit_state {
-            CommitState::DeltaLake {
-                last_version,
-                table,
-            } => {
-                if let Some(new_version) =
-                    delta::commit_files_to_delta(&finished_files, table, *last_version).await?
-                {
-                    *last_version = new_version;
-                }
-            }
             CommitState::Iceberg(table) => {
                 table.commit(epoch, &finished_files).await?;
             }
@@ -1032,7 +1008,6 @@ where
 
     fn delta_version(&mut self) -> i64 {
         match &self.commit_state {
-            CommitState::DeltaLake { last_version, .. } => *last_version,
             CommitState::VanillaParquet => 0,
             CommitState::Iceberg { .. } => 0,
         }

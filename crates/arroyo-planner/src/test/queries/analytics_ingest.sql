@@ -17,7 +17,7 @@ create table events (
 );
 
 create table account_created_sink with (
-    connector = 'delta',
+    connector = 'filesystem',
     path = 's3://my-s3-bucket/data/account_created',
     format = 'parquet',
     'filename.strategy' = 'uuid',

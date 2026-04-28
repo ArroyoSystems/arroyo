@@ -208,7 +208,7 @@ Important execution behaviors include:
 - NATS
 - RabbitMQ
 - Redis lookups/sinks
-- filesystem, Delta Lake, Iceberg, and single-file outputs
+- filesystem, Iceberg, and single-file outputs
 - SSE, webhook, websocket, polling HTTP
 - preview, stdout, blackhole, impulse, and Nexmark test connectors
 

@@ -241,7 +241,7 @@ impl ConnectorTable {
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
-        if connector_name == "delta" || connector_name == "iceberg" {
+        if connector_name == "iceberg" {
             fields = fields
                 .into_iter()
                 .map(|field_spec| match &field_spec {

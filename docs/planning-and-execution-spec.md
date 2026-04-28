@@ -87,7 +87,7 @@ Connectors provide:
 
 ### Runtime role
 
-Connectors provide actual source/sink behavior for systems such as Kafka, filesystems, Iceberg, Delta Lake, MQTT, NATS, RabbitMQ, Redis, SSE, webhook, websocket, preview, and others.
+Connectors provide actual source/sink behavior for systems such as Kafka, filesystems, Iceberg, MQTT, NATS, RabbitMQ, Redis, SSE, webhook, websocket, preview, and others.
 
 ## UDF subsystem
 
