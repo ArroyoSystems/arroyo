@@ -57,7 +57,7 @@ data:
           {{- with .Values.podAnnotations }}
           {{- toYaml . | nindent 10 }}
           {{- end }}    
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: {{ include "arroyo.image" . | quote }}
         image-pull-policy: "{{ .Values.imagePullPolicy }}"
         {{- with .Values.imagePullSecrets }}
         image-pull-secrets:

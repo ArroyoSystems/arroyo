@@ -1,0 +1,83 @@
+name: Bump Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Select which part of the version to increment
+        required: true
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump-tag-master
+  cancel-in-progress: false
+
+jobs:
+  bump-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch tags
+        run: git fetch --force --tags origin
+
+      - name: Compute next tag
+        id: next-tag
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          latest_tag="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+
+          if [ -z "${latest_tag}" ]; then
+            next_tag="v1.0.0"
+          else
+            version="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "${version}"
+
+            case "${BUMP}" in
+              major)
+                major=$((major + 1))
+                minor=0
+                patch=0
+                ;;
+              minor)
+                minor=$((minor + 1))
+                patch=0
+                ;;
+              patch)
+                patch=$((patch + 1))
+                ;;
+              *)
+                echo "Unsupported bump type: ${BUMP}" >&2
+                exit 1
+                ;;
+            esac
+
+            next_tag="v${major}.${minor}.${patch}"
+          fi
+
+          echo "tag=${next_tag}" >> "${GITHUB_OUTPUT}"
+          echo "Next tag: ${next_tag}"
+
+      - name: Create and push tag
+        env:
+          NEXT_TAG: ${{ steps.next-tag.outputs.tag }}
+        run: |
+          git tag -a "${NEXT_TAG}" -m "Release ${NEXT_TAG}"
+          git push origin "refs/tags/${NEXT_TAG}"

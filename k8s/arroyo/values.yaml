@@ -5,8 +5,12 @@ fullnameOverride: ""
 clusterDomain: cluster.local
 
 image:
-  repository: ghcr.io/arroyosystems/arroyo
-  tag: "tip"
+  registry: ghcr.io
+  # Override the namespace when installing charts published from another fork or organization.
+  namespace: arroyosystems
+  name: arroyo
+  # Defaults to the chart appVersion when left empty so chart releases pull the matching image tag.
+  tag: ""
 imagePullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -131,4 +135,4 @@ volumeMounts: []
 
 existingConfigMap: ""
 
-env: []  
+env: []

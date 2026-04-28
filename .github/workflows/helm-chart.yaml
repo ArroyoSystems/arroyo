@@ -1,0 +1,42 @@
+name: Publish Helm Chart
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Prepare chart repository
+        run: |
+          echo "OCI_REPOSITORY=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts" >> $GITHUB_ENV
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package chart
+        run: |
+          helm dependency update k8s/arroyo
+          mkdir -p /tmp/charts
+          helm package k8s/arroyo --destination /tmp/charts
+
+      - name: Push chart
+        run: |
+          helm push /tmp/charts/arroyo-*.tgz "${OCI_REPOSITORY}"

@@ -10,6 +10,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+*' # Semver matching pattern with optional suffix
 
 permissions:
+  contents: read
   packages: write
 
 concurrency:
@@ -32,10 +33,14 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runs_on }}
     steps:
+      - name: Check out
+        uses: actions/checkout@v4
       - name: Prepare
+        id: prepare
         run: |
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          echo "image_namespace=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -52,7 +57,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/arroyo-single
+          images: ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-single
 
       - name: Build and push single
         id: build-single
@@ -63,18 +68,18 @@ jobs:
           build-args: |
             GIT_SHA=${{ github.sha }}
           push: ${{ github.event_name != 'pull_request' }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/arroyo-builder:buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-from: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
           # note that this is now the same as arroyo
           target: arroyo
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/arroyo-single,push-by-digest=true,name-canonical=true,push=true,store=true
+          outputs: type=image,name=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-single,push-by-digest=true,name-canonical=true,push=true,store=true
 
       # arroyo
       - name: Docker meta
         id: meta-arroyo
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/arroyo
+          images: ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo
 
       - name: Build and push arroyo
         id: build-arroyo
@@ -85,17 +90,17 @@ jobs:
           build-args: |
             GIT_SHA=${{ github.sha }}
           push: ${{ github.event_name != 'pull_request' }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/arroyo-builder:buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-from: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
           target: arroyo
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/arroyo,push-by-digest=true,name-canonical=true,push=true,store=true
+          outputs: type=image,name=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo,push-by-digest=true,name-canonical=true,push=true,store=true
 
       # arroyo-full
       - name: Docker meta
         id: meta-arroyo-full
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/arroyo-full
+          images: ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-full
 
       - name: Build and push arroyo-full
         id: build-arroyo-full
@@ -106,10 +111,10 @@ jobs:
           build-args: |
             GIT_SHA=${{ github.sha }}
           push: ${{ github.event_name != 'pull_request' }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/arroyo-builder:buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-from: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
           target: arroyo-full
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/arroyo-full,push-by-digest=true,name-canonical=true,push=true,store=true
+          outputs: type=image,name=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-full,push-by-digest=true,name-canonical=true,push=true,store=true
 
 
       - name: Export digest
@@ -143,6 +148,10 @@ jobs:
           - arroyo-full
     runs-on: ubuntu-latest
     steps:
+      - name: Prepare
+        id: prepare
+        run: |
+          echo "image_namespace=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
       -
         name: Download digests
         uses: actions/download-artifact@v4
@@ -158,7 +167,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
+          images: ghcr.io/${{ steps.prepare.outputs.image_namespace }}/${{ matrix.image_name }}
           tags: |
             type=schedule
             type=ref,event=branch
@@ -179,14 +188,14 @@ jobs:
         working-directory: /tmp/digests/${{ matrix.image_name }}
         run: |          
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}@sha256:%s ' *)
+            $(printf 'ghcr.io/${{ steps.prepare.outputs.image_namespace }}/${{ matrix.image_name }}@sha256:%s ' *)
       -
         name: Inspect image
         run: |
-          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ghcr.io/${{ steps.prepare.outputs.image_namespace }}/${{ matrix.image_name }}:${{ steps.meta.outputs.version }}
       - name: Push to tip tag.
         working-directory: /tmp/digests/${{ matrix.image_name }}
         if: github.ref == 'refs/heads/master'
         run: |
-          docker buildx imagetools create --tag ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:tip \
-            $(printf 'ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}@sha256:%s ' *)
+          docker buildx imagetools create --tag ghcr.io/${{ steps.prepare.outputs.image_namespace }}/${{ matrix.image_name }}:tip \
+            $(printf 'ghcr.io/${{ steps.prepare.outputs.image_namespace }}/${{ matrix.image_name }}@sha256:%s ' *)

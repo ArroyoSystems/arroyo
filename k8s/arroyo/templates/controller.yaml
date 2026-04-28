@@ -46,7 +46,7 @@ spec:
       {{- end }}
       initContainers:
       - name: migrate-database
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: {{ include "arroyo.image" . | quote }}
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         command: [ "/app/arroyo", "--config-dir", "/config", "migrate", "--wait", "300" ]
         volumeMounts:
@@ -73,7 +73,7 @@ spec:
       - name: arroyo-controller
         securityContext:
         {{- toYaml .Values.securityContext | nindent 12 }}
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: {{ include "arroyo.image" . | quote }}
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         command: ["/app/arroyo", "--config-dir", "/config", "cluster"]
 

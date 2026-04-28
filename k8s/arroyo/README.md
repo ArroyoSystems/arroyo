@@ -40,7 +40,7 @@ docs for more details.)
 Then you can create the cluster with
 
 ```
-$ helm install arroyo arroyo/arroyo -f values.yaml
+$ helm install arroyo oci://ghcr.io/arroyosystems/charts/arroyo -f values.yaml
 ```
 
 Once all of the pods start up (which may take a few minutes if you're deploying Postgres) you should be able to access
@@ -64,7 +64,7 @@ and opening http://localhost:5115.
 The Helm chart provides a number of options, which can be inspected by running
 
 ```
-$ helm show values arroyo/arroyo
+$ helm show values oci://ghcr.io/arroyosystems/charts/arroyo
 ```
 
 The most important options are:
