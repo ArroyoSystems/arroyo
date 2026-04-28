@@ -6,6 +6,9 @@ type: application
 version: 0.16.0-dev
 appVersion: "0.16.0-dev"
 
+annotations:
+  org.opencontainers.image.source: https://github.com/dream-faster/arroyo
+
 keywords:
   - stream-processing
   - data
