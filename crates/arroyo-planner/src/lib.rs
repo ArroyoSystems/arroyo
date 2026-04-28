@@ -139,8 +139,11 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
         registry.register_udaf(p).unwrap();
     }
 
-    // some more UDAFs that are missing from the default list for some reason
-    registry.register_udaf(var_samp_udaf()).unwrap();
+    registry
+        .register_udaf(Arc::new(
+            var_samp_udaf().as_ref().clone().with_aliases(["variance"]),
+        ))
+        .unwrap();
 
     for p in SessionStateDefaults::default_window_functions() {
         registry.register_udwf(p).unwrap();
@@ -512,17 +515,41 @@ impl FunctionRegistry for ArroyoSchemaProvider {
     }
 
     fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> Result<Option<Arc<ScalarUDF>>> {
-        Ok(self.functions.insert(udf.name().to_string(), udf))
+        let replaced = self
+            .functions
+            .insert(udf.name().to_string(), Arc::clone(&udf));
+
+        for alias in udf.aliases() {
+            self.functions.insert(alias.to_string(), Arc::clone(&udf));
+        }
+
+        Ok(replaced)
     }
 
     fn register_udaf(&mut self, udaf: Arc<AggregateUDF>) -> Result<Option<Arc<AggregateUDF>>> {
-        Ok(self
+        let replaced = self
             .aggregate_functions
-            .insert(udaf.name().to_string(), udaf))
+            .insert(udaf.name().to_string(), Arc::clone(&udaf));
+
+        for alias in udaf.aliases() {
+            self.aggregate_functions
+                .insert(alias.to_string(), Arc::clone(&udaf));
+        }
+
+        Ok(replaced)
     }
 
     fn register_udwf(&mut self, udwf: Arc<WindowUDF>) -> Result<Option<Arc<WindowUDF>>> {
-        Ok(self.window_functions.insert(udwf.name().to_string(), udwf))
+        let replaced = self
+            .window_functions
+            .insert(udwf.name().to_string(), Arc::clone(&udwf));
+
+        for alias in udwf.aliases() {
+            self.window_functions
+                .insert(alias.to_string(), Arc::clone(&udwf));
+        }
+
+        Ok(replaced)
     }
 
     fn register_expr_planner(&mut self, expr_planner: Arc<dyn ExprPlanner>) -> Result<()> {
