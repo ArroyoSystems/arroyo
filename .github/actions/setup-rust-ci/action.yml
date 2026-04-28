@@ -38,6 +38,12 @@ runs:
           - recursive: true
             args: [--frozen-lockfile, --strict-peer-dependencies]
 
+    - name: Install runner dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev netcat-openbsd mosquitto
+
     - name: Install OpenAPI Generator
       shell: bash
       run: |
@@ -50,42 +56,40 @@ runs:
         cd webui
         pnpm build
 
+    - name: Install CI tools
+      shell: bash
+      run: |
+        curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+        wget -q https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip -O /tmp/protoc.zip
+        rm -rf /tmp/protoc
+        unzip -q /tmp/protoc.zip bin/protoc -d /tmp/protoc
+        sudo install /tmp/protoc/bin/protoc /usr/local/bin/protoc
+        curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        wget -q https://github.com/rust-db/refinery/releases/download/0.8.7/refinery-0.8.7-x86_64-unknown-linux-musl.tar.gz -O /tmp/refinery.tgz
+        rm -rf /tmp/refinery-unpack
+        mkdir -p /tmp/refinery-unpack
+        tar xzf /tmp/refinery.tgz -C /tmp/refinery-unpack
+        install /tmp/refinery-unpack/refinery-*-musl/refinery /tmp/refinery
+        rm -rf /tmp/kafka_2.13-3.9.2
+        wget --progress=dot --show-progress https://dlcdn.apache.org/kafka/3.9.2/kafka_2.13-3.9.2.tgz -O /tmp/kafka.tgz
+        tar xzf /tmp/kafka.tgz -C /tmp
+
     - name: Setup Postgres
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install postgresql
         sudo systemctl start postgresql
         sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
         sudo -u postgres createdb arroyo
-        pushd /tmp
-          wget https://github.com/rust-db/refinery/releases/download/0.8.7/refinery-0.8.7-x86_64-unknown-linux-musl.tar.gz
-          tar xvfz refinery*.tar.gz
-          mv /tmp/refinery*-musl/refinery /tmp
-        popd
         /tmp/refinery migrate -e DATABASE_URL -p crates/arroyo-api/migrations
 
-    - name: Install dependencies
+    - name: Setup Kafka
       shell: bash
       run: |
-        curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-        sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev netcat
-        wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
-        unzip protoc*.zip
-        sudo mv bin/protoc /usr/local/bin
-        curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-    - name: Install Kafka
-      shell: bash
-      run: |
-        wget --progress=dot --show-progress https://dlcdn.apache.org/kafka/3.9.2/kafka_2.13-3.9.2.tgz
-        tar xvfz kafka*.tgz
         mkdir -p /tmp/kraft-combined-logs
-        kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
-        kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
+        /tmp/kafka_2.13-3.9.2/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c /tmp/kafka_2.13-3.9.2/config/kraft/server.properties
+        /tmp/kafka_2.13-3.9.2/bin/kafka-server-start.sh -daemon /tmp/kafka_2.13-3.9.2/config/kraft/server.properties
 
-    - name: Install mosquitto
+    - name: Setup mosquitto
       shell: bash
       run: |
-        sudo apt-get install -y mosquitto
         sudo service mosquitto start
