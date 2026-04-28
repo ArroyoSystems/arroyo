@@ -15,6 +15,7 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
+      ci: ${{ steps.filter.outputs.ci }}
       webui: ${{ steps.filter.outputs.webui }}
       rust: ${{ steps.filter.outputs.rust }}
     steps:
@@ -23,17 +24,19 @@ jobs:
         id: filter
         with:
           filters: |
+            ci:
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             webui:
               - 'webui/**'
             rust:
               - 'crates/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - '.github/actions/**'
 
   lint-console:
     needs: changes
-    if: needs.changes.outputs.webui == 'true'
+    if: needs.changes.outputs.webui == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -52,7 +55,7 @@ jobs:
 
   rust-components:
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     outputs:
       packages: ${{ steps.packages.outputs.packages }}
@@ -81,14 +84,50 @@ jobs:
               for pkg in data["packages"]
               if pkg["name"] != "integ"
           )
-          print(json.dumps(packages))
+          bundled_packages = [
+              ("fast-foundation", [
+                  "arroyo-metrics",
+                  "arroyo-types",
+                  "arroyo-udf-common",
+                  "arroyo-udf-macros",
+              ]),
+              ("fast-runtime", [
+                  "arroyo-compiler-service",
+                  "arroyo-rpc",
+                  "arroyo-state",
+                  "arroyo-storage",
+                  "arroyo-udf-host",
+              ]),
+          ]
+          grouped = []
+          assigned = set()
+          for name, group_packages in bundled_packages:
+              present = [pkg for pkg in group_packages if pkg in packages]
+              if not present:
+                  continue
+              grouped.append(
+                  {
+                      "name": name,
+                      "package_args": " ".join(f"--package {pkg}" for pkg in present),
+                  }
+              )
+              assigned.update(present)
+          grouped.extend(
+              {
+                  "name": pkg,
+                  "package_args": f"--package {pkg}",
+              }
+              for pkg in packages
+              if pkg not in assigned
+          )
+          print(json.dumps(grouped))
           PY
           )
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
   rust-format:
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -103,7 +142,7 @@ jobs:
 
   build-rust:
     needs: rust-components
-    name: build-rust (${{ matrix.package }})
+    name: build-rust (${{ matrix.package.name }})
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -115,16 +154,14 @@ jobs:
       - uses: ./.github/actions/setup-rust-ci
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
-      - name: Build
-        run: cargo build --all-features --package ${{ matrix.package }}
       - name: Run Clippy
-        run: cargo clippy --all-features --all-targets --package ${{ matrix.package }} -- -D warnings
+        run: cargo clippy --all-features --all-targets ${{ matrix.package.package_args }} -- -D warnings
       - name: Run lib tests
-        run: cargo nextest run --all-features --package ${{ matrix.package }} -E 'kind(lib)' --no-tests=pass
+        run: cargo nextest run --all-features ${{ matrix.package.package_args }} -E 'kind(lib)' --no-tests=pass
 
   integ-postgres:
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -143,7 +180,7 @@ jobs:
 
   integ-sqlite:
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -163,7 +200,7 @@ jobs:
 
   build-console:
     needs: changes
-    if: needs.changes.outputs.webui == 'true'
+    if: needs.changes.outputs.webui == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
