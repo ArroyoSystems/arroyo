@@ -1,6 +1,6 @@
 use super::NatsConfig;
 use super::NatsTable;
-use super::{SinkType, get_nats_client};
+use super::{SinkType, encode_flatbuffers_message, get_nats_client};
 use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -11,13 +11,21 @@ use arroyo_types::*;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
+#[cfg(test)]
+mod test;
+
+pub enum NatsSinkEncoder {
+    Flatbuffers,
+    Serializer(Box<ArrowSerializer>),
+}
+
 pub struct NatsSinkFunc {
     pub sink_type: SinkType,
     pub servers: String,
     pub connection: NatsConfig,
     pub table: NatsTable,
     pub publisher: Option<async_nats::Client>,
-    pub serializer: ArrowSerializer,
+    pub encoder: NatsSinkEncoder,
 }
 
 #[async_trait]
@@ -79,7 +87,18 @@ impl ArrowOperator for NatsSinkFunc {
     ) -> DataflowResult<()> {
         let SinkType::Subject(s) = &self.sink_type;
         let nats_subject = async_nats::Subject::from(s.clone());
-        for msg in self.serializer.serialize(&batch) {
+        let messages = match &mut self.encoder {
+            NatsSinkEncoder::Flatbuffers => match encode_flatbuffers_message(&batch) {
+                Ok(message) => vec![message],
+                Err(e) => {
+                    ctx.report_error(e.to_string(), format!("{e:?}")).await;
+                    panic!("Panicked while processing element: {e}");
+                }
+            },
+            NatsSinkEncoder::Serializer(serializer) => serializer.serialize(&batch).collect(),
+        };
+
+        for msg in messages {
             let publisher = self
                 .publisher
                 .as_mut()

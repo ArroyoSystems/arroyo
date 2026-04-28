@@ -185,6 +185,12 @@ pub struct RawStringFormat {}
 #[serde(rename_all = "snake_case")]
 pub struct RawBytesFormat {}
 
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema, Default,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct FlatbuffersFormat {}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 pub struct ConfluentSchemaRegistryConfig {
     endpoint: String,
@@ -398,6 +404,8 @@ pub enum Format {
     Json(JsonFormat),
     #[schema(title = "Avro")]
     Avro(AvroFormat),
+    #[schema(title = "Flatbuffers")]
+    Flatbuffers(FlatbuffersFormat),
     #[schema(title = "Protobuf")]
     Protobuf(ProtobufFormat),
     #[schema(title = "Parquet")]
@@ -419,6 +427,7 @@ impl Format {
         match self {
             Format::Json(_) => "json",
             Format::Avro(_) => "avro",
+            Format::Flatbuffers(_) => "flatbuffers",
             Format::Protobuf(_) => "protobuf",
             Format::Parquet(_) => "parquet",
             Format::RawString(_) => "raw_string",
@@ -434,6 +443,7 @@ impl Format {
         Ok(Some(match name.as_str() {
             "json" => Format::Json(JsonFormat::from_opts(false, opts)?),
             "debezium_json" => Format::Json(JsonFormat::from_opts(true, opts)?),
+            "flatbuffers" => Format::Flatbuffers(FlatbuffersFormat {}),
             "protobuf" => Format::Protobuf(ProtobufFormat::from_opts(opts)?),
             "avro" => Format::Avro(AvroFormat::from_opts(opts)?),
             "raw_string" => Format::RawString(RawStringFormat {}),
@@ -448,6 +458,7 @@ impl Format {
             Format::Json(JsonFormat { debezium: true, .. }) => true,
             Format::Json(_)
             | Format::Avro(_)
+            | Format::Flatbuffers(_)
             | Format::Parquet(_)
             | Format::RawString(_)
             | Format::Protobuf(_) => false,

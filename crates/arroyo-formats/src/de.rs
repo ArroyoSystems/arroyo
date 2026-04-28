@@ -630,6 +630,11 @@ impl ArrowDeserializer {
             Format::RawBytes(_) => {
                 self.deserialize_raw_bytes(msg);
             }
+            Format::Flatbuffers(_) => {
+                return Err(SourceError::bad_data(
+                    "flatbuffers is handled directly by the NATS connector",
+                ));
+            }
             Format::Json(json) => {
                 let msg = if json.confluent_schema_registry {
                     &msg[5..]

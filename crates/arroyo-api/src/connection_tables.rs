@@ -469,6 +469,7 @@ pub(crate) async fn expand_schema(
             )
             .await
         }
+        Format::Flatbuffers(_) => Ok(schema),
     }
 }
 

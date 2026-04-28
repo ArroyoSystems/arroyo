@@ -4,7 +4,7 @@ use super::NatsConfig;
 use super::NatsState;
 use super::NatsTable;
 use super::ReplayPolicy;
-use super::{SourceType, get_nats_client};
+use super::{SourceType, decode_flatbuffers_message, get_nats_client};
 use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;
@@ -325,12 +325,15 @@ impl NatsSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> DataflowResult<SourceFinishType> {
-        collector.initialize_deserializer(
-            self.format.clone(),
-            self.framing.clone(),
-            self.bad_data.clone(),
-            &[],
-        );
+        let flatbuffers = matches!(&self.format, Format::Flatbuffers(_));
+        if !flatbuffers {
+            collector.initialize_deserializer(
+                self.format.clone(),
+                self.framing.clone(),
+                self.bad_data.clone(),
+                &[],
+            );
+        }
 
         let nats_client = get_nats_client(&self.connection)
             .await
@@ -362,7 +365,15 @@ impl NatsSourceFunc {
                                     let payload = msg.payload.as_ref();
                                     let message_info = msg.info().expect("Couldn't get message information");
                                     let timestamp = message_info.published.into() ;
-                                    collector.deserialize_slice(payload, timestamp, None).await?;
+                                    if flatbuffers {
+                                        for batch in decode_flatbuffers_message(payload)
+                                            .map_err(|e| connector_err!(External, WithBackoff, source: e, "failed to decode NATS flatbuffers payload"))?
+                                        {
+                                            collector.collect(batch).await?;
+                                        }
+                                    } else {
+                                        collector.deserialize_slice(payload, timestamp, None).await?;
+                                    }
 
                                     debug!("---------------------------------------------->");
                                     debug!(
@@ -394,7 +405,9 @@ impl NatsSourceFunc {
                                         message_info.delivered
                                     );
 
-                                    if collector.should_flush() {
+                                    // Flatbuffers payloads are decoded directly into record batches,
+                                    // so there is no row-wise deserializer buffer to flush.
+                                    if !flatbuffers && collector.should_flush() {
                                         collector.flush_buffer().await?;
                                     }
 
@@ -476,8 +489,18 @@ impl NatsSourceFunc {
                                 Some(msg) => {
                                     let payload = msg.payload.as_ref();
                                     let timestamp = SystemTime::now();
-                                    collector.deserialize_slice(payload, timestamp, None).await?;
-                                    if collector.should_flush() {
+                                    if flatbuffers {
+                                        for batch in decode_flatbuffers_message(payload)
+                                            .map_err(|e| connector_err!(External, WithBackoff, source: e, "failed to decode NATS flatbuffers payload"))?
+                                        {
+                                            collector.collect(batch).await?;
+                                        }
+                                    } else {
+                                        collector.deserialize_slice(payload, timestamp, None).await?;
+                                    }
+                                    // Flatbuffers payloads are decoded directly into record batches,
+                                    // so there is no row-wise deserializer buffer to flush.
+                                    if !flatbuffers && collector.should_flush() {
                                         collector.flush_buffer().await?;
                                     }
                                 },

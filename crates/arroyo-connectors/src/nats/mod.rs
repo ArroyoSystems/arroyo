@@ -1,8 +1,10 @@
-use crate::nats::sink::NatsSinkFunc;
+use crate::nats::sink::{NatsSinkEncoder, NatsSinkFunc};
 use crate::nats::source::NatsSourceFunc;
 use anyhow::anyhow;
 use anyhow::bail;
-use arroyo_formats::ser::ArrowSerializer;
+use arrow::array::RecordBatch;
+use arrow::ipc::reader::StreamReader;
+use arrow::ipc::writer::StreamWriter;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::ConnectorOptions;
@@ -11,15 +13,20 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
+use arroyo_rpc::{TIMESTAMP_FIELD, formats::Format};
 use async_nats::ServerAddr;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use std::io::Cursor;
 use std::num::NonZeroU32;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
 pub mod sink;
 pub mod source;
+
+#[cfg(test)]
+mod test;
 
 const CONFIG_SCHEMA: &str = include_str!("./profile.json");
 const TABLE_SCHEMA: &str = include_str!("./table.json");
@@ -335,6 +342,7 @@ impl Connector for NatsConnector {
                 }))
             }
             ConnectorType::Sink { ref sink_type } => {
+                let format = config.format.expect("Format must be set for NATS sink");
                 ConstructedOperator::from_operator(Box::new(NatsSinkFunc {
                     sink_type: sink_type
                         .clone()
@@ -347,13 +355,43 @@ impl Connector for NatsConnector {
                     connection: profile.clone(),
                     table: table.clone(),
                     publisher: None,
-                    serializer: ArrowSerializer::new(
-                        config.format.expect("Format must be set for NATS source"),
-                    ),
+                    encoder: match &format {
+                        Format::Flatbuffers(_) => NatsSinkEncoder::Flatbuffers,
+                        _ => NatsSinkEncoder::Serializer(Box::new(
+                            arroyo_formats::ser::ArrowSerializer::new(format.clone()),
+                        )),
+                    },
                 }))
             }
         })
     }
+}
+
+pub(crate) fn project_nats_batch(batch: &RecordBatch) -> anyhow::Result<RecordBatch> {
+    let projection = batch
+        .schema()
+        .fields()
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.name() != TIMESTAMP_FIELD)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+
+    Ok(batch.project(&projection)?)
+}
+
+pub(crate) fn encode_flatbuffers_message(batch: &RecordBatch) -> anyhow::Result<Vec<u8>> {
+    let projected = project_nats_batch(batch)?;
+    let mut bytes = Cursor::new(Vec::new());
+    let mut writer = StreamWriter::try_new(&mut bytes, &projected.schema())?;
+    writer.write(&projected)?;
+    writer.finish()?;
+    Ok(bytes.into_inner())
+}
+
+pub(crate) fn decode_flatbuffers_message(msg: &[u8]) -> anyhow::Result<Vec<RecordBatch>> {
+    let reader = StreamReader::try_new(Cursor::new(msg), None)?;
+    reader.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::Client> {

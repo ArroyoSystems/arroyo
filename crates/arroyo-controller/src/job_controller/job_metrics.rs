@@ -209,7 +209,7 @@ impl RateMetric {
             // TODO: The unwrap case should never happen because a new RateMetric will be created
             //       for any process restart, but for full generality we'd want to implement counter
             //       reset behavior for it
-            let diff = value.checked_sub(prev_value).unwrap_or_default();
+            let diff = value.saturating_sub(prev_value);
             let r = diff as f64 / delta_t;
             self.values
                 .push(if let Some((_, last_r)) = self.values.last() {

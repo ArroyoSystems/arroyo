@@ -521,6 +521,7 @@ impl KafkaTester {
     }
 
     #[allow(unused)]
+    #[allow(clippy::result_large_err)]
     pub async fn topic_metadata(&self, topic: &str) -> Result<TopicMetadata, Status> {
         let client = self
             .connect(None)
@@ -717,6 +718,9 @@ impl KafkaTester {
             }
             Format::RawBytes(_) => {
                 // all bytes are valid
+            }
+            Format::Flatbuffers(_) => {
+                bail!("Flatbuffers messages are only supported by the NATS connector");
             }
             Format::Protobuf(_) => {
                 let aschema: ArroyoSchema = schema.clone().into();
