@@ -1,12 +1,17 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   lint-console:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out
+      - name: Checkout
         uses: actions/checkout@v3
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -19,109 +24,114 @@ jobs:
         run: |
           cd webui
           pnpm check
-          
-  build-rust:
-    runs-on: ubuntu-22.04
-    env:
-      DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
+
+  rust-components:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.packages.outputs.packages }}
     steps:
-      - name: Check out
+      - name: Checkout
         uses: actions/checkout@v3
-      - uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '11'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          components: clippy, rustfmt
           toolchain: 1.93
-      - uses: actions/cache@v4
+      - name: Determine Rust components
+        id: packages
+        run: |
+          packages=$(python3 <<'PY'
+          import json
+          import subprocess
+
+          data = json.loads(
+              subprocess.check_output(
+                  ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+                  text=True,
+              )
+          )
+          packages = sorted(
+              pkg["name"]
+              for pkg in data["packages"]
+              if pkg["name"] != "integ"
+          )
+          print(json.dumps(packages))
+          PY
+          )
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+  rust-format:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          components: rustfmt
+          toolchain: 1.93
       - name: Check Formatting
         run: cargo fmt -- --check
-      - uses: actions/setup-python@v5
-        name: Setup Python
-        with:
-          python-version: '3.12'            
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.0.6
-          run_install: |
-            - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]        
-      - name: Install OpenAPI Generator
-        run: |
-          pnpm install @openapitools/openapi-generator-cli -g
-          cd crates/arroyo-openapi && openapi-generator-cli version
-      - name: Setup Postgres
-        run: |
-          sudo apt-get update
-          sudo apt-get install postgresql
-          sudo systemctl start postgresql
-          sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
-          sudo -u postgres createdb arroyo
-          pushd /tmp
-            wget https://github.com/rust-db/refinery/releases/download/0.8.7/refinery-0.8.7-x86_64-unknown-linux-musl.tar.gz
-            tar xvfz refinery*.tar.gz
-            mv /tmp/refinery*-musl/refinery /tmp
-          popd
-          /tmp/refinery migrate -e DATABASE_URL -p crates/arroyo-api/migrations
-      - name: Install dependencies
-        run: |
-          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-          sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev netcat
-          wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
-          unzip protoc*.zip
-          sudo mv bin/protoc /usr/local/bin
-          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - name: Install Kafka
-        run: |
-          wget --progress=dot --show-progress  https://dlcdn.apache.org/kafka/3.9.2/kafka_2.13-3.9.2.tgz
-          tar xvfz kafka*.tgz
-          mkdir /tmp/kraft-combined-logs
-          kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
-          kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
-      - name: Install mosquitto
-        run: |
-          sudo apt-get install -y mosquitto
-          sudo service mosquitto start
-      - name: Check Formatting
-        run: cargo fmt -- --check
-      - name: Build console
-        run: |
-          cd webui
-          pnpm build
+
+  build-rust:
+    needs: rust-components
+    name: build-rust (${{ matrix.package }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.rust-components.outputs.packages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-rust-ci
+        env:
+          DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       - name: Build
-        run: cargo build --all-features
+        run: cargo build --all-features --package ${{ matrix.package }}
       - name: Run Clippy
-        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
-      - name: Test
-        run: cargo nextest run -E 'kind(lib)' --all-features
+        run: cargo clippy --all-features --all-targets --package ${{ matrix.package }} -- -D warnings
+      - name: Run lib tests
+        run: cargo nextest run --all-features --package ${{ matrix.package }} -E 'kind(lib)' --no-tests=pass
+
+  integ-postgres:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-rust-ci
+        env:
+          DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
+      - name: Build Arroyo
+        run: cargo build --all-features --package arroyo
       - name: Integ postgres
         run: |
-          mkdir /tmp/arroyo-integ
+          killall arroyo || true
+          mkdir -p /tmp/arroyo-integ
           ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts target/debug/arroyo cluster &
           cargo nextest run --package integ -E 'kind(test)'
+
+  integ-sqlite:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-rust-ci
+        env:
+          DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
+      - name: Build Arroyo
+        run: cargo build --all-features --package arroyo
       - name: Integ sqlite
         run: |
-          killall arroyo
+          killall arroyo || true
+          mkdir -p /tmp/arroyo-integ
           ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts ARROYO__DATABASE__TYPE=sqlite target/debug/arroyo cluster &
           timeout=10; while ! nc -z localhost 5115 && [ $timeout -gt 0 ]; do sleep 1; timeout=$((timeout - 1)); done; [ $timeout -gt 0 ]
           cargo nextest run --package integ -E 'kind(test)'
-          
+
   build-console:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out
+      - name: Checkout
         uses: actions/checkout@v3
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

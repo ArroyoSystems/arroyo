@@ -1,7 +1,6 @@
 name: Semgrep scan
 
 on:
-  pull_request: {}
   workflow_dispatch: {}
   push: 
     branches:

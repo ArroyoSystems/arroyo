@@ -58,7 +58,7 @@ fn get_client() -> Arc<Client> {
     CLIENT
         .get_or_init(|| {
             let client = reqwest::ClientBuilder::new()
-                .timeout(Duration::from_secs(60))
+                .timeout(Duration::from_secs(180))
                 .build()
                 .unwrap();
             Arc::new(Client::new_with_client(
