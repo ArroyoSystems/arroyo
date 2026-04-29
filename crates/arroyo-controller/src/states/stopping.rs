@@ -5,7 +5,7 @@ use arroyo_rpc::grpc::rpc::StopMode;
 use tokio::time::timeout;
 use tracing::{error, info};
 
-use super::{JobContext, State, Stopped, Transition};
+use super::{JobContext, State, Stopped, Transition, refresh_workers_from_scheduler};
 
 const FINISH_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -29,6 +29,20 @@ impl State for Stopping {
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         match (ctx.job_controller.as_mut(), self.stop_mode) {
             (Some(job_controller), StopBehavior::StopJob(stop_mode)) => {
+                refresh_workers_from_scheduler(
+                    &ctx.scheduler,
+                    job_controller,
+                    &ctx.config.id,
+                    ctx.status.run_id,
+                )
+                .await;
+
+                if job_controller.worker_count() == 0 {
+                    // All workers gone; skip gRPC stop, fall through to scheduler termination.
+                    self.stop_mode = StopBehavior::StopWorkers;
+                    return Self::next(self, ctx).await;
+                }
+
                 if let Err(e) = job_controller.stop_job(stop_mode).await {
                     return Err(ctx.retryable(self, "failed while stopping job", e, 10));
                 }

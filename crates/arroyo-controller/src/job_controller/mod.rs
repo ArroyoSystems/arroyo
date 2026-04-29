@@ -1,9 +1,7 @@
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
@@ -65,7 +63,7 @@ impl JobController {
         program: Arc<LogicalProgram>,
         epoch: u32,
         min_epoch: u32,
-        worker_connects: HashMap<WorkerId, WorkerClient>,
+        worker_connects: HashMap<WorkerId, (WorkerClient, String)>,
         commit_state: Option<CommittingState>,
         metrics: JobMetrics,
     ) -> Self {
@@ -86,11 +84,12 @@ impl JobController {
                     ),
                 workers: worker_connects
                     .into_iter()
-                    .map(|(id, connect)| {
+                    .map(|(id, (connect, rpc_address))| {
                         (
                             id,
                             WorkerStatus {
                                 id,
+                                rpc_address,
                                 connect,
                                 last_heartbeat: Instant::now(),
                                 state: WorkerState::Running,
@@ -125,6 +124,14 @@ impl JobController {
 
     pub fn update_config(&mut self, config: JobConfig) {
         self.config = config;
+    }
+
+    pub fn retain_workers_by_address(&mut self, live_addresses: &HashSet<String>) {
+        self.model.retain_workers_by_address(live_addresses);
+    }
+
+    pub fn worker_count(&self) -> usize {
+        self.model.workers.len()
     }
 
     pub async fn handle_message(&mut self, msg: RunningMessage) -> anyhow::Result<()> {
@@ -351,7 +358,7 @@ impl JobController {
 
     pub async fn wait_for_finish(&mut self, rx: &mut Receiver<JobMessage>) -> anyhow::Result<()> {
         loop {
-            if self.model.all_tasks_finished() {
+            if self.model.workers.is_empty() || self.model.all_tasks_finished() {
                 return Ok(());
             }
 

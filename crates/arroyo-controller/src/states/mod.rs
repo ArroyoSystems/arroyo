@@ -38,7 +38,9 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
-use arroyo_rpc::{errors, log_event};
+use std::collections::HashSet;
+
+use arroyo_rpc::{errors, log_event, retry};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use prost::Message;
 
@@ -258,6 +260,7 @@ impl TransitionTo<Scheduling> for Rescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
             ctx.status.run_id += 1;
+            clear_worker_handles(ctx);
         })
     }
 }
@@ -279,7 +282,7 @@ impl TransitionTo<Failed> for Failing {}
 
 fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
-    ctx.job_controller = None;
+    clear_worker_handles(ctx);
 }
 
 impl TransitionTo<Stopped> for Stopping {
@@ -353,6 +356,7 @@ impl TransitionTo<Scheduling> for LeaderRestarting {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
             ctx.status.run_id += 1;
+            clear_worker_handles(ctx);
         })
     }
 }
@@ -370,6 +374,7 @@ impl TransitionTo<Scheduling> for LeaderRescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
             ctx.status.run_id += 1;
+            clear_worker_handles(ctx);
         })
     }
 }
@@ -407,6 +412,7 @@ impl TransitionTo<Scheduling> for Restarting {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
             ctx.status.run_id += 1;
+            clear_worker_handles(ctx);
         })
     }
 }
@@ -889,6 +895,49 @@ pub(crate) async fn state_backoff(retries_attempted: usize) {
 
     debug!("waiting {}ms to retry", backoff.as_millis());
     tokio::time::sleep(backoff).await;
+}
+
+fn clear_worker_handles(ctx: &mut JobContext) {
+    ctx.job_controller = None;
+    ctx.leader_manager = None;
+}
+
+/// Filters the in-memory worker map against addresses the scheduler considers
+/// current. Entries whose address is no longer live are removed so that
+/// subsequent gRPC fanouts skip stale targets.
+pub(crate) async fn refresh_workers_from_scheduler(
+    scheduler: &Arc<dyn Scheduler>,
+    job_controller: &mut JobController,
+    job_id: &str,
+    run_id: u64,
+) {
+    let result = retry!(
+        scheduler
+            .worker_addresses_for_job(job_id, Some(run_id))
+            .await,
+        1,
+        Duration::from_millis(200),
+        Duration::from_secs(2),
+        |e| warn!(job_id, error = ?e, "failed to query scheduler for worker addresses, retrying")
+    );
+
+    match result {
+        Ok(Some(addrs)) => {
+            let live: HashSet<String> = addrs.into_iter().map(|a| a.rpc_address).collect();
+            let before = job_controller.worker_count();
+            job_controller.retain_workers_by_address(&live);
+            let removed = before - job_controller.worker_count();
+            if removed > 0 {
+                info!(job_id, removed, "removed stale workers from cleanup set");
+            }
+        }
+        Ok(None) => {
+            // Scheduler does not track addresses; proceed with existing map.
+        }
+        Err(e) => {
+            warn!(job_id, error = ?e, "scheduler address query failed, proceeding with existing worker set");
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

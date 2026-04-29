@@ -82,18 +82,19 @@ impl WorkerJobController {
         }
 
         let futures = workers.into_iter().map(|(id, addr)| async move {
-            let connect = connect_to_worker(id, addr).await?;
-            anyhow::Ok((id, connect))
+            let connect = connect_to_worker(id, addr.clone()).await?;
+            anyhow::Ok((id, connect, addr))
         });
 
         let mut workers = HashMap::new();
 
-        for (id, connect) in try_join_all(futures).await? {
+        for (id, connect, rpc_address) in try_join_all(futures).await? {
             worker_connects.insert(id, connect.clone());
             workers.insert(
                 id,
                 WorkerStatus {
                     id,
+                    rpc_address,
                     connect,
                     last_heartbeat: Instant::now(),
                     state: WorkerState::Running,

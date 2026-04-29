@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use super::{
-    JobContext, State, StateError, Transition, compiling::Compiling, fatal, state_backoff,
+    JobContext, State, StateError, Transition, clear_worker_handles, compiling::Compiling, fatal,
+    refresh_workers_from_scheduler, state_backoff,
 };
 use crate::JobMessage;
 use crate::job_controller::JobController;
 use crate::job_controller::leader_manager::LeaderManager;
+use crate::schedulers::Scheduler;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc::{JobState, JobStopMode, StopMode};
@@ -23,16 +27,22 @@ pub struct Recovering {
 impl Recovering {
     // tries, with increasing levels of force, to tear down the existing cluster
     pub async fn cleanup_job_controller(
+        scheduler: &Arc<dyn Scheduler>,
         job_controller: &mut JobController,
         job_id: &str,
+        run_id: u64,
         rx: &mut Receiver<JobMessage>,
     ) {
-        // first try to stop it gracefully
         if job_controller.finished() {
             return;
         }
 
-        // stop the job
+        refresh_workers_from_scheduler(scheduler, job_controller, job_id, run_id).await;
+
+        if job_controller.worker_count() == 0 {
+            return;
+        }
+
         info!(message = "stopping job", job_id);
         let start = Instant::now();
         match job_controller.stop_job(StopMode::Immediate).await {
@@ -149,11 +159,21 @@ impl Recovering {
     pub async fn cleanup<'a>(ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
         // attempt to shutdown the job cleanly
         match (ctx.job_controller.as_mut(), ctx.leader_manager.as_mut()) {
-            (Some(jc), None) => Self::cleanup_job_controller(jc, &ctx.config.id, ctx.rx).await,
+            (Some(jc), None) => {
+                Self::cleanup_job_controller(
+                    &ctx.scheduler,
+                    jc,
+                    &ctx.config.id,
+                    ctx.status.run_id,
+                    ctx.rx,
+                )
+                .await
+            }
             (None, Some(lm)) => Self::cleanup_leader(lm, &ctx.config.id).await,
             (Some(_), Some(_)) => unreachable!("both job controller and leader manager are set!"),
             (None, None) => {
-                // somehow we got here before scheduling set the job controller / leader manager
+                // No active handles; workers were already torn down or never started.
+                info!(job_id = *ctx.config.id, "no active handles during cleanup");
             }
         };
 
@@ -165,6 +185,8 @@ impl Recovering {
             Duration::from_secs(10),
             |e| warn!(job_id = *ctx.config.id, error =? e, "failed to tear down cluster")
         )?;
+
+        clear_worker_handles(ctx);
 
         Ok(())
     }

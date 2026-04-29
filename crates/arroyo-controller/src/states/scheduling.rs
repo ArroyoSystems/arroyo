@@ -269,6 +269,9 @@ impl State for Scheduling {
             )
         }
 
+        // Ensure no stale handles survive into a new scheduling cycle.
+        super::clear_worker_handles(ctx);
+
         ctx.program
             .update_parallelism(&ctx.config.parallelism_overrides);
 
@@ -739,6 +742,24 @@ impl State for Scheduling {
         ctx.status.tasks = Some(ctx.program.task_count() as i32);
 
         let needs_commit = committing_state.is_some();
+
+        let worker_connects: HashMap<WorkerId, (WorkerClient, String)> = worker_connects
+            .into_iter()
+            .filter_map(|(id, client)| {
+                let addr = match workers.remove(&id) {
+                    Some(w) => w.rpc_address,
+                    None => {
+                        warn!(
+                            job_id = *ctx.config.id,
+                            worker_id = id.0,
+                            "worker channel has no matching registration, skipping"
+                        );
+                        return None;
+                    }
+                };
+                Some((id, (client, addr)))
+            })
+            .collect();
 
         let program = Arc::new(ctx.program.clone());
         let metrics = JobMetrics::new(program.clone());
