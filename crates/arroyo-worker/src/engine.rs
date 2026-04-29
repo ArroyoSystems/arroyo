@@ -27,7 +27,9 @@ use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_rpc::grpc::{api, rpc::TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp, MetadataOrManifest};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{JobId, MachineId, PipelineId, TaskInfo, WorkerId, range_for_server};
+use arroyo_types::{
+    CheckpointFilePathLayout, JobId, MachineId, PipelineId, TaskInfo, WorkerId, range_for_server,
+};
 use arroyo_udf_host::LocalUdf;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -197,6 +199,7 @@ impl Program {
             registry,
             restore_epoch,
             None,
+            CheckpointFilePathLayout::Legacy,
             control_tx,
         )
         .await
@@ -210,6 +213,7 @@ impl Program {
         registry: Registry,
         restore_epoch: Option<u64>,
         checkpoint_manifest_ref: Option<CheckpointManifest>,
+        file_path_layout: CheckpointFilePathLayout,
         control_tx: Sender<ControlResp>,
     ) -> Result<Program, StateError> {
         let mut physical = DiGraph::new();
@@ -279,6 +283,7 @@ impl Program {
                         in_schemas.clone(),
                         out_schema.clone(),
                         checkpoint_metadata.as_ref(),
+                        file_path_layout.clone(),
                         control_tx.clone(),
                         registry.clone(),
                     )
@@ -801,6 +806,7 @@ pub async fn construct_node(
     in_schemas: Vec<Arc<ArroyoSchema>>,
     out_schema: Option<Arc<ArroyoSchema>>,
     restore_from: Option<&MetadataOrManifest>,
+    file_path_layout: CheckpointFilePathLayout,
     control_tx: Sender<ControlResp>,
     registry: Arc<Registry>,
 ) -> OperatorNode {
@@ -820,6 +826,7 @@ pub async fn construct_node(
             task_index: subtask_idx,
             parallelism,
             key_range: range_for_server(subtask_idx as usize, parallelism as usize),
+            checkpoint_file_path_layout: file_path_layout.clone(),
         });
 
         OperatorNode::Source(SourceNode {
@@ -855,6 +862,7 @@ pub async fn construct_node(
                     task_index: subtask_idx,
                     parallelism,
                     key_range: range_for_server(subtask_idx as usize, parallelism as usize),
+                    checkpoint_file_path_layout: file_path_layout.clone(),
                 }),
                 restore_from,
                 control_tx.clone(),

@@ -5,7 +5,7 @@ use arroyo_rpc::grpc::rpc::{
     TableSubtaskCheckpointMetadata,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{Data, TaskInfo};
+use arroyo_types::{CheckpointFilePathLayout, Data, TaskInfo};
 use parquet::format::KeyValue;
 use prost::Message;
 use std::any::Any;
@@ -57,6 +57,25 @@ impl From<Option<&Vec<KeyValue>>> for CheckpointParquetMetadata {
 }
 
 pub(crate) fn table_checkpoint_path(
+    task_info: &TaskInfo,
+    operator_id: &str,
+    table: &str,
+    subtask_index: usize,
+    epoch: u32,
+    compacted: bool,
+) -> String {
+    task_info.checkpoint_file_path_layout.table_checkpoint_path(
+        &task_info.job_id,
+        operator_id,
+        table,
+        subtask_index,
+        epoch,
+        compacted,
+    )
+}
+
+pub(crate) fn table_checkpoint_path_with_layout(
+    layout: &CheckpointFilePathLayout,
     job_id: &str,
     operator_id: &str,
     table: &str,
@@ -64,21 +83,7 @@ pub(crate) fn table_checkpoint_path(
     epoch: u32,
     compacted: bool,
 ) -> String {
-    format!(
-        "{}/table-{}-{:0>3}{}",
-        operator_path(job_id, epoch, operator_id),
-        table,
-        subtask_index,
-        if compacted { "-compacted" } else { "" }
-    )
-}
-
-fn operator_path(job_id: &str, epoch: u32, operator: &str) -> String {
-    format!("{}/operator-{}", base_path(job_id, epoch), operator)
-}
-
-fn base_path(job_id: &str, epoch: u32) -> String {
-    format!("{job_id}/checkpoints/checkpoint-{epoch:0>7}")
+    layout.table_checkpoint_path(job_id, operator_id, table, subtask_index, epoch, compacted)
 }
 
 pub struct DataTuple<K, V> {
@@ -187,6 +192,7 @@ pub struct CompactionConfig {
     pub storage_provider: StorageProviderRef,
     pub compact_generations: HashSet<u64>,
     pub min_compaction_epochs: usize,
+    pub file_path_layout: CheckpointFilePathLayout,
 }
 
 pub trait ErasedTable: Send + Sync + 'static {

@@ -20,8 +20,8 @@ use arroyo_rpc::grpc::rpc::{
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
-    CheckpointBarrier, GENERATION_ENV, JOB_ID_ENV, JobId, MachineId, PIPELINE_ID_ENV, PipelineId,
-    WorkerId, from_micros, from_millis, to_micros,
+    CheckpointBarrier, CheckpointFilePathLayout, GENERATION_ENV, JOB_ID_ENV, JobId, MachineId,
+    PIPELINE_ID_ENV, PipelineId, WorkerId, from_micros, from_millis, to_micros,
 };
 use rand::random;
 
@@ -364,6 +364,15 @@ impl WorkerState {
                 None
             };
 
+            let file_path_layout = if req.wait_for_leader || req.is_leader {
+                CheckpointFilePathLayout::Protocol {
+                    pipeline_id: self.worker_context.pipeline_id.clone(),
+                    generation: self.worker_context.generation,
+                }
+            } else {
+                CheckpointFilePathLayout::Legacy
+            };
+
             let program = Program::from_logical(
                 &self.worker_context.job_id,
                 &logical.graph,
@@ -371,6 +380,7 @@ impl WorkerState {
                 registry,
                 req.restore_epoch,
                 checkpoint_manifest,
+                file_path_layout,
                 control_tx.clone(),
             )
             .await?;

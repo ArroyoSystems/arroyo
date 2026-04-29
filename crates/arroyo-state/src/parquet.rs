@@ -6,6 +6,7 @@ use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
 };
+use arroyo_types::CheckpointFilePathLayout;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 
@@ -175,6 +176,7 @@ impl ParquetBackend {
             compact_generations: vec![0].into_iter().collect(),
             min_compaction_epochs: min_files_to_compact,
             storage_provider: Arc::clone(storage_provider),
+            file_path_layout: CheckpointFilePathLayout::Legacy,
         };
         let operator_metadata = operator_checkpoint_metadata.operator_metadata.unwrap();
 

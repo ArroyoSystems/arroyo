@@ -437,13 +437,14 @@ impl WorkerJobController {
             }
         }
 
-        if !self.stopping
-            && let Some(new_epoch) = self.model.cleanup_needed()
-            && self.cleanup_task.is_none()
-            && self.model.checkpoint_state.is_none()
-        {
-            self.cleanup_task = Some(self.start_cleanup(new_epoch));
-        }
+        // TODO: cleaning
+        // if !self.stopping
+        //     && let Some(new_epoch) = self.model.cleanup_needed()
+        //     && self.cleanup_task.is_none()
+        //     && self.model.checkpoint_state.is_none()
+        // {
+        //     self.cleanup_task = Some(self.start_cleanup(new_epoch));
+        // }
 
         if self.stopping && !self.final_checkpoint_started && self.model.checkpoint_state.is_none()
         {

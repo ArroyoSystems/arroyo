@@ -339,6 +339,52 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     fn schema(&self) -> SchemaRef;
 }
 
+#[derive(Eq, PartialEq, Hash, Debug, Clone, Default)]
+pub enum CheckpointFilePathLayout {
+    #[default]
+    Legacy,
+    Protocol {
+        pipeline_id: PipelineId,
+        generation: u64,
+    },
+}
+
+impl CheckpointFilePathLayout {
+    pub fn base_path(&self, job_id: &str, epoch: u32) -> String {
+        match self {
+            Self::Legacy => format!("{job_id}/checkpoints/checkpoint-{epoch:0>7}"),
+            Self::Protocol {
+                pipeline_id,
+                generation,
+            } => format!(
+                "{pipeline_id}/{job_id}/generations/{generation}/checkpoints/checkpoint-{epoch:0>7}"
+            ),
+        }
+    }
+
+    pub fn operator_path(&self, job_id: &str, epoch: u32, operator: &str) -> String {
+        format!("{}/operator-{}", self.base_path(job_id, epoch), operator)
+    }
+
+    pub fn table_checkpoint_path(
+        &self,
+        job_id: &str,
+        operator_id: &str,
+        table: &str,
+        subtask_index: usize,
+        epoch: u32,
+        compacted: bool,
+    ) -> String {
+        format!(
+            "{}/table-{}-{:0>3}{}",
+            self.operator_path(job_id, epoch, operator_id),
+            table,
+            subtask_index,
+            if compacted { "-compacted" } else { "" }
+        )
+    }
+}
+
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct TaskInfo {
     pub job_id: String,
@@ -348,6 +394,7 @@ pub struct TaskInfo {
     pub task_index: u32,
     pub parallelism: u32,
     pub key_range: RangeInclusive<u64>,
+    pub checkpoint_file_path_layout: CheckpointFilePathLayout,
 }
 
 impl Display for TaskInfo {
@@ -398,6 +445,7 @@ impl TaskInfo {
             task_index: 0,
             parallelism: 1,
             key_range: 0..=u64::MAX,
+            checkpoint_file_path_layout: CheckpointFilePathLayout::Legacy,
         }
     }
 }
@@ -411,6 +459,7 @@ pub fn get_test_task_info() -> TaskInfo {
         task_index: 0,
         parallelism: 1,
         key_range: 0..=u64::MAX,
+        checkpoint_file_path_layout: CheckpointFilePathLayout::Legacy,
     }
 }
 
