@@ -91,7 +91,6 @@ impl ProtocolPaths {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
     use super::*;
     use crate::resolve::{
         EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure,
@@ -100,7 +99,8 @@ mod tests {
     use crate::state::{CheckpointState, derive_checkpoint_state};
     use crate::store::tests::MemoryProtocolStore;
     use crate::store::{
-        CreateResult, StoreError, create_json_if_not_exist, put_json, put_protobuf, read_json, read_protobuf,
+        CreateResult, StoreError, create_json_if_not_exist, put_json, put_protobuf, read_json,
+        read_protobuf,
     };
     use crate::types::{
         CommittedMarker, CurrentGeneration, EpochRecord, GenerationManifest, ProtocolError,
@@ -113,7 +113,8 @@ mod tests {
         resolve_generation_manifest,
     };
     use arroyo_rpc::grpc::rpc::CheckpointManifest;
-    use arroyo_types::{from_micros, JobId, PipelineId};
+    use arroyo_types::{JobId, PipelineId, from_micros};
+    use std::time::SystemTime;
 
     fn checkpoint_ref(path: &str) -> CheckpointRef {
         CheckpointRef::new(path).unwrap()
@@ -206,8 +207,7 @@ mod tests {
             PipelineId::new("P"),
             JobId::new("J"),
             generation,
-            paths.generation_manifest(generation),
-            0,
+            from_micros(0),
         );
 
         put_json(store, &paths.current_generation(), &current_generation)
@@ -245,8 +245,9 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(1),
-                updated_at_micros: 123,
+                updated_at: from_micros(123),
             },
+            false,
         )
         .await
         .unwrap();
@@ -299,8 +300,9 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(2),
-                updated_at_micros: 456,
+                updated_at: from_micros(456),
             },
+            false,
         )
         .await
         .unwrap();
@@ -355,8 +357,9 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(2),
-                updated_at_micros: 456,
+                updated_at: from_micros(456),
             },
+            false,
         )
         .await
         .unwrap();
@@ -399,8 +402,9 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(3),
-                updated_at_micros: 789,
+                updated_at: from_micros(789),
             },
+            false,
         )
         .await
         .unwrap();
@@ -445,8 +449,9 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(2),
-                updated_at_micros: 456,
+                updated_at: from_micros(456),
             },
+            false,
         )
         .await
         .unwrap();
@@ -503,8 +508,9 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(3),
-                updated_at_micros: 456,
+                updated_at: from_micros(456),
             },
+            false,
         )
         .await
         .unwrap();
@@ -570,8 +576,9 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(3),
-                updated_at_micros: 456,
+                updated_at: from_micros(456),
             },
+            false,
         )
         .await
         .unwrap();
@@ -605,13 +612,19 @@ mod tests {
                 pipeline_id: PipelineId::new("P"),
                 job_id: JobId::new("J"),
                 generation: Generation(2),
-                updated_at_micros: 456,
+                updated_at: from_micros(456),
             },
+            false,
         )
         .await
         .unwrap();
 
-        assert_eq!(initialization, GenerationInitialization::StaleGeneration);
+        assert_eq!(
+            initialization,
+            GenerationInitialization::StaleGeneration {
+                current_generation: Generation(3)
+            }
+        );
         assert!(
             read_json::<_, GenerationManifest>(&store, &paths.generation_manifest(Generation(2)))
                 .await
@@ -848,7 +861,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(outcome, EpochClaimOutcome::Owned);
+        assert!(matches!(outcome, EpochClaimOutcome::Owned { .. }));
 
         let record: EpochRecord = read_json(&store, &epoch_record_path)
             .await
@@ -877,7 +890,7 @@ mod tests {
         claim_epoch_record(&store, request.clone()).await.unwrap();
         let outcome = claim_epoch_record(&store, request).await.unwrap();
 
-        assert_eq!(outcome, EpochClaimOutcome::Owned);
+        assert!(matches!(outcome, EpochClaimOutcome::Owned { .. }));
     }
 
     #[tokio::test]
@@ -978,7 +991,10 @@ mod tests {
         let checkpoint = checkpoint(1, None, true);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
 
-        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+        let authorization =
+            prepare_commit(&store, &checkpoint_ref, checkpoint.clone(), None, false)
+                .await
+                .unwrap();
 
         assert_eq!(
             authorization,
@@ -1004,7 +1020,9 @@ mod tests {
         .await
         .unwrap();
 
-        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+        let authorization = prepare_commit(&store, &checkpoint_ref, checkpoint, None, false)
+            .await
+            .unwrap();
 
         assert_eq!(
             authorization,
@@ -1022,7 +1040,9 @@ mod tests {
             .await
             .unwrap();
 
-        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+        let authorization = prepare_commit(&store, &checkpoint_ref, checkpoint, None, false)
+            .await
+            .unwrap();
 
         assert_eq!(
             authorization,
@@ -1046,7 +1066,9 @@ mod tests {
         .await
         .unwrap();
 
-        let authorization = prepare_commit(&store, &loser_ref).await.unwrap();
+        let authorization = prepare_commit(&store, &loser_ref, checkpoint, None, false)
+            .await
+            .unwrap();
 
         assert_eq!(
             authorization,
@@ -1064,7 +1086,9 @@ mod tests {
         let checkpoint = checkpoint(1, None, false);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
 
-        let authorization = prepare_commit(&store, &checkpoint_ref).await.unwrap();
+        let authorization = prepare_commit(&store, &checkpoint_ref, checkpoint, None, false)
+            .await
+            .unwrap();
 
         assert_eq!(
             authorization,
@@ -1080,7 +1104,7 @@ mod tests {
         let checkpoint = checkpoint(1, None, true);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
 
-        let completion = complete_commit(&store, &checkpoint_ref, Generation(2))
+        let completion = complete_commit(&store, &checkpoint_ref, Generation(2), None, false)
             .await
             .unwrap();
 
@@ -1107,10 +1131,10 @@ mod tests {
         let checkpoint = checkpoint(1, None, true);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
 
-        complete_commit(&store, &checkpoint_ref, Generation(2))
+        complete_commit(&store, &checkpoint_ref, Generation(2), None, false)
             .await
             .unwrap();
-        let completion = complete_commit(&store, &checkpoint_ref, Generation(3))
+        let completion = complete_commit(&store, &checkpoint_ref, Generation(3), None, false)
             .await
             .unwrap();
 
@@ -1130,7 +1154,7 @@ mod tests {
             .await
             .unwrap();
 
-        let completion = complete_commit(&store, &checkpoint_ref, Generation(2))
+        let completion = complete_commit(&store, &checkpoint_ref, Generation(2), None, false)
             .await
             .unwrap();
 
@@ -1399,9 +1423,20 @@ mod tests {
         .await
         .unwrap();
 
+        let expected_record = EpochRecord::for_checkpoint(
+            PipelineId::new("P"),
+            Generation(1),
+            checkpoint_ref.clone(),
+            &checkpoint,
+            from_micros(42),
+        )
+        .unwrap();
         assert_eq!(
             publication,
-            CheckpointPublication::CommitRequired { checkpoint_ref }
+            CheckpointPublication::CommitRequired {
+                checkpoint_ref,
+                epoch_record: expected_record,
+            }
         );
     }
 

@@ -30,7 +30,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::mem;
 use std::net::SocketAddr;
-use std::os::unix::process::parent_id;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::net::TcpListener;
@@ -58,13 +57,12 @@ use arroyo_rpc::{
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 use arroyo_state::get_storage_provider;
+use arroyo_state_protocol::store::read_protobuf;
+use arroyo_state_protocol::types::CheckpointRef;
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 use uuid::Uuid;
-use arroyo_state_protocol::ProtocolPaths;
-use arroyo_state_protocol::store::read_protobuf;
-use arroyo_state_protocol::types::CheckpointRef;
 
 pub mod arrow;
 
@@ -242,12 +240,13 @@ impl WorkerState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn initialize_job_controller(
         &self,
         program: Arc<LogicalProgram>,
         tasks: &[TaskAssignment],
-        epoch: u32,
-        min_epoch: u32,
+        epoch: u64,
+        min_epoch: u64,
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
         parent_ref: Option<CheckpointRef>,
@@ -321,6 +320,11 @@ impl WorkerState {
 
         let (control_tx, control_rx) = channel(128);
 
+        let parent_ref = req
+            .checkpoint_manifest_ref
+            .map(CheckpointRef::new)
+            .transpose()?;
+
         if req.is_leader {
             // TODO: the leader needs to load checkpoint metadata and figure out epochs/min epochs
             //  itself from object storage
@@ -331,7 +335,7 @@ impl WorkerState {
                 req.min_epoch,
                 &shutdown_guard,
                 Duration::from_micros(req.checkpoint_interval_micros),
-                req.checkpoint_manifest_ref.map(CheckpointRef),
+                parent_ref.clone(),
             )
             .await?;
         }
@@ -344,12 +348,18 @@ impl WorkerState {
                     .take()
                     .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
             };
-            
-            let checkpoint_manifest = if let Some(parent_ref) = req.checkpoint_manifest_ref {
-                let parent_ref = CheckpointRef(parent_ref);
-                Some(read_protobuf::<_, CheckpointManifest>(
-                    get_storage_provider().await?.as_ref(), &parent_ref).await?
-                    .ok_or_else(|| anyhow!("could not find restoration checkpoint {:?}", parent_ref))?)
+
+            let checkpoint_manifest = if let Some(parent_ref) = parent_ref {
+                Some(
+                    read_protobuf::<_, CheckpointManifest>(
+                        get_storage_provider().await?.as_ref(),
+                        &parent_ref,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow!("could not find restoration checkpoint {:?}", parent_ref)
+                    })?,
+                )
             } else {
                 None
             };

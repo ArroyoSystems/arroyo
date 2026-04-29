@@ -10,7 +10,9 @@ use arroyo_rpc::errors::{DataflowError, DataflowResult};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, MetadataField, get_hasher, MetadataOrManifest};
+use arroyo_rpc::{
+    CompactionResult, ControlMessage, ControlResp, MetadataField, MetadataOrManifest, get_hasher,
+};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, Watermark,

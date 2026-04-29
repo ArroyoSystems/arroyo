@@ -21,6 +21,7 @@ use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
+use arroyo_state_protocol::ProtocolPaths;
 use arroyo_worker::job_controller::committing_state::CommittingState;
 use arroyo_worker::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
@@ -79,6 +80,7 @@ impl JobController {
             checkpoint_store,
             metrics,
             model: RunningJobModel {
+                protocol_paths: ProtocolPaths::new(pipeline_id.clone(), JobId(config.id.clone())),
                 pipeline_id,
                 job_id: JobId(config.id.clone()),
                 generation,
@@ -123,10 +125,12 @@ impl JobController {
                 operator_parallelism: program.tasks_per_node(),
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
+                checkpoint_parent_ref: None,
                 program,
                 checkpoint_spans: vec![],
                 worker_leader_mode: false,
                 finished_operators: vec![],
+                generation_manifest: None,
             },
             config,
             cleanup_task: None,

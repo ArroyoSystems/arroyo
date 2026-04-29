@@ -239,7 +239,7 @@ async fn load_operator_metadata(
 ) -> Result<OperatorCheckpointMetadata, anyhow::Error> {
     match m {
         MetadataOrManifest::Metadata(m) => {
-            StateBackend::load_operator_metadata(&m.job_id, &operator_id, m.epoch)
+            StateBackend::load_operator_metadata(&m.job_id, operator_id, m.epoch)
                 .await?
                 .ok_or_else(|| anyhow!("missing metadata field in checkpoint; invalid protobuf"))
         }

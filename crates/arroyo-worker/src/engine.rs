@@ -170,7 +170,7 @@ impl Program {
         job_id: String,
         logical: &DiGraph<LogicalNode, LogicalEdge>,
         udfs: &[LocalUdf],
-        restore_epoch: Option<u32>,
+        restore_epoch: Option<u64>,
         control_tx: Sender<ControlResp>,
     ) -> Self {
         let assignments = logical
@@ -208,7 +208,7 @@ impl Program {
         logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
         registry: Registry,
-        restore_epoch: Option<u32>,
+        restore_epoch: Option<u64>,
         checkpoint_manifest_ref: Option<CheckpointManifest>,
         control_tx: Sender<ControlResp>,
     ) -> Result<Program, StateError> {
@@ -219,7 +219,7 @@ impl Program {
         } else if let Some(epoch) = restore_epoch {
             info!("Restoring checkpoint {} for job {}", epoch, job_id);
             Some(MetadataOrManifest::Metadata(
-                StateBackend::load_checkpoint_metadata(job_id, epoch).await?,
+                StateBackend::load_checkpoint_metadata(job_id, epoch as u32).await?,
             ))
         } else {
             None

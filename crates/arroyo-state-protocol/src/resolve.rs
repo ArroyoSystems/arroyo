@@ -39,7 +39,7 @@ pub enum ResolveFailure {
 /// Result of interpreting an epoch-record conditional-create outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EpochClaimOutcome {
-    Owned { record: EpochRecord, },
+    Owned { record: EpochRecord },
     Orphaned { canonical_ref: CheckpointRef },
 }
 

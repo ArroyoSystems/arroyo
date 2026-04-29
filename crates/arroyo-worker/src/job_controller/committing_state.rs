@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use crate::job_controller::checkpoint_state::CommitData;
 use arroyo_rpc::grpc::rpc::{OperatorCommitData, TableCommitData};
 use arroyo_state_protocol::types::{CheckpointRef, EpochRecord};
-use crate::job_controller::checkpoint_state::CommitData;
+use std::collections::{HashMap, HashSet};
 
 pub enum CheckpointIdOrRef {
     // used by database-backed mode, checkpoint metadata v0
@@ -31,26 +31,22 @@ impl CommittingState {
 
     pub fn checkpoint_id(&self) -> &str {
         match &self.checkpoint_id {
-            CheckpointIdOrRef::CheckpointId(id) => {
-                id.as_str()
-            }
+            CheckpointIdOrRef::CheckpointId(id) => id.as_str(),
             CheckpointIdOrRef::CheckpointRef(_, _) => {
                 panic!("asked for checkpoint id in leader mode, which is not allowed");
             }
         }
     }
-    
+
     pub fn checkpoint_ref(&self) -> (&CheckpointRef, &EpochRecord) {
         match &self.checkpoint_id {
             CheckpointIdOrRef::CheckpointId(_) => {
                 panic!("asked for checkpoint ref in controller mode, which is not allowed");
             }
-            CheckpointIdOrRef::CheckpointRef(a, b) => {
-                (a, b)
-            }
+            CheckpointIdOrRef::CheckpointRef(a, b) => (a, b),
         }
     }
-    
+
     pub fn subtask_committed(&mut self, operator_id: String, subtask_index: u32) {
         self.subtasks_to_commit
             .remove(&(operator_id, subtask_index));

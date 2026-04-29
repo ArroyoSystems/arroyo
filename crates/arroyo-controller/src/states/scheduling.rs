@@ -1,44 +1,45 @@
 use arroyo_rpc::grpc::rpc::{
-    worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment,
+    CheckpointManifest, StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
 };
 use arroyo_types::{JobId, MachineId, WorkerId};
+use std::time::SystemTime;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
-use std::time::SystemTime;
 use tokio::{select, sync::Mutex, task::JoinHandle};
-use tonic::{transport::Channel, Request};
+use tonic::{Request, transport::Channel};
 use tracing::{debug, error, info, warn};
 
-use super::{leader_running::LeaderRunning, running::Running, JobContext, State, Transition};
+use super::{JobContext, State, Transition, leader_running::LeaderRunning, running::Running};
 use crate::job_controller::checkpoint_store::DbCheckpointMetadataStore;
 use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::leader_manager::LeaderManager;
-use crate::{schedulers::SchedulerError, JobMessage};
+use crate::{JobMessage, schedulers::SchedulerError};
 use crate::{
     job_controller::JobController, queries::controller_queries, states::stop_if_desired_non_running,
 };
 use crate::{
     schedulers::StartPipelineReq,
-    states::{fatal, StateError},
+    states::{StateError, fatal},
 };
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::config::{config, JobControllerMode};
+use arroyo_rpc::config::{JobControllerMode, config};
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc_channel_builder;
 use arroyo_rpc::worker_types::RunningMessage;
 use arroyo_state::{
-    get_storage_provider, tables::{global_keyed_map::GlobalKeyedTable, ErasedTable},
-    BackingStore,
-    StateBackend,
+    BackingStore, StateBackend, get_storage_provider,
+    tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
 };
-use arroyo_state_protocol::ProtocolPaths;
-use arroyo_state_protocol::store::put_json;
-use arroyo_state_protocol::types::{CheckpointRef, CurrentGeneration, Generation};
-use arroyo_state_protocol::workflow::{initialize_generation, GenerationInitialization, GenerationRecovery, InitializeGenerationRequest};
+use arroyo_state_protocol::store::read_protobuf;
+use arroyo_state_protocol::types::Generation;
+use arroyo_state_protocol::workflow::{
+    GenerationInitialization, GenerationRecovery, InitializeGenerationRequest,
+    initialize_generation,
+};
 use arroyo_worker::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 
 #[derive(Debug, Clone)]
@@ -198,8 +199,8 @@ async fn handle_worker_connect<'a>(
 
 #[derive(Clone, Debug)]
 struct CheckpointInfo {
-    epoch: u32,
-    min_epoch: u32,
+    epoch: u64,
+    min_epoch: u64,
     id: String,
     needs_commits: bool,
 }
@@ -256,8 +257,8 @@ async fn get_checkpoint_info_legacy<'a>(
 
                 Some(CheckpointInfo {
                     id: r.pub_id,
-                    epoch: r.epoch as u32,
-                    min_epoch: r.min_epoch as u32,
+                    epoch: r.epoch as u64,
+                    min_epoch: r.min_epoch as u64,
                     needs_commits: r.needs_commits,
                 })
             } else {
@@ -317,20 +318,20 @@ async fn get_checkpoint_info_legacy<'a>(
         needs_commits,
     }) = checkpoint_info.clone()
     {
-        let mut metadata = match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch).await
-        {
-            Ok(m) => m,
-            Err(err) => {
-                return Err(ctx.retryable(
-                    state,
-                    format!("Failed to load checkpoint metadata for epoch {epoch}"),
-                    err.into(),
-                    10,
-                ));
-            }
-        };
+        let mut metadata =
+            match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch as u32).await {
+                Ok(m) => m,
+                Err(err) => {
+                    return Err(ctx.retryable(
+                        state,
+                        format!("Failed to load checkpoint metadata for epoch {epoch}"),
+                        err.into(),
+                        10,
+                    ));
+                }
+            };
 
-        metadata.min_epoch = min_epoch;
+        metadata.min_epoch = min_epoch as u32;
         if needs_commits {
             let mut commit_subtasks = HashSet::new();
             // (operator_id => (table_name => (subtask => data)))
@@ -340,7 +341,7 @@ async fn get_checkpoint_info_legacy<'a>(
                 let operator_metadata = match StateBackend::load_operator_metadata(
                     &ctx.config.id,
                     operator_id,
-                    epoch,
+                    epoch as u32,
                 )
                 .await
                 {
@@ -405,7 +406,11 @@ async fn get_checkpoint_info_legacy<'a>(
                     }
                 }
             }
-            committing_state = Some(CommittingState::new(CheckpointIdOrRef::CheckpointId(id), commit_subtasks, committing_data));
+            committing_state = Some(CommittingState::new(
+                CheckpointIdOrRef::CheckpointId(id),
+                commit_subtasks,
+                committing_data,
+            ));
         }
 
         if let Err(err) = StateBackend::write_checkpoint_metadata(metadata).await {
@@ -423,40 +428,68 @@ async fn get_checkpoint_info_legacy<'a>(
 
 async fn get_and_register_checkpoint_info_leader<'a>(
     ctx: &'a JobContext<'a>,
-) -> anyhow::Result<Option<CheckpointRef>> {
+) -> anyhow::Result<Option<CheckpointInfo>> {
     // in the future, this should likely move to the leader, but that will require rethinking how
     // worker initialization works
-    let new_gen = initialize_generation(get_storage_provider().await?.as_ref(),
-                                        InitializeGenerationRequest {
-                                            pipeline_id: ctx.pipeline_id.clone(),
-                                            job_id: JobId(ctx.config.id.clone()),
-                                             generation: Generation(ctx.status.generation),
-                                             updated_at: SystemTime::now(),
-                                         }, true).await?;
+    let new_gen = initialize_generation(
+        get_storage_provider().await?.as_ref(),
+        InitializeGenerationRequest {
+            pipeline_id: ctx.pipeline_id.clone(),
+            job_id: JobId(ctx.config.id.clone()),
+            generation: Generation(ctx.status.generation),
+            updated_at: SystemTime::now(),
+        },
+        true,
+    )
+    .await?;
 
     let checkpoint_ref = match new_gen {
         GenerationInitialization::Initialized {
-            recovery: GenerationRecovery::NoCheckpoint, .. } => {
-            None
-        }
+            recovery: GenerationRecovery::NoCheckpoint,
+            ..
+        } => None,
         GenerationInitialization::Initialized {
-            recovery: GenerationRecovery::Ready { checkpoint_ref } | GenerationRecovery::ReplayCommit { checkpoint_ref}, .. } => {
-            Some(checkpoint_ref)
-        }
+            recovery:
+                GenerationRecovery::Ready { checkpoint_ref }
+                | GenerationRecovery::ReplayCommit { checkpoint_ref },
+            ..
+        } => Some(checkpoint_ref),
         GenerationInitialization::StaleGeneration { .. } => {
-            unreachable!("cannot end up with stale generation given that we updated the generation\
-            instead of checking it");
+            unreachable!(
+                "cannot end up with stale generation given that we updated the generation\
+            instead of checking it"
+            );
         }
         GenerationInitialization::StopOrphaned { canonical_ref } => {
-            bail!("somehow ended up with an orphaned checkpoint during recovery... should not happen\
-            canonical_ref = {:?}", canonical_ref);
+            bail!(
+                "somehow ended up with an orphaned checkpoint during recovery... should not happen\
+            canonical_ref = {:?}",
+                canonical_ref
+            );
         }
         GenerationInitialization::Failed(failure) => {
-            bail!("failed while resolving restoration checkpoint: {:?}", failure);
+            bail!(
+                "failed while resolving restoration checkpoint: {:?}",
+                failure
+            );
         }
     };
 
-    Ok(checkpoint_ref)
+    Ok(if let Some(r) = checkpoint_ref {
+        let manifest =
+            read_protobuf::<_, CheckpointManifest>(get_storage_provider().await?.as_ref(), &r)
+                .await?
+                .ok_or_else(|| anyhow!("recovery checkpoint manifest {r} is missing!"))?;
+
+        Some(CheckpointInfo {
+            epoch: manifest.epoch,
+            min_epoch: manifest.min_epoch,
+            id: r.to_string(),
+            needs_commits: manifest.needs_commit,
+        })
+    } else {
+        None
+    })
 }
 
 impl Scheduling {
@@ -548,14 +581,14 @@ impl State for Scheduling {
         let leader_mode = matches!(config().job_controller, JobControllerMode::Worker);
 
         let (self, checkpoint_info, committing_state) = if leader_mode {
-            match get_and_register_checkpoint_info_leader(&ctx).await {
+            match get_and_register_checkpoint_info_leader(ctx).await {
                 Ok(ci) => (self, ci, None),
                 Err(e) => {
                     return Err(ctx.retryable(self, "failed to load checkpoint metadata", e, 20));
                 }
             }
         } else {
-            get_checkpoint_info_legacy(self, &ctx).await?
+            get_checkpoint_info_legacy(self, ctx).await?
         };
 
         // wait for them to connect and make outbound RPC connections
@@ -621,7 +654,7 @@ impl State for Scheduling {
             .ignore_state_before_epoch
             .filter(|&t| t > 0)
             .map(|t| {
-                let epoch = (t - 1) as u32;
+                let epoch = (t - 1) as u64;
                 info!(
                     message = "starting from ignore_state_before_epoch threshold",
                     job_id = *ctx.config.id,
@@ -822,8 +855,8 @@ impl State for Scheduling {
                     ctx.pipeline_id.clone(),
                     ctx.status.generation,
                     program,
-                    start_epoch,
-                    min_epoch,
+                    start_epoch as u32,
+                    min_epoch as u32,
                     worker_connects,
                     committing_state,
                     metrics,

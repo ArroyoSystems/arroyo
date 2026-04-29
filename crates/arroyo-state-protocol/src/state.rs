@@ -1,4 +1,7 @@
-use crate::types::{CheckpointRef, CommittedMarker, EpochRecord, ProtocolError, validate_committed_marker_matches_checkpoint, validate_epoch_record_matches_checkpoint, Epoch};
+use crate::types::{
+    CheckpointRef, CommittedMarker, Epoch, EpochRecord, ProtocolError,
+    validate_committed_marker_matches_checkpoint, validate_epoch_record_matches_checkpoint,
+};
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 
 /// Derived state of a checkpoint from the checkpoint manifest, epoch record,

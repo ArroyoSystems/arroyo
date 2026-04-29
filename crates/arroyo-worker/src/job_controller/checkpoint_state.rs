@@ -1,3 +1,4 @@
+use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
@@ -8,7 +9,6 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::grpc::{api, rpc};
 use arroyo_rpc::{TaskEventSpans, get_event_spans, grpc, log_trace_event};
-use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
@@ -265,7 +265,7 @@ impl CheckpointState {
             });
         Ok(())
     }
-    
+
     pub fn checkpoint_finished(
         &mut self,
         c: TaskCheckpointCompletedReq,
@@ -410,7 +410,7 @@ impl CheckpointState {
     pub fn done(&self) -> bool {
         self.operators == self.operators_checkpointed
     }
-    
+
     pub fn build_metadata(&mut self) -> CheckpointMetadata {
         let finish_time = SystemTime::now();
 
@@ -466,14 +466,12 @@ impl CheckpointState {
                 .collect(),
         }
     }
-    
+
     pub fn needs_commit(&self) -> bool {
         !self.subtasks_to_commit.is_empty()
     }
-    
+
     pub fn into_commit(self, checkpoint_id: CheckpointIdOrRef) -> CommittingState {
         CommittingState::new(checkpoint_id, self.subtasks_to_commit, self.commit_data)
     }
 }
-
-

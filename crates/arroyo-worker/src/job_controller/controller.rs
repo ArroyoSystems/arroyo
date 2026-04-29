@@ -1,18 +1,18 @@
+use anyhow::bail;
+use arroyo_rpc::checkpoints::CheckpointMetadataStore;
+use arroyo_rpc::grpc::rpc::{
+    CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus, JobStopMode,
+    StopExecutionReq, StopMode, TaskAssignment, WorkerPhase,
+};
+use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
+use arroyo_types::WorkerId;
+use futures::future::try_join_all;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use std::time::SystemTime;
-use anyhow::bail;
-use arroyo_rpc::checkpoints::CheckpointMetadataStore;
-use arroyo_rpc::grpc::rpc::{
-    CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
-    JobStopMode, StopExecutionReq, StopMode, TaskAssignment, WorkerPhase,
-};
-use arroyo_state::{get_storage_provider, BackingStore, StateBackend};
-use arroyo_types::{to_micros, WorkerId};
-use futures::future::try_join_all;
 
 use crate::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
@@ -25,13 +25,16 @@ use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::log_event;
 use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::types::{CheckpointRef, Generation};
+use arroyo_state_protocol::workflow::{
+    GenerationInitialization, GenerationRecovery, InitializeGenerationRequest,
+    initialize_generation,
+};
 use tokio::time::interval;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::Request;
 use tracing::{error, info};
-use arroyo_state_protocol::ProtocolPaths;
-use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
-use arroyo_state_protocol::workflow::{initialize_generation, GenerationInitialization, GenerationRecovery, InitializeGenerationRequest};
 
 const CHECKPOINT_ROWS_TO_KEEP: u32 = 10;
 
@@ -69,8 +72,8 @@ impl WorkerJobController {
         worker_context: WorkerContext,
         program: Arc<LogicalProgram>,
         tasks: &[TaskAssignment],
-        epoch: u32,
-        min_epoch: u32,
+        epoch: u64,
+        min_epoch: u64,
         rx: Receiver<RunningMessage>,
         job_status: Arc<Mutex<JobStatus>>,
         checkpoint_interval: Duration,
@@ -133,18 +136,29 @@ impl WorkerJobController {
                 job_id: worker_context.job_id.clone(),
                 generation: Generation(worker_context.generation),
                 updated_at: SystemTime::now(),
-            }).await? {
-            GenerationInitialization::Initialized { generation_manifest, recovery,} => {
-                (generation_manifest, recovery)
-            }
+            },
+            false,
+        )
+        .await?
+        {
+            GenerationInitialization::Initialized {
+                generation_manifest,
+                recovery,
+            } => (generation_manifest, recovery),
             GenerationInitialization::StaleGeneration { current_generation } => {
                 // TODO: add more graceful error handling for these cases
-                bail!("failing leader on startup as we are stale — our generation {} but current is {}",
-                    worker_context.generation, current_generation.0);
+                bail!(
+                    "failing leader on startup as we are stale — our generation {} but current is {}",
+                    worker_context.generation,
+                    current_generation.0
+                );
             }
             GenerationInitialization::StopOrphaned { canonical_ref } => {
-                bail!("failing leader on startup as we are attempting to restore an orphaned \
-                (expected to be {:?})", canonical_ref);
+                bail!(
+                    "failing leader on startup as we are attempting to restore an orphaned \
+                (expected to be {:?})",
+                    canonical_ref
+                );
             }
             GenerationInitialization::Failed(e) => {
                 bail!("failed to resolve generation manifest: {:?}", e);
@@ -155,15 +169,24 @@ impl WorkerJobController {
             GenerationRecovery::NoCheckpoint => {
                 // nothing to do -- make sure that we're not inconsistent with the controller /
                 // other workers
-                assert!(parent_ref.is_none(),
-                        "from controller, we believe that we should be restoring from {:?}, but \
+                assert!(
+                    parent_ref.is_none(),
+                    "from controller, we believe that we should be restoring from {:?}, but \
                         our own query of checkpoint state lacks a parent ref",
-                        parent_ref);
+                    parent_ref
+                );
             }
             GenerationRecovery::Ready { checkpoint_ref } => {
-                if !parent_ref.as_ref().map(|p| p == *checkpoint_ref).unwrap_or(false) {
-                    panic!("from controller, we believe we should be restoring from {:?}, but\
-                    generation manifest has {:?}", parent_ref, checkpoint_ref);
+                if !parent_ref
+                    .as_ref()
+                    .map(|p| *p == checkpoint_ref)
+                    .unwrap_or(false)
+                {
+                    panic!(
+                        "from controller, we believe we should be restoring from {:?}, but\
+                    generation manifest has {:?}",
+                        parent_ref, checkpoint_ref
+                    );
                 }
             }
             GenerationRecovery::ReplayCommit { .. } => {
@@ -179,8 +202,8 @@ impl WorkerJobController {
                 generation: worker_context.generation,
                 state: JobState::Running,
                 checkpoint_state: None,
-                epoch,
-                min_epoch,
+                epoch: epoch as u32,
+                min_epoch: min_epoch as u32,
                 last_checkpoint: Instant::now(),
                 workers,
                 tasks,
@@ -188,12 +211,15 @@ impl WorkerJobController {
                 program,
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
-                protocol_paths: ProtocolPaths::new(worker_context.pipeline_id.clone(), worker_context.job_id.clone()),
+                protocol_paths: ProtocolPaths::new(
+                    worker_context.pipeline_id.clone(),
+                    worker_context.job_id.clone(),
+                ),
                 checkpoint_parent_ref: parent_ref,
                 checkpoint_spans: vec![],
                 worker_leader_mode: true,
                 finished_operators: vec![],
-                generation_manifest,
+                generation_manifest: Some(generation_manifest),
             },
             status,
             worker_context,
@@ -217,7 +243,7 @@ impl WorkerJobController {
             let mut connect = status.connect.clone();
             async move {
                 loop {
-                    let phase = connect.get_worker_phase(Request::new(GetWorkerPhaseReq {} )).await?
+                    let phase = connect.get_worker_phase(Request::new(GetWorkerPhaseReq {})).await?
                         .into_inner();
                     match phase.phase() {
                         WorkerPhase::Idle | WorkerPhase::Initializing => {

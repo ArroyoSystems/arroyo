@@ -441,9 +441,9 @@ message TaskAssignment {
 
 message StartExecutionReq {
   api.ArrowProgram program = 1;
-  optional uint32 restore_epoch = 2;
-  uint32 start_epoch = 6;
-  uint32 min_epoch = 7;
+  optional uint64 restore_epoch = 2;
+  uint64 start_epoch = 6;
+  uint64 min_epoch = 7;
   repeated TaskAssignment tasks = 3;
   // if none, clients should use the controller address
   optional string job_controller_addr = 4;

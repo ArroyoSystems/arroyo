@@ -1,8 +1,9 @@
 use crate::job_controller::checkpoint_state::CheckpointState;
+use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use crate::job_controller::{CHECKPOINTS_TO_KEEP, COMPACT_EVERY, RunningMessage, TaskFailedEvent};
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::api_types::checkpoints::{CheckpointEventSpan, JobCheckpointEventType, JobCheckpointSpan};
+use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
 use arroyo_rpc::checkpoints::{
     CheckpointMetadataStore, CheckpointStatus, CreateCheckpointReq, FinishCheckpointReq,
     UpdateCheckpointReq,
@@ -14,9 +15,14 @@ use arroyo_rpc::grpc::rpc::{
     OperatorCheckpointMetadata, TaskCheckpointEventType,
 };
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use arroyo_state::parquet::ParquetBackend;
-use arroyo_state::{get_storage_provider, BackingStore, StateBackend};
+use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
+use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
+use arroyo_state_protocol::workflow::{
+    CheckpointPublication, CommitAuthorization, PublishCheckpointRequest, complete_commit,
+    prepare_commit, publish_checkpoint,
+};
 use arroyo_types::{JobId, PipelineId, WorkerId, to_micros};
 use futures::future::try_join_all;
 use std::collections::HashMap;
@@ -26,9 +32,6 @@ use tokio::task::JoinHandle;
 use tonic::Request;
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
-use arroyo_state_protocol::ProtocolPaths;
-use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
-use arroyo_state_protocol::workflow::{complete_commit, prepare_commit, publish_checkpoint, CheckpointPublication, CommitAuthorization, PublishCheckpointRequest};
 
 pub struct RunningJobModel {
     pub pipeline_id: PipelineId,
@@ -47,7 +50,7 @@ pub struct RunningJobModel {
     pub last_updated_metrics: Instant,
     pub protocol_paths: ProtocolPaths,
     pub checkpoint_parent_ref: Option<CheckpointRef>,
-    pub generation_manifest: GenerationManifest,
+    pub generation_manifest: Option<GenerationManifest>,
 
     pub finished_operators: Vec<OperatorCheckpointMetadata>,
 
@@ -411,8 +414,10 @@ impl RunningJobModel {
                 let pipeline_id = (*self.pipeline_id).clone();
                 let generation = self.generation;
                 let operators = self.finished_operators.drain(..).collect();
-                let metadata_span =
-                    Self::start_or_get_spans_static(&mut self.checkpoint_spans, JobCheckpointEventType::WritingMetadata);
+                let metadata_span = Self::start_or_get_spans_static(
+                    &mut self.checkpoint_spans,
+                    JobCheckpointEventType::WritingMetadata,
+                );
 
                 let metadata = checkpointing.build_metadata();
 
@@ -426,14 +431,21 @@ impl RunningJobModel {
                     finish_time: metadata.finish_time,
                     needs_commit: checkpointing.needs_commit(),
                     operators,
-                    parent_checkpoint_ref: self.checkpoint_parent_ref.as_ref().map(|t| t.to_string()),
+                    parent_checkpoint_ref: self
+                        .checkpoint_parent_ref
+                        .as_ref()
+                        .map(|t| t.to_string()),
                 };
 
-                let checkpoint_ref = self.protocol_paths.checkpoint_manifest(
-                    Generation(generation), Epoch(metadata.epoch as u64));
+                let checkpoint_ref = self
+                    .protocol_paths
+                    .checkpoint_manifest(Generation(generation), Epoch(metadata.epoch as u64));
 
                 let publish_req = PublishCheckpointRequest {
-                    generation_manifest: &self.generation_manifest,
+                    generation_manifest: self
+                        .generation_manifest
+                        .as_ref()
+                        .expect("generation manifest not set in leader mode"),
                     checkpoint_ref: &checkpoint_ref,
                     checkpoint: &manifest,
                     created_at: SystemTime::now(),
@@ -465,21 +477,28 @@ impl RunningJobModel {
                     }
                     CheckpointPublication::CommitRequired {
                         checkpoint_ref,
-                        epoch_record
-                    } => {
-                        (checkpoint_ref, epoch_record)
-                    }
-                    r @ CheckpointPublication::StopOrphaned { .. } | r @ CheckpointPublication::StaleGeneration => {
-                        bail!("this generation ({}) is no longer permitted to checkpoint: {:?}", self.generation, r);
+                        epoch_record,
+                    } => (checkpoint_ref, epoch_record),
+                    r @ CheckpointPublication::StopOrphaned { .. }
+                    | r @ CheckpointPublication::StaleGeneration => {
+                        bail!(
+                            "this generation ({}) is no longer permitted to checkpoint: {:?}",
+                            self.generation,
+                            r
+                        );
                     }
                     CheckpointPublication::Failed(f) => {
-                        bail!("failed while attempting to write checkpoint metadata: {:?}", f);
+                        bail!(
+                            "failed while attempting to write checkpoint metadata: {:?}",
+                            f
+                        );
                     }
                 };
 
-                let commit = checkpointing.into_commit(
-                    CheckpointIdOrRef::CheckpointRef(checkpoint_ref.clone(), epoch_record.clone()),
-                );
+                let commit = checkpointing.into_commit(CheckpointIdOrRef::CheckpointRef(
+                    checkpoint_ref.clone(),
+                    epoch_record.clone(),
+                ));
 
                 let committing_data = commit.committing_data();
 
@@ -493,13 +512,20 @@ impl RunningJobModel {
 
                 self.start_or_get_span(JobCheckpointEventType::Committing);
 
-                match prepare_commit(storage.as_ref(), &checkpoint_ref, manifest, Some(epoch_record), true).await? {
+                match prepare_commit(
+                    storage.as_ref(),
+                    &checkpoint_ref,
+                    manifest,
+                    Some(epoch_record),
+                    true,
+                )
+                .await?
+                {
                     CommitAuthorization::Authorized { .. } => {
                         // commit to workers
                         for worker in self.workers.values_mut() {
                             worker
                                 .connect
-
                                 .commit(Request::new(CommitReq {
                                     epoch: self.epoch,
                                     // TODO: this is pretty expensive
@@ -509,28 +535,36 @@ impl RunningJobModel {
                         }
                     }
                     CommitAuthorization::AlreadyCommitted { .. } => {
-                        unreachable!("we are passing assume_not_committed: true, so we should be able\
-                        able to end up in a state where the protocol believes we have already committed.")
+                        unreachable!(
+                            "we are passing assume_not_committed: true, so we should be able\
+                        able to end up in a state where the protocol believes we have already committed."
+                        )
                     }
                     CommitAuthorization::NoCommitNeeded { checkpoint_ref } => {
-                        unreachable!("RunningJobModel believes that we need to commit for {}, \
-                        but checkpoint protocol disagrees; something has gone very wrong", checkpoint_ref);
+                        unreachable!(
+                            "RunningJobModel believes that we need to commit for {}, \
+                        but checkpoint protocol disagrees; something has gone very wrong",
+                            checkpoint_ref
+                        );
                     }
                     CommitAuthorization::StopOrphaned { canonical_ref } => {
-                        bail!("this checkpoint ({checkpoint_ref}) is orphaned, intentionally failing; \
-                        canonical checkpoint is {canonical_ref}");
+                        bail!(
+                            "this checkpoint ({checkpoint_ref}) is orphaned, intentionally failing; \
+                        canonical checkpoint is {canonical_ref}"
+                        );
                     }
                     CommitAuthorization::NotCanonical { checkpoint_ref } => {
-                        bail!("attempted to commit non-canonical checkpoint {checkpoint_ref}, \
-                        intentionally failing")
+                        bail!(
+                            "attempted to commit non-canonical checkpoint {checkpoint_ref}, \
+                        intentionally failing"
+                        )
                     }
                     CommitAuthorization::MissingCheckpoint { checkpoint_ref } => {
                         bail!("checkpoint {checkpoint_ref} was missing when attempting to commit!");
                     }
                 }
 
-                self.checkpoint_state =
-                    Some(CheckpointingOrCommittingState::Committing(commit));
+                self.checkpoint_state = Some(CheckpointingOrCommittingState::Committing(commit));
             }
             CheckpointingOrCommittingState::Committing(committing) => {
                 self.start_or_get_span(JobCheckpointEventType::Committing)
@@ -539,12 +573,16 @@ impl RunningJobModel {
                     .finish();
 
                 let (checkpoint_ref, epoch_record) = committing.checkpoint_ref();
-                
-                complete_commit(storage.as_ref(), checkpoint_ref,
-                                Generation(self.generation),
-                                Some(epoch_record.clone()),
-                                true).await?;
-                
+
+                complete_commit(
+                    storage.as_ref(),
+                    checkpoint_ref,
+                    Generation(self.generation),
+                    Some(epoch_record.clone()),
+                    true,
+                )
+                .await?;
+
                 self.last_checkpoint = Instant::now();
                 self.checkpoint_state = None;
                 info!(
@@ -559,7 +597,10 @@ impl RunningJobModel {
         Ok(())
     }
 
-    async fn finish_checkpoint_controller(&mut self, store: &dyn CheckpointMetadataStore) -> anyhow::Result<()> {
+    async fn finish_checkpoint_controller(
+        &mut self,
+        store: &dyn CheckpointMetadataStore,
+    ) -> anyhow::Result<()> {
         let state = self.checkpoint_state.take().unwrap();
         match state {
             CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
@@ -580,11 +621,7 @@ impl RunningJobModel {
                 if !checkpointing.needs_commit() {
                     self.start_or_get_span(JobCheckpointEventType::Checkpointing)
                         .finish();
-                    self.update_checkpoint_in_db(
-                        &checkpointing,
-                        store,
-                        CheckpointStatus::Ready,
-                    )
+                    self.update_checkpoint_in_db(&checkpointing, store, CheckpointStatus::Ready)
                         .await?;
                     self.last_checkpoint = Instant::now();
                     self.checkpoint_state = None;
@@ -603,15 +640,15 @@ impl RunningJobModel {
                         store,
                         CheckpointStatus::Committing,
                     )
-                        .await?;
+                    .await?;
 
                     let id = CheckpointIdOrRef::CheckpointId(checkpointing.checkpoint_id.clone());
                     let committing = checkpointing.into_commit(id);
                     info!(
-                            message = "Committing checkpoint",
-                            job_id = *self.job_id,
-                            epoch = self.epoch,
-                        );
+                        message = "Committing checkpoint",
+                        job_id = *self.job_id,
+                        epoch = self.epoch,
+                    );
 
                     self.start_or_get_span(JobCheckpointEventType::Committing);
 
@@ -713,14 +750,16 @@ impl RunningJobModel {
             .all(|(_, t)| t.state == TaskState::Finished)
     }
 
-    fn start_or_get_spans_static(spans: &mut Vec<JobCheckpointSpan>, event: JobCheckpointEventType) -> &mut JobCheckpointSpan {
+    fn start_or_get_spans_static(
+        spans: &mut Vec<JobCheckpointSpan>,
+        event: JobCheckpointEventType,
+    ) -> &mut JobCheckpointSpan {
         if let Some(idx) = spans.iter().position(|e| e.event == event) {
             return &mut spans[idx];
         }
 
         spans.push(JobCheckpointSpan::now(event));
         spans.last_mut().unwrap()
-
     }
 
     pub fn start_or_get_span(&mut self, event: JobCheckpointEventType) -> &mut JobCheckpointSpan {

@@ -185,7 +185,7 @@ pub async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>, Sto
         .get_or_try_init(|| async {
             let storage_url = &config().checkpoint_url;
 
-            Ok(StorageProvider::for_url(storage_url).await.map(Arc::new)?)
+            StorageProvider::for_url(storage_url).await.map(Arc::new)
         })
         .await
 }
