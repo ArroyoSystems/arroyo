@@ -72,6 +72,7 @@ jobs:
           packages=$(python3 <<'PY'
           import json
           import subprocess
+          from functools import lru_cache
 
           data = json.loads(
               subprocess.check_output(
@@ -79,11 +80,56 @@ jobs:
                   text=True,
               )
           )
+          workspace_packages = {pkg["name"]: pkg for pkg in data["packages"]}
           packages = sorted(
               pkg["name"]
-              for pkg in data["packages"]
+              for pkg in workspace_packages.values()
               if pkg["name"] != "integ"
           )
+          dependency_graph = {
+              name: sorted(
+                  dep["name"]
+                  for dep in pkg["dependencies"]
+                  if dep["name"] in workspace_packages
+              )
+              for name, pkg in workspace_packages.items()
+          }
+
+          @lru_cache(maxsize=None)
+          def get_cached_dependency_closure(name):
+              return transitive_workspace_dependencies(name, ())
+
+          def transitive_workspace_dependencies(name, path):
+              if name in path:
+                  cycle = " -> ".join((*path, name))
+                  raise ValueError(f"Cycle detected in workspace dependency graph: {cycle}")
+
+              deps = {name}
+              next_path = (*path, name)
+              for dep in dependency_graph.get(name, []):
+                  deps.update(transitive_workspace_dependencies(dep, next_path))
+              return frozenset(deps)
+
+          def depends_on_any_target(package_names, targets):
+              return any(
+                  get_cached_dependency_closure(package_name) & targets
+                  for package_name in package_names
+              )
+
+          def package_entry(name, package_names):
+              package_set = set(package_names)
+              return {
+                  "name": name,
+                  "package_args": " ".join(f"--package {pkg}" for pkg in package_names),
+                  "build_console": depends_on_any_target(package_names, {"arroyo-api"}),
+                  "setup_postgres": depends_on_any_target(
+                      package_names,
+                      {"arroyo-api", "arroyo-controller"},
+                  ),
+                  "install_kafka": "arroyo-connectors" in package_set,
+                  "install_mosquitto": "arroyo-connectors" in package_set,
+              }
+
           bundled_packages = [
               ("fast-foundation", [
                   "arroyo-metrics",
@@ -105,18 +151,10 @@ jobs:
               present = [pkg for pkg in group_packages if pkg in packages]
               if not present:
                   continue
-              grouped.append(
-                  {
-                      "name": name,
-                      "package_args": " ".join(f"--package {pkg}" for pkg in present),
-                  }
-              )
+              grouped.append(package_entry(name, present))
               assigned.update(present)
           grouped.extend(
-              {
-                  "name": pkg,
-                  "package_args": f"--package {pkg}",
-              }
+              package_entry(pkg, [pkg])
               for pkg in packages
               if pkg not in assigned
           )
@@ -152,6 +190,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - uses: ./.github/actions/setup-rust-ci
+        with:
+          build-console: ${{ matrix.package.build_console }}
+          setup-postgres: ${{ matrix.package.setup_postgres }}
+          install-kafka: ${{ matrix.package.install_kafka }}
+          install-mosquitto: ${{ matrix.package.install_mosquitto }}
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       - name: Run Clippy
@@ -171,6 +214,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - uses: ./.github/actions/setup-rust-ci
+        with:
+          build-console: true
+          setup-postgres: true
+          install-kafka: true
+          install-mosquitto: false
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       - name: Build Arroyo
@@ -194,6 +242,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - uses: ./.github/actions/setup-rust-ci
+        with:
+          build-console: true
+          setup-postgres: true
+          install-kafka: true
+          install-mosquitto: false
+          install-netcat: true
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       - name: Build Arroyo

@@ -1,14 +1,26 @@
 name: Setup Rust CI
 description: Prepare the runner for Rust workspace CI jobs
 
+inputs:
+  build-console:
+    description: Build the web console assets needed by arroyo-api builds
+    default: "true"
+  setup-postgres:
+    description: Install and start Postgres, then run Rust workspace migrations
+    default: "true"
+  install-kafka:
+    description: Install and start the local Kafka broker used by tests
+    default: "true"
+  install-mosquitto:
+    description: Install and start the local Mosquitto broker used by tests
+    default: "true"
+  install-netcat:
+    description: Install netcat for readiness checks
+    default: "false"
+
 runs:
   using: composite
   steps:
-    - uses: actions/setup-java@v3
-      with:
-        distribution: "temurin"
-        java-version: "11"
-
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
       with:
@@ -26,6 +38,7 @@ runs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Setup pnpm
+      if: ${{ inputs.build-console == 'true' }}
       uses: pnpm/action-setup@v4
       with:
         version: 9.0.6
@@ -33,23 +46,38 @@ runs:
           - recursive: true
             args: [--frozen-lockfile, --strict-peer-dependencies]
 
-    - name: Install OpenAPI Generator
-      shell: bash
-      run: |
-        pnpm install @openapitools/openapi-generator-cli -g
-        cd crates/arroyo-openapi && openapi-generator-cli version
-
     - name: Build console
+      if: ${{ inputs.build-console == 'true' }}
       shell: bash
       run: |
         cd webui
         pnpm build
 
-    - name: Setup Postgres
+    - name: Install dependencies based on inputs
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install postgresql
+        packages=(cmake clang protobuf-compiler libsasl2-dev)
+        if [ "${{ inputs.setup-postgres }}" = "true" ]; then
+          packages+=(postgresql)
+        fi
+        if [ "${{ inputs.install-mosquitto }}" = "true" ]; then
+          packages+=(mosquitto)
+        fi
+        if [ "${{ inputs.install-netcat }}" = "true" ]; then
+          packages+=(netcat-openbsd)
+        fi
+        sudo apt-get install -y "${packages[@]}"
+
+    - name: Install cargo-nextest
+      shell: bash
+      run: |
+        curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+
+    - name: Setup Postgres
+      if: ${{ inputs.setup-postgres == 'true' }}
+      shell: bash
+      run: |
         sudo systemctl start postgresql
         sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
         sudo -u postgres createdb arroyo
@@ -58,16 +86,8 @@ runs:
         fi
         ~/.cargo/bin/refinery migrate -e DATABASE_URL -p crates/arroyo-api/migrations
 
-    - name: Install dependencies
-      shell: bash
-      run: |
-        curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-        sudo apt-get install -y cmake clang ruby unzip postgresql protobuf-compiler libsasl2-dev netcat-openbsd
-        if ! command -v wasm-pack >/dev/null 2>&1 || [ "$(wasm-pack --version)" != "wasm-pack 0.13.1" ]; then
-          cargo install wasm-pack --locked --version 0.13.1 --force
-        fi
-
     - name: Install Kafka
+      if: ${{ inputs.install-kafka == 'true' }}
       shell: bash
       run: |
         wget --progress=dot --show-progress https://dlcdn.apache.org/kafka/3.9.2/kafka_2.13-3.9.2.tgz
@@ -77,7 +97,7 @@ runs:
         kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
 
     - name: Install mosquitto
+      if: ${{ inputs.install-mosquitto == 'true' }}
       shell: bash
       run: |
-        sudo apt-get install -y mosquitto
         sudo service mosquitto start
