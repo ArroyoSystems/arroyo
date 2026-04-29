@@ -5,7 +5,7 @@ WORKDIR /app
 ARG GIT_SHA
 ARG TARGETPLATFORM
 ARG PROFILE=release
-ARG FEATURES=python
+ARG FEATURES=
 
 RUN apt-get update && \
     apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
@@ -51,7 +51,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p crates/arroyo-api/migrations && \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --features ${FEATURES} --profile ${PROFILE} --bin arroyo && \
+    set -- cargo build --profile ${PROFILE} --bin arroyo; \
+    if [ -n "${FEATURES}" ]; then set -- "$@" --features "${FEATURES}"; fi; \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false "$@" && \
     mv target/*/arroyo /arroyo
 
 

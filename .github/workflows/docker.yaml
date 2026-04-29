@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: ${{ github.ref }}-docker
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
