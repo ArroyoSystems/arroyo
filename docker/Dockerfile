@@ -84,27 +84,3 @@ ENV INSTALL_RUSTC=true \
 EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
 CMD ["cluster"]
-
-FROM rust:slim-bookworm AS arroyo-full
-WORKDIR /app
-RUN apt-get update && \
-    apt-get -y install libsasl2-2 ca-certificates curl pkg-config
-
-ENV ARROYO__API__RUN_HTTP_PORT=5115
-
-COPY --from=builder /arroyo ./
-COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
-COPY --from=builder /app/include/google /usr/local/include/google
-COPY --from=builder /app/python /python
-
-RUN cp -r /python/bin/* /usr/local/bin/ && \
-    cp -r /python/include/* /usr/local/include/ && \
-    cp -r /python/lib/* /usr/local/lib/ && \
-    cp -r /python/share/* /usr/local/share/ && \
-    rm -rf /python && \
-    ldconfig
-  
-
-EXPOSE 5115
-ENTRYPOINT [ "/app/arroyo" ]
-CMD ["cluster"]
