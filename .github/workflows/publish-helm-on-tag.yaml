@@ -1,0 +1,72 @@
+name: Publish Helm Chart on Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-helm-chart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Update Chart.yaml
+        run: |
+          version="${{ steps.version.outputs.version }}"
+
+          # Update version and appVersion in Chart.yaml
+          sed -i "s/^version: .*/version: ${version}/" k8s/arroyo/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${version}\"/" k8s/arroyo/Chart.yaml
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create branch and commit
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          branch_name="chore/helm-chart-v${version}"
+
+          git checkout -b "${branch_name}"
+          git add k8s/arroyo/Chart.yaml
+          git commit -m "chore(Helm): Update chart version to ${version}"
+          git push -u origin "${branch_name}"
+
+          echo "branch_name=${branch_name}" >> "${GITHUB_ENV}"
+
+      - name: Create Pull Request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ steps.version.outputs.version }}';
+            const tag = '${{ steps.version.outputs.tag }}';
+            const branch = process.env.branch_name;
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `chore(Helm): Update chart version to ${version}`,
+              body: `Updates Helm chart version for release ${tag}\n\n- Chart version: ${version}\n- App version: ${version}`,
+              head: branch,
+              base: 'master',
+            });
+
+            console.log(`Created PR #${pr.data.number}`);
