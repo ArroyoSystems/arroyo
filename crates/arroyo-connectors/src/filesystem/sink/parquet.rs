@@ -5,7 +5,7 @@ use super::{
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::iceberg::schema::{
-    normalize_batch_to_schema, update_field_ids_to_iceberg,
+    SchemaRef as IcebergSchemaRef, normalize_batch_to_schema, update_field_ids_to_iceberg,
 };
 use anyhow::Result;
 use arrow::array::{Array, RecordBatch, TimestampNanosecondArray};
@@ -94,7 +94,7 @@ pub struct ParquetBatchBufferingWriter {
     row_group_size_bytes: usize,
     schema: ArroyoSchemaRef,
     writer_schema: SchemaRef,
-    iceberg_schema: Option<iceberg::spec::SchemaRef>,
+    iceberg_schema: Option<IcebergSchemaRef>,
     event_logger: FsEventLogger,
 }
 
@@ -103,7 +103,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         _config: &config::FileSystemSink,
         format: Format,
         schema: ArroyoSchemaRef,
-        iceberg_schema: Option<iceberg::spec::SchemaRef>,
+        iceberg_schema: Option<IcebergSchemaRef>,
         event_logger: FsEventLogger,
     ) -> DataflowResult<Self> {
         let Format::Parquet(parquet) = format else {

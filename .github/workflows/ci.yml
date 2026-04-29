@@ -198,9 +198,9 @@ jobs:
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       - name: Run Clippy
-        run: cargo clippy --all-features --all-targets ${{ matrix.package.package_args }} -- -D warnings
+        run: cargo clippy --all-targets ${{ matrix.package.package_args }} -- -D warnings
       - name: Run lib tests
-        run: cargo nextest run --all-features ${{ matrix.package.package_args }} -E 'kind(lib)' --no-tests=pass
+        run: cargo nextest run ${{ matrix.package.package_args }} -E 'kind(lib)' --no-tests=pass
 
   integ-postgres:
     needs: changes
@@ -222,7 +222,7 @@ jobs:
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       - name: Build Arroyo
-        run: cargo build --all-features --package arroyo
+        run: cargo build --package arroyo
       - name: Integ postgres
         run: |
           killall arroyo || true
@@ -251,7 +251,7 @@ jobs:
         env:
           DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       - name: Build Arroyo
-        run: cargo build --all-features --package arroyo
+        run: cargo build --package arroyo
       - name: Integ sqlite
         run: |
           killall arroyo || true

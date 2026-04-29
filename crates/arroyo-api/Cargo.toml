@@ -4,9 +4,6 @@ version = "0.16.0-dev"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
-[features]
-default = []
-
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-planner = { path = "../arroyo-planner" }

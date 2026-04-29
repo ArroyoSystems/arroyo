@@ -233,36 +233,13 @@ impl ConnectorTable {
         name: &str,
         connector_name: &str,
         temporary: bool,
-        mut fields: Vec<FieldSpec>,
+        fields: Vec<FieldSpec>,
         primary_keys: Vec<String>,
         watermark: Option<(String, Option<ast::Expr>)>,
         options: &mut ConnectorOptions,
         connection_profile: Option<&ConnectionProfile>,
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Self> {
-        // TODO: a more principled way of letting connectors dictate types to use
-        if connector_name == "iceberg" {
-            fields = fields
-                .into_iter()
-                .map(|field_spec| match &field_spec {
-                    FieldSpec::Struct(struct_field) => match struct_field.data_type() {
-                        DataType::Timestamp(_, None) => {
-                            FieldSpec::Struct(struct_field.clone().with_data_type(
-                                DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
-                            ))
-                        }
-                        _ => field_spec,
-                    },
-                    FieldSpec::Metadata { .. } | FieldSpec::Virtual { .. } => {
-                        unreachable!(
-                            "{} is only a sink, can't have virtual fields",
-                            connector_name
-                        )
-                    }
-                })
-                .collect();
-        }
-
         let connector = connector_for_type(connector_name).ok_or_else(|| {
             DataFusionError::Plan(format!("Unknown connector '{connector_name}'"))
         })?;

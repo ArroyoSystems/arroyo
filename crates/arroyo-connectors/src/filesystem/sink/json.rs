@@ -5,6 +5,7 @@ use super::{
 };
 use crate::filesystem::config;
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::filesystem::sink::iceberg::schema::SchemaRef as IcebergSchemaRef;
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::errors::DataflowResult;
@@ -139,7 +140,7 @@ impl BatchBufferingWriter for JsonWriter {
         _: &config::FileSystemSink,
         format: Format,
         _schema: ArroyoSchemaRef,
-        _: Option<::iceberg::spec::SchemaRef>,
+        _: Option<IcebergSchemaRef>,
         event_logger: FsEventLogger,
     ) -> DataflowResult<Self> {
         let compression = if let Format::Json(ref json) = format {

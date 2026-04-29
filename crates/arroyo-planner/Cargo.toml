@@ -3,7 +3,6 @@ name = "arroyo-planner"
 version = "0.16.0-dev"
 edition = "2024"
 
-
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = {path = "../arroyo-rpc"}

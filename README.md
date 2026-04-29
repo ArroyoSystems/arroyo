@@ -49,7 +49,7 @@ In short: Arroyo lets you ask complex questions of high-volume real-time data wi
 
 🕒 Time-oriented stream processing via the [Dataflow model](https://www.oreilly.com/radar/the-world-beyond-batch-streaming-101/)
 
-🔌 A wide variety of [connectors](https://doc.arroyo.dev/connectors), including Kafka and Iceberg
+🔌 A wide variety of [connectors](https://doc.arroyo.dev/connectors), including Kafka, MQTT, Redis, and filesystems
 
 ## Use cases
 

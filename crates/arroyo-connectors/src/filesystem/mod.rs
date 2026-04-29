@@ -1,5 +1,4 @@
 mod config;
-pub(crate) mod iceberg;
 pub mod sink;
 mod source;
 

@@ -13,6 +13,7 @@ use super::{
 };
 use crate::filesystem::TableFormat;
 use crate::filesystem::config::{self, FilenameStrategy, NamingConfig};
+use crate::filesystem::sink::iceberg::schema::SchemaRef as IcebergSchemaRef;
 use crate::filesystem::sink::two_phase_committer::CommitStrategy;
 use crate::filesystem::sink::v2::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
 use arrow::record_batch::RecordBatch;
@@ -86,7 +87,7 @@ pub struct SinkContext {
     storage_provider: Arc<StorageProvider>,
     partitioner: Arc<Partitioner>,
     schema: ArroyoSchemaRef,
-    iceberg_schema: Option<iceberg::spec::SchemaRef>,
+    iceberg_schema: Option<IcebergSchemaRef>,
     task_info: Arc<TaskInfo>,
     commit_state: CommitState,
 }

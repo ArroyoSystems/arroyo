@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use arrow_schema::SchemaRef;
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
 use axum::{Json, debug_handler};
@@ -23,17 +22,13 @@ use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
 use arroyo_rpc::grpc::api::{ArrowProgram, ConnectorOp};
 
-use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{
     ChainedLogicalOperator, LogicalNode, LogicalProgram, OperatorChain, OperatorName,
 };
-use arroyo_formats::ser::ArrowSerializer;
 use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
-use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
-use arroyo_rpc::{OperatorConfig, error_chain, log_event};
+use arroyo_rpc::{error_chain, log_event};
 use arroyo_udf_host::ParsedUdfFile;
 use prost::Message;
 use serde_json::json;
@@ -57,6 +52,13 @@ use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
 use petgraph::prelude::EdgeRef;
+
+use arrow_schema::SchemaRef;
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
+use arroyo_formats::ser::ArrowSerializer;
+use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::formats::Format;
+use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 
 async fn compile_sql(
     query: String,
@@ -170,7 +172,6 @@ fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
     }
 }
 
-#[allow(unused)]
 async fn try_register_confluent_schema(
     sink: &mut ConnectorOp,
     schema: &SchemaRef,

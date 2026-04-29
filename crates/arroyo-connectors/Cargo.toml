@@ -6,9 +6,6 @@ edition = "2024"
 [lints.clippy]
 to_string_trait_impl = "allow"
 
-[features]
-default = []
-
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-storage = { path = "../arroyo-storage" }
@@ -82,8 +79,6 @@ redis = { version = "0.28", features = [
     "connection-manager",
 ] }
 
-# Kinesis
-aws-sdk-kinesis = { version = "1.95" }
 aws-config = { workspace = true }
 
 # Filesystem
@@ -91,8 +86,6 @@ parquet = { workspace = true, features = ["async"] }
 object_store = { workspace = true }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 flate2 = "1.0.30"
-iceberg = { version = "0.6.0" }
-iceberg-catalog-rest = "0.6.0"
 apache-avro = {workspace = true}
 num-bigint = "0.4.6"
 rust_decimal = "1"

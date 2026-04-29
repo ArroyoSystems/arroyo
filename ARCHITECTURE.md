@@ -32,7 +32,7 @@ Controller -----------------------+
     v
 Workers <---- shuffle / control ----> Workers
     |
-    +----> Connectors (Kafka, files, Iceberg, MQTT, Redis, ...)
+    +----> Connectors (Kafka, files, MQTT, Redis, ...)
     |
     +----> Checkpoint + artifact storage (S3/R2/GCS/Azure/local FS)
 ```
@@ -203,12 +203,11 @@ Important execution behaviors include:
 
 - Kafka
 - Confluent schema registry-backed sources
-- Kinesis
 - MQTT
 - NATS
 - RabbitMQ
 - Redis lookups/sinks
-- filesystem, Iceberg, and single-file outputs
+- filesystem and single-file outputs
 - SSE, webhook, websocket, polling HTTP
 - preview, stdout, blackhole, impulse, and Nexmark test connectors
 
@@ -310,7 +309,7 @@ That abstraction is reused by:
 | `arroyo-datastream` | Logical program model and chaining optimizer |
 | `arroyo-operator` | Runtime operator traits and construction |
 | `arroyo-connectors` | Connector catalog and connector implementations |
-| `arroyo-formats` | Format handling for Avro, JSON, Protobuf, Parquet, Iceberg, and related encodings |
+| `arroyo-formats` | Format handling for Avro, JSON, Protobuf, Parquet, and related encodings |
 
 ### State, storage, and shared contracts
 

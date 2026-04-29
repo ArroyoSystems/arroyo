@@ -14,7 +14,7 @@ CREATE TABLE api_keys (
 -----------------
 -- Definitions --
 -----------------
-create TYPE connection_type as ENUM ('kafka', 'kinesis');
+create TYPE connection_type as ENUM ('kafka');
 
 CREATE TABLE connections (
     id BIGSERIAL PRIMARY KEY,

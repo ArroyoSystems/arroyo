@@ -1,8 +1,6 @@
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::ErasedConnector;
-use arroyo_rpc::api_types::connections::{
-    ConnectionSchema, ConnectionType, FieldType, SourceField, TestSourceMessage,
-};
+use arroyo_rpc::api_types::connections::{ConnectionType, FieldType, SourceField};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_types::string_to_map;
 use reqwest::Client;
@@ -13,15 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
-use tracing::warn;
 
 pub mod blackhole;
 pub mod confluent;
 pub mod filesystem;
 pub mod impulse;
 pub mod kafka;
-pub mod kinesis;
 pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
@@ -40,10 +35,8 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(blackhole::BlackholeConnector {}),
         Box::new(confluent::ConfluentConnector {}),
         Box::new(filesystem::FileSystemConnector {}),
-        Box::new(filesystem::iceberg::IcebergConnector {}),
         Box::new(impulse::ImpulseConnector {}),
         Box::new(kafka::KafkaConnector {}),
-        Box::new(kinesis::KinesisConnector {}),
         Box::new(mqtt::MqttConnector {}),
         Box::new(nats::NatsConnector {}),
         Box::new(nexmark::NexmarkConnector {}),
@@ -64,10 +57,11 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
 #[derive(Serialize, Deserialize)]
 pub struct EmptyConfig {}
 
-pub(crate) async fn send(tx: &mut Sender<TestSourceMessage>, msg: TestSourceMessage) {
-    if tx.send(msg).await.is_err() {
-        warn!("Test API rx closed while sending message");
-    }
+pub(crate) async fn send(
+    tx: &mut tokio::sync::mpsc::Sender<arroyo_rpc::api_types::connections::TestSourceMessage>,
+    message: arroyo_rpc::api_types::connections::TestSourceMessage,
+) {
+    tx.send(message).await.unwrap();
 }
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
@@ -203,5 +197,15 @@ mod test {
     fn fluvio_connector_is_not_registered() {
         assert!(connector_for_type("fluvio").is_none());
         assert!(!connectors().contains_key("fluvio"));
+    }
+
+    #[test]
+    fn removed_connectors_are_not_registered() {
+        let connectors = connectors();
+
+        assert!(connectors.contains_key("confluent"));
+        assert!(connectors.contains_key("kafka"));
+        assert!(!connectors.contains_key("iceberg"));
+        assert!(!connectors.contains_key("kinesis"));
     }
 }

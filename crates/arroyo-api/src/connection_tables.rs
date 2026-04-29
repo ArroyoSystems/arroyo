@@ -13,9 +13,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 
-use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::connector_for_type;
-use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_formats::{avro, json, proto};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
@@ -28,6 +26,9 @@ use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
 };
+
+use arroyo_connectors::confluent::ConfluentProfile;
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 
 use crate::rest::AppState;
 use crate::rest_utils::{

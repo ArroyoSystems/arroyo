@@ -17,6 +17,6 @@ Run the same categories of checks that CI enforces before committing.
 | Category | Commands |
 | --- | --- |
 | Formatter | `cargo fmt -- --check` |
-| Linter | `cargo clippy --all-features --all-targets --workspace -- -D warnings` |
-| Compiler | `cargo build --all-features` |
-| Tests | `cargo nextest run -E 'kind(lib)' --all-features` |
+| Linter | `cargo clippy --all-targets --workspace -- -D warnings` |
+| Tests | `cargo nextest run -E 'kind(lib)'` |
+| Compiler | `cargo build` |

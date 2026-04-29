@@ -3,9 +3,6 @@ name = "arroyo-worker"
 version = "0.16.0-dev"
 edition = "2024"
 
-[features]
-default = []
-
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-state = { path = "../arroyo-state" }

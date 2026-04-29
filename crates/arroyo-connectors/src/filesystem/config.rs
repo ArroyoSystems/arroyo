@@ -1,20 +1,15 @@
-use crate::filesystem::sink::iceberg::transforms;
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
 use arroyo_storage::BackendConfig;
 use core::slice::Iter;
-use datafusion::common::{
-    DFSchema, DataFusionError, Result, ScalarValue, exec_err, plan_datafusion_err, plan_err,
-};
+use datafusion::common::{DataFusionError, Result, ScalarValue, plan_datafusion_err, plan_err};
 use datafusion::logical_expr::sqlparser::ast::Function;
 use datafusion::prelude::{Expr, col, concat, lit, to_char};
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::{
     Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
 };
-use datafusion_expr::ExprSchemable;
-use iceberg::spec::{PartitionSpec, SchemaRef};
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -538,32 +533,6 @@ pub enum IcebergCatalog {
     Rest(IcebergRestCatalog),
 }
 
-/// Main Iceberg profile (wraps the catalog).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IcebergProfile {
-    pub catalog: IcebergCatalog,
-}
-
-impl FromOpts for IcebergProfile {
-    fn from_opts(opts: &mut ConnectorOptions) -> std::result::Result<Self, DataFusionError> {
-        let catalog_type = opts.pull_str("catalog.type")?;
-        let warehouse = opts.pull_opt_str("catalog.warehouse")?;
-        match catalog_type.as_str() {
-            "rest" => Ok(Self {
-                catalog: IcebergCatalog::Rest(IcebergRestCatalog {
-                    url: opts.pull_str("catalog.rest.url")?,
-                    warehouse,
-                    token: opts.pull_opt_str("catalog.rest.token")?.map(VarStr::new),
-                }),
-            }),
-            s => {
-                plan_err!("unsupported Iceberg catalog.type '{}'", s)
-            }
-        }
-    }
-}
-
 /// Iceberg partitioning transforms
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "transform", rename_all = "snake_case")]
@@ -597,23 +566,6 @@ impl Transform {
             Transform::Day => "day",
             Transform::Hour => "hour",
             Transform::Void => "void",
-        }
-    }
-}
-
-impl From<Transform> for iceberg::spec::Transform {
-    fn from(value: Transform) -> Self {
-        use iceberg::spec::Transform as ITransform;
-
-        match value {
-            Transform::Identity => ITransform::Identity,
-            Transform::Bucket { arg0: n } => ITransform::Bucket(n),
-            Transform::Truncate { arg0: width } => ITransform::Truncate(width),
-            Transform::Year => ITransform::Year,
-            Transform::Month => ITransform::Month,
-            Transform::Day => ITransform::Day,
-            Transform::Hour => ITransform::Hour,
-            Transform::Void => ITransform::Void,
         }
     }
 }
@@ -798,69 +750,9 @@ impl FromOpts for IcebergPartitioning {
 }
 
 impl IcebergPartitioning {
-    pub fn as_partition_spec(&self, schema: SchemaRef) -> Result<PartitionSpec, iceberg::Error> {
-        let mut builder = PartitionSpec::builder(schema.clone());
-
-        for f in &self.fields {
-            builder = builder.add_partition_field(&f.field, f.name(), f.transform_fn.into())?;
-        }
-
-        builder.build()
-    }
-
     pub fn partition_expr(&self, schema: &Schema) -> Result<Option<Vec<Expr>>, DataFusionError> {
-        let exprs: Result<Vec<_>, DataFusionError> = self
-            .fields
-            .iter()
-            .map(|f| {
-                Ok(match f.transform_fn {
-                    Transform::Identity => transforms::fns::ice_identity(col(&f.field)),
-                    Transform::Bucket { arg0 } => {
-                        if arg0 == 0 {
-                            return exec_err!(
-                                "in bucket({}, {}) second argument is invalid, must be positive",
-                                f.field,
-                                arg0
-                            );
-                        }
-                        transforms::fns::ice_bucket(col(&f.field), lit(arg0))
-                    }
-                    Transform::Truncate { arg0: width } => {
-                        if width == 0 {
-                            return exec_err!(
-                                "in truncate({}, {}) second argument is invalid, must be positive",
-                                f.field,
-                                width
-                            );
-                        }
-                        transforms::fns::ice_bucket(col(&f.field), lit(width))
-                    }
-                    Transform::Year => transforms::fns::ice_year(col(&f.field)),
-                    Transform::Month => transforms::fns::ice_month(col(&f.field)),
-                    Transform::Day => transforms::fns::ice_day(col(&f.field)),
-                    Transform::Hour => transforms::fns::ice_hour(col(&f.field)),
-                    Transform::Void => lit(ScalarValue::Null),
-                })
-            })
-            .collect();
-
-        let exprs = exprs?;
-
-        let dfschema = DFSchema::try_from(schema.clone())?;
-
-        for (expr, field) in exprs.iter().zip(&self.fields) {
-            schema.field_with_name(&field.field)?;
-
-            if expr.data_type_and_nullable(&dfschema).is_err() {
-                return exec_err!("partition transform {} has invalid types", field);
-            }
-        }
-
-        if exprs.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(exprs))
-        }
+        let _ = schema;
+        Ok(None)
     }
 }
 
@@ -923,27 +815,6 @@ impl FromOpts for IcebergSink {
             file_naming: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
             version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
-        })
-    }
-}
-
-/// Wrapper allowing future extension of Iceberg table types.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum IcebergTable {
-    Sink(IcebergSink),
-}
-
-impl FromOpts for IcebergTable {
-    fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
-        Ok(match opts.pull_str("type")?.as_str() {
-            "source" => {
-                return plan_err!("Iceberg sources are not yet supported");
-            }
-            "sink" => IcebergTable::Sink(opts.pull_struct()?),
-            _ => {
-                return plan_err!("type must be 'sink'");
-            }
         })
     }
 }

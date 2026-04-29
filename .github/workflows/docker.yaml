@@ -8,6 +8,7 @@ on:
       - '*docker*'
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*' # Semver matching pattern with optional suffix
+  workflow_call:
 
 permissions:
   contents: read
@@ -67,6 +68,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             GIT_SHA=${{ github.sha }}
+            FEATURES=
           push: ${{ github.event_name != 'pull_request' }}
           cache-from: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
           cache-to: type=registry,ref=ghcr.io/${{ steps.prepare.outputs.image_namespace }}/arroyo-builder:buildcache-${{ matrix.arch }}
