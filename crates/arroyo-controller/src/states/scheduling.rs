@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use std::time::SystemTime;
 use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{debug, error, info, warn};
@@ -23,11 +24,8 @@ use crate::{
     schedulers::StartPipelineReq,
     states::{fatal, StateError},
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::checkpoint_protocol::{
-    get_checkpoint_manifest, CurrentGeneration, GenerationManifest,
-};
 use arroyo_rpc::config::{config, JobControllerMode};
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc_channel_builder;
@@ -37,7 +35,11 @@ use arroyo_state::{
     BackingStore,
     StateBackend,
 };
-use arroyo_worker::job_controller::committing_state::CommittingState;
+use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::store::put_json;
+use arroyo_state_protocol::types::{CheckpointRef, CurrentGeneration, Generation};
+use arroyo_state_protocol::workflow::{initialize_generation, GenerationInitialization, GenerationRecovery, InitializeGenerationRequest};
+use arroyo_worker::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {
@@ -403,7 +405,7 @@ async fn get_checkpoint_info_legacy<'a>(
                     }
                 }
             }
-            committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
+            committing_state = Some(CommittingState::new(CheckpointIdOrRef::CheckpointId(id), commit_subtasks, committing_data));
         }
 
         if let Err(err) = StateBackend::write_checkpoint_metadata(metadata).await {
@@ -419,81 +421,42 @@ async fn get_checkpoint_info_legacy<'a>(
     Ok((state, checkpoint_info, committing_state))
 }
 
-async fn load_checkpoint_info<'a>(
-    ctx: &'a JobContext<'a>,
-) -> anyhow::Result<Option<CheckpointInfo>> {
-    let provider = get_storage_provider().await?;
-    let Some(generation_manifest) = GenerationManifest::resolve_latest(
-        &provider,
-        &ctx.pipeline_id,
-        &ctx.config.id,
-        ctx.status.generation,
-    )
-    .await?
-    else {
-        return Ok(None);
-    };
-
-    let Some(checkpoint_path) = generation_manifest.recovery_ref() else {
-        return Ok(None);
-    };
-
-    let checkpoint_manifest = get_checkpoint_manifest(provider, checkpoint_path).await?;
-
-    let should_restore = ctx
-        .config
-        .ignore_state_before_epoch
-        .map(|threshold| checkpoint_manifest.epoch as i64 >= threshold as i64)
-        .unwrap_or(true); // If no threshold, restore any checkpoint
-
-    Ok(if should_restore {
-        info!(
-            message = "restoring checkpoint",
-            job_id = *ctx.config.id,
-            epoch = checkpoint_manifest.epoch,
-            min_epoch = checkpoint_manifest.min_epoch
-        );
-
-        Some(CheckpointInfo {
-            id: checkpoint_path.to_string(),
-            epoch: checkpoint_manifest.epoch as u32,
-            min_epoch: checkpoint_manifest.min_epoch as u32,
-            needs_commits: checkpoint_manifest.needs_commit,
-        })
-    } else {
-        info!(
-            message = "skipping checkpoint due to ignore_state_before_epoch threshold",
-            job_id = *ctx.config.id,
-            checkpoint_epoch = checkpoint_manifest.epoch,
-            threshold = ctx.config.ignore_state_before_epoch.unwrap()
-        );
-        None
-    })
-}
-
 async fn get_and_register_checkpoint_info_leader<'a>(
     ctx: &'a JobContext<'a>,
-) -> anyhow::Result<Option<CheckpointInfo>> {
-    // in the future, this should likely move to the leader
-    let checkpoint_info = load_checkpoint_info(ctx).await?;
+) -> anyhow::Result<Option<CheckpointRef>> {
+    // in the future, this should likely move to the leader, but that will require rethinking how
+    // worker initialization works
+    let new_gen = initialize_generation(get_storage_provider().await?.as_ref(),
+                                        InitializeGenerationRequest {
+                                            pipeline_id: ctx.pipeline_id.clone(),
+                                            job_id: JobId(ctx.config.id.clone()),
+                                             generation: Generation(ctx.status.generation),
+                                             updated_at: SystemTime::now(),
+                                         }, true).await?;
 
-    // write the new generation manifest
-    let next_generation = GenerationManifest::new(
-        ctx.pipeline_id.to_string(),
-        ctx.config.id.to_string(),
-        ctx.status.generation,
-        checkpoint_info.as_ref().map(|c| c.id.clone()),
-    );
+    let checkpoint_ref = match new_gen {
+        GenerationInitialization::Initialized {
+            recovery: GenerationRecovery::NoCheckpoint, .. } => {
+            None
+        }
+        GenerationInitialization::Initialized {
+            recovery: GenerationRecovery::Ready { checkpoint_ref } | GenerationRecovery::ReplayCommit { checkpoint_ref}, .. } => {
+            Some(checkpoint_ref)
+        }
+        GenerationInitialization::StaleGeneration { .. } => {
+            unreachable!("cannot end up with stale generation given that we updated the generation\
+            instead of checking it");
+        }
+        GenerationInitialization::StopOrphaned { canonical_ref } => {
+            bail!("somehow ended up with an orphaned checkpoint during recovery... should not happen\
+            canonical_ref = {:?}", canonical_ref);
+        }
+        GenerationInitialization::Failed(failure) => {
+            bail!("failed while resolving restoration checkpoint: {:?}", failure);
+        }
+    };
 
-    let storage_provider = get_storage_provider().await?;
-
-    next_generation.write(storage_provider).await?;
-
-    // write the current generation file
-    let manifest = CurrentGeneration::new(&ctx.pipeline_id, &*ctx.config.id, ctx.status.generation);
-    manifest.write(storage_provider).await?;
-
-    Ok(checkpoint_info)
+    Ok(checkpoint_ref)
 }
 
 impl Scheduling {

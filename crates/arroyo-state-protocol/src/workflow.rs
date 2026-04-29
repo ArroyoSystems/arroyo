@@ -6,7 +6,7 @@ use crate::resolve::{
 };
 use crate::state::{CheckpointState, derive_checkpoint_state};
 use crate::store::{
-    CreateResult, ProtocolStore, StoreError, create_json, create_protobuf, put_json, read_json,
+    CreateResult, ProtocolStore, StoreError, create_json_if_not_exist, create_protobuf, put_json, read_json,
     read_protobuf,
 };
 use crate::types::{
@@ -14,7 +14,7 @@ use crate::types::{
     GenerationManifest, ProtocolError, checkpoint_parent_checkpoint_ref,
 };
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
-use arroyo_types::{JobId, PipelineId};
+use arroyo_types::{to_micros, JobId, PipelineId};
 
 /// Request to claim canonical ownership of a checkpoint's epoch.
 ///
@@ -63,7 +63,7 @@ pub struct InitializeGenerationRequest {
     pub pipeline_id: PipelineId,
     pub job_id: JobId,
     pub generation: Generation,
-    pub updated_at_micros: u64,
+    pub updated_at: SystemTime,
 }
 
 /// Checkpoint, if any, that a newly initialized generation should restore from.
@@ -81,7 +81,9 @@ pub enum GenerationInitialization {
         generation_manifest: GenerationManifest,
         recovery: GenerationRecovery,
     },
-    StaleGeneration,
+    StaleGeneration {
+        current_generation: Generation,
+    },
     StopOrphaned {
         canonical_ref: CheckpointRef,
     },
@@ -149,32 +151,38 @@ pub enum CommitCompletion {
     MissingCheckpoint { checkpoint_ref: CheckpointRef },
 }
 
-/// Initializes a newly current generation and writes its generation manifest.
-///
-/// Correct caller sequence:
-/// 1. The controller writes `current-generation.json` for `request.generation`.
-/// 2. The new leader calls this function.
-/// 3. If `Initialized`, restore according to `recovery` and only continue
-///    normal execution after any required commit replay completes.
+/// Initializes a new generation and writes its generation manifest.
 ///
 /// When older manifests point at orphaned checkpoints, this follows the epoch
 /// record to the canonical checkpoint so replacement generations do not wedge on
 /// the same losing manifest.
+/// 
+/// If `update_current_generation` is set, this method will write the current generation
+/// file. If not set, it will read the current generation and enforce conformance.
 pub async fn initialize_generation<S>(
     store: &S,
     request: InitializeGenerationRequest,
+    update_current_generation: bool,
 ) -> Result<GenerationInitialization, StoreError>
 where
     S: ProtocolStore + ?Sized,
 {
     let paths = ProtocolPaths::new(request.pipeline_id.clone(), request.job_id.clone());
-    let is_current_generation =
-        read_json::<_, CurrentGeneration>(store, &paths.current_generation())
-            .await?
-            .is_some_and(|current_generation| current_generation.generation == request.generation);
+    
+    if update_current_generation {
+        let current_generation = CurrentGeneration::new(
+            request.pipeline_id.clone(), request.job_id.clone(), request.generation, SystemTime::now()
+        );
+        put_json(store, &paths.current_generation(), &current_generation).await?;
+    } else {
+        let current_generation = read_json::<_, CurrentGeneration>(store, &paths.current_generation())
+            .await?;
 
-    if !is_current_generation {
-        return Ok(GenerationInitialization::StaleGeneration);
+        if let Some(cur) = &current_generation && cur.generation != request.generation {
+            return Ok(GenerationInitialization::StaleGeneration {
+                current_generation: cur.generation
+            });
+        }
     }
 
     let recovery = find_recovery_checkpoint(store, &paths, request.generation).await?;
@@ -199,7 +207,7 @@ where
         request.job_id,
         request.generation,
         base_checkpoint_ref,
-        request.updated_at_micros,
+        to_micros(request.updated_at),
     );
 
     put_json(
@@ -774,7 +782,7 @@ where
         request.created_at,
     )?;
 
-    match create_json(store, request.epoch_record_path, &record).await? {
+    match create_json_if_not_exist(store, request.epoch_record_path, &record).await? {
         CreateResult::Created => Ok(EpochClaimOutcome::Owned { record }),
         CreateResult::AlreadyExists(existing) => {
             if existing.checkpoint_ref == *request.checkpoint_ref {
@@ -812,7 +820,7 @@ where
 {
     validate_marker(marker, checkpoint)?;
 
-    match create_json(store, committed_marker_path, marker).await? {
+    match create_json_if_not_exist(store, committed_marker_path, marker).await? {
         CreateResult::Created => Ok(CommittedMarkerOutcome::Created),
         CreateResult::AlreadyExists(existing) => {
             validate_marker(&existing, checkpoint)?;

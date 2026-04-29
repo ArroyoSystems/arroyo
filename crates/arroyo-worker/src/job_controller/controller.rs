@@ -3,15 +3,15 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-
+use std::time::SystemTime;
 use anyhow::bail;
 use arroyo_rpc::checkpoints::CheckpointMetadataStore;
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
     JobStopMode, StopExecutionReq, StopMode, TaskAssignment, WorkerPhase,
 };
-use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::WorkerId;
+use arroyo_state::{get_storage_provider, BackingStore, StateBackend};
+use arroyo_types::{to_micros, WorkerId};
 use futures::future::try_join_all;
 
 use crate::job_controller::model::{
@@ -29,6 +29,9 @@ use tokio::time::interval;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::Request;
 use tracing::{error, info};
+use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
+use arroyo_state_protocol::workflow::{initialize_generation, GenerationInitialization, GenerationRecovery, InitializeGenerationRequest};
 
 const CHECKPOINT_ROWS_TO_KEEP: u32 = 10;
 
@@ -71,7 +74,7 @@ impl WorkerJobController {
         rx: Receiver<RunningMessage>,
         job_status: Arc<Mutex<JobStatus>>,
         checkpoint_interval: Duration,
-        restore_manifest: Option<CheckpointManifest>,
+        parent_ref: Option<CheckpointRef>,
     ) -> anyhow::Result<Self> {
         let mut worker_connects = HashMap::new();
         let mut workers = HashMap::new();
@@ -120,6 +123,54 @@ impl WorkerJobController {
         let status = JobControllerStatus { job_status };
         status.transition(rpc::JobState::JobRunning)?;
 
+        // this is also happening on the controller, so the generation manifest should already have
+        // been created -- ideally we'd just do it here, but the worker initialization process makes
+        // that challenging, because we need the restoration point to initialize the workers
+        let (generation_manifest, recovery) = match initialize_generation(
+            get_storage_provider().await?.as_ref(),
+            InitializeGenerationRequest {
+                pipeline_id: worker_context.pipeline_id.clone(),
+                job_id: worker_context.job_id.clone(),
+                generation: Generation(worker_context.generation),
+                updated_at: SystemTime::now(),
+            }).await? {
+            GenerationInitialization::Initialized { generation_manifest, recovery,} => {
+                (generation_manifest, recovery)
+            }
+            GenerationInitialization::StaleGeneration { current_generation } => {
+                // TODO: add more graceful error handling for these cases
+                bail!("failing leader on startup as we are stale — our generation {} but current is {}",
+                    worker_context.generation, current_generation.0);
+            }
+            GenerationInitialization::StopOrphaned { canonical_ref } => {
+                bail!("failing leader on startup as we are attempting to restore an orphaned \
+                (expected to be {:?})", canonical_ref);
+            }
+            GenerationInitialization::Failed(e) => {
+                bail!("failed to resolve generation manifest: {:?}", e);
+            }
+        };
+
+        match recovery {
+            GenerationRecovery::NoCheckpoint => {
+                // nothing to do -- make sure that we're not inconsistent with the controller /
+                // other workers
+                assert!(parent_ref.is_none(),
+                        "from controller, we believe that we should be restoring from {:?}, but \
+                        our own query of checkpoint state lacks a parent ref",
+                        parent_ref);
+            }
+            GenerationRecovery::Ready { checkpoint_ref } => {
+                if !parent_ref.as_ref().map(|p| p == *checkpoint_ref).unwrap_or(false) {
+                    panic!("from controller, we believe we should be restoring from {:?}, but\
+                    generation manifest has {:?}", parent_ref, checkpoint_ref);
+                }
+            }
+            GenerationRecovery::ReplayCommit { .. } => {
+                todo!("replay commits");
+            }
+        }
+
         Ok(Self {
             checkpoint_interval,
             model: RunningJobModel {
@@ -137,9 +188,12 @@ impl WorkerJobController {
                 program,
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
+                protocol_paths: ProtocolPaths::new(worker_context.pipeline_id.clone(), worker_context.job_id.clone()),
+                checkpoint_parent_ref: parent_ref,
                 checkpoint_spans: vec![],
                 worker_leader_mode: true,
                 finished_operators: vec![],
+                generation_manifest,
             },
             status,
             worker_context,

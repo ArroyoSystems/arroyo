@@ -13,7 +13,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-worker = { path = "../arroyo-worker" }
-
+arroyo-state-protocol = { path = "../arroyo-state-protocol" }
 tonic = {workspace = true}
 
 prost = {workspace = true}

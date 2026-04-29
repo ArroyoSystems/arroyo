@@ -30,6 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::mem;
 use std::net::SocketAddr;
+use std::os::unix::process::parent_id;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::net::TcpListener;
@@ -61,6 +62,9 @@ pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
 use uuid::Uuid;
+use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::store::read_protobuf;
+use arroyo_state_protocol::types::CheckpointRef;
 
 pub mod arrow;
 
@@ -246,7 +250,7 @@ impl WorkerState {
         min_epoch: u32,
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
-        restore_manifest: Option<CheckpointManifest>,
+        parent_ref: Option<CheckpointRef>,
     ) -> anyhow::Result<()> {
         // runs only on the leader
 
@@ -270,7 +274,7 @@ impl WorkerState {
             rx,
             self.job_status.clone(),
             checkpoint_interval,
-            restore_manifest,
+            parent_ref,
         )
         .await?
         .start(shutdown);
@@ -317,17 +321,6 @@ impl WorkerState {
 
         let (control_tx, control_rx) = channel(128);
 
-        let restore_manifest = if let Some(manifest_ref) = req.checkpoint_manifest_ref {
-            info!(
-                manifest_ref,
-                job_id = *self.worker_context.job_id,
-                "restoring checkpoint in leader mode"
-            );
-            Some(get_checkpoint_manifest(get_storage_provider().await?, &manifest_ref).await?)
-        } else {
-            None
-        };
-
         if req.is_leader {
             // TODO: the leader needs to load checkpoint metadata and figure out epochs/min epochs
             //  itself from object storage
@@ -338,7 +331,7 @@ impl WorkerState {
                 req.min_epoch,
                 &shutdown_guard,
                 Duration::from_micros(req.checkpoint_interval_micros),
-                restore_manifest.clone(),
+                req.checkpoint_manifest_ref.map(CheckpointRef),
             )
             .await?;
         }
@@ -351,6 +344,15 @@ impl WorkerState {
                     .take()
                     .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
             };
+            
+            let checkpoint_manifest = if let Some(parent_ref) = req.checkpoint_manifest_ref {
+                let parent_ref = CheckpointRef(parent_ref);
+                Some(read_protobuf::<_, CheckpointManifest>(
+                    get_storage_provider().await?.as_ref(), &parent_ref).await?
+                    .ok_or_else(|| anyhow!("could not find restoration checkpoint {:?}", parent_ref))?)
+            } else {
+                None
+            };
 
             let program = Program::from_logical(
                 &self.worker_context.job_id,
@@ -358,7 +360,7 @@ impl WorkerState {
                 &req.tasks,
                 registry,
                 req.restore_epoch,
-                restore_manifest,
+                checkpoint_manifest,
                 control_tx.clone(),
             )
             .await?;

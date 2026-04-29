@@ -14,7 +14,7 @@ use arroyo_rpc::grpc::rpc::{
     OperatorCheckpointMetadata, TaskCheckpointEventType,
 };
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use crate::job_controller::committing_state::CommittingState;
+use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use arroyo_state::parquet::ParquetBackend;
 use arroyo_state::{get_storage_provider, BackingStore, StateBackend};
 use arroyo_types::{JobId, PipelineId, WorkerId, to_micros};
@@ -77,7 +77,7 @@ impl RunningJobModel {
         {
             store
                 .update_checkpoint(UpdateCheckpointReq {
-                    checkpoint_id: checkpoint_state.checkpoint_id().to_string(),
+                    checkpoint_id: checkpoint_state.checkpoint_id.clone(),
                     operator_details: serde_json::to_value(&checkpoint_state.operator_details)
                         .unwrap(),
                     finish_time: None,
@@ -103,7 +103,7 @@ impl RunningJobModel {
         };
         store
             .update_checkpoint(UpdateCheckpointReq {
-                checkpoint_id: checkpoint_state.checkpoint_id().to_string(),
+                checkpoint_id: checkpoint_state.checkpoint_id.clone(),
                 operator_details: serde_json::to_value(&checkpoint_state.operator_details).unwrap(),
                 finish_time,
                 status,
@@ -403,7 +403,7 @@ impl RunningJobModel {
         Ok(())
     }
 
-    async fn finish_checkpoint_leader(&mut self) -> Result<()> {
+    async fn finish_checkpoint_leader(&mut self) -> anyhow::Result<()> {
         let state = self.checkpoint_state.take().unwrap();
         let storage = get_storage_provider().await?;
         match state {
@@ -415,7 +415,6 @@ impl RunningJobModel {
                     Self::start_or_get_spans_static(&mut self.checkpoint_spans, JobCheckpointEventType::WritingMetadata);
 
                 let metadata = checkpointing.build_metadata();
-                let committing_state = checkpointing.committing_state();
 
                 let manifest = CheckpointManifest {
                     pipeline_id,
@@ -425,7 +424,7 @@ impl RunningJobModel {
                     min_epoch: metadata.min_epoch as u64,
                     start_time: metadata.start_time,
                     finish_time: metadata.finish_time,
-                    needs_commit: !committing_state.done(),
+                    needs_commit: checkpointing.needs_commit(),
                     operators,
                     parent_checkpoint_ref: self.checkpoint_parent_ref.as_ref().map(|t| t.to_string()),
                 };
@@ -470,7 +469,7 @@ impl RunningJobModel {
                     } => {
                         (checkpoint_ref, epoch_record)
                     }
-                    r @ CheckpointPublication::StopOrphaned { .. } | r @ CheckpointPublication::StaleGeneration) => {
+                    r @ CheckpointPublication::StopOrphaned { .. } | r @ CheckpointPublication::StaleGeneration => {
                         bail!("this generation ({}) is no longer permitted to checkpoint: {:?}", self.generation, r);
                     }
                     CheckpointPublication::Failed(f) => {
@@ -478,27 +477,32 @@ impl RunningJobModel {
                     }
                 };
 
-                let committing_data = committing_state.committing_data();
-                self.checkpoint_state =
-                    Some(CheckpointingOrCommittingState::Committing(committing_state));
+                let commit = checkpointing.into_commit(
+                    CheckpointIdOrRef::CheckpointRef(checkpoint_ref.clone(), epoch_record.clone()),
+                );
+
+                let committing_data = commit.committing_data();
+
                 info!(
                     message = "Committing checkpoint",
                     job_id = *self.job_id,
                     epoch = self.epoch,
                     generaiton = self.generation,
-                    checkpoint_ref = checkpoint_ref,
+                    checkpoint_ref = checkpoint_ref.as_str(),
                 );
 
                 self.start_or_get_span(JobCheckpointEventType::Committing);
 
-                match prepare_commit(storage.as_ref(), &checkpoint_ref, manifest, Some(&epoch_record), true).await? {
+                match prepare_commit(storage.as_ref(), &checkpoint_ref, manifest, Some(epoch_record), true).await? {
                     CommitAuthorization::Authorized { .. } => {
                         // commit to workers
                         for worker in self.workers.values_mut() {
                             worker
                                 .connect
+
                                 .commit(Request::new(CommitReq {
                                     epoch: self.epoch,
+                                    // TODO: this is pretty expensive
                                     committing_data: committing_data.clone(),
                                 }))
                                 .await?;
@@ -518,20 +522,28 @@ impl RunningJobModel {
                     }
                     CommitAuthorization::NotCanonical { checkpoint_ref } => {
                         bail!("attempted to commit non-canonical checkpoint {checkpoint_ref}, \
-                        intentionally failing; canonical checkpoint is {canonical_ref}")
+                        intentionally failing")
                     }
                     CommitAuthorization::MissingCheckpoint { checkpoint_ref } => {
                         bail!("checkpoint {checkpoint_ref} was missing when attempting to commit!");
                     }
                 }
+
+                self.checkpoint_state =
+                    Some(CheckpointingOrCommittingState::Committing(commit));
             }
             CheckpointingOrCommittingState::Committing(committing) => {
                 self.start_or_get_span(JobCheckpointEventType::Committing)
                     .finish();
                 self.start_or_get_span(JobCheckpointEventType::Checkpointing)
                     .finish();
+
+                let (checkpoint_ref, epoch_record) = committing.checkpoint_ref();
                 
-                complete_commit(storage.as_ref(), )
+                complete_commit(storage.as_ref(), checkpoint_ref,
+                                Generation(self.generation),
+                                Some(epoch_record.clone()),
+                                true).await?;
                 
                 self.last_checkpoint = Instant::now();
                 self.checkpoint_state = None;
@@ -551,10 +563,9 @@ impl RunningJobModel {
         let state = self.checkpoint_state.take().unwrap();
         match state {
             CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
-                let metadata_span = self.start_or_get_spans_static(JobCheckpointEventType::WritingMetadata);
+                let metadata_span = self.start_or_get_span(JobCheckpointEventType::WritingMetadata);
 
                 let metadata = checkpointing.build_metadata();
-                let committing_state = checkpointing.committing_state();
 
                 StateBackend::write_checkpoint_metadata(metadata).await?;
 
@@ -566,7 +577,7 @@ impl RunningJobModel {
                     .unwrap_or(Duration::ZERO)
                     .as_secs_f32();
                 // shortcut if committing is unnecessary
-                if committing_state.done() {
+                if !checkpointing.needs_commit() {
                     self.start_or_get_span(JobCheckpointEventType::Checkpointing)
                         .finish();
                     self.update_checkpoint_in_db(
@@ -594,9 +605,8 @@ impl RunningJobModel {
                     )
                         .await?;
 
-                    let committing_data = committing_state.committing_data();
-                    self.checkpoint_state =
-                        Some(CheckpointingOrCommittingState::Committing(committing_state));
+                    let id = CheckpointIdOrRef::CheckpointId(checkpointing.checkpoint_id.clone());
+                    let committing = checkpointing.into_commit(id);
                     info!(
                             message = "Committing checkpoint",
                             job_id = *self.job_id,
@@ -610,10 +620,13 @@ impl RunningJobModel {
                             .connect
                             .commit(Request::new(CommitReq {
                                 epoch: self.epoch,
-                                committing_data: committing_data.clone(),
+                                committing_data: committing.committing_data().clone(),
                             }))
                             .await?;
                     }
+
+                    self.checkpoint_state =
+                        Some(CheckpointingOrCommittingState::Committing(committing));
                 }
             }
             CheckpointingOrCommittingState::Committing(committing) => {

@@ -8,7 +8,7 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::grpc::{api, rpc};
 use arroyo_rpc::{TaskEventSpans, get_event_spans, grpc, log_trace_event};
-use crate::job_controller::committing_state::CommittingState;
+use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
@@ -18,10 +18,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, warn};
 
+pub type CommitData = HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>;
+
 #[derive(Debug, Clone)]
 pub struct CheckpointState {
     job_id: Arc<String>,
-    checkpoint_id: String,
+    pub checkpoint_id: String,
     epoch: u32,
     min_epoch: u32,
     start_time: SystemTime,
@@ -31,7 +33,7 @@ pub struct CheckpointState {
     operator_state: HashMap<String, OperatorState>,
     subtasks_to_commit: HashSet<(String, u32)>,
     // map of operator_id -> table_name -> subtask_index -> Data
-    commit_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
+    pub commit_data: CommitData,
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
@@ -206,10 +208,6 @@ impl CheckpointState {
         ]);
     }
 
-    pub fn checkpoint_id(&self) -> &str {
-        &self.checkpoint_id
-    }
-
     pub fn start_time(&self) -> SystemTime {
         self.start_time
     }
@@ -267,7 +265,7 @@ impl CheckpointState {
             });
         Ok(())
     }
-
+    
     pub fn checkpoint_finished(
         &mut self,
         c: TaskCheckpointCompletedReq,
@@ -412,15 +410,7 @@ impl CheckpointState {
     pub fn done(&self) -> bool {
         self.operators == self.operators_checkpointed
     }
-
-    pub fn committing_state(&self) -> CommittingState {
-        CommittingState::new(
-            self.checkpoint_id.clone(),
-            self.subtasks_to_commit.clone(),
-            self.commit_data.clone(),
-        )
-    }
-
+    
     pub fn build_metadata(&mut self) -> CheckpointMetadata {
         let finish_time = SystemTime::now();
 
@@ -476,4 +466,14 @@ impl CheckpointState {
                 .collect(),
         }
     }
+    
+    pub fn needs_commit(&self) -> bool {
+        !self.subtasks_to_commit.is_empty()
+    }
+    
+    pub fn into_commit(self, checkpoint_id: CheckpointIdOrRef) -> CommittingState {
+        CommittingState::new(checkpoint_id, self.subtasks_to_commit, self.commit_data)
+    }
 }
+
+

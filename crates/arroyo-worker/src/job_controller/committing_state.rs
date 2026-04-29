@@ -1,32 +1,54 @@
 use std::collections::{HashMap, HashSet};
 use arroyo_rpc::grpc::rpc::{OperatorCommitData, TableCommitData};
-use arroyo_state_protocol::types::CheckpointRef;
+use arroyo_state_protocol::types::{CheckpointRef, EpochRecord};
+use crate::job_controller::checkpoint_state::CommitData;
+
+pub enum CheckpointIdOrRef {
+    // used by database-backed mode, checkpoint metadata v0
+    CheckpointId(String),
+    // used by checkpoint metadata v1
+    CheckpointRef(CheckpointRef, EpochRecord),
+}
 
 pub struct CommittingState {
-    checkpoint_ref: CheckpointRef,
+    checkpoint_id: CheckpointIdOrRef,
     subtasks_to_commit: HashSet<(String, u32)>,
-    committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
+    committing_data: CommitData,
 }
 
 impl CommittingState {
     pub fn new(
-        checkpoint_ref: CheckpointRef,
+        checkpoint_id: CheckpointIdOrRef,
         subtasks_to_commit: HashSet<(String, u32)>,
-        committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
+        committing_data: CommitData,
     ) -> Self {
         Self {
-            checkpoint_ref,
+            checkpoint_id,
             subtasks_to_commit,
             committing_data,
         }
     }
 
     pub fn checkpoint_id(&self) -> &str {
-        self.checkpoint_ref.as_str()
+        match &self.checkpoint_id {
+            CheckpointIdOrRef::CheckpointId(id) => {
+                id.as_str()
+            }
+            CheckpointIdOrRef::CheckpointRef(_, _) => {
+                panic!("asked for checkpoint id in leader mode, which is not allowed");
+            }
+        }
     }
     
-    pub fn checkpoint_ref(&self) -> &CheckpointRef {
-        &self.checkpoint_ref
+    pub fn checkpoint_ref(&self) -> (&CheckpointRef, &EpochRecord) {
+        match &self.checkpoint_id {
+            CheckpointIdOrRef::CheckpointId(_) => {
+                panic!("asked for checkpoint ref in controller mode, which is not allowed");
+            }
+            CheckpointIdOrRef::CheckpointRef(a, b) => {
+                (a, b)
+            }
+        }
     }
     
     pub fn subtask_committed(&mut self, operator_id: String, subtask_index: u32) {

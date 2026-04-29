@@ -4,14 +4,13 @@ use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::UInt64Type;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_metrics::{QueueGauges, TaskCounters, register_queue_gauge};
-use arroyo_rpc::checkpoint_protocol::MetadataOrManifest;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, MetadataField, get_hasher};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, MetadataField, get_hasher, MetadataOrManifest};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, Watermark,

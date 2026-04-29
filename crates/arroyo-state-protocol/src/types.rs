@@ -1,10 +1,11 @@
 use std::fmt::{Display, Formatter};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 /// Protobuf checkpoint manifest used as the publication point for checkpoint data.
 pub use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_types::{to_micros, JobId, PipelineId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use crate::ProtocolPaths;
 
 /// Current version for JSON protocol records written by this crate.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -156,16 +157,15 @@ impl CurrentGeneration {
         pipeline_id: PipelineId,
         job_id: JobId,
         generation: Generation,
-        generation_manifest_ref: CheckpointRef,
-        updated_at_micros: u64,
+        updated_at: SystemTime,
     ) -> Self {
         Self {
             version: PROTOCOL_VERSION,
+            generation_manifest_ref: ProtocolPaths::new(pipeline_id.clone(), job_id.clone()).generation_manifest(generation),            
             pipeline_id,
             job_id,
             generation,
-            generation_manifest_ref,
-            updated_at_micros,
+            updated_at_micros: to_micros(updated_at),
         }
     }
 }

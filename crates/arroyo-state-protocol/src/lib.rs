@@ -100,7 +100,7 @@ mod tests {
     use crate::state::{CheckpointState, derive_checkpoint_state};
     use crate::store::tests::MemoryProtocolStore;
     use crate::store::{
-        CreateResult, StoreError, create_json, put_json, put_protobuf, read_json, read_protobuf,
+        CreateResult, StoreError, create_json_if_not_exist, put_json, put_protobuf, read_json, read_protobuf,
     };
     use crate::types::{
         CommittedMarker, CurrentGeneration, EpochRecord, GenerationManifest, ProtocolError,
@@ -1171,12 +1171,12 @@ mod tests {
         let record = epoch_record(checkpoint_ref, &checkpoint);
         let epoch_record_path = paths.epoch_record(Epoch(1));
 
-        let created = create_json(&store, &epoch_record_path, &record)
+        let created = create_json_if_not_exist(&store, &epoch_record_path, &record)
             .await
             .unwrap();
         assert_eq!(created, CreateResult::Created);
 
-        let existing = create_json(&store, &epoch_record_path, &record)
+        let existing = create_json_if_not_exist(&store, &epoch_record_path, &record)
             .await
             .unwrap();
         assert_eq!(existing, CreateResult::AlreadyExists(record));

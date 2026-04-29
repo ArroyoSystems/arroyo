@@ -27,7 +27,7 @@ use crate::{
     tables::global_keyed_map::GlobalKeyedTable,
 };
 use crate::{CheckpointMessage, TableData};
-use arroyo_rpc::checkpoint_protocol::MetadataOrManifest;
+use arroyo_rpc::MetadataOrManifest;
 use arroyo_rpc::errors::{DataflowResult, StateError};
 use arroyo_rpc::grpc::rpc::OperatorCheckpointMetadata;
 use tracing::{debug, error, info, warn};

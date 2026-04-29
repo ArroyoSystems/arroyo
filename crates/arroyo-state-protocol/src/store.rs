@@ -106,7 +106,7 @@ where
 ///
 /// Use this for immutable JSON protocol objects such as epoch records and
 /// commit markers.
-pub async fn create_json<S, T>(
+pub async fn create_json_if_not_exist<S, T>(
     store: &S,
     path: &CheckpointRef,
     value: &T,
