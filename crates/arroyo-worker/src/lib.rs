@@ -249,7 +249,7 @@ impl WorkerState {
         min_epoch: u64,
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
-        parent_ref: Option<CheckpointRef>,
+        parent: Option<(CheckpointRef, CheckpointManifest)>,
     ) -> anyhow::Result<()> {
         // runs only on the leader
 
@@ -273,7 +273,7 @@ impl WorkerState {
             rx,
             self.job_status.clone(),
             checkpoint_interval,
-            parent_ref,
+            parent,
         )
         .await?
         .start(shutdown);
@@ -325,6 +325,20 @@ impl WorkerState {
             .map(CheckpointRef::new)
             .transpose()?;
 
+        let parent = if let Some(parent_ref) = parent_ref {
+            let manifest = read_protobuf::<_, CheckpointManifest>(
+                get_storage_provider().await?.as_ref(),
+                &parent_ref,
+            ).await?
+                .ok_or_else(|| {
+                    anyhow!("could not find restoration checkpoint {:?}", parent_ref)
+                })?;
+
+            Some((parent_ref, manifest))
+        } else {
+            None
+        };
+
         if req.is_leader {
             // TODO: the leader needs to load checkpoint metadata and figure out epochs/min epochs
             //  itself from object storage
@@ -335,7 +349,7 @@ impl WorkerState {
                 req.min_epoch,
                 &shutdown_guard,
                 Duration::from_micros(req.checkpoint_interval_micros),
-                parent_ref.clone(),
+                parent.clone(),
             )
             .await?;
         }
@@ -347,21 +361,6 @@ impl WorkerState {
                     .unwrap()
                     .take()
                     .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
-            };
-
-            let checkpoint_manifest = if let Some(parent_ref) = parent_ref {
-                Some(
-                    read_protobuf::<_, CheckpointManifest>(
-                        get_storage_provider().await?.as_ref(),
-                        &parent_ref,
-                    )
-                    .await?
-                    .ok_or_else(|| {
-                        anyhow!("could not find restoration checkpoint {:?}", parent_ref)
-                    })?,
-                )
-            } else {
-                None
             };
 
             let file_path_layout = if req.wait_for_leader || req.is_leader {
@@ -379,7 +378,7 @@ impl WorkerState {
                 &req.tasks,
                 registry,
                 req.restore_epoch,
-                checkpoint_manifest,
+                parent.map(|(_, m)| m),
                 file_path_layout,
                 control_tx.clone(),
             )
@@ -865,6 +864,7 @@ impl WorkerGrpc for WorkerServer {
         let sender_commit_map_pairs = {
             let phase = self.state.phase.lock().unwrap();
             let engine_state = match &*phase {
+                WorkerExecutionPhase::WaitingOnLeader { engine_state, .. } |
                 WorkerExecutionPhase::Running(engine_state) => engine_state,
                 _ => {
                     return Err(Status::failed_precondition("Worker not in running phase"));

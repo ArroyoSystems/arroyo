@@ -1,3 +1,4 @@
+use std::any::Any;
 use crate::ProtocolPaths;
 use crate::resolve::{
     EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure, resolve_candidate,
@@ -128,6 +129,7 @@ pub enum CommitAuthorization {
     Authorized {
         checkpoint_ref: CheckpointRef,
         checkpoint: CheckpointManifest,
+        epoch_record: EpochRecord,
     },
     AlreadyCommitted {
         checkpoint_ref: CheckpointRef,
@@ -325,13 +327,13 @@ where
     match derive_checkpoint_state(
         checkpoint_ref,
         Some(&checkpoint),
-        epoch_record.as_ref(),
+        epoch_record,
         committed_marker.as_ref(),
     )? {
         CheckpointState::Ready => Ok(RecoverySearch::Found(GenerationRecovery::Ready {
             checkpoint_ref: checkpoint_ref.clone(),
         })),
-        CheckpointState::Committing => {
+        CheckpointState::Committing { .. } => {
             Ok(RecoverySearch::Found(GenerationRecovery::ReplayCommit {
                 checkpoint_ref: checkpoint_ref.clone(),
             }))
@@ -385,7 +387,7 @@ where
     match derive_checkpoint_state(
         checkpoint_ref,
         Some(&checkpoint),
-        epoch_record.as_ref(),
+        epoch_record,
         committed_marker.as_ref(),
     )? {
         CheckpointState::Invisible => unreachable!("checkpoint was read above"),
@@ -403,9 +405,10 @@ where
         CheckpointState::Ready => Ok(CommitAuthorization::NoCommitNeeded {
             checkpoint_ref: checkpoint_ref.clone(),
         }),
-        CheckpointState::Committing => Ok(CommitAuthorization::Authorized {
+        CheckpointState::Committing { epoch_record } => Ok(CommitAuthorization::Authorized {
             checkpoint_ref: checkpoint_ref.clone(),
             checkpoint,
+            epoch_record,
         }),
     }
 }
@@ -415,81 +418,32 @@ where
 /// This optionally rechecks commit authorization before writing the marker. Call it only
 /// after all required workers report successful external commit. The write is
 /// conditional and idempotent for retries of the same checkpoint.
-///
-/// If the caller has previously written an epoch record, it can pass that in to avoid re-requesting
-/// from storage.
 pub async fn complete_commit<S>(
     store: &S,
     checkpoint_ref: &CheckpointRef,
+    epoch_record: &EpochRecord,
     writer_generation: Generation,
-    epoch_record: Option<EpochRecord>,
-    assume_not_committed: bool,
-) -> Result<CommitCompletion, StoreError>
+) -> Result<CommittedMarkerOutcome, StoreError>
 where
     S: ProtocolStore + ?Sized,
 {
-    let Some(checkpoint): Option<CheckpointManifest> = read_protobuf(store, checkpoint_ref).await?
-    else {
-        return Ok(CommitCompletion::MissingCheckpoint {
-            checkpoint_ref: checkpoint_ref.clone(),
-        });
-    };
-
     let paths = ProtocolPaths::new(
-        PipelineId::new(&checkpoint.pipeline_id),
-        JobId::new(&checkpoint.job_id),
+        epoch_record.pipeline_id.clone(),
+        epoch_record.job_id.clone(),
     );
-    let committed_marker_path = committed_marker_path(&paths, &checkpoint);
+    let committed_marker_path = paths.committed_marker(
+        epoch_record.generation, epoch_record.epoch);
 
-    match prepare_commit(
-        store,
-        checkpoint_ref,
-        checkpoint,
-        epoch_record,
-        assume_not_committed,
-    )
-    .await?
-    {
-        CommitAuthorization::Authorized {
-            checkpoint_ref,
-            checkpoint,
-        } => {
-            let marker = CommittedMarker::new(
-                PipelineId::new(&checkpoint.pipeline_id),
-                JobId::new(&checkpoint.job_id),
-                Epoch(checkpoint.epoch),
-                Generation(checkpoint.generation),
-                writer_generation,
-                checkpoint_ref.clone(),
-            );
+    let marker = CommittedMarker::new(
+        epoch_record.pipeline_id.clone(),
+        epoch_record.job_id.clone(),
+        epoch_record.epoch,
+        epoch_record.generation,
+        writer_generation,
+        checkpoint_ref.clone(),
+    );
 
-            match mark_committed(store, &committed_marker_path, &marker, &checkpoint).await? {
-                CommittedMarkerOutcome::Created => Ok(CommitCompletion::Created {
-                    checkpoint_ref: checkpoint_ref.clone(),
-                }),
-                CommittedMarkerOutcome::AlreadyCommitted => {
-                    Ok(CommitCompletion::AlreadyCommitted {
-                        checkpoint_ref: checkpoint_ref.clone(),
-                    })
-                }
-            }
-        }
-        CommitAuthorization::AlreadyCommitted { .. } => Ok(CommitCompletion::AlreadyCommitted {
-            checkpoint_ref: checkpoint_ref.clone(),
-        }),
-        CommitAuthorization::NoCommitNeeded { .. } => Ok(CommitCompletion::NoCommitNeeded {
-            checkpoint_ref: checkpoint_ref.clone(),
-        }),
-        CommitAuthorization::StopOrphaned { canonical_ref } => {
-            Ok(CommitCompletion::StopOrphaned { canonical_ref })
-        }
-        CommitAuthorization::NotCanonical { .. } => Ok(CommitCompletion::NotCanonical {
-            checkpoint_ref: checkpoint_ref.clone(),
-        }),
-        CommitAuthorization::MissingCheckpoint { .. } => Ok(CommitCompletion::MissingCheckpoint {
-            checkpoint_ref: checkpoint_ref.clone(),
-        }),
-    }
+    mark_committed(store, &committed_marker_path, &marker, &epoch_record).await
 }
 
 /// Publishes a completed checkpoint and claims its epoch record.
@@ -828,17 +782,17 @@ pub async fn mark_committed<S>(
     store: &S,
     committed_marker_path: &CheckpointRef,
     marker: &CommittedMarker,
-    checkpoint: &CheckpointManifest,
+    epoch_record: &EpochRecord,
 ) -> Result<CommittedMarkerOutcome, StoreError>
 where
     S: ProtocolStore + ?Sized,
 {
-    validate_marker(marker, checkpoint)?;
+    validate_marker(marker, epoch_record)?;
 
     match create_json_if_not_exist(store, committed_marker_path, marker).await? {
         CreateResult::Created => Ok(CommittedMarkerOutcome::Created),
         CreateResult::AlreadyExists(existing) => {
-            validate_marker(&existing, checkpoint)?;
+            validate_marker(&existing, epoch_record)?;
 
             if existing.checkpoint_ref == marker.checkpoint_ref {
                 Ok(CommittedMarkerOutcome::AlreadyCommitted)
@@ -851,9 +805,9 @@ where
 
 fn validate_marker(
     marker: &CommittedMarker,
-    checkpoint: &CheckpointManifest,
+    record: &EpochRecord,
 ) -> Result<(), ProtocolError> {
-    if *marker.job_id != checkpoint.job_id || marker.epoch.0 != checkpoint.epoch {
+    if marker.job_id != record.job_id || marker.epoch != record.epoch {
         return Err(ProtocolError::CommittedMarkerMismatch);
     }
 

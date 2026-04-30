@@ -17,7 +17,7 @@ pub enum CheckpointState {
     /// The checkpoint is canonical and safe to use for normal recovery.
     Ready,
     /// The checkpoint is canonical but still requires external commit replay.
-    Committing,
+    Committing { epoch_record: EpochRecord },
 }
 
 impl CheckpointState {
@@ -28,12 +28,12 @@ impl CheckpointState {
 
     /// Returns true when the checkpoint owns its epoch record.
     pub fn is_canonical(&self) -> bool {
-        matches!(self, Self::Ready | Self::Committing)
+        matches!(self, Self::Ready | Self::Committing { .. })
     }
 
     /// Returns true when recovery must replay external commit before continuing.
     pub fn requires_commit_replay(&self) -> bool {
-        matches!(self, Self::Committing)
+        matches!(self, Self::Committing { .. })
     }
 }
 
@@ -44,7 +44,7 @@ impl CheckpointState {
 pub fn derive_checkpoint_state(
     checkpoint_ref: &CheckpointRef,
     checkpoint: Option<&CheckpointManifest>,
-    epoch_record: Option<&EpochRecord>,
+    epoch_record: Option<EpochRecord>,
     committed_marker: Option<&CommittedMarker>,
 ) -> Result<CheckpointState, ProtocolError> {
     let Some(checkpoint) = checkpoint else {
@@ -69,7 +69,7 @@ pub fn derive_checkpoint_state(
         });
     }
 
-    validate_epoch_record_matches_checkpoint(checkpoint_ref, checkpoint, epoch_record)?;
+    validate_epoch_record_matches_checkpoint(checkpoint_ref, checkpoint, &epoch_record)?;
 
     if !checkpoint.needs_commit {
         return Ok(CheckpointState::Ready);
@@ -80,6 +80,6 @@ pub fn derive_checkpoint_state(
             validate_committed_marker_matches_checkpoint(checkpoint_ref, checkpoint, marker)?;
             Ok(CheckpointState::Ready)
         }
-        None => Ok(CheckpointState::Committing),
+        None => Ok(CheckpointState::Committing { epoch_record }),
     }
 }
