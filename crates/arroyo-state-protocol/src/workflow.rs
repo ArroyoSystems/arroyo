@@ -13,7 +13,6 @@ use crate::types::{
 };
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_types::{JobId, PipelineId, to_micros};
-use std::any::Any;
 use std::time::SystemTime;
 
 /// Request to claim canonical ownership of a checkpoint's epoch.

@@ -106,7 +106,7 @@ mod tests {
         CommittedMarker, CurrentGeneration, EpochRecord, GenerationManifest, ProtocolError,
     };
     use crate::workflow::{
-        CheckpointPublication, ClaimEpochRecordRequest, CommitAuthorization, CommitCompletion,
+        CheckpointPublication, ClaimEpochRecordRequest, CommitAuthorization,
         CommittedMarkerOutcome, GenerationInitialization, GenerationRecovery, GenerationResolution,
         InitializeGenerationRequest, PublishCheckpointRequest, claim_epoch_record, complete_commit,
         initialize_generation, mark_committed, prepare_commit, publish_checkpoint,
@@ -340,6 +340,7 @@ mod tests {
 
         let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
         let checkpoint = checkpoint_for_generation(Generation(1), 1, None, true);
+        let epoch_record = epoch_record(checkpoint_ref.clone(), &checkpoint);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
         let previous_manifest =
             generation_manifest_for_generation(Generation(1), None, Some(checkpoint_ref.clone()));
@@ -374,7 +375,10 @@ mod tests {
                     Some(checkpoint_ref.clone()),
                     456,
                 ),
-                recovery: GenerationRecovery::ReplayCommit { checkpoint_ref }
+                recovery: GenerationRecovery::ReplayCommit {
+                    checkpoint_ref,
+                    epoch_record,
+                }
             }
         );
     }
@@ -487,13 +491,10 @@ mod tests {
         put_protobuf(&store, &loser_ref, &loser_checkpoint)
             .await
             .unwrap();
-        put_json(
-            &store,
-            &paths.epoch_record(Epoch(1)),
-            &epoch_record(winner_ref.clone(), &winner_checkpoint),
-        )
-        .await
-        .unwrap();
+        let epoch_record = epoch_record(winner_ref.clone(), &winner_checkpoint);
+        put_json(&store, &paths.epoch_record(Epoch(1)), &epoch_record)
+            .await
+            .unwrap();
         put_json(
             &store,
             &paths.generation_manifest(Generation(2)),
@@ -555,13 +556,10 @@ mod tests {
         put_protobuf(&store, &loser_ref, &loser_checkpoint)
             .await
             .unwrap();
-        put_json(
-            &store,
-            &paths.epoch_record(Epoch(1)),
-            &epoch_record(winner_ref.clone(), &winner_checkpoint),
-        )
-        .await
-        .unwrap();
+        let epoch_record = epoch_record(winner_ref.clone(), &winner_checkpoint);
+        put_json(&store, &paths.epoch_record(Epoch(1)), &epoch_record)
+            .await
+            .unwrap();
         put_json(
             &store,
             &paths.generation_manifest(Generation(2)),
@@ -594,7 +592,8 @@ mod tests {
                     456,
                 ),
                 recovery: GenerationRecovery::ReplayCommit {
-                    checkpoint_ref: winner_ref
+                    checkpoint_ref: winner_ref,
+                    epoch_record,
                 }
             }
         );
@@ -655,9 +654,13 @@ mod tests {
         let checkpoint = checkpoint(1, None, false);
         let record = epoch_record(checkpoint_ref.clone(), &checkpoint);
 
-        let state =
-            derive_checkpoint_state(&checkpoint_ref, Some(&checkpoint), Some(&record), None)
-                .unwrap();
+        let state = derive_checkpoint_state(
+            &checkpoint_ref,
+            Some(&checkpoint),
+            Some(record.clone()),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(state, CheckpointState::Ready);
         assert!(state.is_canonical());
@@ -675,7 +678,7 @@ mod tests {
         let record = epoch_record(winner_ref.clone(), &checkpoint);
 
         let state =
-            derive_checkpoint_state(&loser_ref, Some(&checkpoint), Some(&record), None).unwrap();
+            derive_checkpoint_state(&loser_ref, Some(&checkpoint), Some(record), None).unwrap();
 
         assert_eq!(
             state,
@@ -693,17 +696,26 @@ mod tests {
         let checkpoint = checkpoint(1, None, true);
         let record = epoch_record(checkpoint_ref.clone(), &checkpoint);
 
-        let state =
-            derive_checkpoint_state(&checkpoint_ref, Some(&checkpoint), Some(&record), None)
-                .unwrap();
-        assert_eq!(state, CheckpointState::Committing);
+        let state = derive_checkpoint_state(
+            &checkpoint_ref,
+            Some(&checkpoint),
+            Some(record.clone()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            state,
+            CheckpointState::Committing {
+                epoch_record: record.clone()
+            }
+        );
         assert!(state.requires_commit_replay());
 
         let marker = committed_marker(checkpoint_ref.clone(), 1);
         let state = derive_checkpoint_state(
             &checkpoint_ref,
             Some(&checkpoint),
-            Some(&record),
+            Some(record),
             Some(&marker),
         )
         .unwrap();
@@ -773,7 +785,7 @@ mod tests {
             &manifest,
             &loser_ref,
             Some(&checkpoint),
-            Some(&record),
+            Some(record),
             None,
             ParentCheckpointStatus::NoParent,
             true,
@@ -801,14 +813,20 @@ mod tests {
             &manifest,
             &checkpoint_ref,
             Some(&checkpoint),
-            Some(&record),
+            Some(record.clone()),
             None,
             ParentCheckpointStatus::NoParent,
             true,
         )
         .unwrap();
 
-        assert_eq!(decision, ResolveDecision::ReplayCommit { checkpoint_ref });
+        assert_eq!(
+            decision,
+            ResolveDecision::ReplayCommit {
+                checkpoint_ref,
+                epoch_record: record,
+            }
+        );
     }
 
     #[test]
@@ -945,14 +963,15 @@ mod tests {
         let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
         let committed_marker_path = paths.committed_marker(Generation(1), Epoch(1));
         let checkpoint = checkpoint(1, None, true);
+        let record = epoch_record(checkpoint_ref.clone(), &checkpoint);
         let marker = committed_marker(checkpoint_ref, 1);
 
-        let outcome = mark_committed(&store, &committed_marker_path, &marker, &checkpoint)
+        let outcome = mark_committed(&store, &committed_marker_path, &marker, &record)
             .await
             .unwrap();
         assert_eq!(outcome, CommittedMarkerOutcome::Created);
 
-        let outcome = mark_committed(&store, &committed_marker_path, &marker, &checkpoint)
+        let outcome = mark_committed(&store, &committed_marker_path, &marker, &record)
             .await
             .unwrap();
         assert_eq!(outcome, CommittedMarkerOutcome::AlreadyCommitted);
@@ -966,14 +985,15 @@ mod tests {
         let loser_ref = paths.checkpoint_manifest(Generation(2), Epoch(1));
         let committed_marker_path = paths.committed_marker(Generation(1), Epoch(1));
         let checkpoint = checkpoint(1, None, true);
+        let record = epoch_record(winner_ref.clone(), &checkpoint);
         let winner_marker = committed_marker(winner_ref, 1);
         let loser_marker = committed_marker(loser_ref, 1);
 
-        mark_committed(&store, &committed_marker_path, &winner_marker, &checkpoint)
+        mark_committed(&store, &committed_marker_path, &winner_marker, &record)
             .await
             .unwrap();
 
-        let err = mark_committed(&store, &committed_marker_path, &loser_marker, &checkpoint)
+        let err = mark_committed(&store, &committed_marker_path, &loser_marker, &record)
             .await
             .unwrap_err();
 
@@ -989,6 +1009,7 @@ mod tests {
         let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
         let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
         let checkpoint = checkpoint(1, None, true);
+        let epoch_record = epoch_record(checkpoint_ref.clone(), &checkpoint);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
 
         let authorization =
@@ -1000,7 +1021,8 @@ mod tests {
             authorization,
             CommitAuthorization::Authorized {
                 checkpoint_ref,
-                checkpoint
+                checkpoint,
+                epoch_record,
             }
         );
     }
@@ -1102,18 +1124,14 @@ mod tests {
         let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
         let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
         let checkpoint = checkpoint(1, None, true);
+        let epoch_record = epoch_record(checkpoint_ref.clone(), &checkpoint);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
 
-        let completion = complete_commit(&store, &checkpoint_ref, Generation(2), None, false)
+        let completion = complete_commit(&store, &checkpoint_ref, &epoch_record, Generation(2))
             .await
             .unwrap();
 
-        assert_eq!(
-            completion,
-            CommitCompletion::Created {
-                checkpoint_ref: checkpoint_ref.clone()
-            }
-        );
+        assert_eq!(completion, CommittedMarkerOutcome::Created);
         let marker: CommittedMarker =
             read_json(&store, &paths.committed_marker(Generation(1), Epoch(1)))
                 .await
@@ -1129,50 +1147,41 @@ mod tests {
         let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
         let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
         let checkpoint = checkpoint(1, None, true);
+        let epoch_record = epoch_record(checkpoint_ref.clone(), &checkpoint);
         write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
 
-        complete_commit(&store, &checkpoint_ref, Generation(2), None, false)
+        complete_commit(&store, &checkpoint_ref, &epoch_record, Generation(2))
             .await
             .unwrap();
-        let completion = complete_commit(&store, &checkpoint_ref, Generation(3), None, false)
+        let completion = complete_commit(&store, &checkpoint_ref, &epoch_record, Generation(3))
             .await
             .unwrap();
 
-        assert_eq!(
-            completion,
-            CommitCompletion::AlreadyCommitted { checkpoint_ref }
-        );
+        assert_eq!(completion, CommittedMarkerOutcome::AlreadyCommitted);
     }
 
     #[tokio::test]
-    async fn complete_commit_does_not_mark_unclaimed_checkpoint() {
+    async fn complete_commit_writes_marker_from_epoch_record() {
         let store = MemoryProtocolStore::default();
         let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
         let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
         let checkpoint = checkpoint(1, None, true);
+        let epoch_record = epoch_record(checkpoint_ref.clone(), &checkpoint);
         put_protobuf(&store, &checkpoint_ref, &checkpoint)
             .await
             .unwrap();
 
-        let completion = complete_commit(&store, &checkpoint_ref, Generation(2), None, false)
+        let completion = complete_commit(&store, &checkpoint_ref, &epoch_record, Generation(2))
             .await
             .unwrap();
 
-        assert_eq!(
-            completion,
-            CommitCompletion::NotCanonical {
-                checkpoint_ref: checkpoint_ref.clone()
-            }
-        );
-        assert!(
-            read_json::<_, CommittedMarker>(
-                &store,
-                &paths.committed_marker(Generation(1), Epoch(1)),
-            )
-            .await
-            .unwrap()
-            .is_none()
-        );
+        assert_eq!(completion, CommittedMarkerOutcome::Created);
+        let marker: CommittedMarker =
+            read_json(&store, &paths.committed_marker(Generation(1), Epoch(1)))
+                .await
+                .unwrap()
+                .expect("committed marker should be written");
+        assert_eq!(marker.checkpoint_ref, checkpoint_ref);
     }
 
     #[tokio::test]
@@ -1253,10 +1262,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            resolution,
-            GenerationResolution::ReplayCommit { checkpoint_ref }
-        );
+        match resolution {
+            GenerationResolution::ReplayCommit {
+                checkpoint_ref: recovered_ref,
+                epoch_record,
+            } => {
+                assert_eq!(recovered_ref, checkpoint_ref);
+                assert_eq!(epoch_record.checkpoint_ref, checkpoint_ref);
+            }
+            other => panic!("expected replay commit resolution, got {other:?}"),
+        }
     }
 
     #[tokio::test]
