@@ -19,11 +19,20 @@ pub enum ParentCheckpointStatus {
 /// this enum is useful for tests and for code that has already read all inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveDecision {
-    Ready { checkpoint_ref: CheckpointRef },
-    ReplayCommit { checkpoint_ref: CheckpointRef },
-    ClaimUnclaimed { checkpoint_ref: CheckpointRef },
+    Ready {
+        checkpoint_ref: CheckpointRef,
+    },
+    ReplayCommit {
+        checkpoint_ref: CheckpointRef,
+        epoch_record: EpochRecord,
+    },
+    ClaimUnclaimed {
+        checkpoint_ref: CheckpointRef,
+    },
     FallbackToBase,
-    StopOrphaned { canonical_ref: CheckpointRef },
+    StopOrphaned {
+        canonical_ref: CheckpointRef,
+    },
     Failed(ResolveFailure),
 }
 
@@ -53,7 +62,7 @@ pub fn resolve_candidate(
     manifest: &GenerationManifest,
     candidate_ref: &CheckpointRef,
     checkpoint: Option<&CheckpointManifest>,
-    epoch_record: Option<&EpochRecord>,
+    epoch_record: Option<EpochRecord>,
     committed_marker: Option<&CommittedMarker>,
     parent_status: ParentCheckpointStatus,
     is_current_generation: bool,
@@ -86,8 +95,9 @@ pub fn resolve_candidate(
         CheckpointState::Ready => ResolveDecision::Ready {
             checkpoint_ref: candidate_ref.clone(),
         },
-        CheckpointState::Committing => ResolveDecision::ReplayCommit {
+        CheckpointState::Committing { epoch_record } => ResolveDecision::ReplayCommit {
             checkpoint_ref: candidate_ref.clone(),
+            epoch_record,
         },
         CheckpointState::Orphaned { canonical_ref } => {
             ResolveDecision::StopOrphaned { canonical_ref }

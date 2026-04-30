@@ -1,4 +1,3 @@
-use std::any::Any;
 use crate::ProtocolPaths;
 use crate::resolve::{
     EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure, resolve_candidate,
@@ -14,6 +13,7 @@ use crate::types::{
 };
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_types::{JobId, PipelineId, to_micros};
+use std::any::Any;
 use std::time::SystemTime;
 
 /// Request to claim canonical ownership of a checkpoint's epoch.
@@ -48,9 +48,16 @@ pub enum CommittedMarkerOutcome {
 /// only to replay external commit before normal execution continues.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerationResolution {
-    Ready { checkpoint_ref: CheckpointRef },
-    ReplayCommit { checkpoint_ref: CheckpointRef },
-    StopOrphaned { canonical_ref: CheckpointRef },
+    Ready {
+        checkpoint_ref: CheckpointRef,
+    },
+    ReplayCommit {
+        checkpoint_ref: CheckpointRef,
+        epoch_record: EpochRecord,
+    },
+    StopOrphaned {
+        canonical_ref: CheckpointRef,
+    },
     Failed(ResolveFailure),
 }
 
@@ -70,8 +77,13 @@ pub struct InitializeGenerationRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerationRecovery {
     NoCheckpoint,
-    Ready { checkpoint_ref: CheckpointRef },
-    ReplayCommit { checkpoint_ref: CheckpointRef },
+    Ready {
+        checkpoint_ref: CheckpointRef,
+    },
+    ReplayCommit {
+        checkpoint_ref: CheckpointRef,
+        epoch_record: EpochRecord,
+    },
 }
 
 /// Result of [`initialize_generation`].
@@ -203,7 +215,9 @@ where
         RecoverySearch::Found(recovery) => match recovery {
             GenerationRecovery::NoCheckpoint => None,
             GenerationRecovery::Ready { checkpoint_ref }
-            | GenerationRecovery::ReplayCommit { checkpoint_ref } => Some(checkpoint_ref.clone()),
+            | GenerationRecovery::ReplayCommit { checkpoint_ref, .. } => {
+                Some(checkpoint_ref.clone())
+            }
         },
         RecoverySearch::StopOrphaned { canonical_ref } => {
             return Ok(GenerationInitialization::StopOrphaned {
@@ -265,9 +279,13 @@ where
                     checkpoint_ref,
                 }));
             }
-            GenerationResolution::ReplayCommit { checkpoint_ref } => {
+            GenerationResolution::ReplayCommit {
+                checkpoint_ref,
+                epoch_record,
+            } => {
                 return Ok(RecoverySearch::Found(GenerationRecovery::ReplayCommit {
                     checkpoint_ref,
+                    epoch_record,
                 }));
             }
             GenerationResolution::StopOrphaned { canonical_ref } => {
@@ -333,9 +351,10 @@ where
         CheckpointState::Ready => Ok(RecoverySearch::Found(GenerationRecovery::Ready {
             checkpoint_ref: checkpoint_ref.clone(),
         })),
-        CheckpointState::Committing { .. } => {
+        CheckpointState::Committing { epoch_record } => {
             Ok(RecoverySearch::Found(GenerationRecovery::ReplayCommit {
                 checkpoint_ref: checkpoint_ref.clone(),
+                epoch_record,
             }))
         }
         CheckpointState::Orphaned { canonical_ref } => {
@@ -431,8 +450,7 @@ where
         epoch_record.pipeline_id.clone(),
         epoch_record.job_id.clone(),
     );
-    let committed_marker_path = paths.committed_marker(
-        epoch_record.generation, epoch_record.epoch);
+    let committed_marker_path = paths.committed_marker(epoch_record.generation, epoch_record.epoch);
 
     let marker = CommittedMarker::new(
         epoch_record.pipeline_id.clone(),
@@ -619,7 +637,7 @@ where
         manifest,
         candidate_ref,
         checkpoint.as_ref(),
-        epoch_record.as_ref(),
+        epoch_record,
         committed_marker.as_ref(),
         parent_status,
         is_current_generation,
@@ -631,8 +649,14 @@ where
                 checkpoint_ref,
             }))
         }
-        ResolveDecision::ReplayCommit { checkpoint_ref } => Ok(CandidateResolution::Done(
-            GenerationResolution::ReplayCommit { checkpoint_ref },
+        ResolveDecision::ReplayCommit {
+            checkpoint_ref,
+            epoch_record,
+        } => Ok(CandidateResolution::Done(
+            GenerationResolution::ReplayCommit {
+                checkpoint_ref,
+                epoch_record,
+            },
         )),
         ResolveDecision::StopOrphaned { canonical_ref } => Ok(CandidateResolution::Done(
             GenerationResolution::StopOrphaned { canonical_ref },
@@ -657,7 +681,7 @@ where
             .await?;
 
             match outcome {
-                EpochClaimOutcome::Owned { .. } if checkpoint.needs_commit => {
+                EpochClaimOutcome::Owned { record } if checkpoint.needs_commit => {
                     let committed_marker_path = paths.committed_marker(
                         Generation(checkpoint.generation),
                         Epoch(checkpoint.epoch),
@@ -671,7 +695,10 @@ where
                         }))
                     } else {
                         Ok(CandidateResolution::Done(
-                            GenerationResolution::ReplayCommit { checkpoint_ref },
+                            GenerationResolution::ReplayCommit {
+                                checkpoint_ref,
+                                epoch_record: record,
+                            },
                         ))
                     }
                 }
@@ -723,7 +750,7 @@ where
     let state = derive_checkpoint_state(
         &parent_checkpoint_ref,
         Some(&parent_checkpoint),
-        parent_epoch_record.as_ref(),
+        parent_epoch_record,
         parent_committed_marker.as_ref(),
     )?;
 
@@ -760,7 +787,7 @@ where
                 derive_checkpoint_state(
                     request.checkpoint_ref,
                     Some(request.checkpoint),
-                    Some(&existing),
+                    Some(existing),
                     None,
                 )?;
                 Ok(EpochClaimOutcome::Owned { record })
@@ -803,10 +830,7 @@ where
     }
 }
 
-fn validate_marker(
-    marker: &CommittedMarker,
-    record: &EpochRecord,
-) -> Result<(), ProtocolError> {
+fn validate_marker(marker: &CommittedMarker, record: &EpochRecord) -> Result<(), ProtocolError> {
     if marker.job_id != record.job_id || marker.epoch != record.epoch {
         return Err(ProtocolError::CommittedMarkerMismatch);
     }

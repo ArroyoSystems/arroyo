@@ -329,10 +329,9 @@ impl WorkerState {
             let manifest = read_protobuf::<_, CheckpointManifest>(
                 get_storage_provider().await?.as_ref(),
                 &parent_ref,
-            ).await?
-                .ok_or_else(|| {
-                    anyhow!("could not find restoration checkpoint {:?}", parent_ref)
-                })?;
+            )
+            .await?
+            .ok_or_else(|| anyhow!("could not find restoration checkpoint {:?}", parent_ref))?;
 
             Some((parent_ref, manifest))
         } else {
@@ -864,8 +863,8 @@ impl WorkerGrpc for WorkerServer {
         let sender_commit_map_pairs = {
             let phase = self.state.phase.lock().unwrap();
             let engine_state = match &*phase {
-                WorkerExecutionPhase::WaitingOnLeader { engine_state, .. } |
-                WorkerExecutionPhase::Running(engine_state) => engine_state,
+                WorkerExecutionPhase::WaitingOnLeader { engine_state, .. }
+                | WorkerExecutionPhase::Running(engine_state) => engine_state,
                 _ => {
                     return Err(Status::failed_precondition("Worker not in running phase"));
                 }

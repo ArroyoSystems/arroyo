@@ -451,7 +451,7 @@ async fn get_and_register_checkpoint_info_leader<'a>(
         GenerationInitialization::Initialized {
             recovery:
                 GenerationRecovery::Ready { checkpoint_ref }
-                | GenerationRecovery::ReplayCommit { checkpoint_ref },
+                | GenerationRecovery::ReplayCommit { checkpoint_ref, .. },
             ..
         } => Some(checkpoint_ref),
         GenerationInitialization::StaleGeneration { .. } => {

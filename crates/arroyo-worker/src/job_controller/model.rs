@@ -10,9 +10,15 @@ use arroyo_rpc::checkpoints::{
 };
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq, OperatorCheckpointMetadata, TableEnum, TaskCheckpointEventType};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq,
+    OperatorCheckpointMetadata, TableEnum, TaskCheckpointEventType,
+};
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::parquet::ParquetBackend;
+use arroyo_state::tables::ErasedTable;
+use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
 use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
@@ -29,9 +35,6 @@ use tokio::task::JoinHandle;
 use tonic::Request;
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
-use arroyo_state::tables::ErasedTable;
-use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
-use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 
 pub struct RunningJobModel {
     pub pipeline_id: PipelineId,
@@ -506,7 +509,7 @@ impl RunningJobModel {
                     message = "Committing checkpoint",
                     job_id = *self.job_id,
                     epoch = self.epoch,
-                    generaiton = self.generation,
+                    generation = self.generation,
                     checkpoint_ref = checkpoint_ref.as_str(),
                 );
 

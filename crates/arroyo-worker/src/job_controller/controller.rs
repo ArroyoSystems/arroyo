@@ -1,16 +1,3 @@
-use anyhow::{anyhow, bail};
-use arroyo_rpc::checkpoints::CheckpointMetadataStore;
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus, JobStopMode, OperatorCommitData, StopExecutionReq, StopMode, TableCommitData, TableEnum, TaskAssignment, TaskCheckpointEventType, WorkerPhase};
-use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
-use arroyo_types::WorkerId;
-use futures::future::try_join_all;
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
-use std::collections::HashSet;
 use crate::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
     WorkerStatus,
@@ -18,21 +5,42 @@ use crate::job_controller::model::{
 use crate::job_controller::{
     JobControllerStatus, RunningMessage, TaskFailedEvent, WorkerContext, connect_to_worker,
 };
+use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::checkpoints::CheckpointMetadataStore;
 use arroyo_rpc::grpc::rpc;
+use arroyo_rpc::grpc::rpc::{
+    CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
+    JobStopMode, OperatorCommitData, StopExecutionReq, StopMode, TableCommitData, TableEnum,
+    TaskAssignment, TaskCheckpointEventType, WorkerPhase,
+};
 use arroyo_rpc::log_event;
 use arroyo_server_common::shutdown::ShutdownGuard;
-use arroyo_state_protocol::ProtocolPaths;
-use arroyo_state_protocol::types::{CheckpointRef, Generation};
-use arroyo_state_protocol::workflow::{GenerationInitialization, GenerationRecovery, InitializeGenerationRequest, initialize_generation, prepare_commit, CommitAuthorization, complete_commit, mark_committed, CommitCompletion, CommittedMarkerOutcome};
-use tokio::time::interval;
-use tokio::{sync::mpsc::Receiver, task::JoinHandle};
-use tonic::Request;
-use tracing::{error, info, warn};
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
+use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
+use arroyo_state_protocol::ProtocolPaths;
 use arroyo_state_protocol::store::StoreError;
+use arroyo_state_protocol::types::{CheckpointRef, EpochRecord, Generation};
+use arroyo_state_protocol::workflow::{
+    CommitAuthorization, CommitCompletion, CommittedMarkerOutcome, GenerationInitialization,
+    GenerationRecovery, InitializeGenerationRequest, complete_commit, initialize_generation,
+    mark_committed, prepare_commit,
+};
+use arroyo_types::WorkerId;
+use futures::future::try_join_all;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
+use tokio::time::interval;
+use tokio::{sync::mpsc::Receiver, task::JoinHandle};
+use tonic::Request;
+use tracing::{debug, error, info, warn};
 
 const CHECKPOINT_ROWS_TO_KEEP: u32 = 10;
 
@@ -45,7 +53,7 @@ pub struct WorkerJobController {
     rx: Receiver<RunningMessage>,
     stopping: bool,
     final_checkpoint_started: bool,
-    replay_commits: Option<(CheckpointRef, CheckpointManifest)>
+    replay_commits: Option<(CheckpointRef, CommitReq, EpochRecord)>,
 }
 
 impl std::fmt::Debug for WorkerJobController {
@@ -194,39 +202,27 @@ impl WorkerJobController {
                 }
                 (Some(checkpoint_ref), None)
             }
-            GenerationRecovery::ReplayCommit { checkpoint_ref } => {
+            GenerationRecovery::ReplayCommit {
+                checkpoint_ref,
+                epoch_record,
+            } => {
                 if let Some((r, manifest)) = parent_ref {
                     assert_eq!(r, checkpoint_ref, "mismatched recovery ref");
 
-                    let commit_data = match prepare_commit(get_storage_provider().await?.as_ref(), &checkpoint_ref, manifest, None, false).await? {
-                        CommitAuthorization::Authorized { checkpoint,  } => {
-                            Some((checkpoint_ref, manifest_into_commit_req(checkpoint)?, ))
-                        }
-                        CommitAuthorization::AlreadyCommitted { .. } => {
-                            // nothing to do
-                            None
-                        }
-                        CommitAuthorization::NoCommitNeeded { checkpoint_ref } => {
-                            unreachable!("according to manifest we need to commit checkpoint {:?}, \
-                            but protocol returned NoCommitNeeded", checkpoint_ref);
-                        }
-                        CommitAuthorization::StopOrphaned { canonical_ref } => {
-                            bail!("cluster with generation {} is orphaned while preparing to \
-                            commit checkpoint {:?}", generation_manifest.generation, canonical_ref);
-                        }
-                        CommitAuthorization::NotCanonical { checkpoint_ref } => {
-                            bail!("cluster with generation {} was preparing to \
-                            commit checkpoint {:?} but it is non-canonical", generation_manifest.generation, checkpoint_ref);
-                        }
-                        CommitAuthorization::MissingCheckpoint { checkpoint_ref } => {
-                            bail!("checkpoint {} was not found while preparing commit!", checkpoint_ref);
-                        }
-                    };
-
-                    (Some(r), commit_data)
+                    (
+                        Some(r),
+                        Some((
+                            checkpoint_ref,
+                            manifest_into_commit_req(manifest)?,
+                            epoch_record,
+                        )),
+                    )
                 } else {
-                    panic!("from controller, expected not to be restoring a checkpoint, but\
-                    generation manifest wants to replay commits from {:?}", checkpoint_ref);
+                    panic!(
+                        "from controller, expected not to be restoring a checkpoint, but\
+                    generation manifest wants to replay commits from {:?}",
+                        checkpoint_ref
+                    );
                 }
             }
         };
@@ -301,6 +297,10 @@ impl WorkerJobController {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
 
+                // TODO: this really should happen after we've replayed the initial commit, but
+                //  that requires a significant reworking on the worker lifecycle
+                status.connect.job_controller_init(JobControllerInitReq {}).await?;
+
                 anyhow::Result::Ok(())
             }
         });
@@ -308,10 +308,12 @@ impl WorkerJobController {
         try_join_all(futures).await?;
 
         // before starting, we need to replay our commits from the previous checkpoint
-        if let Some((checkpoint_ref, commit_req)) = self.replay_commits.take() {
-            let futures = self.model.workers.iter_mut().map(|(_, status)| {
-                status.connect.commit(commit_req.clone())
-            });
+        if let Some((checkpoint_ref, commit_req, epoch_record)) = self.replay_commits.take() {
+            let futures = self
+                .model
+                .workers
+                .iter_mut()
+                .map(|(_, status)| status.connect.commit(commit_req.clone()));
 
             try_join_all(futures).await?;
 
@@ -326,22 +328,24 @@ impl WorkerJobController {
             }
 
             // now wait for ack's
+            info!(job_id =? self.worker_context.job_id, "waiting for subtasks to commit...");
             while !subtasks_to_commit.is_empty() {
                 tokio::select! {
                     msg = self.rx.recv() => {
                         match msg {
                             Some(RunningMessage::TaskCheckpointEvent(event))
                             if event.event_type() == TaskCheckpointEventType::FinishedCommit => {
+                                debug!(job_id = *self.worker_context.job_id, generation =? self.worker_context.generation, "task finished committing {:?}", event);
                                 let key = (event.operator_id, event.subtask_idx);
                                 subtasks_to_commit.remove(&key);
                             }
                             Some(RunningMessage::TaskCheckpointEvent(t)) => {
-                                warn!(job_id = *self.worker_context.job_id, event =? t,
+                                warn!(job_id = *self.worker_context.job_id, generation =? self.worker_context.generation, event =? t,
                                     "received unexpected TaskCheckpointEvent while waiting for \
                                     initial commit replay to complete");
                             }
                             Some(RunningMessage::TaskCheckpointFinished(t)) => {
-                                warn!(job_id = *self.worker_context.job_id, event =? t,
+                                warn!(job_id = *self.worker_context.job_id, generation =? self.worker_context.generation, event =? t,
                                     "received unexpected TaskCheckpointFinished while waiting for \
                                     initial commit replay to complete");
                             }
@@ -377,8 +381,17 @@ impl WorkerJobController {
                 }
             }
 
+            info!(job_id =? self.worker_context.job_id, "completing initial commit replay");
+
             // now we can finalize the commit
-            match complete_commit(get_storage_provider().await?.as_ref(), &checkpoint_ref, &manifest, Generation(self.worker_context.generation)).await? {
+            match complete_commit(
+                get_storage_provider().await?.as_ref(),
+                &checkpoint_ref,
+                &epoch_record,
+                Generation(self.worker_context.generation),
+            )
+            .await?
+            {
                 CommittedMarkerOutcome::Created => {
                     info!(job_id = ?self.worker_context.job_id, checkpoint_ref =? checkpoint_ref, "finalized replayed commit");
                 }
@@ -387,11 +400,6 @@ impl WorkerJobController {
                 }
             }
         }
-
-        // then start the workers
-        try_join_all(self.model.workers.iter_mut().map(|(_, status)| {
-            status.connect.job_controller_init(JobControllerInitReq {})
-        })).await?;
 
         let mut interval = interval(Duration::from_millis(200));
         loop {
@@ -718,7 +726,6 @@ impl WorkerJobController {
     }
 }
 
-
 fn manifest_into_commit_req(manifest: CheckpointManifest) -> anyhow::Result<CommitReq> {
     let mut committing_data: HashMap<String, OperatorCommitData> = HashMap::new();
 
@@ -745,17 +752,22 @@ fn manifest_into_commit_req(manifest: CheckpointManifest) -> anyhow::Result<Comm
             };
 
             if let Some(commit_data) = commit_data {
-                operator_commit_data
-                    .insert(table_name, TableCommitData {
+                operator_commit_data.insert(
+                    table_name,
+                    TableCommitData {
                         commit_data_by_subtask: commit_data,
-                    });
+                    },
+                );
             }
         }
 
         if !operator_commit_data.is_empty() {
-            committing_data.insert(operator_metadata.operator_id, OperatorCommitData {
-                committing_data: operator_commit_data
-            });
+            committing_data.insert(
+                operator_metadata.operator_id,
+                OperatorCommitData {
+                    committing_data: operator_commit_data,
+                },
+            );
         }
     }
 
