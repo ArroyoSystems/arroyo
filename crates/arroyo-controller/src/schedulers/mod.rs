@@ -568,7 +568,7 @@ impl Scheduler for NodeScheduler {
 
             let req = StartWorkerReq {
                 name: start_pipeline_req.name.clone(),
-                pipeline_id: "".to_string(),
+                pipeline_id: (*start_pipeline_req.pipeline_id).clone(),
                 job_id: (*start_pipeline_req.job_id).clone(),
                 slots: slots_for_this_one as u64,
                 machine_id: node.id.to_string(),

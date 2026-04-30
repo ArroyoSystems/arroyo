@@ -1,7 +1,7 @@
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, StartExecutionReq, TaskAssignment, worker_grpc_client::WorkerGrpcClient,
 };
-use arroyo_types::{JobId, MachineId, WorkerId};
+use arroyo_types::{CLUSTER_ID_ENV, JobId, MachineId, WorkerId};
 use std::time::SystemTime;
 use std::{
     collections::{HashMap, HashSet},
@@ -511,10 +511,16 @@ impl Scheduling {
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
-                    env_vars: [(
-                        "ARROYO__CHECKPOINT_URL".to_string(),
-                        config().checkpoint_url.clone(),
-                    )]
+                    env_vars: [
+                        (
+                            "ARROYO__CHECKPOINT_URL".to_string(),
+                            config().checkpoint_url.clone(),
+                        ),
+                        (
+                            CLUSTER_ID_ENV.to_string(),
+                            arroyo_server_common::get_cluster_id(),
+                        ),
+                    ]
                     .into_iter()
                     .collect(),
                 })

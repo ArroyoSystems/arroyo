@@ -20,8 +20,8 @@ use arroyo_rpc::grpc::rpc::{
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_types::{
-    CheckpointBarrier, CheckpointFilePathLayout, GENERATION_ENV, JOB_ID_ENV, JobId, MachineId,
-    PIPELINE_ID_ENV, PipelineId, WorkerId, from_micros, from_millis, to_micros,
+    CLUSTER_ID_ENV, CheckpointBarrier, CheckpointFilePathLayout, GENERATION_ENV, JOB_ID_ENV, JobId,
+    MachineId, PIPELINE_ID_ENV, PipelineId, WorkerId, from_micros, from_millis, to_micros,
 };
 use rand::random;
 
@@ -582,6 +582,8 @@ pub struct WorkerServer {
 impl WorkerServer {
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
         let worker_id = WorkerId(config().worker.id.unwrap_or_else(random));
+        let cluster_id =
+            std::env::var(CLUSTER_ID_ENV).unwrap_or_else(|_| panic!("{CLUSTER_ID_ENV} is not set"));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{JOB_ID_ENV} is not set"));
 
@@ -600,6 +602,8 @@ impl WorkerServer {
 
         let pipeline_id = std::env::var(PIPELINE_ID_ENV)
             .unwrap_or_else(|_| panic!("{PIPELINE_ID_ENV} is not set"));
+
+        arroyo_server_common::set_cluster_id(&cluster_id);
 
         Ok(WorkerServer::new(
             machine_id,

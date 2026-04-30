@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // worker configuration
+pub const CLUSTER_ID_ENV: &str = "CLUSTER_ID";
 pub const JOB_ID_ENV: &str = "JOB_ID";
 pub const GENERATION_ENV: &str = "GENERATION";
 pub const PIPELINE_ID_ENV: &str = "PIPELINE_ID";
