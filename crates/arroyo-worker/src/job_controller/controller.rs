@@ -21,12 +21,10 @@ use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
-use arroyo_state_protocol::store::StoreError;
-use arroyo_state_protocol::types::{CheckpointRef, EpochRecord, Generation};
+use arroyo_state_protocol::types::{CheckpointRef, Generation};
 use arroyo_state_protocol::workflow::{
-    CommitAuthorization, CommitCompletion, CommittedMarkerOutcome, GenerationInitialization,
-    GenerationRecovery, InitializeGenerationRequest, complete_commit, initialize_generation,
-    mark_committed, prepare_commit,
+    CommitPermit, CommittedMarkerOutcome, GenerationInitialization, GenerationRecovery,
+    InitializeGenerationRequest, complete_commit, initialize_generation,
 };
 use arroyo_types::WorkerId;
 use futures::future::try_join_all;
@@ -53,7 +51,7 @@ pub struct WorkerJobController {
     rx: Receiver<RunningMessage>,
     stopping: bool,
     final_checkpoint_started: bool,
-    replay_commits: Option<(CheckpointRef, CommitReq, EpochRecord)>,
+    replay_commits: Option<(CommitReq, CommitPermit)>,
 }
 
 impl std::fmt::Debug for WorkerJobController {
@@ -204,18 +202,14 @@ impl WorkerJobController {
             }
             GenerationRecovery::ReplayCommit {
                 checkpoint_ref,
-                epoch_record,
+                commit_permit,
             } => {
                 if let Some((r, manifest)) = parent_ref {
                     assert_eq!(r, checkpoint_ref, "mismatched recovery ref");
 
                     (
                         Some(r),
-                        Some((
-                            checkpoint_ref,
-                            manifest_into_commit_req(manifest)?,
-                            epoch_record,
-                        )),
+                        Some((manifest_into_commit_req(manifest)?, commit_permit)),
                     )
                 } else {
                     panic!(
@@ -312,7 +306,7 @@ impl WorkerJobController {
         try_join_all(futures).await?;
 
         // before starting, we need to replay our commits from the previous checkpoint
-        if let Some((checkpoint_ref, commit_req, epoch_record)) = self.replay_commits.take() {
+        if let Some((commit_req, commit_permit)) = self.replay_commits.take() {
             let futures = self
                 .model
                 .workers
@@ -391,17 +385,16 @@ impl WorkerJobController {
             // now we can finalize the commit
             match complete_commit(
                 get_storage_provider().await?.as_ref(),
-                &checkpoint_ref,
-                &epoch_record,
+                &commit_permit,
                 Generation(self.worker_context.generation),
             )
             .await?
             {
                 CommittedMarkerOutcome::Created => {
-                    info!(job_id = ?self.worker_context.job_id, checkpoint_ref =? checkpoint_ref, "finalized replayed commit");
+                    info!(job_id = ?self.worker_context.job_id, checkpoint_ref =? commit_permit.checkpoint_ref(), "finalized replayed commit");
                 }
                 CommittedMarkerOutcome::AlreadyCommitted => {
-                    info!(job_id = ?self.worker_context.job_id, checkpoint_ref =? checkpoint_ref, "replayed commit already finalized");
+                    info!(job_id = ?self.worker_context.job_id, checkpoint_ref =? commit_permit.checkpoint_ref(), "replayed commit already finalized");
                 }
             }
         }

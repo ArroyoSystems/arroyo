@@ -1,7 +1,7 @@
-use crate::job_controller::checkpoint_state::{CheckpointState, CommitData};
+use crate::job_controller::checkpoint_state::CheckpointState;
 use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use crate::job_controller::{CHECKPOINTS_TO_KEEP, COMPACT_EVERY, RunningMessage, TaskFailedEvent};
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
 use arroyo_rpc::checkpoints::{
@@ -12,13 +12,10 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq,
-    OperatorCheckpointMetadata, TableEnum, TaskCheckpointEventType,
+    OperatorCheckpointMetadata, TaskCheckpointEventType,
 };
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::parquet::ParquetBackend;
-use arroyo_state::tables::ErasedTable;
-use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
-use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
 use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
@@ -28,7 +25,7 @@ use arroyo_state_protocol::workflow::{
 };
 use arroyo_types::{JobId, PipelineId, WorkerId, to_micros};
 use futures::future::try_join_all;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::task::JoinHandle;
@@ -474,7 +471,7 @@ impl RunningJobModel {
                     .unwrap_or(Duration::ZERO)
                     .as_secs_f32();
 
-                let (checkpoint_ref, epoch_record) = match res {
+                let (checkpoint_ref, commit_permit) = match res {
                     CheckpointPublication::Ready { .. } => {
                         // we're done
                         self.start_or_get_span(JobCheckpointEventType::Checkpointing)
@@ -499,8 +496,8 @@ impl RunningJobModel {
                     }
                     CheckpointPublication::CommitRequired {
                         checkpoint_ref,
-                        epoch_record,
-                    } => (checkpoint_ref, epoch_record),
+                        commit_permit,
+                    } => (checkpoint_ref, commit_permit),
                     r @ CheckpointPublication::StopOrphaned { .. }
                     | r @ CheckpointPublication::StaleGeneration => {
                         bail!(
@@ -517,10 +514,8 @@ impl RunningJobModel {
                     }
                 };
 
-                let commit = checkpointing.into_commit(CheckpointIdOrRef::CheckpointRef(
-                    checkpoint_ref.clone(),
-                    epoch_record.clone(),
-                ));
+                let commit = checkpointing
+                    .into_commit(CheckpointIdOrRef::CheckpointRef(commit_permit.clone()));
 
                 let committing_data = commit.committing_data();
 
@@ -538,7 +533,7 @@ impl RunningJobModel {
                     storage.as_ref(),
                     &checkpoint_ref,
                     manifest,
-                    Some(epoch_record),
+                    Some(commit_permit.epoch_record().clone()),
                     true,
                 )
                 .await?
@@ -594,17 +589,12 @@ impl RunningJobModel {
                 self.start_or_get_span(JobCheckpointEventType::Checkpointing)
                     .finish();
 
-                let (checkpoint_ref, epoch_record) = committing.checkpoint_ref();
+                let commit_permit = committing.commit_permit();
 
-                complete_commit(
-                    storage.as_ref(),
-                    checkpoint_ref,
-                    epoch_record,
-                    Generation(self.generation),
-                )
-                .await?;
+                complete_commit(storage.as_ref(), commit_permit, Generation(self.generation))
+                    .await?;
 
-                self.finish_committing(checkpoint_ref.as_str(), store)
+                self.finish_committing(commit_permit.checkpoint_ref().as_str(), store)
                     .await?;
 
                 self.last_checkpoint = Instant::now();

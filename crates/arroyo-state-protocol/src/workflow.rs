@@ -10,6 +10,7 @@ use crate::store::{
 use crate::types::{
     CheckpointRef, CommittedMarker, CurrentGeneration, Epoch, EpochRecord, Generation,
     GenerationManifest, ProtocolError, checkpoint_parent_checkpoint_ref,
+    validate_epoch_record_matches_checkpoint,
 };
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_types::{JobId, PipelineId, to_micros};
@@ -52,7 +53,7 @@ pub enum GenerationResolution {
     },
     ReplayCommit {
         checkpoint_ref: CheckpointRef,
-        epoch_record: EpochRecord,
+        commit_permit: CommitPermit,
     },
     StopOrphaned {
         canonical_ref: CheckpointRef,
@@ -81,7 +82,7 @@ pub enum GenerationRecovery {
     },
     ReplayCommit {
         checkpoint_ref: CheckpointRef,
-        epoch_record: EpochRecord,
+        commit_permit: CommitPermit,
     },
 }
 
@@ -122,13 +123,63 @@ pub enum CheckpointPublication {
     },
     CommitRequired {
         checkpoint_ref: CheckpointRef,
-        epoch_record: EpochRecord,
+        commit_permit: CommitPermit,
     },
     StopOrphaned {
         canonical_ref: CheckpointRef,
     },
     StaleGeneration,
     Failed(ResolveFailure),
+}
+
+/// Capability proving a checkpoint currently owns its epoch record and may
+/// complete external commit once workers report success.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitPermit {
+    checkpoint_ref: CheckpointRef,
+    epoch_record: EpochRecord,
+}
+
+impl CommitPermit {
+    pub fn new(
+        checkpoint_ref: CheckpointRef,
+        checkpoint: &CheckpointManifest,
+        epoch_record: EpochRecord,
+    ) -> Result<Self, ProtocolError> {
+        validate_epoch_record_matches_checkpoint(&checkpoint_ref, checkpoint, &epoch_record)?;
+
+        if epoch_record.version != crate::types::PROTOCOL_VERSION
+            || epoch_record.checkpoint_ref != checkpoint_ref
+            || epoch_record.generation != Generation(checkpoint.generation)
+            || *epoch_record.pipeline_id != checkpoint.pipeline_id
+            || *epoch_record.job_id != checkpoint.job_id
+        {
+            return Err(ProtocolError::CheckpointManifestMismatch);
+        }
+
+        Ok(Self {
+            checkpoint_ref,
+            epoch_record,
+        })
+    }
+
+    /// The canonical checkpoint ref authorized by this permit.
+    pub fn checkpoint_ref(&self) -> &CheckpointRef {
+        &self.checkpoint_ref
+    }
+
+    /// The canonical epoch record authorizing this checkpoint.
+    pub fn epoch_record(&self) -> &EpochRecord {
+        &self.epoch_record
+    }
+
+    fn committed_marker_path(&self) -> CheckpointRef {
+        ProtocolPaths::new(
+            self.epoch_record.pipeline_id.clone(),
+            self.epoch_record.job_id.clone(),
+        )
+        .committed_marker(self.epoch_record.generation, self.epoch_record.epoch)
+    }
 }
 
 /// Result of checking whether a checkpoint may send external `CommitReq`s.
@@ -140,7 +191,7 @@ pub enum CommitAuthorization {
     Authorized {
         checkpoint_ref: CheckpointRef,
         checkpoint: CheckpointManifest,
-        epoch_record: EpochRecord,
+        commit_permit: CommitPermit,
     },
     AlreadyCommitted {
         checkpoint_ref: CheckpointRef,
@@ -290,11 +341,11 @@ where
             }
             GenerationResolution::ReplayCommit {
                 checkpoint_ref,
-                epoch_record,
+                commit_permit,
             } => {
                 return Ok(RecoverySearch::Found(GenerationRecovery::ReplayCommit {
                     checkpoint_ref,
-                    epoch_record,
+                    commit_permit,
                 }));
             }
             GenerationResolution::StopOrphaned { canonical_ref } => {
@@ -361,9 +412,11 @@ where
             checkpoint_ref: checkpoint_ref.clone(),
         })),
         CheckpointState::Committing { epoch_record } => {
+            let commit_permit =
+                CommitPermit::new(checkpoint_ref.clone(), &checkpoint, epoch_record)?;
             Ok(RecoverySearch::Found(GenerationRecovery::ReplayCommit {
                 checkpoint_ref: checkpoint_ref.clone(),
-                epoch_record,
+                commit_permit,
             }))
         }
         CheckpointState::Orphaned { canonical_ref } => {
@@ -433,33 +486,33 @@ where
         CheckpointState::Ready => Ok(CommitAuthorization::NoCommitNeeded {
             checkpoint_ref: checkpoint_ref.clone(),
         }),
-        CheckpointState::Committing { epoch_record } => Ok(CommitAuthorization::Authorized {
-            checkpoint_ref: checkpoint_ref.clone(),
-            checkpoint,
-            epoch_record,
-        }),
+        CheckpointState::Committing { epoch_record } => {
+            let commit_permit =
+                CommitPermit::new(checkpoint_ref.clone(), &checkpoint, epoch_record)?;
+            Ok(CommitAuthorization::Authorized {
+                checkpoint_ref: checkpoint_ref.clone(),
+                checkpoint,
+                commit_permit,
+            })
+        }
     }
 }
 
 /// Writes `committed.json` after external commit succeeds.
 ///
-/// This optionally rechecks commit authorization before writing the marker. Call it only
-/// after all required workers report successful external commit. The write is
-/// conditional and idempotent for retries of the same checkpoint.
+/// The caller must pass a [`CommitPermit`] returned by this protocol after it
+/// has already validated canonical epoch ownership. The write is conditional
+/// and idempotent for retries of the same checkpoint.
 pub async fn complete_commit<S>(
     store: &S,
-    checkpoint_ref: &CheckpointRef,
-    epoch_record: &EpochRecord,
+    commit_permit: &CommitPermit,
     writer_generation: Generation,
 ) -> Result<CommittedMarkerOutcome, StoreError>
 where
     S: ProtocolStore + ?Sized,
 {
-    let paths = ProtocolPaths::new(
-        epoch_record.pipeline_id.clone(),
-        epoch_record.job_id.clone(),
-    );
-    let committed_marker_path = paths.committed_marker(epoch_record.generation, epoch_record.epoch);
+    let epoch_record = commit_permit.epoch_record();
+    let committed_marker_path = commit_permit.committed_marker_path();
 
     let marker = CommittedMarker::new(
         epoch_record.pipeline_id.clone(),
@@ -467,10 +520,10 @@ where
         epoch_record.epoch,
         epoch_record.generation,
         writer_generation,
-        checkpoint_ref.clone(),
+        commit_permit.checkpoint_ref().clone(),
     );
 
-    mark_committed(store, &committed_marker_path, &marker, &epoch_record).await
+    mark_committed(store, &committed_marker_path, &marker, commit_permit).await
 }
 
 /// Publishes a completed checkpoint and claims its epoch record.
@@ -549,9 +602,11 @@ where
 
     match outcome {
         EpochClaimOutcome::Owned { record } if request.checkpoint.needs_commit => {
+            let commit_permit =
+                CommitPermit::new(request.checkpoint_ref.clone(), request.checkpoint, record)?;
             Ok(CheckpointPublication::CommitRequired {
                 checkpoint_ref: request.checkpoint_ref.clone(),
-                epoch_record: record,
+                commit_permit,
             })
         }
         EpochClaimOutcome::Owned { .. } => Ok(CheckpointPublication::Ready {
@@ -663,8 +718,14 @@ where
             epoch_record,
         } => Ok(CandidateResolution::Done(
             GenerationResolution::ReplayCommit {
-                checkpoint_ref,
-                epoch_record,
+                checkpoint_ref: checkpoint_ref.clone(),
+                commit_permit: CommitPermit::new(
+                    checkpoint_ref,
+                    checkpoint
+                        .as_ref()
+                        .expect("replay commits must have a manifest"),
+                    epoch_record,
+                )?,
             },
         )),
         ResolveDecision::StopOrphaned { canonical_ref } => Ok(CandidateResolution::Done(
@@ -703,10 +764,12 @@ where
                             checkpoint_ref,
                         }))
                     } else {
+                        let commit_permit =
+                            CommitPermit::new(checkpoint_ref.clone(), &checkpoint, record)?;
                         Ok(CandidateResolution::Done(
                             GenerationResolution::ReplayCommit {
                                 checkpoint_ref,
-                                epoch_record: record,
+                                commit_permit,
                             },
                         ))
                     }
@@ -818,17 +881,17 @@ pub async fn mark_committed<S>(
     store: &S,
     committed_marker_path: &CheckpointRef,
     marker: &CommittedMarker,
-    epoch_record: &EpochRecord,
+    commit_permit: &CommitPermit,
 ) -> Result<CommittedMarkerOutcome, StoreError>
 where
     S: ProtocolStore + ?Sized,
 {
-    validate_marker(marker, epoch_record)?;
+    validate_marker(marker, commit_permit)?;
 
     match create_json_if_not_exist(store, committed_marker_path, marker).await? {
         CreateResult::Created => Ok(CommittedMarkerOutcome::Created),
         CreateResult::AlreadyExists(existing) => {
-            validate_marker(&existing, epoch_record)?;
+            validate_marker(&existing, commit_permit)?;
 
             if existing.checkpoint_ref == marker.checkpoint_ref {
                 Ok(CommittedMarkerOutcome::AlreadyCommitted)
@@ -839,10 +902,15 @@ where
     }
 }
 
-fn validate_marker(marker: &CommittedMarker, record: &EpochRecord) -> Result<(), ProtocolError> {
-    if marker.job_id != record.job_id
+fn validate_marker(marker: &CommittedMarker, permit: &CommitPermit) -> Result<(), ProtocolError> {
+    let record = permit.epoch_record();
+
+    if marker.version != crate::types::PROTOCOL_VERSION
+        || marker.pipeline_id != record.pipeline_id
+        || marker.job_id != record.job_id
         || marker.epoch != record.epoch
-        || marker.checkpoint_ref != record.checkpoint_ref
+        || marker.checkpoint_generation != record.generation
+        || marker.checkpoint_ref != *permit.checkpoint_ref()
     {
         return Err(ProtocolError::CommittedMarkerMismatch);
     }

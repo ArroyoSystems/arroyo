@@ -1,13 +1,13 @@
 use crate::job_controller::checkpoint_state::CommitData;
 use arroyo_rpc::grpc::rpc::{OperatorCommitData, TableCommitData};
-use arroyo_state_protocol::types::{CheckpointRef, EpochRecord};
+use arroyo_state_protocol::workflow::CommitPermit;
 use std::collections::{HashMap, HashSet};
 
 pub enum CheckpointIdOrRef {
     // used by database-backed mode, checkpoint metadata v0
     CheckpointId(String),
     // used by checkpoint metadata v1
-    CheckpointRef(CheckpointRef, EpochRecord),
+    CheckpointRef(CommitPermit),
 }
 
 pub struct CommittingState {
@@ -32,18 +32,18 @@ impl CommittingState {
     pub fn checkpoint_id(&self) -> &str {
         match &self.checkpoint_id {
             CheckpointIdOrRef::CheckpointId(id) => id.as_str(),
-            CheckpointIdOrRef::CheckpointRef(_, _) => {
+            CheckpointIdOrRef::CheckpointRef(_) => {
                 panic!("asked for checkpoint id in leader mode, which is not allowed");
             }
         }
     }
 
-    pub fn checkpoint_ref(&self) -> (&CheckpointRef, &EpochRecord) {
+    pub fn commit_permit(&self) -> &CommitPermit {
         match &self.checkpoint_id {
             CheckpointIdOrRef::CheckpointId(_) => {
-                panic!("asked for checkpoint ref in controller mode, which is not allowed");
+                panic!("asked for commit permit in controller mode, which is not allowed");
             }
-            CheckpointIdOrRef::CheckpointRef(a, b) => (a, b),
+            CheckpointIdOrRef::CheckpointRef(commit_permit) => commit_permit,
         }
     }
 
