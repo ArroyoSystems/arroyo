@@ -40,8 +40,6 @@ use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::Request;
 use tracing::{debug, error, info, warn};
 
-const CHECKPOINT_ROWS_TO_KEEP: u32 = 10;
-
 pub struct WorkerJobController {
     worker_context: WorkerContext,
     checkpoint_interval: Duration,
@@ -529,6 +527,13 @@ impl WorkerJobController {
             return Ok(ControllerProgress::Finished);
         }
 
+        if matches!(
+            self.status.job_status.lock().unwrap().job_state(),
+            rpc::JobState::JobFailing | rpc::JobState::JobFailed
+        ) {
+            return Ok(ControllerProgress::Continue);
+        }
+
         // check on cleanup
         if self.cleanup_task.is_some() && self.cleanup_task.as_ref().unwrap().is_finished() {
             let task = self.cleanup_task.take().unwrap();
@@ -680,47 +685,6 @@ impl WorkerJobController {
 
     pub fn operator_parallelism(&self, node_id: u32) -> Option<usize> {
         self.model.operator_parallelism.get(&node_id).cloned()
-    }
-
-    fn start_cleanup(&mut self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {
-        let min_epoch = self.model.min_epoch.max(1);
-        let job_id = self.worker_context.job_id.clone();
-        let store = self.status.clone();
-
-        info!(
-            message = "Starting cleaning",
-            job_id = *job_id,
-            min_epoch,
-            new_min
-        );
-        let start = Instant::now();
-        let cur_epoch = self.model.epoch;
-
-        tokio::spawn(async move {
-            let checkpoint = StateBackend::load_checkpoint_metadata(&job_id, cur_epoch).await?;
-
-            store.mark_compacting(&job_id, min_epoch, new_min).await?;
-
-            StateBackend::cleanup_checkpoint(checkpoint, min_epoch, new_min).await?;
-
-            store.mark_checkpoints_compacted(&job_id, new_min).await?;
-
-            if let Some(epoch_to_filter_before) = min_epoch.checked_sub(CHECKPOINT_ROWS_TO_KEEP) {
-                store
-                    .drop_old_checkpoint_rows(&job_id, epoch_to_filter_before)
-                    .await?;
-            }
-
-            info!(
-                message = "Finished cleaning",
-                job_id = *job_id,
-                min_epoch,
-                new_min,
-                duration = start.elapsed().as_secs_f32()
-            );
-
-            Ok(new_min)
-        })
     }
 }
 
