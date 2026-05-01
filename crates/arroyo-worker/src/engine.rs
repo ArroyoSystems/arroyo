@@ -206,6 +206,7 @@ impl Program {
         .expect("could not load")
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn from_logical(
         job_id: &str,
         logical: &LogicalGraph,

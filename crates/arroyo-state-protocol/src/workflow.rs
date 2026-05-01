@@ -87,6 +87,7 @@ pub enum GenerationRecovery {
 }
 
 /// Result of [`initialize_generation`].
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerationInitialization {
     Initialized {
@@ -187,6 +188,7 @@ impl CommitPermit {
 /// Only `Authorized` permits callers to fan out commit messages. Every other
 /// variant means no commit should be sent for the supplied checkpoint.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum CommitAuthorization {
     Authorized {
         checkpoint_ref: CheckpointRef,
@@ -249,14 +251,12 @@ where
             SystemTime::now(),
         );
         put_json(store, &paths.current_generation(), &current_generation).await?;
-    } else {
-        if let Some(cur) = &current_generation
-            && cur.generation != request.generation
-        {
-            return Ok(GenerationInitialization::StaleGeneration {
-                current_generation: cur.generation,
-            });
-        }
+    } else if let Some(cur) = &current_generation
+        && cur.generation != request.generation
+    {
+        return Ok(GenerationInitialization::StaleGeneration {
+            current_generation: cur.generation,
+        });
     }
 
     let recovery = find_recovery_checkpoint(store, &paths, request.generation).await?;

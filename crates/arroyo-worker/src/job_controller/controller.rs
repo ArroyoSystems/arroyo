@@ -328,7 +328,7 @@ impl WorkerJobController {
             let mut subtasks_to_commit = HashSet::new();
 
             for (op, data) in &commit_req.committing_data {
-                for (_, t) in &data.committing_data {
+                for t in data.committing_data.values() {
                     for subtask in t.commit_data_by_subtask.keys() {
                         subtasks_to_commit.insert((op.clone(), *subtask));
                     }

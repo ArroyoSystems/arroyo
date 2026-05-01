@@ -1102,6 +1102,7 @@ impl LeaderServer {
             .map_err(|_| Status::internal("could not process request, internal queue is closed"))
     }
 
+    #[allow(clippy::result_large_err)]
     fn validate_req(&self, ctx: Option<&rpc::WorkerContext>) -> Result<(), Status> {
         let Some(ctx) = ctx else {
             return Err(Status::invalid_argument(

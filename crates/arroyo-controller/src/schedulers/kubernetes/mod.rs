@@ -325,7 +325,6 @@ mod test {
     use arroyo_rpc::config::config;
     use arroyo_types::{JobId, PipelineId};
     use serde_json::json;
-    use std::sync::Arc;
 
     #[test]
     fn test_resource_creation() {
