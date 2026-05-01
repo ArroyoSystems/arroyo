@@ -188,7 +188,20 @@ where
 {
     let paths = ProtocolPaths::new(request.pipeline_id.clone(), request.job_id.clone());
 
+    // TODO: this read is not strictly necessary if update_current_generation is true, but is here
+    //  to prevent potential corruption by a confused controller
+    let current_generation =
+        read_json::<_, CurrentGeneration>(store, &paths.current_generation()).await?;
+
     if update_current_generation {
+        if let Some(current) = &current_generation
+            && current.generation > request.generation
+        {
+            return Err(StoreError::Protocol(
+                ProtocolError::NonMonotonicGenerationUpdate,
+            ));
+        }
+
         let current_generation = CurrentGeneration::new(
             request.pipeline_id.clone(),
             request.job_id.clone(),
@@ -197,9 +210,6 @@ where
         );
         put_json(store, &paths.current_generation(), &current_generation).await?;
     } else {
-        let current_generation =
-            read_json::<_, CurrentGeneration>(store, &paths.current_generation()).await?;
-
         if let Some(cur) = &current_generation
             && cur.generation != request.generation
         {
@@ -786,10 +796,10 @@ where
                 derive_checkpoint_state(
                     request.checkpoint_ref,
                     Some(request.checkpoint),
-                    Some(existing),
+                    Some(existing.clone()),
                     None,
                 )?;
-                Ok(EpochClaimOutcome::Owned { record })
+                Ok(EpochClaimOutcome::Owned { record: existing })
             } else {
                 Ok(EpochClaimOutcome::Orphaned {
                     canonical_ref: existing.checkpoint_ref.clone(),
@@ -830,7 +840,10 @@ where
 }
 
 fn validate_marker(marker: &CommittedMarker, record: &EpochRecord) -> Result<(), ProtocolError> {
-    if marker.job_id != record.job_id || marker.epoch != record.epoch {
+    if marker.job_id != record.job_id
+        || marker.epoch != record.epoch
+        || marker.checkpoint_ref != record.checkpoint_ref
+    {
         return Err(ProtocolError::CommittedMarkerMismatch);
     }
 

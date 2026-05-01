@@ -57,13 +57,13 @@ pub trait Scheduler: Send + Sync {
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
         force: bool,
     ) -> anyhow::Result<()>;
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>>;
 }
 

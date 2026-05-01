@@ -34,6 +34,8 @@ pub enum ProtocolError {
     CommittedMarkerMismatch,
     #[error("checkpoint manifest does not match protocol record")]
     CheckpointManifestMismatch,
+    #[error("update to current generation would have caused a non-monotonic generation update")]
+    NonMonotonicGenerationUpdate,
 }
 
 /// Monotonic identifier for a worker cluster generation of a job.

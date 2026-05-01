@@ -359,6 +359,11 @@ impl RunningJobModel {
     }
 
     async fn compact_state(&mut self) -> anyhow::Result<()> {
+        if self.worker_leader_mode {
+            // TODO: compaction for leader mode
+            return Ok(());
+        }
+
         if !config().pipeline.compaction.enabled {
             debug!("Compaction is disabled, skipping compaction");
             return Ok(());
@@ -409,7 +414,10 @@ impl RunningJobModel {
         Ok(())
     }
 
-    async fn finish_checkpoint_leader(&mut self) -> anyhow::Result<()> {
+    async fn finish_checkpoint_leader(
+        &mut self,
+        store: &dyn CheckpointMetadataStore,
+    ) -> anyhow::Result<()> {
         let state = self.checkpoint_state.take().unwrap();
         let storage = get_storage_provider().await?;
         match state {
@@ -455,6 +463,9 @@ impl RunningJobModel {
                 };
 
                 let res = publish_checkpoint(storage.as_ref(), publish_req).await?;
+
+                self.checkpoint_parent_ref = Some(checkpoint_ref);
+
                 metadata_span.finish();
 
                 let duration = checkpointing
@@ -476,6 +487,14 @@ impl RunningJobModel {
                             epoch = self.epoch,
                             duration
                         );
+                        self.update_checkpoint_in_db(
+                            &checkpointing,
+                            store,
+                            CheckpointStatus::Ready,
+                        )
+                        .await?;
+
+                        store.notify_checkpoint_complete();
                         return Ok(());
                     }
                     CheckpointPublication::CommitRequired {
@@ -585,6 +604,9 @@ impl RunningJobModel {
                 )
                 .await?;
 
+                self.finish_committing(checkpoint_ref.as_str(), store)
+                    .await?;
+
                 self.last_checkpoint = Instant::now();
                 self.checkpoint_state = None;
                 info!(
@@ -593,6 +615,7 @@ impl RunningJobModel {
                     epoch = self.epoch,
                     generation = self.generation,
                 );
+                store.notify_checkpoint_complete();
             }
         }
 
@@ -695,7 +718,7 @@ impl RunningJobModel {
     ) -> anyhow::Result<()> {
         if self.checkpoint_state.as_ref().unwrap().done() {
             if self.worker_leader_mode {
-                self.finish_checkpoint_leader().await?;
+                self.finish_checkpoint_leader(store).await?;
             } else {
                 self.finish_checkpoint_controller(store).await?;
             }

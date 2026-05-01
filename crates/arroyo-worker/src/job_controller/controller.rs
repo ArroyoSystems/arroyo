@@ -298,10 +298,14 @@ impl WorkerJobController {
                 }
 
                 // TODO: this really should happen after we've replayed the initial commit, but
-                //  that requires a significant reworking on the worker lifecycle
+                //  that requires a significant reworking on the worker lifecycle. However, Committing
+                //  concurrently with startup is how the existing controller has always worked, so in
+                //  practice it doesn't seem to be likely that workers outrun the commit, but it is
+                //  possible and we should look at fixing this at some point in the future when we
+                //  remove the legacy code paths.
                 status.connect.job_controller_init(JobControllerInitReq {}).await?;
 
-                anyhow::Result::Ok(())
+                Ok(())
             }
         });
 
@@ -329,6 +333,7 @@ impl WorkerJobController {
 
             // now wait for ack's
             info!(job_id =? self.worker_context.job_id, "waiting for subtasks to commit...");
+            // no timeout here, we rely on the controller to kill us if we take too longer to initialize
             while !subtasks_to_commit.is_empty() {
                 tokio::select! {
                     msg = self.rx.recv() => {

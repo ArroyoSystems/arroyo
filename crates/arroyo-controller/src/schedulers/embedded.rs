@@ -99,8 +99,13 @@ impl Scheduler for EmbeddedScheduler {
 
     async fn worker_finished(&self, _: WorkerFinishedReq) {}
 
-    async fn stop_workers(&self, job_id: &str, run_id: Option<u64>, _: bool) -> anyhow::Result<()> {
-        for w in self.workers_for_job(job_id, run_id).await? {
+    async fn stop_workers(
+        &self,
+        job_id: &str,
+        generation: Option<u64>,
+        _: bool,
+    ) -> anyhow::Result<()> {
+        for w in self.workers_for_job(job_id, generation).await? {
             let state = self.tasks.lock().await;
             if let Some(worker) = state.get(&w) {
                 worker.shutdown.token().cancel();
@@ -113,13 +118,13 @@ impl Scheduler for EmbeddedScheduler {
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         let state = self.tasks.lock().await;
         Ok(state
             .iter()
             .filter(|(_, t)| {
-                *t.job_id == job_id && (run_id.is_some() && run_id.unwrap() == t.generation)
+                *t.job_id == job_id && (generation.is_none() || generation.unwrap() == t.generation)
             })
             .map(|(k, _)| *k)
             .collect())

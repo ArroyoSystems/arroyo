@@ -1082,6 +1082,27 @@ impl LeaderServer {
             .await
             .map_err(|_| Status::internal("could not process request, internal queue is closed"))
     }
+
+    fn validate_req(&self, ctx: Option<&rpc::WorkerContext>) -> Result<(), Status> {
+        let Some(ctx) = ctx else {
+            return Err(Status::invalid_argument(
+                "request is missing worker context",
+            ));
+        };
+
+        if *self.state.worker_context.job_id != ctx.job_id
+            || self.state.worker_context.generation != ctx.generation
+        {
+            return Err(Status::permission_denied(format!(
+                "received message for incorrect job or generation ({}, {}) != ({}, {})",
+                self.state.worker_context.job_id,
+                self.state.worker_context.generation,
+                ctx.job_id,
+                ctx.generation
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1091,6 +1112,8 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<TaskCheckpointEventReq>,
     ) -> Result<Response<TaskCheckpointEventResp>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
 
         debug!(req =? req, "received task checkpoint event");
 
@@ -1106,6 +1129,8 @@ impl JobControllerGrpc for LeaderServer {
     ) -> Result<Response<TaskCheckpointCompletedResp>, Status> {
         let req = request.into_inner();
 
+        self.validate_req(req.worker_context.as_ref())?;
+
         debug!("received task checkpoint completed {:?}", req);
 
         self.send_job_message(RunningMessage::TaskCheckpointFinished(req))
@@ -1119,6 +1144,8 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<TaskFinishedReq>,
     ) -> Result<Response<TaskFinishedResp>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
 
         let ctx = req
             .worker_context
@@ -1140,6 +1167,9 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<TaskFailedReq>,
     ) -> Result<Response<TaskFailedResp>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
+
         let ctx = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("TaskFailedReq missing worker_context"))?;
@@ -1168,6 +1198,8 @@ impl JobControllerGrpc for LeaderServer {
     ) -> Result<Response<HeartbeatResp>, Status> {
         let req = request.into_inner();
 
+        self.validate_req(req.worker_context.as_ref())?;
+
         debug!(
             "[{:?}] Received heartbeat {:?}",
             self.state.worker_context.worker_id, req
@@ -1187,6 +1219,9 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<NonfatalErrorReq>,
     ) -> Result<Response<WorkerErrorRes>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
+
         let ctx = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing worker_context"))?;
