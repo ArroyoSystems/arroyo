@@ -1,6 +1,8 @@
 use crate::job_controller::checkpoint_state::CheckpointState;
 use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
-use crate::job_controller::{CHECKPOINTS_TO_KEEP, COMPACT_EVERY, RunningMessage, TaskFailedEvent};
+use crate::job_controller::{
+    CHECKPOINTS_TO_KEEP, COMPACT_EVERY, RetireWorkerLeader, RunningMessage, TaskFailedEvent,
+};
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
@@ -500,11 +502,13 @@ impl RunningJobModel {
                     } => (checkpoint_ref, commit_permit),
                     r @ CheckpointPublication::StopOrphaned { .. }
                     | r @ CheckpointPublication::StaleGeneration => {
-                        bail!(
-                            "this generation ({}) is no longer permitted to checkpoint: {:?}",
-                            self.generation,
-                            r
-                        );
+                        return Err(RetireWorkerLeader {
+                            reason: format!(
+                                "generation {} is no longer permitted to checkpoint: {:?}",
+                                self.generation, r
+                            ),
+                        }
+                        .into());
                     }
                     CheckpointPublication::Failed(f) => {
                         bail!(
@@ -565,16 +569,20 @@ impl RunningJobModel {
                         );
                     }
                     CommitAuthorization::StopOrphaned { canonical_ref } => {
-                        bail!(
-                            "this checkpoint ({checkpoint_ref}) is orphaned, intentionally failing; \
-                        canonical checkpoint is {canonical_ref}"
-                        );
+                        return Err(RetireWorkerLeader {
+                            reason: format!(
+                                "checkpoint {checkpoint_ref} is orphaned; canonical checkpoint is {canonical_ref}"
+                            ),
+                        }
+                        .into());
                     }
                     CommitAuthorization::NotCanonical { checkpoint_ref } => {
-                        bail!(
-                            "attempted to commit non-canonical checkpoint {checkpoint_ref}, \
-                        intentionally failing"
-                        )
+                        return Err(RetireWorkerLeader {
+                            reason: format!(
+                                "attempted to commit non-canonical checkpoint {checkpoint_ref}"
+                            ),
+                        }
+                        .into());
                     }
                     CommitAuthorization::MissingCheckpoint { checkpoint_ref } => {
                         bail!("checkpoint {checkpoint_ref} was missing when attempting to commit!");

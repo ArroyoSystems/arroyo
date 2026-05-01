@@ -2,7 +2,7 @@
 #![allow(clippy::type_complexity)]
 
 use crate::engine::{Engine, Program, SubtaskNode};
-use crate::job_controller::{RunningMessage, TaskFailedEvent, WorkerContext};
+use crate::job_controller::{RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext};
 use crate::network_manager::NetworkManager;
 use anyhow::{Context, Result, anyhow};
 
@@ -250,7 +250,7 @@ impl WorkerState {
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
         parent: Option<(CheckpointRef, CheckpointManifest)>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         // runs only on the leader
 
         let (tx, rx) = channel(128);
@@ -264,7 +264,7 @@ impl WorkerState {
             self.worker_context.worker_id
         );
 
-        WorkerJobController::init(
+        let controller = match WorkerJobController::init(
             self.worker_context.clone(),
             program,
             tasks,
@@ -275,10 +275,25 @@ impl WorkerState {
             checkpoint_interval,
             parent,
         )
-        .await?
-        .start(shutdown);
+        .await
+        {
+            Ok(controller) => controller,
+            Err(err) if err.downcast_ref::<RetireWorkerLeader>().is_some() => {
+                info!(
+                    worker_id = self.worker_context.worker_id.0,
+                    generation = self.worker_context.generation,
+                    error = format!("{:?}", err),
+                    "worker leader retired during initialization"
+                );
+                shutdown.cancel();
+                return Ok(false);
+            }
+            Err(err) => return Err(err),
+        };
 
-        Ok(())
+        controller.start(shutdown);
+
+        Ok(true)
     }
 
     async fn initialize_inner(
@@ -341,16 +356,20 @@ impl WorkerState {
         if req.is_leader {
             // TODO: the leader needs to load checkpoint metadata and figure out epochs/min epochs
             //  itself from object storage
-            self.initialize_job_controller(
-                logical.clone(),
-                &req.tasks,
-                req.start_epoch,
-                req.min_epoch,
-                &shutdown_guard,
-                Duration::from_micros(req.checkpoint_interval_micros),
-                parent.clone(),
-            )
-            .await?;
+            if !self
+                .initialize_job_controller(
+                    logical.clone(),
+                    &req.tasks,
+                    req.start_epoch,
+                    req.min_epoch,
+                    &shutdown_guard,
+                    Duration::from_micros(req.checkpoint_interval_micros),
+                    parent.clone(),
+                )
+                .await?
+            {
+                return Ok(());
+            }
         }
 
         let engine = {

@@ -14,6 +14,7 @@ use arroyo_types::WorkerId;
 use arroyo_types::to_micros;
 use async_trait::async_trait;
 use serde_json::Value;
+use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tonic::transport::Channel;
@@ -29,6 +30,19 @@ pub mod checkpoint_state;
 pub mod committing_state;
 pub mod controller;
 pub mod model;
+
+#[derive(Debug)]
+pub struct RetireWorkerLeader {
+    pub reason: String,
+}
+
+impl Display for RetireWorkerLeader {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "retiring worker leader: {}", self.reason)
+    }
+}
+
+impl std::error::Error for RetireWorkerLeader {}
 
 #[derive(Debug, Clone)]
 pub struct WorkerRegistration {
@@ -179,6 +193,14 @@ impl JobControllerStatus {
             status.job_failure = Some(failure);
         }
         self.transition(rpc::JobState::JobFailing)
+    }
+
+    pub fn retire(&self) -> anyhow::Result<()> {
+        let mut status = self.job_status.lock().unwrap();
+        status.job_state = rpc::JobState::JobStopped.into();
+        status.transitioned_at = to_micros(SystemTime::now());
+        status.updated_at = status.transitioned_at;
+        Ok(())
     }
 }
 

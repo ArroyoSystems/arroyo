@@ -3,11 +3,11 @@ use crate::job_controller::model::{
     WorkerStatus,
 };
 use crate::job_controller::{
-    JobControllerStatus, RunningMessage, TaskFailedEvent, WorkerContext, connect_to_worker,
+    JobControllerStatus, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext,
+    connect_to_worker,
 };
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::checkpoints::CheckpointMetadataStore;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
@@ -16,10 +16,10 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::log_event;
 use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_state::get_storage_provider;
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
-use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
 use arroyo_state_protocol::types::{CheckpointRef, Generation};
 use arroyo_state_protocol::workflow::{
@@ -48,9 +48,12 @@ pub struct WorkerJobController {
     cleanup_task: Option<JoinHandle<anyhow::Result<u32>>>,
     rx: Receiver<RunningMessage>,
     stopping: bool,
+    failing: bool,
     final_checkpoint_started: bool,
     replay_commits: Option<(CommitReq, CommitPermit)>,
 }
+
+const FAILURE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl std::fmt::Debug for WorkerJobController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -153,19 +156,21 @@ impl WorkerJobController {
                 recovery,
             } => (generation_manifest, recovery),
             GenerationInitialization::StaleGeneration { current_generation } => {
-                // TODO: add more graceful error handling for these cases
-                bail!(
-                    "failing leader on startup as we are stale — our generation {} but current is {}",
-                    worker_context.generation,
-                    current_generation.0
-                );
+                return Err(RetireWorkerLeader {
+                    reason: format!(
+                        "leader generation {} is stale; current generation is {}",
+                        worker_context.generation, current_generation.0
+                    ),
+                }
+                .into());
             }
             GenerationInitialization::StopOrphaned { canonical_ref } => {
-                bail!(
-                    "failing leader on startup as we are attempting to restore an orphaned \
-                (expected to be {:?})",
-                    canonical_ref
-                );
+                return Err(RetireWorkerLeader {
+                    reason: format!(
+                        "leader attempted to restore an orphaned checkpoint; canonical checkpoint is {canonical_ref:?}"
+                    ),
+                }
+                .into());
             }
             GenerationInitialization::Failed(e) => {
                 bail!("failed to resolve generation manifest: {:?}", e);
@@ -251,6 +256,7 @@ impl WorkerJobController {
             cleanup_task: None,
             rx,
             stopping: false,
+            failing: false,
             final_checkpoint_started: false,
             replay_commits,
         })
@@ -355,8 +361,8 @@ impl WorkerJobController {
                                     "error": event.reason,
                                     "domain": event.error_domain.as_str(),
                                 });
-                                self.status.to_failing(event.into())?;
-                                break;
+                                self.fail_job(event.into()).await?;
+                                return Ok(());
                             }
                             Some(RunningMessage::WorkerHeartbeat { .. }) => {
                                 // ignore heart beats
@@ -406,7 +412,14 @@ impl WorkerJobController {
                             self.handle_stop(stop_mode).await?;
                         }
                         Some(running) => {
-                            self.model.handle_message(running, &self.status).await?;
+                            if let Err(err) = self.model.handle_message(running, &self.status).await {
+                                if let Some(retire) = err.downcast_ref::<RetireWorkerLeader>() {
+                                    self.retire_job(retire.reason.clone()).await?;
+                                    return Ok(());
+                                }
+
+                                return Err(err);
+                            }
                         }
                         None => {
                             return Ok(())
@@ -438,9 +451,15 @@ impl WorkerJobController {
                                 "domain": event.error_domain.as_str(),
                             });
 
-                            self.status.to_failing(event.into())?;
+                            self.fail_job(event.into()).await?;
+                            return Ok(());
                         }
                         Err(err) => {
+                            if let Some(retire) = err.downcast_ref::<RetireWorkerLeader>() {
+                                self.retire_job(retire.reason.clone()).await?;
+                                return Ok(());
+                            }
+
                             error!(message = "error while running", error = format!("{:?}", err), job_id = *self.worker_context.job_id);
                             log_event!("running_error", {
                                 "service": "controller",
@@ -448,14 +467,16 @@ impl WorkerJobController {
                                 "error": format!("{:?}", err),
                             });
 
-                            self.status.to_failing(JobFailure {
+                            self.fail_job(JobFailure {
                                 operator_id: None,
                                 task_id: None,
                                 subtask_index: None,
                                 message: err.to_string(),
                                 error_domain: rpc::ErrorDomain::Internal.into(),
                                 retry_hint: rpc::RetryHint::WithBackoff.into(),
-                            })?;
+                            })
+                            .await?;
+                            return Ok(());
                         }
                     }
                 }
@@ -612,6 +633,82 @@ impl WorkerJobController {
                 .await?;
         }
 
+        Ok(())
+    }
+
+    async fn best_effort_stop_job(&mut self, stop_mode: StopMode) {
+        for c in self.model.workers.values_mut() {
+            if let Err(e) = c
+                .connect
+                .stop_execution(StopExecutionReq {
+                    stop_mode: stop_mode as i32,
+                })
+                .await
+            {
+                warn!(
+                    message = "failed to stop worker during cleanup",
+                    job_id = *self.worker_context.job_id,
+                    worker_id = c.id.0,
+                    error = format!("{:?}", e),
+                );
+            }
+        }
+    }
+
+    async fn fail_job(&mut self, failure: JobFailure) -> anyhow::Result<()> {
+        if !self.failing {
+            self.failing = true;
+            self.status.to_failing(failure)?;
+            self.best_effort_stop_job(StopMode::Immediate).await;
+        }
+
+        let cleanup = async {
+            while !self.model.all_tasks_finished() {
+                let Some(msg) = self.rx.recv().await else {
+                    break;
+                };
+
+                match msg {
+                    RunningMessage::Stop { .. } => {
+                        self.best_effort_stop_job(StopMode::Immediate).await;
+                    }
+                    msg => {
+                        if let Err(e) = self.model.handle_message(msg, &self.status).await {
+                            warn!(
+                                message = "ignoring error while cleaning up failed job",
+                                job_id = *self.worker_context.job_id,
+                                error = format!("{:?}", e),
+                            );
+                        }
+                    }
+                }
+            }
+        };
+
+        if tokio::time::timeout(FAILURE_CLEANUP_TIMEOUT, cleanup)
+            .await
+            .is_err()
+        {
+            warn!(
+                message = "timed out waiting for failed job to stop",
+                job_id = *self.worker_context.job_id,
+            );
+        }
+
+        self.status.transition(rpc::JobState::JobFailed)?;
+        Ok(())
+    }
+
+    async fn retire_job(&mut self, reason: String) -> anyhow::Result<()> {
+        info!(
+            message = "retiring worker leader",
+            job_id = *self.worker_context.job_id,
+            generation = self.worker_context.generation,
+            reason,
+        );
+
+        self.best_effort_stop_job(StopMode::Immediate).await;
+        self.status.retire()?;
         Ok(())
     }
 

@@ -690,6 +690,15 @@ impl ControllerServer {
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
 
+        let scheduler_shutdown_guard = guard.child("scheduler-shutdown");
+        let scheduler_shutdown_token = scheduler_shutdown_guard.token();
+        let scheduler = Arc::clone(&self.scheduler);
+        tokio::spawn(async move {
+            scheduler_shutdown_token.cancelled().await;
+            scheduler.shutdown().await;
+            drop(scheduler_shutdown_guard);
+        });
+
         self.start_updater(guard.child("updater"));
 
         if let Some(tls_config) = config.get_tls_config(&config.controller.tls) {
