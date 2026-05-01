@@ -177,6 +177,12 @@ impl WorkerJobController {
             }
         };
 
+        // Note: There are panics in some of these branches because they indicate a bug in the controller
+        // or worker, not just inconsistent state. We are working around some limitations in adapting
+        // the existing worker lifecycle to the worker leader mode, such that we need the controller
+        // to look up the checkpoint information to initialize the workers. If on the leader side
+        // we end up with a different view of the checkpoint state, that indicates something has
+        // gone very wrong and our best choice is to panic and have the controller clean us up.
         let (parent_ref, replay_commits) = match recovery {
             GenerationRecovery::NoCheckpoint => {
                 // nothing to do -- make sure that we're not inconsistent with the controller /
@@ -331,7 +337,7 @@ impl WorkerJobController {
 
             // now wait for ack's
             info!(job_id =? self.worker_context.job_id, "waiting for subtasks to commit...");
-            // no timeout here, we rely on the controller to kill us if we take too longer to initialize
+            // no timeout here, we rely on the controller to kill us if we take too long to initialize
             while !subtasks_to_commit.is_empty() {
                 tokio::select! {
                     msg = self.rx.recv() => {

@@ -210,17 +210,6 @@ pub enum CommitAuthorization {
     },
 }
 
-/// Result of completing commit after workers report success.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommitCompletion {
-    Created { checkpoint_ref: CheckpointRef },
-    AlreadyCommitted { checkpoint_ref: CheckpointRef },
-    NoCommitNeeded { checkpoint_ref: CheckpointRef },
-    StopOrphaned { canonical_ref: CheckpointRef },
-    NotCanonical { checkpoint_ref: CheckpointRef },
-    MissingCheckpoint { checkpoint_ref: CheckpointRef },
-}
-
 /// Initializes a new generation and writes its generation manifest.
 ///
 /// When older manifests point at orphaned checkpoints, this follows the epoch

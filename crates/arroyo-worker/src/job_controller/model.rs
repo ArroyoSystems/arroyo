@@ -557,8 +557,8 @@ impl RunningJobModel {
                     }
                     CommitAuthorization::AlreadyCommitted { .. } => {
                         unreachable!(
-                            "we are passing assume_not_committed: true, so we should be able\
-                        able to end up in a state where the protocol believes we have already committed."
+                            "we are passing assume_not_committed: true, so we should not be able\
+                        to end up in a state where the protocol believes we have already committed."
                         )
                     }
                     CommitAuthorization::NoCommitNeeded { checkpoint_ref } => {
@@ -675,6 +675,8 @@ impl RunningJobModel {
 
                     self.start_or_get_span(JobCheckpointEventType::Committing);
 
+                    // TODO: this should be done in parallel, but we're being conservative for now
+                    //  about changing existing behaviorÏ
                     for worker in self.workers.values_mut() {
                         worker
                             .connect
