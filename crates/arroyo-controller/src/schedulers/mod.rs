@@ -42,6 +42,12 @@ lazy_static! {
     .unwrap();
 }
 
+/// A worker's current address as reported by the scheduler's backing infrastructure.
+#[derive(Debug, Clone)]
+pub struct WorkerAddress {
+    pub rpc_address: String,
+}
+
 #[async_trait::async_trait]
 pub trait Scheduler: Send + Sync {
     async fn start_workers(
@@ -63,6 +69,17 @@ pub trait Scheduler: Send + Sync {
         job_id: &str,
         run_id: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>>;
+
+    /// Returns authoritative worker addresses from the scheduler's infrastructure.
+    /// Override for schedulers that recycle addresses across worker lifetimes.
+    /// Returns `None` by default; callers fall back to the in-memory channel cache.
+    async fn worker_addresses_for_job(
+        &self,
+        _job_id: &str,
+        _run_id: Option<u64>,
+    ) -> anyhow::Result<Option<Vec<WorkerAddress>>> {
+        Ok(None)
+    }
 }
 
 pub struct ProcessWorker {

@@ -18,7 +18,7 @@ use arroyo_state::parquet::ParquetBackend;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{WorkerId, to_micros};
 use futures::future::try_join_all;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::task::JoinHandle;
@@ -526,6 +526,12 @@ impl RunningJobModel {
             .all(|(_, t)| t.state == TaskState::Finished)
     }
 
+    /// Remove workers whose addresses are not in the given set.
+    pub fn retain_workers_by_address(&mut self, live_addresses: &HashSet<String>) {
+        self.workers
+            .retain(|_, w| live_addresses.contains(&w.rpc_address));
+    }
+
     pub fn start_or_get_span(&mut self, event: JobCheckpointEventType) -> &mut JobCheckpointSpan {
         if let Some(idx) = self.checkpoint_spans.iter().position(|e| e.event == event) {
             return &mut self.checkpoint_spans[idx];
@@ -559,6 +565,7 @@ pub enum WorkerState {
 #[allow(unused)]
 pub struct WorkerStatus {
     pub id: WorkerId,
+    pub rpc_address: String,
     pub connect: WorkerClient,
     pub last_heartbeat: Instant,
     pub state: WorkerState,
