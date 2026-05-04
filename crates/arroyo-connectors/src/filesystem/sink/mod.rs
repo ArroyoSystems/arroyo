@@ -167,6 +167,10 @@ fn map_storage_error(storage_error: StorageError) -> DataflowError {
 fn map_object_store_error(obj_err: &object_store::Error) -> DataflowError {
     use object_store::Error;
     match obj_err {
+        // 409s with "error code: 1018" are spurious upstream errors; let the task recover.
+        Error::AlreadyExists { source, .. } if source.to_string().contains("error code: 1018") => {
+            connector_err!(External, WithBackoff, "{}", obj_err)
+        }
         // User errors: authentication, authorization, bad paths, misconfiguration
         Error::NotFound { .. }
         | Error::InvalidPath { .. }

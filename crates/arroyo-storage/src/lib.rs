@@ -154,6 +154,8 @@ fn should_retry(e: &object_store::Error) -> bool {
             // some operations (like CompleteMultipartUpload)
             !source.to_string().contains("status 404 Not Found")
         }
+        // 409s with "error code: 1018" are spurious upstream errors, not real conflicts.
+        Error::AlreadyExists { source, .. } => source.to_string().contains("error code: 1018"),
         _ => false,
     }
 }
