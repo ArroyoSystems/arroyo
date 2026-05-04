@@ -11,11 +11,11 @@ use arroyo_rpc::checkpoints::{
     UpdateCheckpointReq,
 };
 use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq,
     OperatorCheckpointMetadata, TaskCheckpointEventType,
 };
+use arroyo_rpc::identity::WorkerClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::parquet::ParquetBackend;
 use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
@@ -32,7 +32,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::task::JoinHandle;
 use tonic::Request;
-use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 
 pub struct RunningJobModel {
@@ -375,7 +374,7 @@ impl RunningJobModel {
             epoch = self.epoch,
         );
 
-        let mut worker_clients: Vec<WorkerGrpcClient<Channel>> =
+        let mut worker_clients: Vec<WorkerClient> =
             self.workers.values().map(|w| w.connect.clone()).collect();
         for node in self.program.graph.node_weights() {
             for (op, _) in node.operator_chain.iter() {
@@ -815,7 +814,7 @@ pub enum WorkerState {
 #[allow(unused)]
 pub struct WorkerStatus {
     pub id: WorkerId,
-    pub connect: WorkerGrpcClient<Channel>,
+    pub connect: WorkerClient,
     pub last_heartbeat: Instant,
     pub state: WorkerState,
 }

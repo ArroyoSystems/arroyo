@@ -8,10 +8,8 @@ use std::{
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_rpc::checkpoints::CheckpointMetadataStore;
-use arroyo_rpc::grpc::rpc::{
-    CommitReq, LabelPair, MetricsReq, StopExecutionReq, StopMode,
-    worker_grpc_client::WorkerGrpcClient,
-};
+use arroyo_rpc::grpc::rpc::{CommitReq, LabelPair, MetricsReq, StopExecutionReq, StopMode};
+use arroyo_rpc::identity::WorkerClient;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{JobId, PipelineId, WorkerId};
 use rand::{Rng, rng};
@@ -28,7 +26,6 @@ use arroyo_worker::job_controller::model::{
     WorkerStatus,
 };
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
-use tonic::transport::Channel;
 use tracing::{error, info, warn};
 
 pub mod checkpoint_store;
@@ -72,7 +69,7 @@ impl JobController {
         program: Arc<LogicalProgram>,
         epoch: u32,
         min_epoch: u32,
-        worker_connects: HashMap<WorkerId, WorkerGrpcClient<Channel>>,
+        worker_connects: HashMap<WorkerId, WorkerClient>,
         commit_state: Option<CommittingState>,
         metrics: JobMetrics,
     ) -> Self {

@@ -65,6 +65,7 @@ use url::{Host, Url};
 pub mod config;
 pub mod df;
 pub mod errors;
+pub mod identity;
 
 pub mod grpc {
     pub mod rpc {
