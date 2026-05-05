@@ -433,7 +433,7 @@ async fn get_and_register_checkpoint_info_leader<'a>(
     let new_gen = initialize_generation(
         get_storage_provider().await?.as_ref(),
         InitializeGenerationRequest {
-            pipeline_id: ctx.pipeline_id.clone(),
+            pipeline_id: ctx.pipeline_info.pipeline_id.clone(),
             job_id: JobId(ctx.config.id.clone()),
             generation: Generation(ctx.status.generation),
             updated_at: SystemTime::now(),
@@ -498,30 +498,33 @@ impl Scheduling {
         slots_needed: usize,
     ) -> Result<Box<Self>, StateError> {
         let start = Instant::now();
+        let mut env_vars = std::collections::HashMap::new();
+        env_vars.insert(
+            "ARROYO__CHECKPOINT_URL".to_string(),
+            ctx.pipeline_info
+                .state_url
+                .clone()
+                .unwrap_or_else(|| config().checkpoint_url.clone()),
+        );
+        env_vars.insert(
+            CLUSTER_ID_ENV.to_string(),
+            arroyo_server_common::get_cluster_id(),
+        );
+
         loop {
             match ctx
                 .scheduler
                 .start_workers(StartPipelineReq {
                     program: ctx.program.clone(),
                     wasm_path: "".to_string(),
-                    pipeline_id: ctx.pipeline_id.clone(),
+                    pipeline_id: ctx.pipeline_info.pipeline_id.clone(),
                     job_id: JobId(ctx.config.id.clone()),
                     generation: ctx.status.generation,
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
-                    env_vars: [
-                        (
-                            "ARROYO__CHECKPOINT_URL".to_string(),
-                            config().checkpoint_url.clone(),
-                        ),
-                        (
-                            CLUSTER_ID_ENV.to_string(),
-                            arroyo_server_common::get_cluster_id(),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
+                    env_vars: env_vars.clone(),
+                    pipeline_tags: ctx.pipeline_info.tags.clone(),
                 })
                 .await
             {
@@ -857,7 +860,7 @@ impl State for Scheduling {
                 let mut controller = JobController::new(
                     checkpoint_store,
                     ctx.config.clone(),
-                    ctx.pipeline_id.clone(),
+                    ctx.pipeline_info.pipeline_id.clone(),
                     ctx.status.generation,
                     program,
                     start_epoch as u32,

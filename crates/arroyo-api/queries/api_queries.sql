@@ -123,9 +123,9 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --: DbPipeline (state?, ttl_micros?)
 
---! create_pipeline(textual_repr?)
-INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version)
-VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version);
+--! create_pipeline(textual_repr?, state_url?, tags?)
+INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version, state_url, tags)
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags);
 
 --! get_pipelines : DbPipeline
 SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
@@ -296,7 +296,7 @@ LIMIT cast(:limit as integer);
 --! create_udf (dylib_url?)
 INSERT INTO udfs (pub_id, organization_id, created_by, prefix, name, language, definition, description, dylib_url)
 VALUES (:pub_id, :organization_id, :created_by, :prefix, :name,  :language, :definition, :description, :dylib_url);
-    
+
 --! get_udf: DbUdf
 SELECT pub_id, prefix, name, language, definition, created_at, updated_at, description, dylib_url
 FROM udfs

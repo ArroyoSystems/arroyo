@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime};
 use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::default_sink;
 use arroyo_rpc::api_types::pipelines::{
-    FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
-    QueryValidationResult, StopType, ValidateQueryPost,
+    FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PipelineTags,
+    PreviewPost, QueryValidationResult, StopType, ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
@@ -301,6 +301,10 @@ pub(crate) async fn create_pipeline_int(
     enable_sinks: bool,
     auth: AuthData,
     db: &DatabaseSource,
+    mut compiled: CompiledSql,
+    pub_id: Option<String>,
+    state_url: Option<String>,
+    tags: Option<PipelineTags>,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -310,10 +314,7 @@ pub(crate) async fn create_pipeline_int(
         )));
     }
 
-    let pub_id = generate_id(IdTypes::Pipeline);
-
-    let mut compiled =
-        compile_sql(query.clone(), &udfs, parallelism as usize, &auth, false, db).await?;
+    let pub_id = pub_id.unwrap_or_else(|| generate_id(IdTypes::Pipeline));
 
     if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
@@ -394,6 +395,12 @@ pub(crate) async fn create_pipeline_int(
         return Err(required_field("name"));
     }
 
+    let tags_json = tags
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|e| log_and_map(anyhow!("pipeline tags serialization failed: {e}")))?;
+
     api_queries::execute_create_pipeline(
         &db.client().await?,
         &pub_id,
@@ -405,6 +412,8 @@ pub(crate) async fn create_pipeline_int(
         &serde_json::to_value(&udfs).unwrap(),
         &program_bytes,
         &2,
+        &state_url,
+        &tags_json,
     )
     .await?;
 
@@ -595,16 +604,32 @@ pub async fn create_pipeline(
         .map(Duration::from_micros)
         .unwrap_or(*config().default_checkpoint_interval);
 
+    let udfs = pipeline_post.udfs.unwrap_or_default();
+
+    let compiled = compile_sql(
+        pipeline_post.query.clone(),
+        &udfs,
+        pipeline_post.parallelism as usize,
+        &auth_data,
+        false,
+        &state.database,
+    )
+    .await?;
+
     let pipeline_id = create_pipeline_int(
         pipeline_post.name,
         pipeline_post.query,
-        pipeline_post.udfs.unwrap_or_default(),
+        udfs,
         pipeline_post.parallelism,
         checkpoint_interval,
-        false,
-        true,
+        /* is_preview */ false,
+        /* enable_sinks */ true,
         auth_data.clone(),
         &state.database,
+        compiled,
+        pipeline_post.pub_id,
+        pipeline_post.state_url,
+        pipeline_post.tags,
     )
     .await?;
 
@@ -634,16 +659,32 @@ pub async fn create_preview_pipeline(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
+    let udfs = req.udfs.unwrap_or_default();
+
+    let compiled = compile_sql(
+        req.query.clone(),
+        &udfs,
+        1,
+        &auth_data,
+        false,
+        &state.database,
+    )
+    .await?;
+
     let pipeline_id = create_pipeline_int(
         format!("preview_{}", to_millis(SystemTime::now())),
         req.query,
-        req.udfs.unwrap_or_default(),
+        udfs,
         1,
         Duration::MAX,
-        true,
+        /* is_preview */ true,
         req.enable_sinks,
         auth_data.clone(),
         &state.database,
+        compiled,
+        None,
+        None,
+        None,
     )
     .await?;
 

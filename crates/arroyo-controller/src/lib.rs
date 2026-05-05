@@ -5,6 +5,7 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
+use arroyo_rpc::api_types::pipelines::PipelineTags;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
@@ -25,7 +26,7 @@ use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{MachineId, WorkerId, from_micros};
+use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
 use cornucopia_async::DatabaseSource;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
@@ -73,6 +74,14 @@ pub struct JobConfig {
     restart_nonce: i32,
     restart_mode: RestartMode,
     ignore_state_before_epoch: Option<i32>,
+}
+
+/// Per-pipeline data that doesn't change for the lifetime of a job.
+#[derive(Clone, Debug)]
+pub struct PipelineInfo {
+    pub pipeline_id: PipelineId,
+    pub state_url: Option<String>,
+    pub tags: Option<PipelineTags>,
 }
 
 #[derive(Clone, Debug)]

@@ -280,6 +280,7 @@ impl IntoResponse for HttpError {
     components(schemas(
         ErrorResp,
         PipelinePost,
+        PipelineTags,
         PreviewPost,
         PipelinePatch,
         PipelineRestart,
