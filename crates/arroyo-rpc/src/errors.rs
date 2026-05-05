@@ -269,6 +269,9 @@ pub enum StorageError {
     #[error("URL does not contain a key")]
     NoKeyInUrl,
 
+    #[error("object at path {path} already exists")]
+    AlreadyExists { path: String },
+
     #[error("object store error: {0:?}")]
     ObjectStore(#[from] object_store::Error),
 

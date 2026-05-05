@@ -78,7 +78,7 @@ pub struct JobConfig {
 #[derive(Clone, Debug)]
 pub struct JobStatus {
     id: Arc<String>,
-    run_id: u64,
+    generation: u64,
     state: String,
     start_time: Option<OffsetDateTime>,
     finish_time: Option<OffsetDateTime>,
@@ -105,7 +105,7 @@ impl JobStatus {
             &self.restarts,
             &self.pipeline_path,
             &self.wasm_path,
-            &(self.run_id as i64),
+            &(self.generation as i64),
             &self.restart_nonce,
             &*self.id,
         )
@@ -134,7 +134,7 @@ pub enum JobMessage {
     WorkerConnect {
         worker_id: WorkerId,
         machine_id: MachineId,
-        run_id: u64,
+        generation: u64,
         rpc_address: String,
         data_address: String,
         slots: usize,
@@ -192,7 +192,7 @@ impl ControllerGrpc for ControllerServer {
             JobMessage::WorkerConnect {
                 worker_id: WorkerId(worker.worker_id),
                 machine_id: MachineId(worker.machine_id.into()),
-                run_id: worker.run_id,
+                generation: worker.generation,
                 rpc_address: req.rpc_address,
                 data_address: req.data_address,
                 slots: req.slots as usize,
@@ -596,8 +596,8 @@ impl ControllerServer {
                     let config = JobConfig {
                         id: id.clone(),
                         organization_id: p.org_id,
-                        pipeline_name: p.pipeline_name,
                         pipeline_id: p.pipeline_id,
+                        pipeline_name: p.pipeline_name,
                         stop_mode: p.stop,
                         checkpoint_interval: Duration::from_micros(
                             p.checkpoint_interval_micros as u64,
@@ -621,7 +621,7 @@ impl ControllerServer {
 
                     let status = JobStatus {
                         id: id.clone(),
-                        run_id: p.run_id.unwrap_or(0).max(0) as u64,
+                        generation: p.run_id.unwrap_or(0).max(0) as u64,
                         state: p.state.unwrap_or_else(|| Created {}.name().to_string()),
                         start_time: p.start_time,
                         finish_time: p.finish_time,
@@ -689,6 +689,15 @@ impl ControllerServer {
         let job_controller_service = JobControllerGrpcServer::new(self.clone())
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
+
+        let scheduler_shutdown_guard = guard.child("scheduler-shutdown");
+        let scheduler_shutdown_token = scheduler_shutdown_guard.token();
+        let scheduler = Arc::clone(&self.scheduler);
+        tokio::spawn(async move {
+            scheduler_shutdown_token.cancelled().await;
+            scheduler.shutdown().await;
+            drop(scheduler_shutdown_guard);
+        });
 
         self.start_updater(guard.child("updater"));
 

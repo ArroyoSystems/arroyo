@@ -645,6 +645,7 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
+ "arroyo-state-protocol",
  "arroyo-types",
  "arroyo-worker",
  "async-trait",
@@ -978,6 +979,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-state-protocol"
+version = "0.16.0-dev"
+dependencies = [
+ "arroyo-rpc",
+ "arroyo-storage",
+ "arroyo-types",
+ "async-trait",
+ "prost",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+]
+
+[[package]]
 name = "arroyo-storage"
 version = "0.16.0-dev"
 dependencies = [
@@ -991,6 +1007,7 @@ dependencies = [
  "object_store",
  "rand 0.9.1",
  "regex",
+ "serde_json",
  "thiserror 2.0.12",
  "tokio",
  "tokio-util",
@@ -1089,6 +1106,7 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
+ "arroyo-state-protocol",
  "arroyo-types",
  "arroyo-udf-host",
  "async-stream",

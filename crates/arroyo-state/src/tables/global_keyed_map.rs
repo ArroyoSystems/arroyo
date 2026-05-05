@@ -410,7 +410,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         let parquet_bytes = writer.into_inner().unwrap();
         let bytes = parquet_bytes.len() as u64;
         let path = table_checkpoint_path(
-            &self.task_info.job_id,
+            &self.task_info,
             &self.task_info.operator_id,
             &self.table_name,
             self.task_info.task_index as usize,

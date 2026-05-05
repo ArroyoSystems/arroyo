@@ -41,7 +41,7 @@ SET state = :state,
 WHERE id = :job_id;
 
 --! get_program
-SELECT program, proto_version FROM pipelines WHERE id = :id;
+SELECT program, pub_id as pipeline_id, proto_version FROM pipelines WHERE id = :id;
 
 --! mark_checkpoints_compacted
 UPDATE checkpoints

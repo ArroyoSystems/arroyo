@@ -2,26 +2,27 @@
 #![allow(clippy::type_complexity)]
 
 use crate::engine::{Engine, Program, SubtaskNode};
-use crate::job_controller::{RunningMessage, TaskFailedEvent, WorkerContext};
+use crate::job_controller::{RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext};
 use crate::network_manager::NetworkManager;
 use anyhow::{Context, Result, anyhow};
 
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
-    CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq, GetWorkerPhaseResp,
-    HeartbeatReq, HeartbeatResp, JobControllerInitReq, JobControllerInitResp, JobFinishedReq,
-    JobFinishedResp, JobMetricsReq, JobMetricsResp, JobStatus, JobStatusReq, JobStatusResp,
-    JobStopMode, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily, MetricsReq, MetricsResp,
-    NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq,
-    StopExecutionResp, StopJobReq, StopJobResp, TaskAssignment, TaskCheckpointCompletedReq,
-    TaskCheckpointCompletedResp, TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq,
-    TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
+    CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq,
+    GetWorkerPhaseResp, HeartbeatReq, HeartbeatResp, JobControllerInitReq, JobControllerInitResp,
+    JobFinishedReq, JobFinishedResp, JobMetricsReq, JobMetricsResp, JobStatus, JobStatusReq,
+    JobStatusResp, JobStopMode, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily,
+    MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq,
+    StartExecutionResp, StopExecutionReq, StopExecutionResp, StopJobReq, StopJobResp,
+    TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
+    TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq, TaskFailedResp,
+    TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_rpc::identity::VerifyWorkerId;
 use arroyo_types::{
-    CheckpointBarrier, JOB_ID_ENV, JobId, MachineId, RUN_ID_ENV, WorkerId, from_micros,
-    from_millis, to_micros,
+    CLUSTER_ID_ENV, CheckpointBarrier, CheckpointFilePathLayout, GENERATION_ENV, JOB_ID_ENV, JobId,
+    MachineId, PIPELINE_ID_ENV, PipelineId, WorkerId, from_micros, from_millis, to_micros,
 };
 use rand::random;
 
@@ -53,8 +54,12 @@ use arroyo_rpc::{
     CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
     local_address, retry,
 };
+
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
+use arroyo_state::get_storage_provider;
+use arroyo_state_protocol::store::read_protobuf;
+use arroyo_state_protocol::types::CheckpointRef;
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
@@ -162,7 +167,12 @@ impl LocalRunner {
 
     pub async fn run(mut self) -> anyhow::Result<()> {
         let total_nodes = self.program.total_nodes();
-        let engine = Engine::for_local(self.program, "job-local".to_string()).await?;
+        let engine = Engine::for_local(
+            self.program,
+            "pipe-local".to_string(),
+            "job-local".to_string(),
+        )
+        .await?;
 
         let _running_engine = engine.start().await;
 
@@ -231,15 +241,17 @@ impl WorkerState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn initialize_job_controller(
         &self,
         program: Arc<LogicalProgram>,
         tasks: &[TaskAssignment],
-        epoch: u32,
-        min_epoch: u32,
+        epoch: u64,
+        min_epoch: u64,
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
-    ) -> anyhow::Result<()> {
+        parent: Option<(CheckpointRef, CheckpointManifest)>,
+    ) -> anyhow::Result<bool> {
         // runs only on the leader
 
         let (tx, rx) = channel(128);
@@ -253,7 +265,7 @@ impl WorkerState {
             self.worker_context.worker_id
         );
 
-        WorkerJobController::init(
+        let controller = match WorkerJobController::init(
             self.worker_context.clone(),
             program,
             tasks,
@@ -262,11 +274,27 @@ impl WorkerState {
             rx,
             self.job_status.clone(),
             checkpoint_interval,
+            parent,
         )
-        .await?
-        .start(shutdown);
+        .await
+        {
+            Ok(controller) => controller,
+            Err(err) if err.downcast_ref::<RetireWorkerLeader>().is_some() => {
+                info!(
+                    worker_id = self.worker_context.worker_id.0,
+                    generation = self.worker_context.generation,
+                    error = format!("{:?}", err),
+                    "worker leader retired during initialization"
+                );
+                shutdown.cancel();
+                return Ok(false);
+            }
+            Err(err) => return Err(err),
+        };
 
-        Ok(())
+        controller.start(shutdown);
+
+        Ok(true)
     }
 
     async fn initialize_inner(
@@ -308,18 +336,41 @@ impl WorkerState {
 
         let (control_tx, control_rx) = channel(128);
 
+        let parent_ref = req
+            .checkpoint_manifest_ref
+            .map(CheckpointRef::new)
+            .transpose()?;
+
+        let parent = if let Some(parent_ref) = parent_ref {
+            let manifest = read_protobuf::<_, CheckpointManifest>(
+                get_storage_provider().await?.as_ref(),
+                &parent_ref,
+            )
+            .await?
+            .ok_or_else(|| anyhow!("could not find restoration checkpoint {:?}", parent_ref))?;
+
+            Some((parent_ref, manifest))
+        } else {
+            None
+        };
+
         if req.is_leader {
             // TODO: the leader needs to load checkpoint metadata and figure out epochs/min epochs
             //  itself from object storage
-            self.initialize_job_controller(
-                logical.clone(),
-                &req.tasks,
-                req.start_epoch,
-                req.min_epoch,
-                &shutdown_guard,
-                Duration::from_micros(req.checkpoint_interval_micros),
-            )
-            .await?;
+            if !self
+                .initialize_job_controller(
+                    logical.clone(),
+                    &req.tasks,
+                    req.start_epoch,
+                    req.min_epoch,
+                    &shutdown_guard,
+                    Duration::from_micros(req.checkpoint_interval_micros),
+                    parent.clone(),
+                )
+                .await?
+            {
+                return Ok(());
+            }
         }
 
         let engine = {
@@ -331,15 +382,26 @@ impl WorkerState {
                     .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
             };
 
+            let file_path_layout = if req.wait_for_leader || req.is_leader {
+                CheckpointFilePathLayout::Protocol {
+                    pipeline_id: self.worker_context.pipeline_id.clone(),
+                    generation: self.worker_context.generation,
+                }
+            } else {
+                CheckpointFilePathLayout::Legacy
+            };
+
             let program = Program::from_logical(
                 &self.worker_context.job_id,
                 &logical.graph,
                 &req.tasks,
                 registry,
                 req.restore_epoch,
+                parent.map(|(_, m)| m),
+                file_path_layout,
                 control_tx.clone(),
             )
-            .await;
+            .await?;
 
             let engine = Engine::new(
                 program,
@@ -538,6 +600,8 @@ pub struct WorkerServer {
 impl WorkerServer {
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
         let worker_id = WorkerId(config().worker.id.unwrap_or_else(random));
+        let cluster_id =
+            std::env::var(CLUSTER_ID_ENV).unwrap_or_else(|_| panic!("{CLUSTER_ID_ENV} is not set"));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{JOB_ID_ENV} is not set"));
 
@@ -549,14 +613,20 @@ impl WorkerServer {
                 .unwrap_or_else(|| Uuid::new_v4().to_string()),
         ));
 
-        let run_id = std::env::var(RUN_ID_ENV)
-            .unwrap_or_else(|_| panic!("{RUN_ID_ENV} is not set"))
+        let run_id = std::env::var(GENERATION_ENV)
+            .unwrap_or_else(|_| panic!("{GENERATION_ENV} is not set"))
             .parse()
-            .unwrap_or_else(|_| panic!("{RUN_ID_ENV} must be an unsigned int"));
+            .unwrap_or_else(|_| panic!("{GENERATION_ENV} must be an unsigned int"));
+
+        let pipeline_id = std::env::var(PIPELINE_ID_ENV)
+            .unwrap_or_else(|_| panic!("{PIPELINE_ID_ENV} is not set"));
+
+        arroyo_server_common::set_cluster_id(&cluster_id);
 
         Ok(WorkerServer::new(
             machine_id,
             worker_id,
+            PipelineId(pipeline_id.into()),
             JobId(job_id.into()),
             run_id,
             shutdown_guard,
@@ -566,6 +636,7 @@ impl WorkerServer {
     pub fn new(
         machine_id: MachineId,
         worker_id: WorkerId,
+        pipeline_id: PipelineId,
         job_id: JobId,
         run_id: u64,
         shutdown_guard: ShutdownGuard,
@@ -578,8 +649,9 @@ impl WorkerServer {
                 worker_context: WorkerContext {
                     worker_id,
                     machine_id,
+                    pipeline_id,
                     job_id,
-                    run_id,
+                    generation: run_id,
                 },
                 job_status: Arc::new(Mutex::new(JobStatus {
                     job_state: rpc::JobState::JobInitializing.into(),
@@ -817,7 +889,8 @@ impl WorkerGrpc for WorkerServer {
         let sender_commit_map_pairs = {
             let phase = self.state.phase.lock().unwrap();
             let engine_state = match &*phase {
-                WorkerExecutionPhase::Running(engine_state) => engine_state,
+                WorkerExecutionPhase::WaitingOnLeader { engine_state, .. }
+                | WorkerExecutionPhase::Running(engine_state) => engine_state,
                 _ => {
                     return Err(Status::failed_precondition("Worker not in running phase"));
                 }
@@ -1035,6 +1108,28 @@ impl LeaderServer {
             .await
             .map_err(|_| Status::internal("could not process request, internal queue is closed"))
     }
+
+    #[allow(clippy::result_large_err)]
+    fn validate_req(&self, ctx: Option<&rpc::WorkerContext>) -> Result<(), Status> {
+        let Some(ctx) = ctx else {
+            return Err(Status::invalid_argument(
+                "request is missing worker context",
+            ));
+        };
+
+        if *self.state.worker_context.job_id != ctx.job_id
+            || self.state.worker_context.generation != ctx.generation
+        {
+            return Err(Status::permission_denied(format!(
+                "received message for incorrect job or generation ({}, {}) != ({}, {})",
+                self.state.worker_context.job_id,
+                self.state.worker_context.generation,
+                ctx.job_id,
+                ctx.generation
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1044,6 +1139,8 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<TaskCheckpointEventReq>,
     ) -> Result<Response<TaskCheckpointEventResp>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
 
         debug!(req =? req, "received task checkpoint event");
 
@@ -1059,6 +1156,8 @@ impl JobControllerGrpc for LeaderServer {
     ) -> Result<Response<TaskCheckpointCompletedResp>, Status> {
         let req = request.into_inner();
 
+        self.validate_req(req.worker_context.as_ref())?;
+
         debug!("received task checkpoint completed {:?}", req);
 
         self.send_job_message(RunningMessage::TaskCheckpointFinished(req))
@@ -1072,6 +1171,8 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<TaskFinishedReq>,
     ) -> Result<Response<TaskFinishedResp>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
 
         let ctx = req
             .worker_context
@@ -1093,6 +1194,9 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<TaskFailedReq>,
     ) -> Result<Response<TaskFailedResp>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
+
         let ctx = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("TaskFailedReq missing worker_context"))?;
@@ -1121,6 +1225,8 @@ impl JobControllerGrpc for LeaderServer {
     ) -> Result<Response<HeartbeatResp>, Status> {
         let req = request.into_inner();
 
+        self.validate_req(req.worker_context.as_ref())?;
+
         debug!(
             "[{:?}] Received heartbeat {:?}",
             self.state.worker_context.worker_id, req
@@ -1140,6 +1246,9 @@ impl JobControllerGrpc for LeaderServer {
         request: Request<NonfatalErrorReq>,
     ) -> Result<Response<WorkerErrorRes>, Status> {
         let req = request.into_inner();
+
+        self.validate_req(req.worker_context.as_ref())?;
+
         let ctx = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing worker_context"))?;
@@ -1189,7 +1298,7 @@ impl JobStatusGrpc for LeaderServer {
 
         Ok(Response::new(JobStatusResp {
             job_id,
-            run_id: self.state.worker_context.run_id,
+            generation: self.state.worker_context.generation,
             job_status: Some((*self.state.job_status.lock().unwrap()).clone()),
         }))
     }

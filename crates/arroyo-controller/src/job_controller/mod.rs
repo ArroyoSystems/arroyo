@@ -11,7 +11,7 @@ use arroyo_rpc::checkpoints::CheckpointMetadataStore;
 use arroyo_rpc::grpc::rpc::{CommitReq, LabelPair, MetricsReq, StopExecutionReq, StopMode};
 use arroyo_rpc::identity::WorkerClient;
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::WorkerId;
+use arroyo_types::{JobId, PipelineId, WorkerId};
 use rand::{Rng, rng};
 
 use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
@@ -19,7 +19,8 @@ use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
-use arroyo_state::committing_state::CommittingState;
+use arroyo_state_protocol::ProtocolPaths;
+use arroyo_worker::job_controller::committing_state::CommittingState;
 use arroyo_worker::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
     WorkerStatus,
@@ -44,6 +45,7 @@ pub struct JobController {
 impl std::fmt::Debug for JobController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobController")
+            .field("pipeline_id", &self.model.pipeline_id)
             .field("config", &self.config)
             .field("model", &self.model)
             .field("cleaning", &self.cleanup_task.is_some())
@@ -62,6 +64,8 @@ impl JobController {
     pub fn new(
         checkpoint_store: Arc<dyn CheckpointMetadataStore>,
         config: JobConfig,
+        pipeline_id: PipelineId,
+        generation: u64,
         program: Arc<LogicalProgram>,
         epoch: u32,
         min_epoch: u32,
@@ -73,7 +77,10 @@ impl JobController {
             checkpoint_store,
             metrics,
             model: RunningJobModel {
-                job_id: config.id.clone(),
+                protocol_paths: ProtocolPaths::new(pipeline_id.clone(), JobId(config.id.clone())),
+                pipeline_id,
+                job_id: JobId(config.id.clone()),
+                generation,
                 state: JobState::Running,
                 checkpoint_state: commit_state.map(CheckpointingOrCommittingState::Committing),
                 epoch,
@@ -115,8 +122,12 @@ impl JobController {
                 operator_parallelism: program.tasks_per_node(),
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
+                checkpoint_parent_ref: None,
                 program,
                 checkpoint_spans: vec![],
+                worker_leader_mode: false,
+                finished_operators: vec![],
+                generation_manifest: None,
             },
             config,
             cleanup_task: None,

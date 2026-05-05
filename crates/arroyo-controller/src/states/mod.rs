@@ -40,6 +40,7 @@ use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_types::PipelineId;
 use prost::Message;
 
 pub(crate) mod checkpoint_stopping;
@@ -107,7 +108,7 @@ impl State for Created {
 async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
     if let Err(e) = ctx
         .scheduler
-        .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+        .stop_workers(&ctx.config.id, Some(ctx.status.generation), true)
         .await
     {
         warn!(
@@ -194,7 +195,7 @@ impl TransitionTo<Compiling> for Scheduling {}
 impl TransitionTo<Scheduling> for Compiling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -257,7 +258,7 @@ impl TransitionTo<Rescaling> for Running {}
 impl TransitionTo<Scheduling> for Rescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -352,7 +353,7 @@ impl TransitionTo<LeaderRestarting> for LeaderRestarting {}
 impl TransitionTo<Scheduling> for LeaderRestarting {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -369,7 +370,7 @@ impl TransitionTo<LeaderStopping> for LeaderRestarting {}
 impl TransitionTo<Scheduling> for LeaderRescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -406,7 +407,7 @@ impl TransitionTo<Restarting> for Restarting {}
 impl TransitionTo<Scheduling> for Restarting {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            ctx.status.run_id += 1;
+            ctx.status.generation += 1;
         })
     }
 }
@@ -543,6 +544,7 @@ pub struct JobContext<'a> {
     pub config: JobConfig,
     pub status: &'a mut JobStatus,
     pub program: &'a mut LogicalProgram,
+    pub pipeline_id: PipelineId,
     pub db: DatabaseSource,
     pub scheduler: Arc<dyn Scheduler>,
     pub rx: &'a mut Receiver<JobMessage>,
@@ -894,6 +896,7 @@ pub(crate) async fn state_backoff(retries_attempted: usize) {
 #[allow(clippy::too_many_arguments)]
 async fn run_to_completion(
     config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
+    pipeline_pub_id: String,
     mut program: LogicalProgram,
     mut status: JobStatus,
     mut state: Box<dyn State>,
@@ -906,6 +909,7 @@ async fn run_to_completion(
         config: config.read().unwrap().0.clone(),
         status: &mut status,
         program: &mut program,
+        pipeline_id: PipelineId(pipeline_pub_id.into()),
         db: db.clone(),
         scheduler,
         rx: &mut rx,
@@ -979,7 +983,7 @@ impl StateMachine {
         db: &DatabaseSource,
         job_id: &str,
         id: i64,
-    ) -> anyhow::Result<Option<LogicalProgram>> {
+    ) -> anyhow::Result<Option<(String, LogicalProgram)>> {
         let res = controller_queries::fetch_get_program(&db.client().await?, &id)
             .await
             .map_err(|e| anyhow!("Failed to fetch program from database: {:?}", e))?
@@ -989,7 +993,7 @@ impl StateMachine {
 
         Ok(if res.proto_version == 2 {
             match Self::decode_program(&res.program) {
-                Ok(p) => Some(p),
+                Ok(p) => Some((res.pipeline_id, p)),
                 Err(e) => {
                     warn!("Failed to start {}: {}", job_id, e);
                     None
@@ -1049,12 +1053,13 @@ impl StateMachine {
                 let metrics = self.metrics.clone();
                 let pipeline_id = config.read().unwrap().0.pipeline_id;
                 match Self::get_program(&db, &status.id, pipeline_id).await {
-                    Ok(Some(program)) => {
+                    Ok(Some((pipeline_pub_id, program))) => {
                         shutdown_guard.into_spawn_task(async move {
                             let id = { config.read().unwrap().0.id.clone() };
                             info!(message = "starting state machine", job_id = *id);
                             run_to_completion(
                                 config,
+                                pipeline_pub_id,
                                 program,
                                 status,
                                 initial_state,

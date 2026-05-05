@@ -1,18 +1,26 @@
+use crate::job_controller::checkpoint_state::CommitData;
+use arroyo_rpc::grpc::rpc::{OperatorCommitData, TableCommitData};
+use arroyo_state_protocol::workflow::CommitPermit;
 use std::collections::{HashMap, HashSet};
 
-use arroyo_rpc::grpc::rpc::{OperatorCommitData, TableCommitData};
+pub enum CheckpointIdOrRef {
+    // used by database-backed mode, checkpoint metadata v0
+    CheckpointId(String),
+    // used by checkpoint metadata v1
+    CheckpointRef(CommitPermit),
+}
 
 pub struct CommittingState {
-    checkpoint_id: String,
+    checkpoint_id: CheckpointIdOrRef,
     subtasks_to_commit: HashSet<(String, u32)>,
-    committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
+    committing_data: CommitData,
 }
 
 impl CommittingState {
     pub fn new(
-        checkpoint_id: String,
+        checkpoint_id: CheckpointIdOrRef,
         subtasks_to_commit: HashSet<(String, u32)>,
-        committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
+        committing_data: CommitData,
     ) -> Self {
         Self {
             checkpoint_id,
@@ -22,7 +30,21 @@ impl CommittingState {
     }
 
     pub fn checkpoint_id(&self) -> &str {
-        &self.checkpoint_id
+        match &self.checkpoint_id {
+            CheckpointIdOrRef::CheckpointId(id) => id.as_str(),
+            CheckpointIdOrRef::CheckpointRef(_) => {
+                panic!("asked for checkpoint id in leader mode, which is not allowed");
+            }
+        }
+    }
+
+    pub fn commit_permit(&self) -> &CommitPermit {
+        match &self.checkpoint_id {
+            CheckpointIdOrRef::CheckpointId(_) => {
+                panic!("asked for commit permit in controller mode, which is not allowed");
+            }
+            CheckpointIdOrRef::CheckpointRef(commit_permit) => commit_permit,
+        }
     }
 
     pub fn subtask_committed(&mut self, operator_id: String, subtask_index: u32) {

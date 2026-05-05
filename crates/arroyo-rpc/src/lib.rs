@@ -11,7 +11,9 @@ use crate::config::{TlsConfig, config};
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::api::TaskCheckpointDetail;
 use crate::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
-use crate::grpc::rpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
+use crate::grpc::rpc::{
+    CheckpointManifest, CheckpointMetadata, LoadCompactedDataReq, SubtaskCheckpointMetadata,
+};
 use anyhow::{Context, Result, anyhow};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
@@ -1222,6 +1224,12 @@ impl<Context> Decode<Context> for SerializableBytes {
 }
 
 impl_borrow_decode!(SerializableBytes);
+
+/// Abstracts over v0 checkpoint metadata and v1 checkpoint manifests
+pub enum MetadataOrManifest {
+    Metadata(CheckpointMetadata),
+    Manifest(CheckpointManifest),
+}
 
 #[cfg(test)]
 mod tests {

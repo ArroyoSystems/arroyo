@@ -1,15 +1,16 @@
 use crate::errors;
 use crate::grpc::rpc;
 use crate::grpc::rpc::{JobStopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
-use arroyo_types::{JobId, MachineId, WorkerId};
+use arroyo_types::{JobId, MachineId, PipelineId, WorkerId};
 use std::time::{Instant, SystemTime};
 
 #[derive(Debug, Clone)]
 pub struct WorkerContext {
     pub machine_id: MachineId,
     pub worker_id: WorkerId,
+    pub pipeline_id: PipelineId,
     pub job_id: JobId,
-    pub run_id: u64,
+    pub generation: u64,
 }
 
 impl WorkerContext {
@@ -17,8 +18,9 @@ impl WorkerContext {
         rpc::WorkerContext {
             machine_id: self.machine_id.to_string(),
             worker_id: *self.worker_id,
+            pipeline_id: (*self.pipeline_id).clone(),
             job_id: (*self.job_id).clone(),
-            run_id: self.run_id,
+            generation: self.generation,
         }
     }
 }

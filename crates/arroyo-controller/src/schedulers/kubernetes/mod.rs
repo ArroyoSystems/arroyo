@@ -5,7 +5,7 @@ use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
 use arroyo_rpc::config::{KubernetesSchedulerConfig, ResourceMode, config};
 use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
-use arroyo_types::{JOB_ID_ENV, RUN_ID_ENV, WorkerId};
+use arroyo_types::{GENERATION_ENV, JOB_ID_ENV, PIPELINE_ID_ENV, WorkerId};
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
@@ -18,7 +18,7 @@ use tracing::{info, warn};
 
 const CLUSTER_LABEL: &str = "cluster";
 const JOB_ID_LABEL: &str = "job_id";
-const RUN_ID_LABEL: &str = "run_id";
+const GENERATION_LABEL: &str = "generation";
 const JOB_NAME_LABEL: &str = "job_name";
 
 pub struct KubernetesScheduler {
@@ -81,14 +81,14 @@ impl KubernetesScheduler {
         let mut labels = c.worker.labels.clone();
         labels.insert(CLUSTER_LABEL.to_string(), c.worker.name());
         labels.insert(JOB_ID_LABEL.to_string(), (*req.job_id).clone());
-        labels.insert(RUN_ID_LABEL.to_string(), format!("{}", req.run_id));
+        labels.insert(GENERATION_LABEL.to_string(), format!("{}", req.generation));
         labels.insert(JOB_NAME_LABEL.to_string(), req.name.clone());
 
         let pod_name = format!(
             "{}-{}-{}-{}",
             c.worker.name(),
             req.job_id.to_ascii_lowercase().replace('_', "-"),
-            req.run_id,
+            req.generation,
             number
         );
 
@@ -100,10 +100,13 @@ impl KubernetesScheduler {
                 "name": "ARROYO__WORKER__TASK_SLOTS", "value": format!("{}", slots),
             },
             {
-                "name": JOB_ID_ENV, "value": req.job_id,
+                "name": PIPELINE_ID_ENV, "value": *req.pipeline_id,
             },
             {
-                "name": RUN_ID_ENV, "value": format!("{}", req.run_id),
+                "name": JOB_ID_ENV, "value": *req.job_id,
+            },
+            {
+                "name": GENERATION_ENV, "value": format!("{}", req.generation),
             },
             {
                 "name": "ARROYO__WORKER__MACHINE_ID", "value": pod_name,
@@ -248,14 +251,14 @@ impl Scheduler for KubernetesScheduler {
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
         force: bool,
     ) -> anyhow::Result<()> {
         let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
         let mut labels = format!("{JOB_ID_LABEL}={job_id}");
-        if let Some(run_id) = run_id {
-            labels.push_str(&format!(",{RUN_ID_LABEL}={run_id}"));
+        if let Some(generation) = generation {
+            labels.push_str(&format!(",{GENERATION_LABEL}={generation}"));
         }
 
         let delete_params = if force {
@@ -278,7 +281,7 @@ impl Scheduler for KubernetesScheduler {
         for i in 0..20 {
             tokio::time::sleep(Duration::from_millis(i * 10)).await;
 
-            if self.workers_for_job(job_id, run_id).await?.is_empty() {
+            if self.workers_for_job(job_id, generation).await?.is_empty() {
                 return Ok(());
             }
         }
@@ -289,16 +292,16 @@ impl Scheduler for KubernetesScheduler {
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
-        // get the pods associated with the replica set for the given job_id and run_id
+        // get the pods associated with the replica set for the given job_id and generation
         let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
-        // label selector for job_id and optional run_id
+        // label selector for job_id and optional generation
 
         let mut selector = format!("{JOB_ID_LABEL}={job_id}");
-        if let Some(run_id) = run_id {
-            selector.push_str(&format!(",{RUN_ID_LABEL}={run_id}"));
+        if let Some(generation) = generation {
+            selector.push_str(&format!(",{GENERATION_LABEL}={generation}"));
         }
 
         api.list(&ListParams::default().labels(&selector))
@@ -316,13 +319,12 @@ impl Scheduler for KubernetesScheduler {
 
 #[cfg(test)]
 mod test {
-    use arroyo_datastream::logical::LogicalProgram;
-    use arroyo_rpc::config::config;
-    use serde_json::json;
-    use std::sync::Arc;
-
     use crate::schedulers::StartPipelineReq;
     use crate::schedulers::kubernetes::KubernetesScheduler;
+    use arroyo_datastream::logical::LogicalProgram;
+    use arroyo_rpc::config::config;
+    use arroyo_types::{JobId, PipelineId};
+    use serde_json::json;
 
     #[test]
     fn test_resource_creation() {
@@ -330,9 +332,10 @@ mod test {
             name: "test_pipeline".to_string(),
             program: LogicalProgram::default(),
             wasm_path: "file:///wasm".to_string(),
-            job_id: Arc::new("job123".to_string()),
+            pipeline_id: PipelineId("pipe-123".to_string().into()),
+            job_id: JobId("job123".to_string().into()),
             hash: "12123123h".to_string(),
-            run_id: 1,
+            generation: 1,
             slots: 8,
             env_vars: Default::default(),
         };

@@ -11,8 +11,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // worker configuration
+pub const CLUSTER_ID_ENV: &str = "CLUSTER_ID";
 pub const JOB_ID_ENV: &str = "JOB_ID";
-pub const RUN_ID_ENV: &str = "RUN_ID";
+pub const GENERATION_ENV: &str = "GENERATION";
+pub const PIPELINE_ID_ENV: &str = "PIPELINE_ID";
 
 // telemetry configuration
 pub const TELEMETRY_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";
@@ -53,7 +55,32 @@ impl Display for MachineId {
     }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PipelineId(pub Arc<String>);
+
+impl PipelineId {
+    pub fn new(v: impl Into<String>) -> Self {
+        Self(Arc::new(v.into()))
+    }
+}
+
+impl Deref for PipelineId {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for PipelineId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct JobId(pub Arc<String>);
 
 impl Deref for JobId {
@@ -61,6 +88,12 @@ impl Deref for JobId {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl JobId {
+    pub fn new(v: impl Into<String>) -> Self {
+        Self(Arc::new(v.into()))
     }
 }
 
@@ -307,7 +340,53 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     fn schema(&self) -> SchemaRef;
 }
 
-#[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
+#[derive(Eq, PartialEq, Hash, Debug, Clone, Default)]
+pub enum CheckpointFilePathLayout {
+    #[default]
+    Legacy,
+    Protocol {
+        pipeline_id: PipelineId,
+        generation: u64,
+    },
+}
+
+impl CheckpointFilePathLayout {
+    pub fn base_path(&self, job_id: &str, epoch: u32) -> String {
+        match self {
+            Self::Legacy => format!("{job_id}/checkpoints/checkpoint-{epoch:0>7}"),
+            Self::Protocol {
+                pipeline_id,
+                generation,
+            } => format!(
+                "{pipeline_id}/{job_id}/generations/{generation}/checkpoints/checkpoint-{epoch:0>7}"
+            ),
+        }
+    }
+
+    pub fn operator_path(&self, job_id: &str, epoch: u32, operator: &str) -> String {
+        format!("{}/operator-{}", self.base_path(job_id, epoch), operator)
+    }
+
+    pub fn table_checkpoint_path(
+        &self,
+        job_id: &str,
+        operator_id: &str,
+        table: &str,
+        subtask_index: usize,
+        epoch: u32,
+        compacted: bool,
+    ) -> String {
+        format!(
+            "{}/table-{}-{:0>3}{}",
+            self.operator_path(job_id, epoch, operator_id),
+            table,
+            subtask_index,
+            if compacted { "-compacted" } else { "" }
+        )
+    }
+}
+
+#[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct TaskInfo {
     pub job_id: String,
     pub operator_idx: u32,
@@ -316,6 +395,7 @@ pub struct TaskInfo {
     pub task_index: u32,
     pub parallelism: u32,
     pub key_range: RangeInclusive<u64>,
+    pub checkpoint_file_path_layout: CheckpointFilePathLayout,
 }
 
 impl Display for TaskInfo {
@@ -328,7 +408,7 @@ impl Display for TaskInfo {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Debug, Clone, Encode, Decode)]
+#[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct ChainInfo {
     pub job_id: String,
     pub task_id: u32,
@@ -366,6 +446,7 @@ impl TaskInfo {
             task_index: 0,
             parallelism: 1,
             key_range: 0..=u64::MAX,
+            checkpoint_file_path_layout: CheckpointFilePathLayout::Legacy,
         }
     }
 }
@@ -379,6 +460,7 @@ pub fn get_test_task_info() -> TaskInfo {
         task_index: 0,
         parallelism: 1,
         key_range: 0..=u64::MAX,
+        checkpoint_file_path_layout: CheckpointFilePathLayout::Legacy,
     }
 }
 

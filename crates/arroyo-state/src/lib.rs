@@ -1,5 +1,5 @@
 use arrow_array::RecordBatch;
-use arroyo_rpc::errors::StateError;
+use arroyo_rpc::errors::{StateError, StorageError};
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
     OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
@@ -20,7 +20,6 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-pub mod committing_state;
 mod metrics;
 pub mod parquet;
 pub(crate) mod schemas;
@@ -136,9 +135,6 @@ pub enum DataOperation {
 }
 #[async_trait]
 pub trait BackingStore {
-    /// prepares a checkpoint to be loaded, e.g., by deleting future data
-    async fn prepare_checkpoint_load(metadata: &CheckpointMetadata) -> Result<(), StateError>;
-
     /// loads the checkpoint metadata for a given job id and epoch
     async fn load_checkpoint_metadata(
         job_id: &str,
@@ -180,7 +176,7 @@ pub fn hash_key<K: Hash>(key: &K) -> u64 {
 static STORAGE_PROVIDER: tokio::sync::OnceCell<Arc<StorageProvider>> =
     tokio::sync::OnceCell::const_new();
 
-pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>, StateError> {
+pub async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>, StorageError> {
     // TODO: this should be encoded in the config so that the controller doesn't need
     // to be synchronized with the workers
 
@@ -188,7 +184,7 @@ pub(crate) async fn get_storage_provider() -> Result<&'static Arc<StorageProvide
         .get_or_try_init(|| async {
             let storage_url = &config().checkpoint_url;
 
-            Ok(StorageProvider::for_url(storage_url).await.map(Arc::new)?)
+            StorageProvider::for_url(storage_url).await.map(Arc::new)
         })
         .await
 }

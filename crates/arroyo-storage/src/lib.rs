@@ -11,7 +11,8 @@ use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
 use object_store::{Error, ObjectMeta};
 use object_store::{
-    MultipartId, ObjectStore, PutPayload, RetryConfig, aws::AmazonS3Builder, local::LocalFileSystem,
+    MultipartId, ObjectStore, PutMode, PutOptions, PutPayload, RetryConfig, aws::AmazonS3Builder,
+    local::LocalFileSystem,
 };
 use regex::{Captures, Regex};
 use std::borrow::Cow;
@@ -810,6 +811,38 @@ impl StorageProvider {
         storage_retry!(self.object_store.put(&path, bytes.clone()).await)?;
 
         Ok(())
+    }
+
+    /// Atomically creates a new object at `path`, failing with
+    /// [`StorageError::AlreadyExists`] if the object already exists.
+    ///
+    /// This uses the underlying object store's conditional-create semantics
+    /// (S3 `If-None-Match`, GCS `ifGenerationMatch=0`, etc.) and therefore
+    /// provides a true race-free check-and-put.
+    pub async fn put_if_not_exists(
+        &self,
+        path: impl Into<Path>,
+        bytes: Vec<u8>,
+    ) -> Result<(), StorageError> {
+        let payload = PutPayload::from(Bytes::from(bytes));
+        let path = path.into();
+        let qualified = self.qualify_path(&path);
+        let opts = PutOptions {
+            mode: PutMode::Create,
+            ..Default::default()
+        };
+
+        match storage_retry!(
+            self.object_store
+                .put_opts(&qualified, payload.clone(), opts.clone())
+                .await
+        ) {
+            Ok(_) => Ok(Ok(())),
+            Err(object_store::Error::AlreadyExists { path, .. }) => {
+                Ok(Err(StorageError::AlreadyExists { path }))
+            }
+            Err(e) => Err(StorageError::from(e)),
+        }?
     }
 
     pub fn qualify_path<'a>(&self, path: &'a Path) -> Cow<'a, Path> {

@@ -16,7 +16,9 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
-use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp, MetadataField};
+use arroyo_rpc::{
+    CheckpointCompleted, ControlMessage, ControlResp, MetadataField, MetadataOrManifest,
+};
 use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, single_item_hash_map,
     to_micros,
@@ -107,6 +109,9 @@ impl KafkaTopicTester {
             finish_time: to_micros(SystemTime::now()),
             operator_ids: vec![task_info.operator_id.clone()],
         });
+        let restore_from = checkpoint_metadata
+            .clone()
+            .map(MetadataOrManifest::Metadata);
 
         let out_schema = Some(Arc::new(ArroyoSchema::new_unkeyed(
             Arc::new(Schema::new(vec![
@@ -124,7 +129,7 @@ impl KafkaTopicTester {
 
         let ctx = OperatorContext::new(
             task_info.clone(),
-            checkpoint_metadata.as_ref(),
+            restore_from.as_ref(),
             command_tx.clone(),
             1,
             vec![],

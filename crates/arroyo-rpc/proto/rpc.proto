@@ -10,8 +10,9 @@ import "api.proto";
 message WorkerContext {
   string machine_id = 1;
   uint64 worker_id = 2;
+  string pipeline_id = 5;
   string job_id = 3;
-  uint64 run_id = 4;
+  uint64 generation = 4;
 }
 
 message WorkerResources {
@@ -289,7 +290,7 @@ message JobStatus {
 
 message JobStatusResp {
   string job_id = 1;
-  uint64 run_id = 2;
+  uint64 generation = 2;
   JobStatus job_status = 3;
 }
 
@@ -314,6 +315,19 @@ message CheckpointMetadata {
   uint64 finish_time = 5;
 
   repeated string operator_ids = 6;
+}
+
+message CheckpointManifest {
+  string pipeline_id = 1;
+  string job_id = 2;
+  uint64 generation = 3;
+  uint64 epoch = 4;
+  uint64 min_epoch = 5;
+  uint64 start_time = 6;
+  uint64 finish_time = 7;
+  bool needs_commit = 8;
+  repeated OperatorCheckpointMetadata operators = 10;
+  optional string parent_checkpoint_ref = 11;
 }
 
 message SubtaskCheckpointMetadata {
@@ -427,9 +441,9 @@ message TaskAssignment {
 
 message StartExecutionReq {
   api.ArrowProgram program = 1;
-  optional uint32 restore_epoch = 2;
-  uint32 start_epoch = 6;
-  uint32 min_epoch = 7;
+  optional uint64 restore_epoch = 2;
+  uint64 start_epoch = 6;
+  uint64 min_epoch = 7;
   repeated TaskAssignment tasks = 3;
   // if none, clients should use the controller address
   optional string job_controller_addr = 4;
@@ -438,6 +452,8 @@ message StartExecutionReq {
   // (used in worker leader mode)
   bool wait_for_leader = 8;
   uint64 checkpoint_interval_micros = 9;
+  // for leader mode, this gives the path to load the restore checkpoint manifest from
+  optional string checkpoint_manifest_ref = 10;
 }
 
 message StartExecutionResp {
@@ -538,10 +554,11 @@ service WorkerGrpc {
 
 message StartWorkerReq {
   string name = 1;
+  string pipeline_id = 11;
   string job_id = 2;
   uint64 slots = 6;
   string machine_id = 7;
-  uint64 run_id = 8;
+  uint64 generation = 8;
   map<string, string> env_vars = 10;
 }
 

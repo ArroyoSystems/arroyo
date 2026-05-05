@@ -22,14 +22,14 @@ use arroyo_operator::operator::{ChainedOperator, ConstructedOperator, OperatorNo
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
-use arroyo_rpc::errors::DataflowError;
-use arroyo_rpc::grpc::{
-    api,
-    rpc::{CheckpointMetadata, TaskAssignment},
-};
-use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_rpc::errors::{DataflowError, StateError};
+use arroyo_rpc::grpc::rpc::CheckpointManifest;
+use arroyo_rpc::grpc::{api, rpc::TaskAssignment};
+use arroyo_rpc::{ControlMessage, ControlResp, MetadataOrManifest};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{JobId, MachineId, TaskInfo, WorkerId, range_for_server};
+use arroyo_types::{
+    CheckpointFilePathLayout, JobId, MachineId, PipelineId, TaskInfo, WorkerId, range_for_server,
+};
 use arroyo_udf_host::LocalUdf;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -172,7 +172,7 @@ impl Program {
         job_id: String,
         logical: &DiGraph<LogicalNode, LogicalEdge>,
         udfs: &[LocalUdf],
-        restore_epoch: Option<u32>,
+        restore_epoch: Option<u64>,
         control_tx: Sender<ControlResp>,
     ) -> Self {
         let assignments = logical
@@ -198,30 +198,34 @@ impl Program {
             &assignments,
             registry,
             restore_epoch,
+            None,
+            CheckpointFilePathLayout::Legacy,
             control_tx,
         )
         .await
+        .expect("could not load")
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn from_logical(
         job_id: &str,
         logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
         registry: Registry,
-        restore_epoch: Option<u32>,
+        restore_epoch: Option<u64>,
+        checkpoint_manifest_ref: Option<CheckpointManifest>,
+        file_path_layout: CheckpointFilePathLayout,
         control_tx: Sender<ControlResp>,
-    ) -> Program {
+    ) -> Result<Program, StateError> {
         let mut physical = DiGraph::new();
 
-        let checkpoint_metadata = if let Some(epoch) = restore_epoch {
+        let checkpoint_metadata = if let Some(manifest) = checkpoint_manifest_ref {
+            Some(MetadataOrManifest::Manifest(manifest))
+        } else if let Some(epoch) = restore_epoch {
             info!("Restoring checkpoint {} for job {}", epoch, job_id);
-            Some(
-                StateBackend::load_checkpoint_metadata(job_id, epoch)
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!("failed to load checkpoint metadata for epoch {epoch}")
-                    }),
-            )
+            Some(MetadataOrManifest::Metadata(
+                StateBackend::load_checkpoint_metadata(job_id, epoch as u32).await?,
+            ))
         } else {
             None
         };
@@ -280,6 +284,7 @@ impl Program {
                         in_schemas.clone(),
                         out_schema.clone(),
                         checkpoint_metadata.as_ref(),
+                        file_path_layout.clone(),
                         control_tx.clone(),
                         registry.clone(),
                     )
@@ -350,10 +355,10 @@ impl Program {
             }
         }
 
-        Program {
+        Ok(Program {
             graph: Arc::new(RwLock::new(physical)),
             control_tx: Some(control_tx),
-        }
+        })
     }
 }
 
@@ -473,7 +478,11 @@ impl Engine {
             .count()
     }
 
-    pub async fn for_local(program: Program, job_id: String) -> anyhow::Result<Self> {
+    pub async fn for_local(
+        program: Program,
+        pipeline_id: String,
+        job_id: String,
+    ) -> anyhow::Result<Self> {
         let worker_id = WorkerId(0);
         let assignments = program
             .graph
@@ -499,8 +508,9 @@ impl Engine {
             worker_context: WorkerContext {
                 machine_id: MachineId(Arc::new("local".to_string())),
                 worker_id,
+                pipeline_id: PipelineId(Arc::new(pipeline_id)),
                 job_id: JobId(Arc::new(job_id)),
-                run_id: 0,
+                generation: 0,
             },
             network_manager: NetworkManager::new(0).await?,
             assignments,
@@ -796,7 +806,8 @@ pub async fn construct_node(
     input_partitions: u32,
     in_schemas: Vec<Arc<ArroyoSchema>>,
     out_schema: Option<Arc<ArroyoSchema>>,
-    restore_from: Option<&CheckpointMetadata>,
+    restore_from: Option<&MetadataOrManifest>,
+    file_path_layout: CheckpointFilePathLayout,
     control_tx: Sender<ControlResp>,
     registry: Arc<Registry>,
 ) -> OperatorNode {
@@ -816,6 +827,7 @@ pub async fn construct_node(
             task_index: subtask_idx,
             parallelism,
             key_range: range_for_server(subtask_idx as usize, parallelism as usize),
+            checkpoint_file_path_layout: file_path_layout.clone(),
         });
 
         OperatorNode::Source(SourceNode {
@@ -851,6 +863,7 @@ pub async fn construct_node(
                     task_index: subtask_idx,
                     parallelism,
                     key_range: range_for_server(subtask_idx as usize, parallelism as usize),
+                    checkpoint_file_path_layout: file_path_layout.clone(),
                 }),
                 restore_from,
                 control_tx.clone(),

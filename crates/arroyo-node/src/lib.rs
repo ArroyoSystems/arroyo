@@ -8,7 +8,9 @@ use arroyo_rpc::grpc::rpc::{
 use arroyo_rpc::{controller_client, local_address};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId, to_micros, to_millis};
+use arroyo_types::{
+    GENERATION_ENV, JOB_ID_ENV, MachineId, PIPELINE_ID_ENV, WorkerId, to_micros, to_millis,
+};
 use lazy_static::lazy_static;
 use prometheus::{Gauge, register_gauge};
 use rand::random;
@@ -118,7 +120,8 @@ impl NodeServer {
             .env("ARROYO__WORKER__ID", format!("{}", worker_id.0))
             .env(JOB_ID_ENV, req.job_id.clone())
             .env("ARROYO__WORKER__TASK_SLOTS", format!("{slots}"))
-            .env(RUN_ID_ENV, format!("{}", req.run_id))
+            .env(GENERATION_ENV, format!("{}", req.generation))
+            .env(PIPELINE_ID_ENV, req.pipeline_id.clone())
             .env("ARROYO__ADMIN__HTTP_PORT", "0")
             .kill_on_drop(true)
             .spawn()
@@ -138,6 +141,7 @@ impl NodeServer {
         );
 
         let job_id = req.job_id;
+        let pipeline_id = req.pipeline_id;
         tokio::spawn(async move {
             let status = child.wait().await;
 
@@ -153,8 +157,9 @@ impl NodeServer {
                     worker_context: Some(WorkerContext {
                         machine_id: machine_id.0.to_string(),
                         worker_id: worker_id.0,
+                        pipeline_id,
                         job_id,
-                        run_id: req.run_id,
+                        generation: req.generation,
                     }),
                     time: to_micros(SystemTime::now()),
                     slots,

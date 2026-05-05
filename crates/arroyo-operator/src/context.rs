@@ -8,9 +8,11 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult};
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::rpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
+use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp, MetadataField, get_hasher};
+use arroyo_rpc::{
+    CompactionResult, ControlMessage, ControlResp, MetadataField, MetadataOrManifest, get_hasher,
+};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, Watermark,
@@ -679,7 +681,7 @@ impl OperatorContext {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         task_info: Arc<TaskInfo>,
-        restore_from: Option<&CheckpointMetadata>,
+        restore_from: Option<&MetadataOrManifest>,
         control_tx: Sender<ControlResp>,
         input_partitions: usize,
         in_schemas: Vec<Arc<ArroyoSchema>>,

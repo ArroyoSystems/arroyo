@@ -17,7 +17,7 @@ use tracing::{info, warn};
 pub struct LeaderManager {
     leader_client: JobStatusGrpcClient<Channel>,
     pub job_id: JobId,
-    pub run_id: u64,
+    pub generation: u64,
     pub last_heartbeat: Instant,
 }
 
@@ -33,7 +33,7 @@ impl LeaderManager {
 
         Ok(Self {
             job_id,
-            run_id,
+            generation: run_id,
             leader_client,
             last_heartbeat: Instant::now(),
         })
@@ -58,19 +58,11 @@ impl LeaderManager {
             );
         }
 
-        if response.run_id != self.run_id {
+        if response.generation != self.generation {
             bail!(
                 "leader returned job status for wrong run: expected {}, got {}",
-                self.run_id,
-                response.run_id
-            );
-        }
-
-        if response.run_id != self.run_id {
-            bail!(
-                "leader returned job status for wrong run: expected {}, got {}",
-                self.run_id,
-                response.run_id
+                self.generation,
+                response.generation
             );
         }
 

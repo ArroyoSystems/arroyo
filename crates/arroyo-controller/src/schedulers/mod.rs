@@ -7,7 +7,10 @@ use arroyo_rpc::grpc::rpc::{
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
     WorkerFinishedReq,
 };
-use arroyo_types::{JOB_ID_ENV, MachineId, RUN_ID_ENV, WorkerId};
+use arroyo_types::{
+    GENERATION_ENV, JOB_ID_ENV, JobId, MachineId, PIPELINE_ID_ENV, PipelineId, WorkerId,
+};
+use futures::future::join_all;
 use lazy_static::lazy_static;
 use prometheus::{Gauge, register_gauge};
 use std::collections::HashMap;
@@ -55,20 +58,23 @@ pub trait Scheduler: Send + Sync {
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
         force: bool,
     ) -> anyhow::Result<()>;
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>>;
+
+    async fn shutdown(&self) {}
 }
 
 pub struct ProcessWorker {
-    job_id: Arc<String>,
-    run_id: u64,
+    job_id: JobId,
+    generation: u64,
     shutdown_tx: oneshot::Sender<()>,
+    finished_rx: oneshot::Receiver<()>,
 }
 
 /// This Scheduler starts new processes to run the worker nodes
@@ -86,13 +92,16 @@ impl ProcessScheduler {
     }
 }
 
+const PROCESS_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct StartPipelineReq {
     pub name: String,
     pub program: LogicalProgram,
     pub wasm_path: String,
-    pub job_id: Arc<String>,
+    pub pipeline_id: PipelineId,
+    pub job_id: JobId,
     pub hash: String,
-    pub run_id: u64,
+    pub generation: u64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
 }
@@ -124,6 +133,7 @@ impl Scheduler for ProcessScheduler {
             let worker_id = self.worker_counter.fetch_add(1, Ordering::SeqCst);
 
             let (tx, rx) = oneshot::channel();
+            let (finished_tx, finished_rx) = oneshot::channel();
 
             {
                 let mut workers = self.workers.lock().await;
@@ -131,15 +141,17 @@ impl Scheduler for ProcessScheduler {
                     WorkerId(worker_id),
                     ProcessWorker {
                         job_id: start_pipeline_req.job_id.clone(),
-                        run_id: start_pipeline_req.run_id,
+                        generation: start_pipeline_req.generation,
                         shutdown_tx: tx,
+                        finished_rx,
                     },
                 );
             }
 
             slots_scheduled += slots_here;
+            let pipeline_id = start_pipeline_req.pipeline_id.clone();
             let job_id = start_pipeline_req.job_id.clone();
-            let workers = self.workers.clone();
+            let workers = Arc::downgrade(&self.workers);
             let env_map = start_pipeline_req.env_vars.clone();
 
             tokio::spawn(async move {
@@ -165,18 +177,36 @@ impl Scheduler for ProcessScheduler {
 
                 args.push("worker".into());
 
-                let mut child = command
+                let mut child = match command
                     .args(args)
                     .env("ARROYO__ADMIN__HTTP_PORT", "0")
                     .env("ARROYO__WORKER__TASK_SLOTS", format!("{slots_here}"))
                     .env("ARROYO__WORKER__ID", format!("{worker_id}")) // start at 100 to make same length
                     .env("ARROYO__CONTROLLER_ENDPOINT", config.controller_endpoint())
                     .env("UNDER_PROCESS_SCHEDULER", "true")
+                    .env(PIPELINE_ID_ENV, &*pipeline_id)
                     .env(JOB_ID_ENV, &*job_id)
-                    .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
+                    .env(GENERATION_ENV, format!("{}", start_pipeline_req.generation))
                     .kill_on_drop(true)
                     .spawn()
-                    .unwrap();
+                {
+                    Ok(child) => child,
+                    Err(e) => {
+                        warn!(
+                            message = "failed to start process scheduler worker",
+                            worker_id,
+                            job_id = %job_id,
+                            error = format!("{:?}", e),
+                        );
+
+                        if let Some(workers) = workers.upgrade() {
+                            let mut state = workers.lock().await;
+                            state.remove(&WorkerId(worker_id));
+                        }
+                        let _ = finished_tx.send(());
+                        return;
+                    }
+                };
 
                 tokio::select! {
                     status = child.wait() => {
@@ -184,12 +214,22 @@ impl Scheduler for ProcessScheduler {
                     }
                     _ = rx => {
                         info!(message = "Killing child", worker_id = worker_id, job_id = *job_id);
-                        child.kill().await.unwrap();
+                        if let Err(e) = child.kill().await {
+                            warn!(
+                                message = "failed to kill process scheduler worker",
+                                worker_id,
+                                job_id = %job_id,
+                                error = format!("{:?}", e),
+                            );
+                        }
                     }
                 }
 
-                let mut state = workers.lock().await;
-                state.remove(&WorkerId(worker_id));
+                if let Some(workers) = workers.upgrade() {
+                    let mut state = workers.lock().await;
+                    state.remove(&WorkerId(worker_id));
+                }
+                let _ = finished_tx.send(());
             });
         }
 
@@ -213,7 +253,7 @@ impl Scheduler for ProcessScheduler {
             .await
             .iter()
             .filter(|(_, w)| {
-                *w.job_id == job_id && (run_id.is_none() || w.run_id == run_id.unwrap())
+                *w.job_id == job_id && (run_id.is_none() || w.generation == run_id.unwrap())
             })
             .map(|(k, _)| *k)
             .collect())
@@ -238,6 +278,45 @@ impl Scheduler for ProcessScheduler {
         }
 
         Ok(())
+    }
+
+    async fn shutdown(&self) {
+        let workers: Vec<_> = self.workers.lock().await.drain().collect();
+
+        if workers.is_empty() {
+            return;
+        }
+
+        let worker_count = workers.len();
+        info!(
+            message = "shutting down process scheduler workers",
+            workers = worker_count,
+        );
+
+        let waiters = workers.into_iter().map(|(worker_id, worker)| async move {
+            let _ = worker.shutdown_tx.send(());
+            (worker_id, worker.finished_rx.await)
+        });
+
+        match tokio::time::timeout(PROCESS_WORKER_SHUTDOWN_TIMEOUT, join_all(waiters)).await {
+            Ok(results) => {
+                for (worker_id, result) in results {
+                    if result.is_err() {
+                        warn!(
+                            message = "process scheduler worker exited without completion signal",
+                            worker_id = worker_id.0,
+                        );
+                    }
+                }
+            }
+            Err(_) => {
+                warn!(
+                    message = "timed out waiting for process scheduler workers to stop",
+                    workers = worker_count,
+                    timeout_secs = PROCESS_WORKER_SHUTDOWN_TIMEOUT.as_secs(),
+                );
+            }
+        }
     }
 }
 
@@ -298,9 +377,9 @@ impl NodeStatus {
 
 #[derive(Clone)]
 struct NodeWorker {
-    job_id: Arc<String>,
+    job_id: JobId,
     node_id: MachineId,
-    run_id: u64,
+    generation: u64,
     running: bool,
 }
 
@@ -491,7 +570,7 @@ impl Scheduler for NodeScheduler {
             .filter(|(_, v)| {
                 *v.job_id == job_id
                     && v.running
-                    && (run_id.is_none() || v.run_id == run_id.unwrap())
+                    && (run_id.is_none() || v.generation == run_id.unwrap())
             })
             .map(|(w, _)| *w)
             .collect())
@@ -563,10 +642,11 @@ impl Scheduler for NodeScheduler {
 
             let req = StartWorkerReq {
                 name: start_pipeline_req.name.clone(),
+                pipeline_id: (*start_pipeline_req.pipeline_id).clone(),
                 job_id: (*start_pipeline_req.job_id).clone(),
                 slots: slots_for_this_one as u64,
                 machine_id: node.id.to_string(),
-                run_id: start_pipeline_req.run_id,
+                generation: start_pipeline_req.generation,
                 env_vars: start_pipeline_req.env_vars.clone(),
             };
 
@@ -601,7 +681,7 @@ impl Scheduler for NodeScheduler {
                 WorkerId(res.worker_id),
                 NodeWorker {
                     job_id: start_pipeline_req.job_id.clone(),
-                    run_id: start_pipeline_req.run_id,
+                    generation: start_pipeline_req.generation,
                     node_id: node.id.clone(),
                     running: true,
                 },

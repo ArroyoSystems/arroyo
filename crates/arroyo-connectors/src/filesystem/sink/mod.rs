@@ -156,6 +156,7 @@ fn map_storage_error(storage_error: StorageError) -> DataflowError {
         StorageError::InvalidUrl
         | StorageError::PathError(_)
         | StorageError::NoKeyInUrl
+        | StorageError::AlreadyExists { .. }
         | StorageError::CredentialsError(_) => {
             connector_err!(User, NoRetry, "{}", storage_error)
         }

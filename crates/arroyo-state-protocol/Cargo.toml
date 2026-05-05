@@ -1,0 +1,18 @@
+[package]
+name = "arroyo-state-protocol"
+version = "0.16.0-dev"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+arroyo-types = { path = "../arroyo-types" }
+arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-storage = { path = "../arroyo-storage" }
+async-trait = "0.1"
+prost = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }

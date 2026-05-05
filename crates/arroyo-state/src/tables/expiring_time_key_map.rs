@@ -22,7 +22,10 @@ use arroyo_rpc::{
     },
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{TaskInfo, from_micros, from_nanos, print_time, server_for_hash, to_micros};
+use arroyo_types::{
+    CheckpointFilePathLayout, TaskInfo, from_micros, from_nanos, print_time, server_for_hash,
+    to_micros,
+};
 use datafusion::parquet::arrow::async_reader::ParquetObjectReader;
 use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
@@ -34,7 +37,10 @@ use parquet::{
 };
 use tokio::sync::mpsc::Sender;
 
-use super::{CompactionConfig, Table, TableEpochCheckpointer, table_checkpoint_path};
+use super::{
+    CompactionConfig, Table, TableEpochCheckpointer, table_checkpoint_path,
+    table_checkpoint_path_with_layout,
+};
 use crate::{
     CheckpointMessage, StateMessage, TableData, parquet::ParquetStats,
     schemas::SchemaWithHashAndOperation,
@@ -429,6 +435,7 @@ impl Table for ExpiringTimeKeyTable {
                 epochs.into_iter().max().unwrap(),
                 generation + 1,
                 compaction_config.storage_provider.clone(),
+                compaction_config.file_path_layout.clone(),
                 state_schema,
                 Duration::from_micros(config.retention_micros),
                 operator_metadata,
@@ -458,6 +465,7 @@ struct CompactedFileWriter {
 
 struct TimeTableCompactor {
     storage_provider: StorageProviderRef,
+    file_path_layout: CheckpointFilePathLayout,
     schema: SchemaWithHashAndOperation,
     operator_metadata: OperatorMetadata,
     table: String,
@@ -471,6 +479,7 @@ impl TimeTableCompactor {
         epoch: u32,
         generation: u64,
         storage_provider: StorageProviderRef,
+        file_path_layout: CheckpointFilePathLayout,
         schema: SchemaWithHashAndOperation,
         retention: Duration,
         operator_metadata: &OperatorMetadata,
@@ -479,6 +488,7 @@ impl TimeTableCompactor {
         let mut compactor = Self {
             table,
             storage_provider,
+            file_path_layout,
             schema: schema.clone(),
             operator_metadata: operator_metadata.clone(),
             writers: HashMap::new(),
@@ -582,7 +592,8 @@ impl TimeTableCompactor {
         record_batch: RecordBatch,
     ) -> Result<(), StateError> {
         if let std::collections::hash_map::Entry::Vacant(e) = self.writers.entry(partition) {
-            let file_name = table_checkpoint_path(
+            let file_name = table_checkpoint_path_with_layout(
+                &self.file_path_layout,
                 &self.operator_metadata.job_id,
                 &self.operator_metadata.operator_id,
                 &self.table,
@@ -672,7 +683,7 @@ impl ExpiringTimeKeyTableCheckpointer {
         prior_files: Vec<ParquetTimeFile>,
     ) -> Result<Self, StateError> {
         let file_name = table_checkpoint_path(
-            &parent.task_info.job_id,
+            &parent.task_info,
             &parent.task_info.operator_id,
             &parent.table_name,
             parent.task_info.task_index as usize,

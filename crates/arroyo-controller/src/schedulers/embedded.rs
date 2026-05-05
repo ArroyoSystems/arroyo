@@ -13,8 +13,8 @@ use tonic::Status;
 use tracing::{error, info};
 
 pub struct EmbeddedWorker {
-    job_id: Arc<String>,
-    run_id: u64,
+    job_id: JobId,
+    generation: u64,
     shutdown: Shutdown,
     handle: JoinHandle<()>,
 }
@@ -50,14 +50,15 @@ impl Scheduler for EmbeddedScheduler {
         let guard = shutdown.guard("embedded-worker");
 
         let job_id = req.job_id.clone();
-        let run_id = req.run_id;
+        let generation = req.generation;
         let worker_id = WorkerId(self.worker_counter.fetch_add(1, Ordering::SeqCst));
         let handle = tokio::task::spawn(async move {
             let server = WorkerServer::new(
                 MachineId(Arc::new("embedded".to_string())),
                 worker_id,
-                JobId(req.job_id.clone()),
-                req.run_id,
+                req.pipeline_id.clone(),
+                req.job_id.clone(),
+                req.generation,
                 guard,
             );
 
@@ -81,7 +82,7 @@ impl Scheduler for EmbeddedScheduler {
             worker_id,
             EmbeddedWorker {
                 job_id,
-                run_id,
+                generation,
                 shutdown,
                 handle,
             },
@@ -98,8 +99,13 @@ impl Scheduler for EmbeddedScheduler {
 
     async fn worker_finished(&self, _: WorkerFinishedReq) {}
 
-    async fn stop_workers(&self, job_id: &str, run_id: Option<u64>, _: bool) -> anyhow::Result<()> {
-        for w in self.workers_for_job(job_id, run_id).await? {
+    async fn stop_workers(
+        &self,
+        job_id: &str,
+        generation: Option<u64>,
+        _: bool,
+    ) -> anyhow::Result<()> {
+        for w in self.workers_for_job(job_id, generation).await? {
             let state = self.tasks.lock().await;
             if let Some(worker) = state.get(&w) {
                 worker.shutdown.token().cancel();
@@ -112,13 +118,13 @@ impl Scheduler for EmbeddedScheduler {
     async fn workers_for_job(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        generation: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         let state = self.tasks.lock().await;
         Ok(state
             .iter()
             .filter(|(_, t)| {
-                *t.job_id == job_id && (run_id.is_some() && run_id.unwrap() == t.run_id)
+                *t.job_id == job_id && (generation.is_none() || generation.unwrap() == t.generation)
             })
             .map(|(k, _)| *k)
             .collect())
