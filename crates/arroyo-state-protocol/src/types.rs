@@ -128,6 +128,10 @@ fn validate_ref(path: &str) -> Result<(), ProtocolError> {
         return Err(invalid_ref(path, "path contains an invalid segment"));
     }
 
+    if path.len() > 1024 {
+        return Err(invalid_ref(path, "path length must be <= 1024"));
+    }
+
     Ok(())
 }
 

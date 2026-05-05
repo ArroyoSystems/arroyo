@@ -20,7 +20,6 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-pub mod committing_state;
 mod metrics;
 pub mod parquet;
 pub(crate) mod schemas;

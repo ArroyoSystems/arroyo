@@ -19,20 +19,20 @@ pub enum ParentCheckpointStatus {
 /// this enum is useful for tests and for code that has already read all inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveDecision {
-    Ready {
-        checkpoint_ref: CheckpointRef,
-    },
+    /// The candidate is canonical and ready for normal recovery.
+    Ready { checkpoint_ref: CheckpointRef },
+    /// The candidate is canonical but must replay external commit before recovery continues.
     ReplayCommit {
         checkpoint_ref: CheckpointRef,
         epoch_record: EpochRecord,
     },
-    ClaimUnclaimed {
-        checkpoint_ref: CheckpointRef,
-    },
+    /// The candidate exists but has not claimed its epoch; the current generation may claim it.
+    ClaimUnclaimed { checkpoint_ref: CheckpointRef },
+    /// The latest candidate is unusable; try the generation's base checkpoint instead.
     FallbackToBase,
-    StopOrphaned {
-        canonical_ref: CheckpointRef,
-    },
+    /// The candidate lost epoch ownership to another checkpoint and this generation must stop.
+    StopOrphaned { canonical_ref: CheckpointRef },
+    /// No safe recovery path could be derived from the candidate.
     Failed(ResolveFailure),
 }
 
