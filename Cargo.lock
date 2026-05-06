@@ -967,6 +967,7 @@ dependencies = [
  "datafusion",
  "futures",
  "lazy_static",
+ "moka",
  "object_store",
  "once_cell",
  "parquet",

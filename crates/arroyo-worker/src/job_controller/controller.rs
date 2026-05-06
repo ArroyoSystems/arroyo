@@ -16,10 +16,10 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::log_event;
 use arroyo_server_common::shutdown::ShutdownGuard;
-use arroyo_state::get_storage_provider;
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
+use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
 use arroyo_state_protocol::types::{CheckpointRef, Generation};
 use arroyo_state_protocol::workflow::{
@@ -140,7 +140,9 @@ impl WorkerJobController {
         // been created -- ideally we'd just do it here, but the worker initialization process makes
         // that challenging, because we need the restoration point to initialize the workers
         let (generation_manifest, recovery) = match initialize_generation(
-            get_storage_provider().await?.as_ref(),
+            get_storage_provider(&StorageProviderFor::Worker)
+                .await?
+                .as_ref(),
             InitializeGenerationRequest {
                 pipeline_id: worker_context.pipeline_id.clone(),
                 job_id: worker_context.job_id.clone(),
@@ -254,6 +256,7 @@ impl WorkerJobController {
                 checkpoint_parent_ref: parent_ref,
                 checkpoint_spans: vec![],
                 worker_leader_mode: true,
+                storage_role: StorageProviderFor::Worker,
                 finished_operators: vec![],
                 generation_manifest: Some(generation_manifest),
             },
@@ -394,7 +397,9 @@ impl WorkerJobController {
 
             // now we can finalize the commit
             match complete_commit(
-                get_storage_provider().await?.as_ref(),
+                get_storage_provider(&StorageProviderFor::Worker)
+                    .await?
+                    .as_ref(),
                 &commit_permit,
                 Generation(self.worker_context.generation),
             )

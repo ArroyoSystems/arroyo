@@ -1,7 +1,7 @@
 use crate::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use crate::tables::global_keyed_map::GlobalKeyedTable;
 use crate::tables::{CompactionConfig, ErasedTable};
-use crate::{BackingStore, get_storage_provider};
+use crate::{BackingStore, StorageProviderFor, get_storage_provider};
 use arroyo_rpc::errors::StateError;
 use arroyo_rpc::grpc::rpc::{
     CheckpointMetadata, OperatorCheckpointMetadata, TableCheckpointMetadata,
@@ -43,10 +43,11 @@ impl BackingStore for ParquetBackend {
     }
 
     async fn load_checkpoint_metadata(
+        role: &StorageProviderFor,
         job_id: &str,
         epoch: u32,
     ) -> Result<CheckpointMetadata, StateError> {
-        let storage_client = get_storage_provider().await?;
+        let storage_client = get_storage_provider(role).await?;
         let data = storage_client
             .get(metadata_path(&base_path(job_id, epoch)).as_str())
             .await?;
@@ -55,11 +56,12 @@ impl BackingStore for ParquetBackend {
     }
 
     async fn load_operator_metadata(
+        role: &StorageProviderFor,
         job_id: &str,
         operator_id: &str,
         epoch: u32,
     ) -> Result<Option<OperatorCheckpointMetadata>, StateError> {
-        let storage_client = get_storage_provider().await?;
+        let storage_client = get_storage_provider(role).await?;
         storage_client
             .get_if_present(metadata_path(&operator_path(job_id, epoch, operator_id)).as_str())
             .await?
@@ -68,9 +70,10 @@ impl BackingStore for ParquetBackend {
     }
 
     async fn write_operator_checkpoint_metadata(
+        role: &StorageProviderFor,
         metadata: OperatorCheckpointMetadata,
     ) -> Result<(), StateError> {
-        let storage_client = get_storage_provider().await?;
+        let storage_client = get_storage_provider(role).await?;
         let operator_metadata =
             metadata
                 .operator_metadata
@@ -91,9 +94,12 @@ impl BackingStore for ParquetBackend {
         Ok(())
     }
 
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<(), StateError> {
+    async fn write_checkpoint_metadata(
+        role: &StorageProviderFor,
+        metadata: CheckpointMetadata,
+    ) -> Result<(), StateError> {
         debug!("writing checkpoint {:?}", metadata);
-        let storage_client = get_storage_provider().await?;
+        let storage_client = get_storage_provider(role).await?;
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
         storage_client
             .put(path.as_str(), metadata.encode_to_vec())
@@ -102,6 +108,7 @@ impl BackingStore for ParquetBackend {
     }
 
     async fn cleanup_checkpoint(
+        role: &StorageProviderFor,
         mut metadata: CheckpointMetadata,
         old_min_epoch: u32,
         min_epoch: u32,
@@ -117,6 +124,7 @@ impl BackingStore for ParquetBackend {
             .iter()
             .map(|operator_id| {
                 Self::cleanup_operator(
+                    role,
                     metadata.job_id.clone(),
                     operator_id.clone(),
                     old_min_epoch,
@@ -125,7 +133,7 @@ impl BackingStore for ParquetBackend {
             })
             .collect();
 
-        let storage_client = get_storage_provider().await?;
+        let storage_client = get_storage_provider(role).await?;
 
         // wait for all of the futures to complete
         while let Some(result) = futures.next().await {
@@ -153,7 +161,7 @@ impl BackingStore for ParquetBackend {
                 .await?;
         }
         metadata.min_epoch = min_epoch;
-        Self::write_checkpoint_metadata(metadata).await?;
+        Self::write_checkpoint_metadata(role, metadata).await?;
         Ok(())
     }
 }
@@ -161,6 +169,7 @@ impl BackingStore for ParquetBackend {
 impl ParquetBackend {
     /// Called after a checkpoint is committed
     pub async fn compact_operator(
+        role: &StorageProviderFor,
         job_id: Arc<String>,
         operator_id: &str,
         epoch: u32,
@@ -168,14 +177,14 @@ impl ParquetBackend {
         let min_files_to_compact = config().pipeline.compaction.checkpoints_to_compact as usize;
 
         let operator_checkpoint_metadata =
-            Self::load_operator_metadata(&job_id, operator_id, epoch)
+            Self::load_operator_metadata(role, &job_id, operator_id, epoch)
                 .await?
                 .expect("expect operator metadata to still be present");
-        let storage_provider = get_storage_provider().await?;
+        let storage_provider = get_storage_provider(role).await?;
         let compaction_config = CompactionConfig {
             compact_generations: vec![0].into_iter().collect(),
             min_compaction_epochs: min_files_to_compact,
-            storage_provider: Arc::clone(storage_provider),
+            storage_provider: Arc::clone(&storage_provider),
             file_path_layout: CheckpointFilePathLayout::Legacy,
         };
         let operator_metadata = operator_checkpoint_metadata.operator_metadata.unwrap();
@@ -222,14 +231,16 @@ impl ParquetBackend {
 
     /// Delete files no longer referenced by the new min epoch
     pub async fn cleanup_operator(
+        role: &StorageProviderFor,
         job_id: String,
         operator_id: String,
         old_min_epoch: u32,
         new_min_epoch: u32,
     ) -> Result<String, StateError> {
-        let operator_metadata = Self::load_operator_metadata(&job_id, &operator_id, new_min_epoch)
-            .await?
-            .expect("expect new_min_epoch metadata to still be present");
+        let operator_metadata =
+            Self::load_operator_metadata(role, &job_id, &operator_id, new_min_epoch)
+                .await?
+                .expect("expect new_min_epoch metadata to still be present");
         let paths_to_keep: HashSet<String> = operator_metadata
             .table_checkpoint_metadata
             .iter()
@@ -253,11 +264,11 @@ impl ParquetBackend {
             .collect();
 
         let mut deleted_paths = HashSet::new();
-        let storage_client = get_storage_provider().await?;
+        let storage_client = get_storage_provider(role).await?;
 
         for epoch_to_remove in old_min_epoch..new_min_epoch {
             let Some(operator_metadata) =
-                Self::load_operator_metadata(&job_id, &operator_id, epoch_to_remove).await?
+                Self::load_operator_metadata(role, &job_id, &operator_id, epoch_to_remove).await?
             else {
                 continue;
             };

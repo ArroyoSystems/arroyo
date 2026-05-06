@@ -10,7 +10,7 @@ use anyhow::bail;
 use arroyo_rpc::checkpoints::CheckpointMetadataStore;
 use arroyo_rpc::grpc::rpc::{CommitReq, LabelPair, MetricsReq, StopExecutionReq, StopMode};
 use arroyo_rpc::identity::WorkerClient;
-use arroyo_state::{BackingStore, StateBackend};
+use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
 use arroyo_types::{JobId, PipelineId, WorkerId};
 use rand::{Rng, rng};
 
@@ -65,6 +65,7 @@ impl JobController {
         checkpoint_store: Arc<dyn CheckpointMetadataStore>,
         config: JobConfig,
         pipeline_id: PipelineId,
+        state_url: Option<String>,
         generation: u64,
         program: Arc<LogicalProgram>,
         epoch: u32,
@@ -126,6 +127,9 @@ impl JobController {
                 program,
                 checkpoint_spans: vec![],
                 worker_leader_mode: false,
+                storage_role: StorageProviderFor::Controller {
+                    storage_url: state_url,
+                },
                 finished_operators: vec![],
                 generation_manifest: None,
             },
@@ -400,6 +404,7 @@ impl JobController {
         let min_epoch = self.model.min_epoch.max(1);
         let job_id = self.config.id.clone();
         let store = self.checkpoint_store.clone();
+        let storage_role = self.model.storage_role.clone();
 
         info!(
             message = "Starting cleaning",
@@ -411,11 +416,12 @@ impl JobController {
         let cur_epoch = self.model.epoch;
 
         tokio::spawn(async move {
-            let checkpoint = StateBackend::load_checkpoint_metadata(&job_id, cur_epoch).await?;
+            let checkpoint =
+                StateBackend::load_checkpoint_metadata(&storage_role, &job_id, cur_epoch).await?;
 
             store.mark_compacting(&job_id, min_epoch, new_min).await?;
 
-            StateBackend::cleanup_checkpoint(checkpoint, min_epoch, new_min).await?;
+            StateBackend::cleanup_checkpoint(&storage_role, checkpoint, min_epoch, new_min).await?;
 
             store.mark_checkpoints_compacted(&job_id, new_min).await?;
 

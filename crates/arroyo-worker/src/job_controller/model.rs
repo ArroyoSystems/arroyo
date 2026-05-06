@@ -18,7 +18,7 @@ use arroyo_rpc::grpc::rpc::{
 use arroyo_rpc::identity::WorkerClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::parquet::ParquetBackend;
-use arroyo_state::{BackingStore, StateBackend, get_storage_provider};
+use arroyo_state::{BackingStore, StateBackend, StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
 use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
 use arroyo_state_protocol::workflow::{
@@ -56,6 +56,21 @@ pub struct RunningJobModel {
     pub finished_operators: Vec<OperatorCheckpointMetadata>,
 
     pub worker_leader_mode: bool,
+
+    /// Identifies which process / role is running this model and where its
+    /// checkpoint storage lives.
+    ///
+    /// On the worker-leader process, this is [`StorageProviderFor::Worker`]:
+    /// the worker resolves its URL from `config().checkpoint_url` (set
+    /// per-pipeline via `ARROYO__CHECKPOINT_URL` at worker startup).
+    ///
+    /// On the controller process, this is
+    /// [`StorageProviderFor::Controller`] carrying the pipeline's
+    /// `state_url`. The controller's own `config().checkpoint_url` is a
+    /// global default that doesn't differ across pipelines, so the
+    /// per-pipeline override is needed to route storage operations to the
+    /// right URL.
+    pub storage_role: StorageProviderFor,
 
     // checkpoint-wide events
     pub checkpoint_spans: Vec<JobCheckpointSpan>,
@@ -145,6 +160,7 @@ impl RunningJobModel {
         msg: RunningMessage,
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
+        let storage_role = self.storage_role.clone();
         match msg {
             RunningMessage::TaskCheckpointEvent(c) => {
                 if let Some(checkpoint_state) = &mut self.checkpoint_state {
@@ -200,8 +216,11 @@ impl RunningJobModel {
                             if self.worker_leader_mode {
                                 self.finished_operators.push(operator_metadata);
                             } else {
-                                StateBackend::write_operator_checkpoint_metadata(operator_metadata)
-                                    .await?;
+                                StateBackend::write_operator_checkpoint_metadata(
+                                    &storage_role,
+                                    operator_metadata,
+                                )
+                                .await?;
                             }
                         }
 
@@ -374,12 +393,14 @@ impl RunningJobModel {
             epoch = self.epoch,
         );
 
+        let storage_role = self.storage_role.clone();
         let mut worker_clients: Vec<WorkerClient> =
             self.workers.values().map(|w| w.connect.clone()).collect();
         for node in self.program.graph.node_weights() {
             for (op, _) in node.operator_chain.iter() {
                 let compacted_tables = ParquetBackend::compact_operator(
                     // compact the operator's state and notify the workers to load the new files
+                    &storage_role,
                     self.job_id.0.clone(),
                     &op.operator_id,
                     self.epoch,
@@ -417,7 +438,7 @@ impl RunningJobModel {
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
         let state = self.checkpoint_state.take().unwrap();
-        let storage = get_storage_provider().await?;
+        let storage = get_storage_provider(&self.storage_role).await?;
         match state {
             CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
                 let pipeline_id = (*self.pipeline_id).clone();
@@ -623,6 +644,7 @@ impl RunningJobModel {
         &mut self,
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
+        let storage_role = self.storage_role.clone();
         let state = self.checkpoint_state.take().unwrap();
         match state {
             CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
@@ -630,7 +652,7 @@ impl RunningJobModel {
 
                 let metadata = checkpointing.build_metadata();
 
-                StateBackend::write_checkpoint_metadata(metadata).await?;
+                StateBackend::write_checkpoint_metadata(&storage_role, metadata).await?;
 
                 metadata_span.finish();
 

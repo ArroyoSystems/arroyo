@@ -26,7 +26,7 @@ use arroyo_rpc::errors::{DataflowError, StateError};
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_rpc::grpc::{api, rpc::TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp, MetadataOrManifest};
-use arroyo_state::{BackingStore, StateBackend};
+use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
 use arroyo_types::{
     CheckpointFilePathLayout, JobId, MachineId, PipelineId, TaskInfo, WorkerId, range_for_server,
 };
@@ -224,7 +224,12 @@ impl Program {
         } else if let Some(epoch) = restore_epoch {
             info!("Restoring checkpoint {} for job {}", epoch, job_id);
             Some(MetadataOrManifest::Metadata(
-                StateBackend::load_checkpoint_metadata(job_id, epoch as u32).await?,
+                StateBackend::load_checkpoint_metadata(
+                    &StorageProviderFor::Worker,
+                    job_id,
+                    epoch as u32,
+                )
+                .await?,
             ))
         } else {
             None
