@@ -123,7 +123,7 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --: DbPipeline (state?, ttl_micros?)
 
---! create_pipeline(textual_repr?, state_url?, tags?)
+--! create_pipeline(textual_repr?, state_url?)
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version, state_url, tags)
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags);
 

@@ -5,7 +5,6 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
-use arroyo_rpc::api_types::pipelines::PipelineTags;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
@@ -81,7 +80,7 @@ pub struct JobConfig {
 pub struct PipelineInfo {
     pub pipeline_id: PipelineId,
     pub state_url: Option<String>,
-    pub tags: Option<PipelineTags>,
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]

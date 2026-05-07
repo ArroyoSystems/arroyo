@@ -40,7 +40,7 @@ SET state = :state,
     restart_nonce = :restart_nonce
 WHERE id = :job_id;
 
---! get_program : PipelineRow(state_url?, tags?)
+--! get_program : PipelineRow(state_url?)
 SELECT program, pub_id as pipeline_id, proto_version, state_url, tags FROM pipelines WHERE id = :id;
 
 --! mark_checkpoints_compacted

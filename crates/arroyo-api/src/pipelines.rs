@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime};
 use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::default_sink;
 use arroyo_rpc::api_types::pipelines::{
-    FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PipelineTags,
-    PreviewPost, QueryValidationResult, StopType, ValidateQueryPost,
+    FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
+    QueryValidationResult, StopType, ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
@@ -304,7 +304,7 @@ pub(crate) async fn create_pipeline_int(
     mut compiled: CompiledSql,
     pub_id: Option<String>,
     state_url: Option<String>,
-    tags: Option<PipelineTags>,
+    tags: HashMap<String, String>,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -395,10 +395,7 @@ pub(crate) async fn create_pipeline_int(
         return Err(required_field("name"));
     }
 
-    let tags_json = tags
-        .as_ref()
-        .map(serde_json::to_value)
-        .transpose()
+    let tags_json = serde_json::to_value(tags)
         .map_err(|e| log_and_map(anyhow!("pipeline tags serialization failed: {e}")))?;
 
     api_queries::execute_create_pipeline(
@@ -580,7 +577,9 @@ pub async fn validate_query(
 
 /// Create a new pipeline
 ///
-/// The API will create a single job for the pipeline.
+/// The API will create a single job for the pipeline. The server generates
+/// a fresh id for the pipeline; if the caller wants to supply its own
+/// stable id, use `PUT /pipelines/{id}` instead.
 #[utoipa::path(
     post,
     path = "/v1/pipelines",
@@ -596,9 +595,47 @@ pub async fn create_pipeline(
     bearer_auth: BearerAuth,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
+    create_pipeline_inner(state, bearer_auth, None, pipeline_post).await
+}
+
+/// Create a new pipeline at a caller-supplied id
+///
+/// The API will create a single job for the pipeline, using the
+/// supplied `id`. Useful when an upstream system wants to address
+/// the pipeline by an id it already manages.
+///
+/// The endpoint is currently create-only: PUTing twice with the same id
+/// returns a 400 (duplicate-violation) rather than upserting.
+#[utoipa::path(
+    put,
+    path = "/v1/pipelines/{id}",
+    tag = "pipelines",
+    params(
+        ("id" = String, Path, description = "Caller-supplied pipeline id")
+    ),
+    request_body = PipelinePost,
+    responses(
+        (status = 200, description = "Created pipeline and job", body = Pipeline),
+        (status = 400, description = "Bad request", body = ErrorResp),
+    ),
+)]
+pub async fn put_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(id): Path<String>,
+    WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
+) -> Result<Json<Pipeline>, ErrorResp> {
+    create_pipeline_inner(state, bearer_auth, Some(id), pipeline_post).await
+}
+
+async fn create_pipeline_inner(
+    state: AppState,
+    bearer_auth: BearerAuth,
+    pub_id: Option<String>,
+    pipeline_post: PipelinePost,
+) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    //let transaction = db.transaction().await?;
     let checkpoint_interval = pipeline_post
         .checkpoint_interval_micros
         .map(Duration::from_micros)
@@ -627,13 +664,11 @@ pub async fn create_pipeline(
         auth_data.clone(),
         &state.database,
         compiled,
-        pipeline_post.pub_id,
+        pub_id,
         pipeline_post.state_url,
-        pipeline_post.tags,
+        pipeline_post.tags.unwrap_or_default(),
     )
     .await?;
-
-    // transaction.commit().await?;
 
     let pipeline =
         query_pipeline_by_pub_id(&pipeline_id, &state.database.client().await?, &auth_data).await?;
@@ -684,7 +719,7 @@ pub async fn create_preview_pipeline(
         compiled,
         None,
         None,
-        None,
+        HashMap::default(),
     )
     .await?;
 

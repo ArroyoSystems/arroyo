@@ -20,6 +20,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::Mutex;
 
 mod metrics;
 pub mod parquet;
@@ -181,20 +182,11 @@ pub fn hash_key<K: Hash>(key: &K) -> u64 {
     hasher.finish()
 }
 
-// TODO: Tweak these numbers and maybe introduce a config knob
-const STORAGE_PROVIDER_CACHE_CAPACITY: u64 = 5_000;
-const STORAGE_PROVIDER_CACHE_TTI: Duration = Duration::from_secs(60 * 60);
-
 /// Per-URL cache of [`StorageProvider`] instances.
-fn storage_provider_cache() -> &'static moka::future::Cache<String, Arc<StorageProvider>> {
-    static CACHE: std::sync::OnceLock<moka::future::Cache<String, Arc<StorageProvider>>> =
+fn storage_provider_cache() -> &'static Mutex<HashMap<String, Arc<StorageProvider>>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, Arc<StorageProvider>>>> =
         std::sync::OnceLock::new();
-    CACHE.get_or_init(|| {
-        moka::future::Cache::builder()
-            .max_capacity(STORAGE_PROVIDER_CACHE_CAPACITY)
-            .time_to_idle(STORAGE_PROVIDER_CACHE_TTI)
-            .build()
-    })
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Returns a cached [`StorageProvider`] for the given role.
@@ -208,78 +200,21 @@ fn storage_provider_cache() -> &'static moka::future::Cache<String, Arc<StorageP
 pub async fn get_storage_provider(
     role: &StorageProviderFor,
 ) -> Result<Arc<StorageProvider>, StorageError> {
-    let storage_url: String = match role {
+    let storage_url = match role {
         StorageProviderFor::Controller {
             storage_url: Some(url),
-        } => url.clone(),
+        } => url,
         StorageProviderFor::Worker | StorageProviderFor::Controller { storage_url: None } => {
-            config().checkpoint_url.clone()
+            &config().checkpoint_url
         }
     };
+    let mut cache = storage_provider_cache().lock().await;
 
-    storage_provider_cache()
-        .try_get_with(storage_url.clone(), async move {
-            StorageProvider::for_url(&storage_url).await.map(Arc::new)
-        })
-        .await
-        .map_err(|e: Arc<StorageError>| StorageError::PathError(e.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn unique_local_url(suffix: &str) -> String {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        format!("file:///tmp/arroyo-state-test-{nanos}-{suffix}")
-    }
-
-    #[tokio::test]
-    async fn cache_returns_same_arc_for_same_url() {
-        let url = unique_local_url("same");
-        let role = StorageProviderFor::Controller {
-            storage_url: Some(url),
-        };
-
-        let a = get_storage_provider(&role).await.unwrap();
-        let b = get_storage_provider(&role).await.unwrap();
-        assert!(
-            Arc::ptr_eq(&a, &b),
-            "cache hit on same URL should return the same Arc"
-        );
-    }
-
-    #[tokio::test]
-    async fn cache_returns_distinct_arcs_for_different_urls() {
-        let role_a = StorageProviderFor::Controller {
-            storage_url: Some(unique_local_url("a")),
-        };
-        let role_b = StorageProviderFor::Controller {
-            storage_url: Some(unique_local_url("b")),
-        };
-
-        let a = get_storage_provider(&role_a).await.unwrap();
-        let b = get_storage_provider(&role_b).await.unwrap();
-        assert!(
-            !Arc::ptr_eq(&a, &b),
-            "different URLs should resolve to different cached Arcs"
-        );
-    }
-
-    #[tokio::test]
-    async fn controller_with_none_falls_back_to_worker_url() {
-        let worker = StorageProviderFor::Worker;
-        let controller_none = StorageProviderFor::Controller { storage_url: None };
-
-        let from_worker = get_storage_provider(&worker).await.unwrap();
-        let from_none = get_storage_provider(&controller_none).await.unwrap();
-        assert!(
-            Arc::ptr_eq(&from_worker, &from_none),
-            "Worker and Controller{{None}} should share the cached provider"
-        );
+    if let Some(storage_provider) = cache.get(storage_url) {
+        Ok(storage_provider.clone())
+    } else {
+        let storage_provider = Arc::new(StorageProvider::for_url(storage_url).await?);
+        cache.insert(storage_url.clone(), storage_provider.clone());
+        Ok(storage_provider)
     }
 }

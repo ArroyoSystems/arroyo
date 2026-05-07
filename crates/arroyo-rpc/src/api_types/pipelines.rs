@@ -28,18 +28,8 @@ pub struct PipelinePost {
     pub udfs: Option<Vec<Udf>>,
     pub parallelism: u64,
     pub checkpoint_interval_micros: Option<u64>,
-    pub pub_id: Option<String>,
     pub state_url: Option<String>,
-    pub tags: Option<PipelineTags>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
-pub struct PipelineTags(HashMap<String, String>);
-
-impl PipelineTags {
-    pub fn get(&self, k: &str) -> Option<&String> {
-        self.0.get(k)
-    }
+    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

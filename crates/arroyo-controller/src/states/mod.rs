@@ -34,7 +34,6 @@ use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
 use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::api_types::pipelines::PipelineTags;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
@@ -992,16 +991,12 @@ impl StateMachine {
             .next()
             .ok_or_else(|| anyhow!("Could not find program for job_id {job_id}"))?;
 
-        let tags = res
-            .tags
-            .map(serde_json::from_value::<PipelineTags>)
-            .transpose()
-            .map_err(|e| {
-                anyhow!(
-                    "malformed JSON in pipelines.tags for pipeline {}: {e}",
-                    res.pipeline_id
-                )
-            })?;
+        let tags = serde_json::from_value::<HashMap<String, String>>(res.tags).map_err(|e| {
+            anyhow!(
+                "malformed JSON in pipelines.tags for pipeline {}: {e}",
+                res.pipeline_id
+            )
+        })?;
 
         let info = PipelineInfo {
             pipeline_id: PipelineId(res.pipeline_id.into()),

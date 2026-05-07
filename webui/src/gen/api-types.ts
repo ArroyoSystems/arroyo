@@ -205,7 +205,9 @@ export interface paths {
         put?: never;
         /**
          * Create a new pipeline
-         * @description The API will create a single job for the pipeline.
+         * @description The API will create a single job for the pipeline. The server generates
+         *     a fresh id for the pipeline; if the caller wants to supply its own
+         *     stable id, use `PUT /pipelines/{id}` instead.
          */
         post: operations["create_pipeline"];
         delete?: never;
@@ -257,7 +259,16 @@ export interface paths {
         };
         /** Get a single pipeline */
         get: operations["get_pipeline"];
-        put?: never;
+        /**
+         * Create a new pipeline at a caller-supplied id
+         * @description The API will create a single job for the pipeline, using the
+         *     supplied `id`. Useful when an upstream system wants to address
+         *     the pipeline by an id it already manages.
+         *
+         *     The endpoint is currently create-only: PUTing twice with the same id
+         *     returns a 400 (duplicate-violation) rather than upserting.
+         */
+        put: operations["put_pipeline"];
         post?: never;
         /** Delete a pipeline */
         delete: operations["delete_pipeline"];
@@ -708,7 +719,10 @@ export interface components {
             data: components["schemas"]["JobLogMessage"][];
             hasMore: boolean;
         };
+        /** @enum {string} */
+        JsonCompression: "uncompressed" | "gzip";
         JsonFormat: {
+            compression?: components["schemas"]["JsonCompression"];
             confluent_schema_registry?: boolean;
             debezium?: boolean;
             decimal_encoding?: components["schemas"]["DecimalEncoding"];
@@ -841,6 +855,10 @@ export interface components {
             /** Format: int64 */
             parallelism: number;
             query: string;
+            state_url?: string | null;
+            tags?: {
+                [key: string]: string;
+            } | null;
             udfs?: components["schemas"]["Udf"][] | null;
         };
         PipelineRestart: {
@@ -1366,6 +1384,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+        };
+    };
+    put_pipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Caller-supplied pipeline id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelinePost"];
+            };
+        };
+        responses: {
+            /** @description Created pipeline and job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
                 };
             };
         };

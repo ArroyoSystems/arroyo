@@ -1,7 +1,7 @@
 use axum::response::{Html, IntoResponse, Response};
 use axum::{
     Json, Router,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
 };
 
 use http::{HeaderMap, HeaderName, StatusCode, Uri, header};
@@ -27,7 +27,7 @@ use crate::jobs::{
 use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
     create_pipeline, create_preview_pipeline, delete_pipeline, get_pipeline, get_pipeline_jobs,
-    get_pipelines, patch_pipeline, restart_pipeline, validate_query,
+    get_pipelines, patch_pipeline, put_pipeline, restart_pipeline, validate_query,
 };
 use crate::rest_utils::not_found;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
@@ -174,6 +174,7 @@ pub fn create_rest_app(database: DatabaseSource) -> Router {
         .route("/pipelines", get(get_pipelines))
         .route("/jobs", get(get_jobs))
         .route("/pipelines/validate_query", post(validate_query))
+        .route("/pipelines/:id", put(put_pipeline))
         .route("/pipelines/:id", patch(patch_pipeline))
         .route("/pipelines/:id", get(get_pipeline))
         .route("/pipelines/:id/restart", post(restart_pipeline))
