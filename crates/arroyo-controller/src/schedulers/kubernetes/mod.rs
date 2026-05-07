@@ -338,6 +338,7 @@ mod test {
             generation: 1,
             slots: 8,
             env_vars: Default::default(),
+            pipeline_tags: Default::default(),
         };
 
         let mut config = config().kubernetes_scheduler.clone();

@@ -301,6 +301,10 @@ pub(crate) async fn create_pipeline_int(
     enable_sinks: bool,
     auth: AuthData,
     db: &DatabaseSource,
+    mut compiled: CompiledSql,
+    pub_id: Option<String>,
+    state_url: Option<String>,
+    tags: HashMap<String, String>,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -310,10 +314,7 @@ pub(crate) async fn create_pipeline_int(
         )));
     }
 
-    let pub_id = generate_id(IdTypes::Pipeline);
-
-    let mut compiled =
-        compile_sql(query.clone(), &udfs, parallelism as usize, &auth, false, db).await?;
+    let pub_id = pub_id.unwrap_or_else(|| generate_id(IdTypes::Pipeline));
 
     if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
@@ -394,6 +395,9 @@ pub(crate) async fn create_pipeline_int(
         return Err(required_field("name"));
     }
 
+    let tags_json = serde_json::to_value(tags)
+        .map_err(|e| log_and_map(anyhow!("pipeline tags serialization failed: {e}")))?;
+
     api_queries::execute_create_pipeline(
         &db.client().await?,
         &pub_id,
@@ -405,6 +409,8 @@ pub(crate) async fn create_pipeline_int(
         &serde_json::to_value(&udfs).unwrap(),
         &program_bytes,
         &2,
+        &state_url,
+        &tags_json,
     )
     .await?;
 
@@ -571,7 +577,9 @@ pub async fn validate_query(
 
 /// Create a new pipeline
 ///
-/// The API will create a single job for the pipeline.
+/// The API will create a single job for the pipeline. The server generates
+/// a fresh id for the pipeline; if the caller wants to supply its own
+/// stable id, use `PUT /pipelines/{id}` instead.
 #[utoipa::path(
     post,
     path = "/v1/pipelines",
@@ -587,28 +595,80 @@ pub async fn create_pipeline(
     bearer_auth: BearerAuth,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
+    create_pipeline_inner(state, bearer_auth, None, pipeline_post).await
+}
+
+/// Create a new pipeline at a caller-supplied id
+///
+/// The API will create a single job for the pipeline, using the
+/// supplied `id`. Useful when an upstream system wants to address
+/// the pipeline by an id it already manages.
+///
+/// The endpoint is currently create-only: PUTing twice with the same id
+/// returns a 400 (duplicate-violation) rather than upserting.
+#[utoipa::path(
+    put,
+    path = "/v1/pipelines/{id}",
+    tag = "pipelines",
+    params(
+        ("id" = String, Path, description = "Caller-supplied pipeline id")
+    ),
+    request_body = PipelinePost,
+    responses(
+        (status = 200, description = "Created pipeline and job", body = Pipeline),
+        (status = 400, description = "Bad request", body = ErrorResp),
+    ),
+)]
+pub async fn put_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(id): Path<String>,
+    WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
+) -> Result<Json<Pipeline>, ErrorResp> {
+    create_pipeline_inner(state, bearer_auth, Some(id), pipeline_post).await
+}
+
+async fn create_pipeline_inner(
+    state: AppState,
+    bearer_auth: BearerAuth,
+    pub_id: Option<String>,
+    pipeline_post: PipelinePost,
+) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    //let transaction = db.transaction().await?;
     let checkpoint_interval = pipeline_post
         .checkpoint_interval_micros
         .map(Duration::from_micros)
         .unwrap_or(*config().default_checkpoint_interval);
 
-    let pipeline_id = create_pipeline_int(
-        pipeline_post.name,
-        pipeline_post.query,
-        pipeline_post.udfs.unwrap_or_default(),
-        pipeline_post.parallelism,
-        checkpoint_interval,
+    let udfs = pipeline_post.udfs.unwrap_or_default();
+
+    let compiled = compile_sql(
+        pipeline_post.query.clone(),
+        &udfs,
+        pipeline_post.parallelism as usize,
+        &auth_data,
         false,
-        true,
-        auth_data.clone(),
         &state.database,
     )
     .await?;
 
-    // transaction.commit().await?;
+    let pipeline_id = create_pipeline_int(
+        pipeline_post.name,
+        pipeline_post.query,
+        udfs,
+        pipeline_post.parallelism,
+        checkpoint_interval,
+        /* is_preview */ false,
+        /* enable_sinks */ true,
+        auth_data.clone(),
+        &state.database,
+        compiled,
+        pub_id,
+        pipeline_post.state_url,
+        pipeline_post.tags.unwrap_or_default(),
+    )
+    .await?;
 
     let pipeline =
         query_pipeline_by_pub_id(&pipeline_id, &state.database.client().await?, &auth_data).await?;
@@ -634,16 +694,32 @@ pub async fn create_preview_pipeline(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
+    let udfs = req.udfs.unwrap_or_default();
+
+    let compiled = compile_sql(
+        req.query.clone(),
+        &udfs,
+        1,
+        &auth_data,
+        false,
+        &state.database,
+    )
+    .await?;
+
     let pipeline_id = create_pipeline_int(
         format!("preview_{}", to_millis(SystemTime::now())),
         req.query,
-        req.udfs.unwrap_or_default(),
+        udfs,
         1,
         Duration::MAX,
-        true,
+        /* is_preview */ true,
         req.enable_sinks,
         auth_data.clone(),
         &state.database,
+        compiled,
+        None,
+        None,
+        HashMap::default(),
     )
     .await?;
 

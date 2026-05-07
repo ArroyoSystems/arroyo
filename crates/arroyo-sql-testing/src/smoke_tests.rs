@@ -21,7 +21,7 @@ use arroyo_rpc::grpc::rpc::{
     StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq, WorkerContext,
 };
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
-use arroyo_state::{BackingStore, StateBackend};
+use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
 use arroyo_types::{CheckpointBarrier, to_micros};
 use arroyo_udf_host::LocalUdf;
 use arroyo_worker::engine::Engine;
@@ -182,9 +182,12 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
                 };
                 if let Some(operator_metadata) = checkpoint_state.checkpoint_finished(req).unwrap()
                 {
-                    StateBackend::write_operator_checkpoint_metadata(operator_metadata)
-                        .await
-                        .unwrap();
+                    StateBackend::write_operator_checkpoint_metadata(
+                        &StorageProviderFor::Worker,
+                        operator_metadata,
+                    )
+                    .await
+                    .unwrap();
                 }
             }
             _ => {}
@@ -192,7 +195,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
     }
 
     let checkpoint_metadata = checkpoint_state.build_metadata();
-    StateBackend::write_checkpoint_metadata(checkpoint_metadata)
+    StateBackend::write_checkpoint_metadata(&StorageProviderFor::Worker, checkpoint_metadata)
         .await
         .unwrap();
 
@@ -208,8 +211,13 @@ async fn compact(
     let operator_to_node = running_engine.operator_to_node();
     let operator_controls = running_engine.operator_controls();
     for (operator, _) in tasks_per_operator {
-        if let Ok(compacted) =
-            ParquetBackend::compact_operator(job_id.clone(), &operator, epoch).await
+        if let Ok(compacted) = ParquetBackend::compact_operator(
+            &StorageProviderFor::Worker,
+            job_id.clone(),
+            &operator,
+            epoch,
+        )
+        .await
         {
             let node_id = operator_to_node.get(&operator).unwrap();
             let operator_controls = operator_controls.get(node_id).unwrap();

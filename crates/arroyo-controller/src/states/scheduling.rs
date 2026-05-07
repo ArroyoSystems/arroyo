@@ -30,7 +30,7 @@ use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc_channel_builder;
 use arroyo_rpc::worker_types::RunningMessage;
 use arroyo_state::{
-    BackingStore, StateBackend, get_storage_provider,
+    BackingStore, StateBackend, StorageProviderFor, get_storage_provider,
     tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
 };
 use arroyo_state_protocol::store::read_protobuf;
@@ -317,18 +317,27 @@ async fn get_checkpoint_info_legacy<'a>(
         needs_commits,
     }) = checkpoint_info.clone()
     {
-        let mut metadata =
-            match StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch as u32).await {
-                Ok(m) => m,
-                Err(err) => {
-                    return Err(ctx.retryable(
-                        state,
-                        format!("Failed to load checkpoint metadata for epoch {epoch}"),
-                        err.into(),
-                        10,
-                    ));
-                }
-            };
+        let storage_role = StorageProviderFor::Controller {
+            storage_url: ctx.pipeline_info.state_url.clone(),
+        };
+
+        let mut metadata = match StateBackend::load_checkpoint_metadata(
+            &storage_role,
+            &ctx.config.id,
+            epoch as u32,
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(err) => {
+                return Err(ctx.retryable(
+                    state,
+                    format!("Failed to load checkpoint metadata for epoch {epoch}"),
+                    err.into(),
+                    10,
+                ));
+            }
+        };
 
         metadata.min_epoch = min_epoch as u32;
         if needs_commits {
@@ -338,6 +347,7 @@ async fn get_checkpoint_info_legacy<'a>(
                 HashMap::new();
             for operator_id in &metadata.operator_ids {
                 let operator_metadata = match StateBackend::load_operator_metadata(
+                    &storage_role,
                     &ctx.config.id,
                     operator_id,
                     epoch as u32,
@@ -412,7 +422,7 @@ async fn get_checkpoint_info_legacy<'a>(
             ));
         }
 
-        if let Err(err) = StateBackend::write_checkpoint_metadata(metadata).await {
+        if let Err(err) = StateBackend::write_checkpoint_metadata(&storage_role, metadata).await {
             return Err(ctx.retryable(
                 state,
                 format!("Failed to write checkpoint metadata for epoch {epoch}"),
@@ -430,10 +440,15 @@ async fn get_and_register_checkpoint_info_leader<'a>(
 ) -> anyhow::Result<Option<CheckpointInfo>> {
     // in the future, this should likely move to the leader, but that will require rethinking how
     // worker initialization works
+    let storage_role = StorageProviderFor::Controller {
+        storage_url: ctx.pipeline_info.state_url.clone(),
+    };
+    let storage_provider = get_storage_provider(&storage_role).await?;
+
     let new_gen = initialize_generation(
-        get_storage_provider().await?.as_ref(),
+        storage_provider.as_ref(),
         InitializeGenerationRequest {
-            pipeline_id: ctx.pipeline_id.clone(),
+            pipeline_id: ctx.pipeline_info.pipeline_id.clone(),
             job_id: JobId(ctx.config.id.clone()),
             generation: Generation(ctx.status.generation),
             updated_at: SystemTime::now(),
@@ -475,10 +490,9 @@ async fn get_and_register_checkpoint_info_leader<'a>(
     };
 
     Ok(if let Some(r) = checkpoint_ref {
-        let manifest =
-            read_protobuf::<_, CheckpointManifest>(get_storage_provider().await?.as_ref(), &r)
-                .await?
-                .ok_or_else(|| anyhow!("recovery checkpoint manifest {r} is missing!"))?;
+        let manifest = read_protobuf::<_, CheckpointManifest>(storage_provider.as_ref(), &r)
+            .await?
+            .ok_or_else(|| anyhow!("recovery checkpoint manifest {r} is missing!"))?;
 
         Some(CheckpointInfo {
             epoch: manifest.epoch,
@@ -498,30 +512,33 @@ impl Scheduling {
         slots_needed: usize,
     ) -> Result<Box<Self>, StateError> {
         let start = Instant::now();
+        let mut env_vars = std::collections::HashMap::new();
+        env_vars.insert(
+            "ARROYO__CHECKPOINT_URL".to_string(),
+            ctx.pipeline_info
+                .state_url
+                .clone()
+                .unwrap_or_else(|| config().checkpoint_url.clone()),
+        );
+        env_vars.insert(
+            CLUSTER_ID_ENV.to_string(),
+            arroyo_server_common::get_cluster_id(),
+        );
+
         loop {
             match ctx
                 .scheduler
                 .start_workers(StartPipelineReq {
                     program: ctx.program.clone(),
                     wasm_path: "".to_string(),
-                    pipeline_id: ctx.pipeline_id.clone(),
+                    pipeline_id: ctx.pipeline_info.pipeline_id.clone(),
                     job_id: JobId(ctx.config.id.clone()),
                     generation: ctx.status.generation,
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
-                    env_vars: [
-                        (
-                            "ARROYO__CHECKPOINT_URL".to_string(),
-                            config().checkpoint_url.clone(),
-                        ),
-                        (
-                            CLUSTER_ID_ENV.to_string(),
-                            arroyo_server_common::get_cluster_id(),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
+                    env_vars: env_vars.clone(),
+                    pipeline_tags: ctx.pipeline_info.tags.clone(),
                 })
                 .await
             {
@@ -857,7 +874,8 @@ impl State for Scheduling {
                 let mut controller = JobController::new(
                     checkpoint_store,
                     ctx.config.clone(),
-                    ctx.pipeline_id.clone(),
+                    ctx.pipeline_info.pipeline_id.clone(),
+                    ctx.pipeline_info.state_url.clone(),
                     ctx.status.generation,
                     program,
                     start_epoch as u32,

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::api_types::udfs::Udf;
 use crate::errors::ErrorDomain;
 use crate::grpc as grpc_proto;
@@ -26,6 +28,8 @@ pub struct PipelinePost {
     pub udfs: Option<Vec<Udf>>,
     pub parallelism: u64,
     pub checkpoint_interval_micros: Option<u64>,
+    pub state_url: Option<String>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

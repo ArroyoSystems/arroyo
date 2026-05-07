@@ -12,6 +12,7 @@ use bincode::{Decode, Encode};
 use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_storage::StorageProvider;
+pub use arroyo_storage::StorageProviderFor;
 use prost::Message;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -19,6 +20,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::Mutex;
 
 mod metrics;
 pub mod parquet;
@@ -137,12 +139,14 @@ pub enum DataOperation {
 pub trait BackingStore {
     /// loads the checkpoint metadata for a given job id and epoch
     async fn load_checkpoint_metadata(
+        role: &StorageProviderFor,
         job_id: &str,
         epoch: u32,
     ) -> Result<CheckpointMetadata, StateError>;
 
     /// loads the operator checkpoint metadata for a given job id, operator id, and epoch
     async fn load_operator_metadata(
+        role: &StorageProviderFor,
         job_id: &str,
         operator_id: &str,
         epoch: u32,
@@ -153,14 +157,19 @@ pub trait BackingStore {
 
     /// writes the operator checkpoint metadata to the backing store
     async fn write_operator_checkpoint_metadata(
+        role: &StorageProviderFor,
         metadata: OperatorCheckpointMetadata,
     ) -> Result<(), StateError>;
 
     /// writes the checkpoint metadata to the backing store
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<(), StateError>;
+    async fn write_checkpoint_metadata(
+        role: &StorageProviderFor,
+        metadata: CheckpointMetadata,
+    ) -> Result<(), StateError>;
 
     /// cleans up a checkpoint by deleting data that is no longer needed
     async fn cleanup_checkpoint(
+        role: &StorageProviderFor,
         metadata: CheckpointMetadata,
         old_min_epoch: u32,
         new_min_epoch: u32,
@@ -173,18 +182,39 @@ pub fn hash_key<K: Hash>(key: &K) -> u64 {
     hasher.finish()
 }
 
-static STORAGE_PROVIDER: tokio::sync::OnceCell<Arc<StorageProvider>> =
-    tokio::sync::OnceCell::const_new();
+/// Per-URL cache of [`StorageProvider`] instances.
+fn storage_provider_cache() -> &'static Mutex<HashMap<String, Arc<StorageProvider>>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, Arc<StorageProvider>>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
-pub async fn get_storage_provider() -> Result<&'static Arc<StorageProvider>, StorageError> {
-    // TODO: this should be encoded in the config so that the controller doesn't need
-    // to be synchronized with the workers
+/// Returns a cached [`StorageProvider`] for the given role.
+///
+/// Workers use [`StorageProviderFor::Worker`], which reads `config().checkpoint_url`
+/// (set per-pipeline via the `ARROYO__CHECKPOINT_URL` env var at worker startup).
+///
+/// Controllers manage many pipelines that may have different storage URLs and
+/// pass [`StorageProviderFor::Controller`] with the pipeline's `state_url`.
+/// When `state_url` is `None`, falls back to `config().checkpoint_url`.
+pub async fn get_storage_provider(
+    role: &StorageProviderFor,
+) -> Result<Arc<StorageProvider>, StorageError> {
+    let storage_url = match role {
+        StorageProviderFor::Controller {
+            storage_url: Some(url),
+        } => url,
+        StorageProviderFor::Worker | StorageProviderFor::Controller { storage_url: None } => {
+            &config().checkpoint_url
+        }
+    };
+    let mut cache = storage_provider_cache().lock().await;
 
-    STORAGE_PROVIDER
-        .get_or_try_init(|| async {
-            let storage_url = &config().checkpoint_url;
-
-            StorageProvider::for_url(storage_url).await.map(Arc::new)
-        })
-        .await
+    if let Some(storage_provider) = cache.get(storage_url) {
+        Ok(storage_provider.clone())
+    } else {
+        let storage_provider = Arc::new(StorageProvider::for_url(storage_url).await?);
+        cache.insert(storage_url.clone(), storage_provider.clone());
+        Ok(storage_provider)
+    }
 }

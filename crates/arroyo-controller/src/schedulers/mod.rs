@@ -104,6 +104,7 @@ pub struct StartPipelineReq {
     pub generation: u64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
+    pub pipeline_tags: HashMap<String, String>,
 }
 
 #[async_trait::async_trait]

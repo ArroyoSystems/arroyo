@@ -52,7 +52,9 @@ pub fn map_delete_err(name: &str, user: &str, error: DbError) -> ErrorResp {
 impl From<DbError> for ErrorResp {
     fn from(value: DbError) -> Self {
         match value {
-            DbError::DuplicateViolation => bad_request("A record already exists with that name"),
+            DbError::DuplicateViolation => {
+                bad_request("A record already exists with that name or id")
+            }
             DbError::ForeignKeyViolation => {
                 bad_request("Cannot delete; other records depend on this one")
             }

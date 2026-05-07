@@ -32,7 +32,7 @@ use self::stopping::Stopping;
 use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
-use crate::{JobConfig, JobMessage, JobStatus, queries, schedulers::Scheduler};
+use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
@@ -542,9 +542,9 @@ pub(crate) use stop_if_desired_running;
 
 pub struct JobContext<'a> {
     pub config: JobConfig,
+    pub pipeline_info: Arc<PipelineInfo>,
     pub status: &'a mut JobStatus,
     pub program: &'a mut LogicalProgram,
-    pub pipeline_id: PipelineId,
     pub db: DatabaseSource,
     pub scheduler: Arc<dyn Scheduler>,
     pub rx: &'a mut Receiver<JobMessage>,
@@ -896,7 +896,7 @@ pub(crate) async fn state_backoff(retries_attempted: usize) {
 #[allow(clippy::too_many_arguments)]
 async fn run_to_completion(
     config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
-    pipeline_pub_id: String,
+    pipeline_info: Arc<PipelineInfo>,
     mut program: LogicalProgram,
     mut status: JobStatus,
     mut state: Box<dyn State>,
@@ -907,9 +907,9 @@ async fn run_to_completion(
 ) {
     let mut ctx = JobContext {
         config: config.read().unwrap().0.clone(),
+        pipeline_info,
         status: &mut status,
         program: &mut program,
-        pipeline_id: PipelineId(pipeline_pub_id.into()),
         db: db.clone(),
         scheduler,
         rx: &mut rx,
@@ -983,7 +983,7 @@ impl StateMachine {
         db: &DatabaseSource,
         job_id: &str,
         id: i64,
-    ) -> anyhow::Result<Option<(String, LogicalProgram)>> {
+    ) -> anyhow::Result<Option<(LogicalProgram, PipelineInfo)>> {
         let res = controller_queries::fetch_get_program(&db.client().await?, &id)
             .await
             .map_err(|e| anyhow!("Failed to fetch program from database: {:?}", e))?
@@ -991,9 +991,22 @@ impl StateMachine {
             .next()
             .ok_or_else(|| anyhow!("Could not find program for job_id {job_id}"))?;
 
+        let tags = serde_json::from_value::<HashMap<String, String>>(res.tags).map_err(|e| {
+            anyhow!(
+                "malformed JSON in pipelines.tags for pipeline {}: {e}",
+                res.pipeline_id
+            )
+        })?;
+
+        let info = PipelineInfo {
+            pipeline_id: PipelineId(res.pipeline_id.into()),
+            state_url: res.state_url,
+            tags,
+        };
+
         Ok(if res.proto_version == 2 {
             match Self::decode_program(&res.program) {
-                Ok(p) => Some((res.pipeline_id, p)),
+                Ok(p) => Some((p, info)),
                 Err(e) => {
                     warn!("Failed to start {}: {}", job_id, e);
                     None
@@ -1053,13 +1066,14 @@ impl StateMachine {
                 let metrics = self.metrics.clone();
                 let pipeline_id = config.read().unwrap().0.pipeline_id;
                 match Self::get_program(&db, &status.id, pipeline_id).await {
-                    Ok(Some((pipeline_pub_id, program))) => {
+                    Ok(Some((program, pipeline_info))) => {
+                        let pipeline_info = Arc::new(pipeline_info);
                         shutdown_guard.into_spawn_task(async move {
                             let id = { config.read().unwrap().0.id.clone() };
                             info!(message = "starting state machine", job_id = *id);
                             run_to_completion(
                                 config,
-                                pipeline_pub_id,
+                                pipeline_info,
                                 program,
                                 status,
                                 initial_state,

@@ -2,6 +2,7 @@ use std::any::Any;
 
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
+use crate::StorageProviderFor;
 use anyhow::{Result, anyhow, bail};
 use arroyo_rpc::CompactionResult;
 use arroyo_rpc::{
@@ -238,11 +239,14 @@ async fn load_operator_metadata(
     operator_id: &str,
 ) -> Result<OperatorCheckpointMetadata, anyhow::Error> {
     match m {
-        MetadataOrManifest::Metadata(m) => {
-            StateBackend::load_operator_metadata(&m.job_id, operator_id, m.epoch)
-                .await?
-                .ok_or_else(|| anyhow!("missing metadata field in checkpoint; invalid protobuf"))
-        }
+        MetadataOrManifest::Metadata(m) => StateBackend::load_operator_metadata(
+            &StorageProviderFor::Worker,
+            &m.job_id,
+            operator_id,
+            m.epoch,
+        )
+        .await?
+        .ok_or_else(|| anyhow!("missing metadata field in checkpoint; invalid protobuf")),
         MetadataOrManifest::Manifest(manifest) => manifest
             .operators
             .iter()
@@ -279,7 +283,7 @@ impl TableManager {
             (None, None)
         };
 
-        let storage = get_storage_provider().await?;
+        let storage = get_storage_provider(&StorageProviderFor::Worker).await?;
 
         let tables = table_configs
             .iter()
@@ -354,7 +358,7 @@ impl TableManager {
                 tables,
                 writer,
                 task_info,
-                storage: Arc::clone(storage),
+                storage: Arc::clone(&storage),
                 caches: HashMap::new(),
             },
             watermark,

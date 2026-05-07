@@ -57,7 +57,7 @@ use arroyo_rpc::{
 
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
-use arroyo_state::get_storage_provider;
+use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::store::read_protobuf;
 use arroyo_state_protocol::types::CheckpointRef;
 pub use ordered_float::OrderedFloat;
@@ -343,7 +343,9 @@ impl WorkerState {
 
         let parent = if let Some(parent_ref) = parent_ref {
             let manifest = read_protobuf::<_, CheckpointManifest>(
-                get_storage_provider().await?.as_ref(),
+                get_storage_provider(&StorageProviderFor::Worker)
+                    .await?
+                    .as_ref(),
                 &parent_ref,
             )
             .await?

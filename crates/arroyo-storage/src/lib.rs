@@ -31,6 +31,27 @@ mod aws;
 /// A reference-counted reference to a [StorageProvider].
 pub type StorageProviderRef = Arc<StorageProvider>;
 
+/// Identifies the role / context a [`StorageProvider`] is being requested for.
+///
+/// Worker processes have a single effective checkpoint URL — the per-pipeline
+/// `state_url` is injected via the `ARROYO__CHECKPOINT_URL` env var at worker
+/// startup, which feeds `config().checkpoint_url`. Workers therefore use the
+/// [`Worker`](StorageProviderFor::Worker) variant.
+///
+/// Controller processes (may) manage many pipelines simultaneously, each potentially
+/// backed by a different storage URL. Controllers should use
+/// [`Controller`](StorageProviderFor::Controller) and supply the pipeline's
+/// `state_url`. When `storage_url` is `None`, the controller falls back to
+/// `config().checkpoint_url`, matching the worker default.
+#[derive(Debug, Clone)]
+pub enum StorageProviderFor {
+    /// Use the process-wide checkpoint URL from `config().checkpoint_url`.
+    Worker,
+    /// Use a per-pipeline `state_url`, falling back to `config().checkpoint_url`
+    /// when `None`.
+    Controller { storage_url: Option<String> },
+}
+
 #[derive(Clone)]
 pub struct StorageProvider {
     config: BackendConfig,
