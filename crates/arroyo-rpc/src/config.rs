@@ -880,8 +880,14 @@ pub struct RunConfig {
     pub state_dir: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Sensitive<T: Serialize + DeserializeOwned + Debug + Clone>(T);
+
+impl<T: Serialize + DeserializeOwned + Debug + Clone> std::fmt::Debug for Sensitive<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{SENSITIVE_MASK}")
+    }
+}
 
 impl<'de, T: Serialize + DeserializeOwned + Debug + Clone> Deserialize<'de> for Sensitive<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
