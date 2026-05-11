@@ -22,7 +22,7 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
-use arroyo_rpc::{config, errors};
+use arroyo_rpc::{StateContext, config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
@@ -97,6 +97,7 @@ pub struct JobStatus {
     pipeline_path: Option<String>,
     wasm_path: Option<String>,
     restart_nonce: i32,
+    state_context: StateContext,
 }
 
 impl JobStatus {
@@ -115,6 +116,7 @@ impl JobStatus {
             &self.wasm_path,
             &(self.generation as i64),
             &self.restart_nonce,
+            &serde_json::to_value(&self.state_context).expect("failed to serialize"),
             &*self.id,
         )
         .await
@@ -627,6 +629,16 @@ impl ControllerServer {
 
                     let mut jobs = jobs.lock().await;
 
+                    let state_context: StateContext =
+                        serde_json::from_value(p.state_context.clone()).unwrap_or_else(|e| {
+                            warn!(job_id = *id, original =? p.state_context, error =? e,
+                                "failed to deserialize state context");
+                            StateContext {
+                                version: 1,
+                                leader: None,
+                            }
+                        });
+
                     let status = JobStatus {
                         id: id.clone(),
                         generation: p.run_id.unwrap_or(0).max(0) as u64,
@@ -640,6 +652,7 @@ impl ControllerServer {
                         pipeline_path: p.pipeline_path,
                         wasm_path: p.wasm_path,
                         restart_nonce: p.status_restart_nonce,
+                        state_context,
                     };
 
                     if let Some(sm) = jobs.get_mut(&*id) {

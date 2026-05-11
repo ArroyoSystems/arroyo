@@ -188,7 +188,7 @@ impl Scheduler for ProcessScheduler {
                     .env(PIPELINE_ID_ENV, &*pipeline_id)
                     .env(JOB_ID_ENV, &*job_id)
                     .env(GENERATION_ENV, format!("{}", start_pipeline_req.generation))
-                    .kill_on_drop(true)
+                    .kill_on_drop(config.process_scheduler.shutdown_with_controller)
                     .spawn()
                 {
                     Ok(child) => child,
@@ -214,14 +214,16 @@ impl Scheduler for ProcessScheduler {
                         info!("Child ({:?}) exited with status {:?}", path, status);
                     }
                     _ = rx => {
-                        info!(message = "Killing child", worker_id = worker_id, job_id = *job_id);
-                        if let Err(e) = child.kill().await {
-                            warn!(
-                                message = "failed to kill process scheduler worker",
-                                worker_id,
-                                job_id = %job_id,
-                                error = format!("{:?}", e),
-                            );
+                        if config.process_scheduler.shutdown_with_controller {
+                            info!(message = "Killing child", worker_id = worker_id, job_id = *job_id);
+                            if let Err(e) = child.kill().await {
+                                warn!(
+                                    message = "failed to kill process scheduler worker",
+                                    worker_id,
+                                    job_id = %job_id,
+                                    error = format!("{:?}", e),
+                                );
+                            }
                         }
                     }
                 }
@@ -284,7 +286,7 @@ impl Scheduler for ProcessScheduler {
     async fn shutdown(&self) {
         let workers: Vec<_> = self.workers.lock().await.drain().collect();
 
-        if workers.is_empty() {
+        if workers.is_empty() || !config().process_scheduler.shutdown_with_controller {
             return;
         }
 

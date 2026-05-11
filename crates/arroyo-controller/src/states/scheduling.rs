@@ -27,8 +27,8 @@ use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::{JobControllerMode, config};
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc_channel_builder;
 use arroyo_rpc::worker_types::RunningMessage;
+use arroyo_rpc::{LeaderContext, grpc_channel_builder};
 use arroyo_state::{
     BackingStore, StateBackend, StorageProviderFor, get_storage_provider,
     tables::{ErasedTable, global_keyed_map::GlobalKeyedTable},
@@ -167,7 +167,7 @@ async fn handle_worker_connect<'a>(
                         Ok(channel) => {
                             {
                                 let mut connects = connects.lock().await;
-                                connects.insert(worker_id, worker_client(channel, *worker_id));
+                                connects.insert(worker_id, worker_client(channel, worker_id));
                             }
                             return;
                         }
@@ -695,15 +695,13 @@ impl State for Scheduling {
             .map(|info| info.min_epoch)
             .unwrap_or(default_epoch);
 
-        let (leader_id, leader_addr) = leader_mode
-            .then(|| {
-                workers
-                    .iter()
-                    .min_by_key(|w| w.0.0)
-                    .map(|(id, status)| (*id, status.rpc_address.clone()))
-                    .unwrap()
-            })
-            .unzip();
+        let leader_info = leader_mode.then(|| {
+            workers
+                .iter()
+                .min_by_key(|w| w.0.0)
+                .map(|(id, status)| (*id, status.rpc_address.clone()))
+                .unwrap()
+        });
 
         let checkpoint_interval_micros = ctx.config.checkpoint_interval.as_micros() as u64;
 
@@ -715,10 +713,10 @@ impl State for Scheduling {
                 let restore_epoch = checkpoint_info.as_ref().map(|info| info.epoch);
                 let program = program.clone();
                 let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
-                let leader_addr = leader_addr.clone();
+                let (leader_id, leader_addr) = leader_info.clone().unzip();
+
                 let checkpoint_manifest_ref =
                     leader_id.and(checkpoint_info.as_ref().map(|ci| ci.id.clone()));
-
                 tokio::spawn(async move {
                     info!(
                         message = "starting execution on worker",
@@ -863,7 +861,7 @@ impl State for Scheduling {
             .await
             .insert(ctx.config.id.clone(), metrics.clone());
 
-        match leader_addr {
+        match leader_info {
             None => {
                 let checkpoint_store = Arc::new(DbCheckpointMetadataStore {
                     organization_id: ctx.config.organization_id.clone(),
@@ -895,13 +893,14 @@ impl State for Scheduling {
                 ctx.job_controller = Some(controller);
                 Ok(Transition::next(*self, Running {}))
             }
-            Some(leader_addr) => {
+            Some((id, addr)) => {
                 ctx.job_controller = None;
 
                 let leader_manager = match LeaderManager::connect(
                     JobId(ctx.config.id.clone()),
                     ctx.status.generation,
-                    leader_addr,
+                    id,
+                    addr.clone(),
                 )
                 .await
                 {
@@ -917,6 +916,11 @@ impl State for Scheduling {
                 };
 
                 ctx.leader_manager = Some(leader_manager);
+                ctx.status.state_context.leader = Some(LeaderContext {
+                    worker_id: id,
+                    rpc_address: addr,
+                    generation: ctx.status.generation,
+                });
 
                 Ok(Transition::next(
                     *self,

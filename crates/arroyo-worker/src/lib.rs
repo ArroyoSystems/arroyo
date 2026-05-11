@@ -724,7 +724,10 @@ impl WorkerServer {
                             VerifyWorkerId(*context.worker_id),
                         ))
                         .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::new(leader))
+                        .add_service(JobStatusGrpcServer::with_interceptor(
+                            leader,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 } else {
                     info!("Started worker-rpc on {}", local_addr);
@@ -734,7 +737,10 @@ impl WorkerServer {
                             VerifyWorkerId(*context.worker_id),
                         ))
                         .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::new(leader))
+                        .add_service(JobStatusGrpcServer::with_interceptor(
+                            leader,
+                            VerifyWorkerId(*context.worker_id),
+                        ))
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 },
             ));

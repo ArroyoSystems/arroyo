@@ -8,23 +8,36 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use arroyo_rpc::grpc::rpc::{JobFailure, JobState, JobStatusReq, JobStopMode, StopJobReq};
+use arroyo_rpc::identity::InjectWorkerId;
 use arroyo_rpc::{job_status_client, retry};
-use arroyo_types::JobId;
+use arroyo_types::{JobId, WorkerId};
 use std::time::{Duration, Instant};
+use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
 pub struct LeaderManager {
-    leader_client: JobStatusGrpcClient<Channel>,
+    leader_client: JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>,
     pub job_id: JobId,
     pub generation: u64,
     pub last_heartbeat: Instant,
 }
 
 impl LeaderManager {
-    pub async fn connect(job_id: JobId, run_id: u64, addr: String) -> anyhow::Result<Self> {
+    pub async fn connect(
+        job_id: JobId,
+        generation: u64,
+        worker_id: WorkerId,
+        address: String,
+    ) -> anyhow::Result<Self> {
         let leader_client = retry!(
-            job_status_client("controller", &config().worker.tls, addr.clone()).await,
+            job_status_client(
+                "controller",
+                &config().worker.tls,
+                worker_id,
+                address.clone()
+            )
+            .await,
             5,
             Duration::from_millis(100),
             Duration::from_secs(2),
@@ -33,7 +46,7 @@ impl LeaderManager {
 
         Ok(Self {
             job_id,
-            generation: run_id,
+            generation,
             leader_client,
             last_heartbeat: Instant::now(),
         })

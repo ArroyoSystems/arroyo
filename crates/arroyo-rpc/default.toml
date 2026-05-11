@@ -63,6 +63,7 @@ http-port = 5114
 
 [process-scheduler]
 slots-per-process = 16
+shutdown-with-controller = true
 
 [kubernetes-scheduler]
 namespace = "default"

@@ -7,14 +7,14 @@
 //! 64-bit random values in production, so they are effectively globally
 //! unique across jobs, runs, and clusters.
 
+use crate::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
+use arroyo_types::WorkerId;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::Interceptor;
 use tonic::service::interceptor::InterceptedService;
 use tonic::transport::Channel;
 use tonic::{Request, Status};
 use tracing::warn;
-
-use crate::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
 
 /// Target worker_id header, ASCII decimal.
 pub const WORKER_ID_HEADER: &str = "x-target-worker-id";
@@ -23,7 +23,7 @@ pub const WORKER_ID_HEADER: &str = "x-target-worker-id";
 pub type WorkerClient = WorkerGrpcClient<InterceptedService<Channel, InjectWorkerId>>;
 
 /// Construct a worker client that injects `target` as `x-target-worker-id`.
-pub fn worker_client(channel: Channel, target: u64) -> WorkerClient {
+pub fn worker_client(channel: Channel, target: WorkerId) -> WorkerClient {
     WorkerGrpcClient::with_interceptor(channel, InjectWorkerId::new(target))
 }
 
@@ -32,7 +32,7 @@ pub fn worker_client(channel: Channel, target: u64) -> WorkerClient {
 pub struct InjectWorkerId(MetadataValue<Ascii>);
 
 impl InjectWorkerId {
-    pub fn new(target: u64) -> Self {
+    pub fn new(target: WorkerId) -> Self {
         Self(
             target
                 .to_string()
@@ -87,7 +87,9 @@ mod tests {
     #[test]
     fn inject_writes_decimal_metadata() {
         for id in [0, 42, 1234567890, u64::MAX] {
-            let req = InjectWorkerId::new(id).call(Request::new(())).unwrap();
+            let req = InjectWorkerId::new(WorkerId(id))
+                .call(Request::new(()))
+                .unwrap();
             let parsed: u64 = req
                 .metadata()
                 .get(WORKER_ID_HEADER)
@@ -133,7 +135,7 @@ mod tests {
 
     #[test]
     fn round_trip_through_both_interceptors() {
-        let req = InjectWorkerId::new(1234567890)
+        let req = InjectWorkerId::new(WorkerId(1234567890))
             .call(Request::new(()))
             .unwrap();
         VerifyWorkerId(1234567890).call(req).unwrap();
