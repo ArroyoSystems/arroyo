@@ -166,6 +166,11 @@ impl Recovering {
             }
         };
 
+        // clear workers
+        ctx.leader_manager = None;
+        ctx.status.state_context.leader = None;
+        ctx.job_controller = None;
+
         // then tear down the workers
         retry!(
             Self::tear_down_workers(ctx).await,

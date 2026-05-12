@@ -34,13 +34,15 @@ use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
 use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{JobControllerMode, config};
 use arroyo_rpc::errors::ErrorDomain;
+use arroyo_rpc::grpc::rpc;
+use arroyo_rpc::grpc::rpc::JobFailure;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
-use arroyo_types::PipelineId;
+use arroyo_types::{JobId, PipelineId};
 use prost::Message;
 
 pub(crate) mod checkpoint_stopping;
@@ -533,6 +535,21 @@ macro_rules! leader_stop_if_desired_running {
     };
 }
 
+pub fn controller_job_failure(
+    message: impl Into<String>,
+    error_domain: rpc::ErrorDomain,
+    retry_hint: rpc::RetryHint,
+) -> JobFailure {
+    JobFailure {
+        operator_id: None,
+        task_id: None,
+        subtask_index: None,
+        message: message.into(),
+        error_domain: error_domain as i32,
+        retry_hint: retry_hint as i32,
+    }
+}
+
 use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::leader_manager::LeaderManager;
 use crate::states::restarting::Restarting;
@@ -905,8 +922,31 @@ async fn run_to_completion(
     scheduler: Arc<dyn Scheduler>,
     metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 ) {
+    let job_config = config.read().unwrap().0.clone();
+
+    let leader_manager = if let Some(ctx) = &status.state_context.leader {
+        LeaderManager::connect(
+            JobId(job_config.id.clone()),
+            ctx.generation,
+            ctx.worker_id,
+            ctx.rpc_address.clone(),
+        )
+        .await
+        .map(Some)
+        .unwrap_or_else(|e| {
+            warn!(job_id = *job_config.id,
+                    pipeline_id = *pipeline_info.pipeline_id,
+                    leader_ctx =? ctx,
+                    error =? e,
+                    "failed to connect to leader worker on start");
+            None
+        })
+    } else {
+        None
+    };
+
     let mut ctx = JobContext {
-        config: config.read().unwrap().0.clone(),
+        config: job_config,
         pipeline_info,
         status: &mut status,
         program: &mut program,
@@ -915,7 +955,7 @@ async fn run_to_completion(
         rx: &mut rx,
         retries_attempted: 0,
         job_controller: None,
-        leader_manager: None,
+        leader_manager,
         last_transitioned_at: Instant::now(),
         metrics,
     };
@@ -1023,12 +1063,17 @@ impl StateMachine {
             return;
         }
 
+        let leader_mode = matches!(config().job_controller, JobControllerMode::Worker);
+
         // TODO: This seems pretty error-prone and easy to miss adding when we add states
         let initial_state: Option<Box<dyn State>> = match status.state.as_str() {
             "Created" => Some(Box::new(Created {})),
             "Stopped" => Some(Box::new(Stopped {})),
             "Finished" => Some(Box::new(Finished {})),
             "Failed" => Some(Box::new(Failed {})),
+            "Running" if leader_mode => Some(Box::new(LeaderRunning {
+                started: Instant::now(),
+            })),
             "Compiling" | "Scheduling" | "Running" | "Recovering" | "Rescaling" | "Restarting" => {
                 Some(Box::new(Compiling {}))
             }

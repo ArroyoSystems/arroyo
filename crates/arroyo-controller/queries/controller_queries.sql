@@ -21,7 +21,8 @@ SELECT
     c.restart_nonce as config_restart_nonce,
     s.restart_nonce as status_restart_nonce,
     restart_mode,
-    ignore_state_before_epoch
+    ignore_state_before_epoch,
+    state_context
 FROM job_configs c
 INNER JOIN job_statuses s ON c.id = s.id;
 
@@ -37,7 +38,8 @@ SET state = :state,
     pipeline_path = :pipeline_path,
     wasm_path = :wasm_path,
     run_id = :run_id,
-    restart_nonce = :restart_nonce
+    restart_nonce = :restart_nonce,
+    state_context = :state_context
 WHERE id = :job_id;
 
 --! get_program : PipelineRow(state_url?)

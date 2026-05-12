@@ -685,6 +685,10 @@ pub enum Scheduler {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ProcessSchedulerConfig {
     pub slots_per_process: u32,
+    /// If enabled, the workers spun up by the process scheduler will be killed when the controller
+    /// shuts down. Note if disabled, this may orphan workers -- this is primarily used for testing
+    /// state machine recovery.
+    pub shutdown_with_controller: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

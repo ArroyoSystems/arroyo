@@ -27,7 +27,8 @@ pub const HASH_SEEDS: [u64; 4] = [
     17942305062735447798,
 ];
 
-#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct WorkerId(pub u64);
 
 impl Deref for WorkerId {

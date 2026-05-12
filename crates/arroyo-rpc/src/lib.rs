@@ -13,13 +13,15 @@ use crate::grpc::api::TaskCheckpointDetail;
 use crate::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
 use crate::grpc::rpc::{
     CheckpointManifest, CheckpointMetadata, LoadCompactedDataReq, SubtaskCheckpointMetadata,
+    job_controller_grpc_client, job_status_grpc_client,
 };
+use crate::identity::InjectWorkerId;
 use anyhow::{Context, Result, anyhow};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{ArrowError, DataType, Field, Fields};
-use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
+use arroyo_types::{CheckpointBarrier, HASH_SEEDS, WorkerId};
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
@@ -55,6 +57,7 @@ use tokio::sync::{
     mpsc::{Receiver, Sender, channel},
     oneshot,
 };
+use tonic::codegen::InterceptedService;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint, Identity};
 use tonic::{
     metadata::{Ascii, MetadataValue},
@@ -1067,7 +1070,7 @@ pub async fn job_controller_client(
     our_tls: &Option<TlsConfig>,
     addr: String,
     is_worker_job_controller: bool,
-) -> Result<crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient<Channel>> {
+) -> Result<job_controller_grpc_client::JobControllerGrpcClient<Channel>> {
     let their_tls = if is_worker_job_controller {
         &config().worker.tls
     } else {
@@ -1075,16 +1078,25 @@ pub async fn job_controller_client(
     };
 
     let channel = connect_grpc(our_name, addr, our_tls, their_tls).await?;
-    Ok(crate::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient::new(channel))
+    Ok(job_controller_grpc_client::JobControllerGrpcClient::new(
+        channel,
+    ))
 }
 
 pub async fn job_status_client(
     our_name: &str,
     our_tls: &Option<TlsConfig>,
+    worker_id: WorkerId,
     addr: String,
-) -> Result<crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient<Channel>> {
-    let channel = connect_grpc(our_name, addr, our_tls, &config().controller.tls).await?;
-    Ok(crate::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient::new(channel))
+) -> Result<job_status_grpc_client::JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>>
+{
+    let channel = connect_grpc(our_name, addr, our_tls, &config().worker.tls).await?;
+    Ok(
+        job_status_grpc_client::JobStatusGrpcClient::with_interceptor(
+            channel,
+            InjectWorkerId::new(worker_id),
+        ),
+    )
 }
 
 pub fn local_address(bind_address: IpAddr) -> String {
@@ -1229,6 +1241,19 @@ impl_borrow_decode!(SerializableBytes);
 pub enum MetadataOrManifest {
     Metadata(CheckpointMetadata),
     Manifest(CheckpointManifest),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LeaderContext {
+    pub worker_id: WorkerId,
+    pub rpc_address: String,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StateContext {
+    pub version: u32,
+    pub leader: Option<LeaderContext>,
 }
 
 #[cfg(test)]

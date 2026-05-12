@@ -1,4 +1,4 @@
-use super::{JobContext, State, Transition};
+use super::{JobContext, State, Transition, controller_job_failure};
 use crate::JobMessage;
 use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
@@ -36,6 +36,34 @@ impl State for LeaderRunning {
 
         leader_stop_if_desired_running!(self, ctx.config, ctx);
 
+        if ctx.leader_manager.is_none() {
+            return ctx
+                .handle_job_failure(
+                    *self,
+                    controller_job_failure(
+                        "leader_manager was None entering Running state",
+                        ErrorDomain::Internal,
+                        RetryHint::WithBackoff,
+                    ),
+                )
+                .await;
+        }
+
+        if ctx.leader_manager().generation != ctx.status.generation {
+            let generation = ctx.status.generation;
+            let msg = format!(
+                "leader_manager has incorrect generation (expected {}, found {})",
+                generation,
+                ctx.leader_manager().generation
+            );
+            return ctx
+                .handle_job_failure(
+                    *self,
+                    controller_job_failure(msg, ErrorDomain::Internal, RetryHint::WithBackoff),
+                )
+                .await;
+        }
+
         let operator_parallelism = ctx.program.tasks_per_node();
 
         loop {
@@ -45,17 +73,14 @@ impl State for LeaderRunning {
                 return ctx
                     .handle_job_failure(
                         *self,
-                        JobFailure {
-                            operator_id: None,
-                            task_id: None,
-                            subtask_index: None,
-                            message: format!(
+                        controller_job_failure(
+                            format!(
                                 "no response from job controller after {} seconds",
                                 pipeline_config.worker_heartbeat_timeout.as_secs()
                             ),
-                            error_domain: ErrorDomain::Internal as i32,
-                            retry_hint: RetryHint::WithBackoff as i32,
-                        },
+                            ErrorDomain::Internal,
+                            RetryHint::WithBackoff,
+                        ),
                     )
                     .await;
             }

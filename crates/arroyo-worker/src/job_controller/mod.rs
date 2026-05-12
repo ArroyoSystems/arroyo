@@ -127,7 +127,7 @@ pub(crate) async fn connect_to_worker(id: WorkerId, addr: String) -> anyhow::Res
         .connect()
         .await
         {
-            Ok(channel) => return Ok(worker_client(channel, *id)),
+            Ok(channel) => return Ok(worker_client(channel, id)),
             Err(e) => {
                 error!(
                     message = "Failed to connect to worker",
