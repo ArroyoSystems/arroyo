@@ -19,11 +19,14 @@ use iceberg::{Catalog, ErrorKind, TableCreation, TableIdent};
 use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
 use itertools::Itertools;
 use regex::Regex;
+use reqwest::Client;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::error::Error;
+use std::future::Future;
 use std::iter::once;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -35,6 +38,7 @@ const CONFIG_MAPPINGS: [(&str, &str); 4] = [
 ];
 
 const ARROYO_COMMIT_ID: &str = "arroyo.commit-id";
+const ICEBERG_COMMIT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug)]
 pub struct IcebergTable {
@@ -147,6 +151,25 @@ fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
     }
 }
 
+async fn run_with_iceberg_timeout<T>(
+    timeout: Duration,
+    operation: &'static str,
+    future: impl Future<Output = iceberg::Result<T>>,
+) -> DataflowResult<T> {
+    tokio::time::timeout(timeout, future)
+        .await
+        .map_err(|_| {
+            connector_err!(
+                External,
+                WithBackoff,
+                "timed out after {:?} while {}",
+                timeout,
+                operation
+            )
+        })?
+        .map_err(map_iceberg_error)
+}
+
 impl IcebergTable {
     pub fn new(catalog: &IcebergCatalog, sink: &IcebergSink) -> anyhow::Result<Self> {
         match catalog {
@@ -166,6 +189,9 @@ impl IcebergTable {
                     .uri(rest.url.clone())
                     .warehouse_opt(rest.warehouse.clone())
                     .props(props)
+                    .client(Some(
+                        Client::builder().timeout(ICEBERG_COMMIT_TIMEOUT).build()?,
+                    ))
                     .build();
 
                 let catalog = RestCatalog::new(config);
@@ -306,6 +332,18 @@ impl IcebergTable {
         })
     }
 
+    async fn refresh_table(&mut self, operation: &'static str) -> DataflowResult<()> {
+        self.table = Some(
+            run_with_iceberg_timeout(
+                ICEBERG_COMMIT_TIMEOUT,
+                operation,
+                self.catalog.load_table(&self.table_ident),
+            )
+            .await?,
+        );
+        Ok(())
+    }
+
     pub async fn commit(
         &mut self,
         epoch: u32,
@@ -316,6 +354,8 @@ impl IcebergTable {
             return Ok(());
         }
 
+        self.refresh_table("loading latest Iceberg table metadata before commit")
+            .await?;
         let table = self.table.as_ref().expect("table must have been loaded");
 
         let tx_id = transaction_id(
@@ -390,16 +430,19 @@ impl IcebergTable {
             .apply(tx)
             .map_err(map_iceberg_error)?;
 
-        tx.commit(&self.catalog).await.map_err(map_iceberg_error)?;
-        debug!("finished iceberg commit");
+        run_with_iceberg_timeout(
+            ICEBERG_COMMIT_TIMEOUT,
+            "committing to the Iceberg catalog",
+            tx.commit(&self.catalog),
+        )
+        .await?;
+        debug!("finished iceberg catalog commit");
         // the tx.commit call returns the table but the FileIO somehow ends up misconfigured in such
         // a way that breaks future IO operations
-        self.table = Some(
-            self.catalog
-                .load_table(&self.table_ident)
-                .await
-                .map_err(map_iceberg_error)?,
-        );
+        debug!("reloading iceberg table after commit");
+        self.refresh_table("reloading Iceberg table metadata after commit")
+            .await?;
+        debug!("finished iceberg commit");
 
         Ok(())
     }

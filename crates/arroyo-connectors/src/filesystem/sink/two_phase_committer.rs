@@ -86,7 +86,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
         epoch: u32,
         mut commit_data: HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut OperatorContext,
-    ) {
+    ) -> DataflowResult<()> {
         debug!("received commit message");
         let pre_commits = match self.committer.commit_strategy() {
             CommitStrategy::PerSubtask => std::mem::take(&mut self.pre_commits),
@@ -107,8 +107,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
 
         self.committer
             .commit(epoch, &ctx.task_info, pre_commits)
-            .await
-            .expect("committer committed");
+            .await?;
 
         let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
             checkpoint_epoch: epoch,
@@ -123,6 +122,7 @@ impl<TPC: TwoPhaseCommitter> TwoPhaseCommitterOperator<TPC> {
             .send(checkpoint_event)
             .await
             .expect("sent commit event");
+        Ok(())
     }
 
     fn map_from_serialized_data(serialized_data: Vec<u8>) -> Vec<TPC::PreCommit> {
@@ -206,8 +206,7 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         commit_data: &HashMap<String, HashMap<u32, Vec<u8>>>,
         ctx: &mut OperatorContext,
     ) -> DataflowResult<()> {
-        self.handle_commit(epoch, commit_data.clone(), ctx).await;
-        Ok(())
+        self.handle_commit(epoch, commit_data.clone(), ctx).await
     }
 
     async fn handle_checkpoint(
