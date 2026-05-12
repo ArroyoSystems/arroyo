@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 
+pub mod pg_tls;
 mod profile;
 pub mod shutdown;
 pub mod tls;

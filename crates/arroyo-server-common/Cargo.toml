@@ -40,6 +40,9 @@ uuid = { version = "1.8.0", features = ["v4"] }
 url = { version = "2.5" }
 rustls = { workspace = true, features = ["std", "aws_lc_rs"] }
 rustls-pemfile = { workspace = true }
+rustls-native-certs = "0.8"
+tokio-postgres = { version = "*", features = ["runtime"] }
+tokio-postgres-rustls = "0.13"
 webpki-roots = { workspace = true }
 
 # profile

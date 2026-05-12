@@ -17,9 +17,8 @@ use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, fs};
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::timeout;
-use tokio_postgres::{Client, Connection, NoTls};
+use tokio_postgres::{Client, NoTls};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -196,16 +195,23 @@ async fn pg_pool() -> Pool {
     cfg.port = Some(config.port);
     cfg.user = Some(config.user.clone());
     cfg.password = Some((*config.password).clone());
+    cfg.application_name = Some("arroyo".to_string());
     cfg.options = Some(format!("-csearch_path={}", config.schema));
     cfg.manager = Some(ManagerConfig {
         recycling_method: RecyclingMethod::Fast,
     });
-    let pool = cfg
-        .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
-        .unwrap_or_else(|e| {
-            error!("Unable to connect to database {:?}: {:?}", config, e);
+    let pool = match arroyo_server_common::pg_tls::build_pg_tls_connector(&config.tls) {
+        Ok(Some(connector)) => cfg.create_pool(Some(deadpool_postgres::Runtime::Tokio1), connector),
+        Ok(None) => cfg.create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls),
+        Err(e) => {
+            error!("Invalid Postgres TLS configuration: {:?}", e);
             exit(1);
-        });
+        }
+    }
+    .unwrap_or_else(|e| {
+        error!("Unable to connect to database {:?}: {:?}", config, e);
+        exit(1);
+    });
 
     let object_manager = pool.get().await.unwrap_or_else(|e| {
         error!(
@@ -320,29 +326,30 @@ mod sqlite_migrations {
     embed_migrations!("../arroyo-api/sqlite_migrations");
 }
 
-async fn connect(
-    retry: bool,
-) -> anyhow::Result<(
-    Client,
-    Connection<impl AsyncRead + AsyncWrite + Unpin, impl AsyncRead + AsyncWrite + Unpin>,
-)> {
+async fn connect(retry: bool) -> anyhow::Result<Client> {
     let config = &config().database.postgres;
     let options = format!("-csearch_path={}", config.schema);
 
+    let mut pg_cfg = tokio_postgres::config::Config::new();
+    pg_cfg
+        .host(&config.host)
+        .port(config.port)
+        .user(&config.user)
+        .password(&*config.password)
+        .dbname(&config.database_name)
+        .application_name("arroyo")
+        .options(&options);
+
+    let tls_connector = arroyo_server_common::pg_tls::build_pg_tls_connector(&config.tls)?;
+
     loop {
-        match tokio_postgres::config::Config::new()
-            .host(&config.host)
-            .port(config.port)
-            .user(&config.user)
-            .password(&*config.password)
-            .dbname(&config.database_name)
-            .options(&options)
-            .connect(NoTls)
-            .await
-        {
-            Ok(r) => {
-                return Ok(r);
-            }
+        let attempt = match &tls_connector {
+            Some(connector) => pg_cfg.connect(connector.clone()).await.map(spawn_conn_task),
+            None => pg_cfg.connect(NoTls).await.map(spawn_conn_task),
+        };
+
+        match attempt {
+            Ok(client) => return Ok(client),
             Err(e) => {
                 if !e.to_string().contains("authentication") && retry {
                     debug!("Received error from database while waiting: {}", e);
@@ -356,10 +363,23 @@ async fn connect(
     }
 }
 
+fn spawn_conn_task<S, T>((client, conn): (Client, tokio_postgres::Connection<S, T>)) -> Client
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    T: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            eprintln!("connection error: {e}");
+        }
+    });
+    client
+}
+
 async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
     let _guard = arroyo_server_common::init_logging("migrate");
 
-    let (mut client, connection) = if let Some(wait) = wait {
+    let mut client = if let Some(wait) = wait {
         info!("Waiting for database to be ready to run migrations");
         timeout(Duration::from_secs(wait as u64), connect(true))
             .await
@@ -367,12 +387,6 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
     } else {
         connect(false).await?
     };
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("connection error: {e}");
-        }
-    });
 
     info!(
         "Running migrations on database {:?}",

@@ -654,6 +654,25 @@ pub struct PostgresConfig {
     pub password: Sensitive<String>,
     #[serde(default)]
     pub schema: SchemaName,
+    /// TLS mode for Postgres connections, defaults to `NoTls` (plaintext).
+    #[serde(default)]
+    pub tls: PostgresTlsMode,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(rename_all = "kebab-case", tag = "mode")]
+pub enum PostgresTlsMode {
+    /// Plaintext — no TLS.
+    #[default]
+    NoTls,
+    /// TLS encrypted, but skip server certificate verification.
+    SkipVerification,
+    /// TLS with server certificate verification against the system trust
+    /// store only (no additional CA).
+    SystemRoots,
+    /// TLS with server certificate verification against the system trust
+    /// store plus an additional CA cert at `path`.
+    CaCert { path: String },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
