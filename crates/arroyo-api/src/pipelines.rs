@@ -757,7 +757,7 @@ pub async fn patch_pipeline(
             .await?
             .into_iter()
             .next()
-            .ok_or_else(|| bad_request("There are no jobs for the pipeline"))?
+            .ok_or_else(|| not_found("Job for pipeline"))?
             .id;
 
     let interval = pipeline_patch
