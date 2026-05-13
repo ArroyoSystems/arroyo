@@ -5,8 +5,7 @@ edition = "2024"
 
 [dependencies]
 bincode = { workspace = true }
-chrono = "0.4"
-serde = { version = "1.0", features = ["derive", "rc"] }
+chrono = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
 arrow = { workspace = true }
 arrow-array = { workspace = true }
-tracing = "0.1.44"

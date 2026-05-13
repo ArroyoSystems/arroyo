@@ -21,8 +21,8 @@ arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 tonic = { workspace = true }
 prost = {workspace = true}
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1.12"
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
 tower = {workspace = true}
 
 arrow = { workspace = true }
@@ -30,35 +30,35 @@ arrow-schema = {workspace = true, features = ["serde"]}
 
 petgraph = {workspace = true, features = ["serde-1"]}
 
-http = "1"
+http = { workspace = true }
 tower-http = { workspace = true, features = ["trace", "fs", "cors", "validate-request", "auth", "compression-zstd"]}
 axum = {workspace = true, features = ["tokio", "macros"]}
 axum-extra = { version = "0.9", features = ["typed-header"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
-thiserror = "2"
+thiserror = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { version = "7", features = ["axum"] }
 
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # logging
-tracing = "0.1"
-anyhow = "1.0.70"
+tracing = { workspace = true }
+anyhow = { workspace = true }
 
 # postgres
 postgres-types = { version = "*", features = ["derive"] }
-tokio-postgres = { version = "*", features = ["with-serde_json-1", "with-time-0_3", "with-uuid-1"] }
+tokio-postgres = { workspace = true }
 
 # sqlite
 rusqlite = { workspace = true, features = ["bundled", "serde_json", "time"] }
 
-futures = "0.3"
+futures = { workspace = true }
 futures-util = "0.3.28"
 time = "0.3"
 cornucopia_async = { workspace = true, features = ["with-serde_json-1"]}
 apache-avro = { workspace = true }
-toml = "0.8"
+toml = { workspace = true }
 rust-embed = { version = "8", features = ["axum"] }
 mime_guess = "2.0.4"
 

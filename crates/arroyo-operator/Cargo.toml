@@ -16,18 +16,18 @@ arroyo-storage = { path = "../arroyo-storage" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
-anyhow = "1.0.71"
+anyhow = { workspace = true }
 arrow = { workspace = true, features = ["ffi"] }
-async-trait = "0.1.68"
+async-trait = { workspace = true }
 bincode = { workspace = true }
 datafusion = { workspace = true }
-futures = "0.3"
+futures = { workspace = true }
 prost = {workspace = true}
 rand = { workspace = true }
-tokio = { version = "1", features = ["full", "tracing"] }
-tokio-stream = { version = "0.1", features = ["full"] }
-tracing = "0.1"
+tokio = { workspace = true, features = ["tracing"] }
+tokio-stream = { workspace = true }
+tracing = { workspace = true }
 async-stream = "0.3.5"
-serde_json = "1.0.111"
-serde = "1.0.195"
-dlopen2 = "0.7.0"
+serde_json = { workspace = true }
+serde = { workspace = true }
+dlopen2 = { workspace = true }

@@ -16,7 +16,7 @@ description = "Plugin interface for Arroyo UDFs"
 arroyo-udf-common = { path = "../arroyo-udf-common" }
 arroyo-udf-macros = { path = "../arroyo-udf-macros" }
 
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
-futures = "0.3"
+tokio = { workspace = true }
+futures = { workspace = true }
 arrow = { workspace = true, features = ["ffi"]}
 async-ffi = { version = "0.5.0", features = ["macros"] }

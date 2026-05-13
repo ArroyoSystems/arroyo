@@ -11,6 +11,6 @@ arroyo-udf-common = { path = "../arroyo-udf-common" }
 arrow = { workspace = true, features = ["ffi"] }
 datafusion = { workspace = true }
 pyo3 = { version = "0.21", optional = true}
-anyhow = "1"
-tokio = { version = "1", features = ["full"] }
-itertools = "0.13.0"
+anyhow = { workspace = true }
+tokio = { workspace = true }
+itertools = { workspace = true }

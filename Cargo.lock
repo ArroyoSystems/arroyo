@@ -961,7 +961,6 @@ dependencies = [
  "arrow-array",
  "arrow-ord",
  "arrow-schema",
- "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-storage",
  "arroyo-types",
@@ -1026,7 +1025,6 @@ dependencies = [
  "bincode",
  "chrono",
  "serde",
- "tracing",
 ]
 
 [[package]]
@@ -1090,7 +1088,7 @@ dependencies = [
  "arrow",
  "arroyo-udf-common",
  "datafusion",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "pyo3",
  "tokio",
 ]
@@ -1120,7 +1118,7 @@ dependencies = [
  "datafusion",
  "datafusion-proto",
  "futures",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "mini-moka",
  "ordered-float 3.9.2",
  "petgraph 0.8.2",
@@ -5691,15 +5689,6 @@ name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
-
-[[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "itertools"

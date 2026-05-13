@@ -6,17 +6,17 @@ description = "safe interface for interacting with dynamically-linked UDFs"
 
 [dependencies]
 arroyo-udf-common = { path = "../arroyo-udf-common" }
-dlopen2 = { version = "0.7", features = ["derive"] }
-anyhow = "1.0.82"
+dlopen2 = { workspace = true }
+anyhow = { workspace = true }
 datafusion = { workspace = true }
 async-ffi = { version = "0.5", features = ["macros"] }
 arrow = { workspace = true, features = ["ffi"]}
-toml = "0.8"
-syn = { version = "2", features = ["full"] }
+toml = { workspace = true }
+syn = { workspace = true }
 quote = "1"
-regex = "1.10.3"
+regex = { workspace = true }
 
 [dev-dependencies]
 arroyo-udf-macros = { path = "../arroyo-udf-macros" }
 arroyo-udf-plugin = { path = "../arroyo-udf-plugin" }
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true }

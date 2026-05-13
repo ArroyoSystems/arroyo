@@ -9,10 +9,10 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-storage = { path = "../arroyo-storage" }
 
 tonic = {workspace = true}
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-anyhow = "1.0.75"
-serde_json = "1.0.106"
-base64 = "0.22"
-dlopen2 = "0.7"
-toml = "0.8.12"
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+dlopen2 = { workspace = true }
+toml = { workspace = true }
