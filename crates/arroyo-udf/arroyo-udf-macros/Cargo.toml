@@ -18,6 +18,6 @@ proc-macro = true
 [dependencies]
 arrow-schema = { workspace = true }
 arroyo-udf-common = { path = "../arroyo-udf-common" }
-syn = {version = "2", features = ["full"]}
+syn = { workspace = true }
 quote = "1.0"
 proc-macro2 = "1.0"

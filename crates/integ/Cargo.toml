@@ -5,10 +5,10 @@ edition = "2024"
 
 [dependencies]
 arroyo-openapi = { path = "../arroyo-openapi" }
-anyhow = "1.0.71"
-tokio = { version = "1.16.1", features = ["full"] }
+anyhow = { workspace = true }
+tokio = { workspace = true }
 rand = { workspace = true }
-tracing = "0.1.37"
-serde_json = { version = "1", features = ["preserve_order"] }
+tracing = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
 rdkafka = "0.37"
 reqwest = { workspace = true }

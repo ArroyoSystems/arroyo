@@ -6,14 +6,14 @@ edition = "2024"
 [dependencies]
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor" }
 reqwest = { workspace = true, features = ["json", "stream"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [build-dependencies]
 prettyplease = "0.2"
 progenitor = { version = '0.11' }
-serde_json = "1.0"
-syn = "2"
+serde_json = { workspace = true }
+syn = { workspace = true }
 
 utoipa = {workspace = true}
 arroyo-api = { path = "../arroyo-api" }

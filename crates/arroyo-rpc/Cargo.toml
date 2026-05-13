@@ -14,27 +14,27 @@ arrow-ord = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
 tonic = { workspace = true, features = ["tls-native-roots", "tls-webpki-roots"] }
 prost = {workspace = true}
-tokio = { version = "1", features = ["full"] }
-futures = { version = "0.3.30" }
-serde = {version = "1.0", features = ["derive"]}
-serde_json = "1.0"
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 nanoid = "0.4"
 utoipa = { workspace = true }
-anyhow = "1"
+anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["default", "json"] }
 log = "0.4.20"
-tracing = "0.1.40"
-async-trait = "0.1.74"
+tracing = { workspace = true }
+async-trait = { workspace = true }
 apache-avro = {workspace =  true}
-regex = "1.9.5"
-base64 = "0.22"
+regex = { workspace = true }
+base64 = { workspace = true }
 ahash = { workspace = true }
-strum_macros = "0.27"
-strum = "0.27"
+strum_macros = { workspace = true }
+strum = { workspace = true }
 figment = { version = "0.10", features = ["toml", "env", "yaml", "json"] }
 k8s-openapi = { workspace = true, features = ["v1_30"] }
-url = { version = "2", features = ["serde"] }
-dirs = "6"
+url = { workspace = true }
+dirs = { workspace = true }
 arc-swap = "1.7.1"
 datafusion = { workspace = true }
 rand = { workspace = true }
@@ -44,10 +44,10 @@ rustls = {workspace = true}
 local-ip-address = "0.6"
 schemars = "1"
 smallvec = "1"
-thiserror = "2"
+thiserror = { workspace = true }
 object_store = { workspace = true, features = ["aws", "gcp", "azure"] }
 bincode = { workspace = true }
-bytes = "1"
+bytes = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }

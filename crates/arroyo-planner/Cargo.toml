@@ -20,25 +20,25 @@ datafusion-functions-json = { workspace = true }
 
 prost = {workspace = true}
 arrow-schema = {workspace = true, features = ["serde"] }
-serde = {version = "1", features = ["derive"]}
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 petgraph = { workspace = true }
-tokio = "1.27"
-tokio-stream = { version = "0.1", features = ["full"] }
-futures = "0.3"
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
 arrow = { workspace = true, features = ["ffi"] }
 arrow-array = { workspace = true}
-anyhow = {version = "1.0.70", features = ["backtrace"]}
-async-trait = "0.1"
+anyhow = { workspace = true, features = ["backtrace"] }
+async-trait = { workspace = true }
 
-syn = {version = "2", features = ["full", "parsing", "extra-traits"]}
-tracing = "0.1.37"
+syn = { workspace = true, features = ["parsing", "extra-traits"] }
+tracing = { workspace = true }
 
 serde_json_path = "0.7"
 unicase = "2.7.0"
 xxhash-rust = { version = "0.8.12", features = ["xxh3", "std"] }
-itertools = "0.14.0"
+itertools = { workspace = true }
 
 sqlparser = { workspace = true}
 

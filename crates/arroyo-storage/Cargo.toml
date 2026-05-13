@@ -10,17 +10,17 @@ default = []
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
-bytes = "1.11.1"
-tracing = "0.1"
+bytes = { workspace = true }
+tracing = { workspace = true }
 
 aws-credential-types = "1.2.0"
 aws-config = { workspace = true }
 rand = { workspace = true }
 object_store = { workspace = true, features = ["aws", "gcp", "azure"] }
-regex = "1.9.5"
-serde_json = "1"
-thiserror = "2"
-tokio = { version = "1", features = ["fs"] }
+regex = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
 tokio-util = { version = "0.7.9", features = ["io"] }
-async-trait = "0.1.73"
-futures = "0.3.28"
+async-trait = { workspace = true }
+futures = { workspace = true }
