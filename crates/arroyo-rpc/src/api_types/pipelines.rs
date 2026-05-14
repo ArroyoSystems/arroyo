@@ -30,6 +30,8 @@ pub struct PipelinePost {
     pub checkpoint_interval_micros: Option<u64>,
     pub state_url: Option<String>,
     pub tags: Option<HashMap<String, String>>,
+    /// Per-job environment variables forwarded to workers.
+    pub env_vars: Option<HashMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -71,6 +73,7 @@ pub struct Pipeline {
     pub action_in_progress: bool,
     pub graph: PipelineGraph,
     pub preview: bool,
+    pub env_vars: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

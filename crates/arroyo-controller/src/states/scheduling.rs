@@ -512,18 +512,35 @@ impl Scheduling {
         slots_needed: usize,
     ) -> Result<Box<Self>, StateError> {
         let start = Instant::now();
-        let mut env_vars = std::collections::HashMap::new();
-        env_vars.insert(
-            "ARROYO__CHECKPOINT_URL".to_string(),
-            ctx.pipeline_info
-                .state_url
-                .clone()
-                .unwrap_or_else(|| config().checkpoint_url.clone()),
-        );
-        env_vars.insert(
-            CLUSTER_ID_ENV.to_string(),
-            arroyo_server_common::get_cluster_id(),
-        );
+        let mut env_vars = ctx.config.env_vars.clone();
+
+        let checkpoint_url = ctx
+            .pipeline_info
+            .state_url
+            .clone()
+            .unwrap_or_else(|| config().checkpoint_url.clone());
+        env_vars
+            .insert("ARROYO__CHECKPOINT_URL".to_string(), checkpoint_url)
+            .inspect(|_| {
+                warn!(
+                    job_id = *ctx.config.id,
+                    key = "ARROYO__CHECKPOINT_URL",
+                    "job env_vars contained a reserved infrastructure key; \
+                     user-supplied value has been overridden by the controller"
+                );
+            });
+
+        let cluster_id = arroyo_server_common::get_cluster_id();
+        env_vars
+            .insert(CLUSTER_ID_ENV.to_string(), cluster_id)
+            .inspect(|_| {
+                warn!(
+                    job_id = *ctx.config.id,
+                    key = CLUSTER_ID_ENV,
+                    "job env_vars contained a reserved infrastructure key; \
+                     user-supplied value has been overridden by the controller"
+                );
+            });
 
         loop {
             match ctx

@@ -128,7 +128,7 @@ INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags);
 
 --! get_pipelines : DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, env_vars
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -143,7 +143,7 @@ ORDER BY pipelines.created_at DESC
 LIMIT cast(:limit as integer);
 
 --! get_pipeline: DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, env_vars
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -188,8 +188,8 @@ WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
 INSERT INTO job_configs
-(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros)
-VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros);
+(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros, env_vars)
+VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros, :env_vars);
 
 --! create_job_status
 INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
