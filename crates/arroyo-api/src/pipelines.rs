@@ -305,6 +305,7 @@ pub(crate) async fn create_pipeline_int(
     pub_id: Option<String>,
     state_url: Option<String>,
     tags: HashMap<String, String>,
+    env_vars: HashMap<String, String>,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -441,6 +442,7 @@ pub(crate) async fn create_pipeline_int(
         is_preview,
         &auth,
         db,
+        env_vars,
     )
     .await?;
 
@@ -507,6 +509,7 @@ impl TryInto<Pipeline> for DbPipeline {
             action_text,
             action_in_progress,
             preview: self.ttl_micros.is_some(),
+            env_vars: self.env_vars,
         })
     }
 }
@@ -667,6 +670,7 @@ async fn create_pipeline_inner(
         pub_id,
         pipeline_post.state_url,
         pipeline_post.tags.unwrap_or_default(),
+        pipeline_post.env_vars.unwrap_or_default(),
     )
     .await?;
 
@@ -719,6 +723,7 @@ pub async fn create_preview_pipeline(
         compiled,
         None,
         None,
+        HashMap::default(),
         HashMap::default(),
     )
     .await?;

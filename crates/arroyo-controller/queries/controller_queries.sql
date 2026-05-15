@@ -22,7 +22,8 @@ SELECT
     s.restart_nonce as status_restart_nonce,
     restart_mode,
     ignore_state_before_epoch,
-    state_context
+    state_context,
+    env_vars
 FROM job_configs c
 INNER JOIN job_statuses s ON c.id = s.id;
 

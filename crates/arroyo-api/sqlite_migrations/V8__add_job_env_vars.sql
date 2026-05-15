@@ -1,0 +1,1 @@
+ALTER TABLE job_configs ADD COLUMN env_vars TEXT NOT NULL DEFAULT '{}';

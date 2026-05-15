@@ -73,6 +73,8 @@ pub struct JobConfig {
     restart_nonce: i32,
     restart_mode: RestartMode,
     ignore_state_before_epoch: Option<i32>,
+    /// Per-job environment variables forwarded to workers at scheduling time.
+    env_vars: serde_json::Value,
 }
 
 /// Per-pipeline data that doesn't change for the lifetime of a job.
@@ -625,6 +627,7 @@ impl ControllerServer {
                         restart_nonce: p.config_restart_nonce,
                         restart_mode: p.restart_mode,
                         ignore_state_before_epoch: p.ignore_state_before_epoch,
+                        env_vars: p.env_vars,
                     };
 
                     let mut jobs = jobs.lock().await;

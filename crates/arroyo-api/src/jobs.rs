@@ -44,6 +44,7 @@ pub(crate) async fn create_job(
     preview: bool,
     auth: &AuthData,
     db: &DatabaseSource,
+    env_vars: HashMap<String, String>,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -82,6 +83,9 @@ pub(crate) async fn create_job(
 
     let job_id = generate_id(IdTypes::JobConfig);
 
+    let env_vars_json =
+        serde_json::to_value(&env_vars).expect("HashMap<String, String> is always serializable");
+
     // TODO: handle chance of collision in ids
     api_queries::execute_create_job(
         &db.client().await?,
@@ -96,6 +100,7 @@ pub(crate) async fn create_job(
         } else {
             None
         }),
+        &env_vars_json,
     )
     .await?;
 
