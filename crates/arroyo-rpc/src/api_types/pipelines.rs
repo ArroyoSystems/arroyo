@@ -73,7 +73,7 @@ pub struct Pipeline {
     pub action_in_progress: bool,
     pub graph: PipelineGraph,
     pub preview: bool,
-    pub env_vars: HashMap<String, String>,
+    pub env_vars: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

@@ -512,7 +512,13 @@ impl Scheduling {
         slots_needed: usize,
     ) -> Result<Box<Self>, StateError> {
         let start = Instant::now();
-        let mut env_vars = ctx.config.env_vars.clone();
+        let mut env_vars: HashMap<String, String> =
+            serde_json::from_value(ctx.config.env_vars.clone()).map_err(|e| {
+                fatal(
+                    format!("failed to deserialize env_vars from job_configs: {e}"),
+                    anyhow::anyhow!("malformed env_vars in job_configs row"),
+                )
+            })?;
 
         let checkpoint_url = ctx
             .pipeline_info

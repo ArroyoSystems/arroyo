@@ -1,5 +1,4 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
-use anyhow::anyhow;
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
@@ -84,8 +83,8 @@ pub(crate) async fn create_job(
 
     let job_id = generate_id(IdTypes::JobConfig);
 
-    let env_vars_json = serde_json::to_value(&env_vars)
-        .map_err(|e| log_and_map(anyhow!("env_vars serialization failed: {e}")))?;
+    let env_vars_json =
+        serde_json::to_value(&env_vars).expect("HashMap<String, String> is always serializable");
 
     // TODO: handle chance of collision in ids
     api_queries::execute_create_job(

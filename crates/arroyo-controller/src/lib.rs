@@ -42,7 +42,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 //pub mod compiler;
 pub mod job_controller;
@@ -74,7 +74,7 @@ pub struct JobConfig {
     restart_mode: RestartMode,
     ignore_state_before_epoch: Option<i32>,
     /// Per-job environment variables forwarded to workers at scheduling time.
-    env_vars: HashMap<String, String>,
+    env_vars: serde_json::Value,
 }
 
 /// Per-pipeline data that doesn't change for the lifetime of a job.
@@ -605,17 +605,6 @@ impl ControllerServer {
                 let res = queries::controller_queries::fetch_all_jobs(&client).await?;
                 for p in res {
                     let id = Arc::new(p.id);
-                    let env_vars: HashMap<String, String> =
-                        serde_json::from_value(p.env_vars.clone()).unwrap_or_else(|e| {
-                            error!(
-                                job_id = *id,
-                                original =? p.env_vars,
-                                error =? e,
-                                "failed to deserialize env_vars; falling back to empty map"
-                            );
-                            HashMap::new()
-                        });
-
                     let config = JobConfig {
                         id: id.clone(),
                         organization_id: p.org_id,
@@ -638,7 +627,7 @@ impl ControllerServer {
                         restart_nonce: p.config_restart_nonce,
                         restart_mode: p.restart_mode,
                         ignore_state_before_epoch: p.ignore_state_before_epoch,
-                        env_vars,
+                        env_vars: p.env_vars,
                     };
 
                     let mut jobs = jobs.lock().await;

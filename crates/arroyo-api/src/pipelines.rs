@@ -496,9 +496,6 @@ impl TryInto<Pipeline> for DbPipeline {
             StopMode::force => StopType::Force,
         };
 
-        let env_vars: HashMap<String, String> =
-            serde_json::from_value(self.env_vars).map_err(log_and_map)?;
-
         Ok(Pipeline {
             id: self.pub_id,
             name: self.name,
@@ -512,7 +509,7 @@ impl TryInto<Pipeline> for DbPipeline {
             action_text,
             action_in_progress,
             preview: self.ttl_micros.is_some(),
-            env_vars,
+            env_vars: self.env_vars,
         })
     }
 }
