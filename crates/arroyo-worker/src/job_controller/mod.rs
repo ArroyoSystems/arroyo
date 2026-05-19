@@ -70,7 +70,7 @@ fn checkpoint_span_to_rpc(span: JobCheckpointSpan) -> rpc::JobCheckpointEventSpa
 
 impl CheckpointHistory {
     fn prune(&mut self) {
-        while self.checkpoints.len() > CHECKPOINTS_TO_KEEP as usize {
+        while self.checkpoints.len() > config().worker.checkpoint_details_to_keep as usize {
             self.checkpoints.pop_front();
         }
     }
