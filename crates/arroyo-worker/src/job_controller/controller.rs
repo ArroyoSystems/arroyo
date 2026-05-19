@@ -3,8 +3,8 @@ use crate::job_controller::model::{
     WorkerStatus,
 };
 use crate::job_controller::{
-    JobControllerStatus, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext,
-    connect_to_worker,
+    CheckpointHistory, JobControllerStatus, RetireWorkerLeader, RunningMessage, TaskFailedEvent,
+    WorkerContext, connect_to_worker,
 };
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
@@ -82,6 +82,7 @@ impl WorkerJobController {
         min_epoch: u64,
         rx: Receiver<RunningMessage>,
         job_status: Arc<Mutex<JobStatus>>,
+        checkpoint_history: Arc<Mutex<CheckpointHistory>>,
         checkpoint_interval: Duration,
         parent_ref: Option<(CheckpointRef, CheckpointManifest)>,
     ) -> anyhow::Result<Self> {
@@ -133,7 +134,10 @@ impl WorkerJobController {
             })
             .collect();
 
-        let status = JobControllerStatus { job_status };
+        let status = JobControllerStatus {
+            job_status,
+            checkpoint_history,
+        };
         status.transition(rpc::JobState::JobRunning)?;
 
         // this is also happening on the controller, so the generation manifest should already have

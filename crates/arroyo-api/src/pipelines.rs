@@ -1070,15 +1070,15 @@ pub async fn query_job_by_pub_id<'a>(
     db: &Database<'a>,
     auth_data: &AuthData,
 ) -> Result<Job, ErrorResp> {
-    // make sure pipeline exists
-    query_pipeline_by_pub_id(pipeline_pub_id, db, auth_data).await?;
-
-    Ok(
-        api_queries::fetch_get_pipeline_job(db, &auth_data.organization_id, &job_pub_id)
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| not_found("Job"))?
-            .into(),
+    Ok(api_queries::fetch_get_pipeline_job(
+        db,
+        &auth_data.organization_id,
+        pipeline_pub_id,
+        &job_pub_id,
     )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| not_found("Job"))?
+    .into())
 }

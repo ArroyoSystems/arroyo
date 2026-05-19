@@ -2,21 +2,24 @@
 #![allow(clippy::type_complexity)]
 
 use crate::engine::{Engine, Program, SubtaskNode};
-use crate::job_controller::{RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext};
+use crate::job_controller::{
+    CheckpointHistory, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext,
+};
 use crate::network_manager::NetworkManager;
 use anyhow::{Context, Result, anyhow};
 
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
-    CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq,
-    GetWorkerPhaseResp, HeartbeatReq, HeartbeatResp, JobControllerInitReq, JobControllerInitResp,
-    JobFinishedReq, JobFinishedResp, JobMetricsReq, JobMetricsResp, JobStatus, JobStatusReq,
-    JobStatusResp, JobStopMode, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily,
-    MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq,
-    StartExecutionResp, StopExecutionReq, StopExecutionResp, StopJobReq, StopJobResp,
-    TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
-    TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq, TaskFailedResp,
-    TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
+    CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp,
+    GetCheckpointDetailsReq, GetCheckpointDetailsResp, GetJobCheckpointsReq, GetJobCheckpointsResp,
+    GetWorkerPhaseReq, GetWorkerPhaseResp, HeartbeatReq, HeartbeatResp, JobControllerInitReq,
+    JobControllerInitResp, JobFinishedReq, JobFinishedResp, JobMetricsReq, JobMetricsResp,
+    JobStatus, JobStatusReq, JobStatusResp, JobStopMode, LoadCompactedDataReq,
+    LoadCompactedDataRes, MetricFamily, MetricsReq, MetricsResp, NonfatalErrorReq,
+    RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
+    StopJobReq, StopJobResp, TaskAssignment, TaskCheckpointCompletedReq,
+    TaskCheckpointCompletedResp, TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq,
+    TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_rpc::identity::VerifyWorkerId;
@@ -204,6 +207,7 @@ pub struct WorkerState {
     // used to send messages to the local job controller -- only on the leader node
     job_controller_tx: Arc<OnceLock<Sender<RunningMessage>>>,
     job_status: Arc<Mutex<JobStatus>>,
+    checkpoint_history: Arc<Mutex<CheckpointHistory>>,
 }
 
 impl WorkerState {
@@ -273,6 +277,7 @@ impl WorkerState {
             min_epoch,
             rx,
             self.job_status.clone(),
+            self.checkpoint_history.clone(),
             checkpoint_interval,
             parent,
         )
@@ -659,9 +664,10 @@ impl WorkerServer {
                     job_state: rpc::JobState::JobInitializing.into(),
                     updated_at: to_micros(SystemTime::now()),
                     transitioned_at: to_micros(SystemTime::now()),
-                    last_checkpoint: None,
+                    last_checkpointed_at: None,
                     job_failure: None,
                 })),
+                checkpoint_history: Arc::new(Mutex::new(CheckpointHistory::default())),
             },
             shutdown_guard,
         }
@@ -1102,6 +1108,20 @@ pub struct LeaderServer {
 }
 
 impl LeaderServer {
+    #[allow(clippy::result_large_err)]
+    fn validate_job_generation(&self, job_id: &str, generation: u64) -> Result<(), Status> {
+        if *self.state.worker_context.job_id != job_id
+            || self.state.worker_context.generation != generation
+        {
+            return Err(Status::failed_precondition(format!(
+                "requested job data for invalid job or generation ({job_id}, {generation}) - expected ({}, {})",
+                self.state.worker_context.job_id, self.state.worker_context.generation,
+            )));
+        }
+
+        Ok(())
+    }
+
     async fn send_job_message(&self, msg: RunningMessage) -> Result<(), Status> {
         self.state
             .job_controller_tx
@@ -1289,26 +1309,51 @@ impl JobStatusGrpc for LeaderServer {
         &self,
         request: Request<JobStatusReq>,
     ) -> std::result::Result<Response<JobStatusResp>, Status> {
-        if self.state.job_controller_tx.get().is_none() {
-            return Err(Status::failed_precondition(
-                "requested job status from non-leader node",
-            ));
-        }
-
-        let job_id = (*self.state.worker_context.job_id.0).clone();
         let req = request.into_inner();
-        if job_id != req.job_id {
-            return Err(Status::failed_precondition(format!(
-                "requested job status for invalid job {} - expected {}",
-                req.job_id, job_id
-            )));
-        }
+        self.validate_job_generation(&req.job_id, req.generation)?;
 
         Ok(Response::new(JobStatusResp {
-            job_id,
+            job_id: req.job_id,
             generation: self.state.worker_context.generation,
             job_status: Some((*self.state.job_status.lock().unwrap()).clone()),
         }))
+    }
+
+    async fn get_job_checkpoints(
+        &self,
+        request: Request<GetJobCheckpointsReq>,
+    ) -> std::result::Result<Response<GetJobCheckpointsResp>, Status> {
+        let req = request.into_inner();
+        self.validate_job_generation(&req.job_id, req.generation)?;
+
+        let checkpoints = self
+            .state
+            .checkpoint_history
+            .lock()
+            .map_err(|e| Status::internal(format!("checkpoint history mutex poisoned: {e}")))?
+            .checkpoints();
+
+        Ok(Response::new(GetJobCheckpointsResp { checkpoints }))
+    }
+
+    async fn get_checkpoint_details(
+        &self,
+        request: Request<GetCheckpointDetailsReq>,
+    ) -> std::result::Result<Response<GetCheckpointDetailsResp>, Status> {
+        let req = request.into_inner();
+        self.validate_job_generation(&req.job_id, req.generation)?;
+
+        let operators = self
+            .state
+            .checkpoint_history
+            .lock()
+            .map_err(|e| Status::internal(format!("checkpoint history mutex poisoned: {e}")))?
+            .operators_for_epoch(req.epoch)
+            .ok_or_else(|| {
+                Status::not_found(format!("checkpoint with epoch {} was not found", req.epoch))
+            })?;
+
+        Ok(Response::new(GetCheckpointDetailsResp { operators }))
     }
 
     async fn stop_job(

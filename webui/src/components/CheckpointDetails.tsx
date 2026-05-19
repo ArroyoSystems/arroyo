@@ -27,23 +27,27 @@ interface CheckpointTimelineProps {
 }
 
 export function formatDuration(micros: number): string {
-  let millis = micros / 1000;
+  const sign = micros < 0 ? '-' : '';
+  let millis = Math.abs(micros) / 1000;
   let secs = Math.floor(millis / 1000);
   if (millis < 1000) {
-    return `${millis.toFixed(1)} ms`;
+    return `${sign}${millis.toFixed(1)} ms`;
   } else if (millis < 10000) {
-    return `${Math.floor(millis)} ms`;
+    return `${sign}${Math.floor(millis)} ms`;
   } else if (secs < 60) {
-    return `${secs} s`;
+    return `${sign}${secs} s`;
   } else if (millis / 1000 < 60 * 60) {
     let minutes = Math.floor(secs / 60);
     let seconds = secs - minutes * 60;
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    return `${sign}${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   } else {
     let hours = Math.floor(secs / (60 * 60));
     let minutes = Math.floor((secs - hours * 60 * 60) / 60);
     let seconds = secs - hours * 60 * 60 - minutes * 60;
-    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    return `${sign}${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(
+      2,
+      '0'
+    )}`;
   }
 }
 
@@ -182,11 +186,13 @@ const CheckpointTimeline: React.FC<CheckpointTimelineProps> = ({ operators, chec
     const height = currentY;
 
     const tooltip = d3.select(tooltipRef.current!);
-    const checkpointDuration = checkpointEndTime! - checkpointStartTime;
-    const xScale = d3
-      .scaleLinear()
-      .domain([0, checkpointDuration > 0 ? checkpointDuration : 1])
-      .range([0, width]);
+    const checkpointDuration =
+      checkpointEndTime != null ? checkpointEndTime - checkpointStartTime : 0;
+    const firstSpanStart = d3.min(initialFlatData, d => d.start_time) ?? 0;
+    const lastSpanFinish = d3.max(initialFlatData, d => d.finish_time) ?? checkpointDuration;
+    const timelineStart = Math.min(0, firstSpanStart);
+    const timelineEnd = Math.max(checkpointDuration, lastSpanFinish, timelineStart + 1);
+    const xScale = d3.scaleLinear().domain([timelineStart, timelineEnd]).range([0, width]);
 
     // Dynamic color scale
     const colorScale = d3.scaleOrdinal<string>(d3.schemeTableau10).domain(Array.from(allSpanTypes));
