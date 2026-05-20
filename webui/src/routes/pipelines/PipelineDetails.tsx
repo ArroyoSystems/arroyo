@@ -82,7 +82,7 @@ export function PipelineDetails() {
   const { pipeline, pipelineError, updatePipeline, restartPipeline } = usePipeline(id, true);
   const { jobs, jobsError } = usePipelineJobs(id, true);
   const job = jobs?.length ? jobs[0] : undefined;
-  const { checkpoints } = useJobCheckpoints(id, job?.id);
+  const { checkpoints, checkpointsError } = useJobCheckpoints(id, job?.id);
   const { operatorErrorsPages, operatorErrorsTotalPages, setOperatorErrorsMaxPages } =
     useOperatorErrors(id, job?.id);
   const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
@@ -185,7 +185,14 @@ export function PipelineDetails() {
 
   const checkpointsTab = (
     <TabPanel>
-      {<Checkpoints pipeline={pipeline} job={job} checkpoints={checkpoints ?? []} />}
+      {
+        <Checkpoints
+          pipeline={pipeline}
+          job={job}
+          checkpoints={checkpoints ?? []}
+          checkpointsError={checkpointsError}
+        />
+      }
     </TabPanel>
   );
 

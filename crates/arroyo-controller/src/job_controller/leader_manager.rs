@@ -56,6 +56,7 @@ impl LeaderManager {
         let response = retry!(
             self.leader_client.get_job_status(JobStatusReq {
                   job_id: self.job_id.to_string(),
+                   generation: self.generation,
                 }).await,
                 5,
                 Duration::from_millis(100),

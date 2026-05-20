@@ -1,3 +1,4 @@
+use crate::grpc;
 use arroyo_types::to_micros;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
@@ -11,6 +12,27 @@ pub struct Checkpoint {
     pub start_time: u64,
     pub finish_time: Option<u64>,
     pub events: Vec<CheckpointEventSpan>,
+}
+
+impl From<grpc::rpc::JobCheckpointMetadata> for Checkpoint {
+    fn from(value: grpc::rpc::JobCheckpointMetadata) -> Self {
+        Self {
+            epoch: value.epoch,
+            backend: value.state_backend,
+            start_time: value.start_time,
+            finish_time: value.finish_time,
+            events: value
+                .event_spans
+                .into_iter()
+                .map(|span| CheckpointEventSpan {
+                    start_time: span.start_time,
+                    finish_time: span.finish_time,
+                    event: span.event,
+                    description: span.description,
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

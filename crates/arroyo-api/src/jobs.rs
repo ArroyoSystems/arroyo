@@ -1,4 +1,5 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
+use anyhow::Context;
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
@@ -9,7 +10,7 @@ use arroyo_rpc::api_types::{
 };
 use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_rpc::{get_event_spans, grpc};
+use arroyo_rpc::{LeaderContext, StateContext, get_event_spans, grpc, job_status_client};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
@@ -35,7 +36,82 @@ use crate::{AuthData, queries::api_queries, to_micros, types::public};
 use arroyo_rpc::config::config;
 use arroyo_rpc::controller_client;
 use arroyo_rpc::errors::ErrorDomain;
+use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
+use arroyo_rpc::grpc::rpc::{GetCheckpointDetailsReq, GetJobCheckpointsReq};
+use arroyo_rpc::identity::InjectWorkerId;
 use cornucopia_async::DatabaseSource;
+use http::StatusCode;
+use tonic::codegen::InterceptedService;
+use tonic::transport::Channel;
+
+type LeaderCheckpointClient = JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>;
+
+async fn fetch_from_leader<
+    R,
+    F: Future<Output = Result<R, tonic::Status>>,
+    T: FnOnce(LeaderCheckpointClient, u64) -> F,
+>(
+    leader_context: LeaderContext,
+    req: T,
+) -> Result<R, ErrorResp> {
+    let client = job_status_client(
+        "api",
+        &config().api.tls,
+        leader_context.worker_id,
+        leader_context.rpc_address,
+    )
+    .await
+    .map_err(|_| ErrorResp {
+        status_code: StatusCode::BAD_GATEWAY,
+        message: "the leader is not currently available; try again later".to_string(),
+    })?;
+
+    req(client, leader_context.generation)
+        .await
+        .map_err(|e| match e.code() {
+            Code::FailedPrecondition | Code::NotFound => bad_request(e.message().to_string()),
+            Code::Unavailable => ErrorResp {
+                status_code: StatusCode::BAD_GATEWAY,
+                message: "the leader is not currently available; try again later".to_string(),
+            },
+            _ => log_and_map(e),
+        })
+}
+
+fn operator_checkpoint_groups(
+    operator_details: HashMap<String, OperatorCheckpointDetail>,
+) -> Vec<OperatorCheckpointGroup> {
+    let mut operators = vec![];
+
+    operator_details
+        .iter()
+        .for_each(|(operator_id, operator_details)| {
+            let mut operator_bytes = 0;
+            let mut subtasks = vec![];
+
+            operator_details
+                .tasks
+                .iter()
+                .for_each(|(subtask_index, subtask_details)| {
+                    operator_bytes += subtask_details.bytes.unwrap_or(0);
+                    subtasks.push(SubtaskCheckpointGroup {
+                        index: *subtask_index,
+                        bytes: subtask_details.bytes.unwrap_or(0),
+                        event_spans: get_event_spans(subtask_details).into(),
+                    });
+                });
+
+            operators.push(OperatorCheckpointGroup {
+                operator_id: operator_id.to_string(),
+                bytes: operator_bytes,
+                started_metadata_write: operator_details.started_metadata_write,
+                finish_time: operator_details.finish_time,
+                subtasks,
+            });
+        });
+
+    operators
+}
 
 pub(crate) async fn create_job(
     pipeline_name: &str,
@@ -271,15 +347,49 @@ pub async fn get_job_checkpoints(
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
+    let job = api_queries::fetch_get_pipeline_job(
+        &db,
+        &auth_data.organization_id,
+        &pipeline_pub_id,
+        &job_pub_id,
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| not_found("Job"))?;
 
-    let checkpoints =
+    let state_context: Option<StateContext> = job
+        .state_context
+        .map(serde_json::from_value)
+        .transpose()
+        .with_context(|| format!("converting state context for job {}", job_pub_id))
+        .map_err(log_and_map)?;
+
+    let checkpoints = if let Some(state_context) = state_context
+        && let Some(leader) = state_context.leader
+    {
+        fetch_from_leader(leader, move |mut client, generation| async move {
+            client
+                .get_job_checkpoints(GetJobCheckpointsReq {
+                    job_id: job.id,
+                    generation,
+                })
+                .await
+        })
+        .await?
+        .into_inner()
+        .checkpoints
+        .into_iter()
+        .map(Checkpoint::from)
+        .collect()
+    } else {
         api_queries::fetch_get_job_checkpoints(&db, &job_pub_id, &auth_data.organization_id)
             .await
             .map_err(log_and_map)?
             .into_iter()
             .filter_map(|m| m.try_into().ok())
-            .collect();
+            .collect()
+    };
 
     Ok(Json(CheckpointCollection { data: checkpoints }))
 }
@@ -306,55 +416,63 @@ pub async fn get_checkpoint_details(
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
-
-    let checkpoint_details = api_queries::fetch_get_checkpoint_details(
+    let job = api_queries::fetch_get_pipeline_job(
         &db,
-        &job_pub_id,
         &auth_data.organization_id,
-        &(epoch as i32),
+        &pipeline_pub_id,
+        &job_pub_id,
     )
-    .await
-    .map_err(log_and_map)?
+    .await?
     .into_iter()
     .next()
-    .ok_or_else(|| {
-        not_found(&format!(
-            "Checkpoint with epoch {epoch} for job '{job_pub_id}'"
-        ))
-    })?;
+    .ok_or_else(|| not_found("Job"))?;
 
-    let mut operators: Vec<OperatorCheckpointGroup> = vec![];
+    let state_context: Option<StateContext> = job
+        .state_context
+        .map(serde_json::from_value)
+        .transpose()
+        .with_context(|| format!("converting state context for job {}", job_pub_id))
+        .map_err(log_and_map)?;
 
-    checkpoint_details
+    let operators = if let Some(state_context) = state_context
+        && let Some(leader) = state_context.leader
+    {
+        fetch_from_leader(leader, move |mut client, generation| async move {
+            client
+                .get_checkpoint_details(GetCheckpointDetailsReq {
+                    job_id: job.id,
+                    generation,
+                    epoch: epoch as u64,
+                })
+                .await
+        })
+        .await?
+        .into_inner()
         .operators
-        .map(|o| serde_json::from_value(o).unwrap())
-        .unwrap_or_else(HashMap::<String, OperatorCheckpointDetail>::new)
-        .iter()
-        .for_each(|(operator_id, operator_details)| {
-            let mut operator_bytes = 0;
-            let mut subtasks = vec![];
+    } else {
+        let checkpoint_details = api_queries::fetch_get_checkpoint_details(
+            &db,
+            &job_pub_id,
+            &auth_data.organization_id,
+            &(epoch as i32),
+        )
+        .await
+        .map_err(log_and_map)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            not_found(&format!(
+                "Checkpoint with epoch {epoch} for job '{job_pub_id}'"
+            ))
+        })?;
 
-            operator_details
-                .tasks
-                .iter()
-                .for_each(|(subtask_index, subtask_details)| {
-                    operator_bytes += subtask_details.bytes.unwrap_or(0);
-                    subtasks.push(SubtaskCheckpointGroup {
-                        index: *subtask_index,
-                        bytes: subtask_details.bytes.unwrap_or(0),
-                        event_spans: get_event_spans(subtask_details).into(),
-                    });
-                });
+        checkpoint_details
+            .operators
+            .map(|o| serde_json::from_value(o).unwrap())
+            .unwrap_or_else(HashMap::<String, OperatorCheckpointDetail>::new)
+    };
 
-            operators.push(OperatorCheckpointGroup {
-                operator_id: operator_id.to_string(),
-                bytes: operator_bytes,
-                started_metadata_write: operator_details.started_metadata_write,
-                finish_time: operator_details.finish_time,
-                subtasks,
-            });
-        });
+    let operators = operator_checkpoint_groups(operators);
 
     Ok(Json(OperatorCheckpointGroupCollection { data: operators }))
 }

@@ -448,6 +448,9 @@ pub struct WorkerConfig {
     /// TLS configuration for worker TCP shuffling
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+
+    /// Maximum number of checkpoints to keep in history for serving the checkpoint details APIs
+    pub checkpoint_details_to_keep: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

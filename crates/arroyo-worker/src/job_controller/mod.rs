@@ -1,19 +1,22 @@
-use anyhow::{anyhow, bail};
+use anyhow::bail;
+use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
 use arroyo_rpc::checkpoints::{
     CheckpointMetadataStore, CreateCheckpointReq, FinishCheckpointReq, UpdateCheckpointReq,
 };
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::{ErrorDomain, RetryHint};
+use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::{
     JobFailure, JobStatus, SubtaskCheckpointMetadata, TaskCheckpointEventType,
 };
 use arroyo_rpc::grpc_channel_builder;
 use arroyo_rpc::identity::{WorkerClient, worker_client};
+use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::WorkerId;
 use arroyo_types::to_micros;
 use async_trait::async_trait;
-use serde_json::Value;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -22,8 +25,156 @@ use tracing::{error, info};
 // Re-export shared types from arroyo-rpc
 pub use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent, WorkerContext};
 
-pub const CHECKPOINTS_TO_KEEP: u32 = 4;
+pub const CHECKPOINTS_TO_KEEP: u32 = 10;
 pub const COMPACT_EVERY: u32 = 2;
+
+#[derive(Debug, Clone)]
+pub struct StoredCheckpointMetadata {
+    checkpoint_id: String,
+    epoch: u64,
+    state_backend: String,
+    start_time: SystemTime,
+    finish_time: Option<SystemTime>,
+    event_spans: Vec<JobCheckpointSpan>,
+    operator_details: HashMap<String, OperatorCheckpointDetail>,
+    status: arroyo_rpc::checkpoints::CheckpointStatus,
+}
+
+#[derive(Debug, Default)]
+pub struct CheckpointHistory {
+    checkpoints: VecDeque<StoredCheckpointMetadata>,
+}
+
+fn checkpoint_event_description(event: JobCheckpointEventType) -> &'static str {
+    match event {
+        JobCheckpointEventType::Checkpointing => "The entire checkpointing process",
+        JobCheckpointEventType::CheckpointingOperators => {
+            "The time spent checkpointing operator states"
+        }
+        JobCheckpointEventType::WritingMetadata => "Writing the final checkpoint metadata",
+        JobCheckpointEventType::Compacting => "Compacting old checkpoints",
+        JobCheckpointEventType::Committing => {
+            "Running two-phase commit for transactional connectors"
+        }
+    }
+}
+
+fn checkpoint_span_to_rpc(span: JobCheckpointSpan) -> rpc::JobCheckpointEventSpan {
+    rpc::JobCheckpointEventSpan {
+        start_time: span.start_time,
+        finish_time: span.finish_time.unwrap_or_default(),
+        event: format!("{:?}", span.event),
+        description: checkpoint_event_description(span.event).to_string(),
+    }
+}
+
+impl CheckpointHistory {
+    fn prune(&mut self) {
+        while self.checkpoints.len() > config().worker.checkpoint_details_to_keep as usize {
+            self.checkpoints.pop_front();
+        }
+    }
+
+    fn create_checkpoint(&mut self, req: &CreateCheckpointReq) {
+        let checkpoint = StoredCheckpointMetadata {
+            checkpoint_id: req.checkpoint_id.clone(),
+            epoch: req.epoch as u64,
+            state_backend: StateBackend::name().to_string(),
+            start_time: req.start_time,
+            finish_time: None,
+            event_spans: vec![],
+            operator_details: HashMap::new(),
+            status: arroyo_rpc::checkpoints::CheckpointStatus::InProgress,
+        };
+
+        if let Some(existing) = self
+            .checkpoints
+            .iter_mut()
+            .find(|c| c.checkpoint_id == req.checkpoint_id)
+        {
+            *existing = checkpoint;
+        } else {
+            self.checkpoints.push_back(checkpoint);
+        }
+
+        self.prune();
+    }
+
+    fn update_checkpoint(
+        &mut self,
+        checkpoint_id: &str,
+        operator_details: HashMap<String, OperatorCheckpointDetail>,
+        event_spans: Vec<JobCheckpointSpan>,
+        finish_time: Option<SystemTime>,
+        status: arroyo_rpc::checkpoints::CheckpointStatus,
+    ) {
+        if let Some(checkpoint) = self
+            .checkpoints
+            .iter_mut()
+            .find(|c| c.checkpoint_id == checkpoint_id)
+        {
+            checkpoint.operator_details = operator_details;
+            checkpoint.event_spans = event_spans;
+            checkpoint.finish_time = finish_time;
+            checkpoint.status = status;
+        }
+    }
+
+    fn finish_checkpoint(
+        &mut self,
+        checkpoint_id: &str,
+        finish_time: SystemTime,
+        event_spans: Vec<JobCheckpointSpan>,
+    ) {
+        if let Some(checkpoint) = self
+            .checkpoints
+            .iter_mut()
+            .find(|c| c.checkpoint_id == checkpoint_id)
+        {
+            checkpoint.finish_time = Some(finish_time);
+            checkpoint.event_spans = event_spans;
+            checkpoint.status = arroyo_rpc::checkpoints::CheckpointStatus::Ready;
+        }
+    }
+
+    pub fn checkpoints(&self) -> Vec<rpc::JobCheckpointMetadata> {
+        self.checkpoints
+            .iter()
+            .filter(|c| {
+                !matches!(
+                    c.status,
+                    arroyo_rpc::checkpoints::CheckpointStatus::Failed
+                        | arroyo_rpc::checkpoints::CheckpointStatus::Compacted
+                )
+            })
+            .map(|c| rpc::JobCheckpointMetadata {
+                epoch: c.epoch as u32,
+                state_backend: c.state_backend.clone(),
+                start_time: to_micros(c.start_time),
+                finish_time: c.finish_time.map(to_micros),
+                event_spans: c
+                    .event_spans
+                    .iter()
+                    .cloned()
+                    .map(checkpoint_span_to_rpc)
+                    .collect(),
+            })
+            .collect()
+    }
+
+    pub fn operators_for_epoch(
+        &self,
+        epoch: u64,
+    ) -> Option<HashMap<String, OperatorCheckpointDetail>> {
+        self.checkpoints
+            .iter()
+            .find(|c| {
+                c.epoch == epoch
+                    && !matches!(c.status, arroyo_rpc::checkpoints::CheckpointStatus::Failed)
+            })
+            .map(|c| c.operator_details.clone())
+    }
+}
 
 pub mod checkpoint_state;
 pub mod committing_state;
@@ -146,6 +297,7 @@ pub(crate) async fn connect_to_worker(id: WorkerId, addr: String) -> anyhow::Res
 #[derive(Clone)]
 pub struct JobControllerStatus {
     pub job_status: Arc<Mutex<JobStatus>>,
+    pub checkpoint_history: Arc<Mutex<CheckpointHistory>>,
 }
 
 impl JobControllerStatus {
@@ -200,66 +352,44 @@ impl JobControllerStatus {
     }
 }
 
-fn checkpoint_size_bytes(operator_details: &Value) -> u64 {
-    operator_details
-        .as_object()
-        .into_iter()
-        .flat_map(|operators| operators.values())
-        .filter_map(|operator| operator.get("tasks"))
-        .filter_map(Value::as_object)
-        .flat_map(|tasks| tasks.values())
-        .filter_map(|task| task.get("bytes"))
-        .filter_map(Value::as_u64)
-        .sum()
-}
-
-fn update_last_checkpoint(
-    job_status: &Arc<Mutex<JobStatus>>,
-    f: impl FnOnce(&mut rpc::CheckpointStatus),
-) -> anyhow::Result<()> {
-    let mut status = job_status
-        .lock()
-        .map_err(|e| anyhow!("job status mutex poisoned: {e}"))?;
-
-    status.updated_at = to_micros(SystemTime::now());
-
-    let checkpoint = status
-        .last_checkpoint
-        .as_mut()
-        .ok_or_else(|| anyhow!("job status missing last checkpoint"))?;
-
-    f(checkpoint);
-    Ok(())
-}
-
 #[async_trait]
 impl CheckpointMetadataStore for JobControllerStatus {
     async fn create_checkpoint(&self, req: CreateCheckpointReq) -> anyhow::Result<()> {
-        let mut status = self
-            .job_status
+        self.checkpoint_history
             .lock()
-            .map_err(|e| anyhow!("job status mutex poisoned: {e}"))?;
-        status.last_checkpoint = Some(rpc::CheckpointStatus {
-            epoch: req.epoch,
-            started_at: to_micros(req.start_time),
-            finished_at: None,
-            size_bytes: 0,
-        });
+            .unwrap()
+            .create_checkpoint(&req);
+
         Ok(())
     }
 
     async fn update_checkpoint(&self, req: UpdateCheckpointReq) -> anyhow::Result<()> {
-        let size_bytes = checkpoint_size_bytes(&req.operator_details);
-        update_last_checkpoint(&self.job_status, |checkpoint| {
-            checkpoint.size_bytes = size_bytes;
-            checkpoint.finished_at = req.finish_time.map(to_micros);
-        })
+        let operator_details = serde_json::from_value(req.operator_details.clone())?;
+        let event_spans = serde_json::from_value(req.event_spans.clone())?;
+
+        self.checkpoint_history.lock().unwrap().update_checkpoint(
+            &req.checkpoint_id,
+            operator_details,
+            event_spans,
+            req.finish_time,
+            req.status,
+        );
+
+        Ok(())
     }
 
     async fn finish_checkpoint(&self, req: FinishCheckpointReq) -> anyhow::Result<()> {
-        update_last_checkpoint(&self.job_status, |checkpoint| {
-            checkpoint.finished_at = Some(to_micros(req.finish_time));
-        })
+        let event_spans = serde_json::from_value(req.event_spans.clone())?;
+
+        self.job_status.lock().unwrap().last_checkpointed_at = Some(to_micros(req.finish_time));
+
+        self.checkpoint_history.lock().unwrap().finish_checkpoint(
+            &req.checkpoint_id,
+            req.finish_time,
+            event_spans,
+        );
+
+        Ok(())
     }
 
     async fn mark_compacting(

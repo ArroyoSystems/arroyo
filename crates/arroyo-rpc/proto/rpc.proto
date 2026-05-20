@@ -250,6 +250,7 @@ service JobControllerGrpc {
 
 message JobStatusReq {
   string job_id = 1;
+  uint64 generation = 2;
 }
 
 message CheckpointStatus {
@@ -257,6 +258,21 @@ message CheckpointStatus {
   uint64 started_at = 2;
   optional uint64 finished_at = 3;
   uint64 size_bytes = 4;
+}
+
+message JobCheckpointEventSpan {
+  uint64 start_time = 1;
+  uint64 finish_time = 2;
+  string event = 3;
+  string description = 4;
+}
+
+message JobCheckpointMetadata {
+  uint32 epoch = 1;
+  string state_backend = 2;
+  uint64 start_time = 3;
+  optional uint64 finish_time = 4;
+  repeated JobCheckpointEventSpan event_spans = 5;
 }
 
 enum JobState {
@@ -284,7 +300,7 @@ message JobStatus {
   JobState job_state = 1;
   uint64 updated_at = 2;
   uint64 transitioned_at = 3;
-  optional CheckpointStatus last_checkpoint = 4;
+  optional uint64 last_checkpointed_at = 4;
   optional JobFailure job_failure = 5;
 }
 
@@ -292,6 +308,25 @@ message JobStatusResp {
   string job_id = 1;
   uint64 generation = 2;
   JobStatus job_status = 3;
+}
+
+message GetJobCheckpointsReq {
+  string job_id = 1;
+  uint64 generation = 2;
+}
+
+message GetJobCheckpointsResp {
+  repeated JobCheckpointMetadata checkpoints = 1;
+}
+
+message GetCheckpointDetailsReq {
+  string job_id = 1;
+  uint64 generation = 2;
+  uint64 epoch = 3;
+}
+
+message GetCheckpointDetailsResp {
+  map<string, api.OperatorCheckpointDetail> operators = 1;
 }
 
 message StopJobReq {
@@ -304,6 +339,8 @@ message StopJobResp {
 service JobStatusGrpc {
   rpc GetJobStatus(JobStatusReq) returns (JobStatusResp);
   rpc StopJob(StopJobReq) returns (StopJobResp);
+  rpc GetJobCheckpoints(GetJobCheckpointsReq) returns (GetJobCheckpointsResp);
+  rpc GetCheckpointDetails(GetCheckpointDetailsReq) returns (GetCheckpointDetailsResp);
 }
 
 // Checkpoint metadata
