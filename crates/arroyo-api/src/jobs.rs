@@ -1,8 +1,7 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use anyhow::Context;
 use arroyo_rpc::api_types::checkpoints::{
-    Checkpoint, CheckpointEventSpan, JobCheckpointSpan, OperatorCheckpointGroup,
-    SubtaskCheckpointGroup,
+    Checkpoint, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
 use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
 use arroyo_rpc::api_types::{
@@ -77,25 +76,6 @@ async fn fetch_from_leader<
             },
             _ => log_and_map(e),
         })
-}
-
-fn checkpoint_from_leader(checkpoint: grpc::rpc::JobCheckpointMetadata) -> Checkpoint {
-    Checkpoint {
-        epoch: checkpoint.epoch,
-        backend: checkpoint.state_backend,
-        start_time: checkpoint.start_time,
-        finish_time: checkpoint.finish_time,
-        events: checkpoint
-            .event_spans
-            .into_iter()
-            .map(|span| CheckpointEventSpan {
-                start_time: span.start_time,
-                finish_time: span.finish_time,
-                event: span.event,
-                description: span.description,
-            })
-            .collect(),
-    }
 }
 
 fn operator_checkpoint_groups(
@@ -400,7 +380,7 @@ pub async fn get_job_checkpoints(
         .into_inner()
         .checkpoints
         .into_iter()
-        .map(checkpoint_from_leader)
+        .map(Checkpoint::from)
         .collect()
     } else {
         api_queries::fetch_get_job_checkpoints(&db, &job_pub_id, &auth_data.organization_id)

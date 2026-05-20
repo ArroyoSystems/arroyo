@@ -48,7 +48,7 @@ rpc-port = 0
 data-port = 0
 task-slots = 16
 queue-size = 8192
-checkpoint-details-to-keeper = 10
+checkpoint-details-to-keep = 10
 
 [node]
 bind-address = "0.0.0.0"
