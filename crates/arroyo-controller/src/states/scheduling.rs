@@ -608,6 +608,17 @@ impl State for Scheduling {
         // to schedule
         stop_if_desired_non_running!(self, &ctx.config);
 
+        // update the generation for this scheduling attempt
+        ctx.status.generation += 1;
+        if let Err(e) = ctx.status.update_db(&ctx.db).await {
+            return Err(ctx.retryable(
+                self,
+                "failed to advance generation for scheduling retry",
+                anyhow!("{}", e),
+                10,
+            ));
+        }
+
         // clear out any existing workers for this job
         if let Err(e) = ctx.scheduler.stop_workers(&ctx.config.id, None, true).await {
             warn!(
@@ -683,7 +694,12 @@ impl State for Scheduling {
 
         for h in handles {
             if let Err(e) = h.await {
-                return Err(fatal("Failed to start cluster for pipeline", e.into()));
+                return Err(ctx.retryable(
+                    self,
+                    "Failed to start cluster for pipeline",
+                    e.into(),
+                    10,
+                ));
             }
         }
 
