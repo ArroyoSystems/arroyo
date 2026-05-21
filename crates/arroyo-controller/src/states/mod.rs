@@ -194,13 +194,7 @@ impl TransitionTo<Compiling> for Stopped {}
 
 impl TransitionTo<Compiling> for Scheduling {}
 
-impl TransitionTo<Scheduling> for Compiling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
+impl TransitionTo<Scheduling> for Compiling {}
 
 impl TransitionTo<Running> for Scheduling {
     fn update_status(&self) -> TransitionFn {
@@ -257,13 +251,7 @@ impl TransitionTo<Recovering> for Scheduling {
 
 impl TransitionTo<Rescaling> for Running {}
 
-impl TransitionTo<Scheduling> for Rescaling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
+impl TransitionTo<Scheduling> for Rescaling {}
 
 impl TransitionTo<Compiling> for Recovering {}
 impl TransitionTo<Compiling> for Failed {
@@ -352,13 +340,7 @@ impl TransitionTo<Stopping> for LeaderFinishing {}
 
 impl TransitionTo<LeaderCheckpointStopping> for LeaderRestarting {}
 impl TransitionTo<LeaderRestarting> for LeaderRestarting {}
-impl TransitionTo<Scheduling> for LeaderRestarting {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
+impl TransitionTo<Scheduling> for LeaderRestarting {}
 
 impl TransitionTo<Recovering> for LeaderRestarting {
     fn update_status(&self) -> TransitionFn {
@@ -369,13 +351,8 @@ impl TransitionTo<Recovering> for LeaderRestarting {
 }
 impl TransitionTo<LeaderStopping> for LeaderRestarting {}
 
-impl TransitionTo<Scheduling> for LeaderRescaling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
+impl TransitionTo<Scheduling> for LeaderRescaling {}
+
 impl TransitionTo<Recovering> for LeaderRescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -406,13 +383,7 @@ impl TransitionTo<Restarting> for Running {
     }
 }
 impl TransitionTo<Restarting> for Restarting {}
-impl TransitionTo<Scheduling> for Restarting {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
+impl TransitionTo<Scheduling> for Restarting {}
 impl TransitionTo<Stopping> for Restarting {}
 impl TransitionTo<CheckpointStopping> for Restarting {}
 
