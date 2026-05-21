@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::api_types::jobs::SchedulerConfig;
 use crate::api_types::udfs::Udf;
 use crate::errors::ErrorDomain;
 use crate::grpc as grpc_proto;
@@ -32,6 +33,11 @@ pub struct PipelinePost {
     pub tags: Option<HashMap<String, String>>,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: Option<HashMap<String, String>>,
+    /// Optional per-job scheduler configuration applied to the job that
+    /// is created together with this pipeline. Shape depends on the
+    /// scheduler in use (see [`SchedulerConfig`]). When omitted, the
+    /// controller's global scheduler config is used unchanged.
+    pub scheduler_config: Option<SchedulerConfig>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -131,6 +137,11 @@ pub struct Job {
     pub tasks: Option<u64>,
     pub failure_reason: Option<FailureReason>,
     pub created_at: u64,
+    /// Per-job scheduler configuration applied on top of the
+    /// controller's global scheduler config. `None` means "use the
+    /// global config unchanged".
+    #[schema(value_type = Option<SchedulerConfig>)]
+    pub scheduler_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

@@ -1,3 +1,4 @@
+use arroyo_rpc::api_types::jobs::SchedulerConfig;
 use arroyo_rpc::grpc::rpc::{CheckpointManifest, StartExecutionReq, TaskAssignment};
 use arroyo_rpc::identity::{WorkerClient, worker_client};
 use arroyo_types::{CLUSTER_ID_ENV, JobId, MachineId, WorkerId};
@@ -520,6 +521,27 @@ impl Scheduling {
                 )
             })?;
 
+        let scheduler_config: Option<SchedulerConfig> = ctx
+            .config
+            .scheduler_config
+            .as_ref()
+            .map(|v| serde_json::from_value::<SchedulerConfig>(v.clone()))
+            .transpose()
+            .map_err(|e| {
+                fatal(
+                    format!("failed to deserialize scheduler_config from job_configs: {e}"),
+                    anyhow::anyhow!("malformed scheduler_config in job_configs row"),
+                )
+            })?;
+        if let Some(sc) = &scheduler_config {
+            sc.ensure_supported_version().map_err(|e| {
+                fatal(
+                    format!("unsupported scheduler_config version in job_configs: {e}"),
+                    anyhow::anyhow!("unsupported scheduler_config version"),
+                )
+            })?;
+        }
+
         let checkpoint_url = ctx
             .pipeline_info
             .state_url
@@ -562,6 +584,7 @@ impl Scheduling {
                     slots: slots_needed,
                     env_vars: env_vars.clone(),
                     pipeline_tags: ctx.pipeline_info.tags.clone(),
+                    scheduler_config: scheduler_config.clone(),
                 })
                 .await
             {

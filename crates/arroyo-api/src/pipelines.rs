@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::default_sink;
+use arroyo_rpc::api_types::jobs::SchedulerConfig;
 use arroyo_rpc::api_types::pipelines::{
     FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
     QueryValidationResult, StopType, ValidateQueryPost,
@@ -306,6 +307,7 @@ pub(crate) async fn create_pipeline_int(
     state_url: Option<String>,
     tags: HashMap<String, String>,
     env_vars: HashMap<String, String>,
+    scheduler_config: Option<SchedulerConfig>,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -443,6 +445,7 @@ pub(crate) async fn create_pipeline_int(
         &auth,
         db,
         env_vars,
+        scheduler_config,
     )
     .await?;
 
@@ -532,6 +535,7 @@ impl From<DbPipelineJob> for Job {
                     .unwrap_or_default(),
             }),
             created_at: to_micros(val.created_at),
+            scheduler_config: val.scheduler_config,
         }
     }
 }
@@ -639,6 +643,10 @@ async fn create_pipeline_inner(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
+    if let Some(sc) = &pipeline_post.scheduler_config {
+        jobs::validate_scheduler_config(sc)?;
+    }
+
     let checkpoint_interval = pipeline_post
         .checkpoint_interval_micros
         .map(Duration::from_micros)
@@ -671,6 +679,7 @@ async fn create_pipeline_inner(
         pipeline_post.state_url,
         pipeline_post.tags.unwrap_or_default(),
         pipeline_post.env_vars.unwrap_or_default(),
+        pipeline_post.scheduler_config,
     )
     .await?;
 
@@ -725,6 +734,7 @@ pub async fn create_preview_pipeline(
         None,
         HashMap::default(),
         HashMap::default(),
+        None,
     )
     .await?;
 

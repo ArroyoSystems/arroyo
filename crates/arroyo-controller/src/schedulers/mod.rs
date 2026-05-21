@@ -1,5 +1,6 @@
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::api_types::jobs::SchedulerConfig;
 use arroyo_rpc::config::config;
 use arroyo_rpc::connect_grpc;
 use arroyo_rpc::grpc::rpc::node_grpc_client::NodeGrpcClient;
@@ -105,6 +106,11 @@ pub struct StartPipelineReq {
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
     pub pipeline_tags: HashMap<String, String>,
+    /// Per-job scheduler configuration. `None` means "use the
+    /// controller's global scheduler config unchanged". Variant must
+    /// match the active scheduler (enforced at job creation time in
+    /// the API).
+    pub scheduler_config: Option<SchedulerConfig>,
 }
 
 #[async_trait::async_trait]
