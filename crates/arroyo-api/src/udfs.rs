@@ -62,7 +62,7 @@ pub async fn create_udf(
     bearer_auth: BearerAuth,
     WithRejection(Json(req), _): WithRejection<Json<UdfPost>, ApiError>,
 ) -> Result<Json<GlobalUdf>, ErrorResp> {
-    let auth_data = authenticate(&state.database, bearer_auth).await.unwrap();
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     // let transaction = client.transaction().await.map_err(log_and_map)?;
     // transaction
@@ -129,7 +129,7 @@ pub async fn get_udfs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
 ) -> Result<Json<GlobalUdfCollection>, ErrorResp> {
-    let auth_data = authenticate(&state.database, bearer_auth).await.unwrap();
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     let udfs =
         api_queries::fetch_get_udfs(&state.database.client().await?, &auth_data.organization_id)
@@ -157,7 +157,7 @@ pub async fn delete_udf(
     bearer_auth: BearerAuth,
     Path(udf_pub_id): Path<String>,
 ) -> Result<(), ErrorResp> {
-    let auth_data = authenticate(&state.database, bearer_auth).await.unwrap();
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     let count = api_queries::execute_delete_udf(
         &state.database.client().await?,
