@@ -35,10 +35,10 @@ pub struct PipelinePost {
     /// Per-job scheduler configuration overlay. The shape mirrors the
     /// controller's global scheduler config (e.g. the
     /// `kubernetes-scheduler.*` block) and is merged on top of it at
-    /// scheduling time. An omitted field or an empty object means "use
-    /// the controller's global scheduler config unchanged".
-    #[serde(default)]
-    pub scheduler_config: serde_json::Value,
+    /// scheduling time. An omitted field, `null`, or an empty object
+    /// all mean "use the controller's global scheduler config
+    /// unchanged".
+    pub scheduler_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

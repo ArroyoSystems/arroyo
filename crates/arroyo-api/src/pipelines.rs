@@ -674,7 +674,10 @@ async fn create_pipeline_inner(
         pipeline_post.state_url,
         pipeline_post.tags.unwrap_or_default(),
         pipeline_post.env_vars.unwrap_or_default(),
-        pipeline_post.scheduler_config,
+        match pipeline_post.scheduler_config {
+            None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
+            Some(v) => v,
+        },
     )
     .await?;
 
@@ -729,7 +732,7 @@ pub async fn create_preview_pipeline(
         None,
         HashMap::default(),
         HashMap::default(),
-        serde_json::Value::Null,
+        serde_json::Value::Object(Default::default()),
     )
     .await?;
 
