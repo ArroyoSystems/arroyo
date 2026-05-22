@@ -32,6 +32,13 @@ pub struct PipelinePost {
     pub tags: Option<HashMap<String, String>>,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: Option<HashMap<String, String>>,
+    /// Per-job scheduler configuration overlay. The shape mirrors the
+    /// controller's global scheduler config (e.g. the
+    /// `kubernetes-scheduler.*` block) and is merged on top of it at
+    /// scheduling time. An omitted field, `null`, or an empty object
+    /// all mean "use the controller's global scheduler config
+    /// unchanged".
+    pub scheduler_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -131,6 +138,10 @@ pub struct Job {
     pub tasks: Option<u64>,
     pub failure_reason: Option<FailureReason>,
     pub created_at: u64,
+    /// Per-job scheduler configuration overlay (see `PipelinePost`).
+    /// An empty object means "no overrides, use the controller's
+    /// global scheduler config unchanged".
+    pub scheduler_config: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

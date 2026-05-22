@@ -562,6 +562,7 @@ impl Scheduling {
                     slots: slots_needed,
                     env_vars: env_vars.clone(),
                     pipeline_tags: ctx.pipeline_info.tags.clone(),
+                    scheduler_config: ctx.config.scheduler_config.clone(),
                 })
                 .await
             {
@@ -586,6 +587,12 @@ impl Scheduling {
                         "encountered error during scheduling",
                         anyhow::anyhow!("scheduling error: {}", s),
                         20,
+                    ));
+                }
+                Err(SchedulerError::Fatal(s)) => {
+                    return Err(fatal(
+                        format!("scheduling failed: {s}"),
+                        anyhow::anyhow!("non-retryable scheduling error: {}", s),
                     ));
                 }
             }

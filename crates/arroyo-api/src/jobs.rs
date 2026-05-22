@@ -113,6 +113,7 @@ fn operator_checkpoint_groups(
     operators
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_job(
     pipeline_name: &str,
     pipeline_id: i64,
@@ -121,6 +122,7 @@ pub(crate) async fn create_job(
     auth: &AuthData,
     db: &DatabaseSource,
     env_vars: HashMap<String, String>,
+    scheduler_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -177,6 +179,7 @@ pub(crate) async fn create_job(
             None
         }),
         &env_vars_json,
+        &scheduler_config,
     )
     .await?;
 

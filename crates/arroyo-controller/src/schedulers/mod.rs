@@ -105,6 +105,11 @@ pub struct StartPipelineReq {
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
     pub pipeline_tags: HashMap<String, String>,
+    /// Per-job scheduler configuration overlay as raw JSON. An empty
+    /// object means "use the controller's global scheduler config
+    /// unchanged". The scheduler interprets the shape; the controller
+    /// treats it as opaque and passes it through verbatim.
+    pub scheduler_config: serde_json::Value,
 }
 
 #[async_trait::async_trait]
@@ -416,9 +421,23 @@ pub struct NodeScheduler {
     state: Arc<Mutex<NodeSchedulerState>>,
 }
 
+#[derive(Debug)]
 pub enum SchedulerError {
-    NotEnoughSlots { slots_needed: usize },
+    NotEnoughSlots {
+        slots_needed: usize,
+    },
     Other(String),
+    /// Non-retryable scheduler failure. The state machine treats
+    /// this as fatal and transitions the job to `Failed` without retrying.
+    Fatal(String),
+}
+
+pub fn is_empty_overlay(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(m) => m.is_empty(),
+        _ => false,
+    }
 }
 
 impl NodeScheduler {

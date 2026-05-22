@@ -306,6 +306,7 @@ pub(crate) async fn create_pipeline_int(
     state_url: Option<String>,
     tags: HashMap<String, String>,
     env_vars: HashMap<String, String>,
+    scheduler_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -443,6 +444,7 @@ pub(crate) async fn create_pipeline_int(
         &auth,
         db,
         env_vars,
+        scheduler_config,
     )
     .await?;
 
@@ -532,6 +534,7 @@ impl From<DbPipelineJob> for Job {
                     .unwrap_or_default(),
             }),
             created_at: to_micros(val.created_at),
+            scheduler_config: val.scheduler_config,
         }
     }
 }
@@ -671,6 +674,10 @@ async fn create_pipeline_inner(
         pipeline_post.state_url,
         pipeline_post.tags.unwrap_or_default(),
         pipeline_post.env_vars.unwrap_or_default(),
+        match pipeline_post.scheduler_config {
+            None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
+            Some(v) => v,
+        },
     )
     .await?;
 
@@ -725,6 +732,7 @@ pub async fn create_preview_pipeline(
         None,
         HashMap::default(),
         HashMap::default(),
+        serde_json::Value::Object(Default::default()),
     )
     .await?;
 

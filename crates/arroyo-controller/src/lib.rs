@@ -60,7 +60,7 @@ use types::public::{RestartMode, StopMode};
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
 
-#[derive(Eq, PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct JobConfig {
     id: Arc<String>,
     organization_id: String,
@@ -75,6 +75,11 @@ pub struct JobConfig {
     ignore_state_before_epoch: Option<i32>,
     /// Per-job environment variables forwarded to workers at scheduling time.
     env_vars: serde_json::Value,
+    /// Per-job scheduler configuration overlay as raw JSON (same
+    /// shape as the controller-wide scheduler config). The scheduler
+    /// interprets this; the controller treats it as opaque. An empty
+    /// object is the no-override case.
+    scheduler_config: serde_json::Value,
 }
 
 /// Per-pipeline data that doesn't change for the lifetime of a job.
@@ -628,6 +633,7 @@ impl ControllerServer {
                         restart_mode: p.restart_mode,
                         ignore_state_before_epoch: p.ignore_state_before_epoch,
                         env_vars: p.env_vars,
+                        scheduler_config: p.scheduler_config,
                     };
 
                     let mut jobs = jobs.lock().await;

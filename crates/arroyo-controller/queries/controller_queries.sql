@@ -23,7 +23,8 @@ SELECT
     restart_mode,
     ignore_state_before_epoch,
     state_context,
-    env_vars
+    env_vars,
+    scheduler_config
 FROM job_configs c
 INNER JOIN job_statuses s ON c.id = s.id;
 

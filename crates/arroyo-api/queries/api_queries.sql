@@ -188,8 +188,8 @@ WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
 INSERT INTO job_configs
-(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros, env_vars)
-VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros, :env_vars);
+(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros, env_vars, scheduler_config)
+VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros, :env_vars, :scheduler_config);
 
 --! create_job_status
 INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
@@ -203,7 +203,7 @@ WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
 
 --! get_pipeline_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context
+SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
@@ -211,7 +211,7 @@ WHERE job_configs.organization_id = :organization_id AND pipelines.pub_id = :pub
 ORDER BY job_configs.created_at DESC;
 
 --! get_all_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context
+SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
@@ -219,7 +219,7 @@ WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY job_configs.created_at DESC;
 
 --! get_pipeline_job : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context
+SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
