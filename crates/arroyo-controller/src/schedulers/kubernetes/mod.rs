@@ -66,7 +66,7 @@ impl KubernetesScheduler {
         }
 
         let overlay_json = serde_json::to_string(&req.scheduler_config).map_err(|e| {
-            SchedulerError::Other(format!(
+            SchedulerError::Fatal(format!(
                 "failed to serialize per-job scheduler_config overlay: {e}"
             ))
         })?;
@@ -76,9 +76,7 @@ impl KubernetesScheduler {
             .merge(Json::string(&overlay_json))
             .extract()
             .map_err(|e| {
-                SchedulerError::Other(format!(
-                    "failed to apply per-job scheduler_config overlay: {e}"
-                ))
+                SchedulerError::Fatal(format!("invalid per-job scheduler_config overlay: {e}"))
             })
     }
 
@@ -366,6 +364,7 @@ impl Scheduler for KubernetesScheduler {
 
 #[cfg(test)]
 mod test {
+    use crate::schedulers::SchedulerError;
     use crate::schedulers::StartPipelineReq;
     use crate::schedulers::kubernetes::{JOB_ID_LABEL, KubernetesScheduler};
     use arroyo_datastream::logical::LogicalProgram;
@@ -503,5 +502,25 @@ mod test {
         let resolved = scheduler.resolved_config(&req).unwrap();
 
         assert_eq!(resolved.worker.image, global_image);
+    }
+
+    #[test]
+    fn test_invalid_overlay_returns_fatal() {
+        let overlay = json!({
+            "worker": {
+                "imagee": "typo-not-image"
+            }
+        });
+        let req = base_req(overlay);
+
+        let cfg = config().kubernetes_scheduler.clone();
+        let scheduler = KubernetesScheduler::with_config(None, cfg);
+        let err = scheduler
+            .resolved_config(&req)
+            .expect_err("malformed overlay should be rejected");
+        match err {
+            SchedulerError::Fatal(_) => {}
+            other => panic!("expected SchedulerError::Fatal, got {other:?}"),
+        }
     }
 }

@@ -589,6 +589,12 @@ impl Scheduling {
                         20,
                     ));
                 }
+                Err(SchedulerError::Fatal(s)) => {
+                    return Err(fatal(
+                        format!("scheduling failed: {s}"),
+                        anyhow::anyhow!("non-retryable scheduling error: {}", s),
+                    ));
+                }
             }
 
             tokio::time::sleep(Duration::from_secs(1)).await;

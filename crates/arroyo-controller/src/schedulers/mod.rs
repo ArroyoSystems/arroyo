@@ -423,8 +423,13 @@ pub struct NodeScheduler {
 
 #[derive(Debug)]
 pub enum SchedulerError {
-    NotEnoughSlots { slots_needed: usize },
+    NotEnoughSlots {
+        slots_needed: usize,
+    },
     Other(String),
+    /// Non-retryable scheduler failure. The state machine treats
+    /// this as fatal and transitions the job to `Failed` without retrying.
+    Fatal(String),
 }
 
 impl NodeScheduler {
