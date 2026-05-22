@@ -432,6 +432,14 @@ pub enum SchedulerError {
     Fatal(String),
 }
 
+pub fn is_empty_overlay(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(m) => m.is_empty(),
+        _ => false,
+    }
+}
+
 impl NodeScheduler {
     pub fn new() -> Self {
         Self {

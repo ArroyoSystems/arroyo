@@ -1,7 +1,7 @@
 mod quantities;
 
 use crate::schedulers::kubernetes::quantities::QuantityParser;
-use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
+use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq, is_empty_overlay};
 use anyhow::bail;
 use arroyo_rpc::config::{KubernetesSchedulerConfig, ResourceMode, config};
 use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
@@ -22,14 +22,6 @@ const CLUSTER_LABEL: &str = "cluster";
 const JOB_ID_LABEL: &str = "job_id";
 const GENERATION_LABEL: &str = "generation";
 const JOB_NAME_LABEL: &str = "job_name";
-
-fn is_empty_overlay(v: &serde_json::Value) -> bool {
-    match v {
-        serde_json::Value::Null => true,
-        serde_json::Value::Object(m) => m.is_empty(),
-        _ => false,
-    }
-}
 
 pub struct KubernetesScheduler {
     client: Option<Client>,
