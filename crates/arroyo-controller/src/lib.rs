@@ -75,10 +75,11 @@ pub struct JobConfig {
     ignore_state_before_epoch: Option<i32>,
     /// Per-job environment variables forwarded to workers at scheduling time.
     env_vars: serde_json::Value,
-    /// Per-job scheduler configuration as raw JSON. `None` means "no
-    /// per-job config — use the controller's global scheduler config
-    /// unchanged".
-    scheduler_config: Option<serde_json::Value>,
+    /// Per-job scheduler configuration overlay as raw JSON (same
+    /// shape as the controller-wide scheduler config). The scheduler
+    /// interprets this; the controller treats it as opaque. An empty
+    /// object is the no-override case.
+    scheduler_config: serde_json::Value,
 }
 
 /// Per-pipeline data that doesn't change for the lifetime of a job.

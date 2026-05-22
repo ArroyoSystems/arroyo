@@ -9,7 +9,6 @@ use utoipa::{IntoParams, ToSchema};
 
 pub mod checkpoints;
 pub mod connections;
-pub mod jobs;
 pub mod metrics;
 pub mod pipelines;
 pub mod udfs;

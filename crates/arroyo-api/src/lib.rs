@@ -40,9 +40,7 @@ use crate::pipelines::{
 use crate::rest::__path_ping;
 use crate::rest_utils::{ErrorResp, service_unavailable};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
-use arroyo_rpc::api_types::{
-    checkpoints::*, connections::*, jobs::*, metrics::*, pipelines::*, udfs::*, *,
-};
+use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::config::{ApiAuthMode, config};
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::formats::*;
@@ -290,9 +288,6 @@ impl IntoResponse for HttpError {
         PipelineGraph,
         PipelineNode,
         PipelineEdge,
-        SchedulerConfig,
-        SchedulerConfigSpec,
-        KubernetesJobSchedulerConfig,
         Job,
         FailureReason,
         ErrorDomain,

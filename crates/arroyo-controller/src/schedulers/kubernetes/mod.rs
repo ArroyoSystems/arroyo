@@ -3,11 +3,12 @@ mod quantities;
 use crate::schedulers::kubernetes::quantities::QuantityParser;
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
-use arroyo_rpc::api_types::jobs::SchedulerConfigSpec;
 use arroyo_rpc::config::{KubernetesSchedulerConfig, ResourceMode, config};
 use arroyo_rpc::grpc::rpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_types::{GENERATION_ENV, JOB_ID_ENV, PIPELINE_ID_ENV, WorkerId};
 use async_trait::async_trait;
+use figment::Figment;
+use figment::providers::{Format, Json, Serialized};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{DeleteParams, ListParams};
@@ -21,6 +22,14 @@ const CLUSTER_LABEL: &str = "cluster";
 const JOB_ID_LABEL: &str = "job_id";
 const GENERATION_LABEL: &str = "generation";
 const JOB_NAME_LABEL: &str = "job_name";
+
+fn is_empty_overlay(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(m) => m.is_empty(),
+        _ => false,
+    }
+}
 
 pub struct KubernetesScheduler {
     client: Option<Client>,
@@ -39,89 +48,38 @@ impl KubernetesScheduler {
         Self { client, config }
     }
 
-    /// Return a [`KubernetesSchedulerConfig`] with the per-job
-    /// configuration from `req` overlaid on top of `self.config`.
+    /// Return a [`KubernetesSchedulerConfig`] with the per-job overlay
+    /// from `req.scheduler_config` merged on top of `self.config`.
     ///
-    /// Merge semantics by field:
-    ///   - `image`, `image_pull_policy`, `command`,
-    ///     `service_account_name`, `task_slots`, `resources` → replace
-    ///   - `labels`, `annotations`, `node_selector` → merge map
-    ///     (per-job wins on key collisions)
-    ///   - `image_pull_secrets`, `volumes`, `volume_mounts`,
-    ///     `tolerations`, `env` → append (global first, per-job last)
+    /// The overlay is opaque JSON whose shape mirrors
+    /// [`KubernetesSchedulerConfig`] (the same `kubernetes-scheduler.*`
+    /// block operators set in `config.yaml`).
     ///
-    /// Fields with no per-job override pass through unchanged.
-    fn resolved_config(&self, req: &StartPipelineReq) -> KubernetesSchedulerConfig {
-        let mut config = self.config.clone();
-        let job_config = if let Some(job_config) = &req.scheduler_config {
-            match &job_config.spec {
-                SchedulerConfigSpec::Kubernetes(job_config) => job_config,
-            }
-        } else {
-            return config;
-        };
-
-        if let Some(image) = &job_config.image {
-            config.worker.image = image.clone();
-        }
-        if let Some(ipp) = &job_config.image_pull_policy {
-            config.worker.image_pull_policy = ipp.clone();
-        }
-        if let Some(cmd) = &job_config.command {
-            config.worker.command = cmd.clone();
-        }
-        if let Some(sa) = &job_config.service_account_name {
-            config.worker.service_account_name = sa.clone();
-        }
-        if let Some(ts) = job_config.task_slots {
-            config.worker.task_slots = ts;
-        }
-        if let Some(r) = &job_config.resources {
-            config.worker.resources = r.clone();
-            config.resource_mode = ResourceMode::PerPod;
+    /// An empty or absent overlay is a no-op and yields the global
+    /// config unchanged.
+    fn resolved_config(
+        &self,
+        req: &StartPipelineReq,
+    ) -> Result<KubernetesSchedulerConfig, SchedulerError> {
+        if is_empty_overlay(&req.scheduler_config) {
+            return Ok(self.config.clone());
         }
 
-        // Merge-style maps (per-job wins on collision).
-        if let Some(extra) = &job_config.labels {
-            config
-                .worker
-                .labels
-                .extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
-        }
-        if let Some(extra) = &job_config.annotations {
-            config
-                .worker
-                .annotations
-                .extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
-        }
-        if let Some(extra) = &job_config.node_selector {
-            config
-                .worker
-                .node_selector
-                .extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
-        }
+        let overlay_json = serde_json::to_string(&req.scheduler_config).map_err(|e| {
+            SchedulerError::Other(format!(
+                "failed to serialize per-job scheduler_config overlay: {e}"
+            ))
+        })?;
 
-        // Append-style lists.
-        if let Some(extra) = &job_config.image_pull_secrets {
-            config
-                .worker
-                .image_pull_secrets
-                .extend(extra.iter().cloned());
-        }
-        if let Some(extra) = &job_config.volumes {
-            config.worker.volumes.extend(extra.iter().cloned());
-        }
-        if let Some(extra) = &job_config.volume_mounts {
-            config.worker.volume_mounts.extend(extra.iter().cloned());
-        }
-        if let Some(extra) = &job_config.tolerations {
-            config.worker.tolerations.extend(extra.iter().cloned());
-        }
-        if let Some(extra) = &job_config.env {
-            config.worker.env.extend(extra.iter().cloned());
-        }
-
-        config
+        Figment::new()
+            .merge(Serialized::defaults(&self.config))
+            .merge(Json::string(&overlay_json))
+            .extract()
+            .map_err(|e| {
+                SchedulerError::Other(format!(
+                    "failed to apply per-job scheduler_config overlay: {e}"
+                ))
+            })
     }
 
     fn make_pod(
@@ -292,7 +250,7 @@ impl Scheduler for KubernetesScheduler {
     async fn start_workers(&self, req: StartPipelineReq) -> Result<(), SchedulerError> {
         let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
-        let c = self.resolved_config(&req);
+        let c = self.resolved_config(&req)?;
         let replicas = (req.slots as f32 / c.worker.task_slots as f32).ceil() as usize;
         let max_slots_per_pod = c.worker.task_slots as usize;
         let mut slots_scheduled = 0;
@@ -415,9 +373,8 @@ mod test {
     use arroyo_types::{JobId, PipelineId};
     use serde_json::json;
 
-    #[test]
-    fn test_resource_creation() {
-        let req = StartPipelineReq {
+    fn base_req(overlay: serde_json::Value) -> StartPipelineReq {
+        StartPipelineReq {
             name: "test_pipeline".to_string(),
             program: LogicalProgram::default(),
             wasm_path: "file:///wasm".to_string(),
@@ -428,8 +385,13 @@ mod test {
             slots: 8,
             env_vars: Default::default(),
             pipeline_tags: Default::default(),
-            scheduler_config: None,
-        };
+            scheduler_config: overlay,
+        }
+    }
+
+    #[test]
+    fn test_resource_creation() {
+        let req = base_req(json!({}));
 
         let mut config = config().kubernetes_scheduler.clone();
 
@@ -462,91 +424,27 @@ mod test {
         );
 
         let scheduler = KubernetesScheduler::with_config(None, config);
-        let resolved = scheduler.resolved_config(&req);
+        let resolved = scheduler.resolved_config(&req).unwrap();
         // test that we don't panic when creating the replicaset
         scheduler.make_pod(&resolved, &req, 3, 4);
     }
 
     #[test]
-    fn test_per_job_config_applies_to_pod() {
-        use arroyo_rpc::api_types::jobs::{
-            KubernetesJobSchedulerConfig, SchedulerConfig, SchedulerConfigSpec,
-        };
-        use std::collections::BTreeMap;
-
-        let mut node_selector = BTreeMap::new();
-        node_selector.insert("workload".to_string(), "gpu".to_string());
-
-        let mut labels = BTreeMap::new();
-        labels.insert("team".to_string(), "data".to_string());
-
-        let mut annotations = BTreeMap::new();
-        annotations.insert("scheduler.k8s/preempt".to_string(), "false".to_string());
-
-        let job_cfg = KubernetesJobSchedulerConfig {
-            image: Some("my-registry/custom-worker:v2".to_string()),
-            image_pull_policy: Some("Always".to_string()),
-            image_pull_secrets: Some(vec![
-                serde_json::from_value(json!({ "name": "private-registry" })).unwrap(),
-            ]),
-            command: Some("/usr/local/bin/custom-worker --foo".to_string()),
-            service_account_name: Some("job-specific-sa".to_string()),
-            env: Some(vec![
-                serde_json::from_value(json!({
-                    "name": "PER_JOB_FOO",
-                    "value": "bar"
-                }))
-                .unwrap(),
-            ]),
-            node_selector: Some(node_selector),
-            labels: Some(labels),
-            annotations: Some(annotations),
-            tolerations: Some(vec![
-                serde_json::from_value(json!({
-                    "key": "gpu",
-                    "operator": "Exists",
-                    "effect": "NoSchedule"
-                }))
-                .unwrap(),
-            ]),
-            volumes: Some(vec![
-                serde_json::from_value(json!({
-                    "name": "job-secret",
-                    "secret": { "secretName": "my-job-secret" }
-                }))
-                .unwrap(),
-            ]),
-            volume_mounts: Some(vec![
-                serde_json::from_value(json!({
-                    "name": "job-secret",
-                    "mountPath": "/secrets",
-                    "readOnly": true
-                }))
-                .unwrap(),
-            ]),
-            task_slots: Some(2),
-            resources: None,
-        };
-
-        let req = StartPipelineReq {
-            name: "test_pipeline".to_string(),
-            program: LogicalProgram::default(),
-            wasm_path: "file:///wasm".to_string(),
-            pipeline_id: PipelineId("pipe-123".to_string().into()),
-            job_id: JobId("job123".to_string().into()),
-            hash: "12123123h".to_string(),
-            generation: 1,
-            slots: 4,
-            env_vars: Default::default(),
-            pipeline_tags: Default::default(),
-            scheduler_config: Some(SchedulerConfig::new(SchedulerConfigSpec::Kubernetes(
-                job_cfg,
-            ))),
-        };
+    fn test_per_job_overlay_applies_to_pod() {
+        let overlay = json!({
+            "worker": {
+                "image": "my-registry/custom-worker:v2",
+                "image-pull-policy": "Always",
+                "task-slots": 2,
+                "labels": { "team": "data" },
+                "annotations": { "scheduler.k8s/preempt": "false" }
+            }
+        });
+        let req = base_req(overlay);
 
         let cfg = config().kubernetes_scheduler.clone();
         let scheduler = KubernetesScheduler::with_config(None, cfg);
-        let resolved = scheduler.resolved_config(&req);
+        let resolved = scheduler.resolved_config(&req).unwrap();
 
         // Resolved task_slots should use the per-job override.
         assert_eq!(resolved.worker.task_slots, 2);
@@ -555,97 +453,55 @@ mod test {
         let spec = pod.spec.as_ref().unwrap();
         let container = &spec.containers[0];
 
-        // Image, pull policy, command are replaced.
+        // Image and pull policy are replaced by the overlay.
         assert_eq!(
             container.image.as_deref().unwrap(),
             "my-registry/custom-worker:v2"
         );
         assert_eq!(container.image_pull_policy.as_deref().unwrap(), "Always");
-        let cmd = container.command.as_ref().unwrap();
-        assert_eq!(cmd[0], "/usr/local/bin/custom-worker");
-        assert!(cmd.iter().any(|s| s == "--foo"));
 
-        // Service account is replaced.
-        assert_eq!(
-            spec.service_account_name.as_deref().unwrap(),
-            "job-specific-sa"
-        );
-
-        // Image pull secrets are appended (we just verify presence).
-        assert!(
-            spec.image_pull_secrets
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|s| s.name == "private-registry")
-        );
-
-        // Node selector merged in.
-        let ns = spec.node_selector.as_ref().unwrap();
-        assert_eq!(ns.get("workload").unwrap(), "gpu");
-
-        // Labels include the per-job entry, plus intrinsic labels are
-        // preserved (cluster/job-id/generation/job-name).
+        // Labels: per-job entry merged with intrinsic labels (the
+        // controller still applies cluster/job-id/generation/job-name
+        // last and they win on collision).
         let pod_labels = pod.metadata.labels.as_ref().unwrap();
         assert_eq!(pod_labels.get("team").unwrap(), "data");
         assert_eq!(pod_labels.get(JOB_ID_LABEL).unwrap(), "job123");
 
-        // Annotations include the per-job entry.
+        // Annotations: per-job entry present.
         let pod_annotations = pod.metadata.annotations.as_ref().unwrap();
         assert_eq!(
             pod_annotations.get("scheduler.k8s/preempt").unwrap(),
             "false"
         );
-
-        // Tolerations are appended.
-        let tolerations = spec.tolerations.as_ref().unwrap();
-        assert!(tolerations.iter().any(|t| t.key.as_deref() == Some("gpu")));
-
-        // Volumes / volume mounts are appended.
-        assert!(
-            spec.volumes
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|v| v.name == "job-secret")
-        );
-        assert!(
-            container
-                .volume_mounts
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|m| m.name == "job-secret")
-        );
-
-        // Per-job env var is present.
-        let env = container.env.as_ref().unwrap();
-        assert!(env.iter().any(|e| e.name == "PER_JOB_FOO"));
     }
 
+    /// An empty overlay must pass the global config through unchanged
+    /// (the fast path skips figment entirely).
     #[test]
-    fn test_resolved_config_falls_back_to_global() {
-        let req = StartPipelineReq {
-            name: "test_pipeline".to_string(),
-            program: LogicalProgram::default(),
-            wasm_path: "file:///wasm".to_string(),
-            pipeline_id: PipelineId("pipe-123".to_string().into()),
-            job_id: JobId("job123".to_string().into()),
-            hash: "12123123h".to_string(),
-            generation: 1,
-            slots: 8,
-            env_vars: Default::default(),
-            pipeline_tags: Default::default(),
-            scheduler_config: None,
-        };
+    fn test_empty_overlay_falls_back_to_global() {
+        let req = base_req(json!({}));
 
         let cfg = config().kubernetes_scheduler.clone();
         let global_task_slots = cfg.worker.task_slots;
         let global_image = cfg.worker.image.clone();
         let scheduler = KubernetesScheduler::with_config(None, cfg);
-        let resolved = scheduler.resolved_config(&req);
+        let resolved = scheduler.resolved_config(&req).unwrap();
 
         assert_eq!(resolved.worker.task_slots, global_task_slots);
+        assert_eq!(resolved.worker.image, global_image);
+    }
+
+    /// `Value::Null` (e.g. an explicit null in the JSON column) is
+    /// treated as "no overlay" just like an empty object.
+    #[test]
+    fn test_null_overlay_falls_back_to_global() {
+        let req = base_req(serde_json::Value::Null);
+
+        let cfg = config().kubernetes_scheduler.clone();
+        let global_image = cfg.worker.image.clone();
+        let scheduler = KubernetesScheduler::with_config(None, cfg);
+        let resolved = scheduler.resolved_config(&req).unwrap();
+
         assert_eq!(resolved.worker.image, global_image);
     }
 }

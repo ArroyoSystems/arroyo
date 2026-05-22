@@ -1,6 +1,5 @@
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::api_types::jobs::SchedulerConfig;
 use arroyo_rpc::config::config;
 use arroyo_rpc::connect_grpc;
 use arroyo_rpc::grpc::rpc::node_grpc_client::NodeGrpcClient;
@@ -106,11 +105,11 @@ pub struct StartPipelineReq {
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
     pub pipeline_tags: HashMap<String, String>,
-    /// Per-job scheduler configuration. `None` means "use the
-    /// controller's global scheduler config unchanged". Variant must
-    /// match the active scheduler (enforced at job creation time in
-    /// the API).
-    pub scheduler_config: Option<SchedulerConfig>,
+    /// Per-job scheduler configuration overlay as raw JSON. An empty
+    /// object means "use the controller's global scheduler config
+    /// unchanged". The scheduler interprets the shape; the controller
+    /// treats it as opaque and passes it through verbatim.
+    pub scheduler_config: serde_json::Value,
 }
 
 #[async_trait::async_trait]
@@ -422,6 +421,7 @@ pub struct NodeScheduler {
     state: Arc<Mutex<NodeSchedulerState>>,
 }
 
+#[derive(Debug)]
 pub enum SchedulerError {
     NotEnoughSlots { slots_needed: usize },
     Other(String),

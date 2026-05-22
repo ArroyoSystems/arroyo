@@ -1,9 +1,8 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
-use arroyo_rpc::api_types::jobs::{SchedulerConfig, SchedulerConfigSpec};
 use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
 use arroyo_rpc::api_types::{
     CheckpointCollection, JobCollection, JobLogMessageCollection,
@@ -123,7 +122,7 @@ pub(crate) async fn create_job(
     auth: &AuthData,
     db: &DatabaseSource,
     env_vars: HashMap<String, String>,
-    scheduler_config: Option<SchedulerConfig>,
+    scheduler_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -138,16 +137,6 @@ pub(crate) async fn create_job(
             "Checkpoint_interval_micros must be between 1 second and 1 day.".to_string(),
         ));
     }
-
-    if let Some(sc) = &scheduler_config {
-        validate_scheduler_config(sc)?;
-    }
-
-    let scheduler_config_json = scheduler_config
-        .as_ref()
-        .map(serde_json::to_value)
-        .transpose()
-        .map_err(|e| log_and_map(anyhow!("scheduler_config serialization failed: {e}")))?;
 
     let running_jobs = api_queries::fetch_get_jobs(&db.client().await?, &auth.organization_id)
         .await?
@@ -190,7 +179,7 @@ pub(crate) async fn create_job(
             None
         }),
         &env_vars_json,
-        &scheduler_config_json,
+        &scheduler_config,
     )
     .await?;
 
@@ -203,27 +192,6 @@ pub(crate) async fn create_job(
     .await?;
 
     Ok(job_id)
-}
-
-/// Reject `scheduler_config` payloads that:
-///   1. carry a `version` the current binary doesn't understand, or
-///   2. carry a `type` that doesn't match the controller's active
-///      scheduler (would silently no-op at scheduling time, which is
-///      worse than a 400 here).
-pub(crate) fn validate_scheduler_config(sc: &SchedulerConfig) -> Result<(), ErrorResp> {
-    use arroyo_rpc::config::Scheduler;
-
-    sc.ensure_supported_version()
-        .map_err(|e| bad_request(format!("scheduler_config: {e}")))?;
-
-    let active = &config().controller.scheduler;
-    match (&sc.spec, active) {
-        (SchedulerConfigSpec::Kubernetes(_), Scheduler::Kubernetes) => Ok(()),
-        (SchedulerConfigSpec::Kubernetes(_), other) => Err(bad_request(format!(
-            "scheduler_config.type=kubernetes is only valid when the controller scheduler is \
-             'kubernetes' (current: {other:?})"
-        ))),
-    }
 }
 
 pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option<StopType>, bool) {
