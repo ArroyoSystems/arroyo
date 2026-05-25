@@ -331,6 +331,7 @@ impl IntoResponse for HttpError {
         JsonCompression,
         AvroFormat,
         ProtobufFormat,
+        MsgPackFormat,
         ParquetFormat,
         ParquetCompression,
         RawStringFormat,

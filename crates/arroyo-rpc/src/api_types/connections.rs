@@ -490,8 +490,19 @@ impl ConnectionSchema {
                     );
                 }
             }
+            Some(Format::MsgPack(msgpack_format)) => {
+                if msgpack_format.into_unstructured_json
+                    && (non_metadata_fields.len() != 1
+                        || non_metadata_fields.first().unwrap().field_type != FieldType::Json
+                        || non_metadata_fields.first().unwrap().name != "value")
+                {
+                    bail!(
+                        "msgpack format with into_unstructured_json enabled requires a schema with a single field called `value` of type JSON"
+                    );
+                }
+            }
             _ => {
-                // Right now only RawString has checks, but we may add checks for other formats in the future
+                // Other formats currently do not impose schema-shape checks here.
             }
         }
 
@@ -613,6 +624,7 @@ pub struct ConfluentSchemaQueryParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::formats::MsgPackFormat;
     use arrow_schema::{DataType, Field as ArrowField, TimeUnit};
     use serde_json::{Value as J, json};
     use std::sync::Arc;
@@ -707,6 +719,49 @@ mod tests {
         assert_eq!(arrow.data_type(), &DataType::Utf8);
         let back: SourceField = arrow.try_into().unwrap();
         assert_eq!(back.field_type, FieldType::Json);
+    }
+
+    #[test]
+    fn msgpack_unstructured_json_schema_validation() {
+        let schema = ConnectionSchema::try_new(
+            Some(Format::MsgPack(MsgPackFormat {
+                into_unstructured_json: true,
+                ..Default::default()
+            })),
+            None,
+            None,
+            vec![SourceField {
+                name: "value".into(),
+                field_type: FieldType::Json,
+                required: true,
+                sql_name: None,
+                metadata_key: None,
+            }],
+            None,
+            None,
+            HashSet::default(),
+        );
+        assert!(schema.is_ok());
+
+        let invalid = ConnectionSchema::try_new(
+            Some(Format::MsgPack(MsgPackFormat {
+                into_unstructured_json: true,
+                ..Default::default()
+            })),
+            None,
+            None,
+            vec![SourceField {
+                name: "payload".into(),
+                field_type: FieldType::String,
+                required: true,
+                sql_name: None,
+                metadata_key: None,
+            }],
+            None,
+            None,
+            HashSet::default(),
+        );
+        assert!(invalid.unwrap_err().to_string().contains("msgpack format"));
     }
 
     #[test]
