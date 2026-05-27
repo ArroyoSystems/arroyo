@@ -29,7 +29,7 @@ export interface CheckpointsProps {
 }
 
 const CHECKPOINT_LEADER_UNAVAILABLE_MESSAGE =
-  'Checkpoint data for a running job is served by the job leader. The API server is online, but it could not reach the current leader to proxy this request. The leader may be restarting, failing over, or temporarily unreachable; refresh or try again in a moment.';
+  'The leader for this pipeline could not be reached, possibly because it\'s failed or stopped';
 
 const CheckpointErrorAlert: React.FC<{ error: any }> = ({ error }) => {
   const leaderUnavailable = error?.status === 502;

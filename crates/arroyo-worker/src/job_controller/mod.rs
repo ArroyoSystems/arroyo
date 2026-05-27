@@ -20,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // Re-export shared types from arroyo-rpc
 pub use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent, WorkerContext};
@@ -117,6 +117,8 @@ impl CheckpointHistory {
             checkpoint.event_spans = event_spans;
             checkpoint.finish_time = finish_time;
             checkpoint.status = status;
+        } else {
+            warn!("tried to finish checkpoint for unknown id {checkpoint_id}")
         }
     }
 
@@ -134,6 +136,8 @@ impl CheckpointHistory {
             checkpoint.finish_time = Some(finish_time);
             checkpoint.event_spans = event_spans;
             checkpoint.status = arroyo_rpc::checkpoints::CheckpointStatus::Ready;
+        } else {
+            warn!("tried to finish checkpoint for unknown id {checkpoint_id}")
         }
     }
 
