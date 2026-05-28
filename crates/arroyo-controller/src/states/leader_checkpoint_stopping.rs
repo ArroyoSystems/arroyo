@@ -1,3 +1,4 @@
+use std::time::Duration;
 use super::{JobContext, State, Stopped, Transition};
 use crate::job_controller::leader_manager::handle_leader_stopping;
 use crate::states::StateError;
@@ -24,6 +25,9 @@ impl State for LeaderCheckpointStopping {
 
         let timeout = config().pipeline.checkpoint.timeout.as_ref().map(|t| **t);
 
+        println!("sleeping...");
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        println!("continuing...");
         handle_leader_stopping(*self, ctx, JobState::JobStopped, Stopped {}, timeout).await
     }
 }

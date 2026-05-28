@@ -328,24 +328,15 @@ impl Scheduler for ProcessScheduler {
     }
 }
 
-struct ManualWorker {
-    job_id: JobId,
-    generation: u64,
-}
 
 /// A "manual" scheduler that relies on the user to manage worker processes by executing commands
 /// printed out to the terminal. This is mostly useful for testing scheduling behavior.
 pub struct ManualScheduler {
-    workers: Arc<Mutex<HashMap<WorkerId, ManualWorker>>>,
-    worker_counter: AtomicU64,
 }
 
 impl ManualScheduler {
     pub fn new() -> Self {
-        Self {
-            workers: Arc::new(Mutex::new(HashMap::new())),
-            worker_counter: AtomicU64::new(100),
-        }
+        Self {}
     }
 }
 
@@ -370,15 +361,12 @@ impl Scheduler for ManualScheduler {
             let slots_here = (start_pipeline_req.slots - slots_scheduled).min(slots_per_process);
             slots_scheduled += slots_here;
 
-            let worker_id = self.worker_counter.fetch_add(1, Ordering::SeqCst);
-
             let mut envs: Vec<(String, String)> = vec![
                 ("ARROYO__ADMIN__HTTP_PORT".to_string(), "0".to_string()),
                 (
                     "ARROYO__WORKER__TASK_SLOTS".to_string(),
                     slots_here.to_string(),
                 ),
-                ("ARROYO__WORKER__ID".to_string(), worker_id.to_string()),
                 (
                     "ARROYO__CONTROLLER_ENDPOINT".to_string(),
                     config.controller_endpoint(),
@@ -424,27 +412,15 @@ impl Scheduler for ManualScheduler {
                 cmdline.push_str(&arg);
             }
 
-            {
-                let mut workers = self.workers.lock().await;
-                workers.insert(
-                    WorkerId(worker_id),
-                    ManualWorker {
-                        job_id: start_pipeline_req.job_id.clone(),
-                        generation: start_pipeline_req.generation,
-                    },
-                );
-            }
-
             println!();
             println!(
                 "════════════════════════════════════════════════════════════════════════════════"
             );
             println!(
-                "[manual scheduler] Run worker {} of {} (worker id {}, {} slots) for job {} in a \
+                "[manual scheduler] Run worker {} of {} (worker id {} slots) for job {} in a \
                  separate terminal:",
                 slots_scheduled / slots_per_process.max(1),
                 workers,
-                worker_id,
                 slots_here,
                 start_pipeline_req.job_id,
             );
@@ -467,55 +443,24 @@ impl Scheduler for ManualScheduler {
 
     async fn workers_for_job(
         &self,
-        job_id: &str,
-        run_id: Option<u64>,
+        _job_id: &str,
+        _run_id: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
-        Ok(self
-            .workers
-            .lock()
-            .await
-            .iter()
-            .filter(|(_, w)| {
-                *w.job_id == job_id && (run_id.is_none() || w.generation == run_id.unwrap())
-            })
-            .map(|(k, _)| *k)
-            .collect())
+        Ok(vec![])
     }
 
     async fn stop_workers(
         &self,
         job_id: &str,
-        run_id: Option<u64>,
+        _run_id: Option<u64>,
         _force: bool,
     ) -> anyhow::Result<()> {
-        for worker_id in self.workers_for_job(job_id, run_id).await? {
-            let removed = self.workers.lock().await.remove(&worker_id).is_some();
-            if removed {
-                println!(
-                    "[manual scheduler] Stop worker {} for job {} (Ctrl-C its terminal)",
-                    worker_id.0, job_id
-                );
-            }
-        }
+        println!(
+            "[manual scheduler] Stop workers for job {}",
+            job_id
+        );
 
         Ok(())
-    }
-
-    async fn shutdown(&self) {
-        let workers: Vec<_> = self.workers.lock().await.drain().collect();
-        if workers.is_empty() {
-            return;
-        }
-
-        println!(
-            "[manual scheduler] Controller shutting down; stop the following manually-run workers \
-             (Ctrl-C their terminals): {}",
-            workers
-                .iter()
-                .map(|(id, _)| id.0.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
     }
 }
 
