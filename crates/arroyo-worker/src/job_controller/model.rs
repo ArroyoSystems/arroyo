@@ -538,8 +538,11 @@ impl RunningJobModel {
                     }
                 };
 
-                let commit = checkpointing
-                    .into_commit(CheckpointIdOrRef::CheckpointRef(commit_permit.clone()));
+                let checkpoint_id = checkpointing.checkpoint_id.clone();
+                let commit = checkpointing.into_commit(CheckpointIdOrRef::CheckpointIdAndRef(
+                    checkpoint_id,
+                    commit_permit.clone(),
+                ));
 
                 let committing_data = commit.committing_data();
 
@@ -622,7 +625,7 @@ impl RunningJobModel {
                 complete_commit(storage.as_ref(), commit_permit, Generation(self.generation))
                     .await?;
 
-                self.finish_committing(commit_permit.checkpoint_ref().as_str(), store)
+                self.finish_committing(committing.checkpoint_id(), store)
                     .await?;
 
                 self.last_checkpoint = Instant::now();
