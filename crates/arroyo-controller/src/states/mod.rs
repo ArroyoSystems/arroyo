@@ -271,6 +271,8 @@ impl TransitionTo<Failed> for Failing {}
 fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
     ctx.job_controller = None;
+    ctx.leader_manager = None;
+    ctx.status.state_context.leader = None;
 }
 
 impl TransitionTo<Stopped> for Stopping {

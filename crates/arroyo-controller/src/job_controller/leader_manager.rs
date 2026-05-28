@@ -1,7 +1,9 @@
 use crate::JobMessage;
 use crate::states::leader_stopping::{LeaderStopBehavior, LeaderStopping};
 use crate::states::recovering::Recovering;
-use crate::states::{JobContext, State, StateError, Transition, TransitionTo, fatal};
+use crate::states::{
+    JobContext, State, StateError, Transition, TransitionTo, controller_job_failure,
+};
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::{anyhow, bail};
 use arroyo_rpc::config::config;
@@ -197,7 +199,11 @@ where
             }
             resp = ctx.leader_manager.as_mut().expect("leader manager not initialized").wait_for_state(expected_state) => {
                 if let Err(e) = resp {
-                    return Err(fatal("failed while waiting for final checkpoint", e));
+                return ctx.handle_job_failure(state, controller_job_failure(
+                    format!("failed while taking final checkpoint: {:?}", e),
+                    rpc::ErrorDomain::Internal,
+                    rpc::RetryHint::WithBackoff,
+                )).await;
                 }
                 return Ok(Transition::next(
                     state,
@@ -205,14 +211,11 @@ where
                 ));
             }
             _ = tokio::time::sleep(timeout) => {
-                return ctx.handle_job_failure(state, JobFailure {
-                    operator_id: None,
-                    task_id: None,
-                    subtask_index: None,
-                    message: "timed out while taking final checkpoint".to_string(),
-                    error_domain: rpc::ErrorDomain::Internal as i32,
-                    retry_hint: rpc::RetryHint::WithBackoff as i32,
-                }).await;
+                return ctx.handle_job_failure(state, controller_job_failure(
+                    "timed out while taking final checkpoint".to_string(),
+                    rpc::ErrorDomain::Internal,
+                    rpc::RetryHint::WithBackoff,
+                )).await;
             }
         }
     }

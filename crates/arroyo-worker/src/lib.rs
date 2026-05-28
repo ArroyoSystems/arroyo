@@ -1015,17 +1015,32 @@ impl WorkerGrpc for WorkerServer {
         &self,
         _request: Request<JobFinishedReq>,
     ) -> Result<Response<JobFinishedResp>, Status> {
+        let is_worker_leader = self.state.job_controller_tx.get().is_some();
+
         let mut phase = self.state.phase.lock().unwrap();
         if let WorkerExecutionPhase::Running(engine_state) = &*phase {
             engine_state.shutdown_guard.cancel();
         }
         *phase = WorkerExecutionPhase::Idle;
+        drop(phase);
 
-        let token = self.shutdown_guard.token();
-        tokio::task::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            token.cancel();
-        });
+        if is_worker_leader {
+            // Keep the worker leader reachable so the controller can observe the
+            // terminal job status before explicitly stopping the worker process.
+            info!(
+                message =
+                    "job finished on worker leader; waiting for controller to stop worker process",
+                worker_id = self.state.worker_context.worker_id.0,
+                job_id = *self.state.worker_context.job_id,
+                generation = self.state.worker_context.generation,
+            );
+        } else {
+            let token = self.shutdown_guard.token();
+            tokio::task::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                token.cancel();
+            });
+        }
 
         Ok(Response::new(JobFinishedResp {}))
     }
@@ -1256,15 +1271,24 @@ impl JobControllerGrpc for LeaderServer {
         self.validate_req(req.worker_context.as_ref())?;
 
         debug!(
-            "[{:?}] Received heartbeat {:?}",
-            self.state.worker_context.worker_id, req
+            worker_id =? self.state.worker_context.worker_id,
+            ?req,
+            "received heartbeat",
         );
 
-        self.send_job_message(RunningMessage::WorkerHeartbeat {
-            worker_id: WorkerId(req.worker_context.as_ref().unwrap().worker_id),
-            time: Instant::now(),
-        })
-        .await?;
+        if self
+            .send_job_message(RunningMessage::WorkerHeartbeat {
+                worker_id: WorkerId(req.worker_context.as_ref().unwrap().worker_id),
+                time: Instant::now(),
+            })
+            .await
+            .is_err()
+        {
+            debug!(
+                worker_id =? self.state.worker_context.worker_id,
+                "received heartbeat while shutting down"
+            )
+        };
 
         Ok(Response::new(HeartbeatResp {}))
     }

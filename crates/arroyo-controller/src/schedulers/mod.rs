@@ -328,11 +328,9 @@ impl Scheduler for ProcessScheduler {
     }
 }
 
-
 /// A "manual" scheduler that relies on the user to manage worker processes by executing commands
 /// printed out to the terminal. This is mostly useful for testing scheduling behavior.
-pub struct ManualScheduler {
-}
+pub struct ManualScheduler {}
 
 impl ManualScheduler {
     pub fn new() -> Self {
@@ -455,10 +453,7 @@ impl Scheduler for ManualScheduler {
         _run_id: Option<u64>,
         _force: bool,
     ) -> anyhow::Result<()> {
-        println!(
-            "[manual scheduler] Stop workers for job {}",
-            job_id
-        );
+        println!("[manual scheduler] Stop workers for job {}", job_id);
 
         Ok(())
     }
