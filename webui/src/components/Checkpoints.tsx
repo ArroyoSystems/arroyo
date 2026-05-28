@@ -246,6 +246,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({
   const checkpointMenuItems = checkpoints.slice();
   if (checkpoint && !checkpointMenuItems.some(c => c.epoch == checkpoint.epoch)) {
     checkpointMenuItems.push(checkpoint);
+    checkpointMenuItems.sort((a, b) => a.epoch - b.epoch);
   }
 
   return (
