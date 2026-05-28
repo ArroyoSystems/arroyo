@@ -118,7 +118,7 @@ impl CheckpointHistory {
             checkpoint.finish_time = finish_time;
             checkpoint.status = status;
         } else {
-            warn!("tried to finish checkpoint for unknown id {checkpoint_id}")
+            warn!("tried to update checkpoint for unknown id {checkpoint_id}")
         }
     }
 
