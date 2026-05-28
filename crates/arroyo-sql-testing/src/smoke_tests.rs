@@ -675,7 +675,7 @@ async fn check_output_files(
     golden_output_lines.sort_by_cached_key(|v| roundtrip(v).to_string());
     output_lines
         .into_iter()
-        .zip(golden_output_lines.into_iter())
+        .zip(golden_output_lines)
         .enumerate()
         .for_each(|(i, (output_line, golden_output_line))| {
             similar_asserts::assert_eq!(

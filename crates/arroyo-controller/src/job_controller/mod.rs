@@ -380,14 +380,12 @@ impl JobController {
                         .handle_message(msg, &*self.checkpoint_store)
                         .await?;
                 }
-                JobMessage::ConfigUpdate(c) => {
-                    if c.stop_mode == SqlStopMode::immediate {
-                        info!(
-                            message = "stopping job immediately",
-                            job_id = *self.config.id
-                        );
-                        self.stop_job(StopMode::Immediate).await?;
-                    }
+                JobMessage::ConfigUpdate(c) if c.stop_mode == SqlStopMode::immediate => {
+                    info!(
+                        message = "stopping job immediately",
+                        job_id = *self.config.id
+                    );
+                    self.stop_job(StopMode::Immediate).await?;
                 }
                 _ => {
                     // ignore other messages

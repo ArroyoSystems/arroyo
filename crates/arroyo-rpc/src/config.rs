@@ -1025,6 +1025,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)]
     fn test_config() {
         figment::Jail::expect_with(|jail| {
             // test default loading
@@ -1054,6 +1055,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)]
     fn test_legacy_config() {
         figment::Jail::expect_with(|jail| {
             jail.set_env("SCHEDULER", "kubernetes");
@@ -1076,6 +1078,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)]
     fn test_sensitive_config() {
         figment::Jail::expect_with(|jail| {
             jail.set_env("ARROYO__DATABASE__POSTGRES__PASSWORD", "sup3r-s3cr3t-p@ss");

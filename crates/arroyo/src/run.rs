@@ -134,7 +134,7 @@ async fn get_pipelines(client: &Client) -> anyhow::Result<Vec<Pipeline>> {
             starting_after = next;
         }
 
-        result.extend(pipelines.data.into_iter());
+        result.extend(pipelines.data);
 
         if !pipelines.has_more {
             break;

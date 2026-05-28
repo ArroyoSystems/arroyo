@@ -219,29 +219,29 @@ async fn try_register_confluent_schema(
         ConfluentSchemaRegistry::new(&endpoint, &table.subject(), api_key, api_secret)?;
 
     match config.format.clone() {
-        Some(Format::Avro(mut avro)) => {
-            if avro.confluent_schema_registry && avro.schema_id.is_none() {
-                let avro_schema = ArrowSerializer::avro_schema(schema);
+        Some(Format::Avro(mut avro))
+            if avro.confluent_schema_registry && avro.schema_id.is_none() =>
+        {
+            let avro_schema = ArrowSerializer::avro_schema(schema);
 
-                let id = schema_registry
-                    .write_schema(avro_schema.canonical_form(), ConfluentSchemaType::Avro)
-                    .await?;
+            let id = schema_registry
+                .write_schema(avro_schema.canonical_form(), ConfluentSchemaType::Avro)
+                .await?;
 
-                avro.schema_id = Some(id as u32);
-                config.format = Some(Format::Avro(avro))
-            }
+            avro.schema_id = Some(id as u32);
+            config.format = Some(Format::Avro(avro))
         }
-        Some(Format::Json(mut json)) => {
-            if json.confluent_schema_registry && json.schema_id.is_none() {
-                let json_schema = ArrowSerializer::json_schema(schema);
+        Some(Format::Json(mut json))
+            if json.confluent_schema_registry && json.schema_id.is_none() =>
+        {
+            let json_schema = ArrowSerializer::json_schema(schema);
 
-                let id = schema_registry
-                    .write_schema(json_schema.to_string(), ConfluentSchemaType::Json)
-                    .await?;
+            let id = schema_registry
+                .write_schema(json_schema.to_string(), ConfluentSchemaType::Json)
+                .await?;
 
-                json.schema_id = Some(id as u32);
-                config.format = Some(Format::Json(json))
-            }
+            json.schema_id = Some(id as u32);
+            config.format = Some(Format::Json(json))
         }
         _ => {
             // unsupported for schema registry

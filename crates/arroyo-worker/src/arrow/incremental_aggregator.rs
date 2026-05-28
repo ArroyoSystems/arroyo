@@ -64,7 +64,7 @@ impl BatchData {
     }
 
     fn dec(&mut self) {
-        self.count = self.count.checked_sub(1).unwrap_or_default();
+        self.count = self.count.saturating_sub(1);
         self.generation += 1;
     }
 }
@@ -315,7 +315,7 @@ impl IncrementalAggregatingFunc {
                         agg.func.name()
                     );
 
-                    for (idx, v) in agg.state_cols.iter().zip(state.into_iter()) {
+                    for (idx, v) in agg.state_cols.iter().zip(state) {
                         states[*idx].push(v);
                     }
                 }
@@ -401,7 +401,7 @@ impl IncrementalAggregatingFunc {
             }
         }
 
-        let mut cols = self.key_converter.convert_rows(rows.into_iter())?;
+        let mut cols = self.key_converter.convert_rows(rows)?;
 
         cols.push(Arc::new(accumulator_builder.finish()));
         cols.push(Arc::new(args_row_builder.finish()));
@@ -647,7 +647,7 @@ impl IncrementalAggregatingFunc {
 
         let mut deleted_keys = vec![];
 
-        for (k, retract) in updated_keys.iter().zip(updated_values.into_iter()) {
+        for (k, retract) in updated_keys.iter().zip(updated_values) {
             let append = self.evaluate(&k.0)?;
 
             if let Some(v) = retract {

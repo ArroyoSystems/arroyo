@@ -35,7 +35,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           components: clippy, rustfmt
-          toolchain: 1.93
+          toolchain: 1.95
       - uses: actions/cache@v4
         with:
           path: |
@@ -103,7 +103,7 @@ jobs:
       - name: Build
         run: cargo build --all-features
       - name: Run Clippy
-        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
+        run: cargo clippy --no-deps --all-features --all-targets --workspace -- -D warnings
       - name: Test
         run: cargo nextest run -E 'kind(lib)' --all-features
       - name: Integ postgres

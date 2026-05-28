@@ -521,6 +521,7 @@ impl KafkaTester {
     }
 
     #[allow(unused)]
+    #[allow(clippy::result_large_err)]
     pub async fn topic_metadata(&self, topic: &str) -> Result<TopicMetadata, Status> {
         let client = self
             .connect(None)

@@ -285,7 +285,7 @@ impl UploadState {
                 let futures = f.close()?;
 
                 let mut ps = self.pending_uploads.lock().await;
-                ps.extend(futures.into_iter());
+                ps.extend(futures);
                 true
             } else {
                 false

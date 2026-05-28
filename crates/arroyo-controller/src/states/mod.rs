@@ -1165,13 +1165,12 @@ impl StateMachine {
     ) {
         match (applied, status.state.as_str()) {
             (_, "Running" | "Recovering" | "Rescaling" | "Restarting")
-            | (AppliedStatus::NotApplied, _) => {
+            | (AppliedStatus::NotApplied, _)
                 // done() means there isn't a task running, but these states
                 // need to be advanced.
-                if self.done() {
+                if self.done() => {
                     self.start(status, shutdown_guard.clone_temporary()).await;
                 }
-            }
             _ => {}
         }
     }
