@@ -3,7 +3,6 @@ use crate::job_controller::leader_manager::handle_leader_stopping;
 use crate::states::StateError;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{JobState, JobStopMode};
-use std::time::Duration;
 
 #[derive(Debug)]
 pub struct LeaderCheckpointStopping {}

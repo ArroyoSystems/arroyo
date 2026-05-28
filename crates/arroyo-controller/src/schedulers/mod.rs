@@ -407,7 +407,7 @@ impl Scheduler for ManualScheduler {
             cmdline.push_str(&exe.to_string_lossy());
             for arg in &args {
                 cmdline.push(' ');
-                cmdline.push_str(&arg);
+                cmdline.push_str(arg);
             }
 
             println!();

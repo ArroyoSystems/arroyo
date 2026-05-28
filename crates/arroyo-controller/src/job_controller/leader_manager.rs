@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail};
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
-use arroyo_rpc::grpc::rpc::{JobFailure, JobState, JobStatusReq, JobStopMode, StopJobReq};
+use arroyo_rpc::grpc::rpc::{JobState, JobStatusReq, JobStopMode, StopJobReq};
 use arroyo_rpc::identity::InjectWorkerId;
 use arroyo_rpc::{job_status_client, retry};
 use arroyo_types::{JobId, WorkerId};
