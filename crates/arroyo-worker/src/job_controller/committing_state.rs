@@ -7,7 +7,7 @@ pub enum CheckpointIdOrRef {
     // used by database-backed mode, checkpoint metadata v0
     CheckpointId(String),
     // used by checkpoint metadata v1
-    CheckpointRef(CommitPermit, String),
+    CheckpointIdAndRef(String, CommitPermit),
 }
 
 pub struct CommittingState {
@@ -31,7 +31,7 @@ impl CommittingState {
 
     pub fn checkpoint_id(&self) -> &str {
         match &self.checkpoint_id {
-            CheckpointIdOrRef::CheckpointId(id) | CheckpointIdOrRef::CheckpointRef(_, id) => {
+            CheckpointIdOrRef::CheckpointId(id) | CheckpointIdOrRef::CheckpointIdAndRef(id, _) => {
                 id.as_str()
             }
         }
@@ -42,7 +42,7 @@ impl CommittingState {
             CheckpointIdOrRef::CheckpointId(_) => {
                 panic!("asked for commit permit in controller mode, which is not allowed");
             }
-            CheckpointIdOrRef::CheckpointRef(commit_permit, _) => commit_permit,
+            CheckpointIdOrRef::CheckpointIdAndRef(_, commit_permit) => commit_permit,
         }
     }
 

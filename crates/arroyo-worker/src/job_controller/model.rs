@@ -539,9 +539,9 @@ impl RunningJobModel {
                 };
 
                 let checkpoint_id = checkpointing.checkpoint_id.clone();
-                let commit = checkpointing.into_commit(CheckpointIdOrRef::CheckpointRef(
-                    commit_permit.clone(),
+                let commit = checkpointing.into_commit(CheckpointIdOrRef::CheckpointIdAndRef(
                     checkpoint_id,
+                    commit_permit.clone(),
                 ));
 
                 let committing_data = commit.committing_data();
