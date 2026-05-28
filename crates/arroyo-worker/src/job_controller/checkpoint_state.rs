@@ -433,8 +433,7 @@ impl CheckpointState {
                         task_details
                             .finish_time
                             .unwrap_or_default()
-                            .checked_sub(task_details.start_time)
-                            .unwrap_or_default(),
+                            .saturating_sub(task_details.start_time),
                     ),
                     spans,
                 );

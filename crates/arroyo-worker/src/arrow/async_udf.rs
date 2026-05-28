@@ -457,11 +457,7 @@ impl AsyncUdfOperator {
                 .unwrap_or((u64::MAX, None));
 
             let mut rows = vec![];
-            loop {
-                let Some((id, row)) = self.outputs.pop_first() else {
-                    break;
-                };
-
+            while let Some((id, row)) = self.outputs.pop_first() {
                 if id >= watermark_id {
                     self.outputs.insert(id, row);
                     break;

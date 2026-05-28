@@ -616,10 +616,7 @@ impl KeyComputingHolder {
         let Some(active_session) = self.active_session.as_mut() else {
             bail!("fill_active_session() should not be called when there is no active session");
         };
-        loop {
-            let Some((first_key, _batches)) = self.batches_by_start_time.first_key_value() else {
-                break;
-            };
+        while let Some((first_key, _batches)) = self.batches_by_start_time.first_key_value() {
             if active_session.data_end + self.session_window_config.gap < *first_key {
                 // the next batch is after the current session + gap, so we can stop.
                 break;

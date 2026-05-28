@@ -211,7 +211,7 @@ impl KinesisSourceFunc {
             self.shards.insert(shard_id, shard_state);
         }
         let new_futures = self.sync_shards(ctx).await?;
-        futures.extend(new_futures.into_iter());
+        futures.extend(new_futures);
 
         Ok(futures)
     }
@@ -357,7 +357,7 @@ impl KinesisSourceFunc {
         self.init_client().await;
         let starting_futures = self.init_shards(ctx).await?;
         let mut futures = FuturesUnordered::new();
-        futures.extend(starting_futures.into_iter());
+        futures.extend(starting_futures);
 
         let mut shard_poll_interval = tokio::time::interval(Duration::from_secs(1));
         shard_poll_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);

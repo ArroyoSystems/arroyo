@@ -469,26 +469,24 @@ impl ConnectionSchema {
             .collect();
 
         match &self.format {
-            Some(Format::RawString(_)) => {
-                if non_metadata_fields.len() != 1
+            Some(Format::RawString(_))
+                if (non_metadata_fields.len() != 1
                     || non_metadata_fields.first().unwrap().field_type != FieldType::String
-                    || non_metadata_fields.first().unwrap().name != "value"
-                {
-                    bail!(
-                        "raw_string format requires a schema with a single field called `value` of type TEXT"
-                    );
-                }
+                    || non_metadata_fields.first().unwrap().name != "value") =>
+            {
+                bail!(
+                    "raw_string format requires a schema with a single field called `value` of type TEXT"
+                );
             }
-            Some(Format::Json(json_format)) => {
+            Some(Format::Json(json_format))
                 if json_format.unstructured
                     && (non_metadata_fields.len() != 1
                         || non_metadata_fields.first().unwrap().field_type != FieldType::Json
-                        || non_metadata_fields.first().unwrap().name != "value")
-                {
-                    bail!(
-                        "json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON"
-                    );
-                }
+                        || non_metadata_fields.first().unwrap().name != "value") =>
+            {
+                bail!(
+                    "json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON"
+                );
             }
             _ => {
                 // Right now only RawString has checks, but we may add checks for other formats in the future
