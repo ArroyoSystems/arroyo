@@ -5,8 +5,6 @@ use ahash::HashSet;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
-use serde::__private::ser::FlatMapSerializer;
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
@@ -240,12 +238,21 @@ impl Serialize for ListFieldItem {
     where
         S: Serializer,
     {
-        let mut f = Serializer::serialize_map(s, None)?;
-        f.serialize_entry("name", &self.name)?;
-        self.field_type.serialize(FlatMapSerializer(&mut f))?;
-        f.serialize_entry("required", &self.required)?;
-        f.serialize_entry("sql_name", &self.field_type.sql_type())?;
-        f.end()
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            name: &'a str,
+            #[serde(flatten)]
+            field_type: &'a FieldType,
+            required: bool,
+            sql_name: String,
+        }
+        Wire {
+            name: &self.name,
+            field_type: &self.field_type,
+            required: self.required,
+            sql_name: self.field_type.sql_type(),
+        }
+        .serialize(s)
     }
 }
 
@@ -283,15 +290,24 @@ impl Serialize for SourceField {
     where
         S: Serializer,
     {
-        let mut f = Serializer::serialize_map(s, None)?;
-        f.serialize_entry("name", &self.name)?;
-        self.field_type.serialize(FlatMapSerializer(&mut f))?;
-        f.serialize_entry("required", &self.required)?;
-        if let Some(metadata_key) = &self.metadata_key {
-            f.serialize_entry("metadata_key", metadata_key)?;
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            name: &'a str,
+            #[serde(flatten)]
+            field_type: &'a FieldType,
+            required: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            metadata_key: Option<&'a String>,
+            sql_name: String,
         }
-        f.serialize_entry("sql_name", &self.field_type.sql_type())?;
-        f.end()
+        Wire {
+            name: &self.name,
+            field_type: &self.field_type,
+            required: self.required,
+            metadata_key: self.metadata_key.as_ref(),
+            sql_name: self.field_type.sql_type(),
+        }
+        .serialize(s)
     }
 }
 
@@ -900,5 +916,196 @@ mod tests {
             let back: SourceField = a.try_into().unwrap();
             assert_eq!(back, sf);
         }
+    }
+
+    #[test]
+    fn source_field_serializes_with_flattened_type_and_sql_name() {
+        let sf = SourceField {
+            name: "count".into(),
+            field_type: FieldType::Int64,
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "count",
+                "type": "int64",
+                "required": true,
+                "sql_name": "BIGINT",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_serializes_payload_variant_with_sibling_fields() {
+        let sf = SourceField {
+            name: "ts".into(),
+            field_type: FieldType::Timestamp(TimestampField {
+                unit: TimestampUnit::Millisecond,
+            }),
+            required: false,
+            sql_name: None,
+            metadata_key: Some("kafka_ts".into()),
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "ts",
+                "type": "timestamp",
+                "unit": "millisecond",
+                "required": false,
+                "metadata_key": "kafka_ts",
+                "sql_name": "TIMESTAMP(3)",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_metadata_key_omitted_when_none() {
+        let sf = SourceField {
+            name: "x".into(),
+            field_type: FieldType::String,
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let s = serde_json::to_string(&sf).unwrap();
+        assert!(!s.contains("metadata_key"), "got: {s}");
+    }
+
+    #[test]
+    fn list_field_item_serializes_with_flattened_type_and_sql_name() {
+        let item = ListFieldItem {
+            name: "item".into(),
+            field_type: FieldType::Int32,
+            required: true,
+            sql_name: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&item).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "item",
+                "type": "int32",
+                "required": true,
+                "sql_name": "INTEGER",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_with_struct_payload_serializes_recursively() {
+        let sf = SourceField {
+            name: "obj".into(),
+            field_type: FieldType::Struct(StructField {
+                fields: vec![
+                    SourceField {
+                        name: "a".into(),
+                        field_type: FieldType::Int32,
+                        required: true,
+                        sql_name: None,
+                        metadata_key: None,
+                    },
+                    SourceField {
+                        name: "b".into(),
+                        field_type: FieldType::String,
+                        required: false,
+                        sql_name: None,
+                        metadata_key: None,
+                    },
+                ],
+            }),
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "obj",
+                "type": "struct",
+                "fields": [
+                    {
+                        "name": "a",
+                        "type": "int32",
+                        "required": true,
+                        "sql_name": "INTEGER",
+                    },
+                    {
+                        "name": "b",
+                        "type": "string",
+                        "required": false,
+                        "sql_name": "TEXT",
+                    },
+                ],
+                "required": true,
+                "sql_name": "STRUCT <a INTEGER, b TEXT>",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_with_list_payload_recurses_through_list_field_item() {
+        let sf = SourceField {
+            name: "arr".into(),
+            field_type: FieldType::List(ListField {
+                items: Box::new(ListFieldItem {
+                    name: "item".into(),
+                    field_type: FieldType::Int64,
+                    required: true,
+                    sql_name: None,
+                }),
+            }),
+            required: false,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "arr",
+                "type": "list",
+                "items": {
+                    "name": "item",
+                    "type": "int64",
+                    "required": true,
+                    "sql_name": "BIGINT",
+                },
+                "required": false,
+                "sql_name": "BIGINT[]",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_with_decimal_payload() {
+        let sf = SourceField {
+            name: "price".into(),
+            field_type: FieldType::Decimal128(DecimalField {
+                precision: 10,
+                scale: 2,
+            }),
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "price",
+                "type": "decimal128",
+                "precision": 10,
+                "scale": 2,
+                "required": true,
+                "sql_name": "DECIMAL(10, 2)",
+            })
+        );
     }
 }
