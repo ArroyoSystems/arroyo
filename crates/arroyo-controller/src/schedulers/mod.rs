@@ -328,6 +328,137 @@ impl Scheduler for ProcessScheduler {
     }
 }
 
+/// A "manual" scheduler that relies on the user to manage worker processes by executing commands
+/// printed out to the terminal. This is mostly useful for testing scheduling behavior.
+pub struct ManualScheduler {}
+
+impl ManualScheduler {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[async_trait::async_trait]
+impl Scheduler for ManualScheduler {
+    async fn start_workers(
+        &self,
+        start_pipeline_req: StartPipelineReq,
+    ) -> Result<(), SchedulerError> {
+        let config = config();
+        let slots_per_process = config.manual_scheduler.slots_per_process as usize;
+
+        let workers = (start_pipeline_req.slots as f32 / slots_per_process as f32).ceil() as usize;
+
+        let exe = current_exe().map_err(|e| {
+            SchedulerError::Other(format!("Could not get path of worker binary: {e:?}"))
+        })?;
+
+        let mut slots_scheduled = 0;
+
+        for _ in 0..workers {
+            let slots_here = (start_pipeline_req.slots - slots_scheduled).min(slots_per_process);
+            slots_scheduled += slots_here;
+
+            let mut envs: Vec<(String, String)> = vec![
+                ("ARROYO__ADMIN__HTTP_PORT".to_string(), "0".to_string()),
+                (
+                    "ARROYO__WORKER__TASK_SLOTS".to_string(),
+                    slots_here.to_string(),
+                ),
+                (
+                    "ARROYO__CONTROLLER_ENDPOINT".to_string(),
+                    config.controller_endpoint(),
+                ),
+                (
+                    PIPELINE_ID_ENV.to_string(),
+                    start_pipeline_req.pipeline_id.to_string(),
+                ),
+                (
+                    JOB_ID_ENV.to_string(),
+                    start_pipeline_req.job_id.to_string(),
+                ),
+                (
+                    GENERATION_ENV.to_string(),
+                    start_pipeline_req.generation.to_string(),
+                ),
+            ];
+
+            for (env, value) in &start_pipeline_req.env_vars {
+                envs.push((env.clone(), value.clone()));
+            }
+
+            // Build the command-line arguments, mirroring the process scheduler.
+            let mut args: Vec<String> = vec![];
+            if let Some(path) = &config.config_path {
+                args.push("-c".to_string());
+                args.push(path.to_string_lossy().to_string());
+            }
+            if let Some(path) = &config.config_dir {
+                args.push("--config-dir".to_string());
+                args.push(path.to_string_lossy().to_string());
+            }
+            args.push("worker".to_string());
+
+            // Assemble the copy-pasteable command line.
+            let mut cmdline = String::new();
+            for (env, value) in &envs {
+                cmdline.push_str(&format!("{}={} ", env, value));
+            }
+            cmdline.push_str(&exe.to_string_lossy());
+            for arg in &args {
+                cmdline.push(' ');
+                cmdline.push_str(arg);
+            }
+
+            println!();
+            println!(
+                "════════════════════════════════════════════════════════════════════════════════"
+            );
+            println!(
+                "[manual scheduler] Run worker {} of {} (worker id {} slots) for job {} in a \
+                 separate terminal:",
+                slots_scheduled / slots_per_process.max(1),
+                workers,
+                slots_here,
+                start_pipeline_req.job_id,
+            );
+            println!();
+            println!("{cmdline}");
+            println!(
+                "════════════════════════════════════════════════════════════════════════════════"
+            );
+            println!();
+        }
+
+        Ok(())
+    }
+
+    async fn register_node(&self, _: RegisterNodeReq) {}
+    async fn heartbeat_node(&self, _: HeartbeatNodeReq) -> Result<(), Status> {
+        Ok(())
+    }
+    async fn worker_finished(&self, _: WorkerFinishedReq) {}
+
+    async fn workers_for_job(
+        &self,
+        _job_id: &str,
+        _run_id: Option<u64>,
+    ) -> anyhow::Result<Vec<WorkerId>> {
+        Ok(vec![])
+    }
+
+    async fn stop_workers(
+        &self,
+        job_id: &str,
+        _run_id: Option<u64>,
+        _force: bool,
+    ) -> anyhow::Result<()> {
+        println!("[manual scheduler] Stop workers for job {}", job_id);
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct NodeStatus {
     id: MachineId,

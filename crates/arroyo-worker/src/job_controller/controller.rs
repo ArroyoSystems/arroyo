@@ -554,13 +554,22 @@ impl WorkerJobController {
             return Ok(ControllerProgress::Stopped);
         }
 
+        if !self.stopping && self.model.all_tasks_finished() {
+            let state = self.status.job_status.lock().unwrap().job_state();
+            return Ok(match state {
+                rpc::JobState::JobFinishing | rpc::JobState::JobFinished => {
+                    ControllerProgress::Finished
+                }
+                rpc::JobState::JobFailing | rpc::JobState::JobFailed => {
+                    ControllerProgress::Continue
+                }
+                _ => ControllerProgress::Finishing,
+            });
+        }
+
         // have any of our tasks finished?
         if !self.stopping && self.model.any_finished_sources() {
             return Ok(ControllerProgress::Finishing);
-        }
-
-        if !self.stopping && self.model.all_tasks_finished() {
-            return Ok(ControllerProgress::Finished);
         }
 
         if matches!(

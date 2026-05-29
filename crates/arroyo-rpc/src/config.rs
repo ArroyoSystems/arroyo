@@ -224,6 +224,9 @@ pub struct Config {
     /// Process scheduler configuration
     pub process_scheduler: ProcessSchedulerConfig,
 
+    /// Manual scheduler configuration
+    pub manual_scheduler: ManualSchedulerConfig,
+
     // Kubernetes scheduler configuration
     pub kubernetes_scheduler: KubernetesSchedulerConfig,
 
@@ -699,6 +702,7 @@ impl Default for SqliteConfig {
 pub enum Scheduler {
     Embedded,
     Process,
+    Manual,
     Node,
     Kubernetes,
 }
@@ -711,6 +715,14 @@ pub struct ProcessSchedulerConfig {
     /// shuts down. Note if disabled, this may orphan workers -- this is primarily used for testing
     /// state machine recovery.
     pub shutdown_with_controller: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ManualSchedulerConfig {
+    /// The number of task slots assigned to each worker process. The scheduler will print a command
+    /// line for `ceil(slots / slots_per_process)` workers.
+    pub slots_per_process: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
