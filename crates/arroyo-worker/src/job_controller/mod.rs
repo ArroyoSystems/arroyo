@@ -25,6 +25,8 @@ use tracing::{error, info, warn};
 // Re-export shared types from arroyo-rpc
 pub use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent, WorkerContext};
 
+pub mod job_metrics;
+
 pub const CHECKPOINTS_TO_KEEP: u32 = 10;
 pub const COMPACT_EVERY: u32 = 2;
 

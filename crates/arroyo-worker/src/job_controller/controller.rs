@@ -2,10 +2,7 @@ use crate::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
     WorkerStatus,
 };
-use crate::job_controller::{
-    CheckpointHistory, JobControllerStatus, RetireWorkerLeader, RunningMessage, TaskFailedEvent,
-    WorkerContext, connect_to_worker,
-};
+use crate::job_controller::{CheckpointHistory, JobControllerStatus, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext, connect_to_worker, job_metrics};
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::rpc;
@@ -39,6 +36,7 @@ use tokio::time::interval;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::Request;
 use tracing::{debug, error, info, warn};
+use crate::job_controller::job_metrics::JobMetrics;
 
 pub struct WorkerJobController {
     worker_context: WorkerContext,
@@ -85,6 +83,7 @@ impl WorkerJobController {
         checkpoint_history: Arc<Mutex<CheckpointHistory>>,
         checkpoint_interval: Duration,
         parent_ref: Option<(CheckpointRef, CheckpointManifest)>,
+        metrics: JobMetrics,
     ) -> anyhow::Result<Self> {
         info!(job_id =? worker_context.job_id,
             restore_from =? parent_ref.as_ref().map(|p| &p.0),
@@ -250,6 +249,7 @@ impl WorkerJobController {
                 workers,
                 tasks,
                 operator_parallelism: program.tasks_per_node(),
+                job_metrics: metrics,
                 program,
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
@@ -643,6 +643,12 @@ impl WorkerJobController {
         {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
+        }
+
+        // update metrics
+        if self.model.last_updated_metrics.elapsed() > job_metrics::COLLECTION_RATE {
+            self.model.update_metrics().await;
+            self.model.last_updated_metrics = Instant::now();
         }
 
         Ok(ControllerProgress::Continue)

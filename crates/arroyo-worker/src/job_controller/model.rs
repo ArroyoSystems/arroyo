@@ -11,10 +11,7 @@ use arroyo_rpc::checkpoints::{
     UpdateCheckpointReq,
 };
 use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::rpc::{
-    CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LoadCompactedDataReq,
-    OperatorCheckpointMetadata, TaskCheckpointEventType,
-};
+use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LabelPair, LoadCompactedDataReq, MetricsReq, OperatorCheckpointMetadata, TaskCheckpointEventType};
 use arroyo_rpc::identity::WorkerClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::parquet::ParquetBackend;
@@ -28,11 +25,14 @@ use arroyo_state_protocol::workflow::{
 use arroyo_types::{JobId, PipelineId, WorkerId, to_micros};
 use futures::future::try_join_all;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::task::JoinHandle;
 use tonic::Request;
 use tracing::{debug, error, info, warn};
+use arroyo_rpc::api_types::metrics::MetricName;
+use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
 
 pub struct RunningJobModel {
     pub pipeline_id: PipelineId,
@@ -74,6 +74,8 @@ pub struct RunningJobModel {
 
     // checkpoint-wide events
     pub checkpoint_spans: Vec<JobCheckpointSpan>,
+    
+    pub job_metrics: JobMetrics,
 }
 
 impl std::fmt::Debug for RunningJobModel {
@@ -749,6 +751,87 @@ impl RunningJobModel {
         }
         Ok(())
     }
+
+    pub async fn update_metrics(&mut self) {
+        if self.metric_update_task.is_some()
+            && !self
+            .metric_update_task
+            .as_ref()
+            .unwrap()
+            .is_finished()
+        {
+            return;
+        }
+
+        let workers: Vec<_> = self
+            .workers
+            .iter()
+            .filter(|(_, w)| w.state == WorkerState::Running)
+            .map(|(id, w)| (*id, w.connect.clone()))
+            .collect();
+        let program = self.program.clone();
+        let operator_indices: Arc<HashMap<_, _>> = Arc::new(
+            program
+                .graph
+                .node_indices()
+                .map(|idx| (program.graph[idx].node_id, idx.index() as u32))
+                .collect(),
+        );
+        
+        let job_metrics = self.job_metrics.clone();
+
+        self.metric_update_task = Some(tokio::spawn(async move {
+            let mut metrics: HashMap<(u32, u32), HashMap<MetricName, u64>> = HashMap::new();
+
+            for (id, mut connect) in workers {
+                let Ok(e) = connect.get_metrics(MetricsReq {}).await else {
+                    warn!("Failed to collect metrics from worker {:?}", id);
+                    return;
+                };
+
+                fn find_label<'a>(labels: &'a [LabelPair], name: &'static str) -> Option<&'a str> {
+                    Some(
+                        labels
+                            .iter()
+                            .find(|t| t.name.as_ref().map(|t| t == name).unwrap_or(false))?
+                            .value
+                            .as_ref()?
+                            .as_str(),
+                    )
+                }
+
+                e.into_inner()
+                    .metrics
+                    .into_iter()
+                    .filter_map(|f| Some((get_metric_name(&f.name?)?, f.metric)))
+                    .flat_map(|(metric, values)| {
+                        let operator_indices = operator_indices.clone();
+                        values.into_iter().filter_map(move |m| {
+                            let subtask_idx =
+                                u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
+                            let operator_idx = *operator_indices
+                                .get(&u32::from_str(find_label(&m.label, "node_id")?).ok()?)?;
+                            let value = m
+                                .counter
+                                .map(|c| c.value)
+                                .or_else(|| m.gauge.map(|g| g.value))??
+                                as u64;
+                            Some(((operator_idx, subtask_idx), (metric, value)))
+                        })
+                    })
+                    .for_each(|(subtask_idx, (metric, value))| {
+                        metrics
+                            .entry(subtask_idx)
+                            .or_default()
+                            .insert(metric, value);
+                    });
+            }
+
+            for ((operator_idx, subtask_idx), values) in metrics {
+                job_metrics.update(operator_idx, subtask_idx, &values);
+            }
+        }));
+    }    
 
     pub fn cleanup_needed(&self) -> Option<u32> {
         if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP

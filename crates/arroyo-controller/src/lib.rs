@@ -43,6 +43,7 @@ use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 
 //pub mod compiler;
 pub mod job_controller;
@@ -53,7 +54,6 @@ const TTL_PIPELINE_CLEANUP_TIME: Duration = Duration::from_secs(60 * 60);
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
-use crate::job_controller::job_metrics::JobMetrics;
 use crate::schedulers::{ManualScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
 use types::public::{RestartMode, StopMode};

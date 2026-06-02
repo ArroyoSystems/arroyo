@@ -14,7 +14,7 @@ use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
 use arroyo_types::{JobId, PipelineId, WorkerId};
 use rand::{Rng, rng};
 
-use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
+use arroyo_worker::job_controller::job_metrics::{JobMetrics, get_metric_name};
 use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::metrics::MetricName;
@@ -27,9 +27,9 @@ use arroyo_worker::job_controller::model::{
 };
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tracing::{error, info, warn};
+use arroyo_worker::job_controller::job_metrics;
 
 pub mod checkpoint_store;
-pub mod job_metrics;
 pub mod leader_manager;
 
 const CHECKPOINT_ROWS_TO_KEEP: u32 = 100;
@@ -39,7 +39,6 @@ pub struct JobController {
     config: JobConfig,
     model: RunningJobModel,
     cleanup_task: Option<JoinHandle<anyhow::Result<u32>>>,
-    metrics: JobMetrics,
 }
 
 impl std::fmt::Debug for JobController {
@@ -72,11 +71,10 @@ impl JobController {
         min_epoch: u32,
         worker_connects: HashMap<WorkerId, WorkerClient>,
         commit_state: Option<CommittingState>,
-        metrics: JobMetrics,
+        job_metrics: JobMetrics,
     ) -> Self {
         Self {
             checkpoint_store,
-            metrics,
             model: RunningJobModel {
                 protocol_paths: ProtocolPaths::new(pipeline_id.clone(), JobId(config.id.clone())),
                 pipeline_id,
@@ -132,6 +130,7 @@ impl JobController {
                 },
                 finished_operators: vec![],
                 generation_manifest: None,
+                job_metrics,
             },
             config,
             cleanup_task: None,
@@ -146,88 +145,6 @@ impl JobController {
         self.model
             .handle_message(msg, &*self.checkpoint_store)
             .await
-    }
-
-    async fn update_metrics(&mut self) {
-        if self.model.metric_update_task.is_some()
-            && !self
-                .model
-                .metric_update_task
-                .as_ref()
-                .unwrap()
-                .is_finished()
-        {
-            return;
-        }
-
-        let job_metrics = self.metrics.clone();
-        let workers: Vec<_> = self
-            .model
-            .workers
-            .iter()
-            .filter(|(_, w)| w.state == WorkerState::Running)
-            .map(|(id, w)| (*id, w.connect.clone()))
-            .collect();
-        let program = self.model.program.clone();
-        let operator_indices: Arc<HashMap<_, _>> = Arc::new(
-            program
-                .graph
-                .node_indices()
-                .map(|idx| (program.graph[idx].node_id, idx.index() as u32))
-                .collect(),
-        );
-
-        self.model.metric_update_task = Some(tokio::spawn(async move {
-            let mut metrics: HashMap<(u32, u32), HashMap<MetricName, u64>> = HashMap::new();
-
-            for (id, mut connect) in workers {
-                let Ok(e) = connect.get_metrics(MetricsReq {}).await else {
-                    warn!("Failed to collect metrics from worker {:?}", id);
-                    return;
-                };
-
-                fn find_label<'a>(labels: &'a [LabelPair], name: &'static str) -> Option<&'a str> {
-                    Some(
-                        labels
-                            .iter()
-                            .find(|t| t.name.as_ref().map(|t| t == name).unwrap_or(false))?
-                            .value
-                            .as_ref()?
-                            .as_str(),
-                    )
-                }
-
-                e.into_inner()
-                    .metrics
-                    .into_iter()
-                    .filter_map(|f| Some((get_metric_name(&f.name?)?, f.metric)))
-                    .flat_map(|(metric, values)| {
-                        let operator_indices = operator_indices.clone();
-                        values.into_iter().filter_map(move |m| {
-                            let subtask_idx =
-                                u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
-                            let operator_idx = *operator_indices
-                                .get(&u32::from_str(find_label(&m.label, "node_id")?).ok()?)?;
-                            let value = m
-                                .counter
-                                .map(|c| c.value)
-                                .or_else(|| m.gauge.map(|g| g.value))??
-                                as u64;
-                            Some(((operator_idx, subtask_idx), (metric, value)))
-                        })
-                    })
-                    .for_each(|(subtask_idx, (metric, value))| {
-                        metrics
-                            .entry(subtask_idx)
-                            .or_default()
-                            .insert(metric, value);
-                    });
-            }
-
-            for ((operator_idx, subtask_idx), values) in metrics {
-                job_metrics.update(operator_idx, subtask_idx, &values);
-            }
-        }));
     }
 
     pub async fn progress(&mut self) -> anyhow::Result<ControllerProgress> {
@@ -303,7 +220,7 @@ impl JobController {
 
         // update metrics
         if self.model.last_updated_metrics.elapsed() > job_metrics::COLLECTION_RATE {
-            self.update_metrics().await;
+            self.model.update_metrics().await;
             self.model.last_updated_metrics = Instant::now();
         }
 

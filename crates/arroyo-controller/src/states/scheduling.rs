@@ -13,7 +13,6 @@ use tracing::{debug, error, info, warn};
 
 use super::{JobContext, State, Transition, leader_running::LeaderRunning, running::Running};
 use crate::job_controller::checkpoint_store::DbCheckpointMetadataStore;
-use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::leader_manager::LeaderManager;
 use crate::{JobMessage, schedulers::SchedulerError};
 use crate::{
@@ -40,6 +39,7 @@ use arroyo_state_protocol::workflow::{
     initialize_generation,
 };
 use arroyo_worker::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {
