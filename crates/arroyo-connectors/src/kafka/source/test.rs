@@ -257,7 +257,7 @@ impl KafkaSourceWithReads {
                 .expect("should be a valid message");
 
             if let ControlResp::CheckpointCompleted(checkpoint) = control_response {
-                assert_eq!(expected_epoch, checkpoint.checkpoint_epoch);
+                assert_eq!(expected_epoch as u64, checkpoint.checkpoint_epoch);
                 return checkpoint;
             }
         }

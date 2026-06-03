@@ -936,6 +936,7 @@ dependencies = [
  "arroyo-planner",
  "arroyo-rpc",
  "arroyo-state",
+ "arroyo-state-protocol",
  "arroyo-types",
  "arroyo-udf-host",
  "arroyo-udf-macros",

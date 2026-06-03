@@ -142,7 +142,7 @@ async fn start_and_monitor(
         if let Some(checkpoint) = checkpoints
             .data
             .iter()
-            .find(|c| c.epoch == checkpoints_to_wait as i32)
+            .find(|c| c.epoch == checkpoints_to_wait as i64)
             && checkpoint.finish_time.is_some()
         {
             // get details
