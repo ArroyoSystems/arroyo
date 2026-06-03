@@ -821,7 +821,7 @@ impl WorkerJobController {
         let job_id = self.worker_context.job_id.clone();
         let paths = self.model.protocol_paths.clone();
 
-        let new_min = Epoch(*self.model.epoch - CHECKPOINTS_TO_KEEP);
+        let new_min = Epoch((*self.model.epoch).saturating_sub(CHECKPOINTS_TO_KEEP));
 
         if (*new_min).saturating_sub(*self.model.min_epoch) < CLEAN_AT_LEAST {
             return None;
