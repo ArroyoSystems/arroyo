@@ -43,8 +43,8 @@ use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
-use prost::Message;
 use arroyo_worker::job_controller::job_metrics::JobMetrics;
+use prost::Message;
 
 pub(crate) mod checkpoint_stopping;
 pub(crate) mod compiling;

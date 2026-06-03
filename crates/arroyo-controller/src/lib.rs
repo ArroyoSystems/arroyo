@@ -26,6 +26,7 @@ use arroyo_rpc::{StateContext, config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use cornucopia_async::DatabaseSource;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
@@ -43,7 +44,6 @@ use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
-use arroyo_worker::job_controller::job_metrics::JobMetrics;
 
 //pub mod compiler;
 pub mod job_controller;

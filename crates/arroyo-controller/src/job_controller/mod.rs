@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use std::sync::Arc;
 use std::{
     collections::HashMap,
@@ -8,26 +7,25 @@ use std::{
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_rpc::checkpoints::CheckpointMetadataStore;
-use arroyo_rpc::grpc::rpc::{CommitReq, LabelPair, MetricsReq, StopExecutionReq, StopMode};
+use arroyo_rpc::grpc::rpc::{CommitReq, StopExecutionReq, StopMode};
 use arroyo_rpc::identity::WorkerClient;
 use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
 use arroyo_types::{JobId, PipelineId, WorkerId};
 use rand::{Rng, rng};
 
-use arroyo_worker::job_controller::job_metrics::{JobMetrics, get_metric_name};
 use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_state_protocol::ProtocolPaths;
 use arroyo_worker::job_controller::committing_state::CommittingState;
+use arroyo_worker::job_controller::job_metrics;
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use arroyo_worker::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
     WorkerStatus,
 };
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
-use tracing::{error, info, warn};
-use arroyo_worker::job_controller::job_metrics;
+use tracing::{error, info};
 
 pub mod checkpoint_store;
 pub mod leader_manager;
@@ -71,7 +69,7 @@ impl JobController {
         min_epoch: u32,
         worker_connects: HashMap<WorkerId, WorkerClient>,
         commit_state: Option<CommittingState>,
-        job_metrics: JobMetrics,
+        job_metrics: Option<JobMetrics>,
     ) -> Self {
         Self {
             checkpoint_store,

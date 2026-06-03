@@ -901,14 +901,21 @@ impl State for Scheduling {
         let needs_commit = committing_state.is_some();
 
         let program = Arc::new(ctx.program.clone());
-        let metrics = JobMetrics::new(program.clone());
-        ctx.metrics
-            .write()
-            .await
-            .insert(ctx.config.id.clone(), metrics.clone());
+        let metrics_enabled = config().controller.metrics.enabled;
 
         match leader_info {
             None => {
+                let metrics = if metrics_enabled {
+                    let metrics = JobMetrics::new(program.clone());
+                    ctx.metrics
+                        .write()
+                        .await
+                        .insert(ctx.config.id.clone(), metrics.clone());
+                    Some(metrics)
+                } else {
+                    None
+                };
+
                 let checkpoint_store = Arc::new(DbCheckpointMetadataStore {
                     organization_id: ctx.config.organization_id.clone(),
                     job_id: ctx.config.id.clone(),

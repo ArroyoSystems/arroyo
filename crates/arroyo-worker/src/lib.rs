@@ -58,6 +58,7 @@ use arroyo_rpc::{
     local_address, retry,
 };
 
+use crate::job_controller::job_metrics::JobMetrics;
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 use arroyo_state::{StorageProviderFor, get_storage_provider};
@@ -69,7 +70,6 @@ use prost::Message;
 use tonic::codec::CompressionEncoding;
 use tonic::codegen::InterceptedService;
 use uuid::Uuid;
-use crate::job_controller::job_metrics::JobMetrics;
 
 pub mod arrow;
 
@@ -268,10 +268,15 @@ impl WorkerState {
             anyhow!("tried to initialize job controller but it was already initialized!")
         })?;
 
-        let metrics = JobMetrics::new(program.clone());
-        if let Err(_) = self.metrics.set(metrics.clone()) {
-            panic!("job controller already initialized!");
-        }
+        let metrics = if config().controller.metrics.enabled {
+            let metrics = JobMetrics::new(program.clone());
+            if self.metrics.set(metrics.clone()).is_err() {
+                panic!("job controller already initialized!");
+            }
+            Some(metrics)
+        } else {
+            None
+        };
 
         debug!(
             "[{:?}] initialized job controller",
@@ -731,10 +736,12 @@ impl WorkerServer {
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
 
-        let leader = InterceptedService::new(JobStatusGrpcServer::new(leader)
-            .send_compressed(CompressionEncoding::Zstd)
-            .accept_compressed(CompressionEncoding::Zstd),
-         VerifyWorkerId(*context.worker_id));
+        let leader = InterceptedService::new(
+            JobStatusGrpcServer::new(leader)
+                .send_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Zstd),
+            VerifyWorkerId(*context.worker_id),
+        );
 
         self.shutdown_guard
             .child("grpc")
@@ -1339,13 +1346,14 @@ impl JobControllerGrpc for LeaderServer {
     ) -> Result<Response<JobMetricsResp>, Status> {
         let req = request.into_inner();
         if req.job_id != *self.state.worker_context.job_id {
-            return Err(Status::failed_precondition(
-                format!("requested metrics for incorrect job {}, this is the leader for {}",
-                req.job_id, *self.state.worker_context.job_id)));
+            return Err(Status::failed_precondition(format!(
+                "requested metrics for incorrect job {}, this is the leader for {}",
+                req.job_id, *self.state.worker_context.job_id
+            )));
         }
-        
+
         let Some(metrics) = self.state.metrics.get() else {
-            return Err(Status::failed_precondition("metrics are not available"));
+            return Err(Status::not_found("No metrics for job"));
         };
 
         Ok(Response::new(JobMetricsResp {

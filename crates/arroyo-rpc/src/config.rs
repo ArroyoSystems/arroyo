@@ -376,6 +376,9 @@ pub struct ControllerConfig {
 
     /// Poll interval for leader status
     pub leader_poll_interval: HumanReadableDuration,
+
+    /// Metric system configurations
+    pub metrics: MetricsConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -695,6 +698,13 @@ impl Default for SqliteConfig {
                 .unwrap_or_else(|| PathBuf::from_str("config.sqlite").unwrap()),
         }
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// Whether to enable pipeline metric collection and storage
+    pub enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone)]

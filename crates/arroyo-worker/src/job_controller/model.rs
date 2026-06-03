@@ -1,17 +1,22 @@
 use crate::job_controller::checkpoint_state::CheckpointState;
 use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
+use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
 use crate::job_controller::{
     CHECKPOINTS_TO_KEEP, COMPACT_EVERY, RetireWorkerLeader, RunningMessage, TaskFailedEvent,
 };
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
+use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::checkpoints::{
     CheckpointMetadataStore, CheckpointStatus, CreateCheckpointReq, FinishCheckpointReq,
     UpdateCheckpointReq,
 };
 use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LabelPair, LoadCompactedDataReq, MetricsReq, OperatorCheckpointMetadata, TaskCheckpointEventType};
+use arroyo_rpc::grpc::rpc::{
+    CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LabelPair, LoadCompactedDataReq,
+    MetricsReq, OperatorCheckpointMetadata, TaskCheckpointEventType,
+};
 use arroyo_rpc::identity::WorkerClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_state::parquet::ParquetBackend;
@@ -31,8 +36,6 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::task::JoinHandle;
 use tonic::Request;
 use tracing::{debug, error, info, warn};
-use arroyo_rpc::api_types::metrics::MetricName;
-use crate::job_controller::job_metrics::{get_metric_name, JobMetrics};
 
 pub struct RunningJobModel {
     pub pipeline_id: PipelineId,
@@ -74,8 +77,8 @@ pub struct RunningJobModel {
 
     // checkpoint-wide events
     pub checkpoint_spans: Vec<JobCheckpointSpan>,
-    
-    pub job_metrics: JobMetrics,
+
+    pub job_metrics: Option<JobMetrics>,
 }
 
 impl std::fmt::Debug for RunningJobModel {
@@ -753,12 +756,12 @@ impl RunningJobModel {
     }
 
     pub async fn update_metrics(&mut self) {
+        let Some(job_metrics) = self.job_metrics.clone() else {
+            return;
+        };
+
         if self.metric_update_task.is_some()
-            && !self
-            .metric_update_task
-            .as_ref()
-            .unwrap()
-            .is_finished()
+            && !self.metric_update_task.as_ref().unwrap().is_finished()
         {
             return;
         }
@@ -777,8 +780,6 @@ impl RunningJobModel {
                 .map(|idx| (program.graph[idx].node_id, idx.index() as u32))
                 .collect(),
         );
-        
-        let job_metrics = self.job_metrics.clone();
 
         self.metric_update_task = Some(tokio::spawn(async move {
             let mut metrics: HashMap<(u32, u32), HashMap<MetricName, u64>> = HashMap::new();
@@ -831,7 +832,7 @@ impl RunningJobModel {
                 job_metrics.update(operator_idx, subtask_idx, &values);
             }
         }));
-    }    
+    }
 
     pub fn cleanup_needed(&self) -> Option<u32> {
         if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP
