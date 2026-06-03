@@ -43,6 +43,7 @@ use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use prost::Message;
 
 pub(crate) mod checkpoint_stopping;
@@ -523,7 +524,6 @@ pub fn controller_job_failure(
     }
 }
 
-use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::leader_manager::LeaderManager;
 use crate::states::restarting::Restarting;
 pub(crate) use leader_stop_if_desired_running;

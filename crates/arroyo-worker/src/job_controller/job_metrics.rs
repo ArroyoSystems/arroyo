@@ -178,6 +178,12 @@ impl TaskMetrics {
     }
 }
 
+impl Default for TaskMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Calculates an exponentially-weighted moving average over metrics collected from the job
 pub struct RateMetric {
     values: CircularBuffer<(SystemTime, f64), NUM_BUCKETS>,
@@ -226,6 +232,12 @@ impl RateMetric {
 
     pub fn iter(&self) -> impl Iterator<Item = (SystemTime, f64)> + '_ {
         self.values.iter()
+    }
+}
+
+impl Default for RateMetric {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

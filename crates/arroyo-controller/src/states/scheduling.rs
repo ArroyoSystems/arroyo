@@ -13,7 +13,6 @@ use tracing::{debug, error, info, warn};
 
 use super::{JobContext, State, Transition, leader_running::LeaderRunning, running::Running};
 use crate::job_controller::checkpoint_store::DbCheckpointMetadataStore;
-use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::leader_manager::LeaderManager;
 use crate::{JobMessage, schedulers::SchedulerError};
 use crate::{
@@ -40,6 +39,7 @@ use arroyo_state_protocol::workflow::{
     initialize_generation,
 };
 use arroyo_worker::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 
 #[derive(Debug, Clone)]
 struct WorkerStatus {
@@ -901,14 +901,21 @@ impl State for Scheduling {
         let needs_commit = committing_state.is_some();
 
         let program = Arc::new(ctx.program.clone());
-        let metrics = JobMetrics::new(program.clone());
-        ctx.metrics
-            .write()
-            .await
-            .insert(ctx.config.id.clone(), metrics.clone());
+        let metrics_enabled = config().controller.metrics.enabled;
 
         match leader_info {
             None => {
+                let metrics = if metrics_enabled {
+                    let metrics = JobMetrics::new(program.clone());
+                    ctx.metrics
+                        .write()
+                        .await
+                        .insert(ctx.config.id.clone(), metrics.clone());
+                    Some(metrics)
+                } else {
+                    None
+                };
+
                 let checkpoint_store = Arc::new(DbCheckpointMetadataStore {
                     organization_id: ctx.config.organization_id.clone(),
                     job_id: ctx.config.id.clone(),

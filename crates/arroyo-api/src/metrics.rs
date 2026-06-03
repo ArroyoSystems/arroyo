@@ -1,14 +1,17 @@
+use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, State};
 
-use crate::pipelines::query_job_by_pub_id;
+use crate::queries::api_queries;
 use crate::rest::AppState;
-use crate::rest_utils::{BearerAuth, ErrorResp, authenticate, log_and_map, service_unavailable};
+use crate::rest_utils::{
+    BearerAuth, ErrorResp, authenticate, log_and_map, not_found, service_unavailable,
+};
 use arroyo_rpc::api_types::OperatorMetricGroupCollection;
 use arroyo_rpc::api_types::metrics::OperatorMetricGroup;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::JobMetricsReq;
-use arroyo_rpc::grpc::rpc::job_controller_grpc_client::JobControllerGrpcClient;
+use arroyo_rpc::{StateContext, job_controller_client};
 use tonic::Code;
 use tonic::codec::CompressionEncoding;
 use tracing::error;
@@ -33,29 +36,43 @@ pub async fn get_operator_metric_groups(
 ) -> Result<Json<OperatorMetricGroupCollection>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    let job = query_job_by_pub_id(
+    let job = api_queries::fetch_get_pipeline_job(
+        &state.database.client().await?,
+        &auth_data.organization_id,
         &pipeline_pub_id,
         &job_pub_id,
-        &state.database.client().await?,
-        &auth_data,
     )
-    .await?;
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| not_found("Job"))?;
 
-    let channel = arroyo_rpc::connect_grpc(
-        "api",
-        config().controller_endpoint(),
-        &config().api.tls,
-        &config().controller.tls,
-    )
-    .await
+    let state_context: Option<StateContext> = job
+        .state_context
+        .map(serde_json::from_value)
+        .transpose()
+        .with_context(|| format!("converting state context for job {}", job_pub_id))
+        .map_err(log_and_map)?;
+
+    let mut controller = if let Some(ctx) = state_context
+        && let Some(leader) = ctx.leader
+    {
+        job_controller_client("api", &config().api.tls, leader.rpc_address, true).await
+    } else {
+        job_controller_client(
+            "api",
+            &config().api.tls,
+            config().controller_endpoint(),
+            false,
+        )
+        .await
+    }
     .map_err(|e| {
         error!("Failed to connect to controller service: {}", e);
         service_unavailable("controller-service")
-    })?;
-
-    let mut controller = JobControllerGrpcClient::new(channel)
-        .accept_compressed(CompressionEncoding::Zstd)
-        .send_compressed(CompressionEncoding::Zstd);
+    })?
+    .accept_compressed(CompressionEncoding::Zstd)
+    .send_compressed(CompressionEncoding::Zstd);
 
     let data = match controller
         .job_metrics(JobMetricsReq { job_id: job.id })
