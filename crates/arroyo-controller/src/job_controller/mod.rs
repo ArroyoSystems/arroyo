@@ -17,6 +17,7 @@ use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::types::{Epoch, Generation};
 use arroyo_worker::job_controller::committing_state::CommittingState;
 use arroyo_worker::job_controller::job_metrics;
 use arroyo_worker::job_controller::job_metrics::JobMetrics;
@@ -26,7 +27,6 @@ use arroyo_worker::job_controller::model::{
 };
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tracing::{error, info};
-use arroyo_state_protocol::types::{Epoch, Generation};
 
 pub mod checkpoint_store;
 pub mod leader_manager;
@@ -343,13 +343,24 @@ impl JobController {
 
         tokio::spawn(async move {
             let checkpoint =
-                StateBackend::load_checkpoint_metadata(&storage_role, &job_id, *cur_epoch as u32).await?;
+                StateBackend::load_checkpoint_metadata(&storage_role, &job_id, *cur_epoch as u32)
+                    .await?;
 
-            store.mark_compacting(&job_id, *min_epoch as u32, *new_min as u32).await?;
+            store
+                .mark_compacting(&job_id, *min_epoch as u32, *new_min as u32)
+                .await?;
 
-            StateBackend::cleanup_checkpoint(&storage_role, checkpoint, *min_epoch as u32, *new_min as u32).await?;
+            StateBackend::cleanup_checkpoint(
+                &storage_role,
+                checkpoint,
+                *min_epoch as u32,
+                *new_min as u32,
+            )
+            .await?;
 
-            store.mark_checkpoints_compacted(&job_id, *new_min as u32).await?;
+            store
+                .mark_checkpoints_compacted(&job_id, *new_min as u32)
+                .await?;
 
             if let Some(epoch_to_filter_before) = min_epoch.checked_sub(CHECKPOINT_ROWS_TO_KEEP) {
                 store

@@ -22,6 +22,7 @@ use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::gc::cleanup_leader_checkpoints;
 use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation};
 use arroyo_state_protocol::workflow::{
     CommitPermit, CommittedMarkerOutcome, GenerationInitialization, GenerationRecovery,
@@ -40,7 +41,6 @@ use tokio::time::interval;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::Request;
 use tracing::{debug, error, info, warn};
-use arroyo_state_protocol::gc::cleanup_leader_checkpoints;
 
 pub struct WorkerJobController {
     worker_context: WorkerContext,
@@ -623,10 +623,7 @@ impl WorkerJobController {
             }
         }
 
-        if !self.stopping
-            && self.cleanup_task.is_none()
-            && self.model.checkpoint_state.is_none()
-        {
+        if !self.stopping && self.cleanup_task.is_none() && self.model.checkpoint_state.is_none() {
             self.cleanup_task = self.start_cleanup();
         }
 
@@ -830,7 +827,6 @@ impl WorkerJobController {
             return None;
         }
 
-
         let last_checkpoint = self.model.checkpoint_parent_ref.as_ref()?.clone();
 
         info!(
@@ -843,8 +839,7 @@ impl WorkerJobController {
         let start = Instant::now();
         Some(tokio::spawn(async move {
             let storage = get_storage_provider(&StorageProviderFor::Worker).await?;
-            cleanup_leader_checkpoints(storage.as_ref(), &paths, last_checkpoint, new_min)
-                .await?;
+            cleanup_leader_checkpoints(storage.as_ref(), &paths, last_checkpoint, new_min).await?;
 
             info!(
                 message = "Finished cleaning",

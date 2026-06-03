@@ -38,7 +38,10 @@ pub enum ProtocolError {
     #[error("update to current generation would have caused a non-monotonic generation update")]
     NonMonotonicGenerationUpdate,
     #[error("checkpoint parent chain contains a cycle at generation {generation}, epoch {epoch}")]
-    CheckpointCycle { generation: Generation, epoch: Epoch },
+    CheckpointCycle {
+        generation: Generation,
+        epoch: Epoch,
+    },
 }
 
 /// Monotonic identifier for a worker cluster generation of a job.

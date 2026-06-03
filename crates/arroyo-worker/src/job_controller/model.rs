@@ -1,9 +1,7 @@
 use crate::job_controller::checkpoint_state::CheckpointState;
 use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
-use crate::job_controller::{
-    RetireWorkerLeader, RunningMessage, TaskFailedEvent,
-};
+use crate::job_controller::{RetireWorkerLeader, RunningMessage, TaskFailedEvent};
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
@@ -627,8 +625,7 @@ impl RunningJobModel {
 
                 let commit_permit = committing.commit_permit();
 
-                complete_commit(storage.as_ref(), commit_permit, self.generation)
-                    .await?;
+                complete_commit(storage.as_ref(), commit_permit, self.generation).await?;
 
                 self.finish_committing(committing.checkpoint_id(), store)
                     .await?;
@@ -833,7 +830,7 @@ impl RunningJobModel {
             }
         }));
     }
-    
+
     pub fn worker_timedout(&self) -> bool {
         for (worker, status) in &self.workers {
             if status.heartbeat_timeout() {

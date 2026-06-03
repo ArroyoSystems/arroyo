@@ -36,10 +36,7 @@ pub enum StoreError {
         source: prost::DecodeError,
     },
     #[error("protobuf at path at {path} is invalid: {msg}")]
-    InvalidProtobuf {
-        path: CheckpointRef,
-        msg: String,
-    },
+    InvalidProtobuf { path: CheckpointRef, msg: String },
     #[error("conditional create for {path} reported an existing object, but it could not be read")]
     ExistingObjectMissing { path: CheckpointRef },
     #[error("protocol error: {0}")]
@@ -258,6 +255,13 @@ pub(crate) mod tests {
     #[derive(Debug, Default, Clone)]
     pub(crate) struct MemoryProtocolStore {
         objects: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+        deleted_objects: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl MemoryProtocolStore {
+        pub(crate) fn deleted_objects(&self) -> Vec<String> {
+            self.deleted_objects.lock().unwrap().clone()
+        }
     }
 
     #[async_trait]
@@ -289,6 +293,10 @@ pub(crate) mod tests {
         }
 
         async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError> {
+            self.deleted_objects
+                .lock()
+                .unwrap()
+                .push(path.as_str().to_string());
             self.objects.lock().unwrap().remove(path.as_str());
             Ok(())
         }

@@ -12,12 +12,12 @@ use arroyo_rpc::{TaskEventSpans, get_event_spans, grpc, log_trace_event};
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
+use arroyo_state_protocol::types::Epoch;
 use arroyo_types::{from_micros, to_micros};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, warn};
-use arroyo_state_protocol::types::Epoch;
 
 pub type CommitData = HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>;
 
