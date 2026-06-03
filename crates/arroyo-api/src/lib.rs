@@ -298,6 +298,7 @@ impl IntoResponse for HttpError {
         JobLogMessageCollection,
         JobLogLevel,
         Checkpoint,
+        CheckpointType,
         CheckpointCollection,
         OutputData,
         MetricName,

@@ -273,6 +273,7 @@ message JobCheckpointMetadata {
   uint64 start_time = 3;
   optional uint64 finish_time = 4;
   repeated JobCheckpointEventSpan event_spans = 5;
+  bool is_stopping = 6;
 }
 
 enum JobState {

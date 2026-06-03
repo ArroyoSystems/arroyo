@@ -362,6 +362,7 @@ impl RunningJobModel {
                 epoch: *self.epoch,
                 min_epoch: *self.min_epoch,
                 start_time: SystemTime::now(),
+                is_stopping: then_stop,
             })
             .await?;
 

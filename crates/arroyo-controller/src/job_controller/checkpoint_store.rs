@@ -42,6 +42,7 @@ impl CheckpointMetadataStore for DbCheckpointMetadataStore {
             &(req.epoch as i32),
             &(req.min_epoch as i32),
             &OffsetDateTime::from(req.start_time),
+            &req.is_stopping,
         )
         .await?;
         Ok(())

@@ -39,6 +39,7 @@ pub struct StoredCheckpointMetadata {
     finish_time: Option<SystemTime>,
     event_spans: Vec<JobCheckpointSpan>,
     operator_details: HashMap<String, OperatorCheckpointDetail>,
+    is_stopping: bool,
     status: arroyo_rpc::checkpoints::CheckpointStatus,
 }
 
@@ -86,6 +87,7 @@ impl CheckpointHistory {
             finish_time: None,
             event_spans: vec![],
             operator_details: HashMap::new(),
+            is_stopping: req.is_stopping,
             status: arroyo_rpc::checkpoints::CheckpointStatus::InProgress,
         };
 
@@ -164,6 +166,7 @@ impl CheckpointHistory {
                     .cloned()
                     .map(checkpoint_span_to_rpc)
                     .collect(),
+                is_stopping: c.is_stopping,
             })
             .collect()
     }
@@ -186,6 +189,42 @@ pub mod checkpoint_state;
 pub mod committing_state;
 pub mod controller;
 pub mod model;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arroyo_rpc::checkpoints::CreateCheckpointReq;
+
+    fn create_req(epoch: u64, is_stopping: bool) -> CreateCheckpointReq {
+        CreateCheckpointReq {
+            checkpoint_id: format!("checkpoint-{epoch}"),
+            epoch,
+            min_epoch: 0,
+            start_time: SystemTime::now(),
+            is_stopping,
+        }
+    }
+
+    #[test]
+    fn checkpoint_history_marks_scheduled_checkpoints() {
+        let mut history = CheckpointHistory::default();
+        history.create_checkpoint(&create_req(1, false));
+
+        let checkpoints = history.checkpoints();
+        assert_eq!(checkpoints.len(), 1);
+        assert!(!checkpoints[0].is_stopping);
+    }
+
+    #[test]
+    fn checkpoint_history_marks_stopping_checkpoints() {
+        let mut history = CheckpointHistory::default();
+        history.create_checkpoint(&create_req(1, true));
+
+        let checkpoints = history.checkpoints();
+        assert_eq!(checkpoints.len(), 1);
+        assert!(checkpoints[0].is_stopping);
+    }
+}
 
 #[derive(Debug)]
 pub struct RetireWorkerLeader {

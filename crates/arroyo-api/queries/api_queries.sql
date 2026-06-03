@@ -243,7 +243,7 @@ FROM checkpoints
 WHERE job_id = :job_id AND organization_id = :organization_id;
 
 --! get_job_checkpoints: DbCheckpoint
-SELECT epoch, state_backend, start_time, finish_time, event_spans, operators FROM checkpoints
+SELECT epoch, state_backend, start_time, finish_time, event_spans, operators, is_stopping FROM checkpoints
 JOIN job_configs ON checkpoints.job_id = job_configs.id
 WHERE job_configs.id = :job_id
     AND checkpoints.organization_id = :organization_id
@@ -252,7 +252,7 @@ WHERE job_configs.id = :job_id
 ORDER BY epoch;
 
 --! get_job_checkpoint: DbCheckpoint
-SELECT epoch, state_backend, start_time, finish_time, event_spans, operators FROM checkpoints
+SELECT epoch, state_backend, start_time, finish_time, event_spans, operators, is_stopping FROM checkpoints
 JOIN job_configs ON checkpoints.job_id = job_configs.id
 WHERE job_configs.id = :job_id
     AND checkpoints.organization_id = :organization_id
