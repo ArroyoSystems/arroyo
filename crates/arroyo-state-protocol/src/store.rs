@@ -73,6 +73,10 @@ pub trait ProtocolStore: Send + Sync {
 
     /// Deletes raw object bytes, succeeding if the object is already absent.
     async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError>;
+
+    /// Attempts to delete the specified directory, which must be empty; this is a no-op for
+    /// object stores.
+    async fn delete_directory(&self, path: &str);
 }
 
 /// Reads and JSON-decodes an optional protocol object.
@@ -243,6 +247,10 @@ impl ProtocolStore for StorageProvider {
             .await
             .map_err(StoreError::from)
     }
+
+    async fn delete_directory(&self, path: &str) {
+        let _ = self.delete_directory(path).await;
+    }
 }
 
 #[cfg(test)]
@@ -300,5 +308,7 @@ pub(crate) mod tests {
             self.objects.lock().unwrap().remove(path.as_str());
             Ok(())
         }
+
+        async fn delete_directory(&self, _path: &str) {}
     }
 }

@@ -80,7 +80,7 @@ impl CheckpointHistory {
     fn create_checkpoint(&mut self, req: &CreateCheckpointReq) {
         let checkpoint = StoredCheckpointMetadata {
             checkpoint_id: req.checkpoint_id.clone(),
-            epoch: req.epoch as u64,
+            epoch: req.epoch,
             state_backend: StateBackend::name().to_string(),
             start_time: req.start_time,
             finish_time: None,

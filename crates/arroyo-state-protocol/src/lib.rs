@@ -101,8 +101,8 @@ mod tests {
     use crate::state::{CheckpointState, derive_checkpoint_state};
     use crate::store::tests::MemoryProtocolStore;
     use crate::store::{
-        CreateResult, ProtocolStore, StoreError, create_json_if_not_exist, put_json,
-        put_protobuf, read_json, read_protobuf,
+        CreateResult, ProtocolStore, StoreError, create_json_if_not_exist, put_json, put_protobuf,
+        read_json, read_protobuf,
     };
     use crate::types::{
         CommittedMarker, CurrentGeneration, EpochRecord, GenerationManifest, ProtocolError,

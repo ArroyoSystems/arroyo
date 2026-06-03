@@ -7,6 +7,7 @@ use arroyo_rpc::grpc::rpc::{
 use futures::future::join_all;
 use prost::Message;
 use std::collections::HashSet;
+use std::path::Path;
 use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -34,9 +35,11 @@ where
             "cleaning checkpoint"
         );
 
-        store
-            .delete_object(&paths.checkpoint_manifest(c.generation, c.epoch))
-            .await?;
+        let path = paths.checkpoint_manifest(c.generation, c.epoch);
+        store.delete_object(&path).await?;
+
+        let dir = paths.checkpoint_dir(c.generation, c.epoch);
+        store.delete_directory(dir.as_str()).await;
     }
 
     Ok(())
@@ -89,7 +92,6 @@ where
             .into());
         }
 
-
         if manifest.epoch < *new_min_epoch {
             history.push(owner);
             if let Err(e) = clean_checkpoint(store, paths, &checkpoint_ref, &manifest).await {
@@ -103,7 +105,7 @@ where
 
         next = manifest
             .parent_checkpoint_ref
-            .map(|r| CheckpointRef::new(r))
+            .map(CheckpointRef::new)
             .transpose()?;
     }
 
@@ -142,12 +144,25 @@ where
         }
     }
 
+    let directories: HashSet<_> = to_delete
+        .iter()
+        .filter_map(|f| Path::new(f.as_str()).parent().and_then(|p| p.to_str()))
+        .map(|f| f.to_string())
+        .collect();
+
     to_delete
         .push(paths.committed_marker(Generation(checkpoint.generation), Epoch(checkpoint.epoch)));
+
     to_delete.push(paths.epoch_record(Epoch(checkpoint.epoch)));
 
     for r in join_all(to_delete.iter().map(|f| store.delete_object(f))).await {
         r?;
+    }
+
+    for d in directories {
+        // this will loop over duplicate directory when there are multiples tables per operator,
+        // but it's a no-op if the directory is already deleted
+        store.delete_directory(&d).await;
     }
 
     Ok(())

@@ -59,7 +59,7 @@ const FAILURE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(60);
 /// How many historical checkpoints to keep around
 const CHECKPOINTS_TO_KEEP: u64 = 10;
 /// Don't clean unless we're cleaning at least this many checkpoints
-const CLEAN_AT_LEAST: u64 = 10;
+const CLEAN_AT_LEAST: u64 = 3;
 
 impl std::fmt::Debug for WorkerJobController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
