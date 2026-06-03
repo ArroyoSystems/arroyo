@@ -12,6 +12,7 @@ use arroyo_rpc::{TaskEventSpans, get_event_spans, grpc, log_trace_event};
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
+use arroyo_state_protocol::types::Epoch;
 use arroyo_types::{from_micros, to_micros};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -24,8 +25,8 @@ pub type CommitData = HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>;
 pub struct CheckpointState {
     job_id: Arc<String>,
     pub checkpoint_id: String,
-    epoch: u32,
-    min_epoch: u32,
+    epoch: Epoch,
+    min_epoch: Epoch,
     start_time: SystemTime,
     operators: usize,
     operators_checkpointed: usize,
@@ -148,8 +149,8 @@ impl CheckpointState {
     pub fn new(
         job_id: Arc<String>,
         checkpoint_id: String,
-        epoch: u32,
-        min_epoch: u32,
+        epoch: Epoch,
+        min_epoch: Epoch,
         program: Arc<LogicalProgram>,
     ) -> Self {
         Self {
@@ -177,7 +178,7 @@ impl CheckpointState {
         operator_names: &HashMap<String, String>,
         operator_id: Option<&str>,
         subtask_idx: Option<u64>,
-        epoch: u32,
+        epoch: Epoch,
         size: u64,
         total_time: Duration,
         spans: TaskEventSpans,
@@ -280,8 +281,8 @@ impl CheckpointState {
             message = "Checkpoint finished",
             checkpoint_id = self.checkpoint_id,
             job_id = *self.job_id,
-            epoch = self.epoch,
-            min_epoch = self.min_epoch,
+            epoch = *self.epoch,
+            min_epoch = *self.min_epoch,
             operator_id = %c.operator_id,
             subtask_index = metadata.subtask_index,
             time = c.time);
@@ -394,7 +395,7 @@ impl CheckpointState {
                 operator_metadata: Some(OperatorMetadata {
                     job_id: self.job_id.to_string(),
                     operator_id: c.operator_id,
-                    epoch: self.epoch,
+                    epoch: *self.epoch as u32,
                     min_watermark,
                     max_watermark,
                     parallelism: operator_state.subtasks_checkpointed as u64,
@@ -454,8 +455,8 @@ impl CheckpointState {
 
         CheckpointMetadata {
             job_id: self.job_id.to_string(),
-            epoch: self.epoch,
-            min_epoch: self.min_epoch,
+            epoch: *self.epoch as u32,
+            min_epoch: *self.min_epoch as u32,
             start_time: to_micros(self.start_time),
             finish_time: to_micros(finish_time),
             operator_ids: self

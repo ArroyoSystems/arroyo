@@ -22,6 +22,7 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
+use arroyo_state_protocol::types::Epoch;
 use arroyo_types::{CheckpointBarrier, to_micros};
 use arroyo_udf_host::LocalUdf;
 use arroyo_worker::engine::Engine;
@@ -123,8 +124,8 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
     let mut checkpoint_state = CheckpointState::new(
         ctx.job_id.clone(),
         checkpoint_id.to_string(),
-        epoch,
-        0,
+        Epoch(epoch as u64),
+        Epoch(0),
         ctx.program.clone(),
     );
 

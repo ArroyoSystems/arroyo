@@ -15,8 +15,8 @@ pub enum CheckpointStatus {
 #[derive(Debug, Clone)]
 pub struct CreateCheckpointReq {
     pub checkpoint_id: String,
-    pub epoch: u32,
-    pub min_epoch: u32,
+    pub epoch: u64,
+    pub min_epoch: u64,
     pub start_time: SystemTime,
 }
 

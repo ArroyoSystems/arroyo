@@ -17,6 +17,7 @@ use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::types::{Epoch, Generation};
 use arroyo_worker::job_controller::committing_state::CommittingState;
 use arroyo_worker::job_controller::job_metrics;
 use arroyo_worker::job_controller::job_metrics::JobMetrics;
@@ -30,13 +31,15 @@ use tracing::{error, info};
 pub mod checkpoint_store;
 pub mod leader_manager;
 
-const CHECKPOINT_ROWS_TO_KEEP: u32 = 100;
+const CHECKPOINT_ROWS_TO_KEEP: u64 = 100;
+const CHECKPOINTS_TO_KEEP: u64 = 10;
+const COMPACT_EVERY: u64 = 4;
 
 pub struct JobController {
     checkpoint_store: Arc<dyn CheckpointMetadataStore>,
     config: JobConfig,
     model: RunningJobModel,
-    cleanup_task: Option<JoinHandle<anyhow::Result<u32>>>,
+    cleanup_task: Option<JoinHandle<anyhow::Result<Epoch>>>,
 }
 
 impl std::fmt::Debug for JobController {
@@ -65,8 +68,8 @@ impl JobController {
         state_url: Option<String>,
         generation: u64,
         program: Arc<LogicalProgram>,
-        epoch: u32,
-        min_epoch: u32,
+        epoch: u64,
+        min_epoch: u64,
         worker_connects: HashMap<WorkerId, WorkerClient>,
         commit_state: Option<CommittingState>,
         job_metrics: Option<JobMetrics>,
@@ -77,11 +80,11 @@ impl JobController {
                 protocol_paths: ProtocolPaths::new(pipeline_id.clone(), JobId(config.id.clone())),
                 pipeline_id,
                 job_id: JobId(config.id.clone()),
-                generation,
+                generation: Generation(generation),
                 state: JobState::Running,
                 checkpoint_state: commit_state.map(CheckpointingOrCommittingState::Committing),
-                epoch,
-                min_epoch,
+                epoch: Epoch(epoch),
+                min_epoch: Epoch(min_epoch),
                 // delay the initial checkpoint by a random amount so that on controller restart,
                 // checkpoint times are staggered across jobs
                 last_checkpoint: Instant::now()
@@ -145,6 +148,16 @@ impl JobController {
             .await
     }
 
+    pub fn cleanup_needed(&self) -> Option<Epoch> {
+        if *self.model.epoch - *self.model.min_epoch > CHECKPOINTS_TO_KEEP
+            && self.model.epoch.is_multiple_of(COMPACT_EVERY)
+        {
+            Some(Epoch(*self.model.epoch - CHECKPOINTS_TO_KEEP))
+        } else {
+            None
+        }
+    }
+
     pub async fn progress(&mut self) -> anyhow::Result<ControllerProgress> {
         // have any of our workers failed?
         if self.model.worker_timedout() {
@@ -169,7 +182,7 @@ impl JobController {
                 Ok(Ok(min_epoch)) => {
                     info!(
                         message = "setting new min epoch",
-                        min_epoch,
+                        min_epoch = *min_epoch,
                         job_id = *self.config.id
                     );
                     self.model.min_epoch = min_epoch;
@@ -197,7 +210,7 @@ impl JobController {
             }
         }
 
-        if let Some(new_epoch) = self.model.cleanup_needed()
+        if let Some(new_epoch) = self.cleanup_needed()
             && self.cleanup_task.is_none()
             && self.model.checkpoint_state.is_none()
         {
@@ -271,7 +284,7 @@ impl JobController {
             worker
                 .connect
                 .commit(CommitReq {
-                    epoch: self.model.epoch,
+                    epoch: *self.model.epoch,
                     committing_data: committing.committing_data(),
                 })
                 .await?;
@@ -313,8 +326,8 @@ impl JobController {
         self.model.operator_parallelism.get(&node_id).cloned()
     }
 
-    fn start_cleanup(&mut self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {
-        let min_epoch = self.model.min_epoch.max(1);
+    fn start_cleanup(&mut self, new_min: Epoch) -> JoinHandle<anyhow::Result<Epoch>> {
+        let min_epoch = Epoch((*self.model.min_epoch).max(1));
         let job_id = self.config.id.clone();
         let store = self.checkpoint_store.clone();
         let storage_role = self.model.storage_role.clone();
@@ -322,33 +335,44 @@ impl JobController {
         info!(
             message = "Starting cleaning",
             job_id = *job_id,
-            min_epoch,
-            new_min
+            min_epoch = *min_epoch,
+            new_min = *new_min
         );
         let start = Instant::now();
         let cur_epoch = self.model.epoch;
 
         tokio::spawn(async move {
             let checkpoint =
-                StateBackend::load_checkpoint_metadata(&storage_role, &job_id, cur_epoch).await?;
+                StateBackend::load_checkpoint_metadata(&storage_role, &job_id, *cur_epoch as u32)
+                    .await?;
 
-            store.mark_compacting(&job_id, min_epoch, new_min).await?;
+            store
+                .mark_compacting(&job_id, *min_epoch as u32, *new_min as u32)
+                .await?;
 
-            StateBackend::cleanup_checkpoint(&storage_role, checkpoint, min_epoch, new_min).await?;
+            StateBackend::cleanup_checkpoint(
+                &storage_role,
+                checkpoint,
+                *min_epoch as u32,
+                *new_min as u32,
+            )
+            .await?;
 
-            store.mark_checkpoints_compacted(&job_id, new_min).await?;
+            store
+                .mark_checkpoints_compacted(&job_id, *new_min as u32)
+                .await?;
 
             if let Some(epoch_to_filter_before) = min_epoch.checked_sub(CHECKPOINT_ROWS_TO_KEEP) {
                 store
-                    .drop_old_checkpoint_rows(&job_id, epoch_to_filter_before)
+                    .drop_old_checkpoint_rows(&job_id, epoch_to_filter_before as u32)
                     .await?;
             }
 
             info!(
                 message = "Finished cleaning",
                 job_id = *job_id,
-                min_epoch,
-                new_min,
+                min_epoch = *min_epoch,
+                new_min = *new_min,
                 duration = start.elapsed().as_secs_f32()
             );
 

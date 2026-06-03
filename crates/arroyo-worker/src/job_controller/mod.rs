@@ -27,8 +27,8 @@ pub use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent, WorkerContex
 
 pub mod job_metrics;
 
-pub const CHECKPOINTS_TO_KEEP: u32 = 10;
-pub const COMPACT_EVERY: u32 = 2;
+pub const CHECKPOINTS_TO_KEEP: u64 = 10;
+pub const COMPACT_EVERY: u64 = 2;
 
 #[derive(Debug, Clone)]
 pub struct StoredCheckpointMetadata {
@@ -80,7 +80,7 @@ impl CheckpointHistory {
     fn create_checkpoint(&mut self, req: &CreateCheckpointReq) {
         let checkpoint = StoredCheckpointMetadata {
             checkpoint_id: req.checkpoint_id.clone(),
-            epoch: req.epoch as u64,
+            epoch: req.epoch,
             state_backend: StateBackend::name().to_string(),
             start_time: req.start_time,
             finish_time: None,
@@ -154,7 +154,7 @@ impl CheckpointHistory {
                 )
             })
             .map(|c| rpc::JobCheckpointMetadata {
-                epoch: c.epoch as u32,
+                epoch: c.epoch,
                 state_backend: c.state_backend.clone(),
                 start_time: to_micros(c.start_time),
                 finish_time: c.finish_time.map(to_micros),

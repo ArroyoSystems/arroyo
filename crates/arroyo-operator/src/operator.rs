@@ -676,7 +676,7 @@ impl ChainedOperator {
                 if counter.all_clear() {
                     control_tx
                         .send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
-                            checkpoint_epoch: t.epoch,
+                            checkpoint_epoch: t.epoch as u64,
                             operator_idx: chain_info.task_id,
                             operator_id: self.context.task_info.operator_id.clone(),
                             subtask_idx: chain_info.task_index,

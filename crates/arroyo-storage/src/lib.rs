@@ -883,6 +883,24 @@ impl StorageProvider {
         }
     }
 
+    /// Deletes an empty directory, only on local backends
+    pub async fn delete_directory(&self, path: &str) -> Result<(), StorageError> {
+        // only applies to local -- object stores don't have directories
+        let BackendConfig::Local(config) = &self.config else {
+            return Ok(());
+        };
+
+        let path = format!("{}/{}", config.path, path);
+        tokio::fs::remove_dir(&path).await.map_err(|e| {
+            StorageError::ObjectStore(Error::Generic {
+                store: "local",
+                source: e.into(),
+            })
+        })?;
+
+        Ok(())
+    }
+
     pub fn as_multipart(&self) -> Option<Arc<dyn MultipartStore>> {
         self.multipart_store.clone()
     }

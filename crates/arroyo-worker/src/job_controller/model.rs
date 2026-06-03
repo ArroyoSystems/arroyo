@@ -1,9 +1,7 @@
 use crate::job_controller::checkpoint_state::CheckpointState;
 use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
 use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
-use crate::job_controller::{
-    CHECKPOINTS_TO_KEEP, COMPACT_EVERY, RetireWorkerLeader, RunningMessage, TaskFailedEvent,
-};
+use crate::job_controller::{RetireWorkerLeader, RunningMessage, TaskFailedEvent};
 use anyhow::bail;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::api_types::checkpoints::{JobCheckpointEventType, JobCheckpointSpan};
@@ -40,12 +38,12 @@ use tracing::{debug, error, info, warn};
 pub struct RunningJobModel {
     pub pipeline_id: PipelineId,
     pub job_id: JobId,
-    pub generation: u64,
+    pub generation: Generation,
     pub state: JobState,
     pub program: Arc<LogicalProgram>,
     pub checkpoint_state: Option<CheckpointingOrCommittingState>,
-    pub epoch: u32,
-    pub min_epoch: u32,
+    pub epoch: Epoch,
+    pub min_epoch: Epoch,
     pub last_checkpoint: Instant,
     pub workers: HashMap<WorkerId, WorkerStatus>,
     pub tasks: HashMap<(u32, u32), TaskStatus>,
@@ -144,9 +142,9 @@ impl RunningJobModel {
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
         info!(
-            message = "Finishing committing",
-            epoch = self.epoch,
+            epoch = *self.epoch,
             job_id = *self.job_id,
+            "Finishing committing"
         );
 
         store
@@ -169,11 +167,11 @@ impl RunningJobModel {
         match msg {
             RunningMessage::TaskCheckpointEvent(c) => {
                 if let Some(checkpoint_state) = &mut self.checkpoint_state {
-                    if c.epoch != self.epoch {
+                    if c.epoch != *self.epoch {
                         warn!(
                             message = "Received checkpoint event for wrong epoch",
                             epoch = c.epoch,
-                            expected = self.epoch,
+                            expected = *self.epoch,
                             job_id = *self.job_id,
                         );
                     } else {
@@ -204,11 +202,11 @@ impl RunningJobModel {
             }
             RunningMessage::TaskCheckpointFinished(c) => {
                 if let Some(checkpoint_state) = &mut self.checkpoint_state {
-                    if c.epoch != self.epoch {
+                    if c.epoch != *self.epoch {
                         warn!(
                             message = "Received checkpoint finished for wrong epoch",
                             epoch = c.epoch,
-                            expected = self.epoch,
+                            expected = *self.epoch,
                             job_id = *self.job_id,
                         );
                     } else {
@@ -331,12 +329,12 @@ impl RunningJobModel {
         store: &dyn CheckpointMetadataStore,
         then_stop: bool,
     ) -> anyhow::Result<()> {
-        self.epoch += 1;
+        self.epoch = self.epoch.next();
 
         info!(
             message = "Starting checkpointing",
             job_id = *self.job_id,
-            epoch = self.epoch,
+            epoch = *self.epoch,
             then_stop
         );
 
@@ -346,9 +344,9 @@ impl RunningJobModel {
 
         let checkpoints = self.workers.values_mut().map(|worker| {
             worker.connect.checkpoint(Request::new(CheckpointReq {
-                epoch: self.epoch,
+                epoch: *self.epoch,
                 timestamp: to_micros(SystemTime::now()),
-                min_epoch: self.min_epoch,
+                min_epoch: *self.min_epoch,
                 then_stop,
                 is_commit: false,
             }))
@@ -361,8 +359,8 @@ impl RunningJobModel {
         store
             .create_checkpoint(CreateCheckpointReq {
                 checkpoint_id: checkpoint_id.clone(),
-                epoch: self.epoch,
-                min_epoch: self.min_epoch,
+                epoch: *self.epoch,
+                min_epoch: *self.min_epoch,
                 start_time: SystemTime::now(),
             })
             .await?;
@@ -395,7 +393,7 @@ impl RunningJobModel {
         info!(
             message = "Compacting state",
             job_id = *self.job_id,
-            epoch = self.epoch,
+            epoch = *self.epoch,
         );
 
         let storage_role = self.storage_role.clone();
@@ -408,7 +406,7 @@ impl RunningJobModel {
                     &storage_role,
                     self.job_id.0.clone(),
                     &op.operator_id,
-                    self.epoch,
+                    *self.epoch as u32,
                 )
                 .await?;
 
@@ -433,7 +431,7 @@ impl RunningJobModel {
         info!(
             message = "Finished compaction",
             job_id = *self.job_id,
-            epoch = self.epoch,
+            epoch = *self.epoch,
         );
         Ok(())
     }
@@ -459,7 +457,7 @@ impl RunningJobModel {
                 let manifest = CheckpointManifest {
                     pipeline_id,
                     job_id: metadata.job_id,
-                    generation,
+                    generation: *generation,
                     epoch: metadata.epoch as u64,
                     min_epoch: metadata.min_epoch as u64,
                     start_time: metadata.start_time,
@@ -474,7 +472,7 @@ impl RunningJobModel {
 
                 let checkpoint_ref = self
                     .protocol_paths
-                    .checkpoint_manifest(Generation(generation), Epoch(metadata.epoch as u64));
+                    .checkpoint_manifest(generation, Epoch(metadata.epoch as u64));
 
                 let publish_req = PublishCheckpointRequest {
                     generation_manifest: self
@@ -508,7 +506,7 @@ impl RunningJobModel {
                         info!(
                             message = "Finished checkpointing",
                             job_id = *self.job_id,
-                            epoch = self.epoch,
+                            epoch = *self.epoch,
                             duration
                         );
                         self.update_checkpoint_in_db(
@@ -554,8 +552,8 @@ impl RunningJobModel {
                 info!(
                     message = "Committing checkpoint",
                     job_id = *self.job_id,
-                    epoch = self.epoch,
-                    generation = self.generation,
+                    epoch = *self.epoch,
+                    generation = *self.generation,
                     checkpoint_ref = checkpoint_ref.as_str(),
                 );
 
@@ -576,7 +574,7 @@ impl RunningJobModel {
                             worker
                                 .connect
                                 .commit(Request::new(CommitReq {
-                                    epoch: self.epoch,
+                                    epoch: *self.epoch,
                                     // TODO: this is pretty expensive
                                     committing_data: committing_data.clone(),
                                 }))
@@ -627,8 +625,7 @@ impl RunningJobModel {
 
                 let commit_permit = committing.commit_permit();
 
-                complete_commit(storage.as_ref(), commit_permit, Generation(self.generation))
-                    .await?;
+                complete_commit(storage.as_ref(), commit_permit, self.generation).await?;
 
                 self.finish_committing(committing.checkpoint_id(), store)
                     .await?;
@@ -638,8 +635,8 @@ impl RunningJobModel {
                 info!(
                     message = "Finished committing checkpointing",
                     job_id = *self.job_id,
-                    epoch = self.epoch,
-                    generation = self.generation,
+                    epoch = *self.epoch,
+                    generation = *self.generation,
                 );
                 store.notify_checkpoint_complete();
             }
@@ -682,7 +679,7 @@ impl RunningJobModel {
                     info!(
                         message = "Finished checkpointing",
                         job_id = *self.job_id,
-                        epoch = self.epoch,
+                        epoch = *self.epoch,
                         duration
                     );
                     store.notify_checkpoint_complete();
@@ -699,7 +696,7 @@ impl RunningJobModel {
                     info!(
                         message = "Committing checkpoint",
                         job_id = *self.job_id,
-                        epoch = self.epoch,
+                        epoch = *self.epoch,
                     );
 
                     self.start_or_get_span(JobCheckpointEventType::Committing);
@@ -710,7 +707,7 @@ impl RunningJobModel {
                         worker
                             .connect
                             .commit(Request::new(CommitReq {
-                                epoch: self.epoch,
+                                epoch: *self.epoch,
                                 committing_data: committing.committing_data().clone(),
                             }))
                             .await?;
@@ -732,7 +729,7 @@ impl RunningJobModel {
                 info!(
                     message = "Finished committing checkpointing",
                     job_id = *self.job_id,
-                    epoch = self.epoch,
+                    epoch = *self.epoch,
                 );
                 store.notify_checkpoint_complete();
             }
@@ -832,16 +829,6 @@ impl RunningJobModel {
                 job_metrics.update(operator_idx, subtask_idx, &values);
             }
         }));
-    }
-
-    pub fn cleanup_needed(&self) -> Option<u32> {
-        if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP
-            && self.epoch.is_multiple_of(COMPACT_EVERY)
-        {
-            Some(self.epoch - CHECKPOINTS_TO_KEEP)
-        } else {
-            None
-        }
     }
 
     pub fn worker_timedout(&self) -> bool {
